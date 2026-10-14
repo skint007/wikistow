@@ -2,6 +2,10 @@
 
 How to run a WikiStow server so it stays up, connect an AI provider, back up the installation, restore it, and prove the restore works.
 
+## Choose an image
+
+Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such as `0.2.0`. Run a version tag, or pin its digest, and change it on purpose to upgrade. Take a backup first: the server migrates the database when it starts. `<major>.<minor>` tags, such as `0.2`, move to that line's newest release, and `latest` moves to the newest stable release. `sha-<commit>` and `main` tags are builds of `main` for testing, not releases. Every image's labels name its version and source commit ([releasing](releasing.md)).
+
 ## Run the server under a restart policy
 
 Always run the server under a restart policy, such as Compose's `restart: unless-stopped` or systemd's `Restart=always`. The server stops, with status 1, whenever it can't be sure no restore is under way: when it starts while a restore runs, and whenever it loses its lock on the database, which any Postgres restart or failover causes (see [Restoring](#restoring)). It never waits for Postgres to come back. Only a restart policy starts it again, once Postgres is up and no restore runs. Without one, every Postgres restart leaves WikiStow down until you start it by hand.

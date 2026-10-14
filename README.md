@@ -40,6 +40,7 @@ Open the printed invitation, create the account, and verify its email through Ma
 
 ```sh
 pnpm check
+node scripts/version.ts
 pnpm exec vp test --project client --project unit
 pnpm exec vp test --project integration
 pnpm exec vp test --project client-browser --project ui-browser
@@ -54,11 +55,17 @@ Integration tests use the local Postgres service. The backup and restore tests a
 
 Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).
 
-The Woodpecker pipeline validates and builds the application. Image publishing and deployment belong in operator-managed configuration. Run public pull-request jobs on isolated runners without access to deployment networks or credentials.
+GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version and the desktop app as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need.
 
 ## Deploy and operate
 
-Build the bundles above, then build the runtime image:
+Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`:
+
+```sh
+docker pull ghcr.io/skint007/wikistow:0.2.0
+```
+
+To build it yourself, build the bundles above, then the runtime image:
 
 ```sh
 docker build -f docker/Dockerfile -t wikistow:local .
@@ -67,7 +74,8 @@ docker build -f docker/Dockerfile -t wikistow:local .
 The root Compose file runs development services only. For a server, configure the environment described in [.env.example](.env.example), provide Postgres and persistent attachment storage, and follow [docs/operations.md](docs/operations.md). Keep real environment files and deployment configuration outside this repository.
 
 - [Linux desktop app and Arch package](docs/desktop.md)
-- [Backup, restore, and AI configuration](docs/operations.md)
+- [Images, backup, restore, and AI configuration](docs/operations.md)
+- [Versions and releases](docs/releasing.md)
 - [Restore verification against a test instance](deploy/test-instance/README.md)
 - [Desktop plugin SDK](packages/plugin-sdk/README.md)
 - [Product specification](wikistow.md)
