@@ -4,11 +4,13 @@ The desktop app is the same WikiStow you use in the browser, packaged for Linux.
 
 ## Install
 
-Build the Arch package with the PKGBUILD. It clones the `release` branch from GitHub, rather than your checkout, so it builds the reviewed release:
+Build the Arch package with the PKGBUILD. It clones its release's tag from GitHub, rather than your checkout, so it builds the commit CI tested and released:
 
 ```sh
 cd aur && makepkg -si
 ```
+
+Each [GitHub Release](https://github.com/skint007/wikistow/releases) also has the built app, `wikistow-desktop-<version>.tar.gz`, with its `SHA256SUMS` ([releasing](releasing.md#the-desktop-download)).
 
 Start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
 
@@ -67,18 +69,10 @@ xdg-mime default wikistow-dev.desktop x-scheme-handler/wikistow
 
 The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
 
-1. Packages build from the `release` branch. Point any package repository's build job at that branch, and advance it only after the chosen commit passes validation.
-2. To release, pick a commit on `main` whose push pipeline passed, desktop tests included, and move `release` to it:
+1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build. The PKGBUILD builds the same tag from source.
+2. Build and sign distributed packages in your package repository. Verify its signing key before trusting it on another computer. Keep signing credentials outside this source repository.
+3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Installing an older package from pacman's cache doesn't stick: the next `pacman -Syu` brings the bad build back. To hold a computer on the older package until the fix ships, install it from `/var/cache/pacman/pkg` and add `IgnorePkg = wikistow-desktop` to `/etc/pacman.conf`, then remove that line again.
 
-   ```sh
-   git push origin <commit>:refs/heads/release
-   ```
+The Arch package's version is the release's, such as `0.2.0`. It is newer than the `0.1.0.r<commit count>.<commit>` packages the old `release` branch built, so those installations upgrade. Later releases must keep versions increasing.
 
-3. Build and sign distributed packages in your package repository. Verify its signing key before trusting it on another computer. Keep signing credentials outside this source repository.
-4. To roll back, revert the change on `main`, let CI pass, and release that commit. It is newer, so it ships as an ordinary update. Installing an older package from pacman's cache doesn't stick: the next `pacman -Syu` brings the bad build back. To hold a computer on the older package until the fix ships, install it from `/var/cache/pacman/pkg` and add `IgnorePkg = wikistow-desktop` to `/etc/pacman.conf`, then remove that line again.
-
-The Arch package version is `0.1.0.r<commit count>.<commit>`. Its base version is newer than the earlier `0.0.0` packages, so a fresh source history still upgrades existing installations. Later releases must keep package versions increasing.
-
-Build the server image after validation, tag it with the source commit, and publish it through your deployment tooling. The public validation pipeline does not publish images.
-
-Either way, the account menu ends with the version running, as `0.0.0+<commit>`, the first 8 characters of the commit it was built from. The image's tag is the same 8 characters.
+The account menu ends with the version running. A release shows its version, as `0.2.0`. A build of any other commit adds the first 8 characters of that commit, as `0.2.0+5b9e5ec4`.

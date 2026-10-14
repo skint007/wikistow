@@ -1,7 +1,10 @@
 # Maintainer: skint007
 # Source build for a personal package repository or local installation.
+# The release, as `node scripts/version.ts` sets it. pacman sorts a
+# prerelease such as 0.3.0rc.1 before 0.3.0 only without the `-`.
+_version=0.2.0
 pkgname=wikistow-desktop
-pkgver=0.1.0
+pkgver=${_version//-/}
 pkgrel=1
 pkgdesc="WikiStow desktop app: your family's encrypted wiki"
 arch=('x86_64')
@@ -13,23 +16,17 @@ depends=('electron44' 'desktop-file-utils')
 optdepends=('gnome-keyring: keep the sign-in and a remembered unlock between launches'
             'kwallet: keep the sign-in and a remembered unlock between launches')
 makedepends=('git' 'nodejs>=26' 'pnpm')
-# Only what was released: `release` moves to a main commit by hand, once
-# its CI passed (docs/desktop.md).
-source=("wikistow::git+https://github.com/skint007/wikistow.git#branch=release")
+# Only what was released: the release tag, which CI built and tested
+# (docs/releasing.md).
+source=("wikistow::git+https://github.com/skint007/wikistow.git#tag=v$_version")
 sha256sums=('SKIP')
-
-pkgver() {
-    cd "$srcdir/wikistow"
-    local r h
-    r=$(git rev-list --count HEAD)
-    h=$(git rev-parse --short=7 HEAD)
-    printf '0.1.0.r%s.%s' "$r" "$h"
-}
 
 build() {
     cd "$srcdir/wikistow"
     # The system Electron runs the app, so the npm one isn't downloaded.
     export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+    # The account menu shows the release version, without the commit.
+    export WIKISTOW_RELEASE=$_version
     pnpm install --frozen-lockfile
     pnpm exec vp -C apps/web build
     pnpm exec vp -C apps/desktop pack

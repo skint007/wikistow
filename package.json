@@ -1,5 +1,6 @@
 {
   "name": "wikistow",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -8,6 +9,7 @@
     "test": "vp test"
   },
   "devDependencies": {
+    "@types/node": "^26.0.0",
     "typescript": "^7.0.2",
     "vite-plus": "1.0.0"
   },
