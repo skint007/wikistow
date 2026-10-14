@@ -4,7 +4,7 @@ How to run a WikiStow server so it stays up, connect an AI provider, back up the
 
 ## Choose an image
 
-Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such as `0.2.0`. Run a version tag, or pin its digest, and change it on purpose to upgrade. Take a backup first: the server migrates the database when it starts. `<major>.<minor>` tags, such as `0.2`, move to that line's newest release, and `latest` moves to the newest stable release. `sha-<commit>` and `main` tags are builds of `main` for testing, not releases. Every image's labels name its version and source commit ([releasing](releasing.md)).
+Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such as `0.2.0`. Run a version tag, or pin its digest, and change it on purpose to upgrade. Take a backup first: the server migrates the database when it starts. `<major>.<minor>` tags, such as `0.2`, move to that line's newest release, and `latest` moves to the newest stable release from `main`. `sha-<commit>` tags are builds of `main` commits for testing, not releases. Every image's labels name its version and source commit ([releasing](releasing.md)).
 
 ## Run the server under a restart policy
 

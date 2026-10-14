@@ -20,10 +20,7 @@ GitHub Actions checks every change and publishes the server image and the deskto
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
 
-After a push to `main` passes, the `image` job publishes the server image from the same build:
-
-- `ghcr.io/skint007/wikistow:sha-<commit>`, the commit's first 8 characters. Each commit gets its own tag, and the tag never moves.
-- `ghcr.io/skint007/wikistow:main`, the newest `main` build.
+After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves.
 
 Only that job can write packages, and only that job and the release's `desktop` job can write anything.
 
@@ -52,12 +49,12 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, and that the commit is on `main` or a `release/` branch.
-   2. `ci` runs every CI job on the tagged commit. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0`, `:0.3` and `:latest`.
+   2. `ci` runs every CI job on the tagged commit. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
    3. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds `wikistow-desktop-0.3.0.tar.gz` and `SHA256SUMS`.
 
 If `verify` fails, nothing was published. Delete the tag, fix the cause, and tag again. If a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
-To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Only `main` builds get `sha-` images.
+To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Only `main` builds get `sha-` images.
 
 ## The desktop download
 
