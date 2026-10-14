@@ -49,6 +49,8 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           PKGREL: ${{ inputs.pkgrel }}
+          AUR_USERNAME: ${{ vars.AUR_USERNAME }}
+          AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && "$PKGREL" =~ ^[1-9][0-9]*$ ]]
           archive="wikistow-desktop-$VERSION.tar.gz"
@@ -59,7 +61,8 @@ jobs:
           cp -r aur/wikistow-desktop-bin /home/builder/pkg
           cd /home/builder/pkg
           sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" \
-            -e "s/^sha256sums=.*/sha256sums=('$sha')/" PKGBUILD
+            -e "s/^sha256sums=.*/sha256sums=('$sha')/" \
+            -e "s|^# Maintainer:.*|# Maintainer: $AUR_USERNAME <$AUR_EMAIL>|" PKGBUILD
           chown -R builder: .
           # Electron isn't needed to package the app, only to run it.
           runuser -u builder -- makepkg --nodeps --noconfirm

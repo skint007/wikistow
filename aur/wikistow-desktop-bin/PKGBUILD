@@ -1,9 +1,9 @@
-# Maintainer: skint007 <archlinux.repose742@passmail.net>
+# Maintainer: skint007
 #
 # The desktop app from a GitHub Release, as CI built and tested it
-# (docs/releasing.md). The release workflow sets _version, pkgrel and the
-# checksum when it publishes this to the AUR; the values here are the
-# release this copy was last checked against.
+# (docs/releasing.md). The release workflow sets the maintainer's email,
+# _version, pkgrel and the checksum when it publishes this to the AUR; the
+# values here are the release this copy was last checked against.
 
 # pacman sorts a prerelease such as 0.3.0rc.1 before 0.3.0 only without the `-`.
 _version=0.2.0
