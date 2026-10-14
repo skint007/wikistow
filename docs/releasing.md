@@ -67,7 +67,7 @@ To fix an older release while `main` has moved on, branch `release/<major>.<mino
 | `wikistow-desktop` | `/usr/bin/wikistow-desktop`, which runs the app on the system `electron44` |
 | `wikistow-desktop.desktop` | `/usr/share/applications/wikistow-desktop.desktop` |
 | `wikistow-desktop.svg`, `wikistow-desktop.png` | The app's icons |
-| `LICENSE` | `/usr/share/licenses/wikistow-desktop/LICENSE` |
+| `LICENSE` | `/usr/share/licenses/wikistow-desktop-bin/LICENSE` |
 
 The archive is built the same way every time, from the commit's files and time. Check a download before you use it:
 

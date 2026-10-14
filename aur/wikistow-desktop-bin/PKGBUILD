@@ -17,7 +17,8 @@ url="https://github.com/skint007/wikistow"
 license=('MIT')
 # desktop-file-utils' pacman hook registers the wikistow:// handler, which
 # desktops other than GNOME and KDE need for the browser to open the app.
-depends=('electron44' 'desktop-file-utils' 'hicolor-icon-theme')
+# Signing in opens the browser with xdg-open, optional for electron44.
+depends=('electron44' 'desktop-file-utils' 'hicolor-icon-theme' 'xdg-utils')
 optdepends=('gnome-keyring: keep the sign-in and a remembered unlock between launches'
             'kwallet: keep the sign-in and a remembered unlock between launches')
 provides=('wikistow-desktop')
