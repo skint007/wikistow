@@ -1,6 +1,7 @@
 // The release version. WikiStow has one, kept in every workspace
-// package.json and the Arch PKGBUILD: the account menu shows the web app's,
-// the desktop app's goes into its app.asar, and the CLI prints its own.
+// package.json: the account menu shows the web app's, the desktop app's goes
+// into its app.asar, and the CLI prints its own. The AUR package takes the
+// version of the release it is published for (.github/workflows/aur.yml).
 //
 //   node scripts/version.ts         prints it, and fails if any disagree
 //   node scripts/version.ts 0.3.0   sets it everywhere
@@ -12,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const PKGBUILD = join(root, 'aur/PKGBUILD');
 
 const packages = ['package.json'];
 for (const group of ['apps', 'packages']) {
@@ -33,11 +33,6 @@ if (wanted !== undefined) {
       `${JSON.stringify({ name, version: wanted, ...rest }, null, 2)}\n`,
     );
   }
-  const pkgbuild = await readFile(PKGBUILD, 'utf8');
-  await writeFile(
-    PKGBUILD,
-    pkgbuild.replace(/^_version=.*$/m, `_version=${wanted}`).replace(/^pkgrel=.*$/m, 'pkgrel=1'),
-  );
 }
 
 const found = new Map<string, string>();
@@ -45,7 +40,6 @@ for (const path of packages) {
   const { version } = JSON.parse(await readFile(join(root, path), 'utf8')) as { version?: string };
   found.set(path, String(version));
 }
-found.set('aur/PKGBUILD', String(/^_version=(.*)$/m.exec(await readFile(PKGBUILD, 'utf8'))?.[1]));
 
 const version = found.get('package.json') ?? '';
 if (!SEMVER.test(version) || [...found.values()].some((v) => v !== version)) {

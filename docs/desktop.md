@@ -4,11 +4,21 @@ The desktop app is the same WikiStow you use in the browser, packaged for Linux.
 
 ## Install
 
-Build the Arch package with the PKGBUILD. It clones its release's tag from GitHub, rather than your checkout, so it builds the commit CI tested and released:
+On Arch Linux, install [`wikistow-desktop-bin`](https://aur.archlinux.org/packages/wikistow-desktop-bin) from the AUR. It installs the app CI built and tested for the newest release, checked against the release's checksum, and runs it on Arch's `electron44`. With an AUR helper such as `yay` or `paru`:
 
 ```sh
-cd aur && makepkg -si
+yay -S wikistow-desktop-bin
 ```
+
+Without one, build the package yourself:
+
+```sh
+git clone https://aur.archlinux.org/wikistow-desktop-bin.git
+cd wikistow-desktop-bin
+makepkg -si
+```
+
+The app never updates itself; your package manager does. `pacman -Syu` alone doesn't update AUR packages. Your AUR helper's update, such as `yay -Syu`, does. Without a helper, run `git pull` in that folder and `makepkg -si` again. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were.
 
 Each [GitHub Release](https://github.com/skint007/wikistow/releases) also has the built app, `wikistow-desktop-<version>.tar.gz`, with its `SHA256SUMS` ([releasing](releasing.md#the-desktop-download)).
 
@@ -69,10 +79,10 @@ xdg-mime default wikistow-dev.desktop x-scheme-handler/wikistow
 
 The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
 
-1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build. The PKGBUILD builds the same tag from source.
-2. Build and sign distributed packages in your package repository. Verify its signing key before trusting it on another computer. Keep signing credentials outside this source repository.
-3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Installing an older package from pacman's cache doesn't stick: the next `pacman -Syu` brings the bad build back. To hold a computer on the older package until the fix ships, install it from `/var/cache/pacman/pkg` and add `IgnorePkg = wikistow-desktop` to `/etc/pacman.conf`, then remove that line again.
+1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build, and the AUR package installs that same archive.
+2. Keep the AUR key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment.
+3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history.
 
-The Arch package's version is the release's, such as `0.2.0`. It is newer than the `0.1.0.r<commit count>.<commit>` packages the old `release` branch built, so those installations upgrade. Later releases must keep versions increasing.
+The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. Later releases must keep versions increasing.
 
 The account menu ends with the version running. A release shows its version, as `0.2.0`. A build of any other commit adds the first 8 characters of that commit, as `0.2.0+5b9e5ec4`.
