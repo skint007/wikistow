@@ -1,7 +1,7 @@
 # A release: push a tag `v<version>` on a commit of main (docs/releasing.md).
 # This checks the tag names the version in the source, runs CI on that
 # commit, which publishes the server image under the version, and publishes
-# the desktop app from the same build as a GitHub Release.
+# the desktop app from the same build as a GitHub Release, then to the AUR.
 name: Release
 
 on:
@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      version: ${{ steps.version.outputs.version }}
       latest: ${{ steps.branch.outputs.latest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,13 +29,15 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-      # Every package and the PKGBUILD carry the version, and it is the tag's.
-      - run: |
+      # Every package carries the version, and it is the tag's.
+      - id: version
+        run: |
           version=$(node scripts/version.ts)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::The tag is $GITHUB_REF_NAME, but the source says $version"
             exit 1
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       # Only reviewed commits: main's, or a release/ branch's for a fix to
       # an older release. Only a stable release from main becomes `latest`.
       - id: branch
@@ -99,3 +102,14 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
             release/*.tar.gz release/SHA256SUMS
+
+  # The AUR package follows the newest stable release, once its archive is
+  # downloadable. A prerelease or a fix to an older line leaves it alone.
+  aur:
+    needs: [verify, desktop]
+    if: needs.verify.outputs.latest == 'true'
+    uses: ./.github/workflows/aur.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+    permissions:
+      contents: read

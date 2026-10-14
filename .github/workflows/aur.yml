@@ -1,0 +1,91 @@
+# Publishes wikistow-desktop-bin to the AUR for a GitHub Release that already
+# has its desktop archive. The release workflow runs it after each stable
+# release from main. Run it by hand to publish a release again, such as with
+# a packaging fix and a higher pkgrel (docs/releasing.md).
+name: AUR
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      pkgrel:
+        type: string
+        default: '1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release to publish, such as 0.2.0
+        type: string
+        required: true
+      pkgrel:
+        description: The package release; raise it for a packaging fix
+        type: string
+        default: '1'
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    # Holds the AUR key, for release tags and main only.
+    environment: aur
+    permissions:
+      contents: read
+    container: archlinux:base-devel@sha256:061679925e5d5028f2df9395d441ce6c4b9accf0157ff3486c06b6962e014ef1
+    steps:
+      - run: pacman -Syu --noconfirm --needed git openssh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The package as a user builds it: the release's archive, checked
+      # against the checksum the release published, packaged by a user who
+      # isn't root, as makepkg requires.
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
+          PKGREL: ${{ inputs.pkgrel }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && "$PKGREL" =~ ^[1-9][0-9]*$ ]]
+          archive="wikistow-desktop-$VERSION.tar.gz"
+          sha=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS" \
+            | awk -v f="$archive" '$2 == f { print $1 }')
+          [ -n "$sha" ]
+          useradd -m builder
+          cp -r aur/wikistow-desktop-bin /home/builder/pkg
+          cd /home/builder/pkg
+          sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" \
+            -e "s/^sha256sums=.*/sha256sums=('$sha')/" PKGBUILD
+          chown -R builder: .
+          # Electron isn't needed to package the app, only to run it.
+          runuser -u builder -- makepkg --nodeps --noconfirm
+          runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
+          cat PKGBUILD .SRCINFO
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+          PKGREL: ${{ inputs.pkgrel }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_KNOWN_HOSTS: ${{ vars.AUR_KNOWN_HOSTS }}
+          AUR_USERNAME: ${{ vars.AUR_USERNAME }}
+          AUR_EMAIL: ${{ vars.AUR_EMAIL }}
+        run: |
+          # ssh reads ~/.ssh from root's home, not $HOME, so name the files.
+          ssh_dir="$RUNNER_TEMP/ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/key" && chmod 600 "$ssh_dir/key"
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+          # Only the PKGBUILD and its .SRCINFO go to the AUR.
+          git clone ssh://aur@aur.archlinux.org/wikistow-desktop-bin.git "$RUNNER_TEMP/aur"
+          cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO "$RUNNER_TEMP/aur/"
+          cd "$RUNNER_TEMP/aur"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "The AUR already has $VERSION-$PKGREL."
+          else
+            git -c user.name="$AUR_USERNAME" -c user.email="$AUR_EMAIL" commit -q -m "Update to $VERSION-$PKGREL"
+            git push origin HEAD:master
+          fi
+          rm -rf "$ssh_dir"
