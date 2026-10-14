@@ -10,7 +10,7 @@ _version=0.2.0
 pkgname=wikistow-desktop-bin
 pkgver=${_version//-/}
 pkgrel=1
-pkgdesc="WikiStow desktop app: your family's encrypted wiki"
+pkgdesc="Desktop app for your family's encrypted wiki"
 # The app itself is JavaScript; the system Electron it runs on is x86_64 only.
 arch=('x86_64')
 url="https://github.com/skint007/wikistow"
