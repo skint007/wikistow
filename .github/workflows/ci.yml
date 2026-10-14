@@ -1,0 +1,296 @@
+# Checks every pull request and every push to main, on GitHub-hosted runners.
+# A push to main also publishes the server image, tagged with its commit. The
+# release workflow runs this one for a release tag, so the image and desktop
+# app it publishes come from the same tested build (docs/releasing.md).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+# Every job only reads, except the image job, which pushes to GHCR. Pull
+# requests, forks' included, never reach it.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A pull request's newer push replaces its older run. Every main commit
+  # finishes, so each gets its image.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  POSTGRES_ADMIN_URL: postgres://wikistow:wikistow@postgres:5432/postgres
+
+jobs:
+  # Format, lint, and type checks, and one version everywhere.
+  check:
+    runs-on: ubuntu-24.04
+    # Both images are glibc, so the same lockfile installs the native binaries
+    # Vite+ ships (Rolldown, Oxc, tsgolint) in each.
+    container: &node_image node:26-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: ./node_modules/.bin/vp check
+      - run: node scripts/version.ts
+
+  test:
+    runs-on: ubuntu-24.04
+    container: *node_image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: ./node_modules/.bin/vp test --project client --project unit
+
+  # Against the Postgres service; each test file clones its own database.
+  # The CLI's suite builds its bundle into a directory of its own and runs it there.
+  # The restore drill runs scripts/backup.sh and restore.sh, which need the
+  # Postgres client at the service's major version; trixie's is 17.
+  test-integration:
+    runs-on: ubuntu-24.04
+    container: *node_image
+    services:
+      postgres: &postgres
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: wikistow
+          POSTGRES_PASSWORD: wikistow
+          POSTGRES_DB: wikistow
+        options: >-
+          --health-cmd "pg_isready -U wikistow" --health-interval 2s --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-client-17
+      - run: ./node_modules/.bin/vp test --project integration
+        env:
+          TEST_DATABASE_URL: ${{ env.POSTGRES_ADMIN_URL }}
+
+  # The protocol vectors again, in real Chromium, so browser and Node must
+  # agree; and the editor surfaces, mounted for real.
+  test-browser:
+    runs-on: ubuntu-24.04
+    # Keep in step with the playwright devDependency so the bundled Chromium revision matches.
+    container: &browser_image mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: ./node_modules/.bin/vp test --project client-browser --project ui-browser
+
+  # Everything that ships, built once: the later jobs test these files, and
+  # the image and the release publish them. A release tag's build shows its
+  # version alone (apps/web/vite.config.ts). The web build regenerates the
+  # committed route tree; it must not change.
+  build:
+    runs-on: ubuntu-24.04
+    container: *node_image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
+          cp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"
+          ./node_modules/.bin/vp -C apps/server pack
+          ./node_modules/.bin/vp -C apps/cli pack
+          ./node_modules/.bin/vp -C apps/web build
+          ./node_modules/.bin/vp -C apps/desktop pack
+          # What the desktop release ships: the bundles and pages in one app.asar.
+          node apps/desktop/scripts/asar.ts
+          cmp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build
+          path: |
+            apps/server/dist
+            apps/cli/dist
+            apps/web/dist
+            apps/desktop/dist
+            apps/desktop/out
+          if-no-files-found: error
+          retention-days: 7
+
+  # Boot the exact bundles the image ships against a fresh database. They run
+  # from a copy laid out like the image, outside the workspace, so a dependency
+  # missing from the bundle can't be found in node_modules by accident.
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: *node_image
+    services:
+      postgres: *postgres
+    env:
+      DATABASE_URL: postgres://wikistow:wikistow@postgres:5432/wikistow
+      PUBLIC_ORIGIN: http://localhost:3000
+      MIGRATIONS_DIR: /tmp/app/drizzle
+      BLOB_DIR: /tmp/blobs
+      WEB_DIST: /tmp/app/web
+      # Placeholders: the smoke test sends no mail and signs nobody in.
+      BETTER_AUTH_SECRET: smoke-test-secret-that-is-longer-than-32-characters
+      SMTP_URL: smtp://127.0.0.1:1
+      SMTP_FROM: WikiStow <smoke@localhost>
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+      - name: Server
+        run: |
+          mkdir -p /tmp/app && cp -r apps/server/dist/. /tmp/app/ && cp -r packages/server/drizzle /tmp/app/drizzle && cp -r apps/web/dist /tmp/app/web
+          cd /tmp/app
+          for attempt in $(seq 1 30); do node migrate.mjs && break; [ "$attempt" -eq 30 ] && exit 1; sleep 1; done
+          node server.mjs & server_pid=$!
+          node -e "const go = async (n) => { try { const r = await fetch('http://127.0.0.1:3000/api/installation'); if (!r.ok) throw new Error(String(r.status)); console.log(await r.text()); } catch (e) { if (n === 0) throw e; await new Promise((s) => setTimeout(s, 500)); return go(n - 1); } }; go(20);"
+          node -e "fetch('http://127.0.0.1:3000/sign-in').then(async (r) => { const csp = r.headers.get('content-security-policy') ?? ''; if (!r.ok || !csp.includes(\"script-src 'self'\") || !(await r.text()).includes('/boot.js')) process.exit(1); })"
+          kill "$server_pid"
+      # The CLI is one file too, and runs with nothing but Node: unenrolled,
+      # it says so with its own exit status.
+      - name: CLI
+        run: |
+          mkdir -p /tmp/cli/home && cp apps/cli/dist/wikistow.mjs /tmp/cli/
+          cd /tmp/cli && node wikistow.mjs --help >/dev/null
+          code=0; HOME=/tmp/cli/home node wikistow.mjs spaces list --json || code=$?; test "$code" -eq 5
+          # Only the tests' own build may run a secret-tool root didn't install.
+          grep -q 'Refusing to run' wikistow.mjs && ! grep -q WIKISTOW_TEST wikistow.mjs
+
+  # The browser tests: the built app on the real server, in Chromium.
+  e2e:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: *browser_image
+    services:
+      postgres: *postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+      - run: ./node_modules/.bin/playwright test
+        working-directory: apps/web
+        env:
+          TEST_DATABASE_URL: ${{ env.POSTGRES_ADMIN_URL }}
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results
+          path: apps/web/test-results
+          retention-days: 7
+
+  # The desktop app on the same built pages, under a virtual display, with
+  # GNOME Keyring as its secret store. The browser half of each sign-in runs
+  # in Chromium beside it.
+  e2e-desktop:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: *browser_image
+    services:
+      postgres: *postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+      - run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gnome-keyring dbus-x11 >/dev/null
+      - run: ./e2e/with-keyring.sh xvfb-run -a -s '-screen 0 1600x1000x24' ./node_modules/.bin/playwright test
+        working-directory: apps/desktop
+        env:
+          TEST_DATABASE_URL: ${{ env.POSTGRES_ADMIN_URL }}
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-desktop-results
+          path: apps/desktop/test-results
+          retention-days: 7
+
+  # The one check branch protection needs. A job skipped because another
+  # failed would count as passing, so this one runs regardless and looks.
+  passed:
+    name: CI passed
+    if: always()
+    needs: [check, test, test-integration, test-browser, build, smoke, e2e, e2e-desktop]
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do [ "$result" = success ] || exit 1; done
+
+  # The server image, from the tested build, on a push to main or a release
+  # tag. Main pushes are tagged `sha-` and the commit's first 8 characters,
+  # which never move, and `main`; a release is tagged with its version
+  # (docs/releasing.md).
+  image:
+    needs: passed
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+      # The version the account menu shows, for the image's labels.
+      - id: version
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "$GITHUB_REF_TYPE" != tag ]; then version="$version+${GITHUB_SHA::8}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=sha-${{ steps.version.outputs.commit }},enable=${{ github.ref_type == 'branch' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
+          labels: |
+            org.opencontainers.image.title=WikiStow
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}

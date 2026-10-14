@@ -12,7 +12,7 @@ import {
 } from './desktop';
 
 // The keyring test needs GNOME Keyring on a session bus; CI sets one up
-// (`.woodpecker.yml`, e2e-desktop) and says so with KEYRING=1.
+// (`.github/workflows/ci.yml`, e2e-desktop) and says so with KEYRING=1.
 const KEYRING = process.env['KEYRING'] === '1';
 
 let running: Desktop[] = [];

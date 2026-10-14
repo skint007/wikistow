@@ -1,0 +1,19 @@
+name: Install dependencies
+description: pnpm at the packageManager version and the locked dependencies, with the store cached.
+runs:
+  using: composite
+  steps:
+    # node:26 no longer bundles corepack, so install pnpm at the packageManager version.
+    - shell: bash
+      run: npm install -g "$(node -p "require('./package.json').packageManager")"
+    # The store sits beside the checkout, on the same volume, so pnpm can
+    # hard-link from it, and outside it, where the formatter would scan it.
+    - shell: bash
+      run: echo "npm_config_store_dir=/__w/.pnpm-store" >> "$GITHUB_ENV"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /__w/.pnpm-store
+        key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-${{ runner.os }}-
+    - shell: bash
+      run: pnpm install --frozen-lockfile
