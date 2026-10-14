@@ -1,0 +1,25 @@
+{
+  "name": "@wikistow/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "wikistow": "./dist/wikistow.mjs"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "vp pack"
+  },
+  "dependencies": {
+    "@wikistow/client": "workspace:*",
+    "@wikistow/contracts": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@hono/node-server": "2.1.3",
+    "@types/node": "^26.0.0",
+    "@wikistow/server": "workspace:*",
+    "@wikistow/server-app": "workspace:*",
+    "drizzle-orm": "0.45.3"
+  }
+}

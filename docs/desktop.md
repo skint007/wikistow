@@ -1,0 +1,84 @@
+# WikiStow desktop app
+
+The desktop app is the same WikiStow you use in the browser, packaged for Linux. It runs on Arch's system Electron (`electron44`), so the package itself is only the app's code.
+
+## Install
+
+Build the Arch package with the PKGBUILD. It clones the `release` branch from GitHub, rather than your checkout, so it builds the reviewed release:
+
+```sh
+cd aur && makepkg -si
+```
+
+Start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
+
+## Signing in
+
+The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it; allow it.
+
+Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps** in the browser.
+
+## The keyring
+
+With GNOME Keyring or KWallet running, the app keeps its sign-in between launches, sealed by the keyring. The unlock page also offers **Remember on this computer**, which opens your vault when the app starts. Locking the vault or signing out forgets the unlock.
+
+Without a keyring the app keeps nothing secret. Each launch signs in through the browser again and asks for your vault passphrase. That is on purpose: Electron's fallback store seals data with a key every program on the computer knows, so the app never uses it. Quitting signs that launch's session out, so they don't pile up on the server. If the app crashes, or the server doesn't answer within 3 seconds, the session stays; sign it out under **Settings → Desktop apps**.
+
+On KDE the app uses KWallet. Anywhere else it looks for a Secret Service, such as GNOME Keyring, so Hyprland, Sway or i3 work too once GNOME Keyring runs. To pick one yourself, add a switch such as `--password-store=gnome-libsecret` to `~/.config/wikistow-desktop-flags.conf`. `--password-store=basic` means no keyring.
+
+The app keeps its key in the keyring under its own name. In KWallet that is **WikiStow Safe Storage** in the **WikiStow Keys** folder. Earlier versions used the entry every Chromium-based app shares there, `Chromium Safe Storage` in `Chromium Keys`, so any of those apps could open the app's secrets without a prompt. Leave that entry alone: browsers and other apps may still use it. In GNOME Keyring the key was always the app's own, marked for WikiStow. It is labelled **WikiStow Safe Storage**, or `Chromium Safe Storage` if an earlier version made it.
+
+The first launch after that change, on any desktop, signs in through the browser again and asks for your passphrase. The name doesn't lock other programs out: anything running as you can still ask the keyring for the key.
+
+## While you work on it
+
+```sh
+pnpm exec vp -C apps/web build
+pnpm exec vp -C apps/desktop pack
+pnpm -C apps/desktop start
+```
+
+The desktop tests run the real app under a virtual display, with the browser half of each sign-in in Chromium beside it:
+
+```sh
+cd apps/desktop && xvfb-run -a -s '-screen 0 1600x1000x24' pnpm exec playwright test
+```
+
+The keyring test runs only with `KEYRING=1`, inside a session that has GNOME Keyring. `e2e/with-keyring.sh` sets one up in a CI container; don't run it on your own machine, since it replaces `~/.local/share/keyrings`.
+
+Signing in from a development build needs `wikistow://` links to reach it. With the package installed, they already do: the link starts the packaged app, which finds the development build running on the same profile (`~/.config/WikiStow`) and hands the link over. Without the package, save this as `~/.local/share/applications/wikistow-dev.desktop`, with your checkout's path:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=WikiStow (development)
+Exec=/path/to/wikistow/apps/desktop/node_modules/.bin/electron /path/to/wikistow/apps/desktop %U
+NoDisplay=true
+MimeType=x-scheme-handler/wikistow;
+```
+
+Then make it the handler:
+
+```sh
+xdg-mime default wikistow-dev.desktop x-scheme-handler/wikistow
+```
+
+## Releasing
+
+The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
+
+1. Packages build from the `release` branch. Point any package repository's build job at that branch, and advance it only after the chosen commit passes validation.
+2. To release, pick a commit on `main` whose push pipeline passed, desktop tests included, and move `release` to it:
+
+   ```sh
+   git push origin <commit>:refs/heads/release
+   ```
+
+3. Build and sign distributed packages in your package repository. Verify its signing key before trusting it on another computer. Keep signing credentials outside this source repository.
+4. To roll back, revert the change on `main`, let CI pass, and release that commit. It is newer, so it ships as an ordinary update. Installing an older package from pacman's cache doesn't stick: the next `pacman -Syu` brings the bad build back. To hold a computer on the older package until the fix ships, install it from `/var/cache/pacman/pkg` and add `IgnorePkg = wikistow-desktop` to `/etc/pacman.conf`, then remove that line again.
+
+The Arch package version is `0.1.0.r<commit count>.<commit>`. Its base version is newer than the earlier `0.0.0` packages, so a fresh source history still upgrades existing installations. Later releases must keep package versions increasing.
+
+Build the server image after validation, tag it with the source commit, and publish it through your deployment tooling. The public validation pipeline does not publish images.
+
+Either way, the account menu ends with the version running, as `0.0.0+<commit>`, the first 8 characters of the commit it was built from. The image's tag is the same 8 characters.

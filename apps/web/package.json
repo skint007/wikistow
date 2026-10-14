@@ -1,0 +1,41 @@
+{
+  "name": "@wikistow/web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "e2e": "playwright test",
+    "screenshots": "SCREENSHOTS=1 playwright test -c screenshots",
+    "drill:seed": "playwright test -c drill --project seed",
+    "drill:check": "playwright test -c drill --project check"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.41",
+    "@wikistow/ui": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "2.1.3",
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/router-plugin": "1.168.42",
+    "@types/mailparser": "3.9.0",
+    "@types/node": "^26.0.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/smtp-server": "3.5.13",
+    "@vitejs/plugin-react": "6.1.1",
+    "@wikistow/contracts": "workspace:*",
+    "@wikistow/server": "workspace:*",
+    "@wikistow/server-app": "workspace:*",
+    "drizzle-orm": "0.45.3",
+    "fflate": "0.8.3",
+    "mailparser": "3.9.36",
+    "smtp-server": "3.19.16",
+    "tailwindcss": "4.3.3"
+  }
+}

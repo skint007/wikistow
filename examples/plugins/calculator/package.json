@@ -1,0 +1,15 @@
+{
+  "name": "@wikistow/example-calculator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wikistow-plugin build"
+  },
+  "dependencies": {
+    "@wikistow/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "vite-plus": "1.0.0"
+  }
+}

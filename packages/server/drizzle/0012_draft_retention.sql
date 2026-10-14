@@ -1,0 +1,3 @@
+CREATE INDEX "revisions_published_based_on_idx" ON "revisions" USING btree ("based_on") WHERE "revisions"."audience" = 'published';--> statement-breakpoint
+CREATE INDEX "revisions_draft_page_created_idx" ON "revisions" USING btree ("page_id","created_at") WHERE "revisions"."audience" = 'draft';--> statement-breakpoint
+CREATE INDEX "publications_source_page_idx" ON "publications" USING btree ("source_page_id");

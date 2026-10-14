@@ -1,0 +1,1 @@
+CREATE INDEX "revisions_draft_based_on_idx" ON "revisions" USING btree ("based_on","created_at") WHERE "revisions"."audience" = 'draft';

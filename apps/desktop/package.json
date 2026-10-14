@@ -1,0 +1,25 @@
+{
+  "name": "@wikistow/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build": "vp pack",
+    "start": "electron .",
+    "e2e": "playwright test",
+    "package": "node scripts/asar.ts"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.3.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^26.0.0",
+    "@wikistow/contracts": "workspace:*",
+    "@wikistow/plugin-sdk": "workspace:*",
+    "electron": "44.6.0",
+    "esbuild-wasm": "0.28.2",
+    "zod": "^4.6.5"
+  },
+  "productName": "WikiStow"
+}

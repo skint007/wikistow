@@ -1,0 +1,171 @@
+/* The app's global stylesheet: the self-hosted font, then the design tokens. */
+@import '@fontsource-variable/nunito';
+@import './theme.css';
+/* ProseMirror's own few rules, under the visual editor's (see page/editor/visual). */
+@import '@milkdown/kit/prose/view/style/prosemirror.css' layer(base);
+@import '@milkdown/kit/prose/tables/style/tables.css' layer(base);
+
+/* Classes are used across packages/ui, which sits outside the web app's root. */
+@source '..';
+
+/* Page bodies rendered from Markdown (see page/markdown.tsx). */
+@layer components {
+  .page-body {
+    @apply text-[15.5px] leading-[1.65] wrap-break-word text-foreground;
+  }
+  .page-body > * + * {
+    @apply mt-4;
+  }
+  /* Room above a heading scrolled to, clear of the phone's top bar. */
+  .page-body :is(h1, h2, h3, h4, h5, h6) {
+    @apply scroll-mt-4 max-[899px]:scroll-mt-16;
+  }
+  .page-body h1 {
+    @apply text-2xl font-extrabold;
+  }
+  .page-body h2 {
+    @apply mt-8 text-xl font-extrabold;
+  }
+  .page-body h3 {
+    @apply mt-6 text-lg font-extrabold;
+  }
+  .page-body ul {
+    @apply list-disc pl-6;
+  }
+  .page-body ol {
+    @apply list-decimal pl-6;
+  }
+  /* Links in the visual editor, which the reader draws itself (page/body-link.tsx). */
+  #page-visual a {
+    @apply text-primary underline;
+  }
+  .page-body :is(blockquote, .markdown-alert) {
+    @apply rounded-control border-l-4 border-border bg-muted px-4 py-2 text-subtle-foreground;
+  }
+  /* GitHub's alerts (see page/alerts.ts): a quote in its type's colour, under its label. */
+  .page-body .markdown-alert {
+    @apply border-(--alert) text-foreground;
+  }
+  .page-body .markdown-alert-title {
+    @apply mb-1 flex items-center gap-1.5 font-bold text-(--alert);
+  }
+  .page-body .markdown-alert-note {
+    @apply bg-folder-blue [--alert:#2b5fb4] dark:[--alert:#8ab4f8];
+  }
+  .page-body .markdown-alert-tip {
+    @apply bg-status-published [--alert:var(--status-published-foreground)];
+  }
+  .page-body .markdown-alert-important {
+    @apply bg-folder-purple [--alert:#6d3fc0] dark:[--alert:#c4b5fd];
+  }
+  .page-body .markdown-alert-warning {
+    @apply bg-status-draft [--alert:var(--status-draft-foreground)];
+  }
+  .page-body .markdown-alert-caution {
+    @apply bg-destructive/10 [--alert:#b02525] dark:[--alert:var(--destructive)];
+  }
+  .page-body code {
+    @apply rounded-row bg-muted px-1.5 py-0.5 font-mono text-[0.9em];
+  }
+  .page-body pre {
+    @apply overflow-x-auto rounded-control bg-muted p-4;
+  }
+  .page-body pre code {
+    @apply bg-transparent p-0;
+  }
+  /* A code block under its language (markdown.tsx), a picker in the visual editor (`codeBlockView`). */
+  .page-body .code-block {
+    @apply overflow-hidden rounded-control bg-muted;
+  }
+  .page-body .code-block > pre {
+    @apply rounded-none pt-1;
+  }
+  .page-body .code-language {
+    @apply px-4 pt-2 font-mono text-xs text-subtle-foreground select-none;
+  }
+  /* Highlighted code's tokens (see page/highlight.ts), in the palette's own colours. */
+  .page-body :is(.hljs-comment, .hljs-quote, .hljs-meta) {
+    @apply text-subtle-foreground;
+  }
+  .page-body :is(.hljs-comment, .hljs-quote, .hljs-emphasis) {
+    @apply italic;
+  }
+  .page-body :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag) {
+    @apply text-primary-ink;
+  }
+  .page-body :is(.hljs-string, .hljs-regexp, .hljs-symbol, .hljs-addition) {
+    @apply text-status-published-foreground;
+  }
+  .page-body
+    :is(.hljs-number, .hljs-variable, .hljs-template-variable, .hljs-attr, .hljs-attribute) {
+    @apply text-status-draft-foreground;
+  }
+  .page-body
+    :is(.hljs-title, .hljs-section, .hljs-name, .hljs-type, .hljs-built_in, .hljs-selector-class) {
+    @apply text-[#2b5fb4] dark:text-[#8ab4f8];
+  }
+  .page-body .hljs-deletion {
+    @apply text-destructive;
+  }
+  .page-body .hljs-strong {
+    @apply font-bold;
+  }
+  .page-body table {
+    @apply w-full overflow-hidden rounded-control bg-table text-sm;
+  }
+  .page-body th {
+    @apply bg-table-head px-3 py-2 text-left font-bold;
+  }
+  .page-body td {
+    @apply border-t border-border px-3 py-2;
+  }
+  /* Raw HTML a page may hold (see page/page-html.ts). */
+  .page-body kbd {
+    @apply rounded-[6px] border border-b-2 border-border bg-card px-1.5 py-0.5 font-mono text-[0.85em];
+  }
+  .page-body summary {
+    @apply cursor-pointer font-bold;
+  }
+  .page-body details > * + * {
+    @apply mt-2;
+  }
+
+  /* The visual editor's own (see page/editor/visual). */
+  .page-body li[data-item-type='task'] {
+    @apply -ml-6 flex list-none items-baseline gap-2;
+  }
+  .page-body li[data-item-type='task'] > div {
+    @apply min-w-0 flex-1;
+  }
+  .page-body span[data-type='html'] {
+    @apply rounded-row bg-muted px-1.5 py-0.5 font-mono text-[0.9em];
+  }
+  /* A quote's type picker in the visual editor (`quoteView`), an alert's label. */
+  .page-body .quote-type {
+    @apply mb-1 flex select-none;
+  }
+  .page-body .markdown-alert-marker {
+    @apply font-mono text-[0.85em] text-muted-foreground;
+  }
+  /* The line break after an alert's marker ends the line it shows as a space. */
+  .page-body .markdown-alert-break {
+    @apply block h-0 overflow-hidden;
+  }
+  /* A table scrolls in its own box (`tableView`), its columns not squeezed past reading. */
+  .page-body .tableWrapper table {
+    @apply table-auto;
+  }
+  .page-body .tableWrapper :is(td, th) {
+    @apply min-w-24;
+  }
+  .page-body .ProseMirror-selectednode {
+    @apply rounded-row outline-2 outline-ring;
+  }
+  .page-body .footnote-hidden {
+    @apply text-muted-foreground;
+  }
+  .page-body .footnote-hidden::before {
+    @apply text-xs;
+    content: attr(data-note);
+  }
+}

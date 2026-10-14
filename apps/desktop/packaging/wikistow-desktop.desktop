@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WikiStow
+Comment=Your family's encrypted wiki
+Exec=wikistow-desktop %U
+Icon=wikistow-desktop
+Terminal=false
+Categories=Office;
+MimeType=x-scheme-handler/wikistow;
+StartupWMClass=WikiStow

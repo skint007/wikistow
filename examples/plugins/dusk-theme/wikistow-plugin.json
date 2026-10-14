@@ -1,0 +1,8 @@
+{
+  "id": "dusk-theme",
+  "name": "Dusk",
+  "version": "0.2.0",
+  "api": 1,
+  "description": "A plum dusk theme with serif type, square corners and roomier spacing, for the theme picker.",
+  "themes": [{ "id": "dusk", "name": "Dusk", "base": "dark", "stylesheet": "dusk.css" }]
+}

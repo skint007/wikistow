@@ -1,0 +1,5 @@
+# Build context is the repo; the image only needs prebuilt outputs.
+*
+!apps/server/dist
+!apps/web/dist
+!packages/server/drizzle

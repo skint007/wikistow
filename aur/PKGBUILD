@@ -1,0 +1,48 @@
+# Maintainer: skint007
+# Source build for a personal package repository or local installation.
+pkgname=wikistow-desktop
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="WikiStow desktop app: your family's encrypted wiki"
+arch=('x86_64')
+url="https://github.com/skint007/wikistow"
+license=('MIT')
+# desktop-file-utils' pacman hook registers the wikistow:// handler, which
+# desktops other than GNOME and KDE need for the browser to open the app.
+depends=('electron44' 'desktop-file-utils')
+optdepends=('gnome-keyring: keep the sign-in and a remembered unlock between launches'
+            'kwallet: keep the sign-in and a remembered unlock between launches')
+makedepends=('git' 'nodejs>=26' 'pnpm')
+# Only what was released: `release` moves to a main commit by hand, once
+# its CI passed (docs/desktop.md).
+source=("wikistow::git+https://github.com/skint007/wikistow.git#branch=release")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/wikistow"
+    local r h
+    r=$(git rev-list --count HEAD)
+    h=$(git rev-parse --short=7 HEAD)
+    printf '0.1.0.r%s.%s' "$r" "$h"
+}
+
+build() {
+    cd "$srcdir/wikistow"
+    # The system Electron runs the app, so the npm one isn't downloaded.
+    export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+    pnpm install --frozen-lockfile
+    pnpm exec vp -C apps/web build
+    pnpm exec vp -C apps/desktop pack
+    node apps/desktop/scripts/asar.ts
+}
+
+package() {
+    install -Dm644 "$srcdir/wikistow/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    cd "$srcdir/wikistow/apps/desktop"
+    install -Dm644 out/app.asar "$pkgdir/usr/lib/wikistow-desktop/app.asar"
+    install -Dm755 packaging/wikistow-desktop "$pkgdir/usr/bin/wikistow-desktop"
+    install -Dm644 packaging/wikistow-desktop.desktop \
+        "$pkgdir/usr/share/applications/wikistow-desktop.desktop"
+    install -Dm644 packaging/wikistow-desktop.svg \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/wikistow-desktop.svg"
+}

@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WikiStow layout mocks</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;background:#000;color:#fff;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 18px 80px}
+.wrap>header h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+.lede{color:#bdbdbd;max-width:860px;margin:0 0 6px}
+.jump{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 8px;position:sticky;top:0;background:#000;padding:10px 0;z-index:5;border-bottom:1px solid #1c1c1c}
+.jump a{color:#fff;text-decoration:none;border:1px solid #333;border-radius:999px;padding:4px 12px;font-size:13px}
+.jump a:hover{background:#151515}
+section.v{margin:34px 0 0;scroll-margin-top:60px}
+section.v h2{display:flex;align-items:baseline;gap:12px;font-size:20px;margin:0 0 4px}
+section.v h2 .lt{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:8px;background:#fff;color:#000;font-weight:800;font-size:16px}
+.tag{color:#9a9a9a;margin:0 0 12px;font-size:14px}
+.scroller{overflow-x:auto;border-radius:12px;-webkit-overflow-scrolling:touch}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:12px}
+.notes div{background:#0f0f0f;border:1px solid #1f1f1f;border-radius:10px;padding:12px 14px;font-size:14px;color:#d0d0d0}
+.notes b{display:block;color:#fff;font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.notes ul{margin:0;padding-left:18px}
+table.cmp{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
+table.cmp th,table.cmp td{border-bottom:1px solid #222;padding:8px 10px;text-align:left;vertical-align:top}
+table.cmp th{color:#9a9a9a;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.hint{color:#8a8a8a;font-size:13px}
+h2.round{font-size:15px;text-transform:uppercase;letter-spacing:.1em;color:#9a9a9a;margin:34px 0 4px;font-weight:700}
+.sepj{width:1px;background:#333;margin:0 4px}
+.themes{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px;font-size:13px}
+.themes>span{color:#8a8a8a;margin-right:4px}
+.themes button{display:inline-flex;align-items:center;gap:7px;background:#0f0f0f;color:#ddd;border:1px solid #2a2a2a;border-radius:999px;padding:4px 12px 4px 6px;font:inherit;cursor:pointer}
+.themes button.on{border-color:#fff;color:#fff;background:#1a1a1a}
+.sw{width:16px;height:16px;border-radius:50%;display:inline-block;border:1px solid #444}
+.sw-th-warm{background:linear-gradient(135deg,#1d1a18 50%,#ff7a50 50%)}
+.sw-th-slate{background:linear-gradient(135deg,#111a2b 50%,#2dd4bf 50%)}
+.sw-th-oled{background:linear-gradient(135deg,#000 50%,#a78bfa 50%)}
+.sw-light{background:linear-gradient(135deg,#f4f1ec 50%,#f2643d 50%)}
+
+/* shared mock basics */
+.mock{height:680px;min-width:1000px;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;font-size:14px;line-height:1.5;position:relative;text-align:left}
+.mock a{cursor:pointer;text-decoration:none;color:inherit}
+.mock summary{list-style:none;cursor:pointer;user-select:none}
+.mock summary::-webkit-details-marker{display:none}
+.mock .t{list-style:none;margin:0;padding:0}
+.mock .chev{display:inline-flex;transition:transform .15s;opacity:.6}
+.mock details[open]>summary .chev{transform:rotate(90deg)}
+.mock .pg{cursor:pointer}
+.mock .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mock .sp{display:inline-block;width:12px;flex:none}
+.mock .grow{flex:1}
+.mock table{border-collapse:collapse;width:100%}
+.mock .doc h1,.mock .doc h2{margin-top:0}
+.mock svg{flex:none}
+
+/* ---------- A: Workbench ---------- */
+.va{background:#0c0c0e;color:#e7e7ea;font-family:Inter,system-ui,sans-serif;border:1px solid #232327}
+.va .top{height:50px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid #1f1f23}
+.va .logo{font-weight:650;display:flex;align-items:center;gap:8px;letter-spacing:-.01em}
+.va .logo i{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#8b97ff,#5b6cf0)}
+.va .spacepill{border:1px solid #2a2a30;border-radius:7px;padding:3px 10px;color:#c9c9d1;font-size:13px}
+.va .search{flex:1;max-width:400px;margin:0 auto;display:flex;align-items:center;gap:8px;background:#151518;border:1px solid #232328;border-radius:8px;padding:6px 10px;color:#7d7d87;font-size:13px}
+.va .search kbd{margin-left:auto;font:11px ui-monospace,monospace;border:1px solid #2e2e34;border-radius:4px;padding:1px 5px;color:#9a9aa4}
+.va .links{display:flex;gap:2px}
+.va .links a{padding:5px 10px;border-radius:6px;color:#a1a1aa;font-size:13px}
+.va .links a:hover{background:#1a1a1e}
+.va .links a.cur{color:#fff;background:#18181c}
+.va .iconbtn{color:#a1a1aa;display:grid;place-items:center;width:30px;height:30px;border-radius:7px}
+.va .iconbtn:hover{background:#1a1a1e;color:#fff}
+.va .av{width:28px;height:28px;border-radius:50%;background:#3f3f46;display:grid;place-items:center;font-size:11px;font-weight:600}
+.va .body{flex:1;display:grid;grid-template-columns:260px 1fr 210px;min-height:0}
+.va .side{background:#111114;border-right:1px solid #1f1f23;display:flex;flex-direction:column;min-height:0}
+.va .sidehead{display:flex;justify-content:space-between;align-items:center;padding:14px 14px 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#71717a}
+.va .mini{display:grid;place-items:center;width:20px;height:20px;border-radius:5px;color:#a1a1aa}
+.va .mini:hover{background:#1f1f24}
+.va .tree{flex:1;overflow:auto;padding:0 6px 10px}
+.va .t .t{padding-left:14px}
+.va summary,.va .pg{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;color:#c4c4cc;font-size:13.5px}
+.va summary:hover,.va .pg:hover{background:#1a1a1f}
+.va summary .ic{color:#8b93ff;display:inline-flex}
+.va .pg .ic{color:#5f5f69;display:inline-flex}
+.va .pg.on{background:#1e2140;color:#fff}
+.va .pg.on .ic{color:#a5adff}
+.va .dot{width:6px;height:6px;border-radius:50%;background:#f5a524;margin-left:auto;flex:none}
+.va .sidefoot{border-top:1px solid #1f1f23;padding:8px;display:flex;flex-direction:column;gap:2px}
+.va .sidefoot span{display:flex;gap:8px;align-items:center;color:#8b8b95;font-size:13px;padding:4px 6px;border-radius:6px}
+.va main{overflow:auto;min-height:0}
+.va .bar{display:flex;align-items:center;gap:10px;padding:10px 28px;border-bottom:1px solid #1a1a1e;position:sticky;top:0;background:#0c0c0eee;backdrop-filter:blur(6px);z-index:2}
+.va .crumbs{color:#71717a;font-size:13px}
+.va .crumbs b{color:#d4d4d8;font-weight:500}
+.va .chip{font-size:12px;padding:1px 8px;border-radius:999px;background:#2a2112;color:#f5c26b;border:1px solid #4a3a1a}
+.va .seg{display:flex;border:1px solid #2a2a30;border-radius:7px;overflow:hidden;font-size:12px}
+.va .seg span{padding:4px 10px;color:#8b8b95}
+.va .seg .on{background:#1f1f24;color:#fff}
+.va .btn{background:#6d7cff;color:#fff;border-radius:7px;padding:5px 12px;font-size:13px;font-weight:550}
+.va .ghost{border:1px solid #2a2a30;border-radius:7px;padding:4px 12px;font-size:13px;color:#c4c4cc}
+.va .doc{max-width:680px;margin:0 auto;padding:30px 30px 60px}
+.va .doc h1{font-size:30px;letter-spacing:-.02em;margin:0 0 6px;font-weight:650}
+.va .meta{color:#71717a;font-size:13px;margin-bottom:22px}
+.va .agent{display:inline-flex;align-items:center;gap:4px;color:#a5adff;vertical-align:-3px}
+.va .doc h2{font-size:18px;margin:28px 0 8px;font-weight:600}
+.va .doc p,.va .doc li{color:#d4d4d8}
+.va .callout{background:#15171f;border:1px solid #262a3d;border-left:3px solid #7c8cff;padding:10px 14px;border-radius:8px;color:#c9cbe0;margin:16px 0}
+.va table{font-size:13px;margin-top:14px}
+.va th,.va td{border-bottom:1px solid #222;padding:7px 8px;text-align:left}
+.va th{color:#8b8b95;font-weight:500}
+.va .wl{color:#a5adff;border-bottom:1px dashed #5b63a8}
+.va .toc{border-left:1px solid #1a1a1e;padding:18px 16px;font-size:13px;color:#a1a1aa;overflow:auto}
+.va .toc h4{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#5f5f69;margin:16px 0 6px;font-weight:600}
+.va .toc h4:first-child{margin-top:0}
+.va .toc a{display:block;padding:3px 0 3px 10px;border-left:2px solid #222}
+.va .toc a.on{border-color:#7c8cff;color:#fff}
+.va .ver{display:flex;flex-direction:column;padding:5px 0;border-bottom:1px solid #18181b}
+.va .ver b{color:#d4d4d8;font-weight:500}
+.va .ver span{font-size:12px;color:#71717a}
+
+/* ---------- B: Rail ---------- */
+.vb{background:#0e1320;color:#e2e8f0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;grid-template-columns:64px 256px 1fr;border:1px solid #1d2638}
+.vb .rail{background:#080b13;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0;border-right:1px solid #161d2c}
+.vb .sp-btn{width:40px;height:40px;border-radius:12px;background:#1e293b;display:grid;place-items:center;font-weight:700;font-size:13px;color:#cbd5e1;position:relative;cursor:pointer;transition:border-radius .15s}
+.vb .sp-btn:hover{border-radius:16px}
+.vb .sp-btn.on{background:#14b8a6;color:#04201c}
+.vb .sp-btn.on::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:4px;border-radius:0 4px 4px 0;background:#fff}
+.vb .sp-btn.add{background:transparent;border:1.5px dashed #334155;color:#64748b}
+.vb .rb{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:#7c8aa3;cursor:pointer}
+.vb .rb:hover{background:#141c2c;color:#e2e8f0}
+.vb .me{width:32px;height:32px;border-radius:50%;background:#475569;display:grid;place-items:center;font-size:11px;font-weight:700;margin-top:4px}
+.vb .panel{background:#111827;border-right:1px solid #1d2638;display:flex;flex-direction:column;min-height:0}
+.vb .sphead{padding:14px 16px 12px;border-bottom:1px solid #1d2638}
+.vb .sphead b{font-size:15px}
+.vb .members{display:flex;align-items:center;gap:8px;font-size:12px;color:#7c8aa3;margin-top:4px}
+.vb .stack,.vb .viewers{display:inline-flex}
+.vb .stack i,.vb .viewers i{width:18px;height:18px;border-radius:50%;border:2px solid #111827;margin-left:-5px;font-style:normal;font-size:9px;display:grid;place-items:center;color:#111;font-weight:700}
+.vb .stack i:first-child{margin-left:0}
+.vb .viewers i{width:24px;height:24px;font-size:10px;border-color:#0e1320}
+.vb .row2{display:flex;gap:6px;padding:10px 12px 4px}
+.vb .filter{flex:1;display:flex;align-items:center;gap:6px;background:#0b111c;border:1px solid #1f2a3d;border-radius:8px;padding:5px 8px;color:#64748b;font-size:13px}
+.vb .newbtn{width:32px;display:grid;place-items:center;border-radius:8px;background:#14b8a6;color:#04201c}
+.vb .tree{flex:1;overflow:auto;padding:4px 8px}
+.vb .sec{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#55627a;padding:10px 8px 4px;font-weight:600}
+.vb .t .t{padding-left:12px}
+.vb summary,.vb .pg{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:7px;color:#cbd5e1;font-size:13.5px}
+.vb summary{font-weight:600;color:#e2e8f0}
+.vb summary:hover,.vb .pg:hover{background:#18213a}
+.vb .bul{width:5px;height:5px;border-radius:50%;background:#3b4a63;margin:0 4px;flex:none}
+.vb .cnt{margin-left:auto;font-size:11px;color:#55627a;font-weight:500}
+.vb .pg.on{background:rgba(45,212,191,.13);color:#99f6e4}
+.vb .pg.on .bul{background:#2dd4bf}
+.vb .dot{width:6px;height:6px;border-radius:50%;background:#fbbf24;margin-left:auto;flex:none}
+.vb .activity{border-top:1px solid #1d2638;padding:10px 14px 14px}
+.vb .act{display:flex;gap:8px;font-size:12.5px;color:#cbd5e1;background:#0b111c;border:1px solid #1f2a3d;border-radius:9px;padding:8px 10px}
+.vb .act svg{color:#2dd4bf;margin-top:2px}
+.vb .act span{color:#64748b}
+.vb main{overflow:auto;min-height:0}
+.vb .bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 22px;border-bottom:1px solid #1d2638;position:sticky;top:0;background:#0e1320;z-index:2}
+.vb .crumbs{font-size:13px;color:#7c8aa3}
+.vb .crumbs b{color:#e2e8f0;font-weight:500}
+.vb .ghost{display:inline-flex;gap:6px;align-items:center;border:1px solid #273349;border-radius:8px;padding:5px 12px;font-size:13px}
+.vb .btn{background:#2dd4bf;color:#04201c;font-weight:650;border-radius:8px;padding:6px 14px;font-size:13px}
+.vb .doc{max-width:720px;margin:0 auto;padding:34px 34px 60px}
+.vb .doc h1{font-size:32px;font-weight:700;letter-spacing:-.02em;margin:0 0 12px}
+.vb .tabs{display:flex;gap:18px;border-bottom:1px solid #1d2638;margin-bottom:22px;font-size:13px}
+.vb .tabs span{padding:6px 0;color:#7c8aa3;border-bottom:2px solid transparent;margin-bottom:-1px}
+.vb .tabs .on{color:#e2e8f0;border-color:#2dd4bf}
+.vb .tabs em{font-style:normal;background:#2a2412;color:#fbbf24;border-radius:999px;padding:0 6px;font-size:11px}
+.vb .doc h2{font-size:19px;margin:28px 0 8px}
+.vb .doc p,.vb .doc li{color:#cbd5e1}
+.vb .callout{background:#0f2230;border-left:3px solid #2dd4bf;padding:10px 14px;border-radius:0 8px 8px 0;margin:16px 0;color:#c4e9e4}
+.vb table{font-size:13px;margin-top:14px;border:1px solid #1d2638;border-radius:8px;overflow:hidden;border-collapse:separate;border-spacing:0}
+.vb th,.vb td{padding:8px 12px;border-bottom:1px solid #1d2638;text-align:left}
+.vb th{background:#111827;color:#94a3b8;font-weight:600}
+.vb tr:last-child td{border-bottom:0}
+.vb .wl{color:#5eead4;background:rgba(45,212,191,.08);padding:0 3px;border-radius:4px}
+
+/* ---------- C: Library ---------- */
+.vc{background:#f5f0e6;color:#231f1a;font-family:"Iowan Old Style","Charter","Palatino Linotype",Palatino,Georgia,serif;border:1px solid #d9cfbd}
+.vc .top{height:58px;flex:none;display:flex;align-items:center;gap:22px;padding:0 26px;border-bottom:1px solid #d9cfbd}
+.vc .word{font-size:22px;letter-spacing:-.01em}
+.vc .word em{color:#8b2e1f}
+.vc .space{font-variant:small-caps;letter-spacing:.06em;color:#6b5d4a;font-size:15px;border-left:1px solid #d9cfbd;padding-left:22px}
+.vc .srch{display:flex;align-items:center;gap:8px;color:#9a8b74;border-bottom:1px solid #cdbfa6;padding:3px 2px;width:240px;margin-left:auto;font-style:italic;font-size:14px}
+.vc nav{display:flex;gap:18px;font-variant:small-caps;letter-spacing:.06em;font-size:15px;color:#5b4f40}
+.vc nav a:hover{color:#8b2e1f}
+.vc nav .me{color:#8b2e1f}
+.vc .body{flex:1;display:grid;grid-template-columns:280px 1fr;min-height:0}
+.vc .side{background:#efe7d7;border-right:1px solid #d9cfbd;overflow:auto;padding:22px 22px 30px}
+.vc .sidetitle{font-style:italic;font-size:20px;margin-bottom:10px;color:#3a3229}
+.vc summary{display:flex;align-items:baseline;gap:8px;font-variant:small-caps;letter-spacing:.09em;font-size:14px;color:#7a6a55;padding:12px 0 4px;border-bottom:1px solid #ddd2bf;margin-bottom:4px}
+.vc summary .cnt{margin-left:auto;font-variant:normal;letter-spacing:0;font-size:12px;color:#a8977d;font-style:italic}
+.vc .t .t .t summary{border:0;padding:6px 0 2px 12px;font-size:13px}
+.vc .t .t .t .t{padding-left:12px}
+.vc .pg{display:flex;align-items:baseline;gap:8px;padding:3px 0 3px 12px;border-left:2px solid transparent;font-size:15.5px;color:#2b2620}
+.vc .pg:hover{color:#8b2e1f}
+.vc .pg.on{border-color:#8b2e1f;color:#8b2e1f}
+.vc .mk{font-size:11px;font-style:italic;color:#a8977d;margin-left:auto}
+.vc .t>li>.pg{margin-top:2px}
+.vc .sidenew{margin-top:22px;font-style:italic;color:#8b2e1f;font-size:14px}
+.vc main{overflow:auto;min-height:0}
+.vc .doc{max-width:660px;margin:0 auto;padding:46px 40px 80px;font-size:17.5px;line-height:1.72}
+.vc .kicker{font-variant:small-caps;letter-spacing:.12em;color:#8b2e1f;font-size:15px}
+.vc .doc h1{font-size:44px;font-weight:500;letter-spacing:-.015em;line-height:1.1;margin:4px 0 12px}
+.vc .meta{display:flex;flex-direction:column;gap:6px;font-style:italic;color:#7a6a55;font-size:15px;padding-bottom:18px;border-bottom:1px solid #d9cfbd;margin-bottom:24px}
+.vc .actions{font-style:normal;display:flex;gap:16px;font-variant:small-caps;letter-spacing:.06em;color:#8b2e1f}
+.vc .doc>p:first-of-type::first-letter{float:left;font-size:3.4em;line-height:.85;margin:6px 8px 0 0;color:#8b2e1f}
+.vc .doc h2{font-size:24px;font-weight:500;font-style:italic;margin:34px 0 6px}
+.vc .callout{border-top:1px solid #cdbfa6;border-bottom:1px solid #cdbfa6;padding:12px 4px;margin:20px 0;font-style:italic;color:#4a4036}
+.vc .callout strong{font-style:normal;font-variant:small-caps;letter-spacing:.06em;color:#8b2e1f;font-weight:400}
+.vc table{font-size:15.5px;margin-top:14px}
+.vc th{font-variant:small-caps;letter-spacing:.08em;font-weight:400;color:#7a6a55;border-bottom:1px solid #231f1a;text-align:left;padding:6px 8px}
+.vc td{border-bottom:1px solid #ddd2bf;padding:6px 8px}
+.vc .wl{color:#8b2e1f;border-bottom:1px solid #d4a99f}
+
+/* ---------- D: Console ---------- */
+.vd{background:#000;color:#cfcfcf;font-family:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;font-size:13px;border:1px solid #262626}
+.vd .top{height:36px;flex:none;display:flex;align-items:stretch;gap:0;border-bottom:1px solid #1f1f1f;background:#050505;font-size:12.5px}
+.vd .brand{display:flex;align-items:center;padding:0 14px;color:#ffb000;font-weight:700;border-right:1px solid #1f1f1f;width:240px}
+.vd .brand span{color:#777;font-weight:400}
+.vd .tabs{display:flex}
+.vd .tab{display:flex;align-items:center;gap:8px;padding:0 14px;color:#777;border-right:1px solid #161616}
+.vd .tab.on{background:#000;color:#eee;box-shadow:inset 0 2px 0 #ffb000}
+.vd .tab i{font-style:normal;color:#ffb000;font-size:10px}
+.vd .top>a{display:flex;align-items:center;padding:0 10px;color:#8a8a8a}
+.vd .top>a:hover{color:#ffb000}
+.vd .top>a.me{color:#ffb000;padding-right:14px}
+.vd .body{flex:1;display:grid;grid-template-columns:240px 1fr;min-height:0}
+.vd .side{border-right:1px solid #1f1f1f;overflow:auto;padding:10px 0 20px;background:#030303;display:flex;flex-direction:column}
+.vd .sidehead{font-size:11px;letter-spacing:.12em;color:#666;padding:0 14px 8px}
+.vd .sidehead span{color:#ffb000;letter-spacing:0;margin-left:6px}
+.vd .side>.t{padding:0 8px}
+.vd .t .t{margin-left:7px;padding-left:8px;border-left:1px solid #222}
+.vd summary,.vd .pg{display:flex;align-items:center;gap:6px;padding:2px 6px;border-radius:3px;white-space:nowrap}
+.vd summary{color:#e5c07b}
+.vd summary::before{content:"▸";color:#666;width:10px}
+.vd details[open]>summary::before{content:"▾"}
+.vd .pg{color:#b5b5b5;padding-left:22px}
+.vd .t .t .pg{padding-left:22px}
+.vd summary:hover,.vd .pg:hover{background:#111}
+.vd .pg.on{background:#1f1700;color:#ffcf66}
+.vd .gm{margin-left:auto;font-size:11px;font-weight:700}
+.vd .gm.m{color:#ffb000}.vd .gm.u{color:#4ade80}
+.vd .legend{margin-top:auto;padding:14px 14px 0;font-size:11px;color:#666;line-height:1.8}
+.vd main{overflow:auto;min-height:0;position:relative}
+.vd .doc{max-width:720px;padding:20px 40px 60px;line-height:1.7}
+.vd .fm{color:#6b6b6b;margin:0 0 18px;font:inherit;line-height:1.6}
+.vd .fm b{color:#9a9a9a;font-weight:400}
+.vd .hm,.vd .br{color:#555;font-weight:400}
+.vd .doc h1{font-size:20px;color:#fff;margin:0 0 12px}
+.vd .doc h2{font-size:15px;color:#ffb000;margin:26px 0 6px}
+.vd .doc h2 .hm{color:#7a5a00}
+.vd .doc strong{color:#fff}
+.vd .doc ol{padding-left:28px}
+.vd .doc li::marker{color:#666}
+.vd .callout{border-left:2px solid #444;padding:4px 14px;color:#9a9a9a;margin:14px 0}
+.vd .callout::before{content:"> ";color:#555}
+.vd .callout strong{color:#ddd}
+.vd .wl{color:#56d4e8}
+.vd table{font-size:12.5px;margin-top:12px;max-width:440px;border:1px solid #2a2a2a}
+.vd th,.vd td{padding:4px 10px;border:1px solid #222;text-align:left}
+.vd th{color:#ffb000;font-weight:400}
+.vd .status{height:24px;flex:none;display:flex;align-items:stretch;font-size:11.5px;background:#0a0a0a;border-top:1px solid #1f1f1f;color:#888}
+.vd .status .seg{display:flex;align-items:center;gap:5px;padding:0 10px;border-right:1px solid #1a1a1a}
+.vd .status .seg.hi{background:#ffb000;color:#000;font-weight:700}
+.vd .palette{display:none;position:absolute;top:14px;left:50%;transform:translateX(-50%);width:440px;background:#0b0b0b;border:1px solid #ffb000;box-shadow:0 20px 60px #000;z-index:5}
+.vd .palette.show{display:block}
+.vd .pin{padding:10px 12px;border-bottom:1px solid #222;color:#fff}
+.vd .cur{color:#ffb000;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.vd .pr{display:flex;justify-content:space-between;padding:6px 12px;color:#aaa}
+.vd .pr.on{background:#1f1700;color:#ffcf66}
+.vd .pr span{color:#555}
+
+/* ---------- E: Homey (themeable) ---------- */
+.ve{--bg:#f4f1ec;--card:#fff;--top:#fff;--border:#ece6dc;--text:#2d2a26;--muted:#8a8278;--muted2:#6b645a;--soft:#f4f1ec;--hover:#f8f5f0;--accent:#f2643d;--accent2:#ff8a5c;--accent-soft:#fff0ea;--accent-ink:#c2410c;--on-accent:#fff;--btn:#2d2a26;--btn-ink:#fff;--guide:#f1ece4;--shadow:0 1px 2px rgba(60,40,20,.06),0 4px 16px rgba(60,40,20,.05);--g-bg:#e3f6e9;--g-ink:#1f7a45;--y-bg:#fff3d6;--y-ink:#9a6200;--note-bg:#fff7c2;--note-ink:#5c4a00;--th:#f1ece4;--tbl:#faf8f4;--glass:rgba(255,255,255,.7);--glass-ink:#2d2a26;
+ --tg:#e3f6e9;--to:#ffeedd;--tb:#e4eeff;--tp:#fde6ef;--tv:#efe8ff;
+ --cover:radial-gradient(circle at 20% 30%,#ffd8a8 0,transparent 55%),radial-gradient(circle at 80% 20%,#ffc9c9 0,transparent 50%),linear-gradient(120deg,#ffe8cc,#fff4e6);
+ background:var(--bg);color:var(--text);font-family:ui-rounded,"SF Pro Rounded","Nunito","Varela Round","Segoe UI",system-ui,sans-serif;border:1px solid var(--border);transition:background .2s,color .2s}
+.ve.th-warm{--bg:#131110;--card:#1d1a18;--top:#181614;--border:#2c2825;--text:#eee7df;--muted:#968c82;--muted2:#b8aea4;--soft:#272320;--hover:#24201d;--accent:#ff7a50;--accent2:#ff9a6e;--accent-soft:rgba(255,122,80,.14);--accent-ink:#ffa384;--on-accent:#1c0d06;--btn:#eee7df;--btn-ink:#131110;--guide:#2c2825;--shadow:inset 0 1px 0 rgba(255,255,255,.035),0 8px 24px rgba(0,0,0,.35);--g-bg:rgba(74,222,128,.12);--g-ink:#86efac;--y-bg:rgba(251,191,36,.13);--y-ink:#fcd34d;--note-bg:#352d13;--note-ink:#f3e3a3;--th:#272320;--tbl:#211e1b;--glass:rgba(20,16,14,.55);--glass-ink:#f4ede6;
+ --tg:rgba(74,222,128,.15);--to:rgba(251,146,60,.17);--tb:rgba(96,165,250,.17);--tp:rgba(244,114,182,.17);--tv:rgba(167,139,250,.18);
+ --cover:radial-gradient(circle at 18% 35%,rgba(255,150,80,.42) 0,transparent 55%),radial-gradient(circle at 82% 20%,rgba(255,95,110,.28) 0,transparent 50%),linear-gradient(120deg,#2d2119,#211a16)}
+.ve.th-slate{--bg:#0a0f1c;--card:#111a2b;--top:#0d1424;--border:#1f2a3d;--text:#e2e8f0;--muted:#7c8aa3;--muted2:#a3b0c6;--soft:#1a2436;--hover:#162033;--accent:#2dd4bf;--accent2:#5eead4;--accent-soft:rgba(45,212,191,.13);--accent-ink:#5eead4;--on-accent:#04201c;--btn:#e2e8f0;--btn-ink:#0a0f1c;--guide:#1f2a3d;--shadow:inset 0 1px 0 rgba(255,255,255,.03),0 8px 24px rgba(0,0,0,.4);--g-bg:rgba(74,222,128,.12);--g-ink:#86efac;--y-bg:rgba(251,191,36,.12);--y-ink:#fcd34d;--note-bg:#2b2a17;--note-ink:#efe2a0;--th:#1a2436;--tbl:#0f1727;--glass:rgba(8,12,22,.55);--glass-ink:#e2e8f0;
+ --tg:rgba(74,222,128,.14);--to:rgba(251,146,60,.16);--tb:rgba(96,165,250,.17);--tp:rgba(244,114,182,.16);--tv:rgba(167,139,250,.18);
+ --cover:radial-gradient(circle at 20% 35%,rgba(45,212,191,.35) 0,transparent 55%),radial-gradient(circle at 80% 15%,rgba(99,102,241,.35) 0,transparent 50%),linear-gradient(120deg,#10213a,#0f1a2c)}
+.ve.th-oled{--bg:#000;--card:#0e0e10;--top:#000;--border:#1f1f23;--text:#f4f4f5;--muted:#85858f;--muted2:#b0b0b8;--soft:#1a1a1e;--hover:#151518;--accent:#a78bfa;--accent2:#c4b5fd;--accent-soft:rgba(167,139,250,.14);--accent-ink:#c4b5fd;--on-accent:#140b2b;--btn:#f4f4f5;--btn-ink:#000;--guide:#1f1f23;--shadow:inset 0 0 0 1px #1c1c20;--g-bg:rgba(74,222,128,.12);--g-ink:#86efac;--y-bg:rgba(251,191,36,.12);--y-ink:#fcd34d;--note-bg:#2a2614;--note-ink:#efe2a0;--th:#18181b;--tbl:#0b0b0d;--glass:rgba(0,0,0,.5);--glass-ink:#f4f4f5;
+ --tg:rgba(74,222,128,.14);--to:rgba(251,146,60,.16);--tb:rgba(96,165,250,.17);--tp:rgba(244,114,182,.16);--tv:rgba(167,139,250,.2);
+ --cover:radial-gradient(circle at 22% 40%,rgba(167,139,250,.38) 0,transparent 55%),radial-gradient(circle at 80% 20%,rgba(236,72,153,.25) 0,transparent 50%),linear-gradient(120deg,#16102a,#0c0a14)}
+.ve .top{height:62px;flex:none;display:flex;align-items:center;gap:16px;padding:0 18px;background:var(--top);border-bottom:1px solid var(--border)}
+.ve .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:17px;letter-spacing:-.01em}
+.ve .logo .box{width:32px;height:32px;border-radius:10px;background:var(--accent-soft);display:grid;place-items:center;font-size:17px}
+.ve .pills{display:flex;gap:4px;margin-left:10px}
+.ve .pills a{display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:999px;color:var(--muted2);font-weight:600;font-size:13.5px}
+.ve .pills a:hover{background:var(--hover)}
+.ve .pills a.on{background:var(--accent-soft);color:var(--accent-ink)}
+.ve .cb{width:36px;height:36px;border-radius:50%;background:var(--soft);display:grid;place-items:center;color:var(--muted2);cursor:pointer}
+.ve .me{width:36px;height:36px;border-radius:50%;background:var(--btn);color:var(--btn-ink);display:grid;place-items:center;font-size:12px;font-weight:700}
+.ve .body{flex:1;display:grid;grid-template-columns:276px 1fr;gap:14px;padding:14px;min-height:0}
+.ve .card{background:var(--card);border-radius:18px;box-shadow:var(--shadow);min-height:0}
+.ve .side{display:flex;flex-direction:column;padding:14px}
+.ve .spacecard{display:flex;align-items:center;gap:10px;padding:6px 6px 12px}
+.ve .sq{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent2),var(--accent));color:var(--on-accent);display:grid;place-items:center;font-weight:800}
+.ve .sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.ve .stack{display:inline-flex}
+.ve .stack i,.ve .c i{width:18px;height:18px;border-radius:50%;border:2px solid var(--card);margin-left:-5px;font-style:normal;font-size:9px;display:inline-grid;place-items:center;color:#222;font-weight:700}
+.ve .stack i:first-child{margin-left:0}
+.ve .new{display:flex;align-items:center;justify-content:center;gap:6px;background:var(--accent);color:var(--on-accent);font-weight:700;border-radius:12px;padding:9px;font-size:14px;margin-bottom:10px;cursor:pointer}
+.ve .tree{overflow:auto;flex:1;margin:0 -4px;padding:0 4px}
+.ve summary{display:flex;align-items:center;gap:10px;padding:6px;border-radius:12px;font-weight:700;font-size:14px}
+.ve summary:hover{background:var(--hover)}
+.ve .fi{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;font-size:14px;flex:none}
+.ve .fi.green{background:var(--tg)}.ve .fi.orange{background:var(--to)}.ve .fi.blue{background:var(--tb)}.ve .fi.pink{background:var(--tp)}.ve .fi.purple{background:var(--tv)}
+.ve .cnt{margin-left:auto;font-size:11.5px;background:var(--soft);color:var(--muted);border-radius:999px;padding:1px 8px;font-weight:700}
+.ve .chev{opacity:.4}
+.ve .t .t{padding-left:20px;position:relative}
+.ve .t .t::before{content:"";position:absolute;left:19px;top:2px;bottom:8px;width:2px;border-radius:2px;background:var(--guide)}
+.ve .pg{display:flex;align-items:center;gap:8px;padding:6px 10px 6px 18px;border-radius:10px;color:var(--muted2);font-size:14px}
+.ve .pg:hover{background:var(--hover);color:var(--text)}
+.ve .pg.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:700}
+.ve .dot{width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-left:auto;flex:none}
+.ve main{overflow:auto}
+.ve .cover{height:120px;background:var(--cover);border-radius:18px 18px 0 0;position:relative}
+.ve .emoji{position:absolute;left:44px;bottom:-26px;font-size:48px;background:var(--card);border-radius:18px;width:72px;height:72px;display:grid;place-items:center;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.ve .doc{max-width:720px;padding:40px 44px 60px;font-size:15.5px;line-height:1.65}
+.ve .titlerow{display:flex;align-items:center;gap:8px}
+.ve .doc h1{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:0}
+.ve .btn{background:var(--btn);color:var(--btn-ink);border-radius:10px;padding:7px 16px;font-weight:700;font-size:13.5px}
+.ve .ghost{background:var(--soft);border-radius:10px;padding:7px 14px;font-weight:700;font-size:13.5px}
+.ve .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 22px}
+.ve .c{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;border-radius:999px;padding:3px 10px}
+.ve .c i{margin:0;border:0}
+.ve .c.g{background:var(--g-bg);color:var(--g-ink)}.ve .c.y{background:var(--y-bg);color:var(--y-ink)}.ve .c.p{background:var(--soft);color:var(--muted2)}
+.ve .doc h2{font-size:20px;font-weight:800;margin:28px 0 8px}
+.ve .doc p,.ve .doc li{color:var(--text)}
+.ve .callout{background:var(--note-bg);padding:14px 16px;border-radius:4px 4px 14px 4px;box-shadow:0 3px 10px rgba(0,0,0,.14);transform:rotate(-.6deg);margin:20px 4px;color:var(--note-ink)}
+.ve table{font-size:14px;margin-top:14px;border-radius:12px;overflow:hidden;border-collapse:separate;border-spacing:0;background:var(--tbl)}
+.ve th,.ve td{padding:9px 14px;text-align:left}
+.ve th{background:var(--th);color:var(--muted2);font-weight:800}
+.ve td{border-top:1px solid var(--border)}
+.ve .wl{color:var(--accent-ink);font-weight:700;background:var(--accent-soft);padding:1px 6px;border-radius:6px}
+
+/* ---------- G: Rail + cards ---------- */
+.vg .body{grid-template-columns:70px 280px 1fr;padding:14px 14px 14px 0}
+.vg .rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:2px 0}
+.vg .spc{width:44px;height:44px;border-radius:14px;background:var(--card);box-shadow:var(--shadow);display:grid;place-items:center;font-size:20px;position:relative;cursor:pointer;font-weight:800;font-size:13px;color:var(--muted2);transition:transform .15s}
+.vg .spc:hover{transform:translateY(-1px)}
+.vg .spc.emo{font-size:20px}
+.vg .spc.on{background:var(--accent-soft);box-shadow:0 0 0 2px var(--accent)}
+.vg .spc.on::before{content:"";position:absolute;left:-13px;top:10px;bottom:10px;width:4px;border-radius:0 4px 4px 0;background:var(--accent)}
+.vg .spc.add{background:transparent;box-shadow:none;border:2px dashed var(--border);color:var(--muted)}
+.vg .rdiv{width:28px;height:2px;border-radius:2px;background:var(--border);margin:2px 0}
+.vg .rb{width:56px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;border-radius:12px;color:var(--muted);font-size:10px;font-weight:700;cursor:pointer}
+.vg .rb:hover{background:var(--hover);color:var(--text)}
+.vg .rb.on{color:var(--accent-ink)}
+.vg .rail .me{margin-top:6px}
+.vg .filter{display:flex;gap:7px;align-items:center;background:var(--soft);border-radius:10px;padding:7px 10px;color:var(--muted);font-size:13px;margin-bottom:10px}
+.vg .rowbtn{display:flex;gap:8px}
+.vg .rowbtn .new{flex:1}
+.vg .rowbtn .imp{width:40px;border-radius:12px;background:var(--soft);display:grid;place-items:center;color:var(--muted2);margin-bottom:10px}
+.vg .act{display:flex;gap:9px;background:var(--soft);border-radius:12px;padding:10px 11px;font-size:12.5px;margin-top:10px;color:var(--muted2)}
+.vg .act svg{color:var(--accent);margin-top:2px}
+.vg .act b{color:var(--text)}
+.vg .act span{color:var(--muted)}
+.vg .ctool{position:absolute;top:12px;left:14px;right:14px;display:flex;align-items:center;gap:8px}
+.vg .glass{background:var(--glass);color:var(--glass-ink);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:999px;padding:5px 12px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;gap:6px}
+.vg .glass.pub{background:var(--accent);color:var(--on-accent)}
+.vg .viewers{display:inline-flex}
+.vg .viewers i{width:26px;height:26px;border-radius:50%;border:2px solid var(--glass);font-style:normal;font-size:10px;display:grid;place-items:center;color:#222;font-weight:800}
+.vg .seg{display:inline-flex;background:var(--soft);border-radius:11px;padding:3px;gap:2px;margin:12px 0 4px;font-size:13px;font-weight:700}
+.vg .seg span{padding:5px 12px;border-radius:8px;color:var(--muted)}
+.vg .seg .on{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.vg .seg em{font-style:normal;background:var(--y-bg);color:var(--y-ink);border-radius:999px;padding:0 6px;font-size:11px;margin-left:4px}
+
+.mgrid{display:flex;flex-wrap:wrap;gap:22px;margin-top:6px}
+.pf{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px}
+.pf figcaption{color:#9a9a9a;font-size:13px;max-width:360px;text-align:center}
+.ve.phone{width:375px;height:760px;min-width:0;border-radius:46px;border:10px solid #1b1b1b;box-shadow:0 0 0 1px #333;flex:none;font-size:14px}
+.vm .sbar{height:38px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:4px 28px 0;font-size:13px;font-weight:800}
+.vm .sbi{letter-spacing:-1px;font-size:11px}
+.vm .scr{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+.vm .mtop{height:52px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px}
+.vm .mtop.big b{font-size:26px;font-weight:800;letter-spacing:-.02em}
+.vm .back{font-weight:800;color:var(--accent-ink)}
+.vm .ib{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:var(--soft);color:var(--muted2);font-weight:800}
+.vm .sq.sm{width:28px;height:28px;border-radius:9px;font-size:12px}
+.vm .me.sm{width:30px;height:30px;font-size:11px}
+.vm .mpage{flex:1;min-height:0;overflow:hidden;margin:0 8px 8px;background:var(--card);border-radius:18px;box-shadow:var(--shadow);position:relative}
+.vm .mpage.full{margin:0 6px 6px}
+.vm .cover{height:104px}
+.vm .mctool{position:absolute;top:10px;left:10px;right:10px;display:flex;align-items:center;gap:6px}
+.vm .glass{background:var(--glass);color:var(--glass-ink);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:999px;padding:5px 11px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px}
+.vm .glass.pub{background:var(--accent);color:var(--on-accent)}
+.vm .gic{width:30px;height:30px;padding:0;justify-content:center}
+.vm .emoji{left:18px;bottom:-22px;width:56px;height:56px;font-size:32px;border-radius:16px}
+.vm .doc{padding:32px 18px 120px;font-size:15px}
+.vm .doc h1{font-size:25px}
+.vm .chips{margin:8px 0 14px}
+.vm .c.cur{box-shadow:inset 0 0 0 1.5px currentColor}
+.vm .ebar{display:flex;align-items:center;gap:8px;margin:-4px 0 16px;padding:6px 8px 6px 10px;border-radius:12px;background:var(--soft);color:var(--muted);font-size:12px;font-weight:700}
+.vm .live{width:8px;height:8px;border-radius:50%;background:var(--g-ink)}
+.vm .mseg{display:inline-flex;background:var(--card);border-radius:8px;padding:2px}
+.vm .mseg span{padding:1px 8px;border-radius:6px}
+.vm .mseg .on{background:var(--accent-soft);color:var(--accent-ink)}
+.vm .dim{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.vm .drawer{position:absolute;top:0;bottom:0;left:0;width:92%;background:var(--bg);display:grid;grid-template-columns:62px 1fr;gap:6px;padding:6px 8px 8px 0;box-shadow:12px 0 40px rgba(0,0,0,.4)}
+.vm .drail{display:flex;flex-direction:column;align-items:center;gap:7px;padding-top:4px}
+.vm .drail .spc{width:40px;height:40px}
+.vm .drail .rb{width:54px}
+.vm .side{padding:12px;display:flex;flex-direction:column;min-height:0}
+.vm .side .tree{flex:1}
+.vm .tabbar{height:66px;flex:none;display:flex;justify-content:space-around;align-items:flex-start;padding-top:6px;border-top:1px solid var(--border);background:var(--top)}
+.vm .tabbar .rb.on{color:var(--accent-ink)}
+.vm .abar{flex:none;display:flex;gap:8px;padding:8px 10px;background:var(--top);border-top:1px solid var(--border)}
+.vm .bp{flex:2;text-align:center;background:var(--accent);color:var(--on-accent);border-radius:12px;padding:10px;font-weight:800}
+.vm .bg2{flex:1;text-align:center;background:var(--soft);border-radius:12px;padding:10px;font-weight:800}
+.vm .spchips{display:flex;gap:8px;overflow:hidden;padding:2px 14px 10px;flex:none}
+.vm .spchip{display:inline-flex;align-items:center;gap:7px;padding:5px 12px 5px 5px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);font-weight:800;font-size:13px;white-space:nowrap}
+.vm .spchip .mini{width:26px;height:26px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:12px}
+.vm .spchip.on{background:var(--accent-soft);color:var(--accent-ink);box-shadow:inset 0 0 0 2px var(--accent)}
+.vm .spchip.add{padding:5px;color:var(--muted)}
+.vm .mlist{flex:1;margin:0 8px 8px}
+.vm .dock{position:absolute;left:14px;right:14px;bottom:16px;display:flex;gap:6px;padding:6px;border-radius:20px;background:var(--card);border:1px solid var(--border);box-shadow:0 12px 32px rgba(0,0,0,.35)}
+.vm .dk{flex:2;display:flex;align-items:center;padding:0 12px;font-weight:800;background:var(--soft);border-radius:14px}
+.vm .dock .bp,.vm .dock .bg2{border-radius:14px}
+.vm .sheet{position:absolute;left:0;right:0;bottom:0;height:80%;background:var(--card);border-radius:26px 26px 0 0;padding:8px 12px 12px;display:flex;flex-direction:column;box-shadow:0 -12px 40px rgba(0,0,0,.4)}
+.vm .sheet .spchips{padding:4px 0 8px}
+.vm .sheet .spchip{box-shadow:none;background:var(--soft)}
+.vm .sheet .spchip.on{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+.vm .sheet .tree{flex:1;overflow:hidden}
+.vm .grab{width:40px;height:5px;border-radius:3px;background:var(--border);margin:2px auto 10px;flex:none}
+.vm .navrow{display:flex;justify-content:space-between;margin:0 -4px 8px}
+.vm .navrow .rb{width:auto;flex:1}
+.vm .fab{position:absolute;right:20px;bottom:24px;width:58px;height:58px;border-radius:20px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.vm .fab svg{width:22px;height:22px}
+.vm .fab.ext{width:auto;padding:0 20px;font-weight:800;font-size:15px}
+</style></head>
+<body><div class="wrap">
+<header>
+ <h1>WikiStow layout mocks</h1>
+ <p class="lede">Each variant has the same pieces: navigation to settings and other links, and a left sidebar with folders and pages from the current space. Every mock uses the same sample <em>Family</em> space and the same <em>Sourdough starter</em> page, which has a published version and newer draft changes made by an agent.</p>
+ <p class="hint">The mocks are interactive. Folders expand and collapse, and clicking a page selects it. On narrow screens, scroll each mock sideways.</p>
+</header>
+<nav class="jump"><a href="#vI">I · Drawer</a><a href="#vJ">J · Tab bar</a><a href="#vK">K · Dock + sheet</a><a href="#vL">L · Floating button</a><span class="sepj"></span><a href="#vF">F · Homey Dark</a><a href="#vG">G · Rail + Cards</a><a href="#vH">H · G + pills</a><span class="sepj"></span><a href="#vA">A · Workbench</a><a href="#vB">B · Rail</a><a href="#vC">C · Library</a><a href="#vD">D · Console</a><a href="#vE">E · Homey</a><a href="#cmp">Compare</a></nav>
+<h2 class="round">Round 4 · Mobile layouts for H</h2>
+<p class="lede">Four phone layouts for H. The open question is where Publish and navigation go on a narrow screen. Each design shows two screens. The palette buttons change all the phones at once.</p>
+<div class="themes" data-group="mobile"><span>Palette</span><button data-theme="th-warm" class=""><i class="sw sw-th-warm"></i>Warm charcoal</button><button data-theme="th-slate" class="on"><i class="sw sw-th-slate"></i>Midnight slate</button><button data-theme="th-oled" class=""><i class="sw sw-th-oled"></i>OLED black</button><button data-theme="" class=""><i class="sw sw-light"></i>Light</button></div><div id="mobile">
+<section class="v" id="vI">
+ <h2><span class="lt">I</span>Drawer</h2>
+ <p class="tag">A small top bar and a drawer holding the desktop rail and sidebar side by side. Edit and Publish stay on the banner, as on desktop.</p>
+ <div class="mgrid"><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop"><span class="ib">☰</span><span class="sq sm">F</span><b>Family</b><span class="grow"></span><span class="ib"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="me sm">SK</span></div><div class="mpage"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="glass">Done</span><span class="glass pub">Publish</span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g">✓ Published v4 ›</span><span class="c y cur">✎ Draft has 3 changes</span><span class="c p">🤖 kitchen-agent · 1 h</span></div><div class="ebar"><span class="live"></span>Editing · saved just now<span class="grow"></span><span class="mseg"><span class="on">Visual</span><span>Source</span></span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+</article></div></div></div><figcaption>Draft view: Publish on the banner</figcaption></figure><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop"><span class="ib">☰</span><span class="sq sm">F</span><b>Family</b><span class="grow"></span><span class="ib"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="me sm">SK</span></div><div class="mpage"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="glass pub"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M10.5 2.5l3 3L6 13H3v-3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg> Edit</span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g cur">✓ Published v4</span><span class="c y">✎ Draft has 3 changes ›</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+
+</article></div><div class="dim"></div><div class="drawer"><nav class="drail"><span class="spc" title="Personal">SK</span><span class="spc emo on" title="Family">🏡</span><span class="spc emo" title="Book club">📚</span><span class="spc add"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span><span class="rdiv"></span><span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 13.5c.6-2.3 2.3-3.5 4.5-3.5s3.9 1.2 4.5 3.5M11 3.8a2.3 2.3 0 010 4.4M12.5 10.3c1 .5 1.7 1.6 2 3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Shared</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span><span class="grow"></span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span><span class="me">SK</span></nav><div class="card side"><div class="spacecard"><span class="sq">F</span><div><b>Family</b><div class="sub">5 members</div></div><span style="margin-left:auto;opacity:.5">▾</span></div><span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span><div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div><div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div></div></div></div></div><figcaption>Drawer open: the desktop rail and sidebar, side by side</figcaption></figure></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Closest to desktop, so there is one mental model and the least design and build work.</li><li>The drawer reuses the rail and sidebar components almost unchanged.</li></ul></div><div><b>Tradeoffs</b><ul><li>Publish sits at the top of the screen, the hardest place to reach with a thumb.</li><li>The banner toolbar gets crowded: crumbs, two icons, Done, and Publish.</li></ul></div></div>
+</section>
+<section class="v" id="vJ">
+ <h2><span class="lt">J</span>Tab bar</h2>
+ <p class="tag">A standard phone app layout. Bottom tabs for Pages, Search, Recent, Agents and Settings. The draft view adds a sticky bar with Done and Publish above the tabs.</p>
+ <div class="mgrid"><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop"><span class="back">‹ Recipes</span><span class="grow"></span><span class="ib"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="ib"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><div class="mpage"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g">✓ Published v4 ›</span><span class="c y cur">✎ Draft has 3 changes</span><span class="c p">🤖 kitchen-agent · 1 h</span></div><div class="ebar"><span class="live"></span>Editing · saved just now<span class="grow"></span><span class="mseg"><span class="on">Visual</span><span>Source</span></span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+</article></div><div class="abar"><span class="bg2">Done</span><span class="bp">Publish v5</span></div><div class="tabbar"><span class="rb on"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>Pages</span><span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span></div></div></div><figcaption>Draft view: Publish in a sticky bar above the tabs</figcaption></figure><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop big"><b>Pages</b><span class="grow"></span><span class="me sm">SK</span></div><div class="spchips"><span class="spchip"><span class="mini">SK</span>Personal</span><span class="spchip on"><span class="mini">🏡</span>Family</span><span class="spchip"><span class="mini">📚</span>Book club</span><span class="spchip add"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span></div><div class="mlist card side"><span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span><div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div><div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div></div><div class="tabbar"><span class="rb on"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>Pages</span><span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span></div></div></div><figcaption>Pages tab: spaces as chips, then the folder tree</figcaption></figure></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Publish is a large button in thumb reach and hard to miss.</li><li>Most familiar on phones. Settings and Agents are one tap away.</li><li>Spaces become chips, which scale better than a rail on a narrow screen.</li></ul></div><div><b>Tradeoffs</b><ul><li>The two bars at the bottom take about 130px from the page while editing.</li><li>Looks the least like the desktop layout.</li></ul></div></div>
+</section>
+<section class="v" id="vK">
+ <h2><span class="lt">K</span>Dock + sheet</h2>
+ <p class="tag">The page fills the screen. A floating dock at the bottom holds the current folder and the page action. Tapping the folder slides up a sheet with spaces, navigation and the tree.</p>
+ <div class="mgrid"><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mpage full"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g">✓ Published v4 ›</span><span class="c y cur">✎ Draft has 3 changes</span><span class="c p">🤖 kitchen-agent · 1 h</span></div><div class="ebar"><span class="live"></span>Editing · saved just now<span class="grow"></span><span class="mseg"><span class="on">Visual</span><span>Source</span></span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+</article></div><div class="dock"><span class="dk">☰ Recipes ▾</span><span class="bg2">Done</span><span class="bp">Publish</span></div></div></div><figcaption>Draft view: a floating dock holds navigation and Publish</figcaption></figure><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mpage full"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g cur">✓ Published v4</span><span class="c y">✎ Draft has 3 changes ›</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+
+</article></div><div class="dim"></div><div class="sheet"><span class="grab"></span><div class="spchips"><span class="spchip"><span class="mini">SK</span>Personal</span><span class="spchip on"><span class="mini">🏡</span>Family</span><span class="spchip"><span class="mini">📚</span>Book club</span><span class="spchip add"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span></div><div class="navrow"><span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 13.5c.6-2.3 2.3-3.5 4.5-3.5s3.9 1.2 4.5 3.5M11 3.8a2.3 2.3 0 010 4.4M12.5 10.3c1 .5 1.7 1.6 2 3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Shared</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span><span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span></div><span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span><div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div><div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div></div></div></div><figcaption>Sheet open: spaces, navigation and the tree slide up from the dock</figcaption></figure></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>The most room for reading and writing. The dock is the only chrome.</li><li>Navigation and Publish are both in thumb reach.</li><li>The sheet can be dragged partway up, then all the way.</li></ul></div><div><b>Tradeoffs</b><ul><li>Navigation is hidden until you open the sheet, so it's less discoverable.</li><li>The dock covers the end of the page unless content is padded for it.</li></ul></div></div>
+</section>
+<section class="v" id="vL">
+ <h2><span class="lt">L</span>Floating button</h2>
+ <p class="tag">Like I, with the main action in a floating button at bottom right: a pencil on the published view, Publish on the draft view.</p>
+ <div class="mgrid"><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop"><span class="ib">☰</span><span class="sq sm">F</span><b>Family</b><span class="grow"></span><span class="ib"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="me sm">SK</span></div><div class="mpage"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g cur">✓ Published v4</span><span class="c y">✎ Draft has 3 changes ›</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+
+</article></div><span class="fab"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M10.5 2.5l3 3L6 13H3v-3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span></div></div><figcaption>Published view: a round Edit button</figcaption></figure><figure class="pf"><div class="mock ve vg vm phone th-slate"><div class="sbar"><span>9:41</span><span class="sbi">▂▄▆ ▮</span></div><div class="scr"><div class="mtop"><span class="ib">☰</span><span class="sq sm">F</span><b>Family</b><span class="grow"></span><span class="ib"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="me sm">SK</span></div><div class="mpage"><div class="cover"><div class="mctool"><span class="glass">Recipes</span><span class="grow"></span><span class="glass gic" title="History"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span><span class="glass gic" title="Share"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="glass">Done</span></div><span class="emoji">🍞</span></div><article class="doc"><h1>Sourdough starter</h1><div class="chips"><span class="c g">✓ Published v4 ›</span><span class="c y cur">✎ Draft has 3 changes</span><span class="c p">🤖 kitchen-agent · 1 h</span></div><div class="ebar"><span class="live"></span>Editing · saved just now<span class="grow"></span><span class="mseg"><span class="on">Visual</span><span>Source</span></span></div>
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+</article></div><span class="fab ext">↑ Publish</span></div></div><figcaption>Draft view: the button becomes Publish. Navigation uses I's drawer</figcaption></figure></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>One obvious action per view, always in the same place.</li><li>The banner toolbar stays light: crumbs, History, Share, and Done.</li></ul></div><div><b>Tradeoffs</b><ul><li>A floating button can cover the end of a line or a table.</li><li>Navigation still comes from the drawer at the top, out of thumb reach.</li></ul></div></div>
+</section></div>
+<h2 class="round" style="margin-top:60px">Round 2 and 3 · B + E in dark mode</h2>
+<p class="lede">These two combine the rounded cards and color-coded folder list from E with B's dark styling. Use the palette buttons above each mock to compare dark palettes, or switch to Light to see the same layout in light mode.</p>
+
+<section class="v" id="vF">
+ <h2><span class="lt">F</span>Homey Dark</h2>
+ <p class="tag">E's layout in dark mode: top pill navigation, rounded cards, and the color-coded folder list. Folder tiles become soft tints so the emoji still stand out on a dark background.</p>
+ <div class="themes" data-for="mF"><span>Palette</span><button data-theme="th-warm" class="on"><i class="sw sw-th-warm"></i>Warm charcoal</button><button data-theme="th-slate" class=""><i class="sw sw-th-slate"></i>Midnight slate</button><button data-theme="th-oled" class=""><i class="sw sw-th-oled"></i>OLED black</button><button data-theme="" class=""><i class="sw sw-light"></i>Light</button></div>
+ <div class="scroller">
+<div class="mock ve th-warm" id="mF">
+ <header class="top">
+  <div class="logo"><span class="box">📦</span>wikistow</div>
+  <nav class="pills"><a><svg viewBox="0 0 16 16" width="16" height="16"><path d="M2.5 7.5L8 2.5l5.5 5V13a.5.5 0 01-.5.5H9.5V10h-3v3.5H3a.5.5 0 01-.5-.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg> Home</a><a class="on">Pages</a><a>Recent</a><a>Shared with me</a><a>Agents</a></nav>
+  <span class="grow"></span>
+  <span class="cb" title="Search"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+  <span class="cb" title="Settings"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+  <span class="me">SK</span>
+ </header>
+ <div class="body">
+  <aside class="side card">
+   <div class="spacecard"><span class="sq">F</span><div><b>Family</b><div class="sub">5 members <span class="stack"><i style="background:#fbbf24">J</i><i style="background:#60a5fa">S</i><i style="background:#f472b6">A</i></span></div></div><span style="margin-left:auto;opacity:.5">▾</span></div>
+   <span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span>
+   <div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div>
+  </aside>
+  <main class="card">
+   <div class="cover"><span class="emoji">🍞</span></div>
+   <article class="doc">
+    <div class="titlerow"><h1 data-bind="title">Sourdough starter</h1><span class="grow"></span><span class="ghost">Share</span><span class="btn">Edit</span></div>
+    <div class="chips"><span class="c g">✓ Published v4</span><span class="c y">✎ Draft has 3 changes</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span><span class="c p">🤖 kitchen-agent · 1 h ago</span></div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Keeps E's friendly feel in the dark. The colored folder tiles still separate sections well.</li><li>The warm charcoal palette is easier on the eyes at night than a pure black background.</li><li>Light and dark use one set of colors. Only the palette variables change.</li></ul></div><div><b>Tradeoffs</b><ul><li>Switching spaces still happens through the dropdown on the space card.</li><li>Low density, same as E.</li></ul></div><div><b>Settings and links</b><ul><li>Pill tabs: Home, Pages, Recent, Shared with me, Agents.</li><li>Search and Settings are round buttons beside the avatar.</li></ul></div></div>
+</section>
+<section class="v" id="vG">
+ <h2><span class="lt">G</span>Rail + Cards</h2>
+ <p class="tag">B's space rail combined with E's cards and folder list. Each space is a rounded tile in the rail, and the navigation icons have labels under them so nobody has to guess. Breadcrumbs, Share and Publish float on the page's cover band.</p>
+ <div class="themes" data-for="mG"><span>Palette</span><button data-theme="th-warm" class=""><i class="sw sw-th-warm"></i>Warm charcoal</button><button data-theme="th-slate" class="on"><i class="sw sw-th-slate"></i>Midnight slate</button><button data-theme="th-oled" class=""><i class="sw sw-th-oled"></i>OLED black</button><button data-theme="" class=""><i class="sw sw-light"></i>Light</button></div>
+ <div class="scroller">
+<div class="mock ve vg th-slate" id="mG">
+ <div class="body">
+  <nav class="rail">
+   <span class="spc" title="Personal">SK</span>
+   <span class="spc emo on" title="Family">🏡</span>
+   <span class="spc emo" title="Book club">📚</span>
+   <span class="spc add" title="New space"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+   <span class="rdiv"></span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 13.5c.6-2.3 2.3-3.5 4.5-3.5s3.9 1.2 4.5 3.5M11 3.8a2.3 2.3 0 010 4.4M12.5 10.3c1 .5 1.7 1.6 2 3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Shared</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span>
+   <span class="grow"></span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span>
+   <span class="me">SK</span>
+  </nav>
+  <aside class="side card">
+   <div class="spacecard"><span class="sq">F</span><div><b>Family</b><div class="sub">5 members <span class="stack"><i style="background:#fbbf24">J</i><i style="background:#60a5fa">S</i><i style="background:#f472b6">A</i></span></div></div><span style="margin-left:auto;opacity:.5">▾</span></div>
+   <span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span>
+   <div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div>
+   <div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div>
+   <div class="act"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><div><b>kitchen-agent</b> edited Sourdough starter<br><span>1 h ago · draft only</span></div></div>
+  </aside>
+  <main class="card">
+   <div class="cover">
+    <div class="ctool"><span class="glass">Family › <span data-bind="folder">Recipes</span></span><span class="grow"></span>
+     <span class="viewers"><i style="background:#fbbf24">J</i></span>
+     <span class="glass"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Share</span><span class="glass pub">Publish</span></div>
+    <span class="emoji">🍞</span></div>
+   <article class="doc">
+    <h1 data-bind="title">Sourdough starter</h1>
+    <div class="seg"><span class="on">Draft<em>3</em></span><span>Published v4</span><span>History</span><span>Access</span></div>
+    <div class="chips"><span class="c g">✓ v4 published Sep 28 by Jo</span><span class="c p">🤖 kitchen-agent · 1 h ago</span></div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Switch spaces in one click, with E's warmth on top.</li><li>No top bar, so the page and sidebar get the full height.</li><li>Labeled rail icons fix B's tooltip problem. Agent activity stays next to the tree.</li><li>Draft, Published, History and Access are tabs on the page itself.</li></ul></div><div><b>Tradeoffs</b><ul><li>Uses the most horizontal space before the page content starts, about 360 px.</li><li>On a phone, the rail and sidebar would collapse into one drawer.</li></ul></div><div><b>Settings and links</b><ul><li>Bottom of the rail: Search, Recent, Shared, Agents, then Settings and the avatar.</li><li>Space tiles and the + for a new space are at the top of the rail.</li></ul></div></div>
+</section>
+<section class="v" id="vH">
+ <h2><span class="lt">H</span>Rail + Cards, with status pills</h2>
+ <p class="tag">G with F's pills in place of the Draft / Published / History / Access tabs. Publish state, the last person to publish, and the latest agent edit appear as one row of pills under the title. History moves up to the banner beside Share and Publish.</p>
+ <div class="themes" data-for="mH"><span>Palette</span><button data-theme="th-warm" class=""><i class="sw sw-th-warm"></i>Warm charcoal</button><button data-theme="th-slate" class="on"><i class="sw sw-th-slate"></i>Midnight slate</button><button data-theme="th-oled" class=""><i class="sw sw-th-oled"></i>OLED black</button><button data-theme="" class=""><i class="sw sw-light"></i>Light</button></div>
+ <div class="scroller">
+<div class="mock ve vg th-slate" id="mH">
+ <div class="body">
+  <nav class="rail">
+   <span class="spc" title="Personal">SK</span>
+   <span class="spc emo on" title="Family">🏡</span>
+   <span class="spc emo" title="Book club">📚</span>
+   <span class="spc add" title="New space"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+   <span class="rdiv"></span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Search</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Recent</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 13.5c.6-2.3 2.3-3.5 4.5-3.5s3.9 1.2 4.5 3.5M11 3.8a2.3 2.3 0 010 4.4M12.5 10.3c1 .5 1.7 1.6 2 3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Shared</span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Agents</span>
+   <span class="grow"></span>
+   <span class="rb"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Settings</span>
+   <span class="me">SK</span>
+  </nav>
+  <aside class="side card">
+   <div class="spacecard"><span class="sq">F</span><div><b>Family</b><div class="sub">5 members <span class="stack"><i style="background:#fbbf24">J</i><i style="background:#60a5fa">S</i><i style="background:#f472b6">A</i></span></div></div><span style="margin-left:auto;opacity:.5">▾</span></div>
+   <span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span>
+   <div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div>
+   <div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div>
+   <div class="act"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><div><b>kitchen-agent</b> edited Sourdough starter<br><span>1 h ago · draft only</span></div></div>
+  </aside>
+  <main class="card">
+   <div class="cover">
+    <div class="ctool"><span class="glass">Family › <span data-bind="folder">Recipes</span></span><span class="grow"></span>
+     <span class="viewers"><i style="background:#fbbf24">J</i></span>
+     <span class="glass"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> History</span><span class="glass"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Share</span><span class="glass pub">Publish</span></div>
+    <span class="emoji">🍞</span></div>
+   <article class="doc">
+    <h1 data-bind="title">Sourdough starter</h1>
+    <div class="chips"><span class="c g">✓ Published v4</span><span class="c y">✎ Draft has 3 changes</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span><span class="c p">🤖 kitchen-agent · 1 h ago</span></div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Page state reads at a glance in plain language, with no clicks.</li><li>A cleaner title area: one row of pills instead of tabs plus pills.</li><li>The same pill style can show state in lists and search results.</li></ul></div><div><b>Tradeoffs</b><ul><li>Viewing the published version or Access settings needs another way in. Clicking a pill could open it, or the History panel could cover both.</li><li>Pills show state but don't look clickable, so people need a hint if they are.</li></ul></div><div><b>Settings and links</b><ul><li>Same as G: labeled buttons at the bottom of the rail, and space tiles at the top.</li></ul></div></div>
+</section>
+
+<h2 class="round" style="margin-top:60px">Round 1 · The original five</h2>
+
+<section class="v" id="vA">
+ <h2><span class="lt">A</span>Workbench</h2>
+ <p class="tag">Three panes in a dark neutral theme: top bar, folder tree, page, and a right rail for the outline and versions. This is the familiar Notion or Linear layout.</p>
+ <div class="scroller">
+<div class="mock va">
+ <header class="top">
+  <div class="logo"><i></i>wikistow</div>
+  <span class="spacepill">Family <span style="opacity:.5">▾</span></span>
+  <div class="search"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Search pages, people, agents</span><kbd>Ctrl K</kbd></div>
+  <nav class="links"><a class="cur">Pages</a><a>Recent</a><a>Shared</a><a>Agents</a></nav>
+  <a class="iconbtn" title="Settings"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></a>
+  <span class="av">SK</span>
+ </header>
+ <div class="body">
+  <aside class="side">
+   <div class="sidehead"><span>Family space</span><span class="mini"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span></div>
+   <div class="tree"><ul class="t"><li><details><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.75 4.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v6c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="n">Home &amp; House</span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.75 4.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v6c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="n">Recipes</span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.75 4.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v6c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="n">Weeknight dinners</span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.75 4.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v6c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="n">Travel</span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.75 4.5c0-.7.55-1.25 1.25-1.25h3l1.5 1.5H13c.7 0 1.25.55 1.25 1.25v6c0 .7-.55 1.25-1.25 1.25H3c-.7 0-1.25-.55-1.25-1.25z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span><span class="n">Health</span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="sp"></span><span class="ic"><svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span><span class="n">Emergency contacts</span></span></li></ul></div>
+   <div class="sidefoot"><span><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Import from Obsidian</span><span><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> Trash</span></div>
+  </aside>
+  <main>
+   <div class="bar">
+    <div class="crumbs">Family / <span data-bind="folder">Recipes</span> / <b data-bind="title">Sourdough starter</b></div>
+    <span class="chip">Draft · 3 changes</span>
+    <div class="seg" style="margin-left:auto"><span class="on">Visual</span><span>Source</span></div>
+    <span class="ghost">Share</span><span class="btn">Publish</span>
+   </div>
+   <article class="doc">
+    <h1 data-bind="title">Sourdough starter</h1>
+    <div class="meta">Published v4 by Jo on Sep 28 · Draft edited by <span class="agent"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> kitchen-agent</span> 1 h ago</div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+  <aside class="toc">
+   <h4>On this page</h4>
+   <a class="on">Feeding schedule</a><a>Using the discard</a><a>History</a>
+   <h4>Versions</h4>
+   <div class="ver"><b>Draft</b><span>kitchen-agent · 1 h</span></div>
+   <div class="ver"><b>v4</b><span>Jo · Sep 28</span></div>
+   <div class="ver"><b>v3</b><span>Sam · Sep 12</span></div>
+   <div class="ver"><b>v2</b><span>Jo · Aug 30</span></div>
+   <h4>Access</h4>
+   <div class="ver"><span>Family group can read. Jo and Sam can publish.</span></div>
+  </aside>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Most familiar layout. Little learning for anyone.</li><li>Publish state, version list, and access info are always visible.</li><li>The right rail gives drafts and versions a permanent place in the layout.</li></ul></div><div><b>Tradeoffs</b><ul><li>Three columns get cramped below about 1100 px. The right rail would need to collapse.</li><li>Safe and recognizable rather than distinctive.</li></ul></div><div><b>Settings and links</b><ul><li>Top bar: Pages, Recent, Shared, Agents, plus a settings gear and an avatar menu.</li><li>The space switcher pill sits next to the logo.</li></ul></div></div>
+</section>
+<section class="v" id="vB">
+ <h2><span class="lt">B</span>Rail</h2>
+ <p class="tag">A Discord-style rail switches spaces. The panel next to it shows the current space's folders, members, and agent activity. There is no top bar.</p>
+ <div class="scroller">
+<div class="mock vb">
+ <nav class="rail">
+  <span class="sp-btn" title="Personal">SK</span>
+  <span class="sp-btn on" title="Family">F</span>
+  <span class="sp-btn" title="Book club" style="background:#3b2f63">BC</span>
+  <span class="sp-btn add" title="New space"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+  <span class="grow"></span>
+  <span class="rb" title="Search"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+  <span class="rb" title="Recent"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+  <span class="rb" title="Agents"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+  <span class="rb" title="Settings"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+  <span class="me">SK</span>
+ </nav>
+ <aside class="panel">
+  <div class="sphead"><div><b>Family</b> <span style="opacity:.5">▾</span></div>
+   <div class="members"><span class="stack"><i style="background:#f59e0b">J</i><i style="background:#60a5fa">S</i><i style="background:#f472b6">A</i></span>5 members · shared</div></div>
+  <div class="row2"><div class="filter"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Filter pages</div><span class="newbtn" title="New page"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span></div>
+  <div class="tree">
+   <div class="sec">Folders</div>
+   <ul class="t"><li><details><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="n">Home &amp; House</span><span class="cnt">3</span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="sp"></span><span class="bul"></span><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="sp"></span><span class="bul"></span><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="sp"></span><span class="bul"></span><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="n">Recipes</span><span class="cnt">5</span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="sp"></span><span class="bul"></span><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="sp"></span><span class="bul"></span><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="n">Weeknight dinners</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="sp"></span><span class="bul"></span><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="sp"></span><span class="bul"></span><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="sp"></span><span class="bul"></span><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="n">Travel</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="sp"></span><span class="bul"></span><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="sp"></span><span class="bul"></span><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="n">Health</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="sp"></span><span class="bul"></span><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="sp"></span><span class="bul"></span><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="sp"></span><span class="bul"></span><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="sp"></span><span class="bul"></span><span class="n">Emergency contacts</span></span></li></ul>
+  </div>
+  <div class="activity"><div class="sec" style="padding:0 0 6px">Agent activity</div>
+   <div class="act"><svg viewBox="0 0 16 16" width="16" height="16"><rect x="2.5" y="5" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><path d="M8 5V2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><div><b>kitchen-agent</b> edited <u>Sourdough starter</u><br><span>1 h ago · draft only</span></div></div></div>
+ </aside>
+ <main>
+  <div class="bar">
+   <div class="crumbs"><span data-bind="folder">Recipes</span> <span style="opacity:.4">›</span> <b data-bind="title">Sourdough starter</b></div>
+   <span class="grow"></span>
+   <span class="viewers"><i style="background:#f59e0b">J</i></span>
+   <span class="ghost"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 10V2.5M5 5.5l3-3 3 3M3 9v4h10V9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Share</span><span class="btn">Publish</span>
+  </div>
+  <article class="doc">
+   <h1 data-bind="title">Sourdough starter</h1>
+   <div class="tabs"><span class="on">Draft <em>3</em></span><span>Published v4</span><span>History</span><span>Access</span></div>
+   
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+  </article>
+ </main>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Switching between Personal, Family, and Book club takes one click and always stays visible.</li><li>The page gets the full height of the window.</li><li>Agent activity sits next to the content it touched.</li></ul></div><div><b>Tradeoffs</b><ul><li>Rail icons need tooltips, and new users have to learn them.</li><li>It wastes some space when someone belongs to only one space.</li></ul></div><div><b>Settings and links</b><ul><li>Bottom of the rail: Search, Recent, Agents, Settings, and the account avatar.</li><li>Share and Publish go in the page header.</li></ul></div></div>
+</section>
+<section class="v" id="vC">
+ <h2><span class="lt">C</span>Library</h2>
+ <p class="tag">A warm paper theme with serif type. The sidebar works like a book's table of contents: folders are small-caps section headings and pages are plain entries.</p>
+ <div class="scroller">
+<div class="mock vc">
+ <header class="top">
+  <div class="word">Wiki<em>Stow</em></div>
+  <div class="space">The Family Library ▾</div>
+  <div class="srch"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Search the library</span></div>
+  <nav><a>Recent</a><a>Shared</a><a>Agents</a><a>Settings</a><a class="me">Reader</a></nav>
+ </header>
+ <div class="body">
+  <aside class="side">
+   <div class="sidetitle">Contents</div>
+   <ul class="t"><li><details open><summary><span class="n">Home &amp; House</span><span class="cnt">3</span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="n">Recipes</span><span class="cnt">5</span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="mk">draft</span></span></li><li><details open><summary><span class="n">Weeknight dinners</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="mk">draft</span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="n">Travel</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="mk">draft</span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="mk">draft</span></span></li></ul></details></li><li><details open><summary><span class="n">Health</span><span class="cnt">2</span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul>
+   <div class="sidenew">+ New page &nbsp;·&nbsp; + New folder</div>
+  </aside>
+  <main>
+   <article class="doc">
+    <div class="kicker" data-bind="folder">Recipes</div>
+    <h1 data-bind="title">Sourdough starter</h1>
+    <div class="meta"><span>Fourth edition, published 28 September by Jo. A draft with three changes is in progress.</span>
+     <span class="actions"><a>Read draft</a><a>Edit</a><a>History</a><a>Share</a></span></div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Distinctive and calm. It reads like a family book rather than a work tool.</li><li>Comfortable for long reading by less technical relatives.</li><li>The index-style sidebar shows the whole structure at a glance.</li></ul></div><div><b>Tradeoffs</b><ul><li>Long sidebars with every folder open become a wall of text, so it needs collapsing or filtering at scale.</li><li>A dark mode would need its own design work.</li></ul></div><div><b>Settings and links</b><ul><li>Small-caps text links on the right of the top bar: Recent, Shared, Agents, Settings, and the user's name.</li><li>Page actions appear as a quiet text row under the title.</li></ul></div></div>
+</section>
+<section class="v" id="vD">
+ <h2><span class="lt">D</span>Console</h2>
+ <p class="tag">Keyboard-first. A file-explorer tree, editor tabs, a command palette, and a status bar showing vault lock, draft and sync state. It fits the CLI and agent side of the product.</p>
+ <div class="scroller">
+<div class="mock vd">
+ <header class="top">
+  <span class="brand">wikistow<span>:family</span></span>
+  <div class="tabs"><span class="tab on"><span data-bind="slug">sourdough-starter.md</span> <i>●</i></span><span class="tab">japan-2027.md</span><span class="tab">start-here.md</span></div>
+  <span class="grow"></span>
+  <a data-palette>[ctrl+k] commands</a><a>agents</a><a>settings</a><a class="me">sk@family</a>
+ </header>
+ <div class="body">
+  <aside class="side">
+   <div class="sidehead">EXPLORER <span>family/</span></div>
+   <ul class="t"><li><details><summary><span class="n">home-house/</span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">wi-fi-and-network.md</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">appliance-manuals.md</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">trash-and-recycling-days.md</span></span></li></ul></details></li><li><details open><summary><span class="n">recipes/</span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">grandmas-chili.md</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">sourdough-starter.md</span><span class="gm m">M</span></span></li><li><details open><summary><span class="n">weeknight-dinners/</span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">sheet-pan-chicken.md</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">fried-rice.md</span><span class="gm u">N</span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">sunday-pancakes.md</span></span></li></ul></details></li><li><details open><summary><span class="n">travel/</span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">japan-2027.md</span><span class="gm u">N</span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">packing-checklist.md</span><span class="gm m">M</span></span></li></ul></details></li><li><details><summary><span class="n">health/</span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">insurance-contacts.md</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">vaccination-records.md</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">start-here.md</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">emergency-contacts.md</span></span></li></ul>
+   <div class="legend"><span class="gm m">M</span> draft ahead of published &nbsp; <span class="gm u">N</span> never published</div>
+  </aside>
+  <main>
+   <div class="palette">
+    <div class="pin">&gt; publ<span class="cur">_</span></div>
+    <div class="pr on">publish draft as v5 <span>ctrl+shift+p</span></div>
+    <div class="pr">publish to space… <span></span></div>
+    <div class="pr">compare draft with v4 <span></span></div>
+   </div>
+   <article class="doc">
+    <pre class="fm">---
+title: <b data-bind="title">Sourdough starter</b>
+status: draft (+3 since v4)
+published: v4 · 2026-09-28 · jo
+last_edit: kitchen-agent · 1h ago
+---</pre>
+    <h1><span class="hm"># </span><span data-bind="title">Sourdough starter</span></h1>
+    
+<p>Our starter is called <strong><span class="br">**</span>Doughbert<span class="br">**</span></strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2><span class="hm">## </span>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2><span class="hm">## </span>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl"><span class="br">[[</span>Sunday pancakes<span class="br">]]</span></a> or the flatbread in <a class="wl"><span class="br">[[</span>Weeknight dinners<span class="br">]]</span></a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2><span class="hm">## </span>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+ <footer class="status">
+  <span class="seg hi"><svg viewBox="0 0 16 16" width="13" height="13"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg> vault unlocked</span><span class="seg">draft +3</span><span class="seg">v4 published</span><span class="seg">synced 12s ago</span>
+  <span class="grow"></span><span class="seg">kitchen-agent: idle</span><span class="seg">visual ⇄ source: F6</span><span class="seg">markdown</span>
+ </footer>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Suits Markdown and agent users. Front matter and git-like M and N markers show draft state precisely.</li><li>The status bar is a natural home for vault lock, sync, and agent state.</li><li>Click <em>[ctrl+k] commands</em> in the mock to open the palette.</li></ul></div><div><b>Tradeoffs</b><ul><li>Intimidating for family members who aren't technical.</li><li>Slugs in the tree are less friendly than titles. That could be a setting.</li></ul></div><div><b>Settings and links</b><ul><li>Top-right text links: commands, agents, settings, and the account.</li><li>Nearly every action is reachable from the command palette.</li></ul></div></div>
+</section>
+<section class="v" id="vE">
+ <h2><span class="lt">E</span>Homey</h2>
+ <p class="tag">Rounded cards with a color and emoji for each folder, a cover band on each page, and pill navigation. This is the most approachable option for family members.</p>
+ <div class="scroller">
+<div class="mock ve">
+ <header class="top">
+  <div class="logo"><span class="box">📦</span>wikistow</div>
+  <nav class="pills"><a><svg viewBox="0 0 16 16" width="16" height="16"><path d="M2.5 7.5L8 2.5l5.5 5V13a.5.5 0 01-.5.5H9.5V10h-3v3.5H3a.5.5 0 01-.5-.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg> Home</a><a class="on">Pages</a><a>Recent</a><a>Shared with me</a><a>Agents</a></nav>
+  <span class="grow"></span>
+  <span class="cb" title="Search"><svg viewBox="0 0 16 16" width="15" height="15"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+  <span class="cb" title="Settings"><svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+  <span class="me">SK</span>
+ </header>
+ <div class="body">
+  <aside class="side card">
+   <div class="spacecard"><span class="sq">F</span><div><b>Family</b><div class="sub">5 members <span class="stack"><i style="background:#fbbf24">J</i><i style="background:#60a5fa">S</i><i style="background:#f472b6">A</i></span></div></div><span style="margin-left:auto;opacity:.5">▾</span></div>
+   <span class="new"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> New page</span>
+   <div class="tree"><ul class="t"><li><details><summary><span class="fi green">🏠</span><span class="n">Home &amp; House</span><span class="cnt">3</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Wi-Fi and network" data-folder="Home &amp; House" data-slug="wi-fi-and-network.md"><span class="n">Wi-Fi and network</span></span></li><li><span class="pg" data-title="Appliance manuals" data-folder="Home &amp; House" data-slug="appliance-manuals.md"><span class="n">Appliance manuals</span></span></li><li><span class="pg" data-title="Trash and recycling days" data-folder="Home &amp; House" data-slug="trash-and-recycling-days.md"><span class="n">Trash and recycling days</span></span></li></ul></details></li><li><details open><summary><span class="fi orange">🍲</span><span class="n">Recipes</span><span class="cnt">5</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Grandma&#x27;s chili" data-folder="Recipes" data-slug="grandmas-chili.md"><span class="n">Grandma&#x27;s chili</span></span></li><li><span class="pg on" data-title="Sourdough starter" data-folder="Recipes" data-slug="sourdough-starter.md"><span class="n">Sourdough starter</span><span class="dot" title="Unpublished changes"></span></span></li><li><details open><summary><span class="fi purple">🥘</span><span class="n">Weeknight dinners</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Sheet-pan chicken" data-folder="Weeknight dinners" data-slug="sheet-pan-chicken.md"><span class="n">Sheet-pan chicken</span></span></li><li><span class="pg" data-title="Fried rice" data-folder="Weeknight dinners" data-slug="fried-rice.md"><span class="n">Fried rice</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><span class="pg" data-title="Sunday pancakes" data-folder="Recipes" data-slug="sunday-pancakes.md"><span class="n">Sunday pancakes</span></span></li></ul></details></li><li><details open><summary><span class="fi blue">✈️</span><span class="n">Travel</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Japan 2027" data-folder="Travel" data-slug="japan-2027.md"><span class="n">Japan 2027</span><span class="dot" title="Unpublished changes"></span></span></li><li><span class="pg" data-title="Packing checklist" data-folder="Travel" data-slug="packing-checklist.md"><span class="n">Packing checklist</span><span class="dot" title="Unpublished changes"></span></span></li></ul></details></li><li><details><summary><span class="fi pink">🩺</span><span class="n">Health</span><span class="cnt">2</span><span class="chev"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span></summary><ul class="t"><li><span class="pg" data-title="Insurance contacts" data-folder="Health" data-slug="insurance-contacts.md"><span class="n">Insurance contacts</span></span></li><li><span class="pg" data-title="Vaccination records" data-folder="Health" data-slug="vaccination-records.md"><span class="n">Vaccination records</span></span></li></ul></details></li><li><span class="pg" data-title="Start here" data-folder="Family" data-slug="start-here.md"><span class="n">Start here</span></span></li><li><span class="pg" data-title="Emergency contacts" data-folder="Family" data-slug="emergency-contacts.md"><span class="n">Emergency contacts</span></span></li></ul></div>
+  </aside>
+  <main class="card">
+   <div class="cover"><span class="emoji">🍞</span></div>
+   <article class="doc">
+    <div class="titlerow"><h1 data-bind="title">Sourdough starter</h1><span class="grow"></span><span class="ghost">Share</span><span class="btn">Edit</span></div>
+    <div class="chips"><span class="c g">✓ Published v4</span><span class="c y">✎ Draft has 3 changes</span><span class="c p"><i style="background:#fbbf24">J</i> Jo · Sep 28</span><span class="c p">🤖 kitchen-agent · 1 h ago</span></div>
+    
+<p>Our starter is called <strong>Doughbert</strong>. It lives at the back of the fridge, left side, in the tall glass jar with the rubber band.</p>
+<h2>Feeding schedule</h2>
+<ol><li>Take it out the night before you bake.</li><li>Discard all but 50 g.</li><li>Feed 50 g flour (half whole wheat) and 50 g room-temperature water.</li><li>Wait 4 to 8 hours, until it has doubled and smells tangy.</li></ol>
+<div class="callout"><strong>Grey liquid on top?</strong> That's hooch. Pour it off. It just means Doughbert is hungry.</div>
+<h2>Using the discard</h2>
+<p>Don't throw it out. It goes straight into <a class="wl">Sunday pancakes</a> or the flatbread in <a class="wl">Weeknight dinners</a>.</p>
+<table><thead><tr><th>Kitchen temp</th><th>Peak after feeding</th></tr></thead><tbody><tr><td>18 °C</td><td>8 to 10 h</td></tr><tr><td>22 °C</td><td>5 to 6 h</td></tr><tr><td>26 °C</td><td>3 to 4 h</td></tr></tbody></table>
+<h2>History</h2>
+<p>Started by Grandma in 2019 from a jar she got at the farmers' market. Jo took over feeding in 2024.</p>
+
+   </article>
+  </main>
+ </div>
+</div></div>
+ <div class="notes"><div><b>Strengths</b><ul><li>Friendliest for non-technical people. Folder colors and emoji make the tree scannable.</li><li>Draft and published state appear as plain-language chips.</li><li>Cards and covers give each page some personality.</li></ul></div><div><b>Tradeoffs</b><ul><li>Lower density, so fewer pages fit on screen.</li><li>Per-folder colors and emoji are extra metadata that someone has to choose.</li></ul></div><div><b>Settings and links</b><ul><li>Pill tabs: Home, Pages, Recent, Shared with me, Agents.</li><li>Search and Settings are round icon buttons beside the avatar.</li></ul></div></div>
+</section>
+<section class="v" id="cmp">
+ <h2>Side by side</h2>
+ <table class="cmp">
+  <thead><tr><th></th><th>Feel</th><th>Space switching</th><th>Settings access</th><th>Density</th><th>Best audience</th></tr></thead>
+  <tbody>
+   <tr><td><b>A</b> Workbench</td><td>Neutral dark tool</td><td>Pill dropdown in top bar</td><td>Gear and avatar, top right</td><td>High</td><td>Everyone, no surprises</td></tr>
+   <tr><td><b>B</b> Rail</td><td>Chat-app dark</td><td>Always-visible rail</td><td>Bottom of rail</td><td>Medium-high</td><td>People in several spaces</td></tr>
+   <tr><td><b>C</b> Library</td><td>Warm editorial paper</td><td>Space name in header</td><td>Text link, top right</td><td>Medium, reading-focused</td><td>Readers and family</td></tr>
+   <tr><td><b>D</b> Console</td><td>Terminal, amber on black</td><td>Brand prefix / palette</td><td>Top links and palette</td><td>Highest</td><td>Power users, agent wranglers</td></tr>
+   <tr><td><b>E</b> Homey</td><td>Rounded, colorful, light</td><td>Space card atop sidebar</td><td>Round icon button</td><td>Low</td><td>Non-technical family</td></tr>
+   <tr><td><b>F</b> Homey Dark</td><td>Rounded, colorful, dark</td><td>Space card atop sidebar</td><td>Round icon button</td><td>Low</td><td>Non-technical family</td></tr>
+   <tr><td><b>G</b> Rail + Cards</td><td>Rounded cards with a space rail</td><td>Always-visible tiles in the rail</td><td>Labeled rail button</td><td>Medium</td><td>Families with several spaces</td></tr>
+   <tr><td><b>H</b> G + pills</td><td>G with F's status pills</td><td>Always-visible tiles in the rail</td><td>Labeled rail button</td><td>Medium</td><td>Families with several spaces</td></tr>
+  </tbody>
+ </table>
+ <p class="hint" style="margin-top:14px">You can combine parts of different variants. For example: B's space rail with C's reading typography and E's draft and published chips. D could also become an optional "compact" theme for power users.</p>
+</section>
+</div>
+<script>
+document.querySelectorAll('.mock').forEach(function(m){
+ m.addEventListener('click',function(e){
+  var p=e.target.closest('.pg');
+  if(p){m.querySelectorAll('.pg.on').forEach(function(x){x.classList.remove('on')});p.classList.add('on');
+   ['title','folder','slug'].forEach(function(k){m.querySelectorAll('[data-bind='+k+']').forEach(function(x){x.textContent=p.dataset[k]})});}
+  var k=e.target.closest('[data-palette]'); var pal=m.querySelector('.palette');
+  if(k&&pal){pal.classList.toggle('show')} else if(pal&&!e.target.closest('.palette')){pal.classList.remove('show')}
+ });
+});
+document.querySelectorAll('.themes[data-group]').forEach(function(t){
+ t.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;
+  document.querySelectorAll('#'+t.dataset.group+' .ve').forEach(function(m){m.classList.remove('th-warm','th-slate','th-oled');if(b.dataset.theme)m.classList.add(b.dataset.theme);});
+  t.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});});
+});
+document.querySelectorAll('.themes[data-for]').forEach(function(t){
+ var m=document.getElementById(t.dataset.for);
+ t.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;
+  m.classList.remove('th-warm','th-slate','th-oled');if(b.dataset.theme)m.classList.add(b.dataset.theme);
+  t.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b)});});
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.palette.show').forEach(function(p){p.classList.remove('show')})});
+</script>
+</body></html>

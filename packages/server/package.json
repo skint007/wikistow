@@ -1,0 +1,27 @@
+{
+  "name": "@wikistow/server",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./test/database.ts",
+    "./testing/postgres": "./test/postgres.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@wikistow/client": "workspace:*",
+    "@wikistow/contracts": "workspace:*",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.3",
+    "postgres": "3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "drizzle-kit": "0.31.11"
+  }
+}

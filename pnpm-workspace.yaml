@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+  - examples/plugins/*
+
+overrides:
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vitest: 5.0.1
+
+# The vite alias above reports its own version (1.0.0), which trips Vite peer ranges.
+peerDependencyRules:
+  allowedVersions:
+    vite: '*'
+
+# drizzle-kit loads TypeScript schema files through esbuild. Electron's
+# install script downloads the binary the desktop app's tests run.
+onlyBuiltDependencies:
+  - electron
+  - esbuild

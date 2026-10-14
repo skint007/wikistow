@@ -1,0 +1,480 @@
+{
+  "author": {
+    "public": {
+      "id": "vector-author",
+      "kind": "human",
+      "keyVersion": 1,
+      "boxPublicKey": "Z8WcsZNUD2KZ7Gm8Kw1ImIaAD30R6RDYJW593gAjIWI",
+      "signPublicKey": "y4JF8BRHsl-NiQf3ywsbsZ_YGHXV1Lt0uVAKOn6jdxU"
+    },
+    "boxSecretKey": "vmNlBN-WjPC9hiK03sMLSxYMfeHVNnqI_SaQHiRtfV8",
+    "signSecretKey": "gJJ18JV41eCYBL6BCrt3AjZJLBMrc3Z-IjgzU_1-9UrLgkXwFEeyX42JB_fLCxuxn9gYddXUu3S5UAo6fqN3FQ"
+  },
+  "reader": {
+    "public": {
+      "id": "vector-reader",
+      "kind": "human",
+      "keyVersion": 1,
+      "boxPublicKey": "JvTbQnjgKScQxBQaCEep_y9BP-XYaCZnez1kOSb37V0",
+      "signPublicKey": "MBA7oRDMByQqzF_6U52zyvh3OUeIh5KSAjA9MDMV1Z0"
+    },
+    "boxSecretKey": "TV_J63yJISSlSp_mqgcEhfbqiVui6ZzOW_xaOO5S8ug",
+    "signSecretKey": "K_VfzVkPABGHB3gm_9HgG9gbDNpbOwaOCi1da5EPH_gwEDuhEMwHJCrMX_pTnbPK-Hc5R4iHkpICMD0wMxXVnQ"
+  },
+  "revision": {
+    "record": {
+      "protocol": 1,
+      "installationId": "vector-installation",
+      "spaceId": "vector-space",
+      "pageId": "vector-page",
+      "audience": "published",
+      "revisionId": "vector-revision",
+      "basedOn": "vector-draft",
+      "authorId": "vector-author",
+      "authorKeyVersion": 1,
+      "payloadHash": "LpIQTiJFvCkQLcycxHxd74fN4jUBGxkWSpU8tIupHJo"
+    },
+    "signature": "EunuW8FCB6tnQjBDpEuEQ265SVq7OrRBeMoREaRK2jvft-VNw5LaCDljP6Z2fyA2AeFs4COyZPU0_5z5R0bbBw",
+    "payload": {
+      "nonce": "Uc3WeNUMT7kYxFis7ucTKg4pVTD7z2MS",
+      "ciphertext": "_2vJwj4rCtZRUFQoG9SexPwsiNEPnmpGStSdwXwD3ldjiKm9eQlgVYACdxg-SWjQ71dscAazEarxnoI1jqLaFkY45fWTRUIq4gCSfjtRUGJZMNx3yp_PQfnyh5ynxigCSNt8AHH56DVJuudjaMoRtruzsvHALJhgkElhjdoN9aZi7pkFPdxI5he3uGtIC6kWXx3sM3clOUP5Z5PzzwW8CiTpWWvU7xFyHk_D2ibpVRNI1zsByLMowm04OsWAmVf8m5IPusK8QStELu0Vcqj5Fs220o-iobUD8zxP0qo_qf284J7l3CLWshRMJoBDlJ4mrrA7c8vydh7j19VVEJUcrOUCebFB5481CXurKHnYCFdCGBD4sxsXK_QdQJ--hoHhK2blwj3OSaAsGTBKEvHUWx8FSo2utvD7PugYSVJMHZO85DypqGcFxrhOqF6z0_8RPZ7MxUe9jO0kcstGZ-IxkZxOUH4oNA3Z7A1tV_jYmYX6GVSEiF-5eaSXRVxyy0GBZrRQJArWbMIph7R8yvFz4zz9_6E-cizqQ1jTRvmc3UxHKbA"
+    }
+  },
+  "envelope": {
+    "revisionId": "vector-revision",
+    "recipientId": "vector-reader",
+    "recipientKeyVersion": 1,
+    "sealedKey": "BpvfjeEnbXoOTKzziBS7ZQkLF1LjBFY3eK_OJ9nQmXken2zZyaGM2W9ElruEEDeVgeM3R4MuoDerdtmiknbKHrAh7ObF_pozj294HcaS6V0",
+    "granterId": "vector-author",
+    "granterKeyVersion": 1,
+    "signature": "qhNcmb6heGd8QKkaWZ8TfijqNk4zWB8JyKK0towVXbz479Vult91wvdqcLHLfyE_dKApYL1YA3_ZWGvvlGlWCw"
+  },
+  "payload": {
+    "format": {
+      "major": 1,
+      "minor": 0
+    },
+    "attachments": [
+      {
+        "id": "hTirrMVTaEaGxpWzLxKjmw",
+        "name": "notes.txt",
+        "mediaType": "text/plain",
+        "size": 20,
+        "key": "-guhTMLUJpOLpwdi3ituaV7QgZkUcLTxmIfl2racJx0",
+        "blobHash": "R_wFy0itCldT-hDbEEcArBeIEL-8FUWsEBbC5VsQfio"
+      }
+    ],
+    "extensions": {
+      "wikistow.links": [
+        {
+          "text": "Other page",
+          "target": "vector-other"
+        }
+      ]
+    },
+    "title": "Vector page",
+    "markdown": "# Hello\n\nUnicode survives: ünïcødé ✓"
+  },
+  "attachment": {
+    "target": {
+      "installationId": "vector-installation",
+      "spaceId": "vector-space",
+      "pageId": "vector-page",
+      "audience": "published"
+    },
+    "ref": {
+      "id": "hTirrMVTaEaGxpWzLxKjmw",
+      "name": "notes.txt",
+      "mediaType": "text/plain",
+      "size": 20,
+      "key": "-guhTMLUJpOLpwdi3ituaV7QgZkUcLTxmIfl2racJx0",
+      "blobHash": "R_wFy0itCldT-hDbEEcArBeIEL-8FUWsEBbC5VsQfio"
+    },
+    "blob": "DVd3nLt7Mz7yTbeEgLSfXH8nGrh3X3ghjIiXDjqq9uIIbZBJnCF6_BS8HqB2EY4Ovz2zOAoam3w067ER",
+    "plaintext": "attachment plaintext"
+  },
+  "enrollment": {
+    "installationId": "vector-installation",
+    "agent": {
+      "id": "agent-lbYxKdz9fTIdZfJW2w-TFk8oGb2vtuAUS_MvmwaM3o4",
+      "kind": "agent",
+      "keyVersion": 1,
+      "boxPublicKey": "34PLaeg14BEE3u3TotB38J497LXW8a6oihsUwXDZ3kA",
+      "signPublicKey": "vmyI9_551XpaX1FL5ENftmBoQKKG8zfH3ApPj89JsWc"
+    },
+    "ownerId": "vector-author",
+    "ownerKeyVersion": 1,
+    "signature": "kg_k0mfWUH0S4uQbpQBuQYeqCR2dWg8z48BaAO3SgeKSZg168UFHNkrKa2e_r1BG30RGxFKbQstUARQK-8PzAg"
+  },
+  "agentFingerprint": "c13b 72d3 da70 1cdc 5720 2e92 38ee 0285 b968 4012",
+  "vault": {
+    "wrapper": {
+      "format": 1,
+      "accountId": "vector-account",
+      "keyring": {
+        "nonce": "ly0a-orbvsUdzqD5adwyMpQTTMtU5LE6",
+        "ciphertext": "JCPDIjJyIuS-FphcY7uzc3VqsoVKO5_dqMjGpmTfpBqU71OcVhrfJGrx8WAU32rjq2qieg0aCZAdnC3XpngP72S0orOQidRqTj4lC3gDrFAakACzf_NsL42h6qNF3Cs2DpyweUtXJynLSCkcCJL1HsN5yov-GH9ok5bUEQi_NEDRfj_Go8taoeL82bCI7ysA-87S8amaPRcYDSwfn1Rg0TPIj_7oguUQZQ4uqxnqSCwcsH3AE4d8v_oSGd4VRkkl4MgWtRRvolP5mKuTImhfXkuSPV2l9y5jab48nYUGXJLKfN0AZdQmZERtRiEq0CtwSRaAuqE9C5yQbEDrjSLQYUryEhCD49w6cFcLczxGVURNYijm_KvaeP1DWNNKY0_mV8jIb9EWG2g257xqwFtGtGsglQWPXYiSqWrMQ1GRZX7Du3-8tu8599rI_QHgBYnov9xUKn9FKxoQGhBPwvCh7Ye19yT2uMQbxzcV-_BJgzI"
+      },
+      "passphrase": {
+        "nonce": "o6hG8zNHMU-wv2U3ryI5MkzeZC1Bg0e_",
+        "ciphertext": "7oYVjcwimIHWV5CLCRxsp5Jl_HY1dJ2xGJNpsSWMR0sVAk2tvJAS5FAo8uqfQyOz",
+        "salt": "b0bRYGDIbUKGHsoXd9twSQ",
+        "kdf": {
+          "opsLimit": 1,
+          "memLimit": 8192
+        }
+      },
+      "recovery": {
+        "nonce": "aMjl4FK5MfeJdTiK5eNw8Bo8_nCZXD_8",
+        "ciphertext": "XRXBnplSPMbG8pReaEGOhlVti_A0nZoWkj8Yp9JjUNzvXcDDFnn4nSkHo7jgJARd"
+      }
+    },
+    "passphrase": "vector passphrase",
+    "recoveryKey": "04d1-0033-1313-2ea3-4336-fc4c-d733-b76d-822e-4b41-5e2f-605c-abf1-790f-7062-4cc8"
+  },
+  "metadata": {
+    "sealed": {
+      "record": {
+        "protocol": 1,
+        "installationId": "vector-installation",
+        "spaceId": "vector-space",
+        "subjectKind": "folder",
+        "subjectId": "vector-folder",
+        "metadataRevisionId": "vector-metadata",
+        "basedOn": null,
+        "authorId": "vector-author",
+        "authorKeyVersion": 1,
+        "payloadHash": "r98P5NK7UPUrsi68wOGYiYKf0381q9Tszn1SFXyd1ss"
+      },
+      "signature": "hKyRJSOBN6S-Jd9tUmQpH2ybCu66IZsf5xqKoyMDms89dwQbB4rCI9lZJXqMosEY929Vx8e_rJlumhbt5B_YCw",
+      "payload": {
+        "nonce": "LJ4Hr4qHVT_nOaDyAe87MK-vy5XGbjEU",
+        "ciphertext": "NI6Yf1jtIOuzS6m4iqN4c1YaiI8HbXsssCYSub2ugEaex3Ux0DoQzVlTv3z2jErPJJHYlOGlxDlkwdoPUnOvzD9JCxI4pRtd6Xc-5CWnPCug7gATyqThPrBbIgrKkbtKMkJFi4yGHoT3vmRTKX6xffYEfp_JvZBK3tc7n7TeBjGICxmL__Ca3u0VIg"
+      }
+    },
+    "envelope": {
+      "metadataRevisionId": "vector-metadata",
+      "recipientId": "vector-reader",
+      "recipientKeyVersion": 1,
+      "sealedKey": "-vMVgLXk-oNiCt-Wfn9hOZimAQHSsAsUO8vnG3Ssi33kpB921r7RwOxSC2m6evWj5jfxsDKd2CWzLgSevPDd8NJWH3Hw8VlLw_d1mm0MkEA",
+      "granterId": "vector-author",
+      "granterKeyVersion": 1,
+      "signature": "GZj3UKLYH2z1UlLLvxl4KgiahO_jDHJAdW9puDXefE-K3NtegjpyS9a2FTEbua48GHcgRLwk_YgeoqJbvOuSBw"
+    }
+  },
+  "m2": {
+    "author": {
+      "public": {
+        "id": "vector-m2-author",
+        "kind": "human",
+        "keyVersion": 1,
+        "boxPublicKey": "Aibyct9c0uzYfC6n0-XQogGggSXqwbze-Y7OMGytJkM",
+        "signPublicKey": "ffVwVELQFQZwOU2qcWVVuZ6ohdbryWLjLfVqwKSgmCI"
+      },
+      "boxSecretKey": "anyr1vqM7Hy3UHzhAzpr0uPjXi1cJuew0iAB0A40VsE",
+      "signSecretKey": "sW5DECLqQuGcrA6oyjN3i5nWEcjDZZZy9vMiSOCefSt99XBUQtAVBnA5TapxZVW5nqiF1uvJYuMt9WrApKCYIg"
+    },
+    "reader": {
+      "public": {
+        "id": "vector-m2-reader",
+        "kind": "human",
+        "keyVersion": 1,
+        "boxPublicKey": "P0DON6RPk6uiyxL39h1tBf9LecH54XxOY_MygV1Dmhs",
+        "signPublicKey": "UYtjM6eCd5k_JxaQq6t8KBKGFN40F9Zj-DPS-88cFPo"
+      },
+      "boxSecretKey": "vuEXFagrEyLjncjIm00Kar1wemcF6_5QNSwdUEWPGew",
+      "signSecretKey": "q2ea9rlNsWgi5YBE4wilybXf3FzfB-LjkS168xkmKm9Ri2Mzp4J3mT8nFpCrq3woEoYU3jQX1mP4M9L7zxwU-g"
+    },
+    "agent": {
+      "public": {
+        "id": "agent-9Zk5ftvdsJwq2FiZP6TTKD8ZTiwFeDHeimX_OH4cME4",
+        "kind": "agent",
+        "keyVersion": 1,
+        "boxPublicKey": "MNLisnr_xZ9t6QmKiXLYuHsoaIvTFREOfwvDAjvaRiE",
+        "signPublicKey": "rFdLtFMq3N4axtKyPNuiZMKy_NcpNRCE9RNfXJ2FB6c"
+      },
+      "boxSecretKey": "NfMg3E1S7BGy3HMp8bFS9_sM1FZ7Zr7ztsZiZVpe4ik",
+      "signSecretKey": "trV-2oCbTH9obwxffj5tE2kdt3b7Iujrutver4anrrusV0u0Uyrc3hrG0rI826JkwrL81yk1EIT1E19cnYUHpw"
+    },
+    "keyHashes": {
+      "author": "DDd8ujCHcFBGcNKE_Vs3XhEpicKqQqj-gAq7Q-Yqm0o",
+      "agent": "XX7koCOY7LWwopdIZYuJHSnbH68WgLvknKsPspmHiwU"
+    },
+    "fingerprints": {
+      "author": "45361ea7798ad9c3f9faadfa546debbdfb9e74ef",
+      "reader": "04bf34808f1e9ecdb8ca432e40e034554174a7e8"
+    },
+    "keyCommitment": {
+      "key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "commitment": "pkAtzy986P9IwQbZJI1KEoIQ9WIMyF8nkDIsmvY5RGs"
+    },
+    "revision": {
+      "sealed": {
+        "record": {
+          "protocol": 2,
+          "installationId": "vector-installation",
+          "spaceId": "vector-space",
+          "pageId": "vector-m2-page",
+          "revisionId": "vector-m2-revision",
+          "audience": "draft",
+          "basedOn": null,
+          "authorId": "vector-m2-author",
+          "authorKeyVersion": 1,
+          "payloadHash": "cQUTxYXU6-W4whkNbUoQstY6-QNqVIxDDxkBgzwAeC0",
+          "keyCommitment": "R2zzcA5pyqeQrhIipbcUTgxSQiOYoY5KZFNZwTri4SI"
+        },
+        "signature": "7iO9bHeIBnUU2I2dOBm5x_pzrzWx_NVTxGmg0-98JbgfyypVauxRAYkGJkrRbOJyKaKBvYapIm4tX6PjO3qbAA",
+        "payload": {
+          "nonce": "4CcXm523TCSR5uZnpDD4zahdV0Znc-oB",
+          "ciphertext": "_2upy0UoM8ciwp39xmzXA0L3twJrY1dvKoNrBr_JaCk5h1_p9DY1gLF2mtIE_c5XL4N_aazY2wvYNMWSN5SbW3spBvcJodE7MQ0_mDxSScyStLZOMeURdXl65DatOLIUci6hU_0uj-Bk_UG6TGiOcLDmW0veJc0RaLWiTfGlkcra3r2UPNMvAo0RhlRbYhIC3R0ULCb3JDxgve_4iqYARtCg0-pmvuVdPdFiu9_gNOGR8iVpagnumOvCHw2cyUuVLrgo8pCEdUfN-fneacbFDkJQl1Z8uaQtweP0Su2Akhb6RWKyDhIVIqiWo_tHl6BKXin5w3XSBuOTZhjAsekrYGHWv9B3oMw-4pt4_RAnHPQR6JxxCTjWIdDttftykDW2T46hE5GT2YRR-7ztbXUHCNQ4XlQpR3qh_4Am7tfFn_ImiE62qSd7sZ6uqv56dWVanvSKTajyvYsDATRv6yF9DKjzj2OaAr3fApP6FHrRqQ"
+        }
+      },
+      "envelope": {
+        "version": 2,
+        "revisionId": "vector-m2-revision",
+        "recipientId": "vector-m2-reader",
+        "recipientKeyVersion": 1,
+        "sealedKey": "-LAeEU39xka_-eseiGMDQCdmrXKrR6fEr_iLshPD1AovQUI5wfyNFiSHnQXPcEHK5kmu_euv_hUq1JCnEmx_R66W9tr9XP85Of4XmIxQ0zE",
+        "granterId": "vector-m2-author",
+        "granterKeyVersion": 1,
+        "signature": "mCmbLKlk6Hg8vJ_xnd0-Getno_E3GPUhdBjeban6k8ZUki7ZmnLZquf4d2h_NNtXlfiPlJGltaF9Gm5JJ1n3Bg"
+      },
+      "payload": {
+        "format": {
+          "major": 1,
+          "minor": 1
+        },
+        "attachments": [
+          {
+            "id": "TSXAZe1U2-tprdujQ_7F-g",
+            "name": "notes.txt",
+            "mediaType": "text/plain",
+            "size": 20,
+            "key": "F5iQxwa-IEQHwHrJB-t92rmm66oRNwLjmZHTvtJNTNQ",
+            "blobHash": "U0tnlfQ8WiKXCpnulOCsMNxCdACw5SibYxvYaj0Par8",
+            "plainHash": "ZKPmSpKd29u7n4OkmTwS0m0qzuEc_v9nmc2JgNiKPww"
+          }
+        ],
+        "extensions": {},
+        "title": "M2 page",
+        "markdown": "v2"
+      }
+    },
+    "metadata": {
+      "sealed": {
+        "record": {
+          "protocol": 2,
+          "installationId": "vector-installation",
+          "spaceId": "vector-space",
+          "subjectKind": "folder",
+          "subjectId": "vector-m2-folder",
+          "metadataRevisionId": "vector-m2-metadata",
+          "basedOn": null,
+          "authorId": "vector-m2-author",
+          "authorKeyVersion": 1,
+          "payloadHash": "P4SLtWTHcs_FkBSQSuurB5p5_EtrWmlV2475V2UQvMk",
+          "keyCommitment": "solOHqyDy4gtA4hQncg0fcFiRY_O4v8Yy13d7eIZjvw"
+        },
+        "signature": "FHb1gqe3tzR0DTDmjsY7gNbN2-JoVcIKXjepdgLTE2-_bJZz74r4CZf4iVwMK_x_Hrc2-e_8E3CKnAYyjSWaBg",
+        "payload": {
+          "nonce": "FnbunqKbkFytE5xy1G3sG3MTZqEznik5",
+          "ciphertext": "IijtTKZdBgXPnCEIKRpHyXHtYCpARIfsgauUDc3mlXN_hVuzEIH2BtwzL5q0BTBbszRp6TYVm2jaC1iN82RS9mkHh8amsKCU-kxsioC7E2dSRAWSeTywOvsYFewcPdRZHGz1W7bjDLcYXcm4LA"
+        }
+      },
+      "envelope": {
+        "version": 2,
+        "metadataRevisionId": "vector-m2-metadata",
+        "recipientId": "vector-m2-reader",
+        "recipientKeyVersion": 1,
+        "sealedKey": "AdgzmRPhHZvmPIpgDmbCBJ2y6YktAEMTHSEMwI0XMFlYzG8q3SIKIJ_trJENNtzDbY2S_ILdG4GMuniEBWmicpJ4JGI7YjLPTXq3isR6p34",
+        "granterId": "vector-m2-author",
+        "granterKeyVersion": 1,
+        "signature": "HPWRmXRI1kXKa9mfDqydEvMg6qyy3q_SiMtRCTxGmcCMvPkBDsiElRu9AK3d9JbmAqA9ZiSXIZK24NQ-gJurBw"
+      }
+    },
+    "attachment": {
+      "target": {
+        "installationId": "vector-installation",
+        "spaceId": "vector-space",
+        "pageId": "vector-m2-page",
+        "revisionId": "vector-m2-revision",
+        "audience": "draft",
+        "basedOn": null
+      },
+      "ref": {
+        "id": "TSXAZe1U2-tprdujQ_7F-g",
+        "name": "notes.txt",
+        "mediaType": "text/plain",
+        "size": 20,
+        "key": "F5iQxwa-IEQHwHrJB-t92rmm66oRNwLjmZHTvtJNTNQ",
+        "blobHash": "U0tnlfQ8WiKXCpnulOCsMNxCdACw5SibYxvYaj0Par8",
+        "plainHash": "ZKPmSpKd29u7n4OkmTwS0m0qzuEc_v9nmc2JgNiKPww"
+      },
+      "blob": "eiU-qEZ-FggRfGEMJN2zgDS8c3aoSCnMPpKfnR8PQ2i1-BSteZvY6kdJn_Ib08rDGFMSowxekNTMR-uu",
+      "plaintext": "attachment plaintext"
+    },
+    "contacts": {
+      "record": {
+        "protocol": 1,
+        "installationId": "vector-installation",
+        "ownerId": "vector-m2-author",
+        "ownerKeyVersion": 1,
+        "version": 1,
+        "prevHash": null,
+        "payloadHash": "PxzcYIq_TmxXRc8RC0BMcBG3fqy5YcuibFEXcNc0HW4",
+        "keyCommitment": "ul5olqjxGvIMosJaZ5np6GaRseXSyktAhA0U6pRDP4s",
+        "privatePayloadHash": "FZjkHsWvmkEgP_4S-8BnNy9O9J2WDGwd9skQozoqWSE",
+        "privateKeyCommitment": "XyhtAJRhlo5fLRvQLM2HN6Aicyy6-16hybQpg9mFkHE"
+      },
+      "signature": "tg_Uf9bd_DQeD6Ib94IJAk73q9wbRNCUQuaKtm85TlSWrJZeO1mIUOb5LehIyPgRGNOIGZBLiklnJg_rYOGSDg",
+      "payload": {
+        "nonce": "4p8W2TH2CxH66OpkaX4iPZ7otNQD6F32",
+        "ciphertext": "EmunacSGVYYgzKKCsOsf0iOXyQM_Sve2LdvXfuiXIT_TN4Cw0ee_874Yj6t1PdYqUV5YhHsAxbAID_r7dcMqUVJ9rF9V5KslfLCuq9_mwqsVDgbqPfpdes4l3nEWMmDBYM1Yye6V-k3VbNc-36eZtFVzQPPrrshffLN6WeWetvRWTzRj5va1EYoWdFKJMPqHduHrAPVHlFtGsfwBSJJBsUBwjCDakPAeilrYw9fwNMH1TIdDulC4uowwdqAJLm27Qv1CmZfCUTZAONKMgWwTV5SUXWYE8k-9Y9xfhsvg5tKrEw-ujsdumIYVcVne7cbBNcvIxOh2Ywv97xw7BIegy5RwSUHKd0AT_XaSAvmMrAa32bkEVSADhmuI_UVZiH6XEYQjh-jNoXuI-VHtMTGql_sVX-vy2IghPEIj0zaOY2vlM5qo3oRyVQqa4lAVTqK_cTjoEeHJejGFLPD9XZQ0olj_PSEBtlon4ruMsnMwLFVZ9vUzK5z7LMLnB8w3XPCSSxpCR8eswlxHgjXph2PEI2dcdRI0_9IhCIhoWeRx30E4JuoDfIQ-CaM8j7DoB07JA2MvT1CHkwyx5BkX6P1GEpIRdyAzAdCxZijLIqy3kBHLfHiw0U-4NeYHNfCaFYm3ct0VjNDly3Ud5woAPHS79Lyy86DOt5R25xROMtCzVStdQW1kaUCkUpHQlIktlu3_IjNON4LoZomkzTrnQE1RGK4K4lXb9wGzyaV8Aj1ProQ64cZrLITXjzH_kFqLrOQMgSCIH-kJHfO3GuC-hpPKWdXKtW_Bl2n_MACxSzEd-q2IIt8h9ql5Ukl5TvD-OcWgjJ40MTrC2OgAcDBDiZ8r-0J0f0NXk881BKwmn8fIqQ_fS7AgWFQwoKxhGUp5oNei3HietxRcPH7S8naN2v3Q-rRpQ2u99Rz78b5TsVkeDsq0EKdW1S9fsQATDVJAw6AS5dd1DYvOkaPV2ZujU5CXPChll2smyjUbIyTvvTu0y0R_yANAcnE-CCR6VAgv0bQmZBTWSQCWgaDvMOevE4HJ8A7ir0hF4FlNBnf0Ve5Bsp2PZxplTgF55C3VkluxbJU8r7n3c8hvZyxHdBwKAdNvAT29GrfK82ow4uKOmOWfFeHlgILf7N65mFBv-_sDSQO3Cr8rMXIyUIxEMqO6-UO34VYZP7oJzjvQdK35ksatzM6yNcwZKDjZEoz2sna7ojfX6KalktRDcz8UXdMacwfdw9M7YUxpSk5X96gqfTDsrT5zpMiGdAZIME4XP-sfZJiaYzuWpFeXQyMCKLu9ecGC1caaRMBZmW2kHbHqOvKi_Gm-lVx5MfY_6Ol_ujRqiFyZtWI84fu1KbXyG84fH1MW34GxMS_0ZqJRwqTt_wq6G4txrx5KYeiyeqqhGAEJNWwWVSUc7QbJdb8QRRCdW2DlMgJ8heD3WTWvzQeSBOzMybREUdHgBJqs030MH9B_oOjM3qZNDlpyamVnBehc"
+      },
+      "keys": [
+        {
+          "recipientId": "vector-m2-author",
+          "recipientKeyVersion": 1,
+          "sealedKey": "0ax6nwtUkb4ySasflcVgH_Hvd5RE2lPdPXo6a7jaaGDx8seaQ7rkLJZGUTPV_yCT0M3OHOL0tw4andCMHuiZeJM2xdOs6g9uGlX3wLiaxQ8"
+        },
+        {
+          "recipientId": "agent-9Zk5ftvdsJwq2FiZP6TTKD8ZTiwFeDHeimX_OH4cME4",
+          "recipientKeyVersion": 1,
+          "sealedKey": "40SlKHAwW87Gom6qnRm325izXB9AYDT44MQ8BsLrVUORJz0iNz6vH649NLliuKtY8lBAJI_8KP042AL7JzQEqSijLqXGf0qlCxR_KcxNCJQ"
+        }
+      ],
+      "private": {
+        "nonce": "Co7AExB7iYv24zVBRxgKzehrNfQMHvVI",
+        "ciphertext": "DL3Kz9Q9nSG9L3LYD8LqNM6Uc5jEQPQE9Am3BF2tweuIia5GRurDTIMvqOCBdJ2yN7-U_BihTy_rm5aF0kYQMLf08pKTE6d12-veJzkx2gjW5S9fEdtDUIvbtRNS9qql_raI-L5AJqPfIJL2afXH9_eoR29EbhjAO9WL4SpNH8aqvSxr7tMxzy_zGLrF2qwJ-5QFeq03CdNhe6bnxSkV7OlFaWSCRiHSX8ldM2CzmQvyouvpczkXDdYG8BnaBwtX3sMqnA"
+      },
+      "privateKey": "-3DFpbZHNpYJmpfmO1e8eURUYWHNWPta2XPcMQEPREmlAGeYcsOsoX-FFt5OP1q3FHVXPM-NoMJttblllZ_Yt9KvBmywd5vSlSuQVb5bF2g"
+    },
+    "signatures": {
+      "message": "dmVjdG9yIG1lc3NhZ2U",
+      "publicKey": "OdzwUaJyaarlQgvxa3RZJtB90rgigBQJvuqbPfM9ZAc",
+      "mixedR": "HyhknoMRQqwUfsAd46-j94HUzGfL6mkvfBJBmI6EW1_2I82MSjfpZs_jSBCllFveHgzXShx2pREZSJL2ZN9GCw",
+      "mixedA": {
+        "publicKey": "lcN556mFHKzDUQdl29LNXbe0Y_g_h93pNxVH7Xw6mVM",
+        "signature": "fIQZ5f4I7cZ88qb68lTRyO4BLFHvwR796m4n2pXB56mf6DSwH1FxTtC5o5HBGyh-YTWjclvsgUiEfHEJi_gnCA"
+      },
+      "unreducedS": {
+        "publicKey": "z8MIoTnUjHolyruJc6inoFxpnCCfn0Q5UyzAKNERv6g",
+        "signature": "ybklCmXT0aKR8zKDZfx2UzPmEYdw8waSRnpytoSfkl9zKHgPclZEWmWGTeRyaxJXDA4kmE_W75I2_ertLapdFg"
+      },
+      "smallOrderR": {
+        "publicKey": "z8MIoTnUjHolyruJc6inoFxpnCCfn0Q5UyzAKNERv6g",
+        "signature": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3qSHMIBScrV1yXszGkqCgpBVc4clqQCubK3wWbpqgt7Dw"
+      },
+      "smallOrderA": {
+        "publicKey": "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o",
+        "signature": "1MxDoH2rAf2dc05dFfkRXLSu0hp3xqpSEqVBI4vCInrlOT1BlKh7W_WuUnDY4MjCtRYgwfV7UJThymiD8N5jDw"
+      },
+      "padded": {
+        "publicKey": "z8MIoTnUjHolyruJc6inoFxpnCCfn0Q5UyzAKNERv6g",
+        "signature": "ybklCmXT0aKR8zKDZfx2UzPmEYdw8waSRnpytoSfkl-GVIKyV_MxAo_pVUGUcTNCDA4kmE_W75I2_ertLapdBg=="
+      }
+    },
+    "badBoxKeys": {
+      "topBitSet": "14e5a2a3cc69e07c0433ede8535a845d54763ca8d75ac43c5a376337d09f7dff",
+      "p": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "pPlus9": "f6ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "orderEight": "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800"
+    },
+    "enrollmentFingerprint": "f750 b4aa c23a fad3 4b83 3172 f46d 3209 4a26 018f",
+    "folderKeys": {
+      "shareId": "vector-share",
+      "draftKey": "G1mnx7Co9Z4JWwcho7e7cBvaUyVe6gXzcQKzm4RFSQw",
+      "publishedKey": "rksr9j-e1G5bvNGR7qrKAFyZQuvvw3axJjHB93NoOcc",
+      "editorEnvelope": {
+        "spaceId": "vector-space",
+        "shareId": "vector-share",
+        "keyVersion": 1,
+        "recipientId": "vector-m2-reader",
+        "recipientKeyVersion": 1,
+        "draftKey": "BlUTgC2kJ5MUlMkFYmdgU55drevB2ElTblHugwE5IWnfQJ6qf8qvkG74QOrdkSq_jbhkS6_l2dhdvDVfst4rxAC2CkefJFQi7vqMhSc5I5I",
+        "publishedKey": "J__D3kc6gJLnAAFCME5UJH6NlhRTigUFTGUUuHjsnQUj2vNQzcbqjODrvDh_NhKOYyj7-2KhUlSQmbpvF8RuL524XBSomTDXOixdpResQDU",
+        "sealerId": "vector-m2-author",
+        "sealerKeyVersion": 1,
+        "signature": "rWB78bAKPDcZjdndeSEGBbVYf0HyZtriEIStDaoEtgu9uNapWENl0P-ws_0ctIVjhlo9VUYjPIcB-t33Yv2IAA"
+      },
+      "readerEnvelope": {
+        "spaceId": "vector-space",
+        "shareId": "vector-share",
+        "keyVersion": 2,
+        "recipientId": "vector-m2-reader",
+        "recipientKeyVersion": 1,
+        "draftKey": null,
+        "publishedKey": "2eZrEf0YfgnTbXCH_HDK2XQ30ZgFzdiIm5UsA_PetwGH5nH8GO6xN15cuQy_s5RVL5Z2yMkygfGjgan_EkYpZLTrLk8rYpJpMGFFpOE3AQ8",
+        "sealerId": "vector-m2-author",
+        "sealerKeyVersion": 1,
+        "signature": "z17D-zQ9pDmXJChF0NlmlHCzmICeLqdP8IjQBYjpMeYgUg-xXOUf_40GsTvGlKScnK5h9sPLxY2VASGP1_BqAg"
+      },
+      "readerSignedBytes": "010000001f77696b6973746f772f666f6c6465722d6b65792d656e76656c6f70652f76310100000013766563746f722d696e7374616c6c6174696f6e010000000c766563746f722d7370616365010000000c766563746f722d73686172650200000001320100000010766563746f722d6d322d72656164657202000000013100000000000300000050d9e66b11fd187e09d36d7087fc70cad97437d19805cdd8889b952c03f3deb70187e671fc18eeb1375e5cb90cbfb394552f9676c8c93281f1a381a9ff12462964b4eb2e4f2b629269306145a4e137010f0100000010766563746f722d6d322d617574686f72020000000131"
+    },
+    "keyWrap": {
+      "subject": {
+        "spaceId": "vector-space",
+        "audienceClass": "metadata",
+        "subjectKind": "folder",
+        "subjectId": "vector-m2-folder",
+        "versionId": "vector-m2-metadata"
+      },
+      "keyVersion": 2,
+      "contentKey": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk",
+      "ad": "010000001c77696b6973746f772f636f6e74656e742d6b65792d777261702f76310100000013766563746f722d696e7374616c6c6174696f6e010000000c766563746f722d7370616365010000000c766563746f722d736861726502000000013201000000086d657461646174610100000006666f6c6465720100000010766563746f722d6d322d666f6c6465720100000012766563746f722d6d322d6d65746164617461",
+      "wrap": {
+        "shareId": "vector-share",
+        "keyVersion": 2,
+        "wrappedKey": {
+          "nonce": "LQ4_T4efsuTdecOs1sJyw-qwXg3YEQWF",
+          "ciphertext": "B2FLrdEZOgxocEbXBaZaD7xDEQnSM_AjxsatnhALxL9OPA1s0a_80wSDO_piAZBs"
+        }
+      }
+    },
+    "ownerStatement": {
+      "statement": {
+        "installationId": "vector-installation",
+        "spaceId": "vector-space",
+        "owner": {
+          "id": "vector-m2-reader",
+          "keyVersion": 1,
+          "keyHash": "eYcbV1MxMc2auM-JIVv_JGqAo45lmLBKWto_e8LZQfU"
+        },
+        "signerId": "vector-m2-author",
+        "signerKeyVersion": 1,
+        "signature": "5NzMy-Zzok_-Qqn3CaXc3bQOoBiErNwhqORNZaLviS8h2O-qMBPdAaJd6xK6jjtMSiZMc4UmsQmfAGBF_wEeDw"
+      },
+      "signedBytes": "010000001777696b6973746f772f73706163652d6f776e65722f76310100000013766563746f722d696e7374616c6c6174696f6e010000000c766563746f722d73706163650100000010766563746f722d6d322d726561646572020000000131010000002b6559636256314d784d633261754d2d4a4956765f4a4771416f34356c6d4c424b57746f5f65384c5a5166550100000010766563746f722d6d322d617574686f72020000000131"
+    },
+    "sharedRevision": {
+      "sealed": {
+        "record": {
+          "protocol": 2,
+          "installationId": "vector-installation",
+          "spaceId": "vector-space",
+          "pageId": "vector-m2-page",
+          "revisionId": "vector-m2-shared",
+          "audience": "draft",
+          "basedOn": null,
+          "authorId": "vector-m2-author",
+          "authorKeyVersion": 1,
+          "payloadHash": "z7-xIUla06gYF9YINp7JYmF-3t2JxxnZ67j4CqC_NyQ",
+          "keyCommitment": "QjIcwXRNOq4ArAYCI5Ceu45A48KsSDG9Yed3C_sigsU"
+        },
+        "signature": "QvY_NNEiGGwWMrTQrhbHzwq_EZDyf2q6GxFQWjRUfLDlLZ5CQC_0tJ5XurqYG9uesjBjw4FiYsqeZOiPrJyECQ",
+        "payload": {
+          "nonce": "MZBl-lyy4ef-qzJu4sK-s9CnHCJKZ1gj",
+          "ciphertext": "zkuVHC5jsXXP1436Ry770zY1BByvY_sL709DuxqWP_ze0nHF9N-uXJwmS0cPh7LB_pTw_jt_1PESQt6UJ6uN45sOKRVrNqCigO9hNy2rvuyE9KxVIW9wUkMSWyyAKPz9FXtnIEmYtFo_Rt8YNFC-EjQwfMhBzXvaH2DC_5nRsg"
+        }
+      },
+      "wrap": {
+        "shareId": "vector-share",
+        "keyVersion": 1,
+        "wrappedKey": {
+          "nonce": "o3krSYlFM2_UfccjxnYKaSE1yTleyMKd",
+          "ciphertext": "MmRePynZ5q366Z5RpG4c_yFx_8f2M3bbKoc0onI12dGf55NxQq9GUwCDh0DgZLQ8"
+        }
+      }
+    }
+  }
+}

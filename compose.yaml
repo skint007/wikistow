@@ -1,0 +1,28 @@
+# Local development services, bound to loopback only.
+#   docker compose up -d
+# Postgres:  postgres://wikistow:wikistow@127.0.0.1:5433/wikistow
+# Mailpit:   SMTP on 127.0.0.1:1025, inbox at http://127.0.0.1:8025
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: wikistow
+      POSTGRES_PASSWORD: wikistow
+      POSTGRES_DB: wikistow
+    ports:
+      - 127.0.0.1:5433:5432
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U wikistow]
+      interval: 2s
+      retries: 30
+
+  mail:
+    image: axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
+    ports:
+      - 127.0.0.1:1025:1025
+      - 127.0.0.1:8025:8025
+
+volumes:
+  db:

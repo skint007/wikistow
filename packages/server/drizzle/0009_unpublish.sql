@@ -1,0 +1,1 @@
+ALTER TABLE "page_heads" ADD COLUMN "reader_history_from" integer DEFAULT 1 NOT NULL;

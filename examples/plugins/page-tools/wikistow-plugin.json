@@ -1,0 +1,12 @@
+{
+  "id": "page-tools",
+  "name": "Page tools",
+  "version": "0.1.0",
+  "api": 1,
+  "description": "A page's word count and a reviewed stamp, today's date at the end of a draft, an index of a folder's pages, and a quantity \u00d7 price block.",
+  "ui": "ui.js",
+  "script": "script.js",
+  "styles": ["page-tools.css"],
+  "access": "write",
+  "blocks": ["product"]
+}

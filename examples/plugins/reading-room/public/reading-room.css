@@ -1,0 +1,46 @@
+/*
+ * The page layout, through the app's documented hooks (`data-region`, and
+ * `.page-body` for the page's text): the text in a narrower column, centred
+ * in the page card, with roomier lines. The views style themselves with the
+ * app's theme tokens, so they follow whichever theme is on.
+ */
+[data-region='page.content'] {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+
+.page-body :is(p, li) {
+  line-height: 1.8;
+}
+
+.reading-room-time {
+  display: grid;
+  gap: calc(var(--spacing) * 1);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  padding: calc(var(--spacing) * 3);
+  font-size: 0.875rem;
+}
+
+.reading-room-time span,
+.reading-room-note {
+  color: var(--muted-foreground);
+}
+
+.reading-room-recent {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.reading-room-recent button {
+  width: 100%;
+  border-radius: var(--radius-row);
+  background: var(--muted);
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  text-align: left;
+  font-weight: 700;
+}
+
+.reading-room-recent button:hover {
+  background: var(--accent);
+}

@@ -1,0 +1,10 @@
+{
+  "id": "calculator",
+  "name": "Calculator",
+  "version": "0.1.0",
+  "api": 1,
+  "description": "A product block: Quantity and Unit price fields, and their Total.",
+  "script": "script.js",
+  "access": "none",
+  "blocks": ["product"]
+}

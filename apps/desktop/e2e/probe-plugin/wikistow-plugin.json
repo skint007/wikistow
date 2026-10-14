@@ -1,0 +1,9 @@
+{
+  "id": "probe",
+  "name": "Probe",
+  "version": "1.0.0",
+  "api": 1,
+  "description": "Tries what a script may and may not do, for the desktop tests.",
+  "script": "script.js",
+  "access": "write"
+}

@@ -1,0 +1,71 @@
+/*
+ * A theme plugin: styles only, so it runs no code. Chosen in Settings →
+ * Appearance, this file loads after the app's styles and sets the app's
+ * tokens (`ThemeToken` in @wikistow/plugin-sdk, values in
+ * packages/ui/src/styles/theme.css) over the dark base palette. Choosing
+ * another theme, or turning the plugin off, removes it.
+ */
+:root,
+[data-theme] {
+  color-scheme: dark;
+
+  /* Type, corners and spacing: every gap and padding is a multiple of --spacing. */
+  --font-sans: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  --spacing: 0.27rem;
+  --radius-card: 6px;
+  --radius-tile: 6px;
+  --radius-control: 4px;
+  --radius-row: 4px;
+  --radius-folder: 4px;
+
+  --background: #1b1424;
+  --foreground: #f1e7f7;
+  --card: #251a31;
+  --card-foreground: #f1e7f7;
+  --popover: #2c203a;
+  --popover-foreground: #f1e7f7;
+  --border: #3a2b4b;
+  --input: #3a2b4b;
+  --ring: #f0a6ca;
+
+  --muted: #2c203a;
+  --muted-foreground: #b9a5c9;
+  --subtle-foreground: #d3c2e0;
+  --secondary: #2c203a;
+  --secondary-foreground: #f1e7f7;
+  --accent: #30233f;
+  --accent-foreground: #f1e7f7;
+
+  --primary: #f0a6ca;
+  --primary-2: #f7c6dd;
+  --primary-foreground: #2a1020;
+  --primary-soft: rgba(240, 166, 202, 0.14);
+  --primary-ink: #f7c6dd;
+
+  --strong: #f1e7f7;
+  --strong-foreground: #1b1424;
+
+  --table: #221830;
+  --table-head: #2c203a;
+  --tree-guide: #3a2b4b;
+  --glass: rgba(37, 26, 49, 0.75);
+  --glass-foreground: #f1e7f7;
+  --cover: linear-gradient(120deg, #4b2a5e 0%, #8a3f6b 55%, #e07a5f 100%);
+}
+
+/* Page styling, through the page's text (`.page-body`, in the reader and the editor). */
+.page-body :is(h1, h2) {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.2em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.page-body h2 {
+  color: var(--primary-ink);
+}
+.page-body p {
+  line-height: 1.75;
+}
+.page-body blockquote {
+  font-style: italic;
+}

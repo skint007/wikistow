@@ -1,0 +1,293 @@
+import { accountRoutes, type ErrorCode } from '@wikistow/contracts';
+import {
+  AccountError,
+  consumeRateLimit,
+  currentIdentity,
+  createAccount,
+  finishAccountSetup,
+  inspectInvitation,
+  schema,
+  setTheme,
+  type AccountFailure,
+  type Database,
+} from '@wikistow/server';
+import { and, eq, lte, sql } from 'drizzle-orm';
+import type { Context } from 'hono';
+import { accountSetupMail } from '../auth/account-setup.ts';
+import { TWO_FACTOR_LOCKOUT, type Auth } from '../auth/auth.ts';
+import { GuessesRefused, type PasswordGuesses } from '../auth/password-guesses.ts';
+import { ApiError } from '../http/errors.ts';
+import type { Log } from '../http/logger.ts';
+import type { Routes } from '../http/mount.ts';
+import { sendInBackground, type Deliver } from '../mail/mailer.ts';
+import { accountExistsMail, verifyEmailMail } from '../mail/templates.ts';
+import { APIError, createEmailVerificationToken } from 'better-auth/api';
+
+const ACCOUNT_ERRORS = {
+  'registration-closed': 'registration-closed',
+  'invitation-not-found': 'invitation-not-found',
+  'invitation-used': 'invitation-used',
+  'invitation-revoked': 'invitation-revoked',
+  'invitation-expired': 'invitation-expired',
+  'invitation-email-mismatch': 'invitation-email-mismatch',
+  'invitation-exists': 'invitation-exists',
+  'email-taken': 'email-taken',
+  'admin-exists': 'admin-exists',
+  'account-not-found': 'not-found',
+  'not-admin': 'forbidden',
+  'cannot-target-self': 'cannot-target-self',
+  'last-admin': 'last-admin',
+  'details-required': 'invalid-request',
+  'setup-link-invalid': 'setup-link-invalid',
+} as const satisfies Record<AccountFailure, ErrorCode>;
+
+/** Turn a refused account operation into its API error; rethrow anything else. */
+export function toApiError(error: unknown): never {
+  if (error instanceof AccountError) throw new ApiError(ACCOUNT_ERRORS[error.code], error.message);
+  throw error;
+}
+
+/** The link Better Auth's /verify-email accepts, built the way Better Auth builds it. */
+async function verificationMail(auth: Auth, email: string) {
+  const context = await auth.$context;
+  const token = await createEmailVerificationToken(
+    context.secret,
+    email,
+    undefined,
+    context.options.emailVerification?.expiresIn,
+  );
+  const callbackURL = encodeURIComponent('/sign-in?verified=1');
+  return verifyEmailMail(
+    email,
+    `${context.baseURL}/verify-email?token=${token}&callbackURL=${callbackURL}`,
+  );
+}
+
+// Generous enough for a family filling in forms, tight enough to stop guessing.
+const FORM_LIMIT = { windowSeconds: 60, max: 10 };
+
+// Every confirmation is a password guess. With two-factor on it takes two
+// requests, so twice sign-in's five a minute, counted per account.
+const REAUTH_LIMIT = { windowSeconds: 60, max: 10 };
+
+/** Checked as Better Auth's routes check passwords, against the account's allowance. */
+async function passwordMatches(
+  auth: Auth,
+  guesses: PasswordGuesses,
+  c: Context,
+  account: { id: string; email: string },
+  password: string,
+) {
+  const context = await auth.$context;
+  const credential = await context.internalAdapter.findCredentialAccount(account.id);
+  if (!credential?.password) return false;
+  const hash = credential.password;
+  try {
+    const { result, setCookies } = await guesses.scope(
+      { email: account.email, cookie: c.req.header('cookie') },
+      () => context.password.verify({ hash, password }),
+    );
+    for (const cookie of setCookies) c.header('set-cookie', cookie, { append: true });
+    return result;
+  } catch (error) {
+    if (error instanceof GuessesRefused) {
+      throw new ApiError('account-rate-limited', error.message);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Check a code against the signed-in account through Better Auth, which
+ * also refuses an authenticator code already used and spends a backup code.
+ * With a session present it neither creates nor replaces one. Called in
+ * process, it skips the HTTP gate on code checks from a stale session
+ * (app.ts); the password checked first stands in for it.
+ *
+ * Better Auth counts wrong codes toward its lockout only at sign-in, so
+ * this does the same here, on the same row: a locked account is refused
+ * before any code is tried, each wrong code counts, and a right one clears
+ * the count.
+ */
+async function codeMatches(
+  db: Database,
+  auth: Auth,
+  { accountId, headers }: { accountId: string; headers: Headers },
+  code: { kind: 'totp' | 'backup'; value: string },
+) {
+  const factor = eq(schema.twoFactors.userId, accountId);
+  const [state] = await db
+    .select({ lockedUntil: schema.twoFactors.lockedUntil })
+    .from(schema.twoFactors)
+    .where(factor);
+  if (state?.lockedUntil) {
+    if (state.lockedUntil.getTime() > Date.now()) {
+      throw new ApiError('two-factor-locked', 'Too many wrong codes. Try again later.');
+    }
+    // A lock that has run out starts the count again, as at sign-in.
+    await db
+      .update(schema.twoFactors)
+      .set({ failedVerificationCount: 0, lockedUntil: null })
+      .where(and(factor, lte(schema.twoFactors.lockedUntil, new Date())));
+  }
+  try {
+    const body = { code: code.value };
+    if (code.kind === 'totp') await auth.api.verifyTOTP({ headers, body });
+    else await auth.api.verifyBackupCode({ headers, body });
+  } catch (error) {
+    // CONFLICT: another request spent this backup code first.
+    if (
+      !(error instanceof APIError) ||
+      !['UNAUTHORIZED', 'CONFLICT'].includes(String(error.status))
+    )
+      throw error;
+    const [counted] = await db
+      .update(schema.twoFactors)
+      .set({
+        failedVerificationCount: sql`coalesce(${schema.twoFactors.failedVerificationCount}, 0) + 1`,
+      })
+      .where(factor)
+      .returning({ failed: schema.twoFactors.failedVerificationCount });
+    if ((counted?.failed ?? 0) >= TWO_FACTOR_LOCKOUT.maxFailedAttempts) {
+      await db
+        .update(schema.twoFactors)
+        .set({ lockedUntil: new Date(Date.now() + TWO_FACTOR_LOCKOUT.durationSeconds * 1000) })
+        .where(factor);
+    }
+    return false;
+  }
+  await db
+    .update(schema.twoFactors)
+    .set({ failedVerificationCount: 0, lockedUntil: null })
+    .where(factor);
+  return true;
+}
+
+export function mountAccountRoutes(
+  routes: Routes,
+  {
+    db,
+    auth,
+    guesses,
+    deliver,
+    log,
+    publicOrigin,
+  }: {
+    db: Database;
+    auth: Auth;
+    guesses: PasswordGuesses;
+    deliver: Deliver;
+    log: Log;
+    publicOrigin: string;
+  },
+): void {
+  routes.public(
+    accountRoutes.createAccount,
+    async ({ body }) => {
+      const account = await createAccount(db, body).catch(toApiError);
+      if (account.kind === 'existing') {
+        // Open registration and generic links give the same answer for a taken
+        // address. Only the owner hears of it: the setup link again if the
+        // account was never finished, or else a notice.
+        const { allowed } = await consumeRateLimit(db, `account-exists-mail:${account.email}`, {
+          windowMs: 60_000,
+          max: 3,
+        });
+        if (allowed) {
+          const mail = account.finished
+            ? accountExistsMail(account.email, `${publicOrigin}/sign-in`)
+            : await accountSetupMail(db, publicOrigin, {
+                id: account.accountId,
+                email: account.email,
+              });
+          sendInBackground(deliver, log, mail);
+        }
+        return {};
+      }
+      // Both paths queue mail without Better Auth's HTTP timing pad, so a new
+      // address and a taken one answer alike.
+      const mail = account.emailBound
+        ? await verificationMail(auth, account.email)
+        : await accountSetupMail(db, publicOrigin, { id: account.accountId, email: account.email });
+      sendInBackground(deliver, log, mail);
+      return account.emailBound ? { accountId: account.accountId } : {};
+    },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.public(
+    accountRoutes.finishAccountSetup,
+    async ({ body }) => {
+      await finishAccountSetup(db, body).catch(toApiError);
+      return {};
+    },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.public(
+    accountRoutes.inspectInvitation,
+    async ({ body }) => {
+      const result = await inspectInvitation(db, body.token);
+      return result.status === 'valid'
+        ? {
+            status: 'valid' as const,
+            email: result.email,
+            expiresAt: result.expiresAt.toISOString(),
+          }
+        : { status: result.status };
+    },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.account(accountRoutes.me, async (_input, { principal }) => ({
+    account: {
+      id: principal.accountId,
+      email: principal.email,
+      name: principal.name,
+      role: principal.role,
+      theme: principal.theme,
+    },
+    session: { createdAt: principal.sessionCreatedAt.toISOString() },
+    identity: await currentIdentity(db, principal.accountId),
+  }));
+
+  // The password comes first, so a stale stolen session can't try codes
+  // without it, and a code sent with a wrong password isn't used up.
+  routes.account(
+    accountRoutes.reauthenticate,
+    async ({ body }, { c, principal }) => {
+      const self = { id: principal.accountId, email: principal.email };
+      if (!(await passwordMatches(auth, guesses, c, self, body.password))) {
+        throw new ApiError('wrong-password', 'That password is not right');
+      }
+      const [account] = await db
+        .select({ twoFactorEnabled: schema.users.twoFactorEnabled })
+        .from(schema.users)
+        .where(eq(schema.users.id, principal.accountId));
+      if (account?.twoFactorEnabled) {
+        if (!body.code) return { status: 'code-required' as const };
+        if (
+          !(await codeMatches(
+            db,
+            auth,
+            { accountId: principal.accountId, headers: c.req.raw.headers },
+            body.code,
+          ))
+        ) {
+          throw new ApiError('wrong-code', 'That code didn’t work');
+        }
+      }
+      await db
+        .update(schema.sessions)
+        .set({ authenticatedAt: new Date() })
+        .where(eq(schema.sessions.id, principal.sessionId));
+      return { status: 'confirmed' as const };
+    },
+    { rateLimit: REAUTH_LIMIT },
+  );
+
+  routes.account(accountRoutes.setTheme, async ({ body }, { principal }) => {
+    await setTheme(db, principal.accountId, body.theme);
+    return { theme: body.theme };
+  });
+}

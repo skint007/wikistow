@@ -1,0 +1,370 @@
+/*
+ * WikiStow design tokens for direction H, "Rail + Cards with status pills".
+ * Spec: ../ui-design.md. Reference mock: direction-h.html.
+ *
+ * Tailwind CSS 4 + shadcn/ui. Import this file from the app's global stylesheet.
+ * Palette names follow shadcn's convention (background, card, primary, muted, accent...)
+ * so generated shadcn components pick them up without changes. WikiStow-specific tokens
+ * (status pills, folder tints, cover, glass toolbar) are additions.
+ *
+ * Theme selection: the theme provider sets data-theme on <html>.
+ * Values: light | warm | slate | oled. "System" resolves to light or slate.
+ * The choice is an account setting, synced across devices. In the desktop app a plugin theme
+ * adds its stylesheet over light or slate and sets these tokens; the plugin SDK lists them
+ * (`ThemeToken` in packages/plugin-sdk/src/theme.ts), so keep that list in step.
+ */
+
+@import "tailwindcss";
+
+@custom-variant dark (&:where(
+  [data-theme="warm"], [data-theme="warm"] *,
+  [data-theme="slate"], [data-theme="slate"] *,
+  [data-theme="oled"], [data-theme="oled"] *
+));
+
+/* palettes:start */
+:root,
+[data-theme="light"] {
+  color-scheme: light;            /* native controls and scrollbars drawn to match */
+  --background: #f4f1ec;
+  --foreground: #2d2a26;
+  --card: #ffffff;
+  --card-foreground: #2d2a26;
+  --popover: #ffffff;
+  --popover-foreground: #2d2a26;
+  --border: #ece6dc;
+  --input: #ece6dc;
+  --ring: #c8461a;
+
+  --muted: #f4f1ec;               /* filter field, count pills, neutral pills, rail tiles */
+  --muted-foreground: #71695f;    /* meta text. Darkened from the mock's #8a8278 to pass AA */
+  --subtle-foreground: #6b645a;   /* page rows in the tree, secondary labels */
+  --secondary: #f4f1ec;
+  --secondary-foreground: #2d2a26;
+  --accent: #f8f5f0;              /* hover surface (shadcn meaning of "accent") */
+  --accent-foreground: #2d2a26;
+
+  --primary: #c8461a;             /* New page, Publish. Darkened from the mock's #f2643d so white text passes AA */
+  --primary-2: #d4552a;           /* gradient start for the space tile */
+  --primary-foreground: #ffffff;
+  --primary-soft: #fff0ea;        /* selected tree row, wiki-link chips, active rail tile */
+  --primary-ink: #c2410c;         /* text on primary-soft */
+
+  --strong: #2d2a26;              /* avatar and dark buttons */
+  --strong-foreground: #ffffff;
+  --destructive: #c92a2a;         /* not shown in the mock */
+  --destructive-foreground: #ffffff;
+
+  --status-published: #e3f6e9;
+  --status-published-foreground: #1f7a45;
+  --status-draft: #fff3d6;
+  --status-draft-foreground: #9a6200;
+  --draft-dot: #d97706;           /* tree marker for unpublished changes; 3:1 against white */
+
+  --note: #fff7c2;
+  --note-foreground: #5c4a00;
+  --table: #faf8f4;
+  --table-head: #f1ece4;
+  --tree-guide: #f1ece4;
+
+  --glass: rgba(255, 255, 255, 0.7);
+  --glass-foreground: #2d2a26;
+  --card-shadow: 0 1px 2px rgba(60, 40, 20, 0.06), 0 4px 16px rgba(60, 40, 20, 0.05);
+
+  --folder-green: #e3f6e9;
+  --folder-orange: #ffeedd;
+  --folder-blue: #e4eeff;
+  --folder-pink: #fde6ef;
+  --folder-purple: #efe8ff;
+
+  --cover: radial-gradient(circle at 20% 30%, #ffd8a8 0, transparent 55%),
+    radial-gradient(circle at 80% 20%, #ffc9c9 0, transparent 50%),
+    linear-gradient(120deg, #ffe8cc, #fff4e6);
+}
+
+/* Midnight slate: the palette direction H was reviewed in. Proposed default dark theme. */
+[data-theme="slate"] {
+  color-scheme: dark;
+  --background: #0a0f1c;
+  --foreground: #e2e8f0;
+  --card: #111a2b;
+  --card-foreground: #e2e8f0;
+  --popover: #111a2b;
+  --popover-foreground: #e2e8f0;
+  --border: #1f2a3d;
+  --input: #1f2a3d;
+  --ring: #2dd4bf;
+
+  --muted: #1a2436;
+  --muted-foreground: #7c8aa3;
+  --subtle-foreground: #a3b0c6;
+  --secondary: #1a2436;
+  --secondary-foreground: #e2e8f0;
+  --accent: #162033;
+  --accent-foreground: #e2e8f0;
+
+  --primary: #2dd4bf;
+  --primary-2: #5eead4;
+  --primary-foreground: #04201c;
+  --primary-soft: rgba(45, 212, 191, 0.13);
+  --primary-ink: #5eead4;
+
+  --strong: #e2e8f0;
+  --strong-foreground: #0a0f1c;
+  --destructive: #f87171;
+  --destructive-foreground: #1f0707;
+
+  --status-published: rgba(74, 222, 128, 0.12);
+  --status-published-foreground: #86efac;
+  --status-draft: rgba(251, 191, 36, 0.12);
+  --status-draft-foreground: #fcd34d;
+  --draft-dot: #f59e0b;
+
+  --note: #2b2a17;
+  --note-foreground: #efe2a0;
+  --table: #0f1727;
+  --table-head: #1a2436;
+  --tree-guide: #1f2a3d;
+
+  --glass: rgba(8, 12, 22, 0.66);
+  --glass-foreground: #e2e8f0;
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  --folder-green: rgba(74, 222, 128, 0.14);
+  --folder-orange: rgba(251, 146, 60, 0.16);
+  --folder-blue: rgba(96, 165, 250, 0.17);
+  --folder-pink: rgba(244, 114, 182, 0.16);
+  --folder-purple: rgba(167, 139, 250, 0.18);
+
+  --cover: radial-gradient(circle at 20% 35%, rgba(45, 212, 191, 0.35) 0, transparent 55%),
+    radial-gradient(circle at 80% 15%, rgba(99, 102, 241, 0.35) 0, transparent 50%),
+    linear-gradient(120deg, #10213a, #0f1a2c);
+}
+
+/* Warm charcoal */
+[data-theme="warm"] {
+  color-scheme: dark;
+  --background: #131110;
+  --foreground: #eee7df;
+  --card: #1d1a18;
+  --card-foreground: #eee7df;
+  --popover: #1d1a18;
+  --popover-foreground: #eee7df;
+  --border: #2c2825;
+  --input: #2c2825;
+  --ring: #ff7a50;
+
+  --muted: #272320;
+  --muted-foreground: #968c82;
+  --subtle-foreground: #b8aea4;
+  --secondary: #272320;
+  --secondary-foreground: #eee7df;
+  --accent: #24201d;
+  --accent-foreground: #eee7df;
+
+  --primary: #ff7a50;
+  --primary-2: #ff9a6e;
+  --primary-foreground: #1c0d06;
+  --primary-soft: rgba(255, 122, 80, 0.14);
+  --primary-ink: #ffa384;
+
+  --strong: #eee7df;
+  --strong-foreground: #131110;
+  --destructive: #f87171;
+  --destructive-foreground: #1f0707;
+
+  --status-published: rgba(74, 222, 128, 0.12);
+  --status-published-foreground: #86efac;
+  --status-draft: rgba(251, 191, 36, 0.13);
+  --status-draft-foreground: #fcd34d;
+  --draft-dot: #f59e0b;
+
+  --note: #352d13;
+  --note-foreground: #f3e3a3;
+  --table: #211e1b;
+  --table-head: #272320;
+  --tree-guide: #2c2825;
+
+  --glass: rgba(20, 16, 14, 0.66);
+  --glass-foreground: #f4ede6;
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  --folder-green: rgba(74, 222, 128, 0.15);
+  --folder-orange: rgba(251, 146, 60, 0.17);
+  --folder-blue: rgba(96, 165, 250, 0.17);
+  --folder-pink: rgba(244, 114, 182, 0.17);
+  --folder-purple: rgba(167, 139, 250, 0.18);
+
+  --cover: radial-gradient(circle at 18% 35%, rgba(255, 150, 80, 0.42) 0, transparent 55%),
+    radial-gradient(circle at 82% 20%, rgba(255, 95, 110, 0.28) 0, transparent 50%),
+    linear-gradient(120deg, #2d2119, #211a16);
+}
+
+/* OLED black */
+[data-theme="oled"] {
+  color-scheme: dark;
+  --background: #000000;
+  --foreground: #f4f4f5;
+  --card: #0e0e10;
+  --card-foreground: #f4f4f5;
+  --popover: #0e0e10;
+  --popover-foreground: #f4f4f5;
+  --border: #1f1f23;
+  --input: #1f1f23;
+  --ring: #a78bfa;
+
+  --muted: #1a1a1e;
+  --muted-foreground: #85858f;
+  --subtle-foreground: #b0b0b8;
+  --secondary: #1a1a1e;
+  --secondary-foreground: #f4f4f5;
+  --accent: #151518;
+  --accent-foreground: #f4f4f5;
+
+  --primary: #a78bfa;
+  --primary-2: #c4b5fd;
+  --primary-foreground: #140b2b;
+  --primary-soft: rgba(167, 139, 250, 0.14);
+  --primary-ink: #c4b5fd;
+
+  --strong: #f4f4f5;
+  --strong-foreground: #000000;
+  --destructive: #f87171;
+  --destructive-foreground: #1f0707;
+
+  --status-published: rgba(74, 222, 128, 0.12);
+  --status-published-foreground: #86efac;
+  --status-draft: rgba(251, 191, 36, 0.12);
+  --status-draft-foreground: #fcd34d;
+  --draft-dot: #f59e0b;
+
+  --note: #2a2614;
+  --note-foreground: #efe2a0;
+  --table: #0b0b0d;
+  --table-head: #18181b;
+  --tree-guide: #1f1f23;
+
+  --glass: rgba(0, 0, 0, 0.62);
+  --glass-foreground: #f4f4f5;
+  --card-shadow: inset 0 0 0 1px #1c1c20;
+
+  --folder-green: rgba(74, 222, 128, 0.14);
+  --folder-orange: rgba(251, 146, 60, 0.16);
+  --folder-blue: rgba(96, 165, 250, 0.17);
+  --folder-pink: rgba(244, 114, 182, 0.16);
+  --folder-purple: rgba(167, 139, 250, 0.2);
+
+  --cover: radial-gradient(circle at 22% 40%, rgba(167, 139, 250, 0.38) 0, transparent 55%),
+    radial-gradient(circle at 80% 20%, rgba(236, 72, 153, 0.25) 0, transparent 50%),
+    linear-gradient(120deg, #16102a, #0c0a14);
+}
+/* Banner presets. Palette-independent: a preset looks the same in every theme.
+ * A page card selects its banner by overriding --cover, for example
+ *   style="--cover: var(--banner-ocean)"
+ *   style="--cover: url(<decrypted blob URL>); --cover-focal: 30%"   (uploaded image)
+ * Without an override, --cover is the palette's own gradient. */
+:root {
+  --banner-sunrise: linear-gradient(120deg, #ff9a8b, #ff6a88 45%, #ffd36e);
+  --banner-ocean: linear-gradient(120deg, #0f4c75, #1b9aaa 55%, #8fd3c7);
+  --banner-meadow: linear-gradient(120deg, #3a7d44, #8bbf5b 55%, #e9e4a6);
+  --banner-lavender: linear-gradient(120deg, #6d5bd0, #a78bfa 50%, #f0c4e4);
+  --banner-dusk: linear-gradient(120deg, #1e1b4b, #7c3aed 55%, #f472b6);
+  --banner-stone: linear-gradient(120deg, #334155, #64748b 55%, #cbd5e1);
+}
+/* palettes:end */
+
+/* Expose the palette as Tailwind utilities: bg-card, text-muted-foreground, bg-folder-green... */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-primary: var(--primary);
+  --color-primary-2: var(--primary-2);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-strong: var(--strong);
+  --color-strong-foreground: var(--strong-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-status-published: var(--status-published);
+  --color-status-published-foreground: var(--status-published-foreground);
+  --color-status-draft: var(--status-draft);
+  --color-status-draft-foreground: var(--status-draft-foreground);
+  --color-draft-dot: var(--draft-dot);
+  --color-note: var(--note);
+  --color-note-foreground: var(--note-foreground);
+  --color-table: var(--table);
+  --color-table-head: var(--table-head);
+  --color-tree-guide: var(--tree-guide);
+  --color-glass: var(--glass);
+  --color-glass-foreground: var(--glass-foreground);
+  --color-folder-green: var(--folder-green);
+  --color-folder-orange: var(--folder-orange);
+  --color-folder-blue: var(--folder-blue);
+  --color-folder-pink: var(--folder-pink);
+  --color-folder-purple: var(--folder-purple);
+
+  --shadow-card: var(--card-shadow);
+}
+
+/* Radii and type as variables the utilities read (not inlined), so a theme plugin can set
+ * them on :root like the palette's tokens. */
+@theme {
+  /* rounded-card, rounded-tile, rounded-control, rounded-row, rounded-folder */
+  --radius-card: 18px;    /* sidebar and page cards, emoji badge */
+  --radius-tile: 14px;    /* space tiles in the rail */
+  --radius-control: 12px; /* buttons, folder rows, activity card, tables */
+  --radius-row: 10px;     /* page rows, filter field, segmented controls */
+  --radius-folder: 9px;   /* 28px folder emoji tile */
+
+  /* ui-rounded matches the mocks on macOS. Elsewhere the stack falls back to the bundled
+   * Nunito, imported once in the shared interface: import "@fontsource-variable/nunito"; */
+  --font-sans: ui-rounded, "SF Pro Rounded", "Nunito Variable", "Nunito", "Varela Round", "Segoe UI", system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+  /* Scrollbars in the palette's colours: a muted-foreground thumb, 3:1 or better on every
+   * surface, over the box's own background. It inherits everywhere, the source editor's
+   * shadow root included; the browser darkens the thumb on hover and drag. High contrast
+   * keeps the system's own. */
+  html {
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 80%, transparent) transparent;
+  }
+  @media (forced-colors: active) {
+    html {
+      scrollbar-color: auto;
+    }
+  }
+}
+
+/* Utilities that Tailwind can't express in one class. */
+@utility bg-cover-band {
+  background: var(--cover);
+  background-size: cover;
+  background-position: center var(--cover-focal, 50%);
+}
+@utility glass {
+  background: var(--glass);
+  color: var(--glass-foreground);
+  backdrop-filter: blur(8px);
+}

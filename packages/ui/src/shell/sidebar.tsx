@@ -1,0 +1,762 @@
+import {
+  pageOperations,
+  spaceOperations,
+  type FolderId,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useParams } from '@tanstack/react-router';
+import { ChevronRight, FolderPlus, MoreHorizontal, Plus } from 'lucide-react';
+import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { submitData } from '@/components/form/submit';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Name, plainText } from '@/components/name';
+import { cn } from '@/lib/utils';
+import { AgentActivityCard } from '../agents/activity-card';
+import { searchIndexChanged, treeQuery } from '../data/queries';
+import { destinationsIn, MoveDialog, type Moving } from '../page/move-dialog';
+import type { Destination } from '../page/move-model';
+import { errorMessage } from '../errors';
+import { shareCovering } from '../sharing/model';
+import { useOwnerStanding } from '../sharing/owner-standing';
+import { ShareDialog } from '../sharing/share-dialog';
+import { useClient } from '../vault/store';
+import { ExportDialog, type Exporting } from './export-dialog';
+import { SpaceHeader } from './space-header';
+
+type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
+
+/** One visible row of the tree, in display order. */
+type Row =
+  | {
+      kind: 'folder';
+      id: FolderId;
+      parentId: FolderId | null;
+      level: number;
+      name: string;
+      emoji: string;
+      tint: string;
+      count: number;
+      expanded: boolean;
+    }
+  | {
+      kind: 'page';
+      id: PageId;
+      parentId: FolderId | null;
+      level: number;
+      title: string;
+      emoji: string | null;
+      unpublished: boolean;
+    };
+
+const TINTS: Record<string, string> = {
+  green: 'bg-folder-green',
+  orange: 'bg-folder-orange',
+  blue: 'bg-folder-blue',
+  pink: 'bg-folder-pink',
+  purple: 'bg-folder-purple',
+};
+
+export const pageTitle = (title: string | null) => (title?.trim() ? title : 'Untitled');
+
+function folderName(folder: Tree['folders'][number]) {
+  const opened = folder.metadata?.opened;
+  return opened?.kind === 'current'
+    ? {
+        name: opened.metadata.name,
+        emoji: opened.metadata.emoji ?? '⭐',
+        tint: opened.metadata.tint ?? 'blue',
+      }
+    : { name: 'Unreadable folder', emoji: '⚠️', tint: 'orange' };
+}
+
+/**
+ * The rows shown: folders first, then pages, each alphabetical. A filter
+ * shows matching pages with the folders around them opened.
+ */
+function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string): Row[] {
+  const needle = filter.trim().toLowerCase();
+  const matches = (title: string | null) =>
+    !needle || pageTitle(title).toLowerCase().includes(needle);
+  const rows: Row[] = [];
+  const hasMatch = (folderId: FolderId): boolean =>
+    tree.pages.some((p) => p.parentId === folderId && matches(p.title)) ||
+    tree.folders.some((f) => f.parentId === folderId && hasMatch(f.id));
+  const walk = (parentId: FolderId | null, level: number) => {
+    const folders = tree.folders
+      .filter((f) => f.parentId === parentId && (!needle || hasMatch(f.id)))
+      .map((f) => ({ folder: f, ...folderName(f) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const { folder, name, emoji, tint } of folders) {
+      const open = needle ? true : expanded.has(folder.id);
+      const count =
+        tree.folders.filter((f) => f.parentId === folder.id).length +
+        tree.pages.filter((p) => p.parentId === folder.id).length;
+      rows.push({
+        kind: 'folder',
+        id: folder.id,
+        parentId,
+        level,
+        name,
+        emoji,
+        tint,
+        count,
+        expanded: open,
+      });
+      if (open) walk(folder.id, level + 1);
+    }
+    const pages = tree.pages
+      .filter((p) => p.parentId === parentId && matches(p.title))
+      .sort((a, b) => pageTitle(a.title).localeCompare(pageTitle(b.title)));
+    for (const page of pages) {
+      rows.push({
+        kind: 'page',
+        id: page.id,
+        parentId,
+        level,
+        title: pageTitle(page.title),
+        emoji: page.emoji,
+        unpublished: page.draftChanges || page.publishedHead === null,
+      });
+    }
+  };
+  walk(null, 1);
+  return rows;
+}
+
+/** Everything inside a folder, for the delete confirmation. */
+function contentsOf(tree: Tree, folderId: FolderId) {
+  let folders = 0;
+  let pages = 0;
+  const walk = (id: FolderId) => {
+    pages += tree.pages.filter((p) => p.parentId === id).length;
+    for (const child of tree.folders.filter((f) => f.parentId === id)) {
+      folders += 1;
+      walk(child.id);
+    }
+  };
+  walk(folderId);
+  return { folders, pages };
+}
+
+type Creating = { kind: 'page' | 'folder'; parentId: FolderId | null } | null;
+
+/**
+ * A page or folder being dragged in the tree, where it can be dropped, and
+ * the place it is over now, if it can go there.
+ */
+type Dragging = {
+  moving: Moving;
+  to: Map<FolderId | null, Destination<FolderId>>;
+  over: Destination<FolderId> | null;
+};
+
+// Set, empty, on a drag from the tree, since Firefox starts no drag without data.
+const DRAG_TYPE = 'application/x-wikistow-node';
+
+export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?: () => void }) {
+  const ctx = useClient();
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const params = useParams({ strict: false });
+  const navigate = useNavigate();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [filter, setFilter] = useState('');
+  const [creating, setCreating] = useState<Creating>(null);
+  const [deleting, setDeleting] = useState<FolderId | null>(null);
+  const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
+  const [moving, setMoving] = useState<Moving | null>(null);
+  const [exporting, setExporting] = useState<Exporting | null>(null);
+  const [dragging, setDragging] = useState<Dragging | null>(null);
+  const standing = useOwnerStanding(spaceId);
+  const [focused, setFocused] = useState<string | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLElement>());
+
+  const rows = useMemo(
+    () => (tree ? visibleRows(tree, expanded, filter) : []),
+    [tree, expanded, filter],
+  );
+  const toggle = (id: string, open?: boolean) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (open ?? !next.has(id)) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  if (!tree) return <SidebarCard>{null}</SidebarCard>;
+  // Someone who holds only folders in the space sees no space name: their
+  // tree starts at each shared folder (section 7.7).
+  const opened = tree.space?.metadata?.opened;
+  const spaceName = tree.space
+    ? opened?.kind === 'current'
+      ? opened.metadata.name
+      : 'Space'
+    : null;
+  const spaceEmoji = opened?.kind === 'current' ? opened.metadata.emoji : undefined;
+  // Sharing and deleting folders wait until a new owner has confirmed who added them.
+  const sharer = standing === 'owner';
+  // Whether the person can change what is under `parentId`: their role in
+  // the share that holds it, or in the space.
+  const canEditAt = (parentId: FolderId | null) => {
+    const role = shareCovering(tree, parentId)?.role ?? tree.space?.role;
+    return role === 'editor' || role === 'owner';
+  };
+  // Nothing can be written or shared at the top of a space whose own name
+  // failed its checks; one in a newer format still opened.
+  const topOpened = tree.space?.metadata !== null;
+  const canEdit = canEditAt(null) && topOpened;
+  const focusId =
+    focused && rows.some((r) => r.id === focused) ? focused : (params.pageId ?? rows[0]?.id);
+
+  const openPage = (pageId: PageId) => {
+    onNavigate?.();
+    void navigate({ to: '/s/$spaceId/p/$pageId', params: { spaceId, pageId } });
+  };
+  const focusRow = (row: Row | undefined) => {
+    if (!row) return;
+    setFocused(row.id);
+    itemRefs.current.get(row.id)?.focus();
+  };
+
+  // The WAI-ARIA tree pattern: arrows move, Left and Right fold, Enter opens.
+  function onKeyDown(event: KeyboardEvent<HTMLUListElement>) {
+    // Only keys pressed on a row. A folder's menu and its button sit inside
+    // the tree in React, so their keys bubble here too; they handle their own.
+    if (!(event.target instanceof HTMLElement) || event.target.role !== 'treeitem') return;
+    const index = rows.findIndex((r) => r.id === focusId);
+    const row = rows[index];
+    if (!row) return;
+    const handled = () => event.preventDefault();
+    switch (event.key) {
+      case 'ArrowDown':
+        handled();
+        return focusRow(rows[index + 1]);
+      case 'ArrowUp':
+        handled();
+        return focusRow(rows[index - 1]);
+      case 'Home':
+        handled();
+        return focusRow(rows[0]);
+      case 'End':
+        handled();
+        return focusRow(rows.at(-1));
+      case 'ArrowRight':
+        handled();
+        if (row.kind === 'folder' && !row.expanded) return toggle(row.id, true);
+        if (row.kind === 'folder') return focusRow(rows[index + 1]);
+        return;
+      case 'ArrowLeft':
+        handled();
+        if (row.kind === 'folder' && row.expanded) return toggle(row.id, false);
+        return focusRow(rows.find((r) => r.id === row.parentId));
+      case 'Enter':
+        handled();
+        return row.kind === 'folder' ? toggle(row.id) : openPage(row.id);
+      default:
+        // Type-ahead: jump to the next row starting with that letter.
+        if (event.key.length === 1 && /\S/.test(event.key)) {
+          const label = (r: Row) => (r.kind === 'folder' ? r.name : r.title).toLowerCase();
+          const after = [...rows.slice(index + 1), ...rows.slice(0, index + 1)];
+          focusRow(after.find((r) => label(r).startsWith(event.key.toLowerCase())));
+        }
+    }
+  }
+
+  // Drag and drop moves, for a mouse: a drop opens the move preview on the
+  // place dropped on, as Move… does once that place is chosen. Keyboard
+  // users have Move… in the menus. A drop on a page is a drop beside it,
+  // and one below the rows is at the top of the space.
+  // A drag whose row went away meanwhile, moved or deleted elsewhere, is
+  // over: the row's dragend never reaches the tree.
+  if (dragging && !rows.some((r) => r.id === dragging.moving.id)) setDragging(null);
+  const startDrag = (event: DragEvent, moving: Moving) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(DRAG_TYPE, '');
+    const places = destinationsIn(tree, moving, sharer);
+    setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
+  };
+  const pointAt = (over: Destination<FolderId> | null) =>
+    setDragging((current) => (current && current.over !== over ? { ...current, over } : current));
+  // Only a drag from this tree, and only where Move… would offer: not onto
+  // itself, inside itself, or where it is.
+  const placeAt = (event: DragEvent, parentId: FolderId | null) =>
+    event.dataTransfer.types.includes(DRAG_TYPE) ? (dragging?.to.get(parentId) ?? null) : null;
+  // For dragenter as well as dragover: a browser takes a drop on whatever
+  // took either last, and moving onto a new element fires only dragenter.
+  const dragOver = (event: DragEvent, parentId: FolderId | null) => {
+    event.stopPropagation();
+    const destination = placeAt(event, parentId);
+    pointAt(destination);
+    if (!destination) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+  const drop = (event: DragEvent, parentId: FolderId | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const destination = placeAt(event, parentId);
+    if (dragging && destination) setMoving({ ...dragging.moving, to: destination });
+    setDragging(null);
+  };
+  const dropTarget = (row: Row) => (row.kind === 'folder' ? row.id : row.parentId);
+
+  const deletingContents = deleting ? contentsOf(tree, deleting) : null;
+  const deletingName = rows.find((r) => r.id === deleting);
+
+  return (
+    <SidebarCard>
+      <SpaceHeader
+        spaceId={spaceId}
+        name={spaceName}
+        emoji={spaceEmoji}
+        onShare={topOpened ? () => setSharing({ rootId: null }) : undefined}
+        onExport={() => setExporting({ folderId: null, name: spaceName ?? 'Shared with you' })}
+      />
+      {canEdit && (
+        <div className="flex gap-2">
+          <Button
+            className="flex-1 rounded-control"
+            onClick={() => setCreating({ kind: 'page', parentId: null })}
+          >
+            <Plus strokeWidth={1.75} /> New page
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon"
+            aria-label="New folder"
+            className="rounded-control"
+            onClick={() => setCreating({ kind: 'folder', parentId: null })}
+          >
+            <FolderPlus strokeWidth={1.75} />
+          </Button>
+        </div>
+      )}
+      <Input
+        aria-label="Filter pages"
+        placeholder="Filter pages"
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        className="rounded-row border-0 bg-muted"
+      />
+      <ul
+        role="tree"
+        aria-label={`Pages in ${spaceName === null ? 'folders shared with you' : plainText(spaceName)}`}
+        onKeyDown={onKeyDown}
+        // Between rows, the place last pointed at holds.
+        onDragEnter={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
+        onDragOver={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
+        onDrop={(event) => dragging?.over && drop(event, dragging.over.parentId)}
+        onDragLeave={(event) => {
+          const to = event.relatedTarget;
+          if (!(to instanceof Node) || !event.currentTarget.contains(to)) pointAt(null);
+        }}
+        onDragEnd={() => setDragging(null)}
+        className={cn(
+          '-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
+          dragging?.over?.parentId === null && 'bg-primary-soft/60 ring-2 ring-primary ring-inset',
+        )}
+      >
+        {rows.map((row) => {
+          const indent = {
+            paddingLeft: `${(row.level - 1) * 20 + (row.kind === 'page' ? 18 : 4)}px`,
+          };
+          const common = {
+            role: 'treeitem',
+            'aria-level': row.level,
+            tabIndex: row.id === focusId ? 0 : -1,
+            ref: (element: HTMLLIElement | null) => {
+              if (element) itemRefs.current.set(row.id, element);
+              else itemRefs.current.delete(row.id);
+            },
+            onFocus: () => setFocused(row.id),
+            onDragEnter: (event: DragEvent) => dragOver(event, dropTarget(row)),
+            onDragOver: (event: DragEvent) => dragOver(event, dropTarget(row)),
+            onDrop: (event: DragEvent) => drop(event, dropTarget(row)),
+          } as const;
+          if (row.kind === 'folder') {
+            return (
+              <li
+                key={row.id}
+                {...common}
+                aria-expanded={row.expanded}
+                onClick={() => toggle(row.id)}
+                draggable={canEditAt(row.id)}
+                onDragStart={(event) =>
+                  startDrag(event, { id: row.id, kind: 'folder', name: row.name })
+                }
+                className={cn(
+                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:bg-accent',
+                  dragging?.over?.parentId === row.id &&
+                    'bg-primary-soft ring-2 ring-primary ring-inset',
+                )}
+                style={indent}
+              >
+                <ChevronRight
+                  aria-hidden
+                  className={cn(
+                    'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                    row.expanded && 'rotate-90',
+                  )}
+                  strokeWidth={1.75}
+                />
+                <span
+                  aria-hidden
+                  className={cn(
+                    'grid size-7 shrink-0 place-items-center rounded-folder text-sm',
+                    TINTS[row.tint] ?? TINTS['blue'],
+                  )}
+                >
+                  {row.emoji}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-extrabold">
+                  <Name>{row.name}</Name>
+                </span>
+                <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
+                  {row.count}
+                </span>
+                <FolderMenu
+                  name={row.name}
+                  editing={
+                    canEditAt(row.id)
+                      ? {
+                          onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
+                          onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
+                          onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
+                          onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
+                          onDelete: sharer ? () => setDeleting(row.id) : undefined,
+                        }
+                      : null
+                  }
+                  onExport={() => setExporting({ folderId: row.id, name: row.name })}
+                />
+              </li>
+            );
+          }
+          const selected = params.pageId === row.id;
+          return (
+            <li
+              key={row.id}
+              {...common}
+              aria-selected={selected}
+              onClick={() => openPage(row.id)}
+              draggable={canEditAt(row.parentId)}
+              onDragStart={(event) =>
+                startDrag(event, { id: row.id, kind: 'page', name: row.title })
+              }
+              className={cn(
+                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:bg-accent',
+                selected && 'bg-primary-soft font-bold text-primary-ink',
+              )}
+              style={indent}
+            >
+              {row.emoji && (
+                // Clipped to its own line, whatever the emoji draws.
+                <span aria-hidden className="max-w-[1.5em] shrink-0 overflow-hidden leading-none">
+                  {row.emoji}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate">
+                <Name>{row.title}</Name>
+              </span>
+              {canEditAt(row.parentId) && row.unpublished && (
+                <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
+                  <span className="sr-only">Unpublished changes</span>
+                </span>
+              )}
+            </li>
+          );
+        })}
+        {rows.length === 0 && (
+          <li className="px-2 py-4 text-sm text-muted-foreground">
+            {filter ? 'No pages match.' : 'No pages yet.'}
+          </li>
+        )}
+        <li
+          aria-hidden
+          className="min-h-10 flex-1"
+          onDragEnter={(event) => dragOver(event, null)}
+          onDragOver={(event) => dragOver(event, null)}
+          onDrop={(event) => drop(event, null)}
+        />
+      </ul>
+      {tree.agentActivity && (
+        <AgentActivityCard
+          ctx={ctx}
+          activity={tree.agentActivity}
+          title={pageTitle(
+            tree.pages.find((p) => p.id === tree.agentActivity?.pageId)?.title ?? null,
+          )}
+          onOpen={() => {
+            const pageId = tree.agentActivity?.pageId;
+            if (!pageId) return;
+            onNavigate?.();
+            void navigate({
+              to: '/s/$spaceId/p/$pageId',
+              params: { spaceId, pageId },
+              search: tree.agentActivity?.draftOnly ? { view: 'draft' } : {},
+            });
+          }}
+        />
+      )}
+      <CreateDialog
+        spaceId={spaceId}
+        creating={creating}
+        onClose={() => setCreating(null)}
+        onCreatedFolder={(folderId, parentId) => {
+          if (parentId) toggle(parentId, true);
+          toggle(folderId, true);
+        }}
+        onCreatedPage={openPage}
+      />
+      <MoveDialog
+        spaceId={spaceId}
+        moving={moving}
+        onOpenChange={(open) => !open && setMoving(null)}
+      />
+      <ExportDialog
+        spaceId={spaceId}
+        exporting={exporting}
+        onOpenChange={(open) => !open && setExporting(null)}
+      />
+      {sharer && (
+        <ShareDialog
+          spaceId={spaceId}
+          rootId={sharing?.rootId ?? null}
+          open={sharing !== null}
+          onOpenChange={(open) => !open && setSharing(null)}
+        />
+      )}
+      <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Delete{' '}
+              {deletingName?.kind === 'folder' ? (
+                <>
+                  “<Name>{deletingName.name}</Name>”
+                </>
+              ) : (
+                'folder'
+              )}
+              ?
+            </DialogTitle>
+            <DialogDescription>
+              This deletes the folder, {deletingContents?.folders ?? 0} folder(s) and{' '}
+              {deletingContents?.pages ?? 0} page(s) inside it, with every version and attachment.
+              It can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DeleteButton
+            spaceId={spaceId}
+            nodeId={deleting}
+            onDone={() => {
+              setDeleting(null);
+              const current = tree.pages.find((p) => p.id === params.pageId);
+              if (current && deleting && isInside(tree, current.parentId, deleting)) {
+                void navigate({ to: '/s/$spaceId', params: { spaceId } });
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </SidebarCard>
+  );
+}
+
+function isInside(tree: Tree, folderId: FolderId | null, ancestor: FolderId): boolean {
+  if (folderId === null) return false;
+  if (folderId === ancestor) return true;
+  return isInside(tree, tree.folders.find((f) => f.id === folderId)?.parentId ?? null, ancestor);
+}
+
+function SidebarCard({ children }: { children: React.ReactNode }) {
+  return (
+    <aside className="flex h-full min-h-0 flex-col gap-3 rounded-card bg-card p-3.5 shadow-card">
+      {children}
+    </aside>
+  );
+}
+
+/** A folder's menu: for editors, what they can do there; for everyone, Export. */
+function FolderMenu({
+  name,
+  editing,
+  onExport,
+}: {
+  name: string;
+  editing: {
+    onNewPage: () => void;
+    onNewFolder: () => void;
+    onMove: () => void;
+    onShare: (() => void) | undefined;
+    onDelete: (() => void) | undefined;
+  } | null;
+  onExport: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Actions for ${plainText(name)}`}
+        onClick={(event) => event.stopPropagation()}
+        className="grid size-6 place-items-center rounded-row text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
+      >
+        <MoreHorizontal className="size-4" strokeWidth={1.75} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+        {editing && (
+          <>
+            <DropdownMenuItem onSelect={editing.onNewPage}>New page here</DropdownMenuItem>
+            <DropdownMenuItem onSelect={editing.onNewFolder}>New folder here</DropdownMenuItem>
+            <DropdownMenuItem onSelect={editing.onMove}>Move…</DropdownMenuItem>
+            {editing.onShare && (
+              <DropdownMenuItem onSelect={editing.onShare}>Share…</DropdownMenuItem>
+            )}
+          </>
+        )}
+        <DropdownMenuItem onSelect={onExport}>Export…</DropdownMenuItem>
+        {editing?.onDelete && (
+          <DropdownMenuItem variant="destructive" onSelect={editing.onDelete}>
+            Delete folder
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function CreateDialog({
+  spaceId,
+  creating,
+  onClose,
+  onCreatedFolder,
+  onCreatedPage,
+}: {
+  spaceId: SpaceId;
+  creating: Creating;
+  onClose: () => void;
+  onCreatedFolder: (folderId: FolderId, parentId: FolderId | null) => void;
+  onCreatedPage: (pageId: PageId) => void;
+}) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const kind = creating?.kind ?? 'page';
+
+  async function submit(form: FormData) {
+    const name = form.get('name');
+    if (!creating || typeof name !== 'string' || !name.trim()) return;
+    setError(null);
+    try {
+      if (creating.kind === 'folder') {
+        const folderId = await spaceOperations.createFolder(ctx, {
+          spaceId,
+          parentId: creating.parentId,
+          name: name.trim(),
+        });
+        onCreatedFolder(folderId, creating.parentId);
+      } else {
+        const pageId = await pageOperations.createPage(ctx, {
+          spaceId,
+          parentId: creating.parentId,
+          title: name.trim(),
+        });
+        onCreatedPage(pageId);
+      }
+      searchIndexChanged(queryClient);
+      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      onClose();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  return (
+    <Dialog open={creating !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <form onSubmit={submitData(submit)} className="grid gap-4">
+          <DialogHeader>
+            <DialogTitle>{kind === 'folder' ? 'New folder' : 'New page'}</DialogTitle>
+            <DialogDescription>
+              {kind === 'folder'
+                ? 'It starts with ⭐ on blue. Its name is encrypted.'
+                : 'It starts as a private draft. Publish it when it’s ready.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="create-name">{kind === 'folder' ? 'Name' : 'Title'}</Label>
+            <Input id="create-name" name="name" required autoFocus maxLength={200} />
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="submit">{kind === 'folder' ? 'Create folder' : 'Create page'}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function DeleteButton({
+  spaceId,
+  nodeId,
+  onDone,
+}: {
+  spaceId: SpaceId;
+  nodeId: FolderId | PageId | null;
+  onDone: () => void;
+}) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function remove() {
+    if (!nodeId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await pageOperations.deleteNode(ctx, { spaceId, nodeId });
+      searchIndexChanged(queryClient);
+      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <DialogFooter>
+        <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
+          Delete for good
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
