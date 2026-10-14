@@ -35,7 +35,10 @@ jobs:
       contents: read
     container: archlinux:base-devel@sha256:061679925e5d5028f2df9395d441ce6c4b9accf0157ff3486c06b6962e014ef1
     steps:
-      - run: pacman -Syu --noconfirm --needed git openssh
+      # The keyring first, so packages signed by newer keys than the image's install.
+      - run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Su --noconfirm --needed git openssh
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -71,6 +74,10 @@ jobs:
           AUR_USERNAME: ${{ vars.AUR_USERNAME }}
           AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "::error::AUR_SSH_PRIVATE_KEY is empty: the aur environment holds it (docs/releasing.md)."
+            exit 1
+          fi
           # ssh reads ~/.ssh from root's home, not $HOME, so name the files.
           ssh_dir="$RUNNER_TEMP/ssh"
           install -d -m 700 "$ssh_dir"

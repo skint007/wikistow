@@ -111,5 +111,8 @@ jobs:
     uses: ./.github/workflows/aur.yml
     with:
       version: ${{ needs.verify.outputs.version }}
+    # The called job's environment alone leaves its secrets empty
+    # (actions/runner#4453). The repository has no other secrets.
+    secrets: inherit
     permissions:
       contents: read
