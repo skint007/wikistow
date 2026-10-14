@@ -60,7 +60,7 @@ jobs:
   # The desktop app as CI built and tested it, as an archive of what a
   # package installs, with checksums.
   desktop:
-    needs: ci
+    needs: [verify, ci]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -90,9 +90,12 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # GitHub would otherwise make any stable release its latest, even
+          # a fix to an older one.
+          LATEST: ${{ needs.verify.outputs.latest }}
         run: |
           prerelease=()
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" \
+            --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
             release/*.tar.gz release/SHA256SUMS

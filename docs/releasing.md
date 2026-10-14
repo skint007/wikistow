@@ -54,7 +54,7 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 
 If `verify` fails, nothing was published. Delete the tag, fix the cause, and tag again. If a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
-To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Only `main` builds get `sha-` images.
+To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`, and its GitHub Release isn't marked as the latest. Only `main` builds get `sha-` images.
 
 ## The desktop download
 
