@@ -79,7 +79,9 @@ export function AvatarSettings() {
   const [preview, setPreview] = useState<string | undefined>(undefined);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
-  // The chosen file as a local address for its preview, released when it goes.
+  // The chosen file as a local address for its preview, released when it
+  // goes. A file this browser can't draw is dropped: saved, it would only
+  // ever show as initials.
   useEffect(() => {
     if (!chosen) {
       setPreview(undefined);
@@ -87,7 +89,21 @@ export function AvatarSettings() {
     }
     const url = URL.createObjectURL(chosen);
     setPreview(url);
-    return () => URL.revokeObjectURL(url);
+    let current = true;
+    const probe = new Image();
+    probe.src = url;
+    probe.decode().catch(() => {
+      if (!current) return;
+      setChosen(null);
+      setStatus({
+        kind: 'failed',
+        text: 'This image is damaged or can’t be shown. Choose another.',
+      });
+    });
+    return () => {
+      current = false;
+      URL.revokeObjectURL(url);
+    };
   }, [chosen]);
 
   if (!me) return null;
