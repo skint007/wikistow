@@ -38,6 +38,7 @@ import {
   checkSpaceOwner,
   addStatement,
   directory,
+  directoryAvatars,
   listOwners,
   listShares,
   lookupPerson,
@@ -399,6 +400,14 @@ export function mountContentRoutes(
   routes.content(
     peopleRoutes.directory,
     async ({ query }, { actor }) => directory(db, actor, query.ids).catch(toApiError),
+    { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.content(
+    peopleRoutes.avatars,
+    async ({ query }, { actor }) => ({
+      avatars: await directoryAvatars(db, actor, query.ids).catch(toApiError),
+    }),
     { rateLimit: FETCH_LIMIT },
   );
 

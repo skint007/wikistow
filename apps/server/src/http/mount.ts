@@ -342,6 +342,36 @@ export function createRoutes({
       });
     },
     /**
+     * A signed-in person's raw upload (their avatar), never an agent's: the
+     * same origin, session and rate limit checks as `account`. The body is
+     * read whole and refused past `maxBytes`, stated or streamed, or once
+     * it has taken the large-body deadline to arrive.
+     */
+    upload(
+      path: string,
+      maxBytes: number,
+      handler: (bytes: Uint8Array, ctx: AccountCtx) => Promise<Response>,
+      options: Pick<Options, 'rateLimit'> = {},
+    ) {
+      const route = { method: 'PUT', path } as const;
+      ownLimits.push({ method: route.method, path: pathPattern(path) });
+      app.on(route.method, path, async (c) => {
+        checkOrigin(c, route, config.publicOrigin);
+        const principal = await requirePrincipal(auth, c);
+        if (c.req.header('idempotency-key') !== undefined) refuseKey();
+        await limitAccount(c, route, principal, options);
+        const bytes = await readLimited(c.req.raw, {
+          bytes: maxBytes,
+          deadlineMs: config.bodyDeadlineMs,
+        });
+        return handler(bytes, { c, principal });
+      });
+    },
+    /** Raw bytes anyone may fetch, with no session (avatars). */
+    publicFile(path: string, handler: (c: Context<AppEnv>) => Promise<Response>) {
+      app.get(path, handler);
+    },
+    /**
      * A signed-in route that answers with a stream of JSON lines, one
      * `route.event` each (the AI proxy). The same origin, session, rate
      * limit and body checks as `account`; the handler writes the stream.
@@ -458,7 +488,10 @@ async function readJson(
   if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json')) {
     throw new ApiError('invalid-request', 'Expected a JSON body');
   }
-  const text = limit === undefined ? await c.req.text() : await readLimited(c.req.raw, limit);
+  const text =
+    limit === undefined
+      ? await c.req.text()
+      : new TextDecoder().decode(await readLimited(c.req.raw, limit));
   try {
     return JSON.parse(text);
   } catch {
@@ -466,17 +499,17 @@ async function readJson(
   }
 }
 
-// The body as text, refused once it passes `bytes`, stated or streamed, or
-// once it has taken `deadlineMs` to arrive, so a slow sender can't hold a
-// large-body slot for long.
+// The body, refused once it passes `bytes`, stated or streamed, or once it
+// has taken `deadlineMs` to arrive, so a slow sender can't hold a large-body
+// slot for long.
 async function readLimited(
   request: Request,
   { bytes, deadlineMs }: { bytes: number; deadlineMs: number },
-): Promise<string> {
+): Promise<Uint8Array> {
   const tooLarge = () => new ApiError('payload-too-large', 'Request body is too large');
   if (Number(request.headers.get('content-length')) > bytes) throw tooLarge();
   const reader = request.body?.getReader();
-  if (!reader) return '';
+  if (!reader) return new Uint8Array();
   let late = false;
   const deadline = setTimeout(() => {
     late = true;
@@ -499,7 +532,7 @@ async function readLimited(
       }
       chunks.push(value);
     }
-    return new TextDecoder().decode(Buffer.concat(chunks));
+    return Buffer.concat(chunks);
   } finally {
     clearTimeout(deadline);
   }

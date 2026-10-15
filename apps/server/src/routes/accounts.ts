@@ -1,12 +1,17 @@
 import { accountRoutes, type ErrorCode } from '@wikistow/contracts';
 import {
   AccountError,
+  AvatarRefused,
+  avatarOf,
   consumeRateLimit,
   currentIdentity,
   createAccount,
+  findAvatar,
   finishAccountSetup,
   inspectInvitation,
+  removeAvatar,
   schema,
+  setAvatar,
   setTheme,
   type AccountFailure,
   type Database,
@@ -69,6 +74,21 @@ const FORM_LIMIT = { windowSeconds: 60, max: 10 };
 // Every confirmation is a password guess. With two-factor on it takes two
 // requests, so twice sign-in's five a minute, counted per account.
 const REAUTH_LIMIT = { windowSeconds: 60, max: 10 };
+
+// Changing an avatar a few times while picking one, not filling the database.
+const AVATAR_LIMIT = { windowSeconds: 60, max: 10 };
+
+// How an avatar is sent: never sniffed as another type, never framed or
+// cached under another name, and opened on its own, a sandboxed image that
+// can't run scripts or load anything. A new upload gets a new address, so
+// browsers may keep each one for good.
+const AVATAR_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const AVATAR_FILE_NAMES = {
+  'image/jpeg': 'avatar.jpg',
+  'image/png': 'avatar.png',
+  'image/gif': 'avatar.gif',
+  'image/svg+xml': 'avatar.svg',
+} as const;
 
 /** Checked as Better Auth's routes check passwords, against the account's allowance. */
 async function passwordMatches(
@@ -246,6 +266,7 @@ export function mountAccountRoutes(
       name: principal.name,
       role: principal.role,
       theme: principal.theme,
+      avatar: await avatarOf(db, principal.accountId),
     },
     session: { createdAt: principal.sessionCreatedAt.toISOString() },
     identity: await currentIdentity(db, principal.accountId),
@@ -289,5 +310,45 @@ export function mountAccountRoutes(
   routes.account(accountRoutes.setTheme, async ({ body }, { principal }) => {
     await setTheme(db, principal.accountId, body.theme);
     return { theme: body.theme };
+  });
+
+  // Only the signed-in person changes their own avatar: the account comes
+  // from the session, never from the request.
+  routes.upload(
+    accountRoutes.AVATAR_UPLOAD_PATH,
+    accountRoutes.MAX_AVATAR_BYTES,
+    async (bytes, { c, principal }) => {
+      try {
+        const avatar = await setAvatar(db, principal.accountId, bytes);
+        return c.json(accountRoutes.AvatarUpload.parse({ avatar }));
+      } catch (error) {
+        if (error instanceof AvatarRefused) throw new ApiError('unsupported-image', error.message);
+        throw error;
+      }
+    },
+    { rateLimit: AVATAR_LIMIT },
+  );
+
+  routes.account(
+    accountRoutes.removeAvatar,
+    async (_input, { principal }) => {
+      await removeAvatar(db, principal.accountId);
+      return {};
+    },
+    { rateLimit: AVATAR_LIMIT },
+  );
+
+  routes.publicFile(accountRoutes.AVATAR_PATH, async (c) => {
+    const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
+    const found = id.success ? await findAvatar(db, id.data) : null;
+    if (!found) throw new ApiError('not-found', 'No such avatar');
+    // Copied into a buffer of its own, which a response body takes.
+    return c.body(new Uint8Array(found.bytes), 200, {
+      'content-type': found.contentType,
+      'content-length': String(found.bytes.byteLength),
+      'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
+      'content-security-policy': AVATAR_CSP,
+      'cache-control': 'public, max-age=31536000, immutable',
+    });
   });
 }
