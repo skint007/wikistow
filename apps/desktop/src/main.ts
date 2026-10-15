@@ -31,6 +31,7 @@ import { APP_ORIGIN, appFile } from './app-files.ts';
 import { cookieChange, forward } from './forward.ts';
 import { PluginFolderError } from './plugins/folder.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
+import { searchIndexFile } from './search-index.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
 import {
   checkServer,
@@ -129,6 +130,7 @@ const bundler = workshopBuilder(
 );
 const workshop = desktopWorkshop(app.getPath('userData'), bundler);
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
+const searchIndex = searchIndexFile(join(app.getPath('userData'), 'search-index'));
 
 /** End every workshop, as the page that held them goes, and the bundler with them. */
 async function endWorkshops() {
@@ -302,13 +304,14 @@ async function linkArrived(link: string) {
   // The server's other cookies stay, if it is the same server.
   const kept = server === waiting.origin ? cookie : null;
   cookie = cookieChange(kept, [redeemed]) ?? kept;
-  // A new sign-in starts with no unlock remembered, whoever it is for.
+  // A new sign-in starts with no unlock or search index kept, whoever it is for.
   forget();
   server = waiting.origin;
   waiting.done({ ok: true, value: undefined });
   // Signed in either way; a failed write only means signing in again next time.
   await saveConfig().catch(() => {});
   await persist();
+  await searchIndex.remove().catch(() => {});
 }
 
 function openWindow() {
@@ -559,7 +562,11 @@ void app.whenReady().then(async () => {
   // Kept for another server than the one chosen (a write cut short between
   // the two files): those cookies must not go to this one.
   if (kept.origin === server) ({ cookie, vault } = kept);
-  if (!store.secure) await store.clear();
+  if (!store.secure) {
+    await store.clear();
+    // Sealed by the vault, but kept no more than the sign-in is.
+    await searchIndex.remove().catch(() => {});
+  }
   // Copying a command or a recovery key is the one thing pages may ask for.
   session.defaultSession.setPermissionRequestHandler((_contents, permission, allow) =>
     allow(permission === 'clipboard-sanitized-write'),
@@ -581,6 +588,7 @@ void app.whenReady().then(async () => {
   handle('signedOut', async () => {
     forget();
     await persist();
+    await searchIndex.remove().catch(() => {});
   });
   handle('secureStorage', async () => store?.secure === true);
   handle('rememberVault', async (accountId, key) => {
@@ -597,6 +605,10 @@ void app.whenReady().then(async () => {
   handle('forgetVault', async () => {
     forget();
     await persist();
+  });
+  handle('searchIndex', async () => (store?.secure ? searchIndex.read() : null));
+  handle('keepSearchIndex', async (sealed) => {
+    if (store?.secure) await searchIndex.write(z.instanceof(Uint8Array).parse(sealed));
   });
   handle('plugins', async () => plugins.list(safeMode));
   handle('pickPlugin', async (kind) => {
