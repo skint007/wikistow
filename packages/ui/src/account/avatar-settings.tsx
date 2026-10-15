@@ -152,7 +152,12 @@ export function AvatarSettings() {
         caught instanceof ApiError &&
         (caught.code === 'unsupported-image' || caught.code === 'payload-too-large');
       if (refused) setChosen(null);
-      setStatus({ kind: 'failed', text: errorMessage(caught) });
+      // Only a server from before avatars has no upload route.
+      const unsupported = caught instanceof ApiError && caught.status === 404;
+      setStatus({
+        kind: 'failed',
+        text: unsupported ? 'This server doesn’t support avatars yet.' : errorMessage(caught),
+      });
     }
   };
 

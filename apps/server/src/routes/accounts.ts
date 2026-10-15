@@ -93,6 +93,12 @@ const AVATAR_FILE_NAMES = {
   'image/svg+xml': 'avatar.svg',
 } as const;
 
+// Each avatar being sent holds its image in memory until the client has
+// read it, so only so many go at once, whoever asks. Past that, browsers
+// show initials until a later try.
+const AVATARS_AT_ONCE = 32;
+const AVATAR_CHUNK = 64 * 1024;
+
 /** Checked as Better Auth's routes check passwords, against the account's allowance. */
 async function passwordMatches(
   auth: Auth,
@@ -341,14 +347,40 @@ export function mountAccountRoutes(
     { rateLimit: AVATAR_LIMIT },
   );
 
+  let sending = 0;
+  // The bytes as a stream sent only as fast as the client reads them,
+  // counted in `sending` until it ends or the client leaves.
+  const sendCounted = (bytes: Uint8Array) => {
+    sending++;
+    let offset = 0;
+    let counted = true;
+    const finish = () => {
+      if (counted) sending--;
+      counted = false;
+    };
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(bytes.subarray(offset, offset + AVATAR_CHUNK));
+        offset += AVATAR_CHUNK;
+        if (offset >= bytes.byteLength) {
+          controller.close();
+          finish();
+        }
+      },
+      cancel: finish,
+    });
+  };
+
   routes.publicFile(
     accountRoutes.AVATAR_PATH,
     async (c) => {
+      if (sending >= AVATARS_AT_ONCE) {
+        throw new ApiError('rate-limited', 'Too many avatars being sent; try again shortly');
+      }
       const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
       const found = id.success ? await findAvatar(db, id.data) : null;
       if (!found) throw new ApiError('not-found', 'No such avatar');
-      // Copied into a buffer of its own, which a response body takes.
-      return c.body(new Uint8Array(found.bytes), 200, {
+      return c.body(sendCounted(found.bytes), 200, {
         'content-type': found.contentType,
         'content-length': String(found.bytes.byteLength),
         'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
