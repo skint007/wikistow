@@ -213,3 +213,88 @@ describe('sign-in rate limiting', () => {
     expect((await attempt('203.0.113.8')).status).toBe(401);
   });
 });
+
+describe('avatars', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const svg = (body: string) =>
+    new TextEncoder().encode(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">${body}</svg>`,
+    );
+  // Node needs `duplex` to send a streamed body; the DOM's types don't list it.
+  const streams = { duplex: 'half' };
+  const upload = (browser: Browser, body: BodyInit, headers: Record<string, string> = {}) =>
+    browser.fetch('/api/me/avatar', { method: 'PUT', body, headers, ...streams });
+  const avatarOf = async (browser: Browser) =>
+    ((await (await browser.request('/api/me')).json()) as { account: { avatar: string | null } })
+      .account.avatar;
+  const fetchAvatar = (id: string | null) => new Browser(t.app).request(`/api/avatars/${id}`);
+
+  it('changes only the signed-in account’s own avatar, and drops the old image', async () => {
+    const alice = (await signedInAccount()).browser;
+    const bob = (await signedInAccount()).browser;
+    expect((await upload(alice, PNG)).status).toBe(200);
+    const before = await avatarOf(alice);
+    // Nobody signed out, and no other site, can set or remove one.
+    expect((await upload(new Browser(t.app), PNG)).status).toBe(401);
+    for (const method of ['PUT', 'DELETE'] as const) {
+      const crossSite = await alice.request('/api/me/avatar', {
+        method,
+        headers: { origin: 'https://evil.example' },
+      });
+      expect(crossSite.status).toBe(403);
+    }
+
+    // Bob's changes reach only Bob's avatar, which anyone may fetch.
+    expect((await upload(bob, svg(''))).status).toBe(200);
+    expect((await bob.request('/api/me/avatar', { method: 'DELETE' })).status).toBe(200);
+    expect(await avatarOf(alice)).toBe(before);
+    const served = await fetchAvatar(before);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
+
+    // Replacing gives a new address, and the old one stops working.
+    expect((await upload(alice, svg(''))).status).toBe(200);
+    const after = await avatarOf(alice);
+    expect(after).not.toBe(before);
+    expect((await fetchAvatar(before)).status).toBe(404);
+    expect((await alice.request('/api/me/avatar', { method: 'DELETE' })).status).toBe(200);
+    expect(await avatarOf(alice)).toBeNull();
+    expect((await fetchAvatar(after)).status).toBe(404);
+  });
+
+  it('takes images by their bytes, serves SVG sandboxed, and refuses big ones', async () => {
+    const { browser } = await signedInAccount();
+    // A page claiming to be an image, and SVGs that would run or fetch something.
+    for (const body of [
+      new TextEncoder().encode('<html><script>alert(1)</script></html>'),
+      svg('<script>alert(1)</script>'),
+      svg('<rect onload="alert(1)"/>'),
+      svg('<image href="https://evil.example/x.png"/>'),
+      svg('<style>rect { fill: url(https://evil.example/f) }</style>'),
+    ]) {
+      expect((await upload(browser, body, { 'content-type': 'image/png' })).status).toBe(415);
+    }
+
+    expect((await upload(browser, svg('<rect width="1" height="1"/>'))).status).toBe(200);
+    const res = await fetchAvatar(await avatarOf(browser));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/svg+xml');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+    expect(res.headers.get('content-disposition')).toBe('inline; filename="avatar.svg"');
+
+    // Too big whether the length is stated or only found while streaming.
+    const big = new Uint8Array(2 * 1024 * 1024 + 1);
+    big.set(PNG);
+    expect((await upload(browser, big)).status).toBe(413);
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(big);
+        controller.close();
+      },
+    });
+    expect((await upload(browser, streamed)).status).toBe(413);
+  });
+});

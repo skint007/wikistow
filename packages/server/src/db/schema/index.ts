@@ -7,6 +7,7 @@ export * from './desktop-handoffs.ts';
 export * from './settings.ts';
 export * from './two-factors.ts';
 export * from './users.ts';
+export * from './avatars.ts';
 export * from './verifications.ts';
 export * from './identities.ts';
 export * from './key-envelopes.ts';

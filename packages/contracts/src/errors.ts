@@ -42,6 +42,7 @@ export const ERROR_STATUS = {
   'setup-link-invalid': 410,
   'handoff-invalid': 410,
   'payload-too-large': 413,
+  'unsupported-image': 415,
   'invitation-email-mismatch': 422,
   'vault-immutable-field': 422,
   'bad-signature': 422,

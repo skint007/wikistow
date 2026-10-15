@@ -3,6 +3,7 @@ import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, MoreHorizontal, ShieldAlert } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { Avatar } from '@/components/avatar';
 import { Name, plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
@@ -470,12 +471,7 @@ export function AgentRow({
 export function PersonRow({ person, children }: { person: Person; children: ReactNode }) {
   return (
     <li className="flex flex-wrap items-center gap-2 rounded-row py-1">
-      <span
-        aria-hidden
-        className="grid size-8 shrink-0 place-items-center rounded-full bg-strong text-xs font-extrabold text-strong-foreground"
-      >
-        {plainText(person.name).slice(0, 1).toUpperCase()}
-      </span>
+      <Avatar name={person.name} avatar={person.avatar} letters={1} className="size-8 text-xs" />
       <span className="grid min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-bold">

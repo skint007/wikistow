@@ -3,6 +3,7 @@ import { AgentEnrollment } from '../records/agent.ts';
 import { PublicIdentity } from '../records/identity.ts';
 import { IdentityId } from '../records/ids.ts';
 import type { RouteDef } from '../route.ts';
+import { AvatarId } from './accounts.ts';
 
 /**
  * A person as the directory lists them: their current key, and the display
@@ -48,6 +49,20 @@ export const directory = {
   response: z.strictObject({
     people: z.array(DirectoryPerson),
     agents: z.array(DirectoryAgent),
+  }),
+} as const satisfies RouteDef;
+
+/**
+ * The avatars of the people `directory` would list for these identity IDs.
+ * People without one are left out. Separate from the directory, whose
+ * answer older apps read strictly.
+ */
+export const avatars = {
+  method: 'GET',
+  path: '/api/directory/avatars',
+  query: directory.query,
+  response: z.object({
+    avatars: z.array(z.object({ identityId: IdentityId, avatar: AvatarId })),
   }),
 } as const satisfies RouteDef;
 
