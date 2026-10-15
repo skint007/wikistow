@@ -178,13 +178,16 @@ const KeptJson = z.array(z.tuple([RevisionId, SpaceId, PageId, z.string(), z.str
 // The desktop app keeps the index between launches as these bytes (#3).
 // Their key comes from this person's identity, so only their unlocked vault
 // opens them, and the file can't be taken for another account or server's.
+// They are bound to the app's `build` too: another build may reduce pages
+// differently (`searchText`), so its file opens as nothing and every page
+// is read again.
 const keptKey = (ctx: ClientContext) =>
   sodium.crypto_generichash(32, canonical('search-index-key/v1', []), ctx.identity.boxSecretKey);
-const keptAd = (ctx: ClientContext) =>
-  canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id]);
+const keptAd = (ctx: ClientContext, build: string) =>
+  canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
 
-/** `kept`, sealed for this person on this server: a nonce, then the ciphertext. */
-export function sealKept(ctx: ClientContext, kept: KeptPages): Uint8Array {
+/** `kept`, sealed for this person on this server and build: a nonce, then the ciphertext. */
+export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Uint8Array {
   const json = [...kept].map(([id, page]) => [
     id,
     page.spaceId,
@@ -195,7 +198,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages): Uint8Array {
   const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
     utf8(JSON.stringify(json)),
-    keptAd(ctx),
+    keptAd(ctx, build),
     null,
     nonce,
     keptKey(ctx),
@@ -206,14 +209,14 @@ export function sealKept(ctx: ClientContext, kept: KeptPages): Uint8Array {
   return sealed;
 }
 
-/** What `sealKept` sealed, or null if it isn't this person's on this server, or is damaged. */
-export function openKept(ctx: ClientContext, sealed: Uint8Array): KeptPages | null {
+/** What `sealKept` sealed, or null if it isn't this person's on this server and build, or is damaged. */
+export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string): KeptPages | null {
   const split = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
   try {
     const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
       null,
       sealed.subarray(split),
-      keptAd(ctx),
+      keptAd(ctx, build),
       sealed.subarray(0, split),
       keptKey(ctx),
     );

@@ -125,12 +125,16 @@ export const searchProgressKey = [PLAIN, 'search-progress'] as const;
 
 const searchIndexKey = [PLAIN, 'search-index'] as const;
 
+// The running build's version, set by the web app's Vite config. Only the
+// desktop app's path reads it, so tests without the define never do.
+declare const __APP_VERSION__: string;
+
 /**
  * Every page this person can read, indexed for search on this device. Built
  * afresh from the trees when it is stale, opening only the pages whose
  * version changed since the index before it: the one in memory, or at the
  * first search after an unlock the one the desktop app kept, sealed for this
- * person (`sealKept`). Locking drops it with everything else, and
+ * person and build (`sealKept`). Locking drops it with everything else, and
  * `refreshAccess` rebuilds it, so nothing outlives a lost grant. This
  * person's own changes mark it stale (`searchIndexChanged`).
  */
@@ -139,28 +143,32 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     queryKey: searchIndexKey,
     queryFn: async ({ signal }) => {
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
+      // The desktop app keeps one between launches only with a trusted keyring.
+      const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
+      const shown =
+        queryClient.getQueryData<SearchIndex<searchOperations.SearchPage>>(searchIndexKey);
+      const sealed = shown ? null : await device?.searchIndex().catch(() => null);
       const index = await searchOperations.indexSpaces(ctx, {
-        kept: await keptIndex(ctx, queryClient),
+        kept: shown
+          ? searchOperations.keptPages(shown)
+          : sealed
+            ? searchOperations.openKept(ctx, sealed, __APP_VERSION__)
+            : null,
         signal,
         onProgress: (progress) => queryClient.setQueryData(searchProgressKey, progress),
       });
-      // Kept for the next launch; failing to only means a full build then.
-      void desktop
-        ?.keepSearchIndex(searchOperations.sealKept(ctx, searchOperations.keptPages(index)))
-        .catch(() => {});
+      // Failing to keep it only means reading every page at the next launch.
+      if (device) {
+        const pages = searchOperations.keptPages(index);
+        void device
+          .keepSearchIndex(searchOperations.sealKept(ctx, pages, __APP_VERSION__))
+          .catch(() => {});
+      }
       return index;
     },
     // Reopening search within a minute keeps the index; after that it rebuilds behind it.
     staleTime: 60_000,
   });
-
-/** The index before this one: the one in memory, or else the one the desktop app kept. */
-async function keptIndex(ctx: ClientContext, queryClient: QueryClient) {
-  const shown = queryClient.getQueryData<SearchIndex<searchOperations.SearchPage>>(searchIndexKey);
-  if (shown) return searchOperations.keptPages(shown);
-  const sealed = await desktop?.searchIndex().catch(() => null);
-  return sealed ? searchOperations.openKept(ctx, sealed) : null;
-}
 
 /**
  * After this person's own change to a page or folder (a save, publish,

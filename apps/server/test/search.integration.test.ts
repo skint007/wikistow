@@ -73,7 +73,7 @@ describe('a search index', () => {
     ]);
   });
 
-  it('takes unchanged pages from a kept index, sealed for its person, and opens changed ones', async () => {
+  it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {
     const { bob, ed, lib } = await shared();
     // Kept text stands in for the version's, so what was opened again shows.
     const kept = new Map(
@@ -82,9 +82,10 @@ describe('a search index', () => {
         { ...page, text: 'kept words' },
       ]),
     );
-    const sealed = search.sealKept(ed.ctx, kept);
-    expect(search.openKept(bob.ctx, sealed)).toBeNull();
-    const opened = search.openKept(ed.ctx, sealed);
+    const sealed = search.sealKept(ed.ctx, kept, '1.0.0');
+    expect(search.openKept(bob.ctx, sealed, '1.0.0')).toBeNull();
+    expect(search.openKept(ed.ctx, sealed, '1.0.1')).toBeNull();
+    const opened = search.openKept(ed.ctx, sealed, '1.0.0');
     expect(opened).toEqual(kept);
     expect(found(await search.indexSpaces(ed.ctx, { kept: opened }), 'kept')).toEqual([
       lib.page.pageId,
