@@ -4,12 +4,27 @@ import {
   inlineVaultCrypto,
   openSession,
   openVault,
+  type UnlockedVault,
   type VaultSecret,
 } from '@wikistow/client';
 import { api } from '../api';
+import { desktop } from '../desktop';
 import { forgetKeptUnlock, vaultStore } from './store';
 import { rememberedInTab } from './tab-unlock';
 import { workerVaultCrypto } from './worker-crypto';
+
+/**
+ * Start the session for an unlocked vault. The desktop app, with a trusted
+ * keyring, keeps its contacts and No going back marks between launches
+ * (`KeptMarks`); the browser keeps them for one session.
+ */
+export async function startSession(vault: UnlockedVault) {
+  const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
+  if (!device) return openSession(api, vault);
+  return openSession(api, vault, {
+    kept: { read: () => device.trustMarks(), write: (sealed) => device.keepTrustMarks(sealed) },
+  });
+}
 
 /**
  * Open the vault with `secret` and start the session. Staged until the
@@ -27,7 +42,7 @@ export async function unlockWith(secret: VaultSecret, started: number) {
   };
   const vault = vaultStore.stage(await openVault({ api, crypto, secret }));
   if (lockedSince()) throw refused();
-  const ctx = await openSession(api, vault);
+  const ctx = await startSession(vault);
   if (lockedSince()) {
     closeSession(ctx);
     throw refused();

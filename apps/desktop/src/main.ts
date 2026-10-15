@@ -131,6 +131,12 @@ const bundler = workshopBuilder(
 const workshop = desktopWorkshop(app.getPath('userData'), bundler);
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
+const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
+
+/** Delete what the pages kept sealed: the search index and the trust marks. */
+async function removeKept() {
+  await Promise.all([searchIndex.remove(), trustMarks.remove()]).catch(() => {});
+}
 
 /** End every workshop, as the page that held them goes, and the bundler with them. */
 async function endWorkshops() {
@@ -304,14 +310,14 @@ async function linkArrived(link: string) {
   // The server's other cookies stay, if it is the same server.
   const kept = server === waiting.origin ? cookie : null;
   cookie = cookieChange(kept, [redeemed]) ?? kept;
-  // A new sign-in starts with no unlock or search index kept, whoever it is for.
+  // A new sign-in starts with no unlock, search index or marks kept, whoever it is for.
   forget();
   server = waiting.origin;
   waiting.done({ ok: true, value: undefined });
   // Signed in either way; a failed write only means signing in again next time.
   await saveConfig().catch(() => {});
   await persist();
-  await searchIndex.remove().catch(() => {});
+  await removeKept();
 }
 
 function openWindow() {
@@ -565,7 +571,7 @@ void app.whenReady().then(async () => {
   if (!store.secure) {
     await store.clear();
     // Sealed by the vault, but kept no more than the sign-in is.
-    await searchIndex.remove().catch(() => {});
+    await removeKept();
   }
   // Copying a command or a recovery key is the one thing pages may ask for.
   session.defaultSession.setPermissionRequestHandler((_contents, permission, allow) =>
@@ -588,7 +594,7 @@ void app.whenReady().then(async () => {
   handle('signedOut', async () => {
     forget();
     await persist();
-    await searchIndex.remove().catch(() => {});
+    await removeKept();
   });
   handle('secureStorage', async () => store?.secure === true);
   handle('rememberVault', async (accountId, key) => {
@@ -609,6 +615,10 @@ void app.whenReady().then(async () => {
   handle('searchIndex', async () => (store?.secure ? searchIndex.read() : null));
   handle('keepSearchIndex', async (sealed) => {
     if (store?.secure) await searchIndex.write(z.instanceof(Uint8Array).parse(sealed));
+  });
+  handle('trustMarks', async () => (store?.secure ? trustMarks.read() : null));
+  handle('keepTrustMarks', async (sealed) => {
+    if (store?.secure) await trustMarks.write(z.instanceof(Uint8Array).parse(sealed));
   });
   handle('plugins', async () => plugins.list(safeMode));
   handle('pickPlugin', async (kind) => {

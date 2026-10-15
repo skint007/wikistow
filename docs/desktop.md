@@ -64,9 +64,9 @@ Each computer gets its own desktop session. You can see them, and sign any of th
 
 With GNOME Keyring or KWallet running, the app keeps its sign-in between launches, sealed by the keyring. The unlock page also offers **Remember on this computer**, which opens your vault when the app starts. Locking the vault or signing out forgets the unlock.
 
-The app also keeps your search index in `~/.config/WikiStow/search-index`, encrypted with a key only your unlocked vault has, so the first search after a launch only reads the pages that changed since. Signing out, or signing in again, deletes it.
+The app also keeps your search index in `~/.config/WikiStow/search-index`, encrypted with a key only your unlocked vault has, so the first search after a launch only reads the pages that changed since. Beside it, `trust-marks` keeps, encrypted the same way, the newest contacts record and key versions the app has seen, so it still warns after a relaunch if the server serves older ones. Signing out, or signing in again, deletes both.
 
-Without a keyring the app keeps nothing secret, nor the search index. Each launch signs in through the browser again and asks for your vault passphrase. That is on purpose: Electron's fallback store seals data with a key every program on the computer knows, so the app never uses it. Quitting signs that launch's session out, so they don't pile up on the server. If the app crashes, or the server doesn't answer within 3 seconds, the session stays; sign it out under **Settings → Desktop apps**.
+Without a keyring the app keeps nothing secret, nor these files. Each launch signs in through the browser again and asks for your vault passphrase. That is on purpose: Electron's fallback store seals data with a key every program on the computer knows, so the app never uses it. Quitting signs that launch's session out, so they don't pile up on the server. If the app crashes, or the server doesn't answer within 3 seconds, the session stays; sign it out under **Settings → Desktop apps**.
 
 On KDE the app uses KWallet. Anywhere else it looks for a Secret Service, such as GNOME Keyring, so Hyprland, Sway or i3 work too once GNOME Keyring runs. To pick one yourself, add a switch such as `--password-store=gnome-libsecret` to `~/.config/wikistow-desktop-flags.conf`. `--password-store=basic` means no keyring.
 

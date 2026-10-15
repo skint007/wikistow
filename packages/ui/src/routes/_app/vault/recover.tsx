@@ -1,9 +1,4 @@
-import {
-  changeVaultPassphrase,
-  openSession,
-  openVault,
-  type UnlockedVault,
-} from '@wikistow/client';
+import { changeVaultPassphrase, openVault, type UnlockedVault } from '@wikistow/client';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Field } from '@/components/form/field';
@@ -13,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { api } from '../../../api';
 import { useReauth } from '../../../auth/reauth';
 import { vaultMessage } from '../../../vault/messages';
+import { startSession } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
 import { PassphraseFields, readPassphrase } from './setup';
@@ -96,7 +92,7 @@ function NewPassphrase({ vault }: { vault: UnlockedVault }) {
           passphrase: passphrase.value,
         }),
       );
-      vaultStore.unlock(await openSession(api, vault), vault);
+      vaultStore.unlock(await startSession(vault), vault);
       await navigate({ to: '/' });
     } catch (caught) {
       setError(vaultMessage(caught));

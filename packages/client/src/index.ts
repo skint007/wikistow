@@ -21,6 +21,7 @@ export * from './link-table.ts';
 export * from './links.ts';
 export * from './markdown/index.ts';
 export * from './key-versions.ts';
+export { KeptMarks, type KeptFile } from './kept-marks.ts';
 export * from './payload.ts';
 export * from './regions.ts';
 export * from './restore.ts';

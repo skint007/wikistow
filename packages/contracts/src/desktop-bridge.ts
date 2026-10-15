@@ -109,6 +109,14 @@ export type DesktopBridge = {
   searchIndex(): Promise<Uint8Array | null>;
   /** Keep this sealed search index, in place of the one kept. */
   keepSearchIndex(sealed: Uint8Array): Promise<void>;
+  /**
+   * The contacts and No going back marks kept from an earlier launch, as the
+   * pages sealed them (`KeptMarks`), or null. Kept and deleted as the search
+   * index is.
+   */
+  trustMarks(): Promise<Uint8Array | null>;
+  /** Keep these sealed marks, in place of the ones kept. */
+  keepTrustMarks(sealed: Uint8Array): Promise<void>;
   /** The plugins on this computer, and whether safe mode is on. */
   plugins(): Promise<PluginsState>;
   /**
@@ -174,6 +182,8 @@ export const DESKTOP_CHANNELS = {
   forgetVault: 'wikistow:forget-vault',
   searchIndex: 'wikistow:search-index',
   keepSearchIndex: 'wikistow:keep-search-index',
+  trustMarks: 'wikistow:trust-marks',
+  keepTrustMarks: 'wikistow:keep-trust-marks',
   plugins: 'wikistow:plugins',
   pickPlugin: 'wikistow:pick-plugin',
   approvePlugin: 'wikistow:approve-plugin',
