@@ -59,13 +59,13 @@ function Picker<T extends string>({
         data-slot="picker"
         aria-label={`${label}: ${shown ?? placeholder}`}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-control border border-input bg-background px-2 text-left text-sm outline-ring hover:bg-accent focus:outline-2 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-accent',
+          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-control border border-input bg-background px-2 text-left text-sm outline-ring hover:tint active:tint-strong focus:outline-2 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:tint',
           className,
         )}
         {...props}
       >
         {Icon && <Icon className="size-4 shrink-0" strokeWidth={1.75} />}
-        <span className={cn('flex-1 truncate', shown === undefined && 'text-muted-foreground')}>
+        <span className={cn('flex-1 truncate', shown === undefined && 'text-subtle-foreground')}>
           {shown ?? placeholder}
         </span>
         <ChevronDown className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />

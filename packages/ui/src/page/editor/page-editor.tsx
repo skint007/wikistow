@@ -450,7 +450,7 @@ export function PageEditor({
                   if (choice !== chosen && !checking) void show(choice, true);
                 }}
                 className={cn(
-                  'rounded-row px-2.5 py-1 font-bold text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-disabled:cursor-wait',
+                  'rounded-row px-2.5 py-1 font-bold text-muted-foreground not-aria-disabled:hover:tint not-aria-disabled:hover:text-foreground not-aria-disabled:active:tint-strong focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none aria-disabled:cursor-wait',
                   choice === chosen && 'bg-muted text-foreground',
                 )}
               >

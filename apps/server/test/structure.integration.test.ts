@@ -17,11 +17,18 @@ import {
   sharingOperations as sharing,
   SpaceId,
   spaceOperations,
+  utf8,
 } from '@wikistow/client';
 import { FAST_KDF, setUpVault } from '@wikistow/client/testing';
-import { accountRoutes, SealedMetadataV2, structureRoutes, vaultRoutes } from '@wikistow/contracts';
+import {
+  accountRoutes,
+  peopleRoutes,
+  SealedMetadataV2,
+  structureRoutes,
+  vaultRoutes,
+} from '@wikistow/contracts';
 import type { z } from 'zod';
-import { schema } from '@wikistow/server';
+import { schema, setAvatar } from '@wikistow/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { resetPassword, signedInPerson } from './support/accounts.ts';
@@ -321,6 +328,27 @@ describe('the identity directory', () => {
     await revoke(2);
     expect(await lookup()).toEqual([]);
     expect((await alice.api.call(accountRoutes.me)).identity).toBeNull();
+  });
+
+  it('gives an avatar only to someone the directory shows its person to', async () => {
+    const alice = await personWithVault(t);
+    const bob = await personWithVault(t);
+    const avatar = await setAvatar(t.db, alice.id, utf8('GIF89a'));
+    const ids = alice.vault.identity.public.id;
+    const avatarsFor = async (person: typeof bob) =>
+      (await person.api.call(peopleRoutes.avatars, { query: { ids } })).avatars;
+    // An ID alone mustn't put a face to it.
+    expect(await avatarsFor(bob)).toEqual([]);
+    expect(await avatarsFor(alice)).toEqual([{ identityId: ids, avatar }]);
+    const spaceId = await spaceOperations.createSpace(alice.ctx, { name: 'Shared' });
+    const found = await sharing.findPerson(alice.ctx, bob.email);
+    if (!found) throw new Error('expected to find Bob');
+    await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: null,
+      people: [{ person: found, role: 'reader' }],
+    });
+    expect(await avatarsFor(bob)).toEqual([{ identityId: ids, avatar }]);
   });
 });
 

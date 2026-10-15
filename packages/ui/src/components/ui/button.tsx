@@ -3,19 +3,24 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 import { Slot } from 'radix-ui';
 
+// Every enabled variant shows it can be clicked before it's hovered: a fill, a border, or an
+// underline. Ghost relies on its icon, or on its place in a toolbar, a group of choices, or
+// beside a dialog's main action; a text-only action anywhere else takes outline. Hover and
+// press layer a tint over the fill (`tint` or `shade`, in app.css), and a press nudges the
+// button down a pixel, so a tap gives feedback where there's no hover.
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:saturate-50 aria-disabled:opacity-50 aria-disabled:shadow-none aria-disabled:saturate-50 aria-disabled:hover:bg-none aria-disabled:active:translate-y-0 aria-disabled:active:bg-none aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        default: 'bg-primary text-primary-foreground shadow-xs hover:shade active:shade-strong',
         destructive:
-          'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40',
-        outline:
-          'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
-        link: 'text-primary underline-offset-4 hover:underline',
+          'bg-destructive text-destructive-foreground shadow-xs hover:shade active:shade-strong',
+        outline: 'border border-foreground/20 bg-card shadow-xs hover:tint active:tint-strong',
+        secondary:
+          'bg-secondary text-secondary-foreground shadow-xs inset-ring inset-ring-foreground/15 hover:tint active:tint-strong',
+        ghost: 'hover:tint active:tint-strong',
+        link: 'text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-current active:opacity-70',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',
@@ -58,4 +63,13 @@ function Button({
   );
 }
 
-export { Button, buttonVariants };
+/**
+ * A `<label>` around a hidden file input, drawn as a small outline Button. It shows the
+ * input's keyboard focus, and fades while the input is disabled.
+ */
+const uploadButtonClass = cn(
+  buttonVariants({ variant: 'outline', size: 'sm' }),
+  'cursor-pointer has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring has-disabled:pointer-events-none has-disabled:opacity-50',
+);
+
+export { Button, buttonVariants, uploadButtonClass };

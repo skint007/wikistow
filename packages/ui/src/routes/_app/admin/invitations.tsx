@@ -173,7 +173,11 @@ function Invitations() {
                     >
                       {invitation.email ? 'Resend' : 'New link'}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => revoke.mutate(invitation.id)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => revoke.mutate(invitation.id)}
+                    >
                       Withdraw
                     </Button>
                   </TableCell>

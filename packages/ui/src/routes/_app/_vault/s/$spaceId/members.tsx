@@ -131,7 +131,7 @@ function Members() {
                   {(id !== self || owners.length > 1) && (
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="outline"
                       onClick={() => setAction({ kind: 'remove', ownerId: id, retry: false })}
                     >
                       {id === self ? 'Leave' : 'Remove'}
@@ -173,7 +173,7 @@ function Members() {
                     </span>
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="outline"
                       onClick={() => setSharing({ rootId: share.rootId })}
                     >
                       Manage
@@ -249,7 +249,7 @@ function Members() {
             <ul className="grid gap-1">
               {[...new Set(memberIds)].map((id) => (
                 <PersonRow key={id} person={person(id)}>
-                  <Button size="sm" variant="ghost" onClick={() => setRemoving(id)}>
+                  <Button size="sm" variant="outline" onClick={() => setRemoving(id)}>
                     Remove from every folder
                   </Button>
                 </PersonRow>

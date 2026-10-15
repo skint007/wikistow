@@ -93,7 +93,7 @@ export function ThemePicker() {
                   </span>
                   {!on && (
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       aria-label={`Preview ${option.name}`}
                       onClick={() => pluginTheme.preview({ base: option.base, href: option.href })}

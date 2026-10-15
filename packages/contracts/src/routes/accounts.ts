@@ -75,11 +75,49 @@ export const inspectInvitation = {
   ]),
 } as const satisfies RouteDef;
 
+/**
+ * An avatar's random name, new with every upload. Avatars aren't encrypted:
+ * anyone with the name may fetch the image (`AVATAR_PATH`), so the name is
+ * only given to the account and to people the directory shows it to.
+ */
+export const AvatarId = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
+export type AvatarId = z.infer<typeof AvatarId>;
+
+/** The largest avatar the server takes: 2 MiB. */
+export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Avatar bytes aren't JSON, so these two are registered as binary routes:
+ * PUT `/api/me/avatar` with the image, answered with `AvatarUpload`, and GET
+ * `/api/avatars/:avatarId` for it back, which needs no session.
+ */
+export const AVATAR_UPLOAD_PATH = '/api/me/avatar';
+export const AVATAR_PATH = '/api/avatars/:avatarId';
+export const AvatarUpload = z.object({ avatar: AvatarId });
+
+/** Where the browser loads an avatar from. */
+export const avatarUrl = (avatar: AvatarId) => `/api/avatars/${avatar}`;
+
+/** Remove the signed-in account's avatar. Its initials show again. */
+export const removeAvatar = {
+  method: 'DELETE',
+  path: AVATAR_UPLOAD_PATH,
+  response: z.object({}),
+} as const satisfies RouteDef;
+
 export const me = {
   method: 'GET',
   path: '/api/me',
   response: z.object({
-    account: z.object({ id: z.uuid(), email: Email, name: z.string(), role: Role, theme: Theme }),
+    account: z.object({
+      id: z.uuid(),
+      email: Email,
+      name: z.string(),
+      role: Role,
+      theme: Theme,
+      /** Null when the account shows its initials, as with servers from before avatars. */
+      avatar: AvatarId.nullable().default(null),
+    }),
     session: z.object({ createdAt: z.iso.datetime() }),
     /** Null until the account has set up its vault. */
     identity: PublicIdentity.nullable(),

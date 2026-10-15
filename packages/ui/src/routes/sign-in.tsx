@@ -114,7 +114,7 @@ function PasswordStep({ onCode, onDone }: { onCode: () => void; onDone: () => Pr
           Forgot password?
         </Link>
         {installation?.publicRegistration && (
-          <Link to="/register" className="text-muted-foreground">
+          <Link to="/register" className="quiet-link">
             Create an account
           </Link>
         )}
@@ -161,15 +161,11 @@ function CodeStep({ onDone, onRestart }: { onDone: () => Promise<void>; onRestar
       <Button type="submit" disabled={isSubmitting}>
         Verify
       </Button>
-      <button
-        type="button"
-        className="text-sm text-muted-foreground"
-        onClick={() => setBackup(!backup)}
-      >
+      <button type="button" className="text-sm quiet-link" onClick={() => setBackup(!backup)}>
         {backup ? 'Use your authenticator app' : 'Use a backup code instead'}
       </button>
       {/* A sign-in ends after too many wrong codes, and its code step with it. */}
-      <button type="button" className="text-sm text-muted-foreground" onClick={onRestart}>
+      <button type="button" className="text-sm quiet-link" onClick={onRestart}>
         Start again
       </button>
     </form>

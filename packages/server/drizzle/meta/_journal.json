@@ -148,6 +148,13 @@
       "when": 1791682891889,
       "tag": "0020_end_deleted_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792029058578,
+      "tag": "0021_avatars",
+      "breakpoints": true
     }
   ]
 }

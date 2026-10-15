@@ -63,7 +63,7 @@ export function KeyChangePanel({
           id={headingId}
           ref={heading}
           tabIndex={-1}
-          className="flex items-center gap-2 text-lg leading-none font-extrabold outline-none"
+          className="flex items-center gap-2 pr-6 text-lg leading-none font-extrabold outline-none"
         >
           <ShieldAlert className="size-5 text-destructive" strokeWidth={1.75} />
           {declined ? (

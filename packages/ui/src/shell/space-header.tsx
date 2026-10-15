@@ -1,5 +1,6 @@
 import type { SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
+import { Avatar, initials } from '@/components/avatar';
 import { Name, plainText } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ChevronDown, Download, Share, ShieldAlert, Users } from 'lucide-react';
@@ -14,7 +15,6 @@ import { sharesQuery, spaceKeysQuery } from '../data/queries';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
 import { useClient } from '../vault/store';
-import { initials } from './rail';
 
 /**
  * The sidebar's head: the space tile and name, and for owners, how many
@@ -62,7 +62,7 @@ export function SpaceHeader({
           <button
             type="button"
             onClick={() => askAgain(ctx, spaceId)}
-            className="flex items-center gap-1 text-left text-xs font-bold text-primary-ink hover:underline"
+            className="flex items-center gap-1 text-left text-xs font-bold text-primary-ink underline decoration-current/40 underline-offset-2 hover:decoration-current"
           >
             <ShieldAlert className="size-3.5 shrink-0" strokeWidth={1.75} />
             Confirm who added you
@@ -72,7 +72,7 @@ export function SpaceHeader({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Space menu"
-          className="grid size-8 shrink-0 place-items-center rounded-control text-muted-foreground hover:bg-accent"
+          className="grid size-8 shrink-0 place-items-center rounded-control text-muted-foreground hover:tint active:tint-strong"
         >
           <ChevronDown className="size-4" strokeWidth={1.75} />
         </DropdownMenuTrigger>
@@ -101,7 +101,7 @@ export function SpaceHeader({
   );
 }
 
-/** Everyone with access to the space, owners included, as a count and a stack of initials. */
+/** Everyone with access to the space, owners included, as a count and a stack of avatars. */
 function MemberCount({ spaceId }: { spaceId: SpaceId }) {
   const ctx = useClient();
   const { data: shares } = useQuery(sharesQuery(ctx, spaceId));
@@ -121,16 +121,22 @@ function MemberCount({ spaceId }: { spaceId: SpaceId }) {
       className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground"
     >
       <span aria-hidden className="flex -space-x-1.5">
-        {ids.slice(0, 3).map((id) => (
-          <span
-            key={id}
-            className="grid size-5 place-items-center rounded-full bg-strong text-[9px] font-extrabold text-strong-foreground ring-2 ring-card"
-          >
-            {initials(plainText(people?.get(id)?.name ?? '?')).slice(0, 1)}
-          </span>
-        ))}
+        {ids.slice(0, 3).map((id) => {
+          const person = people?.get(id);
+          return (
+            <Avatar
+              key={id}
+              name={person?.name ?? '?'}
+              avatar={person?.avatar ?? null}
+              letters={1}
+              className="size-5 text-[9px] ring-2 ring-card"
+            />
+          );
+        })}
       </span>
-      {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      <span className="underline decoration-current/40 underline-offset-2">
+        {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      </span>
     </Link>
   );
 }

@@ -63,7 +63,7 @@ export function TableOfContents({
         >
           <a
             href={`#${heading.id}`}
-            className="block rounded-row px-2 py-1 text-subtle-foreground hover:bg-accent hover:text-foreground"
+            className="block rounded-row px-2 py-1 text-subtle-foreground outline-offset-[-2px] hover:tint hover:text-foreground active:tint-strong"
           >
             {heading.text}
           </a>
@@ -75,7 +75,7 @@ export function TableOfContents({
     return (
       <nav aria-label="On this page" className={className}>
         <details className="group rounded-control bg-muted px-2 py-1">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2 py-1 text-sm font-bold [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-row px-2 py-1 text-sm font-bold hover:tint active:tint-strong [&::-webkit-details-marker]:hidden">
             <ChevronRight
               className="size-4 transition-transform group-open:rotate-90"
               strokeWidth={1.75}

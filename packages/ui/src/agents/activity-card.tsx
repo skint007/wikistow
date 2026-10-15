@@ -28,7 +28,7 @@ export function AgentActivityCard({
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full items-start gap-2.5 rounded-control bg-muted p-3 text-left text-sm hover:bg-accent"
+        className="flex w-full items-start gap-2.5 rounded-control bg-muted p-3 text-left text-sm hover:tint active:tint-strong"
       >
         <Bot aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" strokeWidth={1.75} />
         <span className="grid min-w-0 gap-0.5">
@@ -45,7 +45,7 @@ export function AgentActivityCard({
           <span className="truncate">
             edited <Name>{title}</Name> · {ago(activity.at, new Date())}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-subtle-foreground">
             {activity.draftOnly ? 'Draft only, not published yet' : 'In the published version'}
           </span>
         </span>

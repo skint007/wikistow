@@ -38,6 +38,7 @@ import {
   checkSpaceOwner,
   addStatement,
   directory,
+  directoryAvatars,
   listOwners,
   listShares,
   lookupPerson,
@@ -399,6 +400,19 @@ export function mountContentRoutes(
   routes.content(
     peopleRoutes.directory,
     async ({ query }, { actor }) => directory(db, actor, query.ids).catch(toApiError),
+    { rateLimit: FETCH_LIMIT },
+  );
+
+  // For the app's lists of people; agents have no use for faces.
+  routes.account(
+    peopleRoutes.avatars,
+    async ({ query }, { principal }) => ({
+      avatars: await directoryAvatars(
+        db,
+        { accountId: principal.accountId, agentId: null },
+        query.ids,
+      ).catch(toApiError),
+    }),
     { rateLimit: FETCH_LIMIT },
   );
 

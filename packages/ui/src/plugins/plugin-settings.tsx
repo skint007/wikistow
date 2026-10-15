@@ -89,7 +89,7 @@ export function PluginSettings() {
           Load development folder…
         </Button>
         {!safeMode && (
-          <Button variant="ghost" asChild>
+          <Button variant="outline" asChild>
             <Link to="/workshop">Build one with the assistant</Link>
           </Button>
         )}
@@ -328,7 +328,7 @@ function PageAccessList({
               </span>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onClick={() => void save(scopes.filter((_, other) => other !== at))}
               >
                 Remove

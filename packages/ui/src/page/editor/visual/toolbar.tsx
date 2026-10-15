@@ -289,7 +289,7 @@ const BUTTONS: { name: FormatName; label: string; icon: LucideIcon }[][] = [
 
 // A control's look: compact, muted until hovered, filled while it applies.
 const CONTROL =
-  'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-row text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-pressed:bg-primary-soft aria-pressed:text-primary-ink';
+  'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-row text-muted-foreground outline-none hover:tint active:tint-strong hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-none aria-disabled:hover:text-muted-foreground aria-disabled:active:bg-none aria-pressed:bg-primary-soft aria-pressed:text-primary-ink';
 
 function Tip({
   label,
@@ -518,7 +518,7 @@ const LinkControl = memo(function LinkControl({
           </div>
           <div className="flex items-center gap-2">
             {target?.kind === 'link' && target.removable && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => done(removeLink)}>
+              <Button type="button" variant="outline" size="sm" onClick={() => done(removeLink)}>
                 Remove link
               </Button>
             )}

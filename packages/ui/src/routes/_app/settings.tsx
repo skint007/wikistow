@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Picker } from '@/components/ui/picker';
+import { AvatarSettings } from '../../account/avatar-settings';
 import { AiSettings } from '../../ai/ai-settings';
 import { api } from '../../api';
 import { authClient } from '../../auth/client';
@@ -34,6 +35,12 @@ function Settings() {
       data-region="settings"
       className="mx-auto grid h-full max-w-4xl content-start gap-3.5 overflow-y-auto"
     >
+      <Section
+        title="Avatar"
+        description="Shown beside your name in the app. Anyone with its link can see it, so it isn’t encrypted like your pages."
+      >
+        <AvatarSettings />
+      </Section>
       <Section
         title="Appearance"
         description={

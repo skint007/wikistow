@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatStore, useChatStore } from '../ai/chat';
 import { toolActivity, toolResults } from '../ai/chat-model';
+import { Working } from '../ai/working';
 import { useClient } from '../vault/store';
 import type { WorkshopChat } from './workshop-chat';
 
@@ -176,7 +177,6 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
   };
   return (
     <form
-      aria-busy={running}
       className="grid gap-2 border-t p-3"
       onSubmit={(event) => {
         event.preventDefault();
@@ -192,7 +192,7 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
             'flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
             copied === page.pageId
               ? 'border-primary bg-primary/10 font-bold text-primary'
-              : 'text-muted-foreground hover:bg-accent',
+              : 'text-muted-foreground hover:bg-accent active:tint-strong',
           )}
         >
           <Copy className="size-3.5 shrink-0" strokeWidth={1.75} />
@@ -207,6 +207,7 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
           {error}
         </p>
       )}
+      <Working working={running} />
       <div className="flex items-end gap-2">
         {/* 16px on phones: iOS zooms in on a smaller field when it's focused. */}
         <textarea

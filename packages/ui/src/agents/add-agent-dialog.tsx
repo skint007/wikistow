@@ -345,7 +345,7 @@ function Compare({
       <ErrorLine error={error} />
       <DialogFooter>
         <Button
-          variant="ghost"
+          variant="outline"
           disabled={busy}
           onClick={ended ? () => onCancel(false) : () => void reject()}
         >
@@ -551,7 +551,7 @@ function NameAndPicks({
               }}
             />
             <div>
-              <Button size="sm" variant="ghost" onClick={() => setAddingPick(false)}>
+              <Button size="sm" variant="outline" onClick={() => setAddingPick(false)}>
                 Cancel
               </Button>
             </div>
@@ -615,7 +615,7 @@ export function ChosenPicks({
               aria-label={`Remove ${plainText(label)}`}
               disabled={disabled}
               onClick={() => onRemove(pick)}
-              className="grid size-7 place-items-center rounded-control hover:bg-accent"
+              className="grid size-7 place-items-center rounded-control enabled:hover:tint enabled:active:tint-strong disabled:opacity-50"
             >
               <X className="size-4" strokeWidth={1.75} />
             </button>

@@ -136,7 +136,7 @@ export function ExportDialog({
         )}
         <ErrorLine error={error} />
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             {skipped !== null ? 'Close' : 'Cancel'}
           </Button>
           {skipped === null && (
