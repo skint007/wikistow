@@ -2,7 +2,8 @@ import { Button } from '@/components/ui/button';
 import { propertiesText, withProperties } from './properties';
 
 const BOX = 'rounded-control bg-muted text-sm';
-const SUMMARY = 'cursor-pointer px-3 py-2 font-bold text-subtle-foreground select-none';
+const SUMMARY =
+  'cursor-pointer rounded-control px-3 py-2 font-bold text-subtle-foreground select-none hover:tint active:tint-strong';
 
 /**
  * A page's frontmatter above its body, read-only: a collapsed Properties

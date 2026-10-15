@@ -332,7 +332,7 @@ export function AccessPanel({
                   <DropdownMenuTrigger
                     aria-label={`More for ${plainText(who.name)}`}
                     disabled={busy}
-                    className="grid size-8 place-items-center rounded-control hover:bg-accent"
+                    className="grid size-8 place-items-center rounded-control hover:tint active:tint-strong"
                   >
                     <MoreHorizontal className="size-4" strokeWidth={1.75} />
                   </DropdownMenuTrigger>

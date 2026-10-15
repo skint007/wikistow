@@ -437,7 +437,7 @@ function PageBody({
                   <DropdownMenuTrigger
                     ref={menuButton}
                     aria-label="Page actions"
-                    className="grid size-8 place-items-center rounded-control hover:bg-accent"
+                    className="grid size-8 place-items-center rounded-control hover:tint active:tint-strong"
                   >
                     <MoreHorizontal className="size-4" strokeWidth={1.75} />
                   </DropdownMenuTrigger>
@@ -567,7 +567,7 @@ function PageBody({
                 ref={copiesPill}
                 type="button"
                 onClick={() => setShowingCopies(true)}
-                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:tint active:tint-strong"
               >
                 <span aria-hidden>⇉</span>
                 <span>
@@ -591,7 +591,7 @@ function PageBody({
                       }
                     })
                   }
-                  className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+                  className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:tint active:tint-strong"
                 >
                   {checkingCopies
                     ? 'Checking where else it’s published…'
@@ -848,7 +848,10 @@ function Pills({
             key={pill.kind}
             type="button"
             onClick={() => onSwitch(target)}
-            className={cn('rounded-full px-2.5 py-[3px]', style(pill))}
+            className={cn(
+              'rounded-full px-2.5 py-[3px] hover:tint active:tint-strong',
+              style(pill),
+            )}
           >
             {pill.kind === 'published' ? '✓' : '✎'}{' '}
             {pill.kind === 'published' && older ? 'Latest version' : pill.label} ›

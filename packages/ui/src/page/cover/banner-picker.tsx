@@ -64,13 +64,15 @@ export function BannerPicker({
               type="button"
               aria-pressed={current}
               onClick={() => onChoose(choice)}
-              className="grid gap-1 rounded-row text-xs font-bold text-subtle-foreground outline-offset-2"
+              className="group grid gap-1 rounded-row text-xs font-bold text-subtle-foreground outline-offset-2 hover:text-foreground"
             >
               <span
                 className={cn(
-                  'h-9 rounded-row bg-cover',
+                  'h-9 rounded-row bg-cover ring-offset-2 ring-offset-popover group-active:opacity-80',
                   swatch,
-                  current && 'ring-2 ring-primary ring-offset-2 ring-offset-popover',
+                  current
+                    ? 'ring-2 ring-primary'
+                    : 'group-hover:ring-2 group-hover:ring-foreground/25',
                 )}
               />
               {label}
@@ -80,7 +82,7 @@ export function BannerPicker({
       </div>
       <label
         className={cn(
-          'inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-control border px-3 py-1.5 text-sm font-bold hover:bg-accent',
+          'inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-control border px-3 py-1.5 text-sm font-bold hover:tint active:tint-strong',
           uploading && 'cursor-progress opacity-70',
         )}
       >

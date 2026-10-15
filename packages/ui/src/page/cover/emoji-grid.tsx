@@ -79,7 +79,7 @@ export default function EmojiGrid({
                   aria-label={entry.words}
                   aria-pressed={entry.emoji === current}
                   onClick={() => onPick(entry.emoji)}
-                  className="grid size-8 place-items-center rounded-row text-xl outline-offset-[-2px] hover:bg-accent aria-pressed:bg-primary-soft"
+                  className="grid size-8 place-items-center rounded-row text-xl outline-offset-[-2px] hover:tint active:tint-strong aria-pressed:bg-primary-soft"
                 >
                   {entry.emoji}
                 </button>

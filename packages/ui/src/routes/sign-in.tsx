@@ -163,13 +163,17 @@ function CodeStep({ onDone, onRestart }: { onDone: () => Promise<void>; onRestar
       </Button>
       <button
         type="button"
-        className="text-sm text-muted-foreground"
+        className="text-sm text-muted-foreground underline decoration-current/40 underline-offset-4 hover:text-foreground hover:decoration-current"
         onClick={() => setBackup(!backup)}
       >
         {backup ? 'Use your authenticator app' : 'Use a backup code instead'}
       </button>
       {/* A sign-in ends after too many wrong codes, and its code step with it. */}
-      <button type="button" className="text-sm text-muted-foreground" onClick={onRestart}>
+      <button
+        type="button"
+        className="text-sm text-muted-foreground underline decoration-current/40 underline-offset-4 hover:text-foreground hover:decoration-current"
+        onClick={onRestart}
+      >
         Start again
       </button>
     </form>

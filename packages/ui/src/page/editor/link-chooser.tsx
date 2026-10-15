@@ -56,7 +56,7 @@ export function LinkChooser({
                   aria-pressed={picked}
                   onClick={() => onPick(page.id)}
                   className={cn(
-                    'flex w-full items-center gap-3 rounded-control border px-3 py-2 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60',
+                    'flex w-full items-center gap-3 rounded-control border px-3 py-2 text-left text-sm enabled:hover:tint enabled:active:tint-strong disabled:cursor-not-allowed disabled:opacity-60',
                     picked &&
                       'border-primary bg-primary-soft text-primary-ink hover:bg-primary-soft',
                   )}

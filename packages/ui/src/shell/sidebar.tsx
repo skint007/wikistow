@@ -402,7 +402,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                 }
                 className={cn(
-                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:bg-accent',
+                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong',
                   dragging?.over?.parentId === row.id &&
                     'bg-primary-soft ring-2 ring-primary ring-inset',
                 )}
@@ -461,7 +461,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 startDrag(event, { id: row.id, kind: 'page', name: row.title })
               }
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:bg-accent',
+                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong',
                 selected && 'bg-primary-soft font-bold text-primary-ink',
               )}
               style={indent}
@@ -615,7 +615,7 @@ function FolderMenu({
       <DropdownMenuTrigger
         aria-label={`Actions for ${plainText(name)}`}
         onClick={(event) => event.stopPropagation()}
-        className="grid size-6 place-items-center rounded-row text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
+        className="grid size-6 place-items-center rounded-row text-muted-foreground opacity-0 group-hover:opacity-100 hover:tint focus:opacity-100 active:tint-strong pointer-coarse:opacity-100 data-[state=open]:opacity-100"
       >
         <MoreHorizontal className="size-4" strokeWidth={1.75} />
       </DropdownMenuTrigger>

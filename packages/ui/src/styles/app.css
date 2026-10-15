@@ -8,6 +8,31 @@
 /* Classes are used across packages/ui, which sits outside the web app's root. */
 @source '..';
 
+/* Hover and pressed feedback for controls: the palette's text colour, faint, layered over
+ * whatever fill the control has. It darkens a light palette's fill and lightens a dark
+ * one's, on any surface, so `hover:tint active:tint-strong` suits filled and bare controls
+ * alike. `bg-accent` is the same hover surface for controls without a fill. */
+@utility tint {
+  --tint: color-mix(in oklab, var(--foreground) 9%, transparent);
+  background-image: linear-gradient(var(--tint), var(--tint));
+}
+@utility tint-strong {
+  --tint: color-mix(in oklab, var(--foreground) 17%, transparent);
+  background-image: linear-gradient(var(--tint), var(--tint));
+}
+
+@layer base {
+  /* Tailwind gives buttons the arrow; show the hand on anything enabled that clicks. */
+  :is(button, [role='button'], summary):not(:disabled, [aria-disabled='true']) {
+    cursor: pointer;
+  }
+  /* One keyboard focus ring for every control that doesn't draw its own. */
+  :is(button, a, [role='button'], summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
 /* Page bodies rendered from Markdown (see page/markdown.tsx). */
 @layer components {
   .page-body {

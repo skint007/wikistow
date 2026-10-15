@@ -122,7 +122,7 @@ function DialogContent({
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:outline-hidden [&_svg]:size-4"
+          className="absolute top-2 right-2 grid size-8 place-items-center rounded-control text-muted-foreground hover:tint hover:text-foreground active:tint-strong [&_svg]:size-4"
         >
           <XIcon />
           <span className="sr-only">Close</span>

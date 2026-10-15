@@ -10,7 +10,8 @@ export const Route = createFileRoute('/_app/admin')({
 });
 
 function Admin() {
-  const tab = 'rounded-row px-3 py-1.5 text-sm font-bold text-subtle-foreground hover:bg-accent';
+  const tab =
+    'rounded-row px-3 py-1.5 text-sm font-bold text-subtle-foreground hover:tint active:tint-strong';
   const active = { className: 'bg-primary-soft text-primary-ink' };
   return (
     <div className="mx-auto grid h-full max-w-4xl content-start gap-3.5 overflow-y-auto">

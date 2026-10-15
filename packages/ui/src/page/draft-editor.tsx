@@ -202,7 +202,7 @@ export function DraftEditor({
       <section aria-label="Attachments" className="grid gap-2">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-bold">Attachments</h2>
-          <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-control border px-3 py-1.5 text-sm font-bold hover:bg-accent">
+          <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-control border px-3 py-1.5 text-sm font-bold hover:tint active:tint-strong">
             <Paperclip className="size-4" strokeWidth={1.75} />
             {snapshot.uploading ? 'Encrypting…' : 'Attach files'}
             <input
@@ -243,7 +243,7 @@ export function DraftEditor({
                   type="button"
                   aria-label={`Remove ${plainText(attachment.name)}`}
                   onClick={() => session.removeAttachment(attachment.id)}
-                  className="rounded-row p-1 text-muted-foreground hover:bg-accent"
+                  className="rounded-row p-1 text-muted-foreground hover:tint active:tint-strong"
                 >
                   <Trash2 className="size-4" strokeWidth={1.75} />
                 </button>

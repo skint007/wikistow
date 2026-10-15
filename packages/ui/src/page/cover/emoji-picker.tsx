@@ -51,7 +51,7 @@ export function EmojiPicker({
         ) : (
           <button
             type="button"
-            className="glass absolute bottom-3 left-11 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold max-[899px]:left-[18px]"
+            className="glass absolute bottom-3 left-11 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold hover:tint active:tint-strong max-[899px]:left-[18px]"
           >
             <SmilePlus className="size-4" strokeWidth={1.75} /> Add emoji
           </button>

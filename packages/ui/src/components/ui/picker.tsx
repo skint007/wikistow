@@ -59,7 +59,7 @@ function Picker<T extends string>({
         data-slot="picker"
         aria-label={`${label}: ${shown ?? placeholder}`}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-control border border-input bg-background px-2 text-left text-sm outline-ring hover:bg-accent focus:outline-2 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-accent',
+          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-control border border-input bg-background px-2 text-left text-sm outline-ring hover:tint active:tint-strong focus:outline-2 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:tint',
           className,
         )}
         {...props}

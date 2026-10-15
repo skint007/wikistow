@@ -151,7 +151,7 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
                 />
                 <button
                   type="button"
-                  className="justify-self-start text-sm text-muted-foreground"
+                  className="justify-self-start text-sm text-muted-foreground underline decoration-current/40 underline-offset-4 hover:text-foreground hover:decoration-current"
                   onClick={() => setBackup(!backup)}
                 >
                   {backup ? 'Use your authenticator app' : 'Use a backup code instead'}

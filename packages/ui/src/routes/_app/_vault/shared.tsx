@@ -43,7 +43,7 @@ function SharedWithMe() {
                 <Link
                   to="/s/$spaceId"
                   params={{ spaceId: share.spaceId }}
-                  className="flex items-center gap-3 rounded-control border p-3 hover:bg-accent"
+                  className="flex items-center gap-3 rounded-control border p-3 hover:tint active:tint-strong"
                 >
                   <span className="grid size-10 shrink-0 place-items-center rounded-tile bg-folder-blue">
                     <Icon className="size-5" strokeWidth={1.75} />
