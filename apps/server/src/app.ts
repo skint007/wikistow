@@ -64,7 +64,12 @@ export function createApp({ db, config, log, deliver, blobs }: AppDeps) {
   const guesses = createPasswordGuesses({ db, config });
   const auth = createAuth({ db, config, deliver, log, guesses });
 
-  app.use(securityHeaders({ https: config.publicOrigin.startsWith('https:') }));
+  app.use(
+    securityHeaders({
+      https: config.publicOrigin.startsWith('https:'),
+      origin: config.publicOrigin,
+    }),
+  );
   app.use(requestLogger(log));
   const tooLarge = (c: Context<AppEnv>) =>
     errorResponse(c, new ApiError('payload-too-large', 'Request body is too large'));

@@ -43,6 +43,49 @@ export type ScriptEvents = {
 
 type Outputs = Record<string, OutputResult>;
 
+/** What a running script tells its `ScriptWorker`, only ever after `LaunchScript` returned. */
+export type ScriptHandlers = {
+  /** Each message its worker sends, unchecked. */
+  message: (data: unknown) => void;
+  /** It failed to load or threw, with the browser's message if there is one. */
+  error: (message: string) => void;
+  /**
+   * It ended through no fault of its own: the frame holding it stopped
+   * answering and was replaced. It starts again without counting a failure.
+   */
+  lost: () => void;
+};
+
+/** A running script, as its `ScriptWorker` drives it. */
+export type ScriptPort = {
+  post: (message: HostMessage) => void;
+  /** End its worker at once. */
+  close: () => void;
+};
+
+/**
+ * Start a script: `inFrame` (`script-frame.ts`) in the browser's sandboxed
+ * frame, `inWorker` as a worker of the app's own origin.
+ */
+export type LaunchScript = (on: ScriptHandlers) => ScriptPort;
+
+/**
+ * Run the script at `url` as a module worker of the app's origin, as the
+ * desktop app does: it serves the file with a policy that allows the
+ * worker no requests (no fetch, imports or workers).
+ */
+export const inWorker =
+  (url: string): LaunchScript =>
+  (on) => {
+    const worker = new Worker(url, { type: 'module' });
+    worker.onmessage = (event: MessageEvent<unknown>) => on.message(event.data);
+    worker.onerror = (event) => {
+      event.preventDefault();
+      on.error(event.message);
+    };
+    return { post: (message) => worker.postMessage(message), close: () => worker.terminate() };
+  };
+
 type Invocation = {
   resolve: (outputs: Outputs | undefined) => void;
   reject: (error: PluginError) => void;
@@ -51,19 +94,19 @@ type Invocation = {
 };
 
 /**
- * One plugin's script, in a module worker of its own. The worker's file is
- * served with a policy that allows it no requests (no fetch, imports or
- * workers), so its only way out is this class's messages. Every message is
- * checked, and every call's arguments, before the page operations run it.
+ * One plugin's script, in a module worker of its own that can make no
+ * requests (`LaunchScript`), so its only way out is this class's messages,
+ * over the port it is launched with. Every message is checked, and every
+ * call's arguments, before the page operations run it.
  * A command or event that runs past `SCRIPT_BUDGET_MS`, a crash or a
  * malformed message ends the worker and starts it again; after
  * `FAILURES_ALLOWED` of those in five minutes it stays stopped.
  */
 export class ScriptWorker {
-  readonly #url: string;
+  readonly #launch: LaunchScript;
   readonly #on: ScriptEvents;
   readonly #calls: Calls;
-  #worker: Worker | null = null;
+  #worker: ScriptPort | null = null;
   #commands = new Map<string, string>();
   /** Kept as it starts again, which registers the same blocks: their forms stay. */
   #blocks = new Map<string, BlockSpec>();
@@ -79,8 +122,8 @@ export class ScriptWorker {
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(url: string, pages: Pages, on: ScriptEvents) {
-    this.#url = url;
+  constructor(launch: LaunchScript, pages: Pages, on: ScriptEvents) {
+    this.#launch = launch;
     this.#on = on;
     this.#calls = {
       'pages.read': (args) => pages.read(...METHODS['pages.read'].parse(args)),
@@ -106,7 +149,28 @@ export class ScriptWorker {
 
   start() {
     if (this.#stopped || this.#worker) return;
-    const worker = new Worker(this.#url, { type: 'module' });
+    const worker: ScriptPort = this.#launch({
+      message: (data) => {
+        if (this.#worker !== worker) return;
+        const message = WorkerMessage.safeParse(data);
+        if (!message.success) {
+          // Its first problem, such as a block's field ID the app doesn't take.
+          const [issue] = message.error.issues;
+          const where = issue ? ` (${[...issue.path, issue.message].join(': ')})` : '';
+          return this.#fail(`Its script sent a message the app doesn’t accept${where}.`);
+        }
+        this.#receive(worker, message.data);
+      },
+      error: (message) => {
+        if (this.#worker === worker)
+          this.#fail(`Its script failed: ${message || 'it didn’t load'}`);
+      },
+      lost: () => {
+        if (this.#worker !== worker) return;
+        this.#end(new PluginError('failed', 'The plugin sandbox stopped answering'));
+        this.start();
+      },
+    });
     this.#worker = worker;
     this.#ready = false;
     this.#started = Promise.withResolvers<void>();
@@ -114,22 +178,6 @@ export class ScriptWorker {
       if (this.#worker !== worker) return;
       this.#fail(`Its script took longer than ${SCRIPT_BUDGET_MS / 1000} seconds to start.`);
     }, SCRIPT_BUDGET_MS);
-    worker.onmessage = (event: MessageEvent<unknown>) => {
-      if (this.#worker !== worker) return;
-      const message = WorkerMessage.safeParse(event.data);
-      if (!message.success) {
-        // Its first problem, such as a block's field ID the app doesn't take.
-        const [issue] = message.error.issues;
-        const where = issue ? ` (${[...issue.path, issue.message].join(': ')})` : '';
-        return this.#fail(`Its script sent a message the app doesn’t accept${where}.`);
-      }
-      this.#receive(worker, message.data);
-    };
-    worker.onerror = (event) => {
-      event.preventDefault();
-      if (this.#worker === worker)
-        this.#fail(`Its script failed: ${event.message || 'it didn’t load'}`);
-    };
   }
 
   /** Settled once its activation finished, or the worker ended. */
@@ -202,11 +250,11 @@ export class ScriptWorker {
         budget,
       );
       this.#invocations.set(invocation, { resolve, reject, page, timer });
-      worker.postMessage({ type: 'invoke', invocation, target } satisfies HostMessage);
+      worker.post({ type: 'invoke', invocation, target });
     });
   }
 
-  #receive(worker: Worker, message: WorkerMessage) {
+  #receive(worker: ScriptPort, message: WorkerMessage) {
     switch (message.type) {
       case 'ready':
         clearTimeout(this.#starting);
@@ -257,7 +305,7 @@ export class ScriptWorker {
   }
 
   async #answer(
-    worker: Worker,
+    worker: ScriptPort,
     { call, method, args, invocation }: Extract<WorkerMessage, { type: 'call' }>,
   ) {
     const page =
@@ -270,7 +318,7 @@ export class ScriptWorker {
       answer = { type: 'answer', call, ok: false, code, message };
     }
     // Not to a worker ended meanwhile, nor its successor.
-    if (this.#worker === worker) worker.postMessage(answer);
+    if (this.#worker === worker) worker.post(answer);
   }
 
   #run(method: Method, args: unknown, page: PageHandle | null) {
@@ -295,7 +343,7 @@ export class ScriptWorker {
 
   #end(error: PluginError) {
     clearTimeout(this.#starting);
-    this.#worker?.terminate();
+    this.#worker?.close();
     this.#worker = null;
     this.#started.resolve();
     for (const { reject, timer } of this.#invocations.values()) {

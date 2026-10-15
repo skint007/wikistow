@@ -36,7 +36,8 @@ import { pagesFor, pluginError, writeLimit, type Caller } from './pages';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { formView, readFields, type ReadField } from './block-form';
 import { editorDrafts } from './drafts';
-import { ScriptWorker } from './script-worker';
+import { inFrame } from './script-frame';
+import { inWorker, ScriptWorker } from './script-worker';
 
 /** The page a command runs on or a panel shows, as the page view knows it. */
 export type ShownPage = {
@@ -495,7 +496,10 @@ export function createRuntime(source: RuntimeSource) {
       },
     };
     if (manifest.script) {
-      active.worker = new ScriptWorker(fileUrl(plugin, manifest.script), host.pages, {
+      const script = fileUrl(plugin, manifest.script);
+      // The desktop app runs scripts on its own origin until they move to the frame too (ADR 0002).
+      const launch = desktop ? inWorker(script) : inFrame(script, manifest.id);
+      active.worker = new ScriptWorker(launch, host.pages, {
         commands: (commands) => {
           active.scriptCommands = commands;
           if (live()) emit();
