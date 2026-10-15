@@ -134,7 +134,8 @@ export const check = {
 
 /**
  * Forward a conversation and stream the reply, one JSON `AiEvent` per line
- * (`application/x-ndjson`). Refusals before the stream starts (AI off,
+ * (`application/x-ndjson`), with a blank line every 15 seconds the provider
+ * is quiet, for readers to skip. Refusals before the stream starts (AI off,
  * signed out, rate limited, too large) are ordinary API errors. Ending the
  * request cancels the provider's request.
  */

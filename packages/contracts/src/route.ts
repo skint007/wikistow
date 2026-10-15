@@ -45,6 +45,7 @@ export type RouteOutput<R extends RouteDef> = z.input<R['response']>;
 /**
  * A route that answers with a stream of JSON lines (`application/x-ndjson`),
  * each one an `event`, instead of one response value. Used by the AI proxy.
+ * Blank lines, sent while the stream is quiet to keep it open, carry nothing.
  */
 export type StreamRouteDef = {
   method: 'POST';

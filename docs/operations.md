@@ -36,7 +36,7 @@ The model must support tool calls. For the OpenAI style the server limits replie
 
 Check the connection under **Settings → AI assistant → Check connection**. It sends the provider a request of a few tokens and says whether the key and model work.
 
-The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. When a person stops a reply, the server cancels the provider's request too.
+The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. While the provider is quiet, as a reasoning model can be for minutes before it answers, the server sends a blank line every 15 seconds to keep the reply open. When a person stops a reply, the server cancels the provider's request too.
 
 ## What to back up
 
