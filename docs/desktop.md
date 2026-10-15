@@ -46,7 +46,7 @@ Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is instal
 
 ### How it was installed
 
-Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app can read it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. A development build has no such file.
+Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app can read it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app should trust it only when it runs from `/usr/lib/wikistow-desktop`.
 
 ## Signing in
 

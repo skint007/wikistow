@@ -16,7 +16,7 @@ license: MIT
 # What Electron links against, plus what it loads at run time: libsecret
 # for the keyring and xdg-open for signing in. desktop-file-utils registers
 # the wikistow:// handler through its own triggers, and hicolor-icon-theme
-# owns the icon folders. linux-packages-check in ci.yml checks these.
+# owns the icon folders. linux-packages-check in ci.yml checks the linked libraries only.
 overrides:
   deb:
     # The t64 names first, so apt picks the real library: Ubuntu's OSS
