@@ -4,8 +4,8 @@ import { cn } from '@/lib/utils';
 import { Slot } from 'radix-ui';
 
 // Every enabled variant shows it can be clicked before it's hovered: a fill, a border, or an
-// underline. Ghost relies on its icon, or on its place in a toolbar or beside a dialog's main
-// action; a text-only action anywhere else takes outline. Hover and press layer a tint over
+// underline. Ghost relies on its icon, or on its place in a toolbar, a group of choices, or
+// beside a dialog's main action; a text-only action anywhere else takes outline. Hover and press layer a tint over
 // the fill (`tint`, in app.css), and a press nudges the button down a pixel, so a tap gives
 // feedback where there's no hover.
 const buttonVariants = cva(
