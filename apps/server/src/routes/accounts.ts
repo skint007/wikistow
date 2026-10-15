@@ -94,9 +94,10 @@ const AVATAR_FILE_NAMES = {
 } as const;
 
 // Each avatar being sent holds its image in memory until the client has
-// read it, so only so many go at once, whoever asks. Past that, browsers
-// show initials until a later try.
+// read it, so only so many go at once, whoever asks, and each gets so long.
+// Past that, browsers show initials until a later try.
 const AVATARS_AT_ONCE = 32;
+const AVATAR_SEND_MS = 20_000;
 const AVATAR_CHUNK = 64 * 1024;
 
 /** Checked as Better Auth's routes check passwords, against the account's allowance. */
@@ -349,25 +350,38 @@ export function mountAccountRoutes(
 
   let sending = 0;
   // The bytes as a stream sent only as fast as the client reads them,
-  // counted in `sending` until it ends or the client leaves.
-  const sendCounted = (bytes: Uint8Array) => {
+  // counted in `sending` until it ends. A client that leaves, even before
+  // the response starts, or reads too slowly, ends it.
+  const sendCounted = (bytes: Uint8Array, left: AbortSignal) => {
     sending++;
     let offset = 0;
     let counted = true;
+    let stop = () => {};
+    const timer = setTimeout(() => stop(), AVATAR_SEND_MS);
     const finish = () => {
-      if (counted) sending--;
+      if (!counted) return false;
       counted = false;
+      sending--;
+      clearTimeout(timer);
+      left.removeEventListener('abort', stop);
+      return true;
     };
     return new ReadableStream<Uint8Array>({
+      start(controller) {
+        stop = () => {
+          if (finish()) controller.error(new Error('Avatar send ended early'));
+        };
+        if (left.aborted) stop();
+        else left.addEventListener('abort', stop, { once: true });
+      },
       pull(controller) {
         controller.enqueue(bytes.subarray(offset, offset + AVATAR_CHUNK));
         offset += AVATAR_CHUNK;
-        if (offset >= bytes.byteLength) {
-          controller.close();
-          finish();
-        }
+        if (offset >= bytes.byteLength && finish()) controller.close();
       },
-      cancel: finish,
+      cancel() {
+        finish();
+      },
     });
   };
 
@@ -380,13 +394,16 @@ export function mountAccountRoutes(
       const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
       const found = id.success ? await findAvatar(db, id.data) : null;
       if (!found) throw new ApiError('not-found', 'No such avatar');
-      return c.body(sendCounted(found.bytes), 200, {
+      const headers = {
         'content-type': found.contentType,
         'content-length': String(found.bytes.byteLength),
         'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
         'content-security-policy': AVATAR_CSP,
         'cache-control': 'public, max-age=31536000, immutable',
-      });
+      };
+      // Hono answers HEAD with the GET handler, dropping any body unread.
+      if (c.req.method === 'HEAD') return c.body(null, 200, headers);
+      return c.body(sendCounted(found.bytes, c.req.raw.signal), 200, headers);
     },
     { rateLimit: AVATAR_FETCH_LIMIT },
   );
