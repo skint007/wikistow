@@ -44,6 +44,7 @@ const bridge: DesktopBridge = {
     call(DESKTOP_CHANNELS.workshopExport, session, version, hash),
   workshopInstall: (session, version, hash) =>
     call(DESKTOP_CHANNELS.workshopInstall, session, version, hash),
+  update: () => call(DESKTOP_CHANNELS.update),
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

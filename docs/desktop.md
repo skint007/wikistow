@@ -6,7 +6,7 @@ The desktop app is the same WikiStow you use in the browser, packaged for Linux 
 
 Each [GitHub Release](https://github.com/skint007/wikistow/releases) has the app as a `.deb`, an `.rpm`, and `wikistow-desktop-<version>.tar.gz`, the archive the Arch package installs ([releasing](releasing.md#the-desktop-downloads)). Once it's installed, start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
 
-The app never updates itself. How you update it depends on the package, as below. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
+The app never updates itself. How you update it depends on the package, as below. When a newer release is out, the app tells you (see [Updates](#updates)). Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
 
 ### Arch Linux
 
@@ -46,7 +46,13 @@ Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is instal
 
 ### How it was installed
 
-Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app can read it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app should trust it only when it runs from `/usr/lib/wikistow-desktop`.
+Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`.
+
+### Updates
+
+When a newer stable release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; when the app can't tell how it was installed, it opens the release page. The link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
+
+The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikistow/releases/latest`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. GitHub's latest release is never a prerelease, so the app only offers stable releases; running a prerelease such as `0.4.0-rc.1`, you're offered `0.4.0` once it's out. The app keeps the last answer in `~/.config/WikiStow/update.json`, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
 
 ## Signing in
 
