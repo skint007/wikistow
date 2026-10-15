@@ -122,8 +122,12 @@ A secret used to unlock a person's encrypted keys. It is distinct from the accou
 ## Plugins
 
 **Plugin**
-Code, styles or both that a person installs on their own device to change how WikiStow looks and works. It comes from a folder on that device, never from the server or a page.
+Code, styles or both that a person installs to change how WikiStow looks and works. In the desktop app it comes from a folder on that computer; in the browser, from the server's **plugin library**. Never from a page.
 _Avoid_: Extension, add-on.
+
+**Plugin library**
+The plugins members uploaded to their server, which anyone signed in there may install. Installing is **approving** one version's hash; the approvals live in the person's own encrypted account data and follow them to every device.
+_Avoid_: Store, marketplace (nothing is sold or rated).
 
 **Theme plugin**, **script plugin**, **app plugin**
 A plugin's trust level, from what it contains: styles only; code in an isolated worker that reaches pages only through checked requests; or code running in the app's page with the app's own trust.
@@ -150,4 +154,4 @@ Where a person builds a plugin with the assistant, in the desktop app: a workspa
 _Avoid_: Sandbox (the preview isn't one for app code), staging.
 
 **Safe mode**
-The desktop app started with no plugins loaded, to turn off one that broke the app.
+The desktop app, or one browser tab, running with no plugins loaded, to turn off one that broke the app.
