@@ -46,7 +46,7 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 | Shell | `background`. Grid columns `70px 280px 1fr`, gap 14px, padding 14px on top, right, and bottom, 0 on the left (the rail centers itself in its 70px column). |
 | Cards | `card` surface, `rounded-card` (18px), `shadow-card`. The sidebar and page are both cards; the rail is not. |
 | Rail: spaces | One 44px tile per space, `rounded-tile` (14px), showing an emoji or initials. Active: `primary-soft` fill, 2px `primary` ring, and a 4px `primary` bar on the rail's left edge. A dashed tile creates a new space. A 28px divider follows. |
-| Rail: navigation | Search, Recent, Shared, Agents. A flexible spacer, then Settings and the 36px account avatar. Each button is 56px wide with a 16px icon over a 10px bold label. Labels stay visible; B's unlabeled icons were a known weakness. The avatar opens the account menu: name and email, then Administration (for admins), Lock vault and Sign out, and last the running version (`0.2.0` for a release, `0.2.0+<commit>` otherwise), set when the web app is built. |
+| Rail: navigation | Search, Recent, Shared, Agents. A flexible spacer, then Settings and the 36px account avatar. Each button is 56px wide with a 16px icon over a 10px bold label. Labels stay visible; B's unlabeled icons were a known weakness. The avatar opens the account menu: name and email, then Administration (for admins), Lock vault and Sign out, and last the running version (`0.2.0` for a release, `0.2.0+<commit>` otherwise), set when the web app is built. In the desktop app, when a newer stable release is out, a 10px `update-dot` sits on the avatar's top right corner, ringed in the background color, and the avatar's label becomes "Account, update available". The menu then shows **Update available** above the version: the new and installed versions, how to update for the way the app was installed (an AUR helper, the release's `.deb` or `.rpm`, or the release page when unknown), and a link to the release that opens in the system browser. The browser shows neither. |
 | Sidebar header | 38px space tile (gradient `primary-2` → `primary`), space name, member count with an avatar stack, and a chevron that opens the space menu. The count is for owners. The menu holds **Export…** for everyone, and for owners also **Share space** and **Members and owners**. Someone who holds only folders of a space sees "Shared with you" instead of its name. |
 | Sidebar actions | Full-width **New page** (`primary`, `rounded-control`). A filter field below (`muted`, `rounded-row`). There is no import button; see [Import](#import). |
 | Folder tree | Scrolls inside the card. See [Folder tree](#folder-tree). |
@@ -166,6 +166,7 @@ WCAG 2 contrast ratios, computed from `theme.css` with translucent fills composi
 | status-draft fg / bg | 4.6 | 9.5 | 9.1 | 10.8 |
 | note fg / bg | 7.9 | 11.1 | 10.6 | 11.6 |
 | draft-dot / card (non-text) | 3.2 | 8.1 | 8.1 | 9.0 |
+| update-dot / background or card, the lower (non-text) | 4.6 | 6.8 | 6.8 | 7.6 |
 | scrollbar thumb / card (non-text) | 3.6 | 4.3 | 4.4 | 4.4 |
 
 The exploration mocks' light palette failed AA in three places. `theme.css` fixes them, so light differs slightly from what was reviewed:
@@ -195,7 +196,7 @@ Banner toolbar: worst-case ratio of `glass-foreground` over `glass` composited o
 
 Every token, with values per palette, is in [`theme.css`](design/theme.css) and shown as swatches in the reference mock. Names follow shadcn, so generated components (`bg-background`, `text-muted-foreground`, `bg-primary`, `border-input`, `ring-ring`) work unchanged. Note that shadcn's `accent` means hover surface, not brand color; the brand color is `primary`.
 
-WikiStow additions: `subtle-foreground`, `primary-2`, `primary-soft`, `primary-ink`, `strong`, `status-published`, `status-draft`, `draft-dot`, `note`, `table`, `table-head`, `tree-guide`, `glass`, `folder-{green,orange,blue,pink,purple}`, `cover`, `card-shadow`. Palette-independent: `banner-{sunrise,ocean,meadow,lavender,dusk,stone}`, plus the optional `cover-focal` set per page.
+WikiStow additions: `subtle-foreground`, `primary-2`, `primary-soft`, `primary-ink`, `strong`, `status-published`, `status-draft`, `draft-dot`, `update-dot`, `note`, `table`, `table-head`, `tree-guide`, `glass`, `folder-{green,orange,blue,pink,purple}`, `cover`, `card-shadow`. Palette-independent: `banner-{sunrise,ocean,meadow,lavender,dusk,stone}`, plus the optional `cover-focal` set per page.
 
 Radii: `rounded-card` 18px, `rounded-tile` 14px, `rounded-control` 12px, `rounded-row` 10px, `rounded-folder` 9px, and `rounded-full` for pills and avatars.
 

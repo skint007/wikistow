@@ -60,6 +60,7 @@
   --status-draft: #fff3d6;
   --status-draft-foreground: #9a6200;
   --draft-dot: #d97706;           /* tree marker for unpublished changes; 3:1 against white */
+  --update-dot: #2563eb;          /* desktop app: a newer release is out, on the account avatar */
 
   --note: #fff7c2;
   --note-foreground: #5c4a00;
@@ -119,6 +120,7 @@
   --status-draft: rgba(251, 191, 36, 0.12);
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
+  --update-dot: #60a5fa;
 
   --note: #2b2a17;
   --note-foreground: #efe2a0;
@@ -178,6 +180,7 @@
   --status-draft: rgba(251, 191, 36, 0.13);
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
+  --update-dot: #60a5fa;
 
   --note: #352d13;
   --note-foreground: #f3e3a3;
@@ -237,6 +240,7 @@
   --status-draft: rgba(251, 191, 36, 0.12);
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
+  --update-dot: #60a5fa;
 
   --note: #2a2614;
   --note-foreground: #efe2a0;
@@ -305,6 +309,7 @@
   --color-status-draft: var(--status-draft);
   --color-status-draft-foreground: var(--status-draft-foreground);
   --color-draft-dot: var(--draft-dot);
+  --color-update-dot: var(--update-dot);
   --color-note: var(--note);
   --color-note-foreground: var(--note-foreground);
   --color-table: var(--table);
