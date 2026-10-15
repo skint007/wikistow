@@ -33,6 +33,7 @@ import { keyHash, sameKeys, sign, verifySignature, type PrivateIdentity } from '
 import type { InstallationId } from './ids.ts';
 import type { JsonPathPattern } from './json.ts';
 import { Format } from './payload.ts';
+import { withPluginChange, type PluginChange } from './plugin-approvals.ts';
 import { sodium } from './sodium.ts';
 import { verifyEnrollment } from './trust.ts';
 
@@ -578,7 +579,14 @@ export type ContactsChange =
     }
   | { kind: 'accept-owner'; spaceId: SpaceId; owner: AcceptedOwner }
   | { kind: 'remove-owner'; spaceId: SpaceId; ownerId: string }
-  | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner };
+  | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner }
+  /**
+   * Library plugins (`PLUGINS_NAMESPACE`), merged per plugin, the last write
+   * standing: an approval sets the whole entry; a change sets its fields if
+   * the entry is still there, so a plugin removed on another device stays
+   * removed; a removal drops it.
+   */
+  | PluginChange;
 
 export type ContactsPayloads = { shared: SharedContacts; private: PrivateContacts };
 
@@ -776,6 +784,12 @@ export function applyContactsChange(
           removedOwners: entry.removedOwners.filter((id) => id !== change.owner.id),
         };
       });
+    case 'plugin-approve':
+    case 'plugin-change':
+    case 'plugin-remove': {
+      const own = withPluginChange(base.private, change);
+      return own === base.private ? base : { shared, private: own };
+    }
     default: {
       const _exhaustive: never = change;
       return _exhaustive;

@@ -1001,6 +1001,14 @@ privateKey (field)   = base64url(crypto_box_seal(privateKey, owner.boxPublicKey)
 - **Uniqueness.** Each list has a key, and two items with one key make the payload `malformed`: `contacts` by identity ID; `labels` by `id`, and by `email`; `agents` by agent ID, and by `label.name`; `spaceOwners` by `spaceId`.
 - **Sets.** `removed` (by `keyHash`), `revokedAgents` (by `agentId`), an agent's `shares` (by `{spaceId, shareId}`; two items with one key and different `drafts` make the payload `malformed`), and a space's `owners` (by `{id, keyHash}`) and `removedOwners` (by ID) are sets: writers sort and deduplicate them, and readers ignore order and duplicates.
 - Both payloads are loose, have an `extensions` map, and follow the format rules of section 5.5. A writer never writes a payload it would read as `malformed`.
+- **`wikistow.plugins`**, in the private payload's `extensions`, holds the library plugins the person approved ([ADR 0002](../docs/adr/0002-plugin-library-and-browser-plugins.md), `plugin-approvals.ts`), so they follow the person to every device and agents can't read them:
+
+  ```
+  { plugins: [ { id: PluginId, hash: hex SHA-256 (64 characters), enabled: boolean,
+                 access: [ { spaceId, folderId: FolderId | null, access: "read" | "write" } ] } ] }
+  ```
+
+  One entry per plugin `id`. `hash` names the approved version in the server's library; a device runs only that version. `access` is the plugin access the person gave: a whole space when `folderId` is null, otherwise that folder and what is under it. The runtime caps it at the approved version's manifest `access`. An entry a client can't parse is skipped when reading and kept when writing, and so are fields it doesn't know, in an entry, a scope or beside `plugins` (section 5.5). Folder and development installs on the desktop keep their approvals in the device's `plugins.json`, not here.
 
 ### 8.3 Pinning
 
@@ -1053,12 +1061,15 @@ On conflict, the client fetches the newer record, verifies it, and **re-applies 
 | accept an owner | Add `{id, keyHash}` to that space's `owners`, unless the ID is in its `removedOwners`. |
 | remove an owner | Add the ID to that space's `removedOwners`. Keep the `owners` entries, which opening still uses (section 6.5). |
 | add a co-owner | Remove the ID from that space's `removedOwners`, and add `{id, keyHash}` to its `owners`. |
+| approve a library plugin | Set its whole `wikistow.plugins` entry: `hash`, `enabled: true` and `access`, replacing any entry for that ID. |
+| update, change access, turn on or off | Set only that field of the plugin's entry. No-op if the newer record has no entry for it: a plugin removed on another device stays removed. |
+| remove a library plugin | Drop its entry. |
 
-**`removedOwners` is a union** across devices, as `removed` is for pins: only this person's own "add a co-owner" takes an entry out, as only a pin takes a `removed` entry out. Each change is re-applied on top of the newer record, so when two devices disagree about an owner, the change written last stands, by the order of the record's versions, never by a clock.
+**`removedOwners` is a union** across devices, as `removed` is for pins: only this person's own "add a co-owner" takes an entry out, as only a pin takes a `removed` entry out. Each change is re-applied on top of the newer record, so when two devices disagree about an owner, or about one field of a plugin's entry, the change written last stands, by the order of the record's versions, never by a clock. Plugin changes never stop to ask.
 
 **Confirmed writes.** Adding an agent to `revokedAgents`, adding a share to an agent's `shares` or changing its `drafts`, and adding an owner to `removedOwners` are confirmed: the client writes the version, re-reads the record, and goes on only if the served version holds the change (section 9).
 
-**When to write.** Clients write the record when they pin, confirm, decline, rename or unpin a key; enroll, rename, grant, change the role of, or revoke an agent; and accept, add or remove an owner. The CLI never writes it.
+**When to write.** Clients write the record when they pin, confirm, decline, rename or unpin a key; enroll, rename, grant, change the role of, or revoke an agent; accept, add or remove an owner; and approve, update, change the access of, turn on or off, or remove a library plugin. The CLI never writes it.
 
 ---
 
