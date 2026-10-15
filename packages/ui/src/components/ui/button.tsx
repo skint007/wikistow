@@ -9,7 +9,7 @@ import { Slot } from 'radix-ui';
 // the fill (`tint`, in app.css), and a press nudges the button down a pixel, so a tap gives
 // feedback where there's no hover.
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:saturate-50 aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:saturate-50 aria-disabled:opacity-50 aria-disabled:shadow-none aria-disabled:saturate-50 aria-disabled:hover:bg-none aria-disabled:active:translate-y-0 aria-disabled:active:bg-none aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {

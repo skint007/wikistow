@@ -157,15 +157,16 @@ WCAG 2 contrast ratios, computed from `theme.css` with translucent fills composi
 | --- | --- | --- | --- | --- |
 | foreground / card | 14.3 | 14.1 | 14.1 | 17.5 |
 | subtle-foreground / card | 5.8 | 7.9 | 7.9 | 9.0 |
-| muted-foreground / card | 5.4 | 5.0 | 5.3 | 5.3 |
-| muted-foreground / muted | 4.8 | 4.5 | 4.7 | 4.7 |
+| muted-foreground / card | 5.4 | 6.0 | 6.2 | 6.3 |
+| muted-foreground / card, hover tint | 4.8 | 4.8 | 4.9 | 5.2 |
+| muted-foreground / muted | 4.8 | 5.3 | 5.6 | 5.7 |
 | primary-ink / primary-soft | 4.7 | 9.1 | 7.2 | 8.6 |
 | primary-foreground / primary | 4.8 | 9.2 | 7.3 | 6.9 |
 | status-published fg / bg | 4.7 | 9.7 | 9.7 | 11.2 |
 | status-draft fg / bg | 4.6 | 9.5 | 9.1 | 10.8 |
 | note fg / bg | 7.9 | 11.1 | 10.6 | 11.6 |
 | draft-dot / card (non-text) | 3.2 | 8.1 | 8.1 | 9.0 |
-| scrollbar thumb / card (non-text) | 3.6 | 3.7 | 3.8 | 3.8 |
+| scrollbar thumb / card (non-text) | 3.6 | 4.3 | 4.4 | 4.4 |
 
 The exploration mocks' light palette failed AA in three places. `theme.css` fixes them, so light differs slightly from what was reviewed:
 
@@ -175,7 +176,7 @@ The exploration mocks' light palette failed AA in three places. `theme.css` fixe
 | `primary-foreground` (white) on `primary` | `#f2643d` | 3.2 | `#c8461a` | 4.8 |
 | `draft-dot` on white | `#f59e0b` | 2.1 | `#d97706` | 3.2 |
 
-Slate's `muted-foreground` on `muted` sits at the AA limit. Keep muted-on-muted text to short labels such as the filter placeholder and count pills.
+The dark palettes' `muted-foreground` was lightened (slate `#7c8aa3` → `#8a98b0`, warm `#968c82` → `#a39990`, OLED `#85858f` → `#93939c`) so it stays above 4.5:1 on `card` under the hover tint (see Button states). On `muted` under the tint it falls below 4.5:1 in every palette, so keep muted-on-muted text to short labels such as the filter placeholder and count pills, and off controls that tint.
 
 Banner toolbar: worst-case ratio of `glass-foreground` over `glass` composited on each preset's colors and on solid white and black. The dark palettes' `glass` opacity was raised (slate and warm 0.55 → 0.66, OLED 0.50 → 0.62) because the reviewed values fell to about 3.5:1 over a white photo.
 
@@ -238,7 +239,7 @@ Proposed shadcn/Radix building blocks. Check each against the interaction it nee
 | Rail navigation | Buttons or links with visible labels. |
 | Folder tree | No tree primitive in Radix. Build on Collapsible for folders, with the WAI-ARIA tree pattern (`role="tree"`, roving tabindex, arrow keys, Home/End, type-ahead). Wrap in ScrollArea. |
 | New page, Edit, Publish, Done | Button (`default`, `secondary`, glass variant). Shown per the [Page views](#page-views) rules. |
-| Button states | Every button, menu trigger, tree row, and pill that clicks shares these states. Enabled buttons show they click before they're hovered: a fill (`default`, `secondary`, `destructive`), a border (`outline`), or an underline (`link`). `ghost` relies on its icon, or on its place in a toolbar or beside a dialog's main action; a text-only action anywhere else is `outline`. Hover layers the palette's `foreground` over the control's own fill (`tint` in `app.css`), and a press layers more (`tint-strong`): 6% and 12% in Light, which keeps muted text above 4.5:1 while hovered, and 9% and 17% in the dark palettes. Feedback darkens a light fill and lightens a dark one, on any surface. The `accent` hover surface is the same tint as a fill. A press also nudges a Button down 1px, which a tap shows where there's no hover. Keyboard focus is a 2px `ring` outline, 2px out. Disabled is half opacity and less saturated, with no shadow. The current page's row, rail item and admin tab, and the status pills, whose colours sit near 4.5:1, take no tint on hover; the pills underline instead. Controls that appear on hover elsewhere stay visible on touch screens. |
+| Button states | Every button, menu trigger, tree row, and pill that clicks shares these states. Enabled buttons show they click before they're hovered: a fill (`default`, `secondary`, `destructive`), a border (`outline`), or an underline (`link`). `ghost` relies on its icon, or on its place in a toolbar or beside a dialog's main action; a text-only action anywhere else is `outline`. Hover layers the palette's `foreground` over the control's own fill (`tint` in `app.css`), and a press layers more (`tint-strong`): 6% and 12% in Light, which keeps `muted-foreground` on `card` above 4.5:1 while hovered, and 9% and 17% in the dark palettes. Feedback darkens a light fill and lightens a dark one, on any surface. The `accent` hover surface is the same tint as a fill. A press also nudges a Button down 1px, which a tap shows where there's no hover. Keyboard focus is a 2px `ring` outline, 2px out. Disabled is half opacity and less saturated, with no shadow. The current page's row, rail item and admin tab, and the status pills, whose colours sit near 4.5:1, take no tint on hover; the pills underline instead. Controls that appear on hover elsewhere stay visible on touch screens. |
 | Share and access | Dialog listing people with their access: Reader, Editor, or Editor + publish, then agents, read-only, "via" the person they work for. Groups are not in Milestone 2 (#30). |
 | View-switching pills | Badge rendered as a button, with `aria-pressed` on the current view. |
 | Status pills | Badge with WikiStow variants: `published`, `draft`, `neutral`. |

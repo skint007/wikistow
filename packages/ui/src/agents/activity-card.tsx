@@ -45,7 +45,7 @@ export function AgentActivityCard({
           <span className="truncate">
             edited <Name>{title}</Name> · {ago(activity.at, new Date())}
           </span>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-subtle-foreground">
             {activity.draftOnly ? 'Draft only, not published yet' : 'In the published version'}
           </span>
         </span>

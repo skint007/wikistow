@@ -96,7 +96,7 @@
   --ring: #2dd4bf;
 
   --muted: #1a2436;
-  --muted-foreground: #7c8aa3;
+  --muted-foreground: #8a98b0;    /* lightened from #7c8aa3 to stay above 4.5:1 under the hover tint */
   --subtle-foreground: #a3b0c6;
   --secondary: #1a2436;
   --secondary-foreground: #e2e8f0;
@@ -155,7 +155,7 @@
   --ring: #ff7a50;
 
   --muted: #272320;
-  --muted-foreground: #968c82;
+  --muted-foreground: #a39990;
   --subtle-foreground: #b8aea4;
   --secondary: #272320;
   --secondary-foreground: #eee7df;
@@ -214,7 +214,7 @@
   --ring: #a78bfa;
 
   --muted: #1a1a1e;
-  --muted-foreground: #85858f;
+  --muted-foreground: #93939c;
   --subtle-foreground: #b0b0b8;
   --secondary: #1a1a1e;
   --secondary-foreground: #f4f4f5;
