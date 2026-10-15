@@ -207,7 +207,7 @@ function SpaceTiles({
                 aria-current={active ? 'page' : undefined}
                 title={plainText(name)}
                 className={cn(
-                  'grid size-11 place-items-center rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong',
+                  'grid size-11 place-items-center rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
                   active && 'bg-primary-soft ring-2 ring-primary',
                 )}
               >

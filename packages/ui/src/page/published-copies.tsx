@@ -353,7 +353,7 @@ function CopyItem({
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={busy}
               onClick={() => {
                 setConfirming(false);

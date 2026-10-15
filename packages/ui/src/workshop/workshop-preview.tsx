@@ -477,7 +477,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
               {version.plugin && running?.version !== version.version && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => void act(async () => (await workshop.load(version.version), null))}
                 >
                   Preview

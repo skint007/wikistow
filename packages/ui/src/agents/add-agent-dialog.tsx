@@ -551,7 +551,7 @@ function NameAndPicks({
               }}
             />
             <div>
-              <Button size="sm" variant="ghost" onClick={() => setAddingPick(false)}>
+              <Button size="sm" variant="outline" onClick={() => setAddingPick(false)}>
                 Cancel
               </Button>
             </div>

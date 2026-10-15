@@ -23,6 +23,10 @@
   --tint-hover: 9%;
   --tint-pressed: 17%;
 }
+/* Over the banner's glass, whose text keeps 4.5:1 over a white image while hovered. */
+.glass {
+  --tint-hover: 6%;
+}
 @utility tint {
   --tint: color-mix(in oklab, var(--foreground) var(--tint-hover), transparent);
   background-image: linear-gradient(var(--tint), var(--tint));

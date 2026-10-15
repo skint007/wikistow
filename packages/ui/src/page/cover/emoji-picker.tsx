@@ -43,7 +43,7 @@ export function EmojiPicker({
             aria-label={`Change emoji ${emoji}`}
             className={cn(
               badgeClass,
-              'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed focus-visible:outline-ring',
+              'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
             )}
           >
             {emoji}

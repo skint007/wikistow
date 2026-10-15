@@ -212,7 +212,12 @@ export function AgentCard({ agent, onRevoke }: { agent: ListedAgent; onRevoke: (
                 }
               />
               <div>
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => setAdding(false)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setAdding(false)}
+                >
                   Cancel
                 </Button>
               </div>
