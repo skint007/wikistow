@@ -177,7 +177,6 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
   };
   return (
     <form
-      aria-busy={running}
       className="grid gap-2 border-t p-3"
       onSubmit={(event) => {
         event.preventDefault();

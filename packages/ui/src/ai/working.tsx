@@ -6,7 +6,8 @@ const DOTS = ['[animation-delay:0ms]', '[animation-delay:150ms]', '[animation-de
  * Says the assistant is working on a message, from the moment it's sent
  * until the reply ends, fails or is stopped. The live region stays mounted,
  * so screen readers hear it once as work starts; with reduced motion the
- * dots hold still.
+ * dots hold still. Keep it out of an `aria-busy` subtree, which screen
+ * readers may keep quiet until it's no longer busy.
  */
 export function Working({ working }: { working: boolean }) {
   return (

@@ -611,7 +611,6 @@ function Composer({
   };
   return (
     <form
-      aria-busy={busy}
       className="grid gap-2 border-t p-3"
       onSubmit={(event) => {
         event.preventDefault();
