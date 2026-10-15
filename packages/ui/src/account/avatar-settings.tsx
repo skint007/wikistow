@@ -77,12 +77,15 @@ export function AvatarSettings() {
   const input = useRef<HTMLInputElement>(null);
   const [chosen, setChosen] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | undefined>(undefined);
+  // Whether the chosen file decoded; it can't be saved before.
+  const [drawable, setDrawable] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
   // The chosen file as a local address for its preview, released when it
   // goes. A file this browser can't draw is dropped: saved, it would only
   // ever show as initials.
   useEffect(() => {
+    setDrawable(false);
     if (!chosen) {
       setPreview(undefined);
       return;
@@ -92,14 +95,19 @@ export function AvatarSettings() {
     let current = true;
     const probe = new Image();
     probe.src = url;
-    probe.decode().catch(() => {
-      if (!current) return;
-      setChosen(null);
-      setStatus({
-        kind: 'failed',
-        text: 'This image is damaged or can’t be shown. Choose another.',
-      });
-    });
+    probe.decode().then(
+      () => {
+        if (current) setDrawable(true);
+      },
+      () => {
+        if (!current) return;
+        setChosen(null);
+        setStatus({
+          kind: 'failed',
+          text: 'This image is damaged or can’t be shown. Choose another.',
+        });
+      },
+    );
     return () => {
       current = false;
       URL.revokeObjectURL(url);
@@ -179,7 +187,7 @@ export function AvatarSettings() {
         <div className="flex flex-wrap gap-2">
           {chosen ? (
             <>
-              <Button disabled={busy} onClick={() => void save()}>
+              <Button disabled={busy || !drawable} onClick={() => void save()}>
                 Save avatar
               </Button>
               <Button
