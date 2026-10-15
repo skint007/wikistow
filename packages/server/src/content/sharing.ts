@@ -787,10 +787,12 @@ export async function addMember(
       must: lacks ? [member.identityId] : [],
       addedBy: input.accountId,
     });
-    // An app from before groups shares again with someone there only
-    // through groups by repeating their row: that grants nothing directly.
+    // An app from before groups shares again after a key change with
+    // someone there only through groups by repeating their row: that
+    // grants nothing directly.
     const repeated =
       existing?.directRole === null &&
+      existing.keyVersion !== member.keyVersion &&
       existing.role === member.role &&
       existing.canPublish === member.canPublish;
     if (!repeated) {
