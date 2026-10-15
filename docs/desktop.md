@@ -1,10 +1,16 @@
 # WikiStow desktop app
 
-The desktop app is the same WikiStow you use in the browser, packaged for Linux. It runs on Arch's system Electron (`electron44`), so the package itself is only the app's code.
+The desktop app is the same WikiStow you use in the browser, packaged for Linux on x86_64. The Arch package runs on Arch's system Electron (`electron44`), so it is only the app's code. Debian, Ubuntu and Fedora don't package that Electron, so the `.deb` and `.rpm` bring their own copy.
 
 ## Install
 
-On Arch Linux, install [`wikistow-desktop-bin`](https://aur.archlinux.org/packages/wikistow-desktop-bin) from the AUR. It installs the app CI built and tested for the newest release, checked against the release's checksum, and runs it on Arch's `electron44`. With an AUR helper such as `yay` or `paru`:
+Each [GitHub Release](https://github.com/skint007/wikistow/releases) has the app as a `.deb`, an `.rpm`, and `wikistow-desktop-<version>.tar.gz`, the archive the Arch package installs ([releasing](releasing.md#the-desktop-downloads)). Once it's installed, start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
+
+The app never updates itself; your package manager does. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
+
+### Arch Linux
+
+Install [`wikistow-desktop-bin`](https://aur.archlinux.org/packages/wikistow-desktop-bin) from the AUR. It installs the app CI built and tested for the newest release, checked against the release's checksum, and runs it on Arch's `electron44`. With an AUR helper such as `yay` or `paru`:
 
 ```sh
 yay -S wikistow-desktop-bin
@@ -18,11 +24,29 @@ cd wikistow-desktop-bin
 makepkg -si
 ```
 
-The app never updates itself; your package manager does. `pacman -Syu` alone doesn't update AUR packages. Your AUR helper's update, such as `yay -Syu`, does. Without a helper, run `git pull` in that folder and `makepkg -si` again. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were.
+`pacman -Syu` alone doesn't update AUR packages. Your AUR helper's update, such as `yay -Syu`, does. Without a helper, run `git pull` in that folder and `makepkg -si` again.
 
-Each [GitHub Release](https://github.com/skint007/wikistow/releases) also has the built app, `wikistow-desktop-<version>.tar.gz`, with its `SHA256SUMS` ([releasing](releasing.md#the-desktop-download)).
+### Debian, Ubuntu and Fedora
 
-Start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
+The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it. apt and dnf install what it depends on.
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+sudo apt install ./wikistow-desktop-<version>-amd64.deb     # Debian, Ubuntu
+sudo dnf install ./wikistow-desktop-<version>-x86_64.rpm    # Fedora
+```
+
+A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and `dnf upgrade` never see a newer one. To update, download the new release's package and install it the same way; it replaces the old version. To hear about new releases, use **Watch → Custom → Releases** on the [repository](https://github.com/skint007/wikistow). The packages aren't signed. The checksum shows the download matches what the release published.
+
+To remove the app, run `sudo apt remove wikistow-desktop` or `sudo dnf remove wikistow-desktop`. `apt purge` also keeps `~/.config/WikiStow`.
+
+These packages carry their own Electron, so your distribution's security updates don't reach it. Each WikiStow release bundles the newest Electron 44 patch, and a new WikiStow release follows each Electron security fix ([releasing](releasing.md#the-deb-and-rpm)). Updating the app is how you get those fixes.
+
+Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is installed setuid root, as Google Chrome's package does. Chromium uses it where it can't sandbox the app with user namespaces, as on Ubuntu 24.04 and later.
+
+### How it was installed
+
+Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app can read it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. A development build has no such file.
 
 ## Signing in
 
@@ -79,10 +103,10 @@ xdg-mime default wikistow-dev.desktop x-scheme-handler/wikistow
 
 The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
 
-1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build, and the AUR package installs that same archive.
+1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build. Every package installs that same build.
 2. Keep the AUR key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment.
-3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history.
+3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history. With a `.deb` or `.rpm`, install the older release's package with `sudo apt install --allow-downgrades ./<file>.deb` or `sudo dnf downgrade ./<file>.rpm`. It stays until you install a newer one.
 
-The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. Later releases must keep versions increasing.
+The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. The `.deb` and `.rpm` are `wikistow-desktop` at the release's version, with package release `1`. A prerelease such as `0.3.0-rc.1` becomes `0.3.0~rc.1` there, which apt and dnf sort before `0.3.0`. Later releases must keep versions increasing.
 
 The account menu ends with the version running. A release shows its version, as `0.2.0`. A build of any other commit adds the first 8 characters of that commit, as `0.2.0+5b9e5ec4`.
