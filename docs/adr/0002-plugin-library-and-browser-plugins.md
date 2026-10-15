@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # A plugin library on the server, and plugins in the browser
@@ -12,7 +12,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 - Plugins can come from the server's library as well as from a folder. Folder installs and development loading stay, on the desktop only.
 - Approvals of library plugins, with their page access and on/off state, are kept per account and follow the person. Folder and development installs stay per device.
-- In the browser, and if approved for the desktop too (see Decisions to make), a script's worker runs in a sandboxed frame, not on the app's origin. Its consequence about needing "an origin of its own" is met by an opaque origin, not a `wikistow-plugin:` scheme.
+- In the browser, and on the desktop too (in its own PR), a script's worker runs in a sandboxed frame, not on the app's origin. Its consequence about needing "an origin of its own" is met by an opaque origin, not a `wikistow-plugin:` scheme.
 - The app's CSP gains `frame-src 'self'`. Nothing else in it changes.
 
 ## Decisions
@@ -90,15 +90,17 @@ WebKit sending the session cookie means the frame's `default-src 'none'` is the 
 - The library's files are plain text on the server and in its backups.
 - Browser checks belong in `apps/web/e2e`: a script can't open IndexedDB or reach the server, and a script in a loop is stopped while the page keeps answering.
 
-## Decisions to make
+## Decided (2026-10-15)
 
-1. The sandbox: an opaque frame holding `data:` module workers (recommended), or a plugin subdomain.
-2. Whether the desktop runs scripts through the same frame, so there is one path and nothing to empty at lock (recommended, checked under `app://` in its own PR), or keeps today's same-origin worker.
-3. Who uploads and removes: any member uploads, the first uploader owns an ID, the owner or an admin removes (recommended).
-4. Limits: 10 MB and 500 files per version, `script` at most 1 MB (recommended).
-5. Approvals in the contacts record's owner-only part (recommended), or a record of their own.
-6. Library plugins on or off, and their access, per account rather than per device, with the desktop installing approved ones at unlock (recommended).
-7. The browser trusting the server for plugin files as for the app's code, without hashing them (recommended); the desktop always checks.
+Scott approved every recommendation:
+
+1. The sandbox is an opaque frame holding `data:` module workers, not a plugin subdomain.
+2. The desktop runs scripts through the same frame, so there is one path and nothing to empty at lock, checked under `app://` in its own PR.
+3. Any member uploads, the first uploader owns an ID, and the owner or an admin removes.
+4. Limits are 10 MB and 500 files per version, and `script` at most 1 MB.
+5. Approvals live in the contacts record's owner-only part.
+6. Library plugins' on or off and their access are per account, with the desktop installing approved ones at unlock.
+7. The browser trusts the server for plugin files as for the app's code, without hashing them; the desktop always checks.
 
 ## Implementation, in pull requests
 
@@ -107,6 +109,6 @@ WebKit sending the session cookie means the frame's `default-src 'none'` is the 
 3. **The sandbox:** `plugin-host.html` and its script, `frame-src 'self'`, the middleware exceptions, `ScriptWorker` over a port. Browser e2e for isolation and stopping a loop.
 4. **Plugins in the browser:** a library `RuntimeSource` for the runtime, Settings → Plugins with the library, approval dialog, updates and removal, upload from a folder, safe mode in the browser, checked on a phone-sized screen. Spec and this ADR's status updated.
 5. **Desktop and the library:** listing and approving there, installing approved plugins at unlock with the hash check, sharing an installed plugin or workshop version to the library.
-6. **If decision 2 is yes:** desktop scripts through the frame, dropping the storage emptying at lock.
+6. **Desktop scripts through the frame,** dropping the storage emptying at lock.
 
 1, 2 and 3 are independent; 4 needs all three; 5 needs 1 and 2.
