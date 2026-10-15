@@ -27,8 +27,8 @@ const marksAd = (installationId: InstallationId, identity: PrivateIdentity) =>
   canonical('trust-marks/v1', [installationId, identity.public.id]);
 
 /**
- * What the desktop app keeps between launches (#3), as the CLI does in its
- * local state: the contacts mark (section 8.5), the No going back marks
+ * What the desktop app keeps between launches with a trusted keyring (#3),
+ * as the CLI does in its local state: the contacts mark (section 8.5), the No going back marks
  * (section 6.8), and the `restoredAt` of the server's last restore it has
  * seen (`unseenRestore`). Held in memory and written back whole, sealed for
  * this person on this server (`sealOnDevice`), on every change. Writes go

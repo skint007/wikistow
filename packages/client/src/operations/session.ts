@@ -40,8 +40,8 @@ export type ClientContext = {
   /** Opened revisions in memory only, dropped when access changes or the session locks. */
   revisions: RevisionCache;
   /**
-   * The No going back marks (section 6.8): the browser keeps them for one
-   * session, the desktop app between launches (`kept`).
+   * The No going back marks (section 6.8): kept for one session, or between
+   * launches by the desktop app with a trusted keyring (`kept`).
    */
   marks: KeyVersionMarks;
   /**
