@@ -101,6 +101,14 @@ export type DesktopBridge = {
   rememberedVault(accountId: string): Promise<Uint8Array | null>;
   /** Stop unlocking the vault at launch. */
   forgetVault(): Promise<void>;
+  /**
+   * The search index kept from an earlier launch, as the pages sealed it
+   * (`sealKept`), or null. Kept only with a trusted secret store, and
+   * deleted at sign-out and at a new sign-in.
+   */
+  searchIndex(): Promise<Uint8Array | null>;
+  /** Keep this sealed search index, in place of the one kept. */
+  keepSearchIndex(sealed: Uint8Array): Promise<void>;
   /** The plugins on this computer, and whether safe mode is on. */
   plugins(): Promise<PluginsState>;
   /**
@@ -164,6 +172,8 @@ export const DESKTOP_CHANNELS = {
   rememberVault: 'wikistow:remember-vault',
   rememberedVault: 'wikistow:remembered-vault',
   forgetVault: 'wikistow:forget-vault',
+  searchIndex: 'wikistow:search-index',
+  keepSearchIndex: 'wikistow:keep-search-index',
   plugins: 'wikistow:plugins',
   pickPlugin: 'wikistow:pick-plugin',
   approvePlugin: 'wikistow:approve-plugin',

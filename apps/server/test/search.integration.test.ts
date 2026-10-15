@@ -3,6 +3,7 @@ import {
   pageOperations as pages,
   searchOperations as search,
   type ClientContext,
+  type SearchIndex,
 } from '@wikistow/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
@@ -44,6 +45,9 @@ const hits = async (ctx: ClientContext, query: string) =>
     snippet: snippet().text,
   }));
 
+const found = (index: SearchIndex<search.SearchPage>, query: string) =>
+  index.search(query).map(({ doc }) => doc.pageId);
+
 describe('a search index', () => {
   it('holds only published text for a reader, never a draft, and an editor’s drafts', async () => {
     const { bob, ed, lib } = await shared();
@@ -51,6 +55,7 @@ describe('a search index', () => {
       {
         spaceId: lib.spaceId,
         pageId: lib.page.pageId,
+        revisionId: expect.any(String),
         // Bob holds a folder, not the space: its name isn't his to read.
         path: ['Shared'],
         draft: false,
@@ -66,6 +71,29 @@ describe('a search index', () => {
     expect(await hits(ed.ctx, DRAFT_ONLY)).toMatchObject([
       { pageId: lib.page.pageId, draft: true },
     ]);
+  });
+
+  it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {
+    const { bob, ed, lib } = await shared();
+    // Kept text stands in for the version's, so what was opened again shows.
+    const kept = new Map(
+      [...search.keptPages(await search.indexSpaces(ed.ctx))].map(([id, page]) => [
+        id,
+        { ...page, text: 'kept words' },
+      ]),
+    );
+    const sealed = search.sealKept(ed.ctx, kept, '1.0.0');
+    expect(search.openKept(bob.ctx, sealed, '1.0.0')).toBeNull();
+    expect(search.openKept(ed.ctx, sealed, '1.0.1')).toBeNull();
+    const opened = search.openKept(ed.ctx, sealed, '1.0.0');
+    expect(opened).toEqual(kept);
+    expect(found(await search.indexSpaces(ed.ctx, { kept: opened }), 'kept')).toEqual([
+      lib.page.pageId,
+    ]);
+    await pages.editDraft(ed.ctx, lib.page, { markdown: 'changed words' });
+    const next = await search.indexSpaces(ed.ctx, { kept: opened });
+    expect(found(next, 'kept')).toEqual([]);
+    expect(found(next, 'changed')).toEqual([lib.page.pageId]);
   });
 
   it('is abandoned when the vault locks while it is built', async () => {
