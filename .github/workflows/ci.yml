@@ -284,8 +284,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Tags, not digests, to check each distribution as its users have it.
-        image: ['debian:13', 'ubuntu:24.04', 'ubuntu:26.04', 'fedora:43', 'fedora:44']
+        # Pinned like the other images. apt and dnf still install each
+        # distribution's current packages.
+        image:
+          - debian:13@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+          - ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+          - ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+          - fedora:43@sha256:a651ddf48ea28a06ed4e1e6519f51c9f47e7a5a138722ade87369b8fbb7e5b42
+          - fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
