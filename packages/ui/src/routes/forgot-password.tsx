@@ -53,7 +53,7 @@ function ForgotPassword() {
           <Button type="submit" disabled={isSubmitting}>
             Send reset link
           </Button>
-          <Link to="/sign-in" className="text-sm text-muted-foreground">
+          <Link to="/sign-in" className="text-sm quiet-link">
             Back to sign in
           </Link>
         </form>

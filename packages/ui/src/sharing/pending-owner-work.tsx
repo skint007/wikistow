@@ -138,7 +138,7 @@ export function PendingOwnerWork() {
               type="button"
               aria-expanded={unfolded}
               onClick={() => setUnfolded((open) => !open)}
-              className="rounded-control px-2 py-1 text-xs font-bold text-primary-ink hover:tint active:tint-strong min-[900px]:hidden"
+              className="rounded-control px-2 py-1 text-xs font-bold text-primary-ink underline decoration-current/40 underline-offset-2 hover:tint active:tint-strong min-[900px]:hidden"
             >
               {unfolded ? 'Hide' : 'Show'}
             </button>
