@@ -192,7 +192,9 @@ export const removeFromSpace = {
  * People waiting for keys in the spaces the caller owns (section 7.9):
  * each share where someone's access, directly or through groups, is more
  * than the keys they hold at their current key. `holds` is what they hold
- * there now: null for nothing, or keys at an older identity key version.
+ * there now: null for nothing, keys at an older identity key version
+ * (their key changed), or a reader's keys at their current key (they wait
+ * only for draft keys).
  */
 export const waiting = {
   method: 'GET',

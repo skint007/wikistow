@@ -453,7 +453,7 @@ export async function addOwner(
           ),
         );
     }
-    await tx
+    const left = await tx
       .delete(groupMembers)
       .where(
         and(
@@ -463,7 +463,16 @@ export async function addOwner(
             tx.select({ id: groups.id }).from(groups).where(eq(groups.spaceId, input.spaceId)),
           ),
         ),
-      );
+      )
+      .returning({ groupId: groupMembers.groupId });
+    for (const { groupId } of left) {
+      await audit(tx, {
+        actor: input.accountId,
+        action: 'group.member-removed',
+        target: { kind: 'group', id: groupId },
+        details: { identityId: added.id },
+      });
+    }
     await storeFolderEnvelopes(tx, input.folderKeyEnvelopes);
     for (const [kind, envelopes] of [
       ['revision', input.keyEnvelopes.map((e) => ({ id: e.revisionId, envelope: e }))],

@@ -787,12 +787,20 @@ export async function addMember(
       must: lacks ? [member.identityId] : [],
       addedBy: input.accountId,
     });
-    await tx
-      .update(shareMembers)
-      .set({ directRole: member.role, directCanPublish: member.canPublish })
-      .where(
-        and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, member.identityId)),
-      );
+    // An app from before groups shares again with someone there only
+    // through groups by repeating their row: that grants nothing directly.
+    const repeated =
+      existing?.directRole === null &&
+      existing.role === member.role &&
+      existing.canPublish === member.canPublish;
+    if (!repeated) {
+      await tx
+        .update(shareMembers)
+        .set({ directRole: member.role, directCanPublish: member.canPublish })
+        .where(
+          and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, member.identityId)),
+        );
+    }
     await recomputeMembers(tx, [share.id]);
     await bumpPermissions(tx, share.spaceId, await nodesUnder(tx, share.spaceId, share.rootId));
     await audit(tx, {
