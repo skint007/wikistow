@@ -1008,7 +1008,7 @@ privateKey (field)   = base64url(crypto_box_seal(privateKey, owner.boxPublicKey)
                  access: [ { spaceId, folderId: FolderId | null, access: "read" | "write" } ] } ] }
   ```
 
-  One entry per plugin `id`. `hash` names the approved version in the server's library; a device runs only that version. `access` is the plugin access the person gave: a whole space when `folderId` is null, otherwise that folder and what is under it. The runtime caps it at the approved version's manifest `access`. An entry a client can't parse is skipped when reading and kept when writing. Folder and development installs on the desktop keep their approvals in the device's `plugins.json`, not here.
+  One entry per plugin `id`. `hash` names the approved version in the server's library; a device runs only that version. `access` is the plugin access the person gave: a whole space when `folderId` is null, otherwise that folder and what is under it. The runtime caps it at the approved version's manifest `access`. An entry a client can't parse is skipped when reading and kept when writing, and so are fields it doesn't know, in an entry, a scope or beside `plugins` (section 5.5). Folder and development installs on the desktop keep their approvals in the device's `plugins.json`, not here.
 
 ### 8.3 Pinning
 

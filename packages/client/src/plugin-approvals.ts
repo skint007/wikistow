@@ -34,19 +34,28 @@ export const PluginApproval = z.object({
 });
 export type PluginApproval = z.infer<typeof PluginApproval>;
 
-const Plugins = z.looseObject({ plugins: z.array(z.json()) });
-// Just enough of an entry to know its plugin, for entries this version can't read.
-const Keyed = z.looseObject({ id: z.string() });
+type Json = PrivateContacts['extensions'][string];
+type JsonObject = { [key: string]: Json };
+
+const isObject = (value: Json | undefined): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// The stored entries as written, fields this app doesn't know included.
+const storedEntries = (own: PrivateContacts): Json[] => {
+  const stored = own.extensions[PLUGINS_NAMESPACE];
+  const plugins = isObject(stored) ? stored['plugins'] : undefined;
+  return Array.isArray(plugins) ? plugins : [];
+};
+
+const entryId = (entry: Json) => (isObject(entry) ? entry['id'] : undefined);
 
 /**
  * Every readable approval in the private payload, one per plugin, in the
  * record's order. One that doesn't parse is left out, not fatal.
  */
 export function pluginApprovals(own: PrivateContacts): PluginApproval[] {
-  const stored = Plugins.safeParse(own.extensions[PLUGINS_NAMESPACE]);
-  if (!stored.success) return [];
   const seen = new Set<string>();
-  return stored.data.plugins.flatMap((entry) => {
+  return storedEntries(own).flatMap((entry) => {
     const approval = PluginApproval.safeParse(entry);
     if (!approval.success || seen.has(approval.data.id)) return [];
     seen.add(approval.data.id);
@@ -54,28 +63,50 @@ export function pluginApprovals(own: PrivateContacts): PluginApproval[] {
   });
 }
 
+/** A change to one library plugin's approval, as `ContactsChange` merges it (section 8.6). */
+export type PluginChange =
+  /** Install, or approve again: the whole entry, turned on. */
+  | { kind: 'plugin-approve'; approval: PluginApproval }
+  /** Update (a new `hash`), change access, or turn on or off, if the entry is still there. */
+  | { kind: 'plugin-change'; pluginId: string; set: Partial<Omit<PluginApproval, 'id'>> }
+  | { kind: 'plugin-remove'; pluginId: string };
+
 /**
- * The private payload with `pluginId`'s approval replaced by what `update`
- * makes of it (null when there is none), or dropped when that is null.
- * Other plugins' entries stay as they are, unreadable ones included.
+ * The private payload with `change` applied, the same object when it
+ * changes nothing. It works on the entries as stored, so fields a newer
+ * app wrote, in an entry, its scopes or beside `plugins`, survive, and so
+ * do entries this app can't read.
  */
-export function withPluginApproval(
-  own: PrivateContacts,
-  pluginId: string,
-  update: (current: PluginApproval | null) => PluginApproval | null,
-): PrivateContacts {
-  const current = pluginApprovals(own).find((approval) => approval.id === pluginId) ?? null;
-  const next = update(current);
-  if (next === current) return own;
-  const stored = Plugins.safeParse(own.extensions[PLUGINS_NAMESPACE]);
-  const others = (stored.success ? stored.data.plugins : []).filter(
-    (entry) => Keyed.safeParse(entry).data?.id !== pluginId,
-  );
+export function withPluginChange(own: PrivateContacts, change: PluginChange): PrivateContacts {
+  const entries = storedEntries(own);
+  const pluginId = change.kind === 'plugin-approve' ? change.approval.id : change.pluginId;
+  const others = entries.filter((entry) => entryId(entry) !== pluginId);
+  let plugins: Json[];
+  switch (change.kind) {
+    case 'plugin-approve':
+      plugins = [...others, change.approval];
+      break;
+    case 'plugin-remove':
+      if (others.length === entries.length) return own;
+      plugins = others;
+      break;
+    case 'plugin-change': {
+      // The entry `pluginApprovals` reads; none means it was removed, which stands.
+      const index = entries.findIndex(
+        (entry) => entryId(entry) === pluginId && PluginApproval.safeParse(entry).success,
+      );
+      const current = entries[index];
+      if (!isObject(current)) return own;
+      plugins = entries.with(index, { ...current, ...change.set });
+      break;
+    }
+  }
+  const stored = own.extensions[PLUGINS_NAMESPACE];
   return {
     ...own,
     extensions: {
       ...own.extensions,
-      [PLUGINS_NAMESPACE]: { plugins: next ? [...others, next] : others },
+      [PLUGINS_NAMESPACE]: { ...(isObject(stored) ? stored : {}), plugins },
     },
   };
 }

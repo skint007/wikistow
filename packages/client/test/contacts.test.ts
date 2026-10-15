@@ -369,16 +369,21 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
     });
     const plugin = (payloads: ContactsPayloads, id: string) =>
       pluginApprovals(payloads.private).find((entry) => entry.id === id);
-    // Another device wrote calculator first, beside an entry from a newer app.
+    // Another device wrote calculator first. A newer app added fields this one can't read.
     const future = { id: 'future', from: 'a newer app' };
-    const theirs = applyContactsChange(
-      {
-        ...newer,
-        private: { ...newer.private, extensions: { [PLUGINS_NAMESPACE]: { plugins: [future] } } },
+    const theirs: ContactsPayloads = {
+      ...newer,
+      private: {
+        ...newer.private,
+        extensions: {
+          [PLUGINS_NAMESPACE]: {
+            plugins: [future, { ...approval('calculator', 'a'), note: 'kept' }],
+            order: 'kept',
+          },
+        },
       },
-      { kind: 'plugin-approve', approval: approval('calculator', 'a') },
-    );
-    // This device approved dusk-theme: both stand, and the entry it can't read stays.
+    };
+    // This device approved dusk-theme: both stand.
     const both = applyContactsChange(theirs, {
       kind: 'plugin-approve',
       approval: approval('dusk-theme', 'b'),
@@ -387,9 +392,6 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
       'calculator',
       'dusk-theme',
     ]);
-    expect(both.private.extensions[PLUGINS_NAMESPACE]).toMatchObject({
-      plugins: expect.arrayContaining([future]),
-    });
 
     // One plugin changed on two devices: each write sets only its own fields.
     const access = [{ spaceId, folderId: null, access: 'read' as const }];
@@ -407,6 +409,15 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
       ...approval('calculator', 'a'),
       enabled: false,
       access,
+    });
+    // What it can't read is still there.
+    expect(scoped.private.extensions[PLUGINS_NAMESPACE]).toEqual({
+      plugins: [
+        future,
+        { ...approval('calculator', 'a'), note: 'kept', enabled: false, access },
+        approval('dusk-theme', 'b'),
+      ],
+      order: 'kept',
     });
 
     // Removed on another device, it stays removed when this one updates it.
