@@ -80,13 +80,14 @@ export async function uploadPlugin(
   await store.put(hash, byPath);
   const version = await db.transaction(async (tx) => {
     await tx.insert(plugins).values({ id: manifest.id, ownerId: accountId }).onConflictDoNothing();
-    // Held until the version is in, so the plugin can't be removed meanwhile.
+    // Held until the version is in, so a removal waits for it. The row only
+    // goes with its owner's account.
     const [plugin] = await tx
       .select({ ownerId: plugins.ownerId })
       .from(plugins)
       .where(eq(plugins.id, manifest.id))
       .for('update');
-    if (!plugin) throw new ContentError('busy', 'The plugin was just removed; try again.');
+    if (!plugin) throw new Error('plugin row went with its owner');
     if (plugin.ownerId !== accountId) throw notYours();
     const [inserted] = await tx
       .insert(pluginVersions)
