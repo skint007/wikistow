@@ -9,7 +9,12 @@ export function mountSystemRoutes(
   routes.public(systemRoutes.health, () => ({ status: 'ok' as const }));
 
   routes.public(systemRoutes.installation, async () => {
-    const { installationId, publicRegistration } = await readSettings(db);
-    return { installationId, publicRegistration, origin: publicOrigin };
+    const { installationId, publicRegistration, restoredAt, backupTakenAt } =
+      await readSettings(db);
+    const restore = restoredAt && {
+      restoredAt: restoredAt.toISOString(),
+      backupTakenAt: backupTakenAt?.toISOString() ?? null,
+    };
+    return { installationId, publicRegistration, origin: publicOrigin, restore };
   });
 }

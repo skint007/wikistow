@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { cp, mkdtemp, rm, stat, truncate } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { PASSWORD } from './support/accounts.ts';
 import { PASSPHRASE, personWithVault } from './support/content.ts';
@@ -166,8 +166,19 @@ describe('Milestone 4 proofs: backup and restore', () => {
 
     // The same installation, which every client has pinned.
     expect((await readSettings(r.db)).installationId).toBe(olive.ctx.installationId);
+    // Reported as restored, from a backup taken when its name says, so
+    // clients start over from it rather than refuse it as a rollback.
     const res = await r.app.request('/api/installation');
-    expect(await res.json()).toMatchObject({ installationId: olive.ctx.installationId });
+    expect(await res.json()).toMatchObject({
+      installationId: olive.ctx.installationId,
+      restore: {
+        restoredAt: expect.any(String),
+        backupTakenAt: basename(backup).replace(
+          /^wikistow-(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/,
+          '$1-$2-$3T$4:$5:$6.000Z',
+        ),
+      },
+    });
 
     // Olive and Rita sign in with their passwords, unlock with their
     // passphrases, and open the page and its attachment with their own keys.

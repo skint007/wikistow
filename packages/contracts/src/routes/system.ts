@@ -20,5 +20,16 @@ export const installation = {
      * name it. Missing from servers older than the desktop app.
      */
     origin: z.url().optional(),
+    /**
+     * When an operator last restored a backup (`scripts/restore.sh`), and
+     * when that backup was taken, if known; null if never. Clients take what
+     * a server serves after a restore they haven't seen as their new
+     * starting point, not as a rollback (`unseenRestore`). Missing from
+     * servers older than it.
+     */
+    restore: z
+      .object({ restoredAt: z.iso.datetime(), backupTakenAt: z.iso.datetime().nullable() })
+      .nullable()
+      .optional(),
   }),
 } as const satisfies RouteDef;
