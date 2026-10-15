@@ -88,6 +88,9 @@ importers:
       '@wikistow/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@wikistow/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@wikistow/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -335,6 +338,9 @@ importers:
       '@wikistow/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@wikistow/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       better-auth:
         specifier: 1.7.7
         version: 1.7.7(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(kysely@0.29.6)(postgres@3.4.9))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.1)(vue@3.5.43(typescript@7.0.2))

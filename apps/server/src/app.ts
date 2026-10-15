@@ -1,4 +1,4 @@
-import type { BlobStore, Database } from '@wikistow/server';
+import { filePluginStore, type BlobStore, type Database } from '@wikistow/server';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { isIP } from 'node:net';
@@ -28,6 +28,7 @@ import { mountAiRoutes } from './routes/ai.ts';
 import { mountAgentRoutes } from './routes/agents.ts';
 import { mountContentRoutes } from './routes/content.ts';
 import { mountDesktopRoutes } from './routes/desktop.ts';
+import { mountPluginRoutes } from './routes/plugins.ts';
 import { mountSystemRoutes } from './routes/system.ts';
 
 /**
@@ -166,6 +167,8 @@ export function createApp({ db, config, log, deliver, blobs }: AppDeps) {
   mountAgentRoutes(routes, { db });
   mountDesktopRoutes(routes, { db, auth });
   mountAiRoutes(routes, { ai: config.ai ?? null, log });
+  // Library plugins' files live beside the attachment blobs, so backups take both.
+  mountPluginRoutes(routes, { db, plugins: filePluginStore(config.blobDir) });
   if (config.webDist) serveWebApp(app, config.webDist);
 
   app.notFound((c) => errorResponse(c, new ApiError('not-found', 'Not found')));

@@ -162,6 +162,13 @@
       "when": 1792087498531,
       "tag": "0022_restore",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792103022902,
+      "tag": "0023_plugin_library",
+      "breakpoints": true
     }
   ]
 }

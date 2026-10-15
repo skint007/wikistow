@@ -101,6 +101,7 @@ const CONTENT_ERRORS = {
   'folder-limit': 'folder-limit',
   'page-limit': 'page-limit',
   'last-owner': 'last-owner',
+  'invalid-plugin': 'invalid-request',
 } as const satisfies Record<ContentFailure, ErrorCode>;
 
 export function toApiError(error: unknown): never {
