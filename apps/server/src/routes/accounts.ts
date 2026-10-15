@@ -78,6 +78,9 @@ const REAUTH_LIMIT = { windowSeconds: 60, max: 10 };
 // Changing an avatar a few times while picking one, not filling the database.
 const AVATAR_LIMIT = { windowSeconds: 60, max: 10 };
 
+// Browsers keep each avatar for good, so a client fetching many is unusual.
+const AVATAR_FETCH_LIMIT = { windowSeconds: 60, max: 600 };
+
 // How an avatar is sent: never sniffed as another type, never framed or
 // cached under another name, and opened on its own, a sandboxed image that
 // can't run scripts or load anything. A new upload gets a new address, so
@@ -338,17 +341,21 @@ export function mountAccountRoutes(
     { rateLimit: AVATAR_LIMIT },
   );
 
-  routes.publicFile(accountRoutes.AVATAR_PATH, async (c) => {
-    const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
-    const found = id.success ? await findAvatar(db, id.data) : null;
-    if (!found) throw new ApiError('not-found', 'No such avatar');
-    // Copied into a buffer of its own, which a response body takes.
-    return c.body(new Uint8Array(found.bytes), 200, {
-      'content-type': found.contentType,
-      'content-length': String(found.bytes.byteLength),
-      'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
-      'content-security-policy': AVATAR_CSP,
-      'cache-control': 'public, max-age=31536000, immutable',
-    });
-  });
+  routes.publicFile(
+    accountRoutes.AVATAR_PATH,
+    async (c) => {
+      const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
+      const found = id.success ? await findAvatar(db, id.data) : null;
+      if (!found) throw new ApiError('not-found', 'No such avatar');
+      // Copied into a buffer of its own, which a response body takes.
+      return c.body(new Uint8Array(found.bytes), 200, {
+        'content-type': found.contentType,
+        'content-length': String(found.bytes.byteLength),
+        'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
+        'content-security-policy': AVATAR_CSP,
+        'cache-control': 'public, max-age=31536000, immutable',
+      });
+    },
+    { rateLimit: AVATAR_FETCH_LIMIT },
+  );
 }

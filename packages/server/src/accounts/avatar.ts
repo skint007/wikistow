@@ -19,9 +19,11 @@ export class AvatarRefused extends Error {
 const header = (bytes: Uint8Array, length: number) =>
   Buffer.from(bytes.subarray(0, length)).toString('latin1');
 
-// Before the root element, an SVG file may hold an XML declaration, comments
-// and whitespace; the root is then `<svg` in the SVG namespace.
-const SVG_ROOT = /^(?:\s|<\?xml\b[^>]*\?>|<!--[\s\S]*?-->)*<svg(\s[^>]*)?\/?>/;
+// Before the root element, an SVG file may hold an XML declaration, a
+// document type without declarations of its own, comments and whitespace;
+// the root is then `<svg` in the SVG namespace. `[^<>[]` keeps each scan to
+// its own tag, so these stay linear.
+const SVG_ROOT = /^(?:\s|<\?xml\b[^<>]*\?>|<!DOCTYPE\s[^<>[]*>|<!--[\s\S]*?-->)*<svg(\s[^>]*)?\/?>/;
 const SVG_NAMESPACE = /\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/;
 const LINK_ATTRIBUTE = /\s(?:xlink:)?(?:href|src)\s*=\s*(["'])([\s\S]*?)\1/gi;
 const CSS_URL = /url\(\s*(["']?)([^"')]*)/gi;
@@ -36,8 +38,11 @@ const internal = (link: string) => /^(?:#|data:)/i.test(link.trim());
  * something else is turned down with a reason rather than shown broken.
  */
 function svgProblem(text: string): string | null {
-  // A document type can declare entities and fetch outside files.
-  if (/<!DOCTYPE|<!ENTITY/i.test(text)) return 'SVG images with a DOCTYPE aren’t supported.';
+  // Declared entities can hide text from the checks below. Browsers never
+  // fetch a document type's outside file, so a plain one is fine.
+  if (/<!ENTITY|<!DOCTYPE[^<>[]*\[/i.test(text)) {
+    return 'SVG images that declare entities aren’t supported.';
+  }
   const root = SVG_ROOT.exec(text);
   if (!root) return 'This file isn’t an SVG image.';
   if (!SVG_NAMESPACE.test(root[1] ?? '')) {

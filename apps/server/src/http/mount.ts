@@ -373,9 +373,19 @@ export function createRoutes({
         }
       });
     },
-    /** Raw bytes anyone may fetch, with no session (avatars). */
-    publicFile(path: string, handler: (c: Context<AppEnv>) => Promise<Response>) {
-      app.get(path, handler);
+    /** Raw bytes anyone may fetch, with no session (avatars). Its rate limit counts per client. */
+    publicFile(
+      path: string,
+      handler: (c: Context<AppEnv>) => Promise<Response>,
+      options: Pick<Options, 'rateLimit'> = {},
+    ) {
+      app.get(path, async (c) => {
+        if (options.rateLimit && config.rateLimit) {
+          const client = rateLimitKey(clientAddress(c, config.trustProxy));
+          await enforceRateLimit(c, `GET ${path} ${client}`, options.rateLimit);
+        }
+        return handler(c);
+      });
     },
     /**
      * A signed-in route that answers with a stream of JSON lines, one
