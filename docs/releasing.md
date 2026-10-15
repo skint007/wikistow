@@ -20,9 +20,16 @@ GitHub Actions checks every change and publishes the server image and the deskto
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
 
-After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves.
+A push to `main` or a release tag also runs two more jobs, which pull requests skip for time:
 
-Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. The release's `linux-packages` job, which installs dependencies to build the `.deb` and `.rpm`, can only read. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
+| Job | What it does |
+| --- | --- |
+| `linux-packages` | Builds the `.deb` and `.rpm` from the build ([below](#the-deb-and-rpm)) |
+| `linux-packages-check` | Installs them on each supported distribution, and checks every library resolves |
+
+After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
+
+Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
 
 ## Versions
 
@@ -40,7 +47,7 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 ## Cut a release
 
 1. Open a pull request that runs `node scripts/version.ts <version>` and commits the result. If Electron has a newer patch of the major in `apps/desktop/package.json`, raise it in the same pull request ([below](#the-deb-and-rpm)). Merge it once CI passes.
-2. Tag the merged commit and push the tag:
+2. Wait for CI on the merged commit of `main`, which also builds and checks the desktop packages. Then tag that commit and push the tag:
 
    ```sh
    git tag -a v0.3.0 -m 'WikiStow 0.3.0' <commit>
@@ -49,12 +56,11 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, and that Electron is its major's newest patch.
-   2. `ci` runs every CI job on the tagged commit. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
-   3. `linux-packages` builds the `.deb` and `.rpm` from the release's build, and `linux-packages-check` installs them on each supported distribution ([below](#the-deb-and-rpm)).
-   4. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads) and their `SHA256SUMS`.
-   5. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` to the AUR ([below](#the-aur-package)).
+   2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
+   3. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads) and their `SHA256SUMS`.
+   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` to the AUR ([below](#the-aur-package)).
 
-If `verify` fails, nothing was published. Delete the tag, fix the cause, and tag again. If a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
+If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
 To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Its GitHub Release isn't marked as the latest, and the AUR package stays on the newest release. Only `main` builds get `sha-` images.
 
@@ -97,7 +103,7 @@ The Electron is the one `apps/desktop/package.json` pins, which the desktop test
 - When Electron ships a security fix, raise it and release, even with nothing else to ship.
 - Before Electron's major leaves support, move to a newer one. That changes the PKGBUILD's `electron44`, the launcher, and maybe the packages' dependencies.
 
-The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. Before publishing, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
+The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. On every push to `main` and every release, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
 
 To build them yourself, with nfpm on your `PATH`, after the build in the README:
 
@@ -105,7 +111,7 @@ To build them yourself, with nfpm on your `PATH`, after the build in the README:
 cd apps/desktop && scripts/linux-packages.sh 0.3.0 out/packages
 ```
 
-The release workflow pins nfpm's version and checksum in `linux-packages`.
+CI pins nfpm's version and checksum in `linux-packages`.
 
 ## The AUR package
 

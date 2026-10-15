@@ -6,7 +6,7 @@ The clients encrypt page content before sending it to the server. Accounts, perm
 
 ## Install the desktop app
 
-The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest). A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead. [docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
+The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead. [docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
 
 ## Run locally
 

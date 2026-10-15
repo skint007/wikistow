@@ -28,7 +28,7 @@ makepkg -si
 
 ### Debian, Ubuntu and Fedora
 
-The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it. apt and dnf install what it depends on.
+The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Releases have them from 0.3.0 on. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it. apt and dnf install what it depends on.
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
@@ -40,7 +40,7 @@ A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and 
 
 To remove the app, run `sudo apt remove wikistow-desktop` or `sudo dnf remove wikistow-desktop`. `apt purge` also keeps `~/.config/WikiStow`.
 
-These packages carry their own Electron, so your distribution's security updates don't reach it. Each WikiStow release bundles the newest Electron 44 patch, and a new WikiStow release follows each Electron security fix ([releasing](releasing.md#the-deb-and-rpm)). Updating the app is how you get those fixes.
+These packages carry their own Electron, so your distribution's security updates don't reach it. Each WikiStow release bundles the newest Electron 44 patch out when it's made, and an Electron security fix is a reason to release ([releasing](releasing.md#the-deb-and-rpm)). Updating the app is how you get those fixes.
 
 Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is installed setuid root, as Google Chrome's package does. Chromium uses it where it can't sandbox the app with user namespaces, as on Ubuntu 24.04 and later.
 
