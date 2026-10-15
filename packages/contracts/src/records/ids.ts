@@ -39,6 +39,9 @@ export type SpaceId = z.infer<typeof SpaceId>;
 /** A share: a folder or space with its own folder keys. Unique across the installation. */
 export const ShareId = id.brand<'ShareId'>();
 export type ShareId = z.infer<typeof ShareId>;
+/** A group of people in one space that shares go to as one. Made by clients. */
+export const GroupId = id.brand<'GroupId'>();
+export type GroupId = z.infer<typeof GroupId>;
 export const FolderId = id.brand<'FolderId'>();
 export type FolderId = z.infer<typeof FolderId>;
 export const PageId = id.brand<'PageId'>();

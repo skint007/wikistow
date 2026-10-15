@@ -53,6 +53,11 @@ export const shares = pgTable(
 /**
  * Everyone but the owners who holds a share's keys, with their role there
  * (section 7.1), at the identity key version their envelopes are sealed to.
+ * `role` is the keys they hold: their effective role, the highest of their
+ * direct grant and their groups' access (section 7.8), unless they wait
+ * for draft keys. `canPublish` is effective too. `directRole` and
+ * `directCanPublish` are the direct grant, null for someone here only
+ * through groups. Every change recomputes the rows it touches.
  */
 export const shareMembers = pgTable(
   'share_members',
@@ -64,6 +69,8 @@ export const shareMembers = pgTable(
     keyVersion: integer().notNull(),
     role: text({ enum: SHARE_ROLES }).notNull(),
     canPublish: boolean().notNull().default(false),
+    directRole: text({ enum: SHARE_ROLES }),
+    directCanPublish: boolean(),
     addedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamptz().notNull().defaultNow(),
   },
@@ -73,6 +80,12 @@ export const shareMembers = pgTable(
     check(
       'share_members_readers_never_publish',
       sql`${table.role} <> 'reader' or not ${table.canPublish}`,
+    ),
+    check(
+      'share_members_direct',
+      sql`(${table.directRole} is null) = (${table.directCanPublish} is null)
+        and (${table.directRole} is null or ${table.directRole} in ('reader', 'editor'))
+        and (${table.directRole} is distinct from 'reader' or not ${table.directCanPublish})`,
     ),
     check('share_members_human', sql`${table.identityId} not like 'agent-%'`),
     foreignKey({

@@ -16,12 +16,15 @@ import {
   agentGrants,
   agentProfiles,
   folderKeyEnvelopes,
+  groupMembers,
+  groups,
   keyEnvelopes,
   metadataRevisions,
   metadataWraps,
   nodes,
   revisions,
   revisionWraps,
+  shareGroups,
   shareMembers,
   shares,
   spaceOwners,
@@ -37,6 +40,14 @@ import {
   type ShareRow,
 } from './access.ts';
 import { endAgentGrants, requireOwnAgents, storeNewShareGrants } from './agents.ts';
+import {
+  groupAccess,
+  highest,
+  keysCover,
+  keysExceed,
+  recomputeMembers,
+  type Grant,
+} from './effective.ts';
 import { ContentError } from './errors.ts';
 import { lookupIdentities, requireCaller, type Actor, type Caller } from './identities.ts';
 import { revisionKeyMaterial, servedMetadata } from './serving.ts';
@@ -46,6 +57,7 @@ import { requireIdentity, shareOf } from './structure.ts';
 type Member = z.output<typeof sharingRoutes.Member>;
 type Rotation = z.output<typeof sharingRoutes.Rotation>;
 type NewAgentGrant = z.output<typeof sharingRoutes.makeShare.body>['agentGrants'][number];
+type NewGroupGrant = z.output<typeof sharingRoutes.makeShare.body>['groups'][number];
 
 /** Inserts are split so no statement passes Postgres's limit on parameters. */
 const CHUNK = 2000;
@@ -115,7 +127,7 @@ export async function nodesUnder(tx: Database, spaceId: string, rootId: string |
 /**
  * Every retained page and metadata version a share over `rootId` covers
  * (section 6.7): of every page and folder in its subtree, and for a space
- * share, the space's own name too.
+ * share, the space's own name too. Group names stay in the owner region.
  */
 export async function recordsUnder(tx: Database, spaceId: string, rootId: string | null) {
   const ids = await nodesUnder(tx, spaceId, rootId);
@@ -133,7 +145,7 @@ export async function recordsUnder(tx: Database, spaceId: string, rootId: string
       and(
         eq(metadataRevisions.spaceId, spaceId),
         rootId === null
-          ? sql`true`
+          ? inArray(metadataRevisions.subjectKind, ['space', 'folder'])
           : and(
               eq(metadataRevisions.subjectKind, 'folder'),
               ids.length === 0 ? sql`false` : inArray(metadataRevisions.subjectId, ids),
@@ -161,7 +173,7 @@ export async function bumpPermissions(tx: Database, spaceId: string, nodeIds: re
 }
 
 /** The permission version a change to the share over `rootId` carries: its root's, or the space's. */
-async function rootPermissionVersion(tx: Database, spaceId: string, rootId: string | null) {
+export async function rootPermissionVersion(tx: Database, spaceId: string, rootId: string | null) {
   if (rootId === null) {
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId));
     if (!space) throw new ContentError('not-found');
@@ -175,7 +187,7 @@ async function rootPermissionVersion(tx: Database, spaceId: string, rootId: stri
   return folder.permissionVersion;
 }
 
-function requirePermissionVersion(actual: number, given: number) {
+export function requirePermissionVersion(actual: number, given: number) {
   if (actual !== given) {
     throw new ContentError('permission-version', 'Access changed; reload and try again');
   }
@@ -257,6 +269,107 @@ export async function storeFolderEnvelopes(tx: Database, envelopes: readonly Fol
   );
 }
 
+/** Who may receive keys in a share, at their live key, with the access to seal by. */
+export type Recipients = ReadonlyMap<string, { identity: PublicIdentity; access: Grant }>;
+
+/**
+ * People whose access in `share` (effective, from `access`) needs keys
+ * they don't hold at their live key: no member row, a row at an older
+ * identity key version, or a reader's keys where they are an editor. They
+ * wait until an owner's app seals to them (section 7.9).
+ */
+export async function lackingKeys(
+  tx: Database,
+  share: ShareRow,
+  access: ReadonlyMap<string, Grant>,
+): Promise<Recipients> {
+  const rows = new Map(
+    (await tx.select().from(shareMembers).where(eq(shareMembers.shareId, share.id))).map((row) => [
+      row.identityId,
+      row,
+    ]),
+  );
+  const live = await lookupIdentities(tx, [...access.keys()]);
+  return new Map(
+    live.flatMap((identity) => {
+      const grant = access.get(identity.id);
+      if (!grant || identity.kind !== 'human') return [];
+      const row = rows.get(identity.id);
+      if (row?.keyVersion === identity.keyVersion && keysCover(row.role, grant)) return [];
+      return [[identity.id, { identity, access: grant }] as const];
+    }),
+  );
+}
+
+/**
+ * Give people in `share` the keys their access needs (sections 7.3 and
+ * 7.8): envelopes for every key version, at each recipient's live key, by
+ * role, in place of any they had there. Every recipient must be in
+ * `recipients`, and everyone in `must` among them; anyone else left out
+ * waits. Their member rows take the new key version and role, with no
+ * direct grant for a new row; the caller recomputes publish rights.
+ * Returns who was given keys.
+ */
+export async function giveKeys(
+  tx: Database,
+  {
+    share,
+    sealer,
+    envelopes,
+    recipients,
+    must = [],
+    addedBy,
+  }: {
+    share: ShareRow;
+    sealer: PublicIdentity;
+    envelopes: readonly FolderKeyEnvelope[];
+    recipients: Recipients;
+    must?: readonly string[];
+    addedBy: string;
+  },
+) {
+  const given = [...new Set<string>(envelopes.map((e) => e.recipientId))];
+  if (!given.every((id) => recipients.has(id)) || !must.every((id) => given.includes(id))) {
+    throw new ContentError('recipients-mismatch', 'Keys must go to exactly the people listed');
+  }
+  const people = given.flatMap((id) => {
+    const recipient = recipients.get(id);
+    return recipient ? [recipient] : [];
+  });
+  await checkFolderEnvelopes(tx, envelopes, {
+    spaceId: share.spaceId,
+    shareId: share.id,
+    sealer,
+    expected: people.flatMap(({ identity, access }) =>
+      Array.from({ length: share.currentKeyVersion }, (_, i) => ({
+        recipientId: identity.id,
+        recipientKeyVersion: identity.keyVersion,
+        keyVersion: i + 1,
+        drafts: access.role === 'editor',
+      })),
+    ),
+  });
+  if (given.length > 0) {
+    await tx
+      .delete(folderKeyEnvelopes)
+      .where(
+        and(
+          eq(folderKeyEnvelopes.shareId, share.id),
+          inArray(folderKeyEnvelopes.recipientIdentityId, given),
+        ),
+      );
+  }
+  for (const { identity, access } of people) {
+    const row = { keyVersion: identity.keyVersion, role: access.role, canPublish: false };
+    await tx
+      .insert(shareMembers)
+      .values({ shareId: share.id, identityId: identity.id, addedBy, ...row })
+      .onConflictDoUpdate({ target: [shareMembers.shareId, shareMembers.identityId], set: row });
+  }
+  await storeFolderEnvelopes(tx, envelopes);
+  return people;
+}
+
 /** People who become members must be people, at their live key, and not owners already. */
 async function requireMembers(
   tx: Database,
@@ -289,14 +402,47 @@ const ownersExpected = (owners: readonly PublicIdentity[], keyVersion: number): 
   }));
 
 /**
+ * The groups a new share is made with, each one of the space's, and the
+ * access their human members get through them (section 7.8).
+ */
+async function newShareGroupAccess(
+  tx: Database,
+  spaceId: string,
+  grants: readonly NewGroupGrant[],
+) {
+  const ids = grants.map((grant) => grant.groupId);
+  const access = new Map<string, Grant>();
+  if (ids.length === 0) return access;
+  if (new Set(ids).size !== ids.length) {
+    throw new ContentError('recipients-mismatch', 'A group is listed twice');
+  }
+  const found = await tx
+    .select({ id: groups.id })
+    .from(groups)
+    .where(and(eq(groups.spaceId, spaceId), inArray(groups.id, ids)));
+  if (found.length !== ids.length) throw new ContentError('not-found', 'No such group');
+  const members = await tx
+    .select({ groupId: groupMembers.groupId, identityId: groupMembers.identityId })
+    .from(groupMembers)
+    .where(inArray(groupMembers.groupId, ids));
+  for (const { groupId, identityId } of members) {
+    const grant = grants.find((g) => g.groupId === groupId) ?? null;
+    const best = highest([access.get(identityId) ?? null, grant]);
+    if (best && !identityId.startsWith('agent-')) access.set(identityId, best);
+  }
+  return access;
+}
+
+/**
  * Make a folder, or the whole space, a share (section 6.7). Under a lock on
  * the space: the share ID is new anywhere, shares don't nest, every record
  * in the subtree has exactly one wrap under version 1 of this share, and
  * version 1 goes to every owner, every new member and each of the caller's
- * agents it is made for (section 9.4). Then the subtree's owner-region
- * envelopes go, the members and agent grants are added, and permission
- * versions move on, so a write prepared against the old region fails. All
- * or nothing.
+ * agents it is made for (section 9.4), and to those of the groups' members
+ * the caller seals to, by their effective role (section 7.8). Anyone else
+ * in the groups waits. Then the subtree's owner-region envelopes go, the
+ * members, groups and agent grants are added, and permission versions move
+ * on, so a write prepared against the old region fails. All or nothing.
  */
 export async function makeShare(
   db: Database,
@@ -309,6 +455,7 @@ export async function makeShare(
     envelopes: readonly FolderKeyEnvelope[];
     members: readonly Member[];
     agentGrants: readonly NewAgentGrant[];
+    groups: readonly NewGroupGrant[];
     permissionVersion: number;
   },
 ): Promise<void> {
@@ -330,6 +477,35 @@ export async function makeShare(
     const records = await recordsUnder(tx, input.spaceId, input.rootId);
     await requireCoverage(tx, input.wraps, records, { shareId: input.shareId, keyVersion: 1 });
     await requireMembers(tx, input.spaceId, input.members);
+    const viaGroups = await newShareGroupAccess(tx, input.spaceId, input.groups);
+    // Direct members, then the groups' members the caller seals to.
+    const direct = new Set<string>(input.members.map((m) => m.identityId));
+    const sealedTo = new Set<string>(input.envelopes.map((e) => e.recipientId));
+    const grouped = await lookupIdentities(
+      tx,
+      [...viaGroups.keys()].filter((id) => !direct.has(id) && sealedTo.has(id)),
+    );
+    const people = [
+      ...input.members.map((m) => ({
+        identityId: m.identityId,
+        keyVersion: m.keyVersion,
+        access: highest([viaGroups.get(m.identityId) ?? null, m]) ?? m,
+        direct: { directRole: m.role, directCanPublish: m.canPublish },
+      })),
+      ...grouped.flatMap((person) => {
+        const access = viaGroups.get(person.id);
+        return access
+          ? [
+              {
+                identityId: person.id,
+                keyVersion: person.keyVersion,
+                access,
+                direct: { directRole: null, directCanPublish: null },
+              },
+            ]
+          : [];
+      }),
+    ];
     const agents = await requireOwnAgents(tx, input.accountId, input.agentGrants);
     const owners = await currentOwners(tx, input.spaceId);
     await checkFolderEnvelopes(tx, input.envelopes, {
@@ -338,11 +514,11 @@ export async function makeShare(
       sealer: identity,
       expected: [
         ...ownersExpected(owners, 1),
-        ...input.members.map((m) => ({
-          recipientId: m.identityId,
-          recipientKeyVersion: m.keyVersion,
+        ...people.map((p) => ({
+          recipientId: p.identityId,
+          recipientKeyVersion: p.keyVersion,
           keyVersion: 1,
-          drafts: m.role === 'editor',
+          drafts: p.access.role === 'editor',
         })),
         ...input.agentGrants.map((grant, i) => ({
           recipientId: agents[i]?.id ?? grant.agentId,
@@ -359,18 +535,27 @@ export async function makeShare(
       rootId: input.rootId,
       createdBy: input.accountId,
     });
-    if (input.members.length > 0) {
+    if (people.length > 0) {
       await tx.insert(shareMembers).values(
-        input.members.map((m) => ({
+        people.map((p) => ({
           shareId: input.shareId,
-          identityId: m.identityId,
-          keyVersion: m.keyVersion,
-          role: m.role,
-          canPublish: m.canPublish,
+          identityId: p.identityId,
+          keyVersion: p.keyVersion,
+          role: p.access.role,
+          canPublish: false,
+          ...p.direct,
           addedBy: input.accountId,
         })),
       );
     }
+    if (input.groups.length > 0) {
+      await tx
+        .insert(shareGroups)
+        .values(
+          input.groups.map((g) => ({ shareId: input.shareId, addedBy: input.accountId, ...g })),
+        );
+    }
+    await recomputeMembers(tx, [input.shareId]);
     const [made] = await tx.select().from(shares).where(eq(shares.id, input.shareId));
     if (!made) throw new Error('the share just made is gone');
     await storeNewShareGrants(tx, made, input.accountId, input.agentGrants);
@@ -418,6 +603,7 @@ export async function makeShare(
         rootId: input.rootId,
         members: input.members.map((m) => m.identityId),
         agents: input.agentGrants.map((grant) => grant.agentId),
+        groups: input.groups.map((g) => g.groupId),
         records: input.wraps.length,
       },
     });
@@ -522,7 +708,11 @@ export async function requireCoverage(
 }
 
 /** A share by ID, with the caller's identity, or `not-found`. */
-async function requireShare(tx: Database, shareId: string, { lock }: { lock?: 'update' } = {}) {
+export async function requireShare(
+  tx: Database,
+  shareId: string,
+  { lock }: { lock?: 'update' } = {},
+) {
   const query = tx.select().from(shares).where(eq(shares.id, shareId));
   const [share] = lock ? await query.for(lock) : await query;
   if (!share) throw new ContentError('not-found');
@@ -546,13 +736,14 @@ async function lockShareForChange(tx: Database, shareId: string) {
 }
 
 /**
- * Add a member, or replace one: a reader becoming an editor, or a member
- * whose key changed (sections 7.3 and 7.4). Their envelopes must cover
- * every key version of the share at their key, with the draft key exactly
- * for an editor; they replace any the member had. Demoting an editor is a
- * rotation, so it is refused here. Turning an editor's publish rights on
- * or off changes no keys: with the same role and key, and no envelopes,
- * only the rights change.
+ * Set a member's direct grant (sections 7.3, 7.4 and 7.8): add them, make
+ * a reader an editor, share again with one whose key changed, or change
+ * publish rights. Where the keys they hold at their key fall short of
+ * their effective access, envelopes must give every key version of the
+ * share at their key, with the draft key exactly for an editor, in place
+ * of any they had; otherwise envelopes are optional and replace theirs the
+ * same way. Lowering the grant below the keys they hold is a rotation, so
+ * it is refused here; while a group keeps their access it changes no keys.
  */
 export async function addMember(
   db: Database,
@@ -580,28 +771,39 @@ export async function addMember(
       .where(
         and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, member.identityId)),
       );
-    if (existing?.role === 'editor' && member.role === 'reader') {
+    const viaGroups = (await groupAccess(tx, [share.id])).get(share.id)?.get(member.identityId);
+    const access = highest([viaGroups ?? null, member]) ?? member;
+    if (existing && keysExceed(existing.role, access)) {
       throw new ContentError('forbidden', 'Making an editor a reader rotates the keys');
     }
-    const rightsOnly =
-      existing?.role === member.role &&
-      existing.keyVersion === member.keyVersion &&
-      input.envelopes.length === 0;
-    if (!rightsOnly) await replaceEnvelopes(tx, share, member, input.envelopes, identity);
-    const row = {
-      keyVersion: member.keyVersion,
-      role: member.role,
-      canPublish: member.canPublish,
-    };
-    await tx
-      .insert(shareMembers)
-      .values({
-        shareId: share.id,
-        identityId: member.identityId,
-        addedBy: input.accountId,
-        ...row,
-      })
-      .onConflictDoUpdate({ target: [shareMembers.shareId, shareMembers.identityId], set: row });
+    const [live] = await lookupIdentities(tx, [member.identityId]);
+    if (!live) throw new ContentError('recipients-mismatch', 'Members must be people');
+    const lacks = !(existing?.keyVersion === member.keyVersion && keysCover(existing.role, access));
+    await giveKeys(tx, {
+      share,
+      sealer: identity,
+      envelopes: input.envelopes,
+      recipients: new Map([[member.identityId, { identity: live, access }]]),
+      must: lacks ? [member.identityId] : [],
+      addedBy: input.accountId,
+    });
+    // An app from before groups shares again after a key change with
+    // someone there only through groups by repeating their row: that
+    // grants nothing directly.
+    const repeated =
+      existing?.directRole === null &&
+      existing.keyVersion !== member.keyVersion &&
+      existing.role === member.role &&
+      existing.canPublish === member.canPublish;
+    if (!repeated) {
+      await tx
+        .update(shareMembers)
+        .set({ directRole: member.role, directCanPublish: member.canPublish })
+        .where(
+          and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, member.identityId)),
+        );
+    }
+    await recomputeMembers(tx, [share.id]);
     await bumpPermissions(tx, share.spaceId, await nodesUnder(tx, share.spaceId, share.rootId));
     await audit(tx, {
       actor: input.accountId,
@@ -612,37 +814,6 @@ export async function addMember(
   });
 }
 
-// A member's envelopes, checked to cover every key version of the share at
-// their key with the draft key exactly for an editor, in place of theirs.
-async function replaceEnvelopes(
-  tx: Database,
-  share: ShareRow,
-  member: Member,
-  envelopes: readonly FolderKeyEnvelope[],
-  sealer: PublicIdentity,
-) {
-  await checkFolderEnvelopes(tx, envelopes, {
-    spaceId: share.spaceId,
-    shareId: share.id,
-    sealer,
-    expected: Array.from({ length: share.currentKeyVersion }, (_, i) => ({
-      recipientId: member.identityId,
-      recipientKeyVersion: member.keyVersion,
-      keyVersion: i + 1,
-      drafts: member.role === 'editor',
-    })),
-  });
-  await tx
-    .delete(folderKeyEnvelopes)
-    .where(
-      and(
-        eq(folderKeyEnvelopes.shareId, share.id),
-        eq(folderKeyEnvelopes.recipientIdentityId, member.identityId),
-      ),
-    );
-  await storeFolderEnvelopes(tx, envelopes);
-}
-
 /**
  * Apply one rotation of a held share (section 7.5, step 4): the current
  * version is still `expectedKeyVersion` (`stale-head` otherwise, naming it),
@@ -651,7 +822,9 @@ async function replaceEnvelopes(
  * the draft key exactly for those who stay editors after `demoted`. No
  * agent is among them: only an agent's own person seals to it (section
  * 9.4). Then the removed go, with their agents' grants in the share, the
- * demoted become readers, and the share moves to its next version.
+ * demoted become readers, direct grant included, and the share moves to
+ * its next version. Someone removed or demoted who keeps more through a
+ * group waits for an owner to seal to them (section 7.9).
  */
 export async function applyRotation(
   tx: Database,
@@ -708,9 +881,15 @@ export async function applyRotation(
     await endAgentGrants(tx, { personIds: [...removed], shareIds: [share.id] });
   }
   if (demoted.size > 0) {
+    // A direct grant comes down to reader with the keys.
     await tx
       .update(shareMembers)
-      .set({ role: 'reader', canPublish: false })
+      .set({
+        role: 'reader',
+        canPublish: false,
+        directRole: sql`case when ${shareMembers.directRole} is null then null else 'reader' end`,
+        directCanPublish: sql`case when ${shareMembers.directRole} is null then null else false end`,
+      })
       .where(
         and(eq(shareMembers.shareId, share.id), inArray(shareMembers.identityId, [...demoted])),
       );

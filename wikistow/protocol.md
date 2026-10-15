@@ -1,6 +1,6 @@
 # WikiStow protocol
 
-This is the wire and cryptographic protocol shared by the browser, desktop app, CLI and server. It covers what Milestones 0 and 1 built, and what Milestone 2 adds for sharing and agents. It is written so that two independent implementations produce identical bytes.
+This is the wire and cryptographic protocol shared by the browser, desktop app, CLI and server. It covers what Milestones 0 and 1 built, what Milestone 2 adds for sharing and agents, and Milestone 5's groups. It is written so that two independent implementations produce identical bytes.
 
 The product rules it implements are in [`wikistow.md`](../wikistow.md). Terms are defined in [`CONTEXT.md`](CONTEXT.md). Review findings are logged in [`protocol-review.md`](protocol-review.md).
 
@@ -55,6 +55,11 @@ Everything Milestones 0 and 1 shipped is **version 1 and frozen**. Stored data u
 - the `wikistow.publication` payload extension, which names a published copy's source inside its encrypted payload (section 13).
 
 Identity key rotation, and its statement format, are left to a later milestone (section 4.6).
+
+### What Milestone 5 adds
+
+- **groups** of people in a space, which shares go to as one (sections 7.8 and 7.9). Nothing new is signed but a group's name, which is a metadata record v2 with `subjectKind: "group"` in the owner region. There are no new domain strings. A client from before Milestone 5 parses such a record strictly and refuses it, so it can't scan an owner region that holds one (adding a co-owner) until it updates;
+- the agents' `groups` list in the contacts record (section 8.2).
 
 Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
@@ -473,7 +478,7 @@ On the server, a blob is labelled with its page and audience when it is uploaded
 
 ### 5.4 Metadata (space and folder names)
 
-**MetadataRecord** (`contracts/src/records/metadata.ts`): `protocol` (1), `installationId`, `spaceId`, `subjectKind` (`"space"` \| `"folder"`), `subjectId` (the space ID or folder ID), `metadataRevisionId`, `basedOn`, `authorId`, `authorKeyVersion`, `payloadHash`.
+**MetadataRecord** (`contracts/src/records/metadata.ts`): `protocol` (1), `installationId`, `spaceId`, `subjectKind` (`"space"` \| `"folder"` \| `"group"`), `subjectId` (the space ID, folder ID or group ID), `metadataRevisionId`, `basedOn`, `authorId`, `authorKeyVersion`, `payloadHash`. A group's name is only ever a v2 record (section 7.8).
 
 Sealing works the same way as for revisions (`sealMetadata`):
 
@@ -488,7 +493,7 @@ signature = Ed25519(author, canonical('metadata-record/v1', [protocol, installat
 
 Opening (`openMetadata`) runs the same checks as revisions, with every expected field required. The server's checks are in `verifyMetadataCommit`.
 
-**Authority.** Renaming a space needs an owner. Renaming a folder needs edit rights at the folder: an owner, or an editor of the share the folder is in. Only the server checks this (A1).
+**Authority.** Renaming a space or a group needs an owner. Renaming a folder needs edit rights at the folder: an owner, or an editor of the share the folder is in. Only the server checks this (A1).
 
 ### 5.5 Payload and metadata formats
 
@@ -654,7 +659,7 @@ Share = { shareId: ID, spaceId, rootId: FolderId | null, currentKeyVersion: inte
 **Regions.** Every page, every folder's name and the space's name has exactly one **region**, which decides what protects its content keys:
 - a node's region is the share whose root is the node itself or its nearest ancestor that is a share root, and every node is in the space share if there is one;
 - the space's name is in the space share if there is one;
-- anything else is in the space's **owner region** (section 6.6).
+- anything else is in the space's **owner region** (section 6.6). A group's name (section 7.8) is always there, in a shared space too.
 
 So a share root's own name is in that share, and the names of the folders above it are not.
 
@@ -789,9 +794,9 @@ When an owner first shares a folder `F`, or the space, or a person first grants 
 
 1. **Preview.** It lists the folders and pages under `F` by decrypted name, and who will hold the keys. The tree is the server's, so this is where the owner can notice a page that shouldn't be there. Nothing is wrapped or sealed before the owner confirms.
 2. **Keys.** It makes `shareId` and key version 1.
-3. **Wrap.** For every retained revision and metadata version in the subtree (and the space's name, for a space share), it opens the content key through its own v1 or v2 envelope, checks it against the record, and writes a key wrap under version 1, with the record's class. That means every retained draft, not only the head: new members receive the share's retained history (section 7.3).
+3. **Wrap.** For every retained revision and metadata version in the subtree (and the space's name, for a space share, but never a group's name), it opens the content key through its own v1 or v2 envelope, checks it against the record, and writes a key wrap under version 1, with the record's class. That means every retained draft, not only the head: new members receive the share's retained history (section 7.3).
 4. **Seal.** It seals version 1 to every sealing owner (section 6.5), and to the people or agent being added (sections 7.3 and 9.4).
-5. **Upload.** It sends the share, the wraps and the envelopes together. Under a lock on the space, the server checks the nesting rule (section 6.1), that every record in the subtree has exactly one wrap under version 1 and that the envelopes cover every current owner, every new member and each agent in `agentGrants`. It then makes `F` a share root, deletes the owner-region envelopes of the subtree's records, adds the members, and bumps the space's permission version. A write prepared against the old region fails. If anything fails, nothing changes.
+5. **Upload.** It sends the share, the wraps and the envelopes together, with any groups it is shared with (section 7.8). Under a lock on the space, the server checks the nesting rule (section 6.1), that every record in the subtree has exactly one wrap under version 1 and that the envelopes cover every current owner, every new member and each agent in `agentGrants`, and go to no one else but the groups' members, by their effective role. It then makes `F` a share root, deletes the owner-region envelopes of the subtree's records, adds the members, and bumps the space's permission version. A write prepared against the old region fails. If anything fails, nothing changes.
 
 ### 6.8 Saves and the key version check
 
@@ -824,7 +829,7 @@ Owners are owners of the whole space. Everyone else is a member of one or more s
 | editor with publish | the same as an editor | also publish and unpublish |
 | owner | every key of every share in the space, and the owner region | everything, and share, remove, change roles, rotate keys, move across shares, add and remove owners, and rename the space |
 
-The server enforces roles on every request, counting a member's current role in the share whose subtree holds the node, and an agent's cap (section 9.5). Clients don't check roles; only keys bind them (A1). The server's state: shares, members and roles, owners, agent grants, owner statements, folder key envelopes and key wraps.
+The server enforces roles on every request, counting a member's current role in the share whose subtree holds the node (their effective role, section 7.8), and an agent's cap (section 9.5). Clients don't check roles; only keys bind them (A1). The server's state: shares, members and roles, owners, agent grants, owner statements, folder key envelopes and key wraps.
 
 ### 7.2 Who seals, and when
 
@@ -836,6 +841,9 @@ Folder keys are sealed only in these cases. **A save never seals a folder key.**
 | Change a reader to an editor (7.4) | an owner | the draft key of every version | that member |
 | Remove someone, or rotate keys (7.5) | an owner | a new key version | the remaining people of section 7.5, as shown in the dialog |
 | Add a co-owner (7.6) | an owner | every version of every share in the space, and the owner region's content keys | the new owner |
+| Share with a group, or raise its access (7.8) | an owner | every key version of the share, by role | the group's members whose keys fall short, as shown |
+| Add someone to a group (7.8) | an owner | every key version of each of the group's shares where they lack keys | the person being added |
+| Give access (7.9) | an owner | every key version of the shares they wait in, at their current key | a waiting person the owner confirms |
 | Grant an agent folders (9.4) | the agent's person | the versions that person holds of the chosen shares | their own agent |
 | Unlock (9.4) | a person's app | newer versions of shares the agent was granted | their own agents, from their own contacts record |
 
@@ -847,9 +855,11 @@ Folder keys are sealed only in these cases. **A save never seals a folder key.**
 2. **Choose a role:** reader, editor, or editor with publish.
 3. **Preview.** The dialog shows the person, the role, and what they will receive: for a reader, every published version the share has kept; for an editor, also every retained draft. If the folder isn't a share yet, it also lists the subtree (section 6.7, step 1).
 4. **Seal.** The owner's app seals every key version, `1` to current, to the person: both keys for an editor, the published key only for a reader.
-5. **Upload.** The envelopes and the member go in one request. The server adds the member only if their envelopes cover every version, with the class their role needs, so nobody is ever a member without their keys. There is no pending state.
+5. **Upload.** The envelopes and the member go in one request. The server adds the member only if their envelopes cover every version, with the class their role needs, so nobody is ever a direct member without their keys. Someone a group brings in may wait (section 7.9).
 
-**A member whose key changed** holds no envelopes for their new key version. Once an owner confirms the change (section 8.4), the owner shares with them again by the same steps. The request replaces their member row's key version, and the server deletes their envelopes for the old key version.
+The request sets the member's **direct grant** (section 7.8). Envelopes are needed only where the keys the member holds fall short of their effective access, and then with the class it needs. A grant lowered below the keys they hold is a rotation (section 7.4), refused here; one lowered while a group keeps their access changes no keys. A request at a new key for someone there only through groups that repeats the role and publish right their member row shows, as an app from before groups sends to share again after a key change, leaves them without a direct grant.
+
+**A member whose key changed** holds no envelopes for their new key version, and waits (section 7.9). Once an owner confirms the change (section 8.4), **Give access** seals everything they reach, directly and through groups, at the new key in one request. It replaces the key version of their member rows, and the server deletes their envelopes for the old key version. Sharing again by the steps above still does the same for one share.
 
 Adding an agent to a share is the person's own action, never an owner's (section 9.4).
 
@@ -884,7 +894,7 @@ Because the recipients of `v + 1` are drawn from verified `v` envelopes and the 
 
 **Rotate keys** without removing anyone is the same flow with `X` empty. Owners use it after an agent that held the share's keys is revoked (section 9.7).
 
-**Remove from every folder in this space.** One owner action removes `P` from every share in the space where `P` is a member, rotating each, in one dialog that lists each share's remaining people. If `P` is an owner, it also removes `P` as an owner (section 7.6).
+**Remove from every folder in this space.** One owner action removes `P` from every share in the space where `P` is a member, rotating each, in one dialog that lists each share's remaining people. It also takes `P` out of every group in the space, in the same request: `POST /api/spaces/:spaceId/members/:identityId/remove {rotations, permissionVersion}`, with one rotation for each share where `P` holds keys, checked as in section 7.9. If `P` is an owner, the app removes `P` as an owner instead (section 7.6).
 
 **What the removed person keeps.** Every key version up to `v`, and so everything wrapped under them: what they downloaded, and what a server still serves them (A3). The same holds for their agents. Nothing wrapped under `v + 1` or later reaches them, because the server refuses saves under `v` (section 6.8). A server that accepts such saves anyway, or hides `v + 1` from a writer, is A2.
 
@@ -895,7 +905,7 @@ Because the recipients of `v + 1` are drawn from verified `v` envelopes and the 
 1. The owner's app seals every version of every share in the space to `Q`, with both keys.
 2. For every retained revision and metadata version in the owner region, it seals the content key to `Q` in a v2 envelope it grants (section 5.8).
 3. It signs an owner statement naming `Q` (section 6.5).
-4. It uploads all of this in one request. The server adds `Q` as an owner only when the envelopes cover every share version and every owner-region record.
+4. It uploads all of this in one request. The server adds `Q` as an owner only when the envelopes cover every share version and every owner-region record. `Q` stops being a member of the space's shares, and leaves its groups (section 7.8).
 
 Before the upload, the adder's app records `Q` as accepted, at the key it sealed to, in a contacts write (section 8.6). If `Q` is on the space's `removedOwners`, that write takes them off it; adding someone again is the only way off the list.
 
@@ -921,6 +931,56 @@ Nothing in the owner region is rotated: later saves leave `R` out (section 6.6).
 - **Shared with me** lists every share in which the person is a member and not an owner. Each item shows the share root's name, decrypted with the share's published key (the space's name, for a space share), and the person who shared it, by label: the owner the app accepted first for that space (section 6.5, step 2). An agent's list (`wikistow spaces list`) names each share by the folder it was picked at, which may be inside the share; only the server keeps an agent's picks (section 9.4), so the app takes that folder from the name record the server serves (A1).
 - **Members never receive ancestor names.** The names of the folders above a share root are in the owner region or in no share at all, so no member holds a key for them.
 - **The server withholds the rest.** It never serves a member the IDs, metadata or records of nodes outside their shares, ancestors included, nor any other share's wraps or envelopes. A path in Shared with me starts at the share root.
+
+### 7.8 Groups
+
+A **group** is a named set of people in one space, and later their agents, that a share goes to as one. Only the space's current owners make, rename, fill and delete groups, and only they are served anything about them. Owners aren't members: they hold every key already, and a person added as a co-owner leaves the space's groups (section 7.6). A group holds no keys. Folder keys are still sealed to each person, by an owner's app, from that app's pins.
+
+```
+Group       = { groupId: ID, spaceId }                  // the ID is made by the owner's client
+member      = { groupId, identityId }                    // a person, or an agent for its person
+share group = { shareId, groupId, role: "reader" | "editor", canPublish }
+```
+
+**Nothing new is signed.** A membership isn't signed: it is only the owners' instruction about whom to seal to. Who holds a share's keys is still fixed by the signed folder key envelopes (section 6.4), and an owner's app seals only to people it shows by their pinned labels and the owner confirms (section 7.2). A server that adds someone to a group can at most put a stranger in an owner's dialog, as it can put one in a share's member list.
+
+**The group name record.** A group's name is a metadata record v2 (sections 5.4 and 5.7) with `subjectKind: "group"` and `subjectId` the group ID, holding the node metadata payload (section 5.5; `emoji` and `tint` unused). It is always in the space's owner region (section 6.6): v2 envelopes to exactly the space's current owners, and never a wrap. The first version has `basedOn: null`; a rename is a new version based on the current one, as for a folder. The server refuses a group name with a wrap, or any other key material than envelopes to exactly its current owners, and a write of one through the space and folder metadata route. A space share never wraps it (section 6.7), and a new co-owner gets an envelope for it like every owner-region record (section 7.6, step 2). Members never receive a group's name or members. Deleting a group deletes its name versions.
+
+**Effective access.** A person's access in a share is the highest of their **direct grant** there and the access of each group they are in that has the share, in the order reader, editor, editor with publish. There are no exceptions or denials: to take someone out of a share they reach through a group, remove them from the group, or the group from the share.
+
+The server keeps one member row per person holding the share's keys, and enforces only that row. Its `role` is the class of the keys they hold (their envelope of the current version), which is their effective role unless they wait for draft keys (section 7.9); its publish right is their effective one, for an editor. Two more columns keep the direct grant, null for someone there only through groups. Every change to a direct grant, a group's access, its members or its shares recomputes the rows it touches, in the same transaction and under the lock on the space, so access checks, rotations and envelope checks read the rows and a group is never expanded at request time.
+
+**Requests.** All are for owners of the space. Each change to who has access names the permission version of the space, or for a change to one share, of its root (section 6.8), and bumps them. Making and renaming a group change no access, and carry none: a rename is checked against the name's current version instead.
+
+| Request | What the server does |
+|---|---|
+| `GET /api/spaces/:spaceId/groups` | Lists each group's name, as an owner-region record with the caller's envelopes, its members at their current keys, and its shares with their access; every direct grant in the space's shares; and the space's permission version. The share listing (section 7.5) is unchanged, since older apps read it strictly. |
+| `POST /api/spaces/:spaceId/groups {groupId, metadata, envelopes}` | Makes an empty group with its first name version. |
+| `POST /api/groups/:groupId/name {metadata, envelopes}` | Renames it. |
+| `POST /api/groups/:groupId/members {identityId, keyVersion, envelopes}` | Adds a person at their current key, not an owner. The envelopes must give them every version of exactly the group's shares where the keys they hold fall short of their new access (section 7.9). |
+| `POST /api/groups/:groupId/members/:identityId/remove {rotations}` | Takes them out, with the rotations section 7.9 requires. |
+| `PUT /api/shares/:shareId/groups/:groupId {access, envelopes, rotation}` | Shares the share with the group, or changes its access. Raising it carries envelopes; lowering it a rotation, as section 7.9 requires. Publish rights alone carry neither. |
+| `POST /api/shares/:shareId/groups/:groupId/remove {rotation}` | Takes the group out of the share. |
+| `POST /api/groups/:groupId/delete {rotations}` | Takes the group out of every share it has, then deletes it. |
+| `POST /api/shares/:shareId/members/:identityId/direct/remove {rotation}` | Drops someone's direct grant, keeping what their groups give them. |
+| `POST /api/spaces/:spaceId/members/:identityId/remove {rotations}` | Remove from every folder in this space (section 7.5). |
+| `GET /api/me/waiting`, `POST /api/spaces/:spaceId/members/:identityId/give-access {keyVersion, envelopes}` | Waiting people, and giving them access (section 7.9). |
+
+Making a share (section 6.7) takes `groups: [{groupId, role, canPublish}]` too. Adding a member (section 7.3) sets their direct grant.
+
+The audit log records `group.created`, `group.deleted`, `group.member-added`, `group.member-removed`, `share.group-added`, `share.group-changed` and `share.group-removed`, with IDs and roles only, never names. Each rotation a group change makes records `share.rotated`, naming the group.
+
+### 7.9 Waiting, and the server's checks
+
+**Waiting.** Only an owner's app seals, so someone a group brings into a share can be without keys: a member whose changed key nobody has confirmed, a member left out of a rotation because their envelope didn't verify, a member the owner's app didn't seal to, or an agent its person hasn't confirmed. They **wait**: their effective access needs keys they don't hold at their current identity key. Until an owner's app seals to them, someone with no member row for that share is served nothing from it, Shared with me doesn't list it, and nothing tells them it exists. Folders they already hold stay as they were: someone waiting only for draft keys keeps reading as a reader, and a member whose key changed keeps their row at the old key, as before groups, so the share stays listed but their new key opens none of it.
+
+`GET /api/me/waiting` lists, for every space the caller owns, each share where someone waits: the person at their current key, the role and publish right their access needs, and what they hold there now: nothing, keys of a role at an older identity key version (their key changed), or a reader's keys at their current key (they wait only for draft keys). The list is the server's, so it isn't trusted: after unlocking, the owner's app shows waiting people by their pinned labels, with the key-change warning where it applies (section 8.4), and **Give access** seals only once the owner confirms. It never seals by itself, since membership isn't signed.
+
+**The sealing check.** A request that gives access (adding a member, adding someone to a group, sharing with a group or raising its access, making a share with groups, giving access) may carry envelopes only for people whose keys at their current identity key fall short of their effective access after the change, and adding a member may also seal again to that member. Each of them gets either every key version of the share at that key, with `draftKey` exactly for an editor, or nothing. The server refuses anything else as `recipients-mismatch`. Adding a direct member, or a person to a group, must cover every share where they fall short. Elsewhere, people left out wait. Envelopes given replace the person's envelopes in that share, and their member row takes the new key version and role.
+
+**The coverage check.** A request that takes access away (removing someone from a group, a group from a share, lowering a group's access, deleting a group, dropping a direct grant, removing someone from every folder) carries rotations, each as in section 7.5, step 4. Under the lock on the space, the server works out every member's effective access after the change, and refuses (`stale-head`) unless the rotations cover exactly the shares where some member's keys exceed it, one each, and each leaves those members out, or, for one who keeps reading, leaves them out or demotes them. Where nobody's keys exceed their new access, nothing is rotated. Where only publish rights go, the server drops them. A member whose role is unchanged, such as a direct editor leaving a group that made them an editor, keeps their keys and their row. The server applies every rotation at once with the change, or nothing. Demoting someone (section 7.4) also lowers their direct grant to reader. Someone removed or demoted who keeps more through a group waits.
+
+For each share that rotates, the owner's app works out the person's effective access without the change, from the server's listing of direct grants and groups, and plans the rotation as in section 7.5 with them in `X`, or demoted. The rest of the request, and anyone the app leaves out, follow the usual rotation rules.
 
 ---
 
@@ -975,7 +1035,8 @@ privateKey (field)   = base64url(crypto_box_seal(privateKey, owner.boxPublicKey)
   contacts:      [ { identity: PublicIdentity, verifiedAt: Timestamp, method: "first-seen" | "confirmed" } ],
   removed:       [ { id, keyHash, removedAt: Timestamp } ],
   agents:        [ { enrollment: AgentEnrollment, label: { name: string, enrolledAt: Timestamp },
-                     shares: [ { spaceId, shareId, drafts: boolean } ] } ],
+                     shares: [ { spaceId, shareId, drafts: boolean } ],
+                     groups: [ { spaceId, groupId, drafts: boolean } ] } ],
   revokedAgents: [ { agentId, revokedAt: Timestamp } ],
   spaceOwners:   [ { spaceId, owners: [ { id, keyHash } ], removedOwners: [ HumanId ] } ],
   extensions:    { }
@@ -995,11 +1056,11 @@ privateKey (field)   = base64url(crypto_box_seal(privateKey, owner.boxPublicKey)
 - **`contacts` are the pins**, humans only, one per identity ID. `verifiedAt` is when the key was pinned. `method` is `"first-seen"` for a key pinned the first time it was seen (section 8.3), or `"confirmed"` for a key the person accepted after a key-change warning (section 8.4).
 - **`labels`** name the pins. Each pin has exactly one label, written in the same version, matched by `id` and `keyHash`. `email` is the normalized email the person was found by, or the one the directory showed when the key was first seen. `name` is the directory's display name at that moment, which the person may edit, 1–100 characters under section 3.3, rule 5. Neither is ever updated from later directory text. The interface names a pinned person only by their label, so the server can't swap two people's names. Avatars come from the server, which could swap them, so they are only decoration: the interface never names a person, or lets someone choose one, by an avatar. A pin with no usable label is shown by its fingerprint only, and can't be chosen in a dialog until the person names it.
 - **`removed`** holds keys the person stopped trusting: a changed key they declined, or a pin they removed. A removed key is never sealed to, and nothing it signed is accepted.
-- **`agents`** holds one entry per agent the person enrolled (section 9.2). `label.name` is the name the person typed at approval, distinct among their agents, never filled in from text the server or the CLI sent. **`shares`** lists the shares the person has granted the agent, and whether the agent gets draft keys there (`drafts`, section 9.4). Their app seals to the agent only versions of these shares, with draft keys only where `drafts` is `true`.
+- **`agents`** holds one entry per agent the person enrolled (section 9.2). `label.name` is the name the person typed at approval, distinct among their agents, never filled in from text the server or the CLI sent. **`shares`** lists the shares the person has granted the agent, and whether the agent gets draft keys there (`drafts`, section 9.4). Their app seals to the agent only versions of these shares, with draft keys only where `drafts` is `true`. **`groups`** (Milestone 5; optional, an empty list when absent) lists the groups the person confirmed for the agent, and whether it gets draft keys through each (section 9.4). The app also seals to the agent the versions it holds of the shares those groups have, by the same rule.
 - **`revokedAgents`** lists agents the person revoked. An agent ID is never removed from it. The person's apps never seal to a listed agent: not the contacts key, and not a folder key.
 - **`spaceOwners`** holds, per space, the owners the person's app has accepted (section 6.5), by identity ID and key hash, and in `removedOwners` the IDs of owners this person removed (section 7.6), whom their apps don't accept again unless this person adds them back as a co-owner. They are in the shared payload because the person's agents accept v1 records only from accepted owners (section 5.7). A compromised agent host learns which spaces the person belongs to (A7).
 - **Uniqueness.** Each list has a key, and two items with one key make the payload `malformed`: `contacts` by identity ID; `labels` by `id`, and by `email`; `agents` by agent ID, and by `label.name`; `spaceOwners` by `spaceId`.
-- **Sets.** `removed` (by `keyHash`), `revokedAgents` (by `agentId`), an agent's `shares` (by `{spaceId, shareId}`; two items with one key and different `drafts` make the payload `malformed`), and a space's `owners` (by `{id, keyHash}`) and `removedOwners` (by ID) are sets: writers sort and deduplicate them, and readers ignore order and duplicates.
+- **Sets.** `removed` (by `keyHash`), `revokedAgents` (by `agentId`), an agent's `shares` (by `{spaceId, shareId}`; two items with one key and different `drafts` make the payload `malformed`) and `groups` (by `{spaceId, groupId}`, the same way), and a space's `owners` (by `{id, keyHash}`) and `removedOwners` (by ID) are sets: writers sort and deduplicate them, and readers ignore order and duplicates.
 - Both payloads are loose, have an `extensions` map, and follow the format rules of section 5.5. A writer never writes a payload it would read as `malformed`.
 - **`wikistow.plugins`**, in the private payload's `extensions`, holds the library plugins the person approved ([ADR 0002](../docs/adr/0002-plugin-library-and-browser-plugins.md), `plugin-approvals.ts`), so they follow the person to every device and agents can't read them:
 
@@ -1056,7 +1117,7 @@ On conflict, the client fetches the newer record, verifies it, and **re-applies 
 | confirm a changed key | Replace that pin and its label's key hash. Stop and ask if the newer record holds a third key for the ID. |
 | rename a label, or unpin | Change or remove that pin's label; for an unpin, remove the pin and add a `removed` entry. |
 | enroll agent `{enrollment, label, shares}` | Add it unless the same agent ID is there. Stop and ask if another agent has the same label name. |
-| rename agent, or change its `shares` | Set the field. For `shares`, apply the added and removed `{spaceId, shareId}` items, and the changed `drafts` values, never the whole list. |
+| rename agent, or change its `shares` or `groups` | Set the field. For `shares` and `groups`, apply the added and removed `{spaceId, shareId}` or `{spaceId, groupId}` items, and the changed `drafts` values, never the whole list. |
 | revoke agent | Add it to `revokedAgents` if absent. Never remove an entry. |
 | accept an owner | Add `{id, keyHash}` to that space's `owners`, unless the ID is in its `removedOwners`. |
 | remove an owner | Add the ID to that space's `removedOwners`. Keep the `owners` entries, which opening still uses (section 6.5). |
@@ -1067,7 +1128,7 @@ On conflict, the client fetches the newer record, verifies it, and **re-applies 
 
 **`removedOwners` is a union** across devices, as `removed` is for pins: only this person's own "add a co-owner" takes an entry out, as only a pin takes a `removed` entry out. Each change is re-applied on top of the newer record, so when two devices disagree about an owner, or about one field of a plugin's entry, the change written last stands, by the order of the record's versions, never by a clock. Plugin changes never stop to ask.
 
-**Confirmed writes.** Adding an agent to `revokedAgents`, adding a share to an agent's `shares` or changing its `drafts`, and adding an owner to `removedOwners` are confirmed: the client writes the version, re-reads the record, and goes on only if the served version holds the change (section 9).
+**Confirmed writes.** Adding an agent to `revokedAgents`, adding a share to an agent's `shares` or a group to its `groups`, or changing their `drafts`, and adding an owner to `removedOwners` are confirmed: the client writes the version, re-reads the record, and goes on only if the served version holds the change (section 9).
 
 **When to write.** Clients write the record when they pin, confirm, decline, rename or unpin a key; enroll, rename, grant, change the role of, or revoke an agent; accept, add or remove an owner; and approve, update, change the access of, turn on or off, or remove a library plugin. The CLI never writes it.
 
@@ -1147,6 +1208,7 @@ The CLI never receives the person's keyring, vault key, password or browser cook
 - **At every unlock**, the person's app seals to each of its agents that isn't in `revokedAgents`, for each share in that agent's `shares`, every version it holds that the agent lacks, up to the highest one that counts for its own writing (section 6.5, **Writing**). The server lists what is missing; the app checks the share is on the agent's list, and never seals any other share. **The class comes from that share's `drafts` in the person's own contacts record, never from the server's grant or an earlier envelope:** both keys only if `drafts` is `true` and the person holds the new version's draft key; otherwise the published key only. It never seals a version it doesn't hold, so **when the person loses access to a share, their agents stop receiving its new versions too**. Rotations leave such agents out by construction.
 - **Changing an agent's role.** The app sets that share's `drafts` in a confirmed contacts write (section 8.6), then seals every version it holds again, as above, and these envelopes replace the agent's ones; the server sets the grant's role. On a change to reader, the agent keeps the draft keys it had (A6), so the app offers to ask the share's owners to rotate keys (section 7.5), as after a revocation (section 9.7).
 - **Removing a pick.** The app removes `{spaceId, shareId}` from the agent's `shares` in a confirmed write, and the server deletes the grant. The agent keeps the versions it had (A6); an owner can rotate the keys (section 7.5).
+- **Groups** (section 7.8, built later in Milestone 5). An owner may add an agent to a group for its person, who must be a member of the group or an owner. Only the person's app seals to it, so the group gives it nothing until the person confirms: the app adds `{spaceId, groupId, drafts}` to the agent's `groups` in a confirmed write, then at every unlock seals to it the versions it holds of every share the group has, as for a pick. The server grants the agent each of those shares whole, at the group's role, capped by its person's current access (section 9.5).
 
 ### 9.5 Abilities, limits and attribution
 

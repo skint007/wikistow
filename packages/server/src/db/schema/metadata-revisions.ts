@@ -4,7 +4,7 @@ import { timestamptz } from './helpers.ts';
 import { spaces } from './spaces.ts';
 
 /**
- * Immutable versions of encrypted space and folder metadata, stored exactly
+ * Immutable versions of encrypted space, folder and group metadata, stored exactly
  * as signed. Two renames can't both build on the same version: the unique
  * (subject, basedOn) pair turns the loser into a conflict.
  */
@@ -15,7 +15,7 @@ export const metadataRevisions = pgTable(
     spaceId: text()
       .notNull()
       .references(() => spaces.id, { onDelete: 'cascade' }),
-    subjectKind: text({ enum: ['space', 'folder'] }).notNull(),
+    subjectKind: text({ enum: ['space', 'folder', 'group'] }).notNull(),
     subjectId: text().notNull(),
     basedOn: text(),
     authorIdentityId: text().notNull(),

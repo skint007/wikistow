@@ -4,16 +4,17 @@ import { envelopeParties, recordCommitment } from './envelope.ts';
 import { IdentityId, InstallationId, MetadataRevisionId, NodeId, SpaceId } from './ids.ts';
 
 /**
- * A signed, immutable version of a space's or folder's encrypted metadata
- * (name, emoji, tint). Renaming writes a new version based on the current
- * head, exactly like a page draft.
+ * A signed, immutable version of a space's, folder's or group's encrypted
+ * metadata (name, emoji, tint). Renaming writes a new version based on the
+ * current head, exactly like a page draft. A group's name is always a v2
+ * record in the space's owner region (protocol section 6.6).
  */
 export const MetadataRecord = z.strictObject({
   protocol: z.literal(1),
   installationId: InstallationId,
   spaceId: SpaceId,
-  subjectKind: z.enum(['space', 'folder']),
-  /** The space ID for a space, the folder ID for a folder. */
+  subjectKind: z.enum(['space', 'folder', 'group']),
+  /** The space ID for a space, the folder ID for a folder, the group ID for a group. */
   subjectId: NodeId,
   metadataRevisionId: MetadataRevisionId,
   basedOn: MetadataRevisionId.nullable(),

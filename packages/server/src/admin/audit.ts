@@ -27,6 +27,7 @@ const DETAILS = {
     rootId: z.string().nullable(),
     members: z.array(z.string()),
     agents: z.array(z.string()),
+    groups: z.array(z.string()),
     records: z.number().int(),
   }),
   'share.member-added': z.strictObject({
@@ -38,7 +39,25 @@ const DETAILS = {
     keyVersion: z.number().int(),
     removed: z.array(z.string()),
     demoted: z.array(z.string()),
+    /** The group whose change made the rotation, if one did. */
+    groupId: z.string().optional(),
   }),
+  'share.group-added': z.strictObject({
+    groupId: z.string(),
+    role: z.enum(['reader', 'editor']),
+    canPublish: z.boolean(),
+  }),
+  'share.group-changed': z.strictObject({
+    groupId: z.string(),
+    role: z.enum(['reader', 'editor']),
+    canPublish: z.boolean(),
+  }),
+  'share.group-removed': z.strictObject({ groupId: z.string() }),
+  // Groups: IDs only. A group's name is encrypted, for the space's owners.
+  'group.created': z.strictObject({ spaceId: z.string() }),
+  'group.deleted': z.strictObject({ spaceId: z.string(), shares: z.number().int() }),
+  'group.member-added': z.strictObject({ identityId: z.string() }),
+  'group.member-removed': z.strictObject({ identityId: z.string() }),
   // A move across a share boundary, which rewraps its records (null: the owner region).
   'node.moved': z.strictObject({
     spaceId: z.string(),
@@ -67,7 +86,7 @@ export async function audit<A extends AuditAction>(
     actor: string | null;
     action: A;
     target: {
-      kind: 'account' | 'agent' | 'invitation' | 'node' | 'settings' | 'share' | 'space';
+      kind: 'account' | 'agent' | 'group' | 'invitation' | 'node' | 'settings' | 'share' | 'space';
       id: string;
     };
     details: z.input<(typeof DETAILS)[A]>;

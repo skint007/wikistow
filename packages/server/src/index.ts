@@ -33,6 +33,7 @@ export * from './content/owners.ts';
 export * from './content/people.ts';
 export * from './content/serving.ts';
 export * from './content/sharing.ts';
+export * from './content/groups.ts';
 export * from './content/moves.ts';
 export * from './content/publications.ts';
 // Thrown by the shared checks on signatures and encodings.

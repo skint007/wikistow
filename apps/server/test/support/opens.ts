@@ -173,6 +173,8 @@ export async function everyAnswer(
   await get('myEnvelopes', `/api/spaces/${spaceId}/my-envelopes`);
   await get('shares', `/api/spaces/${spaceId}/shares`);
   await get('records', `/api/spaces/${spaceId}/records?scope=owner-region`);
+  await get('groups', `/api/spaces/${spaceId}/groups`);
+  await get('waiting', '/api/me/waiting');
   await get('contacts', '/api/me/contacts');
   await get('agents', '/api/me/agents');
   await get('directory', `/api/directory?ids=${ownerId}`);
