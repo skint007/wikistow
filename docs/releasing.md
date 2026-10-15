@@ -105,10 +105,11 @@ The Electron is the one `apps/desktop/package.json` pins, which the desktop test
 
 The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. On every push to `main` and every release, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
 
-To build them yourself, with nfpm on your `PATH`, after the build in the README:
+To build them yourself, with nfpm on your `PATH`, after the build in the README. CI gives the files the commit's time:
 
 ```sh
-cd apps/desktop && scripts/linux-packages.sh 0.3.0 out/packages
+cd apps/desktop
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/linux-packages.sh "$(node ../../scripts/version.ts)" out/packages
 ```
 
 CI pins nfpm's version and checksum in `linux-packages`.
