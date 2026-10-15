@@ -3,7 +3,7 @@
 // with scripts/backup.sh, keeps writing, restores with scripts/restore.sh
 // onto another installation's database and an empty blob directory, and
 // starts the real server on them. People sign in again and read with their
-// own keys.
+// own keys, and the plugin library's files come back with the rest.
 // The scripts need pg_dump, pg_restore and psql 17 on PATH. Without them this fails.
 import {
   createApiClient,
@@ -14,6 +14,7 @@ import {
   spaceOperations,
   type ClientContext,
 } from '@wikistow/client';
+import { pluginHash } from '@wikistow/plugin-sdk/files';
 import { connect, readSettings, schema } from '@wikistow/server';
 import { createTestDatabase } from '@wikistow/server/testing';
 import { eq } from 'drizzle-orm';
@@ -30,6 +31,17 @@ import type { KeyHolder } from './support/opens.ts';
 import { invite, shareFolder, type Person } from './support/sharing.ts';
 
 const MARKER = 'PLAINTEXT-M4-RESTORED-PAGE-8b8b';
+/** A theme plugin's files, as an upload carries them. */
+const PLUGIN = Object.entries({
+  'wikistow-plugin.json': JSON.stringify({
+    id: 'restored',
+    name: 'Restored',
+    version: '1.0.0',
+    api: 1,
+    styles: ['style.css'],
+  }),
+  'style.css': 'p{}',
+}).map(([path, text]) => ({ path, data: Buffer.from(text).toString('base64url') }));
 /** A 1×1 PNG. */
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -56,7 +68,7 @@ const exists = (path: string) =>
   );
 
 /** Sign in to `app` with `person`'s password and unlock their vault with the passphrase. */
-async function reopen(app: TestApp, person: Person): Promise<KeyHolder> {
+async function reopen(app: TestApp, person: Person): Promise<KeyHolder & { browser: Browser }> {
   const browser = new Browser(app.app);
   const signedIn = await browser.request('/api/auth/sign-in/email', {
     method: 'POST',
@@ -69,7 +81,7 @@ async function reopen(app: TestApp, person: Person): Promise<KeyHolder> {
     crypto: inlineVaultCrypto,
     secret: { kind: 'passphrase', passphrase: PASSPHRASE },
   });
-  return { identity: vault.identity, ctx: await openSession(api, vault) };
+  return { identity: vault.identity, ctx: await openSession(api, vault), browser };
 }
 
 /** The published page's text and its attachment, opened with `ctx`'s own keys. */
@@ -131,6 +143,13 @@ describe('Milestone 4 proofs: backup and restore', () => {
       rootId: folder,
       people: [await invite(olive, rita, 'reader')],
     });
+    // And uploads a plugin to the library.
+    const uploaded = await olive.browser.request('/api/plugins', {
+      method: 'POST',
+      json: { files: PLUGIN },
+    });
+    expect(uploaded.status).toBe(201);
+    const pluginFile = `/plugins/restored/${await pluginHash(new Map(PLUGIN.map((f) => [f.path, Buffer.from(f.data, 'base64url')])))}/style.css`;
 
     // Pointed at the wrong blob directory, a backup fails rather than miss the files.
     await expect(script('backup.sh', { ...t, blobDir: backups }, [backups])).rejects.toThrow(
@@ -188,6 +207,8 @@ describe('Milestone 4 proofs: backup and restore', () => {
     for (const { ctx } of [olive2, rita2]) {
       expect(await readPublished(ctx, plan)).toEqual({ markdown: MARKER, file: PNG });
     }
+    const served = await olive2.browser.request(pluginFile);
+    expect(await served.text()).toBe('p{}');
 
     // Rolled back in place, over its own database and files, the live
     // installation loses the later page and its file, and gets back a file
