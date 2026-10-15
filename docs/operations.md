@@ -10,6 +10,10 @@ Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such
 
 Always run the server under a restart policy, such as Compose's `restart: unless-stopped` or systemd's `Restart=always`. The server stops, with status 1, whenever it can't be sure no restore is under way: when it starts while a restore runs, and whenever it loses its lock on the database, which any Postgres restart or failover causes (see [Restoring](#restoring)). It never waits for Postgres to come back. Only a restart policy starts it again, once Postgres is up and no restore runs. Without one, every Postgres restart leaves WikiStow down until you start it by hand.
 
+## Idle connections
+
+The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout well over 15 seconds, about the longest an AI reply goes without sending anything. Proxy defaults, such as nginx's 60 seconds, are.
+
 ## Connect an AI provider
 
 The AI assistant is off until you configure one provider in the server's environment. People's apps send their conversations to your server, which adds the key and forwards them to the provider. The key never leaves the server. Turning AI on means the content people choose to send passes through your server to that provider, and the app tells them so.
@@ -36,7 +40,7 @@ The model must support tool calls. For the OpenAI style the server limits replie
 
 Check the connection under **Settings → AI assistant → Check connection**. It sends the provider a request of a few tokens and says whether the key and model work.
 
-The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. When a person stops a reply, the server cancels the provider's request too.
+The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. While the provider is quiet, as a reasoning model can be for minutes before it answers, the server sends a blank line every 15 seconds to keep the reply open. When a person stops a reply, the server cancels the provider's request too.
 
 ## What to back up
 

@@ -11,6 +11,9 @@ import type { AppEnv } from './env.ts';
 import { ApiError } from './errors.ts';
 import { isRecentlyAuthenticated, requirePrincipal, type Principal } from './principal.ts';
 
+/** How long a stream route waits on its handler before sending a blank line. */
+const STREAM_KEEPALIVE_MS = 15_000;
+
 type Handler<R extends RouteDef, Ctx> = (
   input: RouteInput<R>,
   ctx: Ctx,
@@ -413,11 +416,30 @@ export function createRoutes({
         const events = await handler(body, { c, principal, signal });
         const iterator = events[Symbol.asyncIterator]();
         const encoder = new TextEncoder();
+        // The event being waited for, kept across a keep-alive. Handled here
+        // too, as nothing awaits it while the reader takes no more.
+        let pending: ReturnType<typeof iterator.next> | null = null;
         // Pulled one event at a time, so a slow reader slows the provider's
         // stream rather than filling memory.
         const lines = new ReadableStream<Uint8Array>({
           async pull(controller) {
-            const next = await iterator.next();
+            if (!pending) {
+              pending = iterator.next();
+              pending.catch(() => {});
+            }
+            // A reasoning model can think for minutes before its first word.
+            // A blank line while it does, which readers skip, keeps the
+            // server's idle timeout and any proxy's from closing the stream.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const quiet = new Promise<null>((resolve) => {
+              timer = setTimeout(resolve, STREAM_KEEPALIVE_MS, null);
+            });
+            const next = await Promise.race([pending, quiet]).finally(() => clearTimeout(timer));
+            if (next === null) {
+              controller.enqueue(encoder.encode('\n'));
+              return;
+            }
+            pending = null;
             if (next.done) controller.close();
             else
               controller.enqueue(
