@@ -44,9 +44,9 @@ The server keeps no prompt or reply. It doesn't store them, and its log has one 
 
 ## What to back up
 
-Two things, taken together by `scripts/backup.sh`:
+Three things, taken together by `scripts/backup.sh`:
 
-- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys and the installation ID.
+- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys, the plugin library's records and the installation ID.
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 - The plugin library's files in `BLOB_DIR/plugins`, one folder per uploaded version, named by its hash. These are plain text, as the server serves them to members.
 

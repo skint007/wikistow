@@ -93,7 +93,12 @@ describe('the plugin library', () => {
         id: 'notes',
         mine: false,
         owner: { name: ann.email.split('@')[0] },
-        versions: [expect.objectContaining({ hash })],
+        versions: [
+          expect.objectContaining({
+            hash,
+            files: ['icons/a.svg', 'script.js', 'style.css', 'wikistow-plugin.json'],
+          }),
+        ],
       }),
     ]);
     expect((await list(ann))[0]?.mine).toBe(true);

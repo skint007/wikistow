@@ -20,8 +20,9 @@ const UPLOAD_LIMIT = { windowSeconds: 600, max: 20 };
 const UPLOAD_BODY = 15 * 1024 * 1024;
 const WRITE_LIMIT = { windowSeconds: 60, max: 60 };
 const FETCH_LIMIT = { windowSeconds: 60, max: 120 };
-// A few plugins' files on each page load, cached for good after that.
-const FILE_LIMIT = { windowSeconds: 60, max: 600 };
+// A few plugins' files on each page load, cached for good after that; or
+// a desktop fetching every file of the versions it installs (up to 500 each).
+const FILE_LIMIT = { windowSeconds: 60, max: 2000 };
 
 const FILE = /^\/plugins\/([^/]+)\/([^/]+)\/(.+)$/;
 

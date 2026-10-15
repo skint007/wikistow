@@ -2,6 +2,7 @@ CREATE TABLE "plugin_versions" (
 	"hash" text PRIMARY KEY NOT NULL,
 	"plugin_id" text NOT NULL,
 	"manifest" jsonb NOT NULL,
+	"files" jsonb NOT NULL,
 	"size" bigint NOT NULL,
 	"uploaded_by" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL

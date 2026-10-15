@@ -23,6 +23,7 @@ const invalid = (message: string) => new ContentError('invalid-plugin', message)
 const versionOut = (row: typeof pluginVersions.$inferSelect) => ({
   hash: row.hash,
   manifest: row.manifest,
+  files: row.files,
   size: row.size,
   uploadedAt: row.createdAt.toISOString(),
 });
@@ -52,7 +53,11 @@ export async function uploadPlugin(
       `A plugin may hold ${pluginRoutes.MAX_VERSION_BYTES / MB} MB at most.`,
     );
   }
-  const { manifest, hash } = await checkPlugin(byPath).catch((error: unknown) => {
+  const {
+    manifest,
+    files: paths,
+    hash,
+  } = await checkPlugin(byPath).catch((error: unknown) => {
     throw error instanceof PluginFolderError ? invalid(error.message) : error;
   });
   if (
@@ -91,7 +96,7 @@ export async function uploadPlugin(
     if (plugin.ownerId !== accountId) throw notYours();
     const [inserted] = await tx
       .insert(pluginVersions)
-      .values({ hash, pluginId: manifest.id, manifest, size, uploadedBy: accountId })
+      .values({ hash, pluginId: manifest.id, manifest, files: paths, size, uploadedBy: accountId })
       .onConflictDoNothing()
       .returning();
     return (

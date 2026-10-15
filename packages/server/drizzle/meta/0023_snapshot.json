@@ -1,5 +1,5 @@
 {
-  "id": "48781f59-6e34-42ae-ba1e-74ab69c8e288",
+  "id": "25b5315d-c89a-4449-a54d-e9ac3f72719e",
   "prevId": "662f9bb1-15a5-4e30-92df-7571ed5683fe",
   "version": "7",
   "dialect": "postgresql",
@@ -4128,6 +4128,12 @@
         },
         "manifest": {
           "name": "manifest",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "files": {
+          "name": "files",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true

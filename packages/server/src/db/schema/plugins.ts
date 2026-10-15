@@ -28,6 +28,8 @@ export const pluginVersions = pgTable(
       .notNull()
       .references(() => plugins.id, { onDelete: 'cascade' }),
     manifest: jsonb().$type<Manifest>().notNull(),
+    /** Every file's path, sorted: what a download needs to check the hash. */
+    files: jsonb().$type<string[]>().notNull(),
     size: bigint({ mode: 'number' }).notNull(),
     uploadedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamptz().notNull().defaultNow(),

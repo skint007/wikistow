@@ -38,6 +38,8 @@ export const UploadFile = z.strictObject({
 export const LibraryVersion = z.strictObject({
   hash: PluginHash,
   manifest: Manifest,
+  /** Every file's path, sorted. The hash covers them all, not only those the manifest names. */
+  files: z.array(PluginFile),
   /** Every file's bytes together. */
   size: z.number().int().nonnegative(),
   uploadedAt: Timestamp,
