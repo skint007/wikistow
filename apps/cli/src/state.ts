@@ -1,8 +1,9 @@
 // What the CLI keeps between runs (protocol section 9.3): its person's
-// contacts mark, its No going back marks (section 6.8) and its own
-// first-seen pins (section 8.3). The file sits beside the key file, mode
-// 600, encrypted and authenticated under a key only the key file holds, so
-// a changed file fails to open instead of lowering a mark.
+// contacts mark, its No going back marks (section 6.8), its own first-seen
+// pins (section 8.3) and the server's last restore it has seen. The file
+// sits beside the key file, mode 600, encrypted and authenticated under a
+// key only the key file holds, so a changed file fails to open instead of
+// lowering a mark.
 import {
   aeadDecrypt,
   aeadEncrypt,
@@ -30,6 +31,9 @@ const Contents = z.strictObject({
   marks: z.record(z.string(), z.number().int().positive()),
   // Changes this CLI made itself, written only after the library made them.
   pins: z.array(z.custom<ContactsChange>((value) => typeof value === 'object' && value !== null)),
+  // The `restoredAt` the marks were taken after (`unseenRestore`). Missing
+  // from files written before the server reported restores.
+  restoredAt: z.iso.datetime().nullable().default(null),
 });
 type Contents = z.infer<typeof Contents>;
 
@@ -58,8 +62,18 @@ export class LocalState implements KeyVersionMarks, AgentPins {
    * A fresh state for a newly enrolled agent, written at once over whatever
    * is at `path`: nothing there can be this new agent's.
    */
-  static create(path: string, key: Uint8Array, agentId: AgentId): LocalState {
-    const state = new LocalState(path, key, agentId, { contactsMark: null, marks: {}, pins: [] });
+  static create(
+    path: string,
+    key: Uint8Array,
+    agentId: AgentId,
+    restoredAt: string | null,
+  ): LocalState {
+    const state = new LocalState(path, key, agentId, {
+      contactsMark: null,
+      marks: {},
+      pins: [],
+      restoredAt,
+    });
     state.#write({ fresh: true });
     return state;
   }
@@ -103,8 +117,21 @@ export class LocalState implements KeyVersionMarks, AgentPins {
 
   // Another run of the CLI may have written the file since this one read
   // it. Take in what it kept, so neither lowers the other's marks: the
-  // higher of each mark, the later contacts mark, every pin once.
+  // higher of each mark, the later contacts mark, every pin once. Marks from
+  // before a restore the other has seen no longer count: the later restore's
+  // marks win whole.
   #merge(disk: Contents): void {
+    const seen = new Set(disk.pins.map((pin) => JSON.stringify(pin)));
+    const pins = [
+      ...disk.pins,
+      ...this.#contents.pins.filter((pin) => !seen.has(JSON.stringify(pin))),
+    ];
+    const restored = (contents: Contents) => Date.parse(contents.restoredAt ?? '') || 0;
+    if (restored(disk) !== restored(this.#contents)) {
+      const later = restored(disk) > restored(this.#contents) ? disk : this.#contents;
+      this.#contents = { ...later, pins };
+      return;
+    }
     const marks = { ...disk.marks };
     for (const [share, version] of Object.entries(this.#contents.marks)) {
       marks[share] = Math.max(marks[share] ?? 0, version);
@@ -112,12 +139,7 @@ export class LocalState implements KeyVersionMarks, AgentPins {
     const mine = this.#contents.contactsMark;
     const theirs = disk.contactsMark;
     const contactsMark = !theirs || (mine && mine.version >= theirs.version) ? mine : theirs;
-    const seen = new Set(disk.pins.map((pin) => JSON.stringify(pin)));
-    const pins = [
-      ...disk.pins,
-      ...this.#contents.pins.filter((pin) => !seen.has(JSON.stringify(pin))),
-    ];
-    this.#contents = { contactsMark, marks, pins };
+    this.#contents = { contactsMark, marks, pins, restoredAt: disk.restoredAt };
   }
 
   // Under the lock, so no run's write lands between this one's read and its rename.
@@ -135,6 +157,21 @@ export class LocalState implements KeyVersionMarks, AgentPins {
       >;
       writePrivateFile(this.#path, utf8(`${JSON.stringify(file)}\n`));
     });
+  }
+
+  /** The `restoredAt` of the last restore this agent has seen, or null. */
+  get restoredAt(): string | null {
+    return this.#contents.restoredAt;
+  }
+
+  /**
+   * After a restore it hadn't seen (`unseenRestore`): forget the contacts
+   * mark and the No going back marks, which describe the server before it,
+   * so the next session starts from what the server serves now.
+   */
+  startOver(restoredAt: string): void {
+    this.#contents = { ...this.#contents, contactsMark: null, marks: {}, restoredAt };
+    this.#write();
   }
 
   get contactsMark(): ContactsMark | null {

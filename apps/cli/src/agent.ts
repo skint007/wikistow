@@ -5,10 +5,13 @@ import {
   createApiClient,
   CryptoError,
   openAgentSession,
+  restoreNotice,
   saveContacts,
+  unseenRestore,
   type ClientContext,
   type Fetch,
 } from '@wikistow/client';
+import { systemRoutes } from '@wikistow/contracts';
 import { join } from 'node:path';
 import { CliError } from './exit.ts';
 import { configDir, readPrivateFile } from './files.ts';
@@ -119,10 +122,16 @@ export type OpenedAgent = {
   ctx: ClientContext;
 };
 
+/** A time as the CLI prints it, in UTC to the minute: `2026-10-15 09:30 UTC`. */
+const utcMinute = (iso: string) =>
+  `${new Date(iso).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
 /**
  * Unlock and open the agent's session. Its first-seen pins, marks and
  * contacts mark come from the local state, and `finish` keeps what the
- * session changed for the next run.
+ * session changed for the next run. After a restore of the server it
+ * hasn't seen, it says so on standard error and starts over from what the
+ * server serves now (`unseenRestore`).
  */
 export async function openAgent(
   io: Io,
@@ -158,6 +167,12 @@ export async function openAgent(
     fetch: journal.fetch(send),
     token: secrets.token,
   });
+  const { restore } = await api.call(systemRoutes.installation);
+  const unseen = unseenRestore(restore, state.restoredAt);
+  if (unseen) {
+    state.startOver(unseen.restoredAt);
+    io.stderr.write(`${restoreNotice(unseen, utcMinute)}\n`);
+  }
   const ctx = await openAgentSession(api, {
     identity: secrets.identity,
     person: secrets.person,

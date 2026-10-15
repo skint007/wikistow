@@ -23,6 +23,7 @@ export * from './markdown/index.ts';
 export * from './key-versions.ts';
 export * from './payload.ts';
 export * from './regions.ts';
+export * from './restore.ts';
 export * from './revision.ts';
 export * from './revision-cache.ts';
 export * from './rotation.ts';
