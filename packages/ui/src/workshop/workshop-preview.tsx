@@ -61,7 +61,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
               ))}
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onClick={() =>
                   setSelected(workshop.samples.put({ title: 'Sample', markdown: '' }).pageId)
                 }
@@ -112,7 +112,7 @@ function Status({ workshop }: { workshop: Workshop }) {
             <strong>{plugin.manifest.name}</strong>
             <span className="text-muted-foreground">{plugin.manifest.version}</span>
             <Badge variant="secondary">{LEVELS[plugin.level]}</Badge>
-            <Button size="sm" variant="ghost" onClick={() => void workshop.unload()}>
+            <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
           </>
@@ -185,7 +185,7 @@ function Problems({ workshop }: { workshop: Workshop }) {
       {plugin?.manifest.ui && appCode && (
         <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           This workshop’s app code runs in the preview, with your trust.
-          <Button size="sm" variant="ghost" onClick={() => void workshop.allowAppCode(false)}>
+          <Button size="sm" variant="outline" onClick={() => void workshop.allowAppCode(false)}>
             Stop running it
           </Button>
         </p>
@@ -477,7 +477,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
               {version.plugin && running?.version !== version.version && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => void act(async () => (await workshop.load(version.version), null))}
                 >
                   Preview

@@ -43,7 +43,7 @@ export function EmojiPicker({
             aria-label={`Change emoji ${emoji}`}
             className={cn(
               badgeClass,
-              'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed focus-visible:outline-ring',
+              'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
             )}
           >
             {emoji}
@@ -51,7 +51,7 @@ export function EmojiPicker({
         ) : (
           <button
             type="button"
-            className="glass absolute bottom-3 left-11 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold max-[899px]:left-[18px]"
+            className="glass absolute bottom-3 left-11 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold hover:tint active:tint-strong max-[899px]:left-[18px]"
           >
             <SmilePlus className="size-4" strokeWidth={1.75} /> Add emoji
           </button>

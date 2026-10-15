@@ -51,7 +51,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           type="button"
           aria-label="Close the assistant"
           onClick={onClose}
-          className="grid size-8 place-items-center rounded-control hover:bg-accent"
+          className="grid size-8 place-items-center rounded-control hover:tint active:tint-strong"
         >
           <X className="size-4" strokeWidth={1.75} />
         </button>
@@ -632,7 +632,7 @@ function Composer({
             'flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
             including
               ? 'border-primary bg-primary/10 font-bold text-primary'
-              : 'text-muted-foreground hover:bg-accent',
+              : 'text-muted-foreground hover:bg-accent active:tint-strong',
           )}
         >
           <FileText className="size-3.5 shrink-0" strokeWidth={1.75} />

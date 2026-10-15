@@ -353,7 +353,7 @@ function CopyItem({
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={busy}
               onClick={() => {
                 setConfirming(false);
@@ -382,7 +382,7 @@ function CopyItem({
               <Button
                 ref={endButton}
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 aria-label={`End this copy in ${where}…`}
                 onClick={() => setConfirming(true)}
               >

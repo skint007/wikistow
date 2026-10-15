@@ -83,7 +83,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             aria-label="Open navigation"
             onClick={() => setDrawer(true)}
-            className="grid size-9 place-items-center rounded-control hover:bg-accent"
+            className="grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
           >
             <Menu className="size-5" strokeWidth={1.75} />
           </button>
@@ -95,7 +95,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="button"
               aria-label="Search"
               onClick={search}
-              className="ml-auto grid size-9 place-items-center rounded-control hover:bg-accent"
+              className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
             >
               <Search className="size-5" strokeWidth={1.75} />
             </button>

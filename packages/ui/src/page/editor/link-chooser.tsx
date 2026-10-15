@@ -56,9 +56,11 @@ export function LinkChooser({
                   aria-pressed={picked}
                   onClick={() => onPick(page.id)}
                   className={cn(
-                    'flex w-full items-center gap-3 rounded-control border px-3 py-2 text-left text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60',
-                    picked &&
-                      'border-primary bg-primary-soft text-primary-ink hover:bg-primary-soft',
+                    'flex w-full items-center gap-3 rounded-control border px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60',
+                    // The chosen page's colours sit near 4.5:1, so it takes no tint.
+                    picked
+                      ? 'border-primary bg-primary-soft text-primary-ink'
+                      : 'enabled:hover:tint enabled:active:tint-strong',
                   )}
                 >
                   <span className="grid min-w-0 flex-1">

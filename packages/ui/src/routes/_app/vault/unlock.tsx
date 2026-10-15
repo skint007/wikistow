@@ -115,7 +115,7 @@ function Unlock() {
         <Button type="submit" disabled={busy}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </Button>
-        <Link to="/vault/recover" className="text-sm text-muted-foreground">
+        <Link to="/vault/recover" className="text-sm quiet-link">
           Use your recovery key instead
         </Link>
       </form>

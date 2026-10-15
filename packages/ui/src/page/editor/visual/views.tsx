@@ -315,7 +315,8 @@ class CodeBlockView implements NodeView {
           value={shown}
           options={names.map((name) => ({ value: name, label: name || 'text' }))}
           onChange={(language) => this.#relabel(language)}
-          className="-mx-1 h-auto w-auto gap-1 rounded-row border-0 bg-transparent px-1 py-0.5 text-xs hover:bg-background/60 data-[state=open]:bg-background/60 [&>svg]:size-3"
+          // Lightened on hover instead of the Picker's tint, which would dim the label.
+          className="-mx-1 h-auto w-auto gap-1 rounded-row border-0 bg-transparent px-1 py-0.5 text-xs hover:bg-background/60 hover:bg-none! data-[state=open]:bg-background/60 data-[state=open]:bg-none! [&>svg]:size-3"
         />
         {claimed && <span> · shown as written, without the {claimed.pluginId} plugin</span>}
       </>,
@@ -413,8 +414,9 @@ class QuoteView implements NodeView {
         options={QUOTE_TYPES}
         onChange={(type) => this.#retype(type === 'quote' ? null : type)}
         refocus={() => this.#view.focus()}
+        // Lightened on hover instead of the Picker's tint, which would dim an alert's label.
         className={cn(
-          '-mx-1 h-auto w-auto gap-1.5 rounded-row border-0 bg-transparent px-1 py-0.5 hover:bg-background/60 data-[state=open]:bg-background/60',
+          '-mx-1 h-auto w-auto gap-1.5 rounded-row border-0 bg-transparent px-1 py-0.5 hover:bg-background/60 hover:bg-none! data-[state=open]:bg-background/60 data-[state=open]:bg-none!',
           alert
             ? 'text-[length:inherit] font-bold text-(--alert)'
             : 'text-xs text-subtle-foreground [&_svg]:size-3.5',

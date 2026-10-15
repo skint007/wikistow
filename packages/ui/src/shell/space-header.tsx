@@ -62,7 +62,7 @@ export function SpaceHeader({
           <button
             type="button"
             onClick={() => askAgain(ctx, spaceId)}
-            className="flex items-center gap-1 text-left text-xs font-bold text-primary-ink hover:underline"
+            className="flex items-center gap-1 text-left text-xs font-bold text-primary-ink underline decoration-current/40 underline-offset-2 hover:decoration-current"
           >
             <ShieldAlert className="size-3.5 shrink-0" strokeWidth={1.75} />
             Confirm who added you
@@ -72,7 +72,7 @@ export function SpaceHeader({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Space menu"
-          className="grid size-8 shrink-0 place-items-center rounded-control text-muted-foreground hover:bg-accent"
+          className="grid size-8 shrink-0 place-items-center rounded-control text-muted-foreground hover:tint active:tint-strong"
         >
           <ChevronDown className="size-4" strokeWidth={1.75} />
         </DropdownMenuTrigger>
@@ -134,7 +134,9 @@ function MemberCount({ spaceId }: { spaceId: SpaceId }) {
           );
         })}
       </span>
-      {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      <span className="underline decoration-current/40 underline-offset-2">
+        {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      </span>
     </Link>
   );
 }

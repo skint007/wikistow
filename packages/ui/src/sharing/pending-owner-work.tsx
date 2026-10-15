@@ -138,7 +138,7 @@ export function PendingOwnerWork() {
               type="button"
               aria-expanded={unfolded}
               onClick={() => setUnfolded((open) => !open)}
-              className="rounded-control px-2 py-1 text-xs font-bold text-primary-ink hover:bg-accent min-[900px]:hidden"
+              className="rounded-control px-2 py-1 text-xs font-bold text-primary-ink underline decoration-current/40 underline-offset-2 hover:tint active:tint-strong min-[900px]:hidden"
             >
               {unfolded ? 'Hide' : 'Show'}
             </button>
@@ -146,7 +146,7 @@ export function PendingOwnerWork() {
               type="button"
               aria-label="Dismiss"
               onClick={() => setDismissed(true)}
-              className="grid size-7 place-items-center rounded-control hover:bg-accent"
+              className="grid size-7 place-items-center rounded-control hover:tint active:tint-strong"
             >
               <X className="size-4" strokeWidth={1.75} />
             </button>

@@ -8,6 +8,60 @@
 /* Classes are used across packages/ui, which sits outside the web app's root. */
 @source '..';
 
+/* Hover and pressed feedback for controls: the palette's text colour, faint, layered over
+ * whatever fill the control has. It darkens a light palette's fill and lightens a dark
+ * one's, on any surface, so `hover:tint active:tint-strong` suits bare controls and most
+ * fills (bright ones take `shade`, below). `bg-accent` is the hover tint as a fill, for controls without one. Light palettes
+ * take less, which keeps muted text on a card above 4.5:1 while hovered (not on muted). */
+:root {
+  --tint-hover: 6%;
+  --tint-pressed: 12%;
+}
+[data-theme='slate'],
+[data-theme='warm'],
+[data-theme='oled'] {
+  --tint-hover: 9%;
+  --tint-pressed: 17%;
+}
+/* Controls on the banner's glass, whose text keeps 4.5:1 over a white image while hovered.
+ * Not a dialog's: one opened from the toolbar sits inside it in the DOM. */
+.glass:is(button, a),
+.glass :is(button, a):not(dialog *) {
+  --tint-hover: 6%;
+}
+/* A quiet text action, such as "Start again": muted, and underlined so it reads as one. */
+@utility quiet-link {
+  @apply text-muted-foreground underline decoration-current/40 underline-offset-4 hover:text-foreground hover:decoration-current;
+}
+@utility tint {
+  --tint: color-mix(in oklab, var(--foreground) var(--tint-hover), transparent);
+  background-image: linear-gradient(var(--tint), var(--tint));
+}
+@utility tint-strong {
+  --tint: color-mix(in oklab, var(--foreground) var(--tint-pressed), transparent);
+  background-image: linear-gradient(var(--tint), var(--tint));
+}
+/* The same for a bright fill, such as a primary Button's: black, so it darkens in every palette,
+ * where a dark palette's light tint would barely show. Its text keeps 4.5:1 either way. */
+@utility shade {
+  background-image: linear-gradient(rgb(0 0 0 / 10%), rgb(0 0 0 / 10%));
+}
+@utility shade-strong {
+  background-image: linear-gradient(rgb(0 0 0 / 18%), rgb(0 0 0 / 18%));
+}
+
+@layer base {
+  /* Tailwind gives buttons the arrow; show the hand on anything enabled that clicks. */
+  :is(button, [role='button'], summary):not(:disabled, [aria-disabled='true']) {
+    cursor: pointer;
+  }
+  /* One keyboard focus ring for every control that doesn't draw its own. */
+  :is(button, a, [role='button'], [role='treeitem'], summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
 /* Page bodies rendered from Markdown (see page/markdown.tsx). */
 @layer components {
   .page-body {

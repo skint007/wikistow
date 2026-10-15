@@ -192,7 +192,7 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
             'flex w-fit max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
             copied === page.pageId
               ? 'border-primary bg-primary/10 font-bold text-primary'
-              : 'text-muted-foreground hover:bg-accent',
+              : 'text-muted-foreground hover:bg-accent active:tint-strong',
           )}
         >
           <Copy className="size-3.5 shrink-0" strokeWidth={1.75} />
