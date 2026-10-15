@@ -86,6 +86,8 @@ deb:
 rpm:
   summary: Desktop app for your family's encrypted wiki
   compression: zstd
+  # The same bytes on any machine, rather than its hostname.
+  buildhost: wikistow
 
 contents:
   # Electron, named for the app, with the app as its resources/app.asar.
@@ -118,6 +120,10 @@ contents:
   - src: LICENSE
     dst: /usr/share/doc/wikistow-desktop/copyright
     packager: deb
+  # rpm removes only the folders a package lists.
+  - dst: /usr/share/licenses/wikistow-desktop
+    type: dir
+    packager: rpm
   - src: LICENSE
     dst: /usr/share/licenses/wikistow-desktop/LICENSE
     packager: rpm

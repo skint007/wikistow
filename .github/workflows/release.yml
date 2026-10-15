@@ -53,6 +53,15 @@ jobs:
           latest=false
           if grep -Eq '^ *origin/main$' <<< "$branches" && [[ "$GITHUB_REF_NAME" != *-* ]]; then latest=true; fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      # The .deb and .rpm bundle this Electron, so it must be its major's
+      # newest patch, with every security fix released so far.
+      - run: |
+          pinned=$(jq -r .devDependencies.electron apps/desktop/package.json)
+          newest=$(npm view "electron@${pinned%%.*}" version --json | jq -r 'if type == "array" then .[-1] else . end')
+          if [ "$pinned" != "$newest" ]; then
+            echo "::error::apps/desktop/package.json pins Electron $pinned, but $newest is out (docs/releasing.md)"
+            exit 1
+          fi
 
   ci:
     needs: verify
