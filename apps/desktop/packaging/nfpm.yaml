@@ -14,9 +14,9 @@ homepage: https://github.com/skint007/wikistow
 license: MIT
 
 # What Electron links against, plus what it loads at run time: libsecret
-# for the keyring and xdg-open for signing in. desktop-file-utils and the
-# hicolor icon cache register the wikistow:// handler and the icons through
-# their own triggers. Check these with ldd when Electron's major changes.
+# for the keyring and xdg-open for signing in. desktop-file-utils registers
+# the wikistow:// handler through its own triggers, and hicolor-icon-theme
+# owns the icon folders. linux-packages-check in release.yml checks these.
 overrides:
   deb:
     # The t64 names first, so apt picks the real library: Ubuntu's OSS

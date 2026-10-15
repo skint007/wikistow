@@ -92,11 +92,11 @@ jobs:
       - working-directory: apps/desktop
         env:
           SOURCE_DATE_EPOCH: ${{ needs.verify.outputs.time }}
-        run: scripts/linux-packages.sh "${GITHUB_REF_NAME#v}" ../../packages
+        run: scripts/linux-packages.sh "${GITHUB_REF_NAME#v}" out/linux-packages
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-packages
-          path: packages
+          path: apps/desktop/out/linux-packages
           if-no-files-found: error
           retention-days: 7
 
@@ -121,10 +121,12 @@ jobs:
           if command -v apt-get >/dev/null; then
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./packages/*.deb >/dev/null
+            source=deb
           else
             dnf install -y -q ./packages/*.rpm
+            source=rpm
           fi
-          cat /usr/lib/wikistow-desktop/install-source
+          [ "$(cat /usr/lib/wikistow-desktop/install-source)" = "$source" ]
           for file in /usr/lib/wikistow-desktop/wikistow-desktop /usr/lib/wikistow-desktop/*.so*; do
             ldd -r "$file" 2>&1
           done | grep -E 'not found|undefined symbol' && exit 1
