@@ -1,6 +1,7 @@
 #!/bin/sh
 # Back up a WikiStow installation: the database, then the encrypted
-# attachment files. Safe while the server runs. See docs/operations.md.
+# attachment files and the plugin library's files. Safe while the server
+# runs. See docs/operations.md.
 #
 #   DATABASE_URL=postgres://... BLOB_DIR=/data/blobs backup.sh /backups
 #
@@ -32,29 +33,41 @@ trap 'rm -rf "$partial"' EXIT
 # could miss a file the dump lists.
 pg_dump --format=custom --file="$partial/database.dump" --dbname="$DATABASE_URL"
 
-# Only objects/: staging/ holds unfinished uploads, which no dump lists. A
-# new installation has no objects/ until its first attachment.
+# Only objects/ (attachments) and plugins/ (the plugin library's versions):
+# staging/ and plugin-staging/ hold unfinished uploads, which no dump lists.
+# A new installation has neither until its first attachment or plugin.
 from=$BLOB_DIR
-[ -d "$from/objects" ] || { from=$partial/empty; mkdir -p "$from/objects"; }
+dirs=
+for dir in objects plugins; do
+  [ -d "$from/$dir" ] && dirs="$dirs $dir"
+done
+[ -n "$dirs" ] || { from=$partial/empty; dirs=objects; mkdir -p "$from/objects"; }
 # tar fails when files come and go as it reads, which a running server
 # does, so it gets a few tries.
 for try in 1 2 3; do
-  tar -C "$from" -cf "$partial/blobs.tar" objects && break
+  tar -C "$from" -cf "$partial/blobs.tar" $dirs && break
   [ "$try" -lt 3 ] || exit 1
 done
 rm -rf "$partial/empty"
 
-# Every file the dump lists must be in blobs.tar. A wrong BLOB_DIR misses
-# them all, and deleting a page removes its files at once, so one deleted
-# while tar ran would come back without them. `hash` is the table's first
+# Every file the dump lists must be in blobs.tar: each attachment blob, and
+# each plugin version's manifest. A wrong BLOB_DIR misses them all, and
+# deleting a page or a plugin removes its files at once, so one deleted
+# while tar ran would come back without them. `hash` is each table's first
 # column; were it not, nothing would match and the backup would fail.
-pg_restore --data-only --table=blobs --file="$partial/blobs.sql" "$partial/database.dump"
-awk -F '\t' '/^COPY /{on=1; next} /^\\\.$/{on=0} on{print $1}' "$partial/blobs.sql" |
-  sort > "$partial/listed"
+pg_restore --data-only --table=blobs --table=plugin_versions --file="$partial/listed.sql" \
+  "$partial/database.dump"
+awk -F '\t' '
+  /^COPY ([^ ]*\.)?blobs /{on="objects"; next}
+  /^COPY ([^ ]*\.)?plugin_versions /{on="plugins"; next}
+  /^\\\.$/{on=""}
+  on{print on "/" $1}' "$partial/listed.sql" | sort > "$partial/listed"
 tar -tf "$partial/blobs.tar" > "$partial/entries"
-sed -n 's|^objects/[^/]*/\([^/][^/]*\)$|\1|p' "$partial/entries" | sort > "$partial/archived"
+sed -n -e 's|^\(objects\)/[^/]*/\([^/][^/]*\)$|\1/\2|p' \
+  -e 's|^\(plugins\)/\([^/][^/]*\)/wikistow-plugin\.json$|\1/\2|p' \
+  "$partial/entries" | sort > "$partial/archived"
 missing=$(comm -23 "$partial/listed" "$partial/archived")
-rm "$partial/blobs.sql" "$partial/entries" "$partial/listed" "$partial/archived"
+rm "$partial/listed.sql" "$partial/entries" "$partial/listed" "$partial/archived"
 if [ -n "$missing" ]; then
   echo "blobs.tar lacks $(echo "$missing" | wc -l) file(s) the database lists:" >&2
   echo "$missing" | head -n 20 >&2

@@ -15,6 +15,7 @@
   "dependencies": {
     "@wikistow/client": "workspace:*",
     "@wikistow/contracts": "workspace:*",
+    "@wikistow/plugin-sdk": "workspace:*",
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.3",
     "postgres": "3.4.9",

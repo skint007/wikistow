@@ -22,6 +22,8 @@ export * from './content/stored.ts';
 export * from './content/structure.ts';
 export * from './content/vault.ts';
 export * from './blobs/store.ts';
+export * from './plugins/library.ts';
+export * from './plugins/store.ts';
 export * from './content/pages.ts';
 export * from './content/contacts.ts';
 export * from './content/quota.ts';

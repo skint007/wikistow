@@ -1,6 +1,7 @@
 #!/bin/sh
-# Restore a backup made by backup.sh, replacing the database's contents and
-# the attachment files. Stop the server first. See docs/operations.md.
+# Restore a backup made by backup.sh, replacing the database's contents, the
+# attachment files and the plugin library's files. Stop the server first.
+# See docs/operations.md.
 #
 #   DATABASE_URL=postgres://... BLOB_DIR=/data/blobs \
 #     restore.sh --server-stopped /backups/wikistow-<time>
@@ -64,7 +65,13 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 tar -C "$incoming" -xf "$backup/blobs.tar"
-[ -d "$incoming/objects" ] || { echo "blobs.tar holds no objects/" >&2; exit 1; }
+if [ ! -d "$incoming/objects" ] && [ ! -d "$incoming/plugins" ]; then
+  echo "blobs.tar holds no objects/ or plugins/" >&2
+  exit 1
+fi
+# A backup from before the plugin library, or of an installation with no
+# attachments yet, lacks one of them: restored, it is empty.
+mkdir -p "$incoming/objects" "$incoming/plugins"
 
 # The flag is only the operator's word. A running server could write over the
 # restore, or serve files and cached state from before it. Every WikiStow
@@ -184,12 +191,14 @@ if [ "$answer" != recorded ]; then
   exit 1
 fi
 
-rm -rf "$BLOB_DIR/objects"
-mv "$incoming/objects" "$BLOB_DIR/objects"
+for dir in objects plugins; do
+  rm -rf "$BLOB_DIR/$dir"
+  mv "$incoming/$dir" "$BLOB_DIR/$dir"
+done
 rmdir "$incoming"
 # Run as root, as in a one-off container: give the files to BLOB_DIR's owner.
 if [ "$(id -u)" -eq 0 ]; then
-  chown -R "$(stat -c %u:%g "$BLOB_DIR/.")" "$BLOB_DIR/objects"
+  chown -R "$(stat -c %u:%g "$BLOB_DIR/.")" "$BLOB_DIR/objects" "$BLOB_DIR/plugins"
 fi
 stage=
 # Unlocked, and waited for, so a server started the moment this ends can lock.

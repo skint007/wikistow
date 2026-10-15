@@ -52,7 +52,8 @@ export default {
   define: { __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`) },
   resolve: { alias: { '@': ui('src'), 'decode-named-character-reference': entities } },
   // The API runs separately in development (`pnpm --filter @wikistow/server-app dev`).
-  server: { proxy: { '/api': 'http://127.0.0.1:3000' } },
+  // Library plugins' files are the server's too (ADR 0002).
+  server: { proxy: { '/api': 'http://127.0.0.1:3000', '/plugins/': 'http://127.0.0.1:3000' } },
   build: { outDir: 'dist', sourcemap: true },
   // The vault worker imports libsodium; ES modules let it share chunks.
   worker: { format: 'es' },

@@ -3,11 +3,13 @@ import {
   connect,
   DatabaseLockedError,
   fileBlobStore,
+  filePluginStore,
   lockDatabase,
   MIGRATIONS_DIR,
   sweepBlobs,
   sweepDrafts,
   sweepPasswordBudgets,
+  sweepPlugins,
 } from '@wikistow/server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -43,10 +45,14 @@ const { app } = createApp({ db, config, log: stdoutLog, deliver: smtpDeliver(con
 
 // Each sweep on its own, so one failing doesn't stop the others: attachment
 // data nothing uses, and publications into another space nobody finished
-// (see sweepBlobs); old draft checkpoints nothing needs (see sweepDrafts);
+// (see sweepBlobs); library plugin files no version lists (see
+// sweepPlugins); old draft checkpoints nothing needs (see sweepDrafts);
 // and password allowances that are full again (see sweepPasswordBudgets).
 const sweeps = [
   scheduleSweep(stdoutLog, 'blob-sweep', () => sweepBlobs(db, blobs)),
+  scheduleSweep(stdoutLog, 'plugin-sweep', async () => ({
+    versions: await sweepPlugins(db, filePluginStore(config.blobDir)),
+  })),
   scheduleSweep(stdoutLog, 'draft-sweep', async () => ({
     drafts: await sweepDrafts(db, { retentionMs: config.draftRetentionMs }),
   })),

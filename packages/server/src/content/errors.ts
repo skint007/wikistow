@@ -29,7 +29,8 @@ export type ContentFailure =
   | 'space-limit'
   | 'folder-limit'
   | 'page-limit'
-  | 'last-owner';
+  | 'last-owner'
+  | 'invalid-plugin';
 
 export class ContentError extends Error {
   readonly code: ContentFailure;

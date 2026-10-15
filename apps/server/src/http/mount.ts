@@ -376,6 +376,21 @@ export function createRoutes({
         }
       });
     },
+    /**
+     * Raw bytes for any signed-in person, never an agent (library plugins'
+     * files). Its rate limit counts per account.
+     */
+    file(
+      path: string,
+      handler: (c: Context<AppEnv>, principal: Principal) => Promise<Response>,
+      options: Pick<Options, 'rateLimit'> = {},
+    ) {
+      app.get(path, async (c) => {
+        const principal = await requirePrincipal(auth, c);
+        await limitAccount(c, { method: 'GET', path }, principal, options);
+        return handler(c, principal);
+      });
+    },
     /** Raw bytes anyone may fetch, with no session (avatars). Its rate limit counts per client. */
     publicFile(
       path: string,

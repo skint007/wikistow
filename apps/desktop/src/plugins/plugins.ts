@@ -4,10 +4,11 @@ import type {
   PluginScope,
   PluginsState,
 } from '@wikistow/contracts';
+import { fileType } from '@wikistow/plugin-sdk/files';
 import { asksMore, Manifest, PageAccess, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   copyPluginFiles,
@@ -42,29 +43,8 @@ const State = z.strictObject({
 });
 type State = z.infer<typeof State>;
 
-const TYPES: Record<string, string> = {
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-};
-
 /** A file served under `/plugins/`, with what it is served as. */
 export type PluginFile = { path: string; type: string };
-
-/** What a file is served as, by its extension. */
-export const fileType = (file: string) =>
-  TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream';
 
 /** `/plugins/<id>/<key>/<path>`, split, its path decoded. */
 export type PluginAddress = { id: string; key: string; path: string };
