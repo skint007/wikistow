@@ -344,8 +344,9 @@ export function createRoutes({
     /**
      * A signed-in person's raw upload (their avatar), never an agent's: the
      * same origin, session and rate limit checks as `account`. The body is
-     * read whole and refused past `maxBytes`, stated or streamed, or once
-     * it has taken the large-body deadline to arrive.
+     * read whole, in a `bulk` large-body slot, and refused past `maxBytes`,
+     * stated or streamed, or once it has taken the large-body deadline to
+     * arrive.
      */
     upload(
       path: string,
@@ -360,11 +361,16 @@ export function createRoutes({
         const principal = await requirePrincipal(auth, c);
         if (c.req.header('idempotency-key') !== undefined) refuseKey();
         await limitAccount(c, route, principal, options);
-        const bytes = await readLimited(c.req.raw, {
-          bytes: maxBytes,
-          deadlineMs: config.bodyDeadlineMs,
-        });
-        return handler(bytes, { c, principal });
+        const release = takeSlot.bulk(principal.accountId);
+        try {
+          const bytes = await readLimited(c.req.raw, {
+            bytes: maxBytes,
+            deadlineMs: config.bodyDeadlineMs,
+          });
+          return await handler(bytes, { c, principal });
+        } finally {
+          release();
+        }
       });
     },
     /** Raw bytes anyone may fetch, with no session (avatars). */

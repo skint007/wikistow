@@ -43,7 +43,8 @@ function svgProblem(text: string): string | null {
   if (!SVG_NAMESPACE.test(root[1] ?? '')) {
     return 'This SVG has no xmlns="http://www.w3.org/2000/svg" on its root, so browsers won’t show it.';
   }
-  if (/<script\b/i.test(text) || /<[^>]*\son[a-z]+\s*=/i.test(text)) {
+  // `[^<>]` keeps each tag's scan to that tag, so this stays linear.
+  if (/<script\b/i.test(text) || /<[^<>]*\son[a-z]+\s*=/i.test(text)) {
     return 'SVG images with scripts aren’t supported.';
   }
   const links = [...text.matchAll(LINK_ATTRIBUTE)].map((match) => match[2] ?? '');
