@@ -27,6 +27,7 @@ import {
 } from './chat';
 import { foldDiff, lineDiff, toolActivity, toolResults } from './chat-model';
 import { aiStatusQuery } from './session';
+import { Working } from './working';
 
 /**
  * The page chat (wikistow.md, AI assistant): a conversation with one of
@@ -582,8 +583,11 @@ function Composer({
   const [text, setText] = useState('');
   const [included, setIncluded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Reading the included page, before the reply starts.
+  // From Send until chat.send settles: it reads the included page, then waits out the reply.
   const [sending, setSending] = useState(false);
+  // From Send until the reply starts. After Stop, a tool call still settling isn't shown as work.
+  const [starting, setStarting] = useState(false);
+  if (starting && running) setStarting(false);
   const busy = running || sending;
   const including = page !== null && included === page.pageId;
   const send = async () => {
@@ -591,6 +595,7 @@ function Composer({
     if (!message || busy) return;
     setError(null);
     setSending(true);
+    setStarting(true);
     try {
       const sent = chat.send(message, including ? page : null);
       setText('');
@@ -601,6 +606,7 @@ function Composer({
       setError(caught instanceof Error ? caught.message : 'Couldn’t send that.');
     } finally {
       setSending(false);
+      setStarting(false);
     }
   };
   return (
@@ -635,6 +641,7 @@ function Composer({
           {error}
         </p>
       )}
+      <Working working={running || starting} />
       <div className="flex items-end gap-2">
         {/* 16px on phones: iOS zooms in on a smaller field when it's focused. */}
         <textarea

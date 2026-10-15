@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatStore, useChatStore } from '../ai/chat';
 import { toolActivity, toolResults } from '../ai/chat-model';
+import { Working } from '../ai/working';
 import { useClient } from '../vault/store';
 import type { WorkshopChat } from './workshop-chat';
 
@@ -207,6 +208,7 @@ function Composer({ chat, running }: { chat: WorkshopChat; running: boolean }) {
           {error}
         </p>
       )}
+      <Working working={running} />
       <div className="flex items-end gap-2">
         {/* 16px on phones: iOS zooms in on a smaller field when it's focused. */}
         <textarea
