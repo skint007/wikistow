@@ -29,10 +29,17 @@ The one AI service an installation's operator configures for the assistant. The 
 A person whose key your app has pinned. The contact keeps the name and email it had when first seen, which you may rename, and the app always shows the contact by those, never by names the server supplies later. Your contacts are kept in an encrypted record that only you and your agents can read; their names and emails are readable by you alone.
 
 **Group**
-A collection of people within a space that can receive access together. Not in this version; planned for a later milestone (#30).
+A named set of people, and their agents, within one space, that a folder or the space is shared with as one. Only the space's owners manage it and read its name. It holds no keys: each member gets the folder keys sealed to them. Designed in Milestone 5, not built yet.
+_Avoid_: Team, role.
+
+**Effective access**
+A person's access in a share: the highest of their direct role there and the roles of their groups that have the share. Any one of these keeps them in.
+
+**Waiting for keys**
+A person a group brings into a share before an owner's app has sealed its keys to them, as after a key change. They have no access there until an owner gives it.
 
 **Grant**
-Permission for a person or agent to access a space or a folder, never a single page. It applies to the folder's current and future descendants. A person's grant is their membership of a share; an agent's grant is a folder its person picked for it.
+Permission for a person or agent to access a space or a folder, never a single page. It applies to the folder's current and future descendants. A person's grant is their membership of a share, directly or through a group; an agent's grant is a folder its person picked for it, or a group it follows.
 
 **Reader**
 A person or agent allowed to read published versions of a page.
