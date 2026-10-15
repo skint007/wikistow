@@ -21,9 +21,11 @@ trap 'rm -rf "$stage"' EXIT
 electron=$(realpath node_modules/electron)
 mkdir "$stage/electron"
 cp "$electron/package.json" "$electron/install.js" "$electron/checksums.json" "$stage/electron/"
-NODE_PATH=$(dirname "$electron") node "$stage/electron/install.js"
+# Its own dependencies, found before any node_modules above the stage.
+ln -s "$(dirname "$electron")" "$stage/node_modules"
+node "$stage/electron/install.js"
 mv "$stage/electron/dist" "$stage/lib"
-rm -r "$stage/electron"
+rm -r "$stage/electron" "$stage/node_modules"
 mv "$stage/lib/electron" "$stage/lib/wikistow-desktop"
 # Electron starts resources/app.asar in place of its own default app.
 rm "$stage/lib/resources/default_app.asar"
