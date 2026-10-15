@@ -22,7 +22,8 @@ import type { PrivateIdentity, PublicIdentity } from '../identity.ts';
  * The newest contacts record this session has accepted, and its payloads.
  * `mark` is the session's contacts mark: the browser keeps it in memory
  * only, so it catches a rollback within one session (section 8.5, Q2); the
- * desktop app keeps it between launches too (`KeptMarks`).
+ * desktop app, with a trusted keyring, keeps it between launches too
+ * (`KeptMarks`).
  */
 export type ContactsBook = {
   record: ContactsRecord | null;
