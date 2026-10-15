@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import type { Database } from '../db/client.ts';
 import { AVATAR_TYPES, avatars, identities } from '../db/schema/index.ts';
@@ -118,13 +118,33 @@ export async function avatarOf(db: Database, accountId: string): Promise<string 
   return row?.id ?? null;
 }
 
-/** The image stored under an avatar ID, or null if there is none. */
+/** An avatar's type and size in bytes, or null if there is none. */
 export async function findAvatar(db: Database, id: string) {
   const [row] = await db
-    .select({ contentType: avatars.contentType, bytes: avatars.bytes })
+    .select({
+      contentType: avatars.contentType,
+      size: sql`octet_length(${avatars.bytes})`.mapWith(Number),
+    })
     .from(avatars)
     .where(eq(avatars.id, id));
   return row ?? null;
+}
+
+/**
+ * Up to `length` of an avatar's bytes from `offset`, or null once it is gone
+ * (replaced or removed). The column is stored uncompressed, so Postgres
+ * reads only this part.
+ */
+export async function avatarPart(db: Database, id: string, offset: number, length: number) {
+  const [row] = await db
+    .select({
+      part: sql`substring(${avatars.bytes} from ${offset + 1} for ${length})`.mapWith(
+        avatars.bytes,
+      ),
+    })
+    .from(avatars)
+    .where(eq(avatars.id, id));
+  return row?.part ?? null;
 }
 
 /**

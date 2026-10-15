@@ -9,4 +9,6 @@ CREATE TABLE "avatars" (
 	CONSTRAINT "avatars_size" CHECK (octet_length("avatars"."bytes") <= 2097152)
 );
 --> statement-breakpoint
-ALTER TABLE "avatars" ADD CONSTRAINT "avatars_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "avatars" ADD CONSTRAINT "avatars_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- Uncompressed, so serving an avatar a part at a time reads only that part.
+ALTER TABLE "avatars" ALTER COLUMN "bytes" SET STORAGE EXTERNAL;

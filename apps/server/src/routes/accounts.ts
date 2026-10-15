@@ -3,6 +3,7 @@ import {
   AccountError,
   AvatarRefused,
   avatarOf,
+  avatarPart,
   consumeRateLimit,
   currentIdentity,
   createAccount,
@@ -93,12 +94,9 @@ const AVATAR_FILE_NAMES = {
   'image/svg+xml': 'avatar.svg',
 } as const;
 
-// Each avatar being sent holds its image in memory until the client has
-// read it, so only so many go at once, whoever asks, and each gets so long.
-// Past that, browsers show initials until a later try.
-const AVATARS_AT_ONCE = 32;
-const AVATAR_SEND_MS = 20_000;
-const AVATAR_CHUNK = 64 * 1024;
+// Avatars are read from the database a part at a time, as the client takes
+// them, so a slow reader holds one part rather than the whole image.
+const AVATAR_PART = 256 * 1024;
 
 /** Checked as Better Auth's routes check passwords, against the account's allowance. */
 async function passwordMatches(
@@ -348,62 +346,35 @@ export function mountAccountRoutes(
     { rateLimit: AVATAR_LIMIT },
   );
 
-  let sending = 0;
-  // The bytes as a stream sent only as fast as the client reads them,
-  // counted in `sending` until it ends. A client that leaves, even before
-  // the response starts, or reads too slowly, ends it.
-  const sendCounted = (bytes: Uint8Array, left: AbortSignal) => {
-    sending++;
-    let offset = 0;
-    let counted = true;
-    let stop = () => {};
-    const timer = setTimeout(() => stop(), AVATAR_SEND_MS);
-    const finish = () => {
-      if (!counted) return false;
-      counted = false;
-      sending--;
-      clearTimeout(timer);
-      left.removeEventListener('abort', stop);
-      return true;
-    };
-    return new ReadableStream<Uint8Array>({
-      start(controller) {
-        stop = () => {
-          if (finish()) controller.error(new Error('Avatar send ended early'));
-        };
-        if (left.aborted) stop();
-        else left.addEventListener('abort', stop, { once: true });
-      },
-      pull(controller) {
-        controller.enqueue(bytes.subarray(offset, offset + AVATAR_CHUNK));
-        offset += AVATAR_CHUNK;
-        if (offset >= bytes.byteLength && finish()) controller.close();
-      },
-      cancel() {
-        finish();
-      },
-    });
-  };
-
   routes.publicFile(
     accountRoutes.AVATAR_PATH,
     async (c) => {
-      if (sending >= AVATARS_AT_ONCE) {
-        throw new ApiError('rate-limited', 'Too many avatars being sent; try again shortly');
-      }
       const id = accountRoutes.AvatarId.safeParse(c.req.param('avatarId'));
       const found = id.success ? await findAvatar(db, id.data) : null;
-      if (!found) throw new ApiError('not-found', 'No such avatar');
+      if (!id.success || !found) throw new ApiError('not-found', 'No such avatar');
       const headers = {
         'content-type': found.contentType,
-        'content-length': String(found.bytes.byteLength),
+        'content-length': String(found.size),
         'content-disposition': `inline; filename="${AVATAR_FILE_NAMES[found.contentType]}"`,
         'content-security-policy': AVATAR_CSP,
         'cache-control': 'public, max-age=31536000, immutable',
       };
       // Hono answers HEAD with the GET handler, dropping any body unread.
       if (c.req.method === 'HEAD') return c.body(null, 200, headers);
-      return c.body(sendCounted(found.bytes, c.req.raw.signal), 200, headers);
+      let offset = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const part = await avatarPart(db, id.data, offset, AVATAR_PART);
+          if (!part?.byteLength) {
+            controller.error(new Error('The avatar changed while it was being sent'));
+            return;
+          }
+          controller.enqueue(part);
+          offset += part.byteLength;
+          if (offset >= found.size) controller.close();
+        },
+      });
+      return c.body(body, 200, headers);
     },
     { rateLimit: AVATAR_FETCH_LIMIT },
   );
