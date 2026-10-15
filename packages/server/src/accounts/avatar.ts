@@ -21,9 +21,11 @@ const header = (bytes: Uint8Array, length: number) =>
 
 // Before the root element, an SVG file may hold an XML declaration, a
 // document type without declarations of its own, comments and whitespace;
-// the root is then `<svg` in the SVG namespace. `[^<>[]` keeps each scan to
-// its own tag, so these stay linear.
-const SVG_ROOT = /^(?:\s|<\?xml\b[^<>]*\?>|<!DOCTYPE\s[^<>[]*>|<!--[\s\S]*?-->)*<svg(\s[^>]*)?\/?>/;
+// the root is then `<svg` in the SVG namespace. No part can run past its own
+// end (`[^<>[]`, a comment's first `-->`), so a failed match can't try
+// every way of splitting the text and this stays linear.
+const SVG_ROOT =
+  /^(?:\s|<\?xml\b[^<>]*\?>|<!DOCTYPE\s[^<>[]*>|<!--(?:[^-]|-(?!->))*-->)*<svg(\s[^>]*)?\/?>/;
 const SVG_NAMESPACE = /\sxmlns\s*=\s*(["'])http:\/\/www\.w3\.org\/2000\/svg\1/;
 const LINK_ATTRIBUTE = /\s(?:xlink:)?(?:href|src)\s*=\s*(["'])([\s\S]*?)\1/gi;
 const CSS_URL = /url\(\s*(["']?)([^"')]*)/gi;
