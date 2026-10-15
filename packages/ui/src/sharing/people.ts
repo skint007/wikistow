@@ -11,6 +11,7 @@ import {
   type PublicIdentity,
   type TrustStore,
 } from '@wikistow/client';
+import { peopleRoutes, type accountRoutes } from '@wikistow/contracts';
 import { queryOptions } from '@tanstack/react-query';
 import { PLAIN } from '../vault/store';
 
@@ -41,6 +42,11 @@ export type Person = {
   pinnedKey: PublicIdentity | null;
   /** When this app pinned them, and whether that was a key someone checked or first sight. */
   pinned: { at: string; checked: boolean } | null;
+  /**
+   * Their avatar as the server has it, or null for initials. The server
+   * chooses it, so it is decoration: nothing names or picks a person by it.
+   */
+  avatar: accountRoutes.AvatarId | null;
 };
 
 /** What naming someone reads from the session: whose it is, their contacts, and their pins. */
@@ -108,7 +114,28 @@ export function describePerson(
     status,
     pinnedKey,
     pinned: pin && { at: pin.verifiedAt, checked: pin.method === 'confirmed' },
+    avatar: null,
   };
+}
+
+/**
+ * The avatars of the people with these identity IDs, by ID. Avatars are
+ * decoration, so a server that can't say (one from before avatars) leaves
+ * everyone with initials rather than failing the list.
+ */
+async function avatarsOf(ctx: ClientContext, ids: readonly string[]) {
+  const found = new Map<string, accountRoutes.AvatarId>();
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const { avatars } = await ctx.api.call(peopleRoutes.avatars, {
+        query: { ids: ids.slice(i, i + 100).join(',') },
+      });
+      for (const { identityId, avatar } of avatars) found.set(identityId, avatar);
+    }
+  } catch {
+    return new Map<string, accountRoutes.AvatarId>();
+  }
+  return found;
 }
 
 /** The people with these identity IDs, by ID, as `describePerson` names them. */
@@ -117,10 +144,17 @@ export const peopleQuery = (ctx: ClientContext, ids: readonly string[]) => {
   return queryOptions({
     queryKey: [PLAIN, 'people', ...unique],
     queryFn: async () => {
-      const found = new Map<string, DirectoryEntry>(
-        (await lookupPeople(ctx, unique)).map((e) => [e.identity.id, e]),
+      const [entries, avatars] = await Promise.all([
+        lookupPeople(ctx, unique),
+        avatarsOf(ctx, unique),
+      ]);
+      const found = new Map<string, DirectoryEntry>(entries.map((e) => [e.identity.id, e]));
+      return new Map(
+        unique.map((id) => [
+          id,
+          { ...describePerson(ctx, id, found.get(id) ?? null), avatar: avatars.get(id) ?? null },
+        ]),
       );
-      return new Map(unique.map((id) => [id, describePerson(ctx, id, found.get(id) ?? null)]));
     },
   });
 };

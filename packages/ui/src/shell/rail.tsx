@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { Bot, Lock, LogOut, Plus, Search, Settings, Shield, Users } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { Avatar, initials } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -38,14 +39,6 @@ import { useVault, vaultStore, type VaultState } from '../vault/store';
 
 // The running build's version, set by the web app's Vite config.
 declare const __APP_VERSION__: string;
-
-export const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase())
-    .join('') || '?';
 
 /**
  * Space tiles, then navigation, then the account. Labels stay visible.
@@ -318,11 +311,9 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label="Account"
-        className="grid size-9 place-items-center rounded-full bg-strong text-xs font-extrabold text-strong-foreground"
-      >
-        {initials(me.account.name)}
+      {/* Relative, so a mark can sit on the avatar's corner without being clipped. */}
+      <DropdownMenuTrigger aria-label="Account" className="relative rounded-full">
+        <Avatar name={me.account.name} avatar={me.account.avatar} className="size-9 text-xs" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="end">
         <DropdownMenuLabel>

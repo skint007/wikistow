@@ -4,6 +4,7 @@ export * from './accounts/create-account.ts';
 export * from './accounts/desktop.ts';
 export * from './accounts/errors.ts';
 export * from './accounts/invitations.ts';
+export * from './accounts/avatar.ts';
 export * from './accounts/profile.ts';
 export * from './accounts/state.ts';
 export * from './db/client.ts';

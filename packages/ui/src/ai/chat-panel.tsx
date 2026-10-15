@@ -27,6 +27,7 @@ import {
 } from './chat';
 import { foldDiff, lineDiff, toolActivity, toolResults } from './chat-model';
 import { aiStatusQuery } from './session';
+import { Working } from './working';
 
 /**
  * The page chat (wikistow.md, AI assistant): a conversation with one of
@@ -305,7 +306,8 @@ function Messages({
       </div>
       <Composer
         chat={chat}
-        running={ai.status === 'running' || state.applying}
+        replying={ai.status === 'running'}
+        applying={state.applying}
         disabled={state.phase !== 'ready'}
       />
     </>
@@ -571,19 +573,27 @@ function Text({ children }: { children: string }) {
  */
 function Composer({
   chat,
-  running,
+  replying,
+  applying,
   disabled,
 }: {
   chat: AgentChat;
-  running: boolean;
+  /** The assistant is writing a reply or running its tools. */
+  replying: boolean;
+  /** Approved proposals are being made. */
+  applying: boolean;
   disabled: boolean;
 }) {
   const { page } = useChatStore();
   const [text, setText] = useState('');
   const [included, setIncluded] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Reading the included page, before the reply starts.
+  // From Send until chat.send settles: it reads the included page, then waits out the reply.
   const [sending, setSending] = useState(false);
+  // From Send until the reply starts. After Stop, a tool call still settling isn't shown as work.
+  const [starting, setStarting] = useState(false);
+  if (starting && replying) setStarting(false);
+  const running = replying || applying;
   const busy = running || sending;
   const including = page !== null && included === page.pageId;
   const send = async () => {
@@ -591,6 +601,7 @@ function Composer({
     if (!message || busy) return;
     setError(null);
     setSending(true);
+    setStarting(true);
     try {
       const sent = chat.send(message, including ? page : null);
       setText('');
@@ -601,11 +612,11 @@ function Composer({
       setError(caught instanceof Error ? caught.message : 'Couldn’t send that.');
     } finally {
       setSending(false);
+      setStarting(false);
     }
   };
   return (
     <form
-      aria-busy={busy}
       className="grid gap-2 border-t p-3"
       onSubmit={(event) => {
         event.preventDefault();
@@ -635,6 +646,7 @@ function Composer({
           {error}
         </p>
       )}
+      <Working working={running || starting} />
       <div className="flex items-end gap-2">
         {/* 16px on phones: iOS zooms in on a smaller field when it's focused. */}
         <textarea
