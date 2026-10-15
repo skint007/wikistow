@@ -18,6 +18,7 @@ export * as aiRoutes from './routes/ai.ts';
 export * as agentRoutes from './routes/agents.ts';
 export * as adminRoutes from './routes/admin.ts';
 export * as contactsRoutes from './routes/contacts.ts';
+export * as groupRoutes from './routes/groups.ts';
 export * as desktopRoutes from './routes/desktop.ts';
 export * as ownerRoutes from './routes/owners.ts';
 export * as pageRoutes from './routes/pages.ts';

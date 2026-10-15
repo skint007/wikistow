@@ -3,6 +3,7 @@ import { PositiveInt } from '../records/encoding.ts';
 import {
   AgentId,
   FolderId,
+  GroupId,
   HumanId,
   IdentityId,
   MetadataRevisionId,
@@ -31,7 +32,12 @@ import { ServedMetadata } from './structure.ts';
 export const ShareRole = z.enum(['reader', 'editor']);
 export type ShareRole = z.infer<typeof ShareRole>;
 
-/** A member as the server lists them, at the identity key version their envelopes go to. */
+/**
+ * A member as the server lists them, at the identity key version their
+ * envelopes go to. `role` is the keys they hold there, and `canPublish`
+ * their effective publish rights: the highest of their direct grant and
+ * their groups' access (section 7.8), capped by those keys.
+ */
 export const Member = z
   .strictObject({
     identityId: HumanId,
@@ -97,6 +103,14 @@ export const listShares = {
           }),
         ),
         formerAgents: z.array(ShareAgent),
+        /** Members' direct grants, which `addMember` sets (section 7.8). */
+        direct: z.array(
+          z.strictObject({ identityId: HumanId, role: ShareRole, canPublish: z.boolean() }),
+        ),
+        /** The groups the share is shared with, and their access. */
+        groups: z.array(
+          z.strictObject({ groupId: GroupId, role: ShareRole, canPublish: z.boolean() }),
+        ),
       }),
     ),
   }),
@@ -137,6 +151,20 @@ export const makeShare = {
             canPublish: z.boolean(),
           })
           .refine((grant) => grant.role === 'editor' || !grant.canPublish, {
+            message: 'Readers never publish',
+          }),
+      )
+      .max(100)
+      .default([]),
+    /**
+     * Groups the share is made with (section 7.8). Their members get version
+     * 1 by role in `envelopes`, or wait for an owner to seal to them.
+     */
+    groups: z
+      .array(
+        z
+          .strictObject({ groupId: GroupId, role: ShareRole, canPublish: z.boolean() })
+          .refine((group) => group.role === 'editor' || !group.canPublish, {
             message: 'Readers never publish',
           }),
       )
@@ -184,7 +212,10 @@ export const move = {
  * key changed (sections 7.3 and 7.4): envelopes for every key version, at
  * the member's key, with the draft key exactly when they are an editor. A
  * member listed at the same role and key with no envelopes changes only
- * their publish rights, which change no keys.
+ * their publish rights, which change no keys. With groups, `member` is the
+ * direct grant: envelopes are needed only where the keys the member holds
+ * fall short of their effective access (section 7.8), and lowering the
+ * direct grant is allowed without a rotation while their groups keep it.
  */
 export const addMember = {
   method: 'POST',

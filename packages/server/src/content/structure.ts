@@ -52,7 +52,7 @@ import { charge } from './quota.ts';
 import { servedMetadata } from './serving.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
-type MetadataCommit = {
+export type MetadataCommit = {
   metadata: SealedMetadataV2;
   envelopes: MetadataEnvelopeV2[];
   wrap: KeyWrap | null;
@@ -82,13 +82,13 @@ async function requireAccess(
  * record, bound to this subject and signed by the caller, with the key
  * material of the subject's region.
  */
-async function verifyMetadataCommit(
+export async function verifyMetadataCommit(
   tx: Database,
   { metadata, envelopes, wrap }: MetadataCommit,
   expected: {
     author: PublicIdentity;
     spaceId: string;
-    subjectKind: 'space' | 'folder';
+    subjectKind: 'space' | 'folder' | 'group';
     subjectId: string;
     basedOn: string | null;
     share: ShareRow | null;
@@ -128,7 +128,7 @@ async function verifyMetadataCommit(
 }
 
 /** Store a checked metadata version, charging its ciphertext to its author's storage. */
-async function storeMetadata(
+export async function storeMetadata(
   tx: Database,
   { metadata, envelopes, wrap }: MetadataCommit,
   { accountId, storageBytes }: { accountId: string; storageBytes: number },
@@ -331,6 +331,8 @@ export async function updateMetadata(
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
     const folderId = record.subjectKind === 'folder' ? record.subjectId : null;
+    // A group is renamed through its own route.
+    if (record.subjectKind === 'group') throw new ContentError('binding-mismatch');
     if (record.subjectKind === 'space' && record.subjectId !== input.spaceId)
       throw new ContentError('binding-mismatch');
     await lockSpace(tx, input.spaceId);

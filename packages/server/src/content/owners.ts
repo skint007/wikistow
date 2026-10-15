@@ -24,6 +24,8 @@ import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
   folderKeyEnvelopes,
+  groupMembers,
+  groups,
   identities,
   keyEnvelopes,
   metadataRevisions,
@@ -330,7 +332,7 @@ async function identityAt(tx: Database, id: string, keyVersion: number) {
  * caller's envelopes must give them every key version of every share in the
  * space, with both keys, and every owner-region record's key, with the
  * caller's statement naming them. `Q` stops being a member of any share
- * there: owners hold every key. All or nothing.
+ * there, and leaves its groups: owners hold every key. All or nothing.
  */
 export async function addOwner(
   db: Database,
@@ -451,6 +453,17 @@ export async function addOwner(
           ),
         );
     }
+    await tx
+      .delete(groupMembers)
+      .where(
+        and(
+          eq(groupMembers.identityId, added.id),
+          inArray(
+            groupMembers.groupId,
+            tx.select({ id: groups.id }).from(groups).where(eq(groups.spaceId, input.spaceId)),
+          ),
+        ),
+      );
     await storeFolderEnvelopes(tx, input.folderKeyEnvelopes);
     for (const [kind, envelopes] of [
       ['revision', input.keyEnvelopes.map((e) => ({ id: e.revisionId, envelope: e }))],
