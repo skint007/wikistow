@@ -23,8 +23,10 @@
   --tint-hover: 9%;
   --tint-pressed: 17%;
 }
-/* Over the banner's glass, whose text keeps 4.5:1 over a white image while hovered. */
-.glass {
+/* Controls on the banner's glass, whose text keeps 4.5:1 over a white image while hovered.
+ * Not a dialog's: one opened from the toolbar sits inside it in the DOM. */
+.glass:is(button, a),
+.glass :is(button, a):not(dialog *) {
   --tint-hover: 6%;
 }
 /* A quiet text action, such as "Start again": muted, and underlined so it reads as one. */
