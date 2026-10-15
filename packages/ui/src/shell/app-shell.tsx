@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
@@ -11,10 +12,11 @@ import {
   type ReactNode,
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { desktopUpdateQuery } from '../desktop';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
-import { Rail, useSignOut } from './rail';
+import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
 import { SearchDialog } from './search-dialog';
 import { isApple, isSearchKey } from './search-model';
@@ -37,6 +39,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
   const { signOut, failed: signOutFailed } = useSignOut();
+  // The avatar's update mark is in the drawer, so the button opening it carries it too.
+  const { data: update } = useQuery(desktopUpdateQuery);
   // The session search was opened in: unlocking again starts a new one, closed.
   const [searchIn, setSearchIn] = useState<ClientContext | null>(null);
   const search = useCallback(() => {
@@ -81,11 +85,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <button
             type="button"
-            aria-label="Open navigation"
+            aria-label={update ? 'Open navigation, update available' : 'Open navigation'}
             onClick={() => setDrawer(true)}
-            className="grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+            className="relative grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
           >
             <Menu className="size-5" strokeWidth={1.75} />
+            {update && <UpdateDot />}
           </button>
           <span className="font-extrabold">
             Wiki<span className="text-primary">Stow</span>

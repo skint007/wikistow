@@ -13,7 +13,7 @@ import {
   Shield,
   Users,
 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { Avatar, initials } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
@@ -329,12 +329,7 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
         className="relative rounded-full"
       >
         <Avatar name={me.account.name} avatar={me.account.avatar} className="size-9 text-xs" />
-        {update && (
-          <span
-            aria-hidden
-            className="absolute top-0 right-0 size-2.5 rounded-full bg-update-dot ring-2 ring-background"
-          />
-        )}
+        {update && <UpdateDot />}
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="end">
         <DropdownMenuLabel>
@@ -385,12 +380,31 @@ const UPDATE_ROUTES = {
   unknown: { how: 'Get it from the release page.', link: 'Open the release' },
 } as const;
 
-/** The desktop app's newer release, and how to get it. The link opens in the system browser. */
+/**
+ * The mark for a newer desktop release on a button's corner: the avatar,
+ * and the top bar's menu button while the rail is in the drawer. The button
+ * is `relative`, and its label says it too.
+ */
+export function UpdateDot() {
+  return (
+    <span
+      aria-hidden
+      className="absolute top-0 right-0 size-2.5 rounded-full bg-update-dot ring-2 ring-background"
+    />
+  );
+}
+
+/**
+ * The desktop app's newer release, and how to get it. The link opens in the
+ * system browser; it is described by the text above it, which a screen reader
+ * in the menu wouldn't otherwise read.
+ */
 function UpdateEntry({ update }: { update: DesktopUpdate }) {
   const route = UPDATE_ROUTES[update.source ?? 'unknown'];
+  const about = useId();
   return (
     <>
-      <DropdownMenuLabel className="max-w-64 text-xs font-normal text-muted-foreground">
+      <DropdownMenuLabel id={about} className="max-w-64 text-xs font-normal text-muted-foreground">
         <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
           <span aria-hidden className="size-2 rounded-full bg-update-dot" />
           Update available
@@ -401,7 +415,7 @@ function UpdateEntry({ update }: { update: DesktopUpdate }) {
         <span className="block">{route.how}</span>
       </DropdownMenuLabel>
       <DropdownMenuItem asChild>
-        <a href={update.url} target="_blank" rel="noreferrer">
+        <a href={update.url} target="_blank" rel="noreferrer" aria-describedby={about}>
           <ExternalLink strokeWidth={1.75} /> {route.link}
         </a>
       </DropdownMenuItem>
