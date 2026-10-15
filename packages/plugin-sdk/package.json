@@ -11,6 +11,7 @@
     ".": "./src/index.ts",
     "./react": "./src/react.tsx",
     "./manifest": "./src/manifest.ts",
+    "./files": "./src/files.ts",
     "./protocol": "./src/protocol.ts",
     "./README.md": "./README.md",
     "./src/*": "./src/*"

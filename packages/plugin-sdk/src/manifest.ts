@@ -13,7 +13,7 @@ export const MANIFEST_FILE = 'wikistow-plugin.json';
 export const PluginId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, 'Use 2–40 of a–z, 0–9 and -');
 
 /** A file in the built folder, by its path from the top, with no way out of it. */
-const PluginFile = z
+export const PluginFile = z
   .string()
   .regex(/^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[\w./-]+$/, 'A path inside the plugin folder');
 

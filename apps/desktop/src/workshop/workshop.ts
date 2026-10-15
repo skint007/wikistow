@@ -1,11 +1,12 @@
 import type { BuildDiagnostic, WorkshopFile, WorkshopVersion } from '@wikistow/contracts';
+import { fileType } from '@wikistow/plugin-sdk/files';
 import { Manifest, MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { copyPluginFiles, PluginFolderError, readPluginFolder } from '../plugins/folder.ts';
-import { fileType, type PluginAddress, type PluginFile } from '../plugins/plugins.ts';
+import type { PluginAddress, PluginFile } from '../plugins/plugins.ts';
 import type { BuildOutput, BuildRequest } from './builder.ts';
 
 /** A workshop request refused, with a message for the person or the assistant. */
