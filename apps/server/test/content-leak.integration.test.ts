@@ -36,6 +36,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
+import { addToGroup, makeGroup, removeFromGroup, shareWithGroup } from './support/groups.ts';
 import { asAgentOf, asPerson, everyAnswer, keysOf, whatOpens } from './support/opens.ts';
 import { shareFolder } from './support/sharing.ts';
 import { snapshot } from './support/snapshot.ts';
@@ -457,6 +458,81 @@ describe('a member of one folder', () => {
   });
 });
 
+/** A group's name, which only the space's owners ever read. */
+const GROUP = 'PLAINTEXT-GROUP-NAME-7a8b';
+
+/**
+ * `memberWorld`'s folder shared with a group too, named `GROUP`, holding a
+ * member and someone since removed from it, and a whole space of the
+ * owner's, with a group of its own, shared with the member afterwards.
+ */
+async function groupWorld() {
+  const m = await memberWorld();
+  const { owner, spaceId, shareId } = m;
+  const [member, removed] = await Promise.all([personWithVault(t), personWithVault(t)]);
+  const groupId = await makeGroup(owner, spaceId, GROUP);
+  await addToGroup(owner, spaceId, groupId, member);
+  await addToGroup(owner, spaceId, groupId, removed);
+  await shareWithGroup(owner, {
+    spaceId,
+    shareId,
+    groupId,
+    access: { role: 'reader', canPublish: false },
+    sealTo: [member, removed],
+  });
+  await spaceOperations.loadTree(removed.ctx, spaceId);
+  expect(await removeFromGroup(owner, spaceId, groupId, removed)).toEqual([shareId]);
+  // A group made before the whole space is shared stays in the owner region.
+  const whole = await spaceOperations.createSpace(owner.ctx, { name: 'Whole' });
+  const wholeGroup = await makeGroup(owner, whole, GROUP);
+  const found = await sharingOperations.findPerson(owner.ctx, member.email);
+  if (!found) throw new Error('expected to find the member');
+  await shareFolder(owner.ctx, {
+    spaceId: whole,
+    rootId: null,
+    people: [{ person: found, role: 'editor' }],
+  });
+  return { ...m, member, removed, groupId, whole, wholeGroup };
+}
+
+describe('a group member, and someone removed from the group', () => {
+  it('are sent no group name and nothing outside the folder, by any route', async () => {
+    const g = await groupWorld();
+    const member = await everyAnswer(t, asPerson(g.member), ownerOf(g));
+    expect(member.statuses[`target:${g.shared}`]).toBe(200);
+    expect(member.statuses['groups']).toBe(403);
+    const removed = await everyAnswer(t, asPerson(g.removed), ownerOf(g));
+    for (const key of [`target:${g.shared}`, 'myEnvelopes', 'tree', 'groups']) {
+      expect(removed.statuses[key], key).toBe(404);
+    }
+    expect(removed.statuses[`envelopes:${g.shareId}:2`]).toBe(404);
+    const whole = await everyAnswer(t, asPerson(g.member), {
+      spaceId: g.whole,
+      ownerId: g.owner.vault.identity.public.id,
+    });
+    expect(whole.statuses['tree']).toBe(200);
+    for (const text of [member.text, removed.text, whole.text]) {
+      for (const marker of [GROUP, g.groupId, g.wholeGroup, ...Object.values(OUTSIDE)]) {
+        expect(text).not.toContain(marker);
+      }
+    }
+  });
+
+  it('hold keys that open no group name', async () => {
+    const g = await groupWorld();
+    await spaceOperations.loadTree(g.member.ctx, g.whole);
+    for (const person of [g.member, g.removed]) {
+      const { names } = await whatOpens(t, keysOf(person));
+      expect(names.has(g.groupId)).toBe(false);
+      expect(names.has(g.wholeGroup)).toBe(false);
+    }
+    // The member holds the whole space's keys, so the control is real.
+    expect((await whatOpens(t, keysOf(g.member))).names.has(g.whole)).toBe(true);
+    const owner = await whatOpens(t, keysOf(g.owner));
+    expect([owner.names.has(g.groupId), owner.names.has(g.wholeGroup)]).toEqual([true, true]);
+  });
+});
+
 describe('a reader of a page published from another space', () => {
   it('is sent nothing of the source or what is around it, and holds no key to it', async () => {
     const m = await copyWorld();
@@ -624,7 +700,13 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
       expect(exposes(corpus, utf8(marker)), marker).toBe(false);
       expect(exposes(corpus, utf8(token)), token).toBe(false);
     }
-    const marked = [...Object.values(NAMES), ...Object.values(OUTSIDE), ...Object.values(COPY)];
+    await groupWorld();
+    const marked = [
+      ...Object.values(NAMES),
+      ...Object.values(OUTSIDE),
+      ...Object.values(COPY),
+      GROUP,
+    ];
     // The copy's record of where it came from is inside its payload too.
     for (const marker of [...marked, 'wikistow.publication', 'sourceRecordHash']) {
       expect(exposes(corpus, utf8(marker)), marker).toBe(false);
