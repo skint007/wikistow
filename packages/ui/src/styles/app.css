@@ -48,7 +48,7 @@
     cursor: pointer;
   }
   /* One keyboard focus ring for every control that doesn't draw its own. */
-  :is(button, a, [role='button'], summary):focus-visible {
+  :is(button, a, [role='button'], [role='treeitem'], summary):focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }

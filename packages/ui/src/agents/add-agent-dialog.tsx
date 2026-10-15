@@ -345,7 +345,7 @@ function Compare({
       <ErrorLine error={error} />
       <DialogFooter>
         <Button
-          variant="ghost"
+          variant="outline"
           disabled={busy}
           onClick={ended ? () => onCancel(false) : () => void reject()}
         >
