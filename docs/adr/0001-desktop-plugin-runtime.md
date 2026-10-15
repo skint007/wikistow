@@ -4,6 +4,8 @@ status: accepted
 
 # Desktop plugins: locally installed folders, trusted app code, sandboxed scripts
 
+[ADR 0002](0002-plugin-library-and-browser-plugins.md) (proposed) amends this one: a plugin library on the server, approvals that follow the account, and plugins in the browser, with scripts in a sandboxed frame.
+
 WikiStow gains TypeScript plugins (#256), on the desktop app first. A person installs a built plugin folder from their own disk; nothing comes from the server. The plugin is served from the app's own origin. Its interface code runs in the page with the person's full trust, and its scripts run in a network-less worker that can reach pages only through a typed, access-checked host interface. Pages never carry code: a plugin block in a page is a fenced code block that names an installed plugin, so without the plugin it reads, edits, saves and exports as the code block it is.
 
 This design was accepted on 2026-10-13, with plugin writes as the person's own, moves within existing permissions, three trust levels, folder installs only, plugin data published like any namespace, and no "not responding" prompt. It replaces the spec's earlier rule ("plugin code ships with the application or is approved by an administrator"). The family-and-friends trust model makes a person's own device the right place to decide what runs, and a server that could push code could read every page.
