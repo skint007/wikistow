@@ -140,9 +140,12 @@ describe('the restore lock', () => {
     const server = await startServer(testDb.url, t.blobDir);
     await server.waitFor('listening', 'blob-sweep', 'draft-sweep', 'password-budget-sweep');
     // As postgres.js leaves an idle server once its pooled connections reach
-    // their max_lifetime: only the lock's session is open.
+    // their max_lifetime: only the lock's session is open. Nothing reconnects,
+    // as the sweeps run again only in an hour. Without a timeout,
+    // pg_terminate_backend only signals each backend, and on a busy runner one
+    // can still be listed after, so wait up to 15 seconds for each to exit.
     await withAdmin(
-      (sql) => sql`select pg_terminate_backend(pid) from pg_stat_activity
+      (sql) => sql`select pg_terminate_backend(pid, 15000) from pg_stat_activity
         where datname = ${database()} and application_name <> ${DATABASE_LOCK_APPLICATION}`,
     );
     expect(await sessions()).toEqual([{ name: DATABASE_LOCK_APPLICATION }]);
