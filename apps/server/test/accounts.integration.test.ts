@@ -220,8 +220,10 @@ describe('avatars', () => {
     new TextEncoder().encode(
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">${body}</svg>`,
     );
+  // Node needs `duplex` to send a streamed body; the DOM's types don't list it.
+  const streams = { duplex: 'half' };
   const upload = (browser: Browser, body: BodyInit, headers: Record<string, string> = {}) =>
-    browser.fetch('/api/me/avatar', { method: 'PUT', body, headers, duplex: 'half' });
+    browser.fetch('/api/me/avatar', { method: 'PUT', body, headers, ...streams });
   const avatarOf = async (browser: Browser) =>
     ((await (await browser.request('/api/me')).json()) as { account: { avatar: string | null } })
       .account.avatar;

@@ -403,10 +403,15 @@ export function mountContentRoutes(
     { rateLimit: FETCH_LIMIT },
   );
 
-  routes.content(
+  // For the app's lists of people; agents have no use for faces.
+  routes.account(
     peopleRoutes.avatars,
-    async ({ query }, { actor }) => ({
-      avatars: await directoryAvatars(db, actor, query.ids).catch(toApiError),
+    async ({ query }, { principal }) => ({
+      avatars: await directoryAvatars(
+        db,
+        { accountId: principal.accountId, agentId: null },
+        query.ids,
+      ).catch(toApiError),
     }),
     { rateLimit: FETCH_LIMIT },
   );

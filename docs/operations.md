@@ -42,7 +42,7 @@ The server keeps no prompt or reply. It doesn't store them, and its log has one 
 
 Two things, taken together by `scripts/backup.sh`:
 
-- The PostgreSQL database at `DATABASE_URL`. It holds accounts, encrypted pages, everyone's wrapped keys and the installation ID.
+- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys and the installation ID.
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 
 Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. Keep it with your other secrets.
