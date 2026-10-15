@@ -16,7 +16,8 @@ export const initials = (name: string) =>
  * A person's round avatar: their uploaded image, or their initials when they
  * have none or it fails to load. Size and text size come from `className`.
  * The image is only ever an `<img>`, so an SVG avatar can't run scripts or
- * load anything. Decorative: the person's name always shows beside it.
+ * load anything. Decoration only: the server chooses it, so nothing names
+ * or picks a person by it.
  *
  *   <Avatar name={me.account.name} avatar={me.account.avatar} className="size-9 text-xs" />
  */

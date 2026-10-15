@@ -5,17 +5,21 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { api, meQuery } from '../api';
 import { errorMessage } from '../errors';
 import { PLAIN } from '../vault/store';
 
 const ACCEPT = '.jpg,.jpeg,.png,.gif,.svg,image/jpeg,image/png,image/gif,image/svg+xml';
 const EXTENSION = /\.(jpe?g|png|gif|svg)$/i;
+const TYPES: readonly string[] = ['image/jpeg', 'image/png', 'image/gif', 'image/svg+xml'];
 const LIMIT_MB = accountRoutes.MAX_AVATAR_BYTES / (1024 * 1024);
 
 // A quick look before uploading. The server checks the bytes themselves.
 function fileProblem(file: File): string | null {
-  if (!EXTENSION.test(file.name)) return 'Choose a JPEG, PNG, GIF or SVG image.';
+  if (!EXTENSION.test(file.name) && !TYPES.includes(file.type)) {
+    return 'Choose a JPEG, PNG, GIF or SVG image.';
+  }
   if (file.size > accountRoutes.MAX_AVATAR_BYTES) {
     return `That image is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Avatars can be up to ${LIMIT_MB} MB.`;
   }
@@ -62,7 +66,8 @@ function uploadAvatar(file: File, onProgress: (fraction: number) => void) {
 
 type Status =
   | { kind: 'idle' }
-  | { kind: 'uploading'; fraction: number }
+  /** `fraction` is null until the browser reports progress, which the desktop app's doesn't. */
+  | { kind: 'uploading'; fraction: number | null }
   | { kind: 'removing' }
   | { kind: 'done'; text: string }
   | { kind: 'failed'; text: string };
@@ -140,7 +145,7 @@ export function AvatarSettings() {
 
   const save = async () => {
     if (!chosen) return;
-    setStatus({ kind: 'uploading', fraction: 0 });
+    setStatus({ kind: 'uploading', fraction: null });
     try {
       await uploadAvatar(chosen, (fraction) => setStatus({ kind: 'uploading', fraction }));
       await refresh();
@@ -222,20 +227,26 @@ export function AvatarSettings() {
         {status.kind === 'uploading' ? (
           <div className="grid max-w-xs gap-1.5">
             <p role="status" className="text-sm font-bold">
-              Uploading… {Math.round(status.fraction * 100)}%
+              Uploading…
+              {status.fraction !== null && ` ${Math.round(status.fraction * 100)}%`}
             </p>
             <div
               role="progressbar"
               aria-label="Upload progress"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(status.fraction * 100)}
+              aria-valuenow={
+                status.fraction === null ? undefined : Math.round(status.fraction * 100)
+              }
               className="h-2 overflow-hidden rounded-full bg-muted"
             >
               {/* Set through the CSSOM, which the style policy allows. */}
               <div
-                className="h-full rounded-full bg-primary transition-[width]"
-                style={{ width: `${status.fraction * 100}%` }}
+                className={cn(
+                  'h-full rounded-full bg-primary transition-[width]',
+                  status.fraction === null && 'animate-pulse',
+                )}
+                style={{ width: `${(status.fraction ?? 1) * 100}%` }}
               />
             </div>
           </div>

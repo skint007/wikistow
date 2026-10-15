@@ -43,9 +43,8 @@ export type Person = {
   /** When this app pinned them, and whether that was a key someone checked or first sight. */
   pinned: { at: string; checked: boolean } | null;
   /**
-   * Their avatar as the server has it, or null for initials. Like the
-   * directory's name it is the server's to choose, so it only ever shows
-   * beside the name above, never in place of it.
+   * Their avatar as the server has it, or null for initials. The server
+   * chooses it, so it is decoration: nothing names or picks a person by it.
    */
   avatar: accountRoutes.AvatarId | null;
 };
