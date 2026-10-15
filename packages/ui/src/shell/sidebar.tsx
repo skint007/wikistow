@@ -402,7 +402,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                 }
                 className={cn(
-                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong',
+                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none',
                   dragging?.over?.parentId === row.id &&
                     'bg-primary-soft ring-2 ring-primary ring-inset',
                 )}
