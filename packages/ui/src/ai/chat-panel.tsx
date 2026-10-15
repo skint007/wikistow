@@ -306,7 +306,8 @@ function Messages({
       </div>
       <Composer
         chat={chat}
-        running={ai.status === 'running' || state.applying}
+        replying={ai.status === 'running'}
+        applying={state.applying}
         disabled={state.phase !== 'ready'}
       />
     </>
@@ -572,11 +573,15 @@ function Text({ children }: { children: string }) {
  */
 function Composer({
   chat,
-  running,
+  replying,
+  applying,
   disabled,
 }: {
   chat: AgentChat;
-  running: boolean;
+  /** The assistant is writing a reply or running its tools. */
+  replying: boolean;
+  /** Approved proposals are being made. */
+  applying: boolean;
   disabled: boolean;
 }) {
   const { page } = useChatStore();
@@ -587,7 +592,8 @@ function Composer({
   const [sending, setSending] = useState(false);
   // From Send until the reply starts. After Stop, a tool call still settling isn't shown as work.
   const [starting, setStarting] = useState(false);
-  if (starting && running) setStarting(false);
+  if (starting && replying) setStarting(false);
+  const running = replying || applying;
   const busy = running || sending;
   const including = page !== null && included === page.pageId;
   const send = async () => {
