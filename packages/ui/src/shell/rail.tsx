@@ -1,8 +1,19 @@
 import { spaceOperations } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { Bot, Lock, LogOut, Plus, Search, Settings, Shield, Users } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import type { DesktopUpdate } from '@wikistow/contracts';
+import {
+  Bot,
+  ExternalLink,
+  Lock,
+  LogOut,
+  Plus,
+  Search,
+  Settings,
+  Shield,
+  Users,
+} from 'lucide-react';
+import { useCallback, useId, useState } from 'react';
 import { Avatar, initials } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
@@ -30,7 +41,7 @@ import { meQuery } from '../api';
 import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
-import { desktop } from '../desktop';
+import { desktop, desktopUpdateQuery } from '../desktop';
 import { spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
@@ -305,6 +316,7 @@ export function useSignOut() {
 
 function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const { data: me } = useQuery(meQuery);
+  const { data: update } = useQuery(desktopUpdateQuery);
   const navigate = useNavigate();
   const vault = useVault();
   if (!me) return null;
@@ -312,8 +324,12 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
   return (
     <DropdownMenu>
       {/* Relative, so a mark can sit on the avatar's corner without being clipped. */}
-      <DropdownMenuTrigger aria-label="Account" className="relative rounded-full">
+      <DropdownMenuTrigger
+        aria-label={update ? 'Account, update available' : 'Account'}
+        className="relative rounded-full"
+      >
         <Avatar name={me.account.name} avatar={me.account.avatar} className="size-9 text-xs" />
+        {update && <UpdateDot />}
       </DropdownMenuTrigger>
       <DropdownMenuContent side="right" align="end">
         <DropdownMenuLabel>
@@ -340,10 +356,70 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
           <LogOut strokeWidth={1.75} /> Sign out
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        {update && <UpdateEntry update={update} />}
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
           Version {__APP_VERSION__}
         </DropdownMenuLabel>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** How each kind of install is updated (`DesktopUpdate.source`), and the link to the release. */
+const UPDATE_ROUTES = {
+  aur: {
+    how: (
+      <>
+        Update it with your AUR helper, such as <span className="whitespace-nowrap">yay -Syu</span>.
+      </>
+    ),
+    link: 'Release notes',
+  },
+  deb: { how: 'Download the new .deb and install it.', link: 'Release notes and download' },
+  rpm: { how: 'Download the new .rpm and install it.', link: 'Release notes and download' },
+  unknown: { how: 'Get it from the release page.', link: 'Open the release' },
+} as const;
+
+/**
+ * The mark for a newer desktop release on a button's corner: the avatar,
+ * and the top bar's menu button while the rail is in the drawer. The button
+ * is `relative`, and its label says it too.
+ */
+export function UpdateDot() {
+  return (
+    <span
+      aria-hidden
+      className="absolute top-0 right-0 size-2.5 rounded-full bg-update-dot ring-2 ring-background"
+    />
+  );
+}
+
+/**
+ * The desktop app's newer release, and how to get it. The link opens in the
+ * system browser; it is described by the text above it, which a screen reader
+ * in the menu wouldn't otherwise read.
+ */
+function UpdateEntry({ update }: { update: DesktopUpdate }) {
+  const route = UPDATE_ROUTES[update.source ?? 'unknown'];
+  const about = useId();
+  return (
+    <>
+      <DropdownMenuLabel id={about} className="max-w-64 text-xs font-normal text-muted-foreground">
+        <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+          <span aria-hidden className="size-2 rounded-full bg-update-dot" />
+          Update available
+        </span>
+        <span className="block">
+          WikiStow {update.version} is out. You have {update.installed}.
+        </span>
+        <span className="block">{route.how}</span>
+      </DropdownMenuLabel>
+      <DropdownMenuItem asChild>
+        <a href={update.url} target="_blank" rel="noreferrer" aria-describedby={about}>
+          <ExternalLink strokeWidth={1.75} /> {route.link}
+        </a>
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
   );
 }

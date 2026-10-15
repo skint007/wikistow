@@ -58,6 +58,18 @@ export type WorkshopVersion = {
   hash: string | null;
 };
 
+/** A stable release newer than the desktop app running, and how this copy is updated (#12). */
+export type DesktopUpdate = {
+  /** The app's own version, as `0.3.0`. */
+  installed: string;
+  /** The newest stable release, as `0.4.0`. */
+  version: string;
+  /** Its release page, with the notes and the downloads. */
+  url: string;
+  /** How this copy was installed (`install-source`), or null when the app can't tell. */
+  source: 'aur' | 'deb' | 'rpm' | null;
+};
+
 /**
  * What the desktop app's preload script gives its pages, as
  * `window.wikistowDesktop`. The browser has none. Every call crosses into the
@@ -135,6 +147,11 @@ export type DesktopBridge = {
    * hash to `hash`: a candidate for `approvePlugin`, with that same hash.
    */
   workshopInstall(session: string, version: number, hash: string): Promise<PluginCandidate>;
+  /**
+   * A newer stable release, if the last check found one; null otherwise,
+   * offline and before any check worked. The app checks GitHub itself.
+   */
+  update(): Promise<DesktopUpdate | null>;
 };
 
 /** The IPC channels behind `DesktopBridge`, one per method. */
@@ -166,6 +183,7 @@ export const DESKTOP_CHANNELS = {
   workshopCancel: 'wikistow:workshop-cancel',
   workshopExport: 'wikistow:workshop-export',
   workshopInstall: 'wikistow:workshop-install',
+  update: 'wikistow:update',
 } as const satisfies Record<keyof DesktopBridge, string>;
 
 /** What a channel answers: the value, or the message for a failure. */

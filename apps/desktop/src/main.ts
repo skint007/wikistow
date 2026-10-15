@@ -1,8 +1,8 @@
 // The desktop app's main process. It serves the built web app from
 // `app://wikistow`, forwards that origin's API requests to the server with
 // the session only it holds, signs in through the system browser, keeps
-// and serves the plugins installed on this computer, and builds and serves
-// the plugin workshop's versions.
+// and serves the plugins installed on this computer, builds and serves
+// the plugin workshop's versions, and checks for a newer release.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
@@ -41,6 +41,7 @@ import {
   signOutSession,
   SignInError,
 } from './sign-in.ts';
+import { desktopUpdates } from './updates.ts';
 import { workshopBuilder } from './workshop/builder.ts';
 import { desktopWorkshop, WorkshopError } from './workshop/workshop.ts';
 
@@ -127,6 +128,7 @@ const bundler = workshopBuilder(
   fileURLToPath(new URL('./esbuild.wasm', import.meta.url)),
 );
 const workshop = desktopWorkshop(app.getPath('userData'), bundler);
+const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 
 /** End every workshop, as the page that held them goes, and the bundler with them. */
 async function endWorkshops() {
@@ -566,6 +568,8 @@ void app.whenReady().then(async () => {
     (_contents, permission) => permission === 'clipboard-sanitized-write',
   );
   protocol.handle('app', serve);
+  updates.start();
+  handle('update', () => updates.state());
   handle('server', async () => server);
   handle('signIn', (origin) => signIn(origin));
   handle('cancelSignIn', async () => {

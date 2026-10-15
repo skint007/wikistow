@@ -37,6 +37,7 @@ export const PALETTE_TOKENS = [
   '--status-draft',
   '--status-draft-foreground',
   '--draft-dot',
+  '--update-dot',
   '--note',
   '--note-foreground',
   '--table',
