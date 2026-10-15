@@ -76,7 +76,7 @@ Keep framework, filesystem, and operating-system key storage outside the shared 
 
 Request flow and deployment:
 
-- **Same origin.** The web app and API share one origin. The server serves `/api/*` routes, with Better Auth at `/api/auth/*`, and static assets. Any other path returns `index.html`, so client-side routes load directly. Browser session cookies need no cross-origin requests.
+- **Same origin.** The web app and API share one origin. The server serves `/api/*` routes, with Better Auth at `/api/auth/*`, and static assets. Any other path returns `index.html`, so client-side routes load directly. Browser session cookies need no cross-origin requests. A connection that sends and takes nothing for 60 seconds is closed, such as a client that stopped reading a large file.
 - **Development.** The Vite dev server proxies `/api` to the Hono server, which runs in watch mode, so development matches production's single origin.
 - **One container.** A single Node image serves the API and the built app, with an attachments volume and PostgreSQL alongside. The CI pipeline changes only its build commands. Use a single authorized operation for each action so browser, desktop, and CLI cannot implement different permission rules.
 

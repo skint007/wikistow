@@ -15,6 +15,9 @@ import { stdoutLog } from './http/logger.ts';
 import { scheduleSweep } from './sweep.ts';
 import { smtpDeliver } from './mail/mailer.ts';
 
+/** How long a connection may go without sending or taking a byte. */
+const IDLE_TIMEOUT_MS = 60_000;
+
 const config = loadConfig();
 // Held for as long as the server runs, before anything touches the database,
 // so a restore can't start under it, nor it under a restore. Losing it means
@@ -55,6 +58,11 @@ const sweeps = [
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   stdoutLog({ level: 'info', event: 'listening', port: info.port });
 });
+// Close a connection that has sent and taken nothing for a minute, such as
+// a client that stopped reading a large file, which would otherwise hold its
+// socket forever. A quiet AI reply sends blank lines to stay inside it (see
+// `routes.stream`).
+server.setTimeout(IDLE_TIMEOUT_MS);
 
 // Stop taking connections, let in-flight requests finish, then close the pool.
 const shutdown = () => {
