@@ -38,7 +38,7 @@ echo deb > "$stage/install-source.deb"
 echo rpm > "$stage/install-source.rpm"
 # nfpm takes the tree's modes and times from its files, so make them the
 # same whatever the umask and download time.
-chmod -R go-w "$stage"
+chmod -R u+rwX,go+rX,go-w "$stage"
 if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then find "$stage" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +; fi
 
 # Named like the release archive. nfpm's own names put a `~` in a
