@@ -41,7 +41,7 @@
   --subtle-foreground: #6b645a;   /* page rows in the tree, secondary labels */
   --secondary: #f4f1ec;
   --secondary-foreground: #2d2a26;
-  --accent: rgba(45, 42, 38, 0.08); /* hover surface (shadcn meaning of "accent"): foreground, faint, over any surface */
+  --accent: rgba(45, 42, 38, 0.06); /* hover surface (shadcn meaning of "accent"): foreground, faint, over any surface */
   --accent-foreground: #2d2a26;
 
   --primary: #c8461a;             /* New page, Publish. Darkened from the mock's #f2643d so white text passes AA */
@@ -100,7 +100,7 @@
   --subtle-foreground: #a3b0c6;
   --secondary: #1a2436;
   --secondary-foreground: #e2e8f0;
-  --accent: rgba(226, 232, 240, 0.08);
+  --accent: rgba(226, 232, 240, 0.09);
   --accent-foreground: #e2e8f0;
 
   --primary: #2dd4bf;
@@ -159,7 +159,7 @@
   --subtle-foreground: #b8aea4;
   --secondary: #272320;
   --secondary-foreground: #eee7df;
-  --accent: rgba(238, 231, 223, 0.08);
+  --accent: rgba(238, 231, 223, 0.09);
   --accent-foreground: #eee7df;
 
   --primary: #ff7a50;
@@ -218,7 +218,7 @@
   --subtle-foreground: #b0b0b8;
   --secondary: #1a1a1e;
   --secondary-foreground: #f4f4f5;
-  --accent: rgba(244, 244, 245, 0.08);
+  --accent: rgba(244, 244, 245, 0.09);
   --accent-foreground: #f4f4f5;
 
   --primary: #a78bfa;

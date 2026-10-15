@@ -11,13 +11,24 @@
 /* Hover and pressed feedback for controls: the palette's text colour, faint, layered over
  * whatever fill the control has. It darkens a light palette's fill and lightens a dark
  * one's, on any surface, so `hover:tint active:tint-strong` suits filled and bare controls
- * alike. `bg-accent` is the same hover surface for controls without a fill. */
+ * alike. `bg-accent` is the hover tint as a fill, for controls without one. Light surfaces
+ * show less tint, and keep muted text on them above 4.5:1 while hovered. */
+:root {
+  --tint-hover: 6%;
+  --tint-pressed: 12%;
+}
+[data-theme='slate'],
+[data-theme='warm'],
+[data-theme='oled'] {
+  --tint-hover: 9%;
+  --tint-pressed: 17%;
+}
 @utility tint {
-  --tint: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --tint: color-mix(in oklab, var(--foreground) var(--tint-hover), transparent);
   background-image: linear-gradient(var(--tint), var(--tint));
 }
 @utility tint-strong {
-  --tint: color-mix(in oklab, var(--foreground) 17%, transparent);
+  --tint: color-mix(in oklab, var(--foreground) var(--tint-pressed), transparent);
   background-image: linear-gradient(var(--tint), var(--tint));
 }
 

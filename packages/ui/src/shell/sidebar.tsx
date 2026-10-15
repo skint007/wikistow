@@ -461,7 +461,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 startDrag(event, { id: row.id, kind: 'page', name: row.title })
               }
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong',
+                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
                 selected && 'bg-primary-soft font-bold text-primary-ink',
               )}
               style={indent}

@@ -78,7 +78,7 @@ export function Rail({
               onSearch();
             }}
             aria-keyshortcuts={isApple() ? 'Meta+K' : 'Control+K'}
-            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong"
+            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
           >
             <Search className="size-4" strokeWidth={1.75} />
             Search
@@ -91,7 +91,7 @@ export function Rail({
       <Link
         to="/agents"
         onClick={onNavigate}
-        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong"
+        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
         activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
       >
         <Bot className="size-4" strokeWidth={1.75} />
@@ -102,7 +102,7 @@ export function Rail({
       <Link
         to="/settings"
         onClick={onNavigate}
-        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong"
+        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
         activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
       >
         <Settings className="size-4" strokeWidth={1.75} />
@@ -124,7 +124,7 @@ function PluginItems({ onNavigate }: { onNavigate: (() => void) | undefined }) {
       onClick={onNavigate}
       title={title}
       data-plugin={pluginId}
-      className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong"
+      className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
       activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
     >
       <span
@@ -149,7 +149,7 @@ function SharedLink({ here, onNavigate }: { here: boolean; onNavigate: (() => vo
       onClick={onNavigate}
       aria-current={here ? 'page' : undefined}
       className={cn(
-        'flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong',
+        'flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
         here && 'bg-primary-soft text-primary-ink',
       )}
       activeProps={{ className: 'text-primary-ink bg-primary-soft' }}

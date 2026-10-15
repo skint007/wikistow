@@ -518,7 +518,7 @@ const LinkControl = memo(function LinkControl({
           </div>
           <div className="flex items-center gap-2">
             {target?.kind === 'link' && target.removable && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => done(removeLink)}>
+              <Button type="button" variant="outline" size="sm" onClick={() => done(removeLink)}>
                 Remove link
               </Button>
             )}

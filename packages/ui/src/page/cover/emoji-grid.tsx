@@ -92,7 +92,7 @@ export default function EmojiGrid({
         )}
       </div>
       {current && (
-        <Button variant="ghost" size="sm" onClick={onRemove}>
+        <Button variant="outline" size="sm" onClick={onRemove}>
           Remove emoji
         </Button>
       )}

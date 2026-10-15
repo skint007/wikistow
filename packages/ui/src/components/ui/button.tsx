@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils';
 import { Slot } from 'radix-ui';
 
 // Every enabled variant shows it can be clicked before it's hovered: a fill, a border, or an
-// underline (ghost relies on its icon or its place in a toolbar). Hover and press layer a
-// tint over the fill (`tint`, in app.css), and a press nudges the button down a pixel, so
-// a tap gives feedback where there's no hover.
+// underline. Ghost relies on its icon, or on its place in a toolbar or beside a dialog's main
+// action; a text-only action anywhere else takes outline. Hover and press layer a tint over
+// the fill (`tint`, in app.css), and a press nudges the button down a pixel, so a tap gives
+// feedback where there's no hover.
 const buttonVariants = cva(
   "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none disabled:saturate-50 aria-invalid:border-destructive aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
@@ -17,7 +18,7 @@ const buttonVariants = cva(
           'bg-destructive text-destructive-foreground shadow-xs hover:tint active:tint-strong',
         outline: 'border border-foreground/20 bg-card shadow-xs hover:tint active:tint-strong',
         secondary:
-          'bg-secondary text-secondary-foreground shadow-xs inset-ring inset-ring-foreground/10 hover:tint active:tint-strong',
+          'bg-secondary text-secondary-foreground shadow-xs inset-ring inset-ring-foreground/15 hover:tint active:tint-strong',
         ghost: 'hover:tint active:tint-strong',
         link: 'text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-current active:opacity-70',
       },
@@ -62,4 +63,13 @@ function Button({
   );
 }
 
-export { Button, buttonVariants };
+/**
+ * A `<label>` around a hidden file input, drawn as a small outline Button. It shows the
+ * input's keyboard focus, and fades while the input is disabled.
+ */
+const uploadButtonClass = cn(
+  buttonVariants({ variant: 'outline', size: 'sm' }),
+  'cursor-pointer has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring has-disabled:pointer-events-none has-disabled:opacity-50',
+);
+
+export { Button, buttonVariants, uploadButtonClass };

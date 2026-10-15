@@ -104,7 +104,7 @@ export function AgentCard({ agent, onRevoke }: { agent: ListedAgent; onRevoke: (
           {live ? 'Live' : `Revoked ${day(agent.revokedAt ?? agent.enrolledAt)}`}
         </span>
         {live && (
-          <Button size="sm" variant="ghost" className="text-destructive" onClick={onRevoke}>
+          <Button size="sm" variant="outline" className="text-destructive" onClick={onRevoke}>
             Revoke
           </Button>
         )}

@@ -567,7 +567,7 @@ function PageBody({
                 ref={copiesPill}
                 type="button"
                 onClick={() => setShowingCopies(true)}
-                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:tint active:tint-strong"
+                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
               >
                 <span aria-hidden>⇉</span>
                 <span>
@@ -591,7 +591,7 @@ function PageBody({
                       }
                     })
                   }
-                  className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:tint active:tint-strong"
+                  className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
                 >
                   {checkingCopies
                     ? 'Checking where else it’s published…'
@@ -849,7 +849,7 @@ function Pills({
             type="button"
             onClick={() => onSwitch(target)}
             className={cn(
-              'rounded-full px-2.5 py-[3px] hover:tint active:tint-strong',
+              'rounded-full px-2.5 py-[3px] hover:underline active:tint-strong',
               style(pill),
             )}
           >

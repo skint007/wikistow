@@ -615,7 +615,7 @@ export function ChosenPicks({
               aria-label={`Remove ${plainText(label)}`}
               disabled={disabled}
               onClick={() => onRemove(pick)}
-              className="grid size-7 place-items-center rounded-control hover:tint active:tint-strong"
+              className="grid size-7 place-items-center rounded-control enabled:hover:tint enabled:active:tint-strong disabled:opacity-50"
             >
               <X className="size-4" strokeWidth={1.75} />
             </button>
