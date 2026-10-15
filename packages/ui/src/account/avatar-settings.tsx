@@ -123,6 +123,11 @@ export function AvatarSettings() {
       setChosen(null);
       setStatus({ kind: 'done', text: 'Avatar saved.' });
     } catch (caught) {
+      // A refused file would only be refused again; anything else may work on a retry.
+      const refused =
+        caught instanceof ApiError &&
+        (caught.code === 'unsupported-image' || caught.code === 'payload-too-large');
+      if (refused) setChosen(null);
       setStatus({ kind: 'failed', text: errorMessage(caught) });
     }
   };
