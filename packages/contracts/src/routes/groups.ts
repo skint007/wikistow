@@ -28,7 +28,10 @@ export const GroupAccess = z
  * A space's groups, for its owners: each group's name, an owner-region
  * metadata record served with the caller's own envelopes (section 7.8), its
  * members at their current keys, and the shares it has with its access
- * there. `permissionVersion` is the space's, which every group change names.
+ * there. `direct` holds every member's direct grant in the space's shares,
+ * so an app can say where each person's access comes from. Both are here
+ * rather than in `listShares`, whose answer older apps read strictly.
+ * `permissionVersion` is the space's, which every group change names.
  */
 export const listGroups = {
   method: 'GET',
@@ -44,6 +47,14 @@ export const listGroups = {
         shares: z.array(
           z.strictObject({ shareId: ShareId, role: ShareRole, canPublish: z.boolean() }),
         ),
+      }),
+    ),
+    direct: z.array(
+      z.strictObject({
+        shareId: ShareId,
+        identityId: HumanId,
+        role: ShareRole,
+        canPublish: z.boolean(),
       }),
     ),
     permissionVersion: z.number().int(),

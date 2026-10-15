@@ -55,22 +55,20 @@ type State = Awaited<ReturnType<typeof state>>;
 
 /** Someone's effective access in a share, from the listings, leaving out `without`. */
 function accessIn(
-  { groups, shares }: State,
+  { groups, shares, direct }: State,
   shareId: ShareId,
   identityId: string,
   without?: GroupId,
 ) {
   const share = shares.find((s) => s.shareId === shareId);
   if (!share) throw new Error(`no share ${shareId}`);
-  const direct = share.direct.find((d) => d.identityId === identityId) ?? null;
-  const viaGroups = share.groups.filter(
-    (g) =>
-      g.groupId !== without &&
-      groups
-        .find((group) => group.groupId === g.groupId)
-        ?.members.some((m) => m.identity.id === identityId),
+  const own = direct.find((d) => d.shareId === shareId && d.identityId === identityId) ?? null;
+  const viaGroups = groups.flatMap((group) =>
+    group.groupId !== without && group.members.some((m) => m.identity.id === identityId)
+      ? group.shares.filter((s) => s.shareId === shareId)
+      : [],
   );
-  return { share, access: highest([direct, ...viaGroups]) };
+  return { share, access: highest([own, ...viaGroups]) };
 }
 
 /**
@@ -170,13 +168,13 @@ export async function shareWithGroup(
   if (!group) throw new Error(`no group ${groupId}`);
   const after = {
     ...before,
-    shares: before.shares.map((s) =>
-      s.shareId === shareId
+    groups: before.groups.map((g) =>
+      g.groupId === groupId
         ? {
-            ...s,
-            groups: [...s.groups.filter((g) => g.groupId !== groupId), { groupId, ...access }],
+            ...g,
+            shares: [...g.shares.filter((s) => s.shareId !== shareId), { shareId, ...access }],
           }
-        : s,
+        : g,
     ),
   };
   const envelopes = [];

@@ -919,10 +919,7 @@ export async function rotateShare(
   });
 }
 
-/**
- * A space's shares and their members, for its owners (section 7.5, step
- * 1), with each member's direct grant and the groups each share has.
- */
+/** A space's shares and their members, for its owners (section 7.5, step 1). */
 export async function listShares(db: Database, accountId: string, spaceId: string) {
   const identity = await requireIdentity(db, accountId);
   await requireOwner(db, identity, spaceId);
@@ -961,14 +958,6 @@ export async function listShares(db: Database, accountId: string, spaceId: strin
           .innerJoin(agentProfiles, eq(agentProfiles.agentId, agentGrants.agentId))
           .where(inArray(agentGrants.shareId, shareIds))
           .orderBy(agentGrants.agentId);
-  const groupRows =
-    rows.length === 0
-      ? []
-      : await db
-          .select()
-          .from(shareGroups)
-          .where(inArray(shareGroups.shareId, shareIds))
-          .orderBy(shareGroups.groupId);
   // Agents holding a share's current keys with no pick there any more.
   const former =
     rows.length === 0
@@ -1019,20 +1008,6 @@ export async function listShares(db: Database, accountId: string, spaceId: strin
     formerAgents: former
       .filter((held) => held.shareId === row.id)
       .map(({ agentId, personId, name }) => ({ agentId, personId, name })),
-    direct: members.flatMap((m) =>
-      m.shareId === row.id && m.directRole !== null
-        ? [
-            {
-              identityId: m.identityId,
-              role: m.directRole,
-              canPublish: m.directCanPublish === true,
-            },
-          ]
-        : [],
-    ),
-    groups: groupRows
-      .filter((g) => g.shareId === row.id)
-      .map(({ groupId, role, canPublish }) => ({ groupId, role, canPublish })),
   }));
 }
 

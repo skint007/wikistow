@@ -69,7 +69,10 @@ export async function checkGroupOwner(db: Database, accountId: string, groupId: 
   await requireOwner(db, identity, group.spaceId);
 }
 
-/** The space's groups, each with its name, members and shares, for its owners. */
+/**
+ * The space's groups, each with its name, members and shares, and every
+ * direct grant in the space's shares, for its owners.
+ */
 export async function listGroups(
   db: Database,
   accountId: string,
@@ -122,6 +125,25 @@ export async function listGroups(
         .filter((g) => g.groupId === row.id)
         .map(({ shareId, role, canPublish }) => ({ shareId, role, canPublish })),
     })),
+    direct: (
+      await db
+        .select()
+        .from(shareMembers)
+        .innerJoin(shares, eq(shares.id, shareMembers.shareId))
+        .where(and(eq(shares.spaceId, spaceId), isNotNull(shareMembers.directRole)))
+        .orderBy(shareMembers.shareId, shareMembers.identityId)
+    ).flatMap(({ share_members: m }) =>
+      m.directRole === null
+        ? []
+        : [
+            {
+              shareId: m.shareId,
+              identityId: m.identityId,
+              role: m.directRole,
+              canPublish: m.directCanPublish === true,
+            },
+          ],
+    ),
     permissionVersion: space.permissionVersion,
   };
 }

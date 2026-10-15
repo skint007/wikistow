@@ -103,14 +103,6 @@ export const listShares = {
           }),
         ),
         formerAgents: z.array(ShareAgent),
-        /** Members' direct grants, which `addMember` sets (section 7.8). */
-        direct: z.array(
-          z.strictObject({ identityId: HumanId, role: ShareRole, canPublish: z.boolean() }),
-        ),
-        /** The groups the share is shared with, and their access. */
-        groups: z.array(
-          z.strictObject({ groupId: GroupId, role: ShareRole, canPublish: z.boolean() }),
-        ),
       }),
     ),
   }),
