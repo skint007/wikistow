@@ -2,6 +2,7 @@ import { accountRoutes } from '@wikistow/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, use, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, meQuery } from '../api';
+import { desktop } from '../desktop';
 import { usePlugins } from '../plugins/runtime';
 import { pluginTheme, usePluginTheme, type ThemeStyle } from './plugin-theme';
 
@@ -48,7 +49,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     chosen &&
     themes.find((option) => option.pluginId === chosen.pluginId && option.id === chosen.themeId);
   // At launch, until the desktop app lists its plugins: as it was last shown.
-  const chosenStyle = listed ? (available ?? null) : launch;
+  // A browser draws no plugin's styles until the vault is open and lists them.
+  const chosenStyle = listed ? (available ?? null) : desktop ? launch : null;
   const style = preview ?? chosenStyle;
   const availableBase = available?.base ?? null;
   const availableHref = available?.href ?? null;

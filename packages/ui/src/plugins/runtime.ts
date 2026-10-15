@@ -1,11 +1,5 @@
 import type { PayloadChanges } from '@wikistow/client';
-import {
-  PageId,
-  SpaceId,
-  type InstalledPlugin,
-  type PluginScope,
-  type PluginsState,
-} from '@wikistow/contracts';
+import { PageId, SpaceId, type InstalledPlugin, type PluginScope } from '@wikistow/contracts';
 import {
   blockLanguage,
   isRegion,
@@ -36,6 +30,8 @@ import { pagesFor, pluginError, writeLimit, type Caller } from './pages';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { formView, readFields, type ReadField } from './block-form';
 import { editorDrafts } from './drafts';
+import { librarySource } from './library';
+import { isSafeModeKey, tabSafeMode } from './safe-mode';
 import { inFrame } from './script-frame';
 import { inWorker, ScriptWorker } from './script-worker';
 
@@ -81,9 +77,11 @@ export type PluginBlock = { pluginId: string; type: string; view: View<BlockProp
 export type PluginStatus = { plugin: InstalledPlugin; problem: string | null };
 
 export type PluginsSnapshot = {
-  /** Plugins can run here: the desktop app. */
-  available: boolean;
-  /** What is installed is known: false only as the desktop app starts, until it answers. */
+  /**
+   * What is installed is known: false as the desktop app starts, until it
+   * answers, and in the browser while the vault is locked, since the
+   * approvals are encrypted.
+   */
   listed: boolean;
   safeMode: boolean;
   plugins: PluginStatus[];
@@ -197,10 +195,16 @@ const fire = <E extends keyof PluginEvents>(set: Handlers[E], payload: PluginEve
 
 /** Where a runtime's plugins come from, and what they reach. */
 export type RuntimeSource = {
-  /** The plugins to run now (the enabled ones), and whether safe mode is on. */
-  list(): Promise<PluginsState>;
+  /**
+   * The plugins here, enabled or not, and whether safe mode is on. Plugins
+   * null: not known now, as the browser's while the vault is locked. The
+   * runtime lists again whenever the vault locks or unlocks.
+   */
+  list(): Promise<{ safeMode: boolean; plugins: InstalledPlugin[] | null }>;
   /** The open account's page access settings, by plugin. */
   access(): Promise<Record<string, PluginScope[]>>;
+  /** Replace one plugin's page access for the open account. */
+  setAccess(pluginId: string, scopes: PluginScope[]): Promise<void>;
   /** The page operations a plugin gets as `host.pages`. */
   pages(caller: Caller): Pages;
   /** The handle a command or view gets for the page shown. */
@@ -219,8 +223,9 @@ export type RuntimeSource = {
  * plugin's styles load while it is listed. Its code runs while the vault
  * is open: unlocking activates it, and locking or signing out ends its
  * worker, aborts its `signal` and drops what it registered, as disabling
- * does. In safe mode, or in a browser, nothing loads. `pluginRuntime` runs
- * the plugins installed here; the workshop runs one of its own (#257).
+ * does. In safe mode nothing loads. `pluginRuntime` runs the plugins
+ * installed here (the desktop's) or approved from the library (the
+ * browser's); the workshop runs one of its own (#257).
  */
 export function createRuntime(source: RuntimeSource) {
   const loaded = new Map<string, Loaded>();
@@ -231,9 +236,8 @@ export function createRuntime(source: RuntimeSource) {
   let safeMode = false;
   let queryClient: QueryClient | null = null;
   const listeners = new Set<() => void>();
-  let listed = desktop === null;
+  let listed = false;
   let snapshot: PluginsSnapshot = {
-    available: desktop !== null,
     listed,
     safeMode: false,
     plugins: [],
@@ -248,7 +252,6 @@ export function createRuntime(source: RuntimeSource) {
   const emit = () => {
     const entries = [...loaded.values()];
     snapshot = {
-      available: desktop !== null,
       listed,
       safeMode,
       plugins: [
@@ -577,14 +580,18 @@ export function createRuntime(source: RuntimeSource) {
     access = unlocked() ? await source.access().catch(() => ({})) : {};
   }
 
-  /** Match what runs to the desktop app's list: load what's new or changed, unload the rest. */
+  /**
+   * Match what runs to the source's list: load what's new or changed,
+   * unload the rest, and while the vault is open start what isn't running.
+   */
   async function sync() {
-    if (!desktop || stopped) return;
+    if (stopped) return;
     const state = await source.list();
     if (stopped) return;
     safeMode = state.safeMode;
+    const plugins = state.plugins ?? [];
     const wanted = new Map(
-      (safeMode ? [] : state.plugins.filter((plugin) => plugin.enabled)).map((plugin) => [
+      (safeMode ? [] : plugins.filter((plugin) => plugin.enabled)).map((plugin) => [
         plugin.manifest.id,
         plugin,
       ]),
@@ -595,8 +602,7 @@ export function createRuntime(source: RuntimeSource) {
     }
     if (unlocked()) await readAccess();
     for (const plugin of wanted.values()) {
-      if (loaded.has(plugin.manifest.id)) continue;
-      const entry: Loaded = {
+      const entry = loaded.get(plugin.manifest.id) ?? {
         plugin,
         links: loadStyles(plugin),
         active: null,
@@ -604,10 +610,10 @@ export function createRuntime(source: RuntimeSource) {
         problems: { app: null, script: null },
       };
       loaded.set(plugin.manifest.id, entry);
-      if (unlocked()) entry.starting = activate(entry);
+      if (unlocked() && !entry.active) entry.starting = activate(entry);
     }
-    idle = state.plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
-    listed = true;
+    idle = plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
+    listed = state.plugins !== null;
     emit();
   }
 
@@ -619,10 +625,9 @@ export function createRuntime(source: RuntimeSource) {
   const refresh = () => (syncing = syncing.then(sync, sync));
 
   return {
-    /** Start, once, in the desktop app; with `client`, what plugins change shows afresh. */
+    /** Start, once; with `client`, what plugins change shows afresh. */
     start(client: QueryClient | null) {
       queryClient = client;
-      if (!desktop) return;
       let was = vaultStore.get();
       watching = vaultStore.subscribe(() => {
         const now = vaultStore.get();
@@ -637,14 +642,9 @@ export function createRuntime(source: RuntimeSource) {
         if (now.status !== 'unlocked') {
           access = {};
           if (source.ownsStorage) void clearScriptStorage();
-          return;
         }
-        const run = epoch;
-        void readAccess().then(() => {
-          // Not if it locked, or unlocked afresh, meanwhile.
-          if (run !== epoch || !unlocked()) return;
-          for (const entry of loaded.values()) entry.starting = activate(entry);
-        });
+        // Listed again: the browser's plugins come and go with the account.
+        void refresh();
       });
       // Left by a run that ended without locking, as when the app quits.
       if (source.ownsStorage) void clearScriptStorage().then(refresh);
@@ -661,9 +661,8 @@ export function createRuntime(source: RuntimeSource) {
     refresh,
     access: (pluginId: string) => access[pluginId] ?? [],
     async setAccess(pluginId: string, scopes: PluginScope[]) {
-      const vault = vaultStore.get();
-      if (!desktop || vault.status !== 'unlocked') return;
-      await desktop.setPluginAccess(vault.vault.accountId, pluginId, scopes);
+      if (!unlocked()) return;
+      await source.setAccess(pluginId, scopes);
       access = { ...access, [pluginId]: scopes };
       emit();
     },
@@ -769,27 +768,74 @@ export type PluginRuntime = ReturnType<typeof createRuntime>;
 
 const drafts = editorDrafts();
 
-/** The plugins installed on this computer, running in the app's own page. */
+/** The desktop's plugins: folder and development installs on this computer, per device. */
+const desktopSource = (
+  bridge: NonNullable<typeof desktop>,
+): Omit<RuntimeSource, 'pages' | 'handle'> => ({
+  list: () => bridge.plugins(),
+  async access() {
+    const vault = vaultStore.get();
+    if (vault.status !== 'unlocked') return {};
+    return bridge.pluginAccess(vault.vault.accountId);
+  },
+  async setAccess(pluginId, scopes) {
+    const vault = vaultStore.get();
+    if (vault.status !== 'unlocked') return;
+    await bridge.setPluginAccess(vault.vault.accountId, pluginId, scopes);
+  },
+  disable: (pluginId) => bridge.setPluginEnabled(pluginId, false),
+  ownsStorage: true,
+});
+
+const ownSource = desktop ? desktopSource(desktop) : librarySource;
+
+/**
+ * The app's own plugins, running in its page: in the desktop app those
+ * installed on this computer, in the browser the library plugins the
+ * person approved.
+ */
+const ownRuntime = createRuntime({
+  ...ownSource,
+  pages: (caller) =>
+    pagesFor({
+      ...caller,
+      open: (page, base, change) => drafts.through(caller, page, base, change),
+    }),
+  handle: (caller, shown) => drafts.handle(caller, shown),
+  async disable(pluginId) {
+    await ownSource.disable(pluginId);
+    await pluginRuntime.refresh();
+  },
+});
+
 export const pluginRuntime = {
-  ...createRuntime({
-    list: async () => (desktop ? desktop.plugins() : { safeMode: false, plugins: [] }),
-    async access() {
-      const vault = vaultStore.get();
-      if (!desktop || vault.status !== 'unlocked') return {};
-      return desktop.pluginAccess(vault.vault.accountId);
-    },
-    pages: (caller) =>
-      pagesFor({
-        ...caller,
-        open: (page, base, change) => drafts.through(caller, page, base, change),
-      }),
-    handle: (caller, shown) => drafts.handle(caller, shown),
-    async disable(pluginId) {
-      await desktop?.setPluginEnabled(pluginId, false);
-      await pluginRuntime.refresh();
-    },
-    ownsStorage: true,
-  }),
+  ...ownRuntime,
+  /** Start, once. In a browser tab, Ctrl+Shift+Alt+P turns on safe mode; the desktop's main catches it there. */
+  start(client: QueryClient | null) {
+    ownRuntime.start(client);
+    if (desktop) return;
+    // Captured before anything a plugin adds can stop it.
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        if (!isSafeModeKey(event)) return;
+        event.preventDefault();
+        void pluginRuntime.setSafeMode(true);
+      },
+      { capture: true },
+    );
+  },
+  /**
+   * Turn safe mode on or off. The desktop app restarts its window. A browser
+   * tab reloads to turn it on, so nothing a plugin left in the page stays,
+   * and lists again to turn it off.
+   */
+  async setSafeMode(on: boolean) {
+    if (desktop) return desktop.setSafeMode(on);
+    tabSafeMode.set(on);
+    if (on && pluginRuntime.get().plugins.some(({ plugin }) => plugin.enabled)) location.reload();
+    else await pluginRuntime.refresh();
+  },
   /** The draft view opened `page` in the editor; plugins change it through `draft` until the returned function runs. */
   openDraft: (page: PageRef, draft: OpenDraft) => drafts.open(page, draft),
   /** The editor saved a draft: told to every plugin but one it saved for. */
