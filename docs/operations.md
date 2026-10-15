@@ -12,7 +12,7 @@ Always run the server under a restart policy, such as Compose's `restart: unless
 
 ## Idle connections
 
-The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout of at least 15 seconds, the longest an AI reply goes without sending anything; proxy defaults, such as nginx's 60 seconds, are longer.
+The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout well over 15 seconds, about the longest an AI reply goes without sending anything. Proxy defaults, such as nginx's 60 seconds, are.
 
 ## Connect an AI provider
 
