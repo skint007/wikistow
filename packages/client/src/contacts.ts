@@ -33,6 +33,7 @@ import { keyHash, sameKeys, sign, verifySignature, type PrivateIdentity } from '
 import type { InstallationId } from './ids.ts';
 import type { JsonPathPattern } from './json.ts';
 import { Format } from './payload.ts';
+import { withPluginApproval, type PluginApproval } from './plugin-approvals.ts';
 import { sodium } from './sodium.ts';
 import { verifyEnrollment } from './trust.ts';
 
@@ -578,7 +579,20 @@ export type ContactsChange =
     }
   | { kind: 'accept-owner'; spaceId: SpaceId; owner: AcceptedOwner }
   | { kind: 'remove-owner'; spaceId: SpaceId; ownerId: string }
-  | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner };
+  | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner }
+  /**
+   * Library plugins (`PLUGINS_NAMESPACE`), merged per plugin, the last write
+   * standing: an approval sets the whole entry; a change sets its fields if
+   * the entry is still there, so a plugin removed on another device stays
+   * removed; a removal drops it.
+   */
+  | { kind: 'plugin-approve'; approval: PluginApproval }
+  | {
+      kind: 'plugin-change';
+      pluginId: string;
+      set: Partial<Omit<PluginApproval, 'id'>>;
+    }
+  | { kind: 'plugin-remove'; pluginId: string };
 
 export type ContactsPayloads = { shared: SharedContacts; private: PrivateContacts };
 
@@ -776,6 +790,14 @@ export function applyContactsChange(
           removedOwners: entry.removedOwners.filter((id) => id !== change.owner.id),
         };
       });
+    case 'plugin-approve':
+      return withPlugin(base, change.approval.id, () => change.approval);
+    case 'plugin-change':
+      return withPlugin(base, change.pluginId, (current) =>
+        current ? { ...current, ...change.set } : null,
+      );
+    case 'plugin-remove':
+      return withPlugin(base, change.pluginId, () => null);
     default: {
       const _exhaustive: never = change;
       return _exhaustive;
@@ -805,6 +827,16 @@ function withSpaceOwners(
     },
     private: base.private,
   };
+}
+
+// One library plugin's approval, changed by `update`; the same payloads when it changes nothing.
+function withPlugin(
+  base: ContactsPayloads,
+  pluginId: string,
+  update: (current: PluginApproval | null) => PluginApproval | null,
+): ContactsPayloads {
+  const own = withPluginApproval(base.private, pluginId, update);
+  return own === base.private ? base : { shared: base.shared, private: own };
 }
 
 /** An empty first version's payloads. */

@@ -14,6 +14,8 @@ import {
   openContacts,
   parsePrivateContacts,
   parseSharedContacts,
+  pluginApprovals,
+  PLUGINS_NAMESPACE,
   requireContactsChain,
   enrollmentFingerprint,
   sealContacts,
@@ -356,5 +358,63 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
     const readded = applyContactsChange(both, { kind: 'add-co-owner', spaceId, owner: fern });
     expect(entry(readded)?.removedOwners).toEqual([self.id]);
     expect(entry(readded)?.owners).toEqual([fern]);
+  });
+
+  it('merges library plugin approvals per plugin, the last write standing', () => {
+    const approval = (id: string, hash: string) => ({
+      id,
+      hash: hash.repeat(64),
+      enabled: true,
+      access: [],
+    });
+    const plugin = (payloads: ContactsPayloads, id: string) =>
+      pluginApprovals(payloads.private).find((entry) => entry.id === id);
+    // Another device wrote calculator first, beside an entry from a newer app.
+    const future = { id: 'future', from: 'a newer app' };
+    const theirs = applyContactsChange(
+      {
+        ...newer,
+        private: { ...newer.private, extensions: { [PLUGINS_NAMESPACE]: { plugins: [future] } } },
+      },
+      { kind: 'plugin-approve', approval: approval('calculator', 'a') },
+    );
+    // This device approved dusk-theme: both stand, and the entry it can't read stays.
+    const both = applyContactsChange(theirs, {
+      kind: 'plugin-approve',
+      approval: approval('dusk-theme', 'b'),
+    });
+    expect(pluginApprovals(both.private).map((entry) => entry.id)).toEqual([
+      'calculator',
+      'dusk-theme',
+    ]);
+    expect(both.private.extensions[PLUGINS_NAMESPACE]).toMatchObject({
+      plugins: expect.arrayContaining([future]),
+    });
+
+    // One plugin changed on two devices: each write sets only its own fields.
+    const access = [{ spaceId, folderId: null, access: 'read' as const }];
+    const off = applyContactsChange(both, {
+      kind: 'plugin-change',
+      pluginId: 'calculator',
+      set: { enabled: false },
+    });
+    const scoped = applyContactsChange(off, {
+      kind: 'plugin-change',
+      pluginId: 'calculator',
+      set: { access },
+    });
+    expect(plugin(scoped, 'calculator')).toEqual({
+      ...approval('calculator', 'a'),
+      enabled: false,
+      access,
+    });
+
+    // Removed on another device, it stays removed when this one updates it.
+    const removed = applyContactsChange(scoped, { kind: 'plugin-remove', pluginId: 'calculator' });
+    expect(plugin(removed, 'calculator')).toBeUndefined();
+    const update = { hash: 'c'.repeat(64) };
+    expect(
+      applyContactsChange(removed, { kind: 'plugin-change', pluginId: 'calculator', set: update }),
+    ).toBe(removed);
   });
 });

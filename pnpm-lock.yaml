@@ -249,6 +249,9 @@ importers:
       '@wikistow/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@wikistow/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       libsodium-wrappers-sumo:
         specifier: ^0.8.4
         version: 0.8.4
