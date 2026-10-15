@@ -10,9 +10,11 @@ import {
   type ClientContext,
   type PageId,
   type RevisionId,
+  type SearchIndex,
   type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
 
 // Everything here is decrypted or describes encrypted content, so every key
@@ -125,23 +127,40 @@ const searchIndexKey = [PLAIN, 'search-index'] as const;
 
 /**
  * Every page this person can read, indexed for search on this device. Built
- * afresh from the trees when it is stale; locking drops it with everything
- * else, and `refreshAccess` rebuilds it, so nothing outlives a lost grant.
- * This person's own changes mark it stale (`searchIndexChanged`).
+ * afresh from the trees when it is stale, opening only the pages whose
+ * version changed since the index before it: the one in memory, or at the
+ * first search after an unlock the one the desktop app kept, sealed for this
+ * person (`sealKept`). Locking drops it with everything else, and
+ * `refreshAccess` rebuilds it, so nothing outlives a lost grant. This
+ * person's own changes mark it stale (`searchIndexChanged`).
  */
 export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =>
   queryOptions({
     queryKey: searchIndexKey,
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
-      return searchOperations.indexSpaces(ctx, {
+      const index = await searchOperations.indexSpaces(ctx, {
+        kept: await keptIndex(ctx, queryClient),
         signal,
         onProgress: (progress) => queryClient.setQueryData(searchProgressKey, progress),
       });
+      // Kept for the next launch; failing to only means a full build then.
+      void desktop
+        ?.keepSearchIndex(searchOperations.sealKept(ctx, searchOperations.keptPages(index)))
+        .catch(() => {});
+      return index;
     },
     // Reopening search within a minute keeps the index; after that it rebuilds behind it.
     staleTime: 60_000,
   });
+
+/** The index before this one: the one in memory, or else the one the desktop app kept. */
+async function keptIndex(ctx: ClientContext, queryClient: QueryClient) {
+  const shown = queryClient.getQueryData<SearchIndex<searchOperations.SearchPage>>(searchIndexKey);
+  if (shown) return searchOperations.keptPages(shown);
+  const sealed = await desktop?.searchIndex().catch(() => null);
+  return sealed ? searchOperations.openKept(ctx, sealed) : null;
+}
 
 /**
  * After this person's own change to a page or folder (a save, publish,

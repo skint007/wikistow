@@ -1,9 +1,12 @@
-import { sharingRoutes, structureRoutes, type PageId, type SpaceId } from '@wikistow/contracts';
+import { PageId, RevisionId, sharingRoutes, SpaceId, structureRoutes } from '@wikistow/contracts';
+import { z } from 'zod';
 import { ApiError } from '../api/client.ts';
+import { canonical, decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
-import { SearchIndex } from '../search.ts';
+import { SearchIndex, searchText } from '../search.ts';
+import { sodium } from '../sodium.ts';
 import { shownVersions } from './pages.ts';
-import type { LoadedMetadata } from './records.ts';
+import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import type { ClientContext } from './session.ts';
 import { loadStructure } from './spaces.ts';
 
@@ -11,6 +14,8 @@ import { loadStructure } from './spaces.ts';
 export type SearchPage = {
   spaceId: SpaceId;
   pageId: PageId;
+  /** The version whose title and text are indexed. */
+  revisionId: RevisionId;
   /**
    * Where it is: the space's name, when this person holds the space, then
    * each folder's down to the page's, null where a name can't be opened.
@@ -54,18 +59,22 @@ export const nameOf = (loaded: LoadedMetadata | null) =>
  * space listed as held or shared with this person, skipping one that is
  * gone by the time it is loaded or fails its checks.
  *
- * Opened pages come from the revision cache where they can. If the cache is
- * cleared (the vault locks, or access changes) or `signal` aborts, it stops
- * with `IndexAbandoned` and what it built is dropped.
+ * A page whose shown version is in `kept`, as an earlier index read it
+ * (`keptPages`), is indexed from there without being opened; a version's
+ * content never changes. Others come from the revision cache where they can.
+ * If the cache is cleared (the vault locks, or access changes) or `signal`
+ * aborts, it stops with `IndexAbandoned` and what it built is dropped.
  */
 export async function indexSpaces(
   ctx: ClientContext,
   {
     spaceIds,
+    kept,
     onProgress,
     signal,
   }: {
     spaceIds?: readonly SpaceId[];
+    kept?: KeptPages | null;
     onProgress?: (progress: IndexProgress) => void;
     signal?: AbortSignal;
   } = {},
@@ -99,11 +108,22 @@ export async function indexSpaces(
     const top = space ? [nameOf(space.metadata)] : [];
     for (let at = 0; at < pages.length; at += CHUNK) {
       const chunk = pages.slice(at, at + CHUNK);
-      const versions = await shownVersions(ctx, spaceId, chunk);
+      // Each page's version as kept; a copy unpublished where it is lists no
+      // head, so it is always opened.
+      const reused = new Map<PageId, IndexedContent>();
+      for (const page of chunk) {
+        const head = page.draftHead ?? page.publishedHead;
+        const found = head === null ? undefined : kept?.get(head);
+        if (head !== null && found?.spaceId === spaceId && found.pageId === page.id) {
+          reused.set(page.id, { revisionId: head, title: found.title, text: found.text });
+        }
+      }
+      const unkept = chunk.filter((page) => !reused.has(page.id));
+      const versions = unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept) : null;
       live();
       for (const page of chunk) {
-        const opened = versions.get(page.id)?.opened;
-        if (opened?.kind !== 'current') continue;
+        const content = reused.get(page.id) ?? contentOf(versions?.get(page.id));
+        if (!content) continue;
         const path: (string | null)[] = [];
         const seen = new Set<string>();
         for (let id = page.parentId; id !== null && !seen.has(id);) {
@@ -113,15 +133,16 @@ export async function indexSpaces(
           path.unshift(nameOf(folder.metadata));
           id = folder.parentId;
         }
-        index.add(
+        index.addText(
           {
             spaceId,
             pageId: page.id,
+            revisionId: content.revisionId,
             path: [...top, ...path],
             draft: page.draftHead !== null && (page.publishedHead === null || page.draftChanges),
             unpublished: page.draftHead === null && page.publishedHead === null,
           },
-          opened.payload,
+          content,
         );
       }
       done += chunk.length;
@@ -129,6 +150,87 @@ export async function indexSpaces(
     }
   }
   return index;
+}
+
+type IndexedContent = { revisionId: RevisionId; title: string; text: string };
+
+/**
+ * What an index read from each version it holds, by that version, so a
+ * later index can take it without opening the version again (`indexSpaces`).
+ */
+export type KeptPages = ReadonlyMap<
+  RevisionId,
+  { spaceId: SpaceId; pageId: PageId; title: string; text: string }
+>;
+
+export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
+  new Map(
+    index
+      .pages()
+      .map(({ doc, title, text }) => [
+        doc.revisionId,
+        { spaceId: doc.spaceId, pageId: doc.pageId, title, text },
+      ]),
+  );
+
+const KeptJson = z.array(z.tuple([RevisionId, SpaceId, PageId, z.string(), z.string()]));
+
+// The desktop app keeps the index between launches as these bytes (#3).
+// Their key comes from this person's identity, so only their unlocked vault
+// opens them, and the file can't be taken for another account or server's.
+const keptKey = (ctx: ClientContext) =>
+  sodium.crypto_generichash(32, canonical('search-index-key/v1', []), ctx.identity.boxSecretKey);
+const keptAd = (ctx: ClientContext) =>
+  canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id]);
+
+/** `kept`, sealed for this person on this server: a nonce, then the ciphertext. */
+export function sealKept(ctx: ClientContext, kept: KeptPages): Uint8Array {
+  const json = [...kept].map(([id, page]) => [
+    id,
+    page.spaceId,
+    page.pageId,
+    page.title,
+    page.text,
+  ]);
+  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+  const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+    utf8(JSON.stringify(json)),
+    keptAd(ctx),
+    null,
+    nonce,
+    keptKey(ctx),
+  );
+  const sealed = new Uint8Array(nonce.length + ciphertext.length);
+  sealed.set(nonce);
+  sealed.set(ciphertext, nonce.length);
+  return sealed;
+}
+
+/** What `sealKept` sealed, or null if it isn't this person's on this server, or is damaged. */
+export function openKept(ctx: ClientContext, sealed: Uint8Array): KeptPages | null {
+  const split = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+  try {
+    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+      null,
+      sealed.subarray(split),
+      keptAd(ctx),
+      sealed.subarray(0, split),
+      keptKey(ctx),
+    );
+    const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
+    return new Map(
+      json.map(([id, spaceId, pageId, title, text]) => [id, { spaceId, pageId, title, text }]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** What a version gives the index, when it opens. */
+function contentOf(version: OpenedRevision | null | undefined): IndexedContent | null {
+  if (version?.opened.kind !== 'current') return null;
+  const { title, markdown } = version.opened.payload;
+  return { revisionId: version.record.revisionId, title, text: searchText(markdown) };
 }
 
 /**

@@ -1,5 +1,6 @@
 // Local full-text search over the pages a person can decrypt. Nothing here
-// leaves memory: the index is rebuilt from opened pages, never stored.
+// leaves memory: the index is built from opened pages, and from what an
+// earlier index read from them (`pages`, `addText`).
 
 /**
  * An in-memory inverted index of page titles and text, searched as you type.
@@ -35,7 +36,7 @@
  * fine for a family library of thousands of pages.
  */
 export class SearchIndex<T> {
-  readonly #pages: Indexed<T>[] = [];
+  readonly #pages: IndexedPage<T>[] = [];
   // Each term's pages, as flat pairs: the page, and its counts as `add` packs them.
   readonly #postings = new Map<string, number[]>();
   #sorted: string[] | null = null;
@@ -46,12 +47,16 @@ export class SearchIndex<T> {
 
   /** Index a page's title and Markdown; `doc` is what its hits return. */
   add(doc: T, page: { title: string; markdown: string }): void {
+    this.addText(doc, { title: page.title, text: searchText(page.markdown) });
+  }
+
+  /** Index a page as another index read it (`pages`): its title and text, already reduced. */
+  addText(doc: T, { title, text }: { title: string; text: string }): void {
     const id = this.#pages.length;
-    const text = searchText(page.markdown);
-    this.#pages.push({ doc, title: page.title, text });
+    this.#pages.push({ doc, title, text });
     // Each term's count in the text, doubled, plus one if the title has it.
     const counts = new Map<string, number>();
-    eachTerm(page.title, (term) => counts.set(term, (counts.get(term) ?? 0) | 1));
+    eachTerm(title, (term) => counts.set(term, (counts.get(term) ?? 0) | 1));
     eachTerm(text, (term) => counts.set(term, (counts.get(term) ?? 0) + 2));
     for (const [term, packed] of counts) {
       let list = this.#postings.get(term);
@@ -59,6 +64,11 @@ export class SearchIndex<T> {
       list.push(id, packed);
     }
     this.#sorted = null;
+  }
+
+  /** Each page indexed, in the order added, with its text as reduced for search. */
+  pages(): readonly Readonly<IndexedPage<T>>[] {
+    return this.#pages;
   }
 
   /** The best `limit` pages holding every term of `query`, best first. */
@@ -92,7 +102,7 @@ export class SearchIndex<T> {
       }
       if (scores.size === 0) return [];
     }
-    const hits: { page: Indexed<T>; score: number; inText: boolean }[] = [];
+    const hits: { page: IndexedPage<T>; score: number; inText: boolean }[] = [];
     for (const [id, score] of scores ?? []) {
       const page = this.#pages[id];
       if (page) hits.push({ page, score, inText: inTexts.has(id) });
@@ -132,7 +142,8 @@ export class SearchIndex<T> {
   }
 }
 
-type Indexed<T> = { doc: T; title: string; text: string };
+/** A page as an index holds it: what its hits return, its title, and its reduced text. */
+export type IndexedPage<T> = { doc: T; title: string; text: string };
 
 /** Text with the parts a query matched, as UTF-16 offsets into `text`. */
 export type Marked = { text: string; highlights: { start: number; end: number }[] };
