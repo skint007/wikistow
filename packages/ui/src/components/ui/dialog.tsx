@@ -122,7 +122,7 @@ function DialogContent({
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="absolute top-2 right-2 grid size-8 place-items-center rounded-control text-muted-foreground hover:tint hover:text-foreground active:tint-strong [&_svg]:size-4"
+          className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-control text-muted-foreground hover:tint hover:text-foreground active:tint-strong [&_svg]:size-4"
         >
           <XIcon />
           <span className="sr-only">Close</span>
@@ -158,7 +158,8 @@ function DialogTitle({ className, ...props }: React.ComponentProps<'h2'>) {
     <h2
       id={titleId}
       data-slot="dialog-title"
-      className={cn('text-lg leading-none font-extrabold', className)}
+      // Clear of the close button: both sides on phones, where it's centred.
+      className={cn('px-6 text-lg leading-none font-extrabold sm:pl-0', className)}
       {...props}
     />
   );
