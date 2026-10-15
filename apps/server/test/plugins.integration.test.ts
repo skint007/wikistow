@@ -130,6 +130,8 @@ describe('the plugin library', () => {
     await refused(plugin({ id: 'bad', script: 'script.js' }), /lacks: script\.js/);
     await refused({ ...plugin({ id: 'bad' }), '../escape.js': 'x' }, /files\.1\.path/);
     await refused({ ...plugin({ id: 'bad' }), '/abs.js': 'x' }, /files\.1\.path/);
+    await refused({ ...plugin({ id: 'bad' }), 'a//b.js': 'x' }, /files\.1\.path/);
+    await refused({ ...plugin({ id: 'bad' }), 'x/': 'x' }, /files\.1\.path/);
     await refused({ ...plugin({ id: 'bad' }), a: 'x', 'a/b': 'y' }, /folder’s name/);
     const twice = await ann.browser.request('/api/plugins', {
       method: 'POST',
@@ -205,16 +207,13 @@ describe('the plugin library', () => {
       v2,
     ]);
 
-    // An admin removes the whole plugin, and the ID is free for anyone.
+    // An admin removes the whole plugin. The ID stays Ann's, so Bob's
+    // plugin can't pose as an update of hers, and she may upload again.
     expect((await remove(admin, 'notes')).status).toBe(200);
     expect(await stored(v2)).toBe(false);
     expect((await list(bob)).map((p) => p.id)).not.toContain('notes');
-    expect((await upload(bob, notes('3.0.0'))).status).toBe(201);
-    expect((await list(bob)).find((p) => p.id === 'notes')?.mine).toBe(true);
-
-    // The last version going takes the plugin with it.
-    const bobs = await hashOf(notes('3.0.0'));
-    expect((await remove(bob, `notes/versions/${bobs}`)).status).toBe(200);
-    expect((await list(ann)).map((p) => p.id)).not.toContain('notes');
+    expect((await upload(bob, notes('3.0.0'))).status).toBe(403);
+    expect((await upload(ann, notes('3.0.0'))).status).toBe(201);
+    expect((await list(ann)).find((p) => p.id === 'notes')?.mine).toBe(true);
   });
 });

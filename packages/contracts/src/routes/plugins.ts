@@ -50,7 +50,7 @@ export type LibraryVersion = z.infer<typeof LibraryVersion>;
  */
 export const LibraryPlugin = z.strictObject({
   id: PluginId,
-  /** The account that uploaded the ID first, which alone uploads its versions. */
+  /** The account that uploaded the ID first, which alone ever uploads its versions. */
   owner: z.strictObject({ name: z.string() }),
   /** Whether the caller is the owner. */
   mine: z.boolean(),
@@ -81,7 +81,10 @@ export const uploadPlugin = {
   status: 201,
 } as const satisfies RouteDef;
 
-/** Remove a whole plugin, every version's files with it. Its owner or an administrator. */
+/**
+ * Remove a whole plugin, every version and its files. Its owner or an
+ * administrator. The ID stays the owner's, who may upload to it again.
+ */
 export const removePlugin = {
   method: 'DELETE',
   path: '/api/plugins/:pluginId',
@@ -90,8 +93,8 @@ export const removePlugin = {
 } as const satisfies RouteDef;
 
 /**
- * Remove one version and its files. Its owner or an administrator. The
- * plugin goes with its last version, and its ID is free again.
+ * Remove one version and its files. Its owner or an administrator. A
+ * plugin with no versions left isn't listed; its ID stays the owner's.
  */
 export const removeVersion = {
   method: 'DELETE',

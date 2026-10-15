@@ -12,10 +12,17 @@ export const MANIFEST_FILE = 'wikistow-plugin.json';
  */
 export const PluginId = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, 'Use 2–40 of a–z, 0–9 and -');
 
-/** A file in the built folder, by its path from the top, with no way out of it. */
+/**
+ * A file in the built folder, by its path from the top, with no way out of
+ * it: names of letters, digits, `_`, `.` and `-`, none of them `.` or `..`,
+ * joined by single slashes. They need no escaping in a URL.
+ */
 export const PluginFile = z
   .string()
-  .regex(/^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[\w./-]+$/, 'A path inside the plugin folder');
+  .regex(
+    /^(?!(?:.*\/)?\.\.?(?:\/|$))[\w.-]+(?:\/[\w.-]+)*$/,
+    'A path inside the plugin folder, of letters, digits, _ . - and /',
+  );
 
 /** How much of a person's pages a plugin may be given. */
 export const PageAccess = z.enum(['none', 'read', 'write']);

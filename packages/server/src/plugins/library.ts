@@ -8,7 +8,8 @@ import type { PluginStore } from './store.ts';
 
 /*
  * The plugin library (ADR 0002). Any person may upload a built plugin; the
- * first to upload an ID owns it, and only they upload its later versions.
+ * first to upload an ID owns it for good, and only they upload its later
+ * versions.
  * The owner or an administrator removes a version or the whole plugin.
  * Files go to the store before the rows that list them, and are deleted
  * after, so a crash leaves at worst files no row lists, which
@@ -119,8 +120,10 @@ export async function listPlugins(db: Database, accountId: string) {
 type Remover = { accountId: string; admin: boolean };
 
 /**
- * Remove `hash` from `pluginId`, or with no hash the whole plugin, and the
- * files that go with it. The plugin goes with its last version.
+ * Remove `hash` from `pluginId`, or with no hash every version, and the
+ * files that go with them. The ID stays its owner's, so another account's
+ * plugin can never come in as an update of one people approved; a plugin
+ * with no versions isn't listed.
  */
 export async function removePlugin(
   db: Database,
@@ -148,12 +151,6 @@ export async function removePlugin(
       .returning({ hash: pluginVersions.hash });
     if (hash !== undefined && gone.length === 0)
       throw new ContentError('not-found', 'No such version');
-    const [left] = await tx
-      .select({ hash: pluginVersions.hash })
-      .from(pluginVersions)
-      .where(eq(pluginVersions.pluginId, pluginId))
-      .limit(1);
-    if (!left) await tx.delete(plugins).where(eq(plugins.id, pluginId));
     return gone.map((row) => row.hash);
   });
   for (const gone of removed) await store.delete(gone);
