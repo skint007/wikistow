@@ -7,6 +7,7 @@ import {
   setPluginTheme,
   setTheme as setThemeCommand,
 } from '../commands/ui-commands';
+import { desktop } from '../desktop';
 import { usePlugins, type PluginThemeOption } from '../plugins/runtime';
 import { pluginTheme, usePluginTheme } from './plugin-theme';
 import { THEME_LABELS, useTheme } from './theme';
@@ -14,8 +15,8 @@ import { THEME_LABELS, useTheme } from './theme';
 const env = { satisfies: requirementsHere() };
 
 /**
- * The built-in palettes, synced to the account, and in the desktop app the
- * themes enabled plugins add, kept on this computer. A plugin theme can be
+ * The built-in palettes, synced to the account, and the themes enabled
+ * plugins add, kept on this computer or in this browser. A plugin theme can be
  * previewed first; a built-in choice, or "Use … here", leaves it.
  */
 export function ThemePicker() {
@@ -71,7 +72,8 @@ export function ThemePicker() {
       {themes.length > 0 && (
         <div className="grid gap-2">
           <p className="text-sm text-muted-foreground">
-            From plugins, on this computer only. Your account keeps its theme everywhere else.
+            From plugins, {desktop ? 'on this computer' : 'in this browser'} only. Your account
+            keeps its theme everywhere else.
           </p>
           <ul aria-label="Plugin themes" className="grid gap-2">
             {themes.map((option) => {

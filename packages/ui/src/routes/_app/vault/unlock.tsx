@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { safeRedirect } from '@/lib/redirect';
 import { meQuery } from '../../../api';
 import { desktop } from '../../../desktop';
+import { tabSafeMode } from '../../../plugins/safe-mode';
 import { vaultMessage } from '../../../vault/messages';
 import { unlockWith } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
@@ -39,6 +40,8 @@ function Unlock() {
   // Once per page: React may run the effect twice, and two unlocks at once
   // would trip over each other's staged keys.
   const tried = useRef(false);
+  // Pressed Open without plugins: this tab unlocks in safe mode.
+  const withoutPlugins = useRef(false);
 
   // At launch, a remembered unlock opens the vault without asking.
   useEffect(() => {
@@ -68,6 +71,10 @@ function Unlock() {
     const passphrase = form.get('passphrase');
     if (typeof passphrase !== 'string' || !passphrase) return;
     const started = vaultStore.epoch();
+    // Before unlocking, which starts the plugins; only if it opens.
+    const safe = withoutPlugins.current && !tabSafeMode.on();
+    withoutPlugins.current = false;
+    if (safe) tabSafeMode.set(true);
     setBusy(true);
     setError(null);
     try {
@@ -77,6 +84,7 @@ function Unlock() {
       else await desktop?.forgetVault();
       await navigate({ to: safeRedirect(redirect) });
     } catch (caught) {
+      if (safe) tabSafeMode.set(false);
       setError(vaultMessage(caught));
     } finally {
       setBusy(false);
@@ -115,6 +123,16 @@ function Unlock() {
         <Button type="submit" disabled={busy}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </Button>
+        {!desktop && (
+          <Button
+            type="submit"
+            variant="outline"
+            disabled={busy}
+            onClick={() => (withoutPlugins.current = true)}
+          >
+            Open without plugins
+          </Button>
+        )}
         <Link to="/vault/recover" className="text-sm quiet-link">
           Use your recovery key instead
         </Link>

@@ -3,7 +3,7 @@ import type { PluginCandidate, PluginScope } from '@wikistow/contracts';
 import type { PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import { desktop } from '../desktop';
 import { useVault } from '../vault/store';
 import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
 
-const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
+export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
   theme: {
     label: 'Theme',
     trust:
@@ -40,19 +40,34 @@ const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
   },
 };
 
-const ACCESS: Record<PageAccess, string> = {
+export const ACCESS: Record<PageAccess, string> = {
   none: 'no pages',
   read: 'reading the pages you choose',
   write: 'reading and changing drafts in the pages you choose',
 };
 
-const message = (error: unknown) =>
+export const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
+
+/** Says safe mode is on, with the way out: in Settings → Plugins, wherever plugins come from. */
+export function SafeModeNotice() {
+  const { safeMode } = usePlugins();
+  if (!safeMode) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      Safe mode: no plugins are running.
+      <Button size="sm" variant="outline" onClick={() => void pluginRuntime.setSafeMode(false)}>
+        Turn plugins back on
+      </Button>
+    </div>
+  );
+}
 
 /**
  * Settings → Plugins, in the desktop app: install a plugin folder or load
  * one for development, turn each on or off, reload, remove, and choose
- * the pages it may use. Every install asks for approval first.
+ * the pages it may use. Every install asks for approval first. The
+ * browser's, with the server's library, is `LibrarySettings`.
  */
 export function PluginSettings() {
   const { safeMode, plugins } = usePlugins();
@@ -75,14 +90,7 @@ export function PluginSettings() {
 
   return (
     <div className="grid gap-4">
-      {safeMode && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          Safe mode: no plugins are running.
-          <Button size="sm" variant="outline" onClick={() => void bridge.setSafeMode(false)}>
-            Turn plugins back on
-          </Button>
-        </div>
-      )}
+      <SafeModeNotice />
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void pick('install')}>Install plugin…</Button>
         <Button variant="outline" onClick={() => void pick('development')}>
@@ -99,44 +107,76 @@ export function PluginSettings() {
         <p className="text-sm text-muted-foreground">No plugins are installed.</p>
       ) : (
         <ul className="grid gap-3" aria-label="Installed plugins">
-          {plugins.map((status) => (
-            <PluginRow
-              key={status.plugin.manifest.id}
-              status={status}
-              act={act}
-              onCandidate={setCandidate}
-            />
-          ))}
+          {plugins.map((status) => {
+            const { manifest, development } = status.plugin;
+            return (
+              <PluginRow
+                key={manifest.id}
+                status={status}
+                onEnabled={(on) => void act(() => bridge.setPluginEnabled(manifest.id, on))}
+                onRemove={() => void act(() => bridge.removePlugin(manifest.id))}
+                actions={
+                  development && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void act(async () => {
+                          const asks = await bridge.reloadPlugin(manifest.id);
+                          if (asks) setCandidate(asks);
+                        })
+                      }
+                    >
+                      Reload
+                    </Button>
+                  )
+                }
+              />
+            );
+          })}
         </ul>
       )}
       <Approval
         candidate={candidate}
         onDone={() => setCandidate(null)}
-        onApprove={(token) => act(() => bridge.approvePlugin(token))}
+        onApprove={({ token }) => act(() => bridge.approvePlugin(token))}
       />
     </div>
   );
 }
 
-/** Ask the person to approve a plugin folder read for install or development. */
-export function Approval({
+/**
+ * What the approval dialog asks about: a plugin folder read for install or
+ * development, or a version in the server's library.
+ */
+export type ApprovalRequest = Pick<
+  PluginCandidate,
+  'manifest' | 'level' | 'development' | 'hash' | 'replaces'
+>;
+
+/**
+ * Ask the person to approve a plugin before it runs: its name, version,
+ * trust level, the most page access it may ask for and the hash approved,
+ * and for an update what it replaces, with any change of level or access.
+ */
+export function Approval<T extends ApprovalRequest>({
   candidate,
   onDone,
   onApprove,
 }: {
-  candidate: PluginCandidate | null;
+  candidate: T | null;
   onDone: () => void;
-  onApprove: (token: string) => Promise<void>;
+  onApprove: (candidate: T) => Promise<void>;
 }) {
   const level = candidate ? LEVELS[candidate.level] : null;
+  const verb = candidate?.replaces ? 'Update' : candidate?.development ? 'Load' : 'Install';
   return (
     <Dialog open={candidate !== null} onOpenChange={(open) => !open && onDone()}>
       {candidate && level && (
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {candidate.replaces ? 'Update' : candidate.development ? 'Load' : 'Install'}{' '}
-              {candidate.manifest.name} {candidate.manifest.version}?
+              {verb} {candidate.manifest.name} {candidate.manifest.version}?
             </DialogTitle>
             <DialogDescription>
               {candidate.manifest.description ?? candidate.manifest.id}
@@ -147,13 +187,7 @@ export function Approval({
               <Badge variant="secondary">{level.label}</Badge> {level.trust}
             </p>
             <p>It asks for {ACCESS[candidate.manifest.access]}.</p>
-            {candidate.replaces && (
-              <p>
-                It replaces version {candidate.replaces.version} (
-                {LEVELS[candidate.replaces.level].label}, asking for{' '}
-                {ACCESS[candidate.replaces.access]}).
-              </p>
-            )}
+            {candidate.replaces && <Replaces candidate={candidate} />}
             {candidate.development && (
               <p>
                 Development: its code is read from {candidate.development} again at each Reload,
@@ -171,9 +205,7 @@ export function Approval({
             <Button variant="outline" onClick={onDone}>
               Cancel
             </Button>
-            <Button onClick={() => void onApprove(candidate.token).then(onDone)}>
-              {candidate.development ? 'Load' : 'Install'}
-            </Button>
+            <Button onClick={() => void onApprove(candidate).then(onDone)}>{verb}</Button>
           </DialogFooter>
         </DialogContent>
       )}
@@ -181,18 +213,52 @@ export function Approval({
   );
 }
 
-function PluginRow({
+/** The version an update replaces, and whether its trust level or page access change. */
+function Replaces({ candidate }: { candidate: ApprovalRequest }) {
+  const { replaces } = candidate;
+  if (!replaces) return null;
+  const levelChanges = replaces.level !== candidate.level;
+  const accessChanges = replaces.access !== candidate.manifest.access;
+  return (
+    <p>
+      It replaces version {replaces.version}.{' '}
+      {levelChanges && (
+        <strong>
+          Its trust level changes from {LEVELS[replaces.level].label} to{' '}
+          {LEVELS[candidate.level].label}.{' '}
+        </strong>
+      )}
+      {accessChanges && (
+        <strong>
+          It asked for {ACCESS[replaces.access]}, and now asks for{' '}
+          {ACCESS[candidate.manifest.access]}.
+        </strong>
+      )}
+      {!levelChanges && !accessChanges && 'Its trust level and page access stay the same.'}
+    </p>
+  );
+}
+
+/**
+ * One plugin in Settings → Plugins: its name, version, trust level and
+ * on/off, its description and any problem, Remove beside `actions`, then
+ * its page access.
+ */
+export function PluginRow({
   status: { plugin, problem },
-  act,
-  onCandidate,
+  onEnabled,
+  onRemove,
+  actions,
+  note,
 }: {
   status: PluginStatus;
-  act: (run: () => Promise<unknown>) => Promise<void>;
-  onCandidate: (candidate: PluginCandidate) => void;
+  onEnabled: (on: boolean) => void;
+  onRemove: () => void;
+  actions?: ReactNode;
+  /** Shown under the description, such as an update waiting. */
+  note?: ReactNode;
 }) {
   const { manifest, level, development, enabled } = plugin;
-  const bridge = desktop;
-  if (!bridge) return null;
   return (
     <li className="grid gap-2 rounded-control border border-border p-3" aria-label={manifest.name}>
       <div className="flex flex-wrap items-center gap-2">
@@ -204,36 +270,24 @@ function PluginRow({
         <Switch
           checked={enabled}
           aria-label={`${manifest.name} enabled`}
-          onCheckedChange={(on) => void act(() => bridge.setPluginEnabled(manifest.id, on))}
+          onCheckedChange={onEnabled}
         />
       </div>
       {manifest.description && <p className="text-sm">{manifest.description}</p>}
       {development && <p className="text-sm text-muted-foreground">Read from {development}</p>}
+      {note}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {development && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              void act(async () => {
-                const asks = await bridge.reloadPlugin(manifest.id);
-                if (asks) onCandidate(asks);
-              })
-            }
-          >
-            Reload
-          </Button>
-        )}
+        {actions}
         <Button
           aria-label={`Remove ${manifest.name}`}
           size="sm"
           variant="outline"
-          onClick={() => void act(() => bridge.removePlugin(manifest.id))}
+          onClick={onRemove}
         >
           Remove
         </Button>
