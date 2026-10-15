@@ -1,0 +1,123 @@
+# The .deb and .rpm, built by nfpm from the folder scripts/linux-packages.sh
+# stages, which holds every `src` below. Electron comes with the app, since
+# these distributions have no system electron44 (docs/desktop.md).
+name: wikistow-desktop
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: web
+priority: optional
+maintainer: skint007 <37035851+skint007@users.noreply.github.com>
+description: Desktop app for your family's encrypted wiki
+homepage: https://github.com/skint007/wikistow
+license: MIT
+
+# What Electron links against, plus what it loads at run time: libsecret
+# for the keyring and xdg-open for signing in. desktop-file-utils and the
+# hicolor icon cache register the wikistow:// handler and the icons through
+# their own triggers. Check these with ldd when Electron's major changes.
+overrides:
+  deb:
+    # The t64 names first, so apt picks the real library: Ubuntu's OSS
+    # emulation also provides libasound2, without symbols Electron needs.
+    depends:
+      - libasound2t64 | libasound2
+      - libatk-bridge2.0-0t64 | libatk-bridge2.0-0
+      - libatk1.0-0t64 | libatk1.0-0
+      - libatspi2.0-0t64 | libatspi2.0-0
+      - libcairo2
+      - libcups2t64 | libcups2
+      - libdbus-1-3
+      - libexpat1
+      - libgbm1
+      - libglib2.0-0t64 | libglib2.0-0
+      - libgtk-3-0t64 | libgtk-3-0
+      - libnspr4
+      - libnss3
+      - libpango-1.0-0
+      - libsecret-1-0
+      - libudev1
+      - libx11-6
+      - libxcb1
+      - libxcomposite1
+      - libxdamage1
+      - libxext6
+      - libxfixes3
+      - libxkbcommon0
+      - libxrandr2
+      - xdg-utils
+      - desktop-file-utils
+      - hicolor-icon-theme
+  rpm:
+    depends:
+      - alsa-lib
+      - at-spi2-atk
+      - at-spi2-core
+      - atk
+      - cairo
+      - cups-libs
+      - dbus-libs
+      - expat
+      - glib2
+      - gtk3
+      - libX11
+      - libXcomposite
+      - libXdamage
+      - libXext
+      - libXfixes
+      - libXrandr
+      - libsecret
+      - libxcb
+      - libxkbcommon
+      - mesa-libgbm
+      - nspr
+      - nss
+      - pango
+      - systemd-libs
+      - xdg-utils
+      - desktop-file-utils
+      - hicolor-icon-theme
+suggests:
+  - gnome-keyring
+
+deb:
+  compression: xz
+rpm:
+  summary: Desktop app for your family's encrypted wiki
+  compression: zstd
+
+contents:
+  # Electron, named for the app, with the app as its resources/app.asar.
+  - src: lib/
+    dst: /usr/lib/wikistow-desktop
+    type: tree
+  # Chromium's sandbox helper must be setuid root wherever unprivileged
+  # user namespaces are off, as on Ubuntu 24.04 and later.
+  - src: chrome-sandbox
+    dst: /usr/lib/wikistow-desktop/chrome-sandbox
+    file_info:
+      mode: 04755
+  # How the app was installed, for the app to read (docs/desktop.md).
+  - src: install-source.deb
+    dst: /usr/lib/wikistow-desktop/install-source
+    packager: deb
+  - src: install-source.rpm
+    dst: /usr/lib/wikistow-desktop/install-source
+    packager: rpm
+  - src: wikistow-desktop
+    dst: /usr/bin/wikistow-desktop
+    file_info:
+      mode: 0755
+  - src: wikistow-desktop.desktop
+    dst: /usr/share/applications/wikistow-desktop.desktop
+  - src: wikistow-desktop.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/wikistow-desktop.svg
+  - src: wikistow-desktop.png
+    dst: /usr/share/icons/hicolor/512x512/apps/wikistow-desktop.png
+  - src: LICENSE
+    dst: /usr/share/doc/wikistow-desktop/copyright
+    packager: deb
+  - src: LICENSE
+    dst: /usr/share/licenses/wikistow-desktop/LICENSE
+    packager: rpm
