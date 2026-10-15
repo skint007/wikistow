@@ -454,7 +454,7 @@ Status: built (2026-10-11), tracked in #109. It merged as #113 (desktop sign-in 
 
 ### Milestone 5 Groups
 
-Add groups for sharing (#1). Status: designed 2026-10-15, not built.
+Add groups for sharing (#1). Status: designed and approved 2026-10-15, not built.
 
 A group is a named set of people in one space, and their agents, that a folder or the space is shared with as one. Sharing with a group shares with each member at the group's access, adding someone to the group gives them every folder the group has, and removing them takes it away. The encryption doesn't change: folder keys are still sealed to each person (see **Content keys and sharing**), and a group holds no keys of its own. The design keeps the Milestone 2 records and checks and adds the least beside them.
 
