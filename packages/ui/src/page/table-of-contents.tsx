@@ -63,7 +63,7 @@ export function TableOfContents({
         >
           <a
             href={`#${heading.id}`}
-            className="block rounded-row px-2 py-1 text-subtle-foreground hover:tint active:tint-strong hover:text-foreground"
+            className="block rounded-row px-2 py-1 text-subtle-foreground outline-offset-[-2px] hover:tint hover:text-foreground active:tint-strong"
           >
             {heading.text}
           </a>

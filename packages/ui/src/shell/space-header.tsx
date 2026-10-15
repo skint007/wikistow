@@ -130,7 +130,9 @@ function MemberCount({ spaceId }: { spaceId: SpaceId }) {
           </span>
         ))}
       </span>
-      {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      <span className="underline decoration-current/40 underline-offset-2">
+        {ids.length === 1 ? '1 person' : `${ids.length} people`}
+      </span>
     </Link>
   );
 }
