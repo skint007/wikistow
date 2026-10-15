@@ -29,7 +29,7 @@ A push to `main` or a release tag also runs two more jobs, which pull requests s
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
 
-Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
+Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
 
 ## Versions
 
@@ -101,6 +101,7 @@ The Electron is the one `apps/desktop/package.json` pins, which the desktop test
 
 - Before each release, raise `electron` to the newest patch of its major: `pnpm -C apps/desktop add -DE electron@<version>`. [Electron's releases](https://releases.electronjs.org) list them. `verify` fails until it is the newest.
 - When Electron ships a security fix, raise it and release, even with nothing else to ship.
+- Each Monday, `.github/workflows/electron-patch.yml` runs the same check as `verify`. When a newer patch is out, it opens the issue "Raise Electron to its newest patch", unless one is already open. Run it by hand with **Actions → Electron patch → Run workflow**.
 - Before Electron's major leaves support, move to a newer one. That changes the PKGBUILD's `electron44`, the launcher, and maybe the packages' dependencies.
 
 The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. On every push to `main` and every release, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
