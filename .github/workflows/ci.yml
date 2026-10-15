@@ -260,9 +260,14 @@ jobs:
           curl -fsSLo /tmp/nfpm.tar.gz "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
           echo "$NFPM_SHA256  /tmp/nfpm.tar.gz" | sha256sum -c
           tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
-      # The commit's time for the files', as the release archive has.
+      # The commit's time for the files', as the release archive has. The
+      # runner, not root, owns the checkout, which git refuses without this.
       - working-directory: apps/desktop
-        run: SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/linux-packages.sh "$(node ../../scripts/version.ts)" out/linux-packages
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          time=$(git log -1 --format=%ct)
+          version=$(node ../../scripts/version.ts)
+          SOURCE_DATE_EPOCH=$time scripts/linux-packages.sh "$version" out/linux-packages
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-packages
