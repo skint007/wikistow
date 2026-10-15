@@ -1,0 +1,50 @@
+# Each week, checks that apps/desktop/package.json pins its Electron major's
+# newest patch, as release.yml's verify job requires, and opens an issue when
+# it doesn't. The .deb and .rpm bundle this Electron, so a new patch, often a
+# security fix, reaches their users only with a release (docs/releasing.md).
+name: Electron patch
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same check as release.yml's verify. One open issue at a time,
+      # found by its title, so a later patch doesn't open another.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: Raise Electron to its newest patch
+        run: |
+          pinned=$(jq -r .devDependencies.electron apps/desktop/package.json)
+          newest=$(npm view "electron@${pinned%%.*}" version --json | jq -r 'if type == "array" then .[-1] else . end')
+          if [ "$pinned" = "$newest" ]; then
+            echo "Electron $pinned is its major's newest patch"
+            exit 0
+          fi
+          echo "::warning::apps/desktop/package.json pins Electron $pinned, but $newest is out"
+          open=$(gh issue list --state open --search "in:title \"$TITLE\"" --json title --jq '[.[] | select(.title == env.TITLE)] | length')
+          if [ "$open" != 0 ]; then
+            echo "An open issue already asks for it"
+            exit 0
+          fi
+          gh issue create --title "$TITLE" --body "$(cat <<EOF
+          \`apps/desktop/package.json\` pins Electron $pinned, but $newest is out. The .deb and .rpm bundle it, so their users get the new patch only with a WikiStow release.
+
+          Raise it with \`pnpm -C apps/desktop add -DE electron@$newest\`, check [its release notes](https://releases.electronjs.org/release/v$newest) for security fixes, and release if it has any ([releasing](https://github.com/$GH_REPO/blob/main/docs/releasing.md#the-deb-and-rpm)). A newer patch may be out by then: raise it to the newest.
+
+          Opened by the Electron patch workflow.
+          EOF
+          )"
