@@ -9,9 +9,13 @@
 set -eu
 version=$1
 out=$(mkdir -p "$2" && cd "$2" && pwd)
+# The packages are x86_64, and Electron downloads for the machine it's on.
+[ "$(uname -m)" = x86_64 ] || { echo "Build the packages on x86_64" >&2; exit 1; }
 
-# The electron package downloads its runtime on first use, checked against
-# the checksums it ships with.
+# The electron package downloads its runtime, checked against the checksums
+# it ships with. An extracted copy, which pnpm's cache may have restored,
+# isn't checked again, so start without one.
+rm -rf node_modules/electron/dist node_modules/electron/path.txt
 node node_modules/electron/install.js
 dist=node_modules/electron/dist
 

@@ -50,7 +50,7 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, and that the commit is on `main` or a `release/` branch.
    2. `ci` runs every CI job on the tagged commit. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
-   3. `linux-packages` builds the `.deb` and `.rpm` from the release's build.
+   3. `linux-packages` builds the `.deb` and `.rpm` from the release's build, and `linux-packages-check` installs them on each supported distribution ([below](#the-deb-and-rpm)).
    4. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads) and their `SHA256SUMS`.
    5. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` to the AUR ([below](#the-aur-package)).
 
@@ -97,7 +97,7 @@ The Electron is the one `apps/desktop/package.json` pins, which the desktop test
 - When Electron ships a security fix, raise it and release, even with nothing else to ship.
 - Before Electron's major leaves support, move to a newer one. That changes the PKGBUILD's `electron44`, the launcher, and maybe the packages' dependencies.
 
-The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. After a new major, check them on each supported distribution: install the package in a container, and `ldd /usr/lib/wikistow-desktop/wikistow-desktop` must find every library.
+The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. Before publishing, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
 
 To build them yourself, with nfpm on your `PATH`, after the build in the README:
 

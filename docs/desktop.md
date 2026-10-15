@@ -6,7 +6,7 @@ The desktop app is the same WikiStow you use in the browser, packaged for Linux 
 
 Each [GitHub Release](https://github.com/skint007/wikistow/releases) has the app as a `.deb`, an `.rpm`, and `wikistow-desktop-<version>.tar.gz`, the archive the Arch package installs ([releasing](releasing.md#the-desktop-downloads)). Once it's installed, start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
 
-The app never updates itself; your package manager does. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
+The app never updates itself. How you update it depends on the package, as below. Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
 
 ### Arch Linux
 

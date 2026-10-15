@@ -1,6 +1,7 @@
 // Pack the desktop app into one `out/app.asar`, as the system Electron runs
-// it: `electron44 /usr/lib/wikistow-desktop/app.asar`. Run after `vp pack`
-// here and `vp build` in apps/web:
+// it: `electron44 /usr/lib/wikistow-desktop/app.asar`. The .deb and .rpm
+// run it on their own Electron (scripts/linux-packages.sh). Run after
+// `vp pack` here and `vp build` in apps/web:
 //
 //   node scripts/asar.ts
 import { createPackage } from '@electron/asar';

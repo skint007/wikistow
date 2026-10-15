@@ -100,10 +100,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Each supported distribution installs the packages, and every library
+  # and symbol Electron links against must resolve. It doesn't start the app.
+  linux-packages-check:
+    needs: linux-packages
+    runs-on: ubuntu-24.04
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Tags, not digests, to check each distribution as its users have it.
+        image: ['debian:13', 'ubuntu:24.04', 'ubuntu:26.04', 'fedora:43', 'fedora:44']
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-packages
+          path: packages
+      - run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./packages/*.deb >/dev/null
+          else
+            dnf install -y -q ./packages/*.rpm
+          fi
+          cat /usr/lib/wikistow-desktop/install-source
+          for file in /usr/lib/wikistow-desktop/wikistow-desktop /usr/lib/wikistow-desktop/*.so*; do
+            ldd -r "$file" 2>&1
+          done | grep -E 'not found|undefined symbol' && exit 1
+          echo 'Every library and symbol resolves.'
+
   # The desktop app as CI built and tested it: the .deb, the .rpm, and an
   # archive of what the AUR package installs, with checksums.
   desktop:
-    needs: [verify, ci, linux-packages]
+    needs: [verify, ci, linux-packages, linux-packages-check]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
