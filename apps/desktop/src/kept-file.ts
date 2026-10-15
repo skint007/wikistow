@@ -1,11 +1,12 @@
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 
 /**
- * The search index kept between launches (#3). The pages seal it with a key
- * only their unlocked vault has (`sealKept`), so this side only ever holds
- * bytes it can't read. Writes and removals run one at a time, in order.
+ * A file the pages keep between launches (#3), such as the search index.
+ * They seal it with a key only their unlocked vault has (`sealOnDevice`), so
+ * this side only ever holds bytes it can't read. Writes and removals run one
+ * at a time, in order.
  */
-export function searchIndexFile(path: string) {
+export function keptFile(path: string) {
   const next = `${path}.next`;
   let queue: Promise<void> = Promise.resolve();
   const run = (step: () => Promise<void>) => {

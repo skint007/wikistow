@@ -1,7 +1,6 @@
 import {
   AccountId,
   MIN_PASSPHRASE,
-  openSession,
   prepareVault,
   registerVault,
   spaceOperations,
@@ -17,6 +16,7 @@ import { AuthCard, FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { api, meQuery } from '../../../api';
 import { vaultMessage } from '../../../vault/messages';
+import { startSession } from '../../../vault/open';
 import { confirmPassphrase } from '../../../vault/passphrase';
 import { vaultStore } from '../../../vault/store';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
@@ -164,7 +164,7 @@ function SaveRecoveryKey({ prepared }: { prepared: PreparedVault }) {
     setError(null);
     try {
       await registerVault(api, prepared);
-      const ctx = await openSession(api, prepared.vault);
+      const ctx = await startSession(prepared.vault);
       await spaceOperations.createSpace(ctx, { name: 'Personal', emoji: '🏠' });
       vaultStore.unlock(ctx, prepared.vault);
       await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });

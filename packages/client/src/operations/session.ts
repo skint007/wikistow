@@ -10,7 +10,9 @@ import {
 import { CryptoError } from '../errors.ts';
 import { FolderKeyring } from '../folder-keys.ts';
 import { keyHash, type PrivateIdentity, type PublicIdentity } from '../identity.ts';
+import { KeptMarks, type KeptFile } from '../kept-marks.ts';
 import { MemoryKeyVersionMarks, type KeyVersionMarks } from '../key-versions.ts';
+import { unseenRestore } from '../restore.ts';
 import { RevisionCache } from '../revision-cache.ts';
 import { TrustStore } from '../trust.ts';
 import type { UnlockedVault } from '../vault.ts';
@@ -37,8 +39,16 @@ export type ClientContext = {
   keyring: FolderKeyring;
   /** Opened revisions in memory only, dropped when access changes or the session locks. */
   revisions: RevisionCache;
-  /** The No going back marks: the browser keeps them for one session (section 6.8). */
+  /**
+   * The No going back marks (section 6.8): kept for one session, or between
+   * launches by the desktop app with a trusted keyring (`kept`).
+   */
   marks: KeyVersionMarks;
+  /**
+   * What this device keeps between sessions, if it keeps anything: `marks`
+   * and the contacts mark, which follows `contacts.book` (`openSession`).
+   */
+  kept?: KeptMarks;
   /** Each space as this session last worked it out (`spaceKeys`). */
   spaces: Map<SpaceId, Promise<SpaceKeys>>;
   /**
@@ -80,12 +90,28 @@ export class MemoryAgentPins implements AgentPins {
  * their contacts record and load the keys they have pinned. A record that
  * fails its checks stops the session, since nothing may be sealed or signed
  * until the person resolves it (section 8.5).
+ *
+ * With `kept`, the desktop app's file, the session starts from the contacts
+ * mark and No going back marks kept there and keeps them as they rise
+ * (`KeptMarks`). After a restore of the server those marks haven't seen,
+ * they are dropped first, so what the server serves now is the starting
+ * point (`unseenRestore`); the app tells the person itself. Without `kept`,
+ * as in the browser, each session starts with none.
  */
-export async function openSession(api: ApiClient, vault: UnlockedVault): Promise<ClientContext> {
-  const { installationId } = await api.call(systemRoutes.installation);
+export async function openSession(
+  api: ApiClient,
+  vault: UnlockedVault,
+  { kept: file }: { kept?: KeptFile } = {},
+): Promise<ClientContext> {
+  const { installationId, restore } = await api.call(systemRoutes.installation);
+  const kept = file && (await KeptMarks.open(file, { identity: vault.identity, installationId }));
+  const unseen = kept && unseenRestore(restore, kept.restoredAt);
+  if (unseen) kept.startOver(unseen.restoredAt);
   const trust = new TrustStore(installationId);
   trust.pinSelf(vault.identity);
-  const book = await readContacts({ api, installationId, identity: vault.identity }, null);
+  const owner = { api, installationId, identity: vault.identity };
+  const book = await readContacts(owner, kept?.contactsMark ?? null);
+  kept?.keepContactsMark(book.mark);
   trust.load(book.payloads);
   return {
     api,
@@ -95,7 +121,8 @@ export async function openSession(api: ApiClient, vault: UnlockedVault): Promise
     contacts: { book, pending: [] },
     keyring: new FolderKeyring(),
     revisions: new RevisionCache(),
-    marks: new MemoryKeyVersionMarks(),
+    marks: kept ?? new MemoryKeyVersionMarks(),
+    ...(kept && { kept }),
     spaces: new Map(),
   };
 }
@@ -175,10 +202,12 @@ export function agentContactsMark(ctx: ClientContext): ContactsMark | null {
 
 /**
  * End the session when the app locks: drop opened revisions, wipe every
- * folder key it opened, and forget what it worked out about each space.
+ * folder key it opened, forget what it worked out about each space, and
+ * stop writing kept marks.
  * The context can't be used after this; unlocking opens a new session.
  */
 export function closeSession(ctx: ClientContext): void {
+  ctx.kept?.close();
   ctx.revisions.close();
   ctx.keyring.wipe();
   ctx.spaces.clear();
@@ -282,6 +311,7 @@ async function writeQueued(
         all,
         confirmed ? { holds: confirmed } : {},
       );
+      ctx.kept?.keepContactsMark(ctx.contacts.book.mark);
       break;
     } catch (error) {
       const kept =
@@ -321,6 +351,7 @@ async function withoutConflictingPins(
   const dropped = changes.filter(conflicts);
   if (dropped.length === 0) return null;
   ctx.contacts.book = stored;
+  ctx.kept?.keepContactsMark(stored.mark);
   ctx.trust.reload(
     stored.payloads,
     dropped.flatMap((change) => (change.kind === 'pin' ? [change.pin.identity] : [])),
