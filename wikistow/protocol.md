@@ -1389,7 +1389,7 @@ These notes say what the next two PRs change. They add no rules; where they diff
 
 | # | Question or limitation | Current answer |
 |---|---|---|
-| Q1 | **Groups** aren't in this version. | A later milestone (#30). A group would be a set of people added to a share together; it needs no new key format. |
+| Q1 | **Groups** aren't in this version. | Designed in Milestone 5 (`wikistow.md`). A group is a set of people and agents added to shares together; it needs no new key format. |
 | Q2 | **Contacts rollback in the browser, and contacts forks between devices** (section 8.5). | Accepted. The desktop app and the CLI detect a rollback; the person can compare the version and hash each device shows. |
 | Q3 | **KDF floor.** Vault wrappers accept libsodium's minimum Argon2id cost (section 5.6). | Recommend refusing to *write* below INTERACTIVE. Needs a code change. |
 | Q4 | **Identity key rotation** isn't in Milestone 2 (section 4.6). | Later milestone, which also defines its statement format. Until then a person with a new key version is re-shared by owners after a key-change warning. |
