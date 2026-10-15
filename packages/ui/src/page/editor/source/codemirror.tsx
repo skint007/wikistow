@@ -176,9 +176,11 @@ function extensions({
  * Security Policy refuses. The range is the one the browser names (a
  * spellcheck fix names one word), else the selection.
  *
- * TODO(#56): the policy still refuses a few edits only the browser
- * makes: an IME composition started over a selection of several lines, and
- * deleting across lines on Android, which fires no key events to handle.
+ * Edits this can't take over are left to the browser. Android Chrome
+ * (126 and later) edits through EditContext, so it never touches the DOM.
+ * Without EditContext, joining lines can still have a `style` refused, but
+ * that style only copies the line's computed one, so the text comes out
+ * right (checked in #2).
  */
 const typingLines = EditorView.domEventHandlers({
   beforeinput(event, view) {
