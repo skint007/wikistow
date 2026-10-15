@@ -1,10 +1,10 @@
 import { PageId, RevisionId, sharingRoutes, SpaceId, structureRoutes } from '@wikistow/contracts';
 import { z } from 'zod';
 import { ApiError } from '../api/client.ts';
+import { openOnDevice, sealOnDevice } from '../device-seal.ts';
 import { canonical, decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { SearchIndex, searchText } from '../search.ts';
-import { sodium } from '../sodium.ts';
 import { shownVersions } from './pages.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import type { ClientContext } from './session.ts';
@@ -175,18 +175,16 @@ export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
 
 const KeptJson = z.array(z.tuple([RevisionId, SpaceId, PageId, z.string(), z.string()]));
 
-// The desktop app keeps the index between launches as these bytes (#3).
-// Their key comes from this person's identity, so only their unlocked vault
-// opens them, and the file can't be taken for another account or server's.
-// They are bound to the app's `build` too: another build may reduce pages
-// differently (`searchText`), so its file opens as nothing and every page
-// is read again.
-const keptKey = (ctx: ClientContext) =>
-  sodium.crypto_generichash(32, canonical('search-index-key/v1', []), ctx.identity.boxSecretKey);
+// The desktop app keeps the index between launches as these bytes (#3),
+// sealed for this person (`sealOnDevice`), so the file can't be taken for
+// another account or server's. They are bound to the app's `build` too:
+// another build may reduce pages differently (`searchText`), so its file
+// opens as nothing and every page is read again.
+const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
 
-/** `kept`, sealed for this person on this server and build: a nonce, then the ciphertext. */
+/** `kept`, sealed for this person on this server and build. */
 export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Uint8Array {
   const json = [...kept].map(([id, page]) => [
     id,
@@ -195,31 +193,14 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.title,
     page.text,
   ]);
-  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-  const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-    utf8(JSON.stringify(json)),
-    keptAd(ctx, build),
-    null,
-    nonce,
-    keptKey(ctx),
-  );
-  const sealed = new Uint8Array(nonce.length + ciphertext.length);
-  sealed.set(nonce);
-  sealed.set(ciphertext, nonce.length);
-  return sealed;
+  return sealOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), utf8(JSON.stringify(json)));
 }
 
 /** What `sealKept` sealed, or null if it isn't this person's on this server and build, or is damaged. */
 export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string): KeptPages | null {
-  const split = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+  const plaintext = openOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), sealed);
+  if (!plaintext) return null;
   try {
-    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-      null,
-      sealed.subarray(split),
-      keptAd(ctx, build),
-      sealed.subarray(0, split),
-      keptKey(ctx),
-    );
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
       json.map(([id, spaceId, pageId, title, text]) => [id, { spaceId, pageId, title, text }]),

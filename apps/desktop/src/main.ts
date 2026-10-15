@@ -29,9 +29,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
 import { cookieChange, forward } from './forward.ts';
+import { keptFile } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
-import { searchIndexFile } from './search-index.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
 import {
   checkServer,
@@ -130,7 +130,7 @@ const bundler = workshopBuilder(
 );
 const workshop = desktopWorkshop(app.getPath('userData'), bundler);
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
-const searchIndex = searchIndexFile(join(app.getPath('userData'), 'search-index'));
+const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
 
 /** End every workshop, as the page that held them goes, and the bundler with them. */
 async function endWorkshops() {
