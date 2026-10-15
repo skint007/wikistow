@@ -403,7 +403,7 @@ The internal extension points stay internal and may change freely; plugins see o
 | Page heads | Current draft and published revision IDs, publication linkage where applicable |
 | Key envelopes and wraps | Folder keys sealed per member and key version; content keys wrapped under a folder key, or sealed to owners outside shares |
 | Blobs | Opaque ID, encrypted bytes, size, version references, upload completion state |
-| Plugin library | Plugin ID and owner; each version's hash, manifest, size, uploader and time; its files in plain text, stored beside the blobs and backed up with them |
+| Plugin library | Plugin ID and owner; each version's hash, manifest, file paths, size, uploader and time; its files in plain text, stored beside the blobs and backed up with them |
 | Audit events | Actor, resource IDs, administrative and publication actions, timestamps; no plaintext names or bodies |
 
 Store attachment payloads outside PostgreSQL while retaining authorization and revision references in the database. Authorize every download, upload completion, and envelope fetch. Opaque URLs alone do not grant access. Back up the database and encrypted blob store consistently and test restoration.
