@@ -20,7 +20,14 @@ GitHub Actions checks every change and publishes the server image and the deskto
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
 
-After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves.
+A push to `main` or a release tag also runs two more jobs, which pull requests skip for time:
+
+| Job | What it does |
+| --- | --- |
+| `linux-packages` | Builds the `.deb` and `.rpm` from the build ([below](#the-deb-and-rpm)) |
+| `linux-packages-check` | Installs them on each supported distribution, and checks every library resolves |
+
+After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
 
 Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
 
@@ -33,14 +40,14 @@ node scripts/version.ts         # prints it, and fails if any disagree
 node scripts/version.ts 0.3.0   # sets it everywhere
 ```
 
-A release build shows the version alone in the account menu, as `0.2.0`. Any other build adds the commit it was built from, as `0.2.0+5b9e5ec4`, the same 8 characters as its image's `sha-` tag. The desktop app's `app.asar`, the CLI's `wikistow --version`, the image's `org.opencontainers.image.version` label and the AUR package all carry the same version.
+A release build shows the version alone in the account menu, as `0.2.0`. Any other build adds the commit it was built from, as `0.2.0+5b9e5ec4`, the same 8 characters as its image's `sha-` tag. The desktop app's `app.asar`, the CLI's `wikistow --version`, the image's `org.opencontainers.image.version` label and the desktop packages all carry the same version.
 
-Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-rc.1`, is a prerelease. Its GitHub Release is marked as one, its image gets only its own tag, and the AUR package doesn't take it.
+Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-rc.1`, is a prerelease. Its GitHub Release is marked as one, its image gets only its own tag, and the AUR package doesn't take it. Its `.deb` and `.rpm` carry `0.3.0~rc.1`, which apt and dnf sort before `0.3.0`.
 
 ## Cut a release
 
-1. Open a pull request that runs `node scripts/version.ts <version>` and commits the result. Merge it once CI passes.
-2. Tag the merged commit and push the tag:
+1. Open a pull request that runs `node scripts/version.ts <version>` and commits the result. If Electron has a newer patch of the major in `apps/desktop/package.json`, raise it in the same pull request ([below](#the-deb-and-rpm)). Merge it once CI passes.
+2. Wait for CI on the merged commit of `main`, which also builds and checks the desktop packages. Then tag that commit and push the tag:
 
    ```sh
    git tag -a v0.3.0 -m 'WikiStow 0.3.0' <commit>
@@ -48,18 +55,33 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
    ```
 
 3. `.github/workflows/release.yml` then runs on the tag:
-   1. `verify` checks that the tag names the version in the source, and that the commit is on `main` or a `release/` branch.
-   2. `ci` runs every CI job on the tagged commit. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
-   3. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds `wikistow-desktop-0.3.0.tar.gz` and `SHA256SUMS`.
+   1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, and that Electron is its major's newest patch.
+   2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
+   3. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads) and their `SHA256SUMS`.
    4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` to the AUR ([below](#the-aur-package)).
 
-If `verify` fails, nothing was published. Delete the tag, fix the cause, and tag again. If a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
+If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
 To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Its GitHub Release isn't marked as the latest, and the AUR package stays on the newest release. Only `main` builds get `sha-` images.
 
-## The desktop download
+## The desktop downloads
 
-`wikistow-desktop-<version>.tar.gz` holds what the Arch package installs, from the tested build:
+Each release has the desktop app, for x86_64, from the tested build:
+
+| File | For |
+| --- | --- |
+| `wikistow-desktop-<version>.tar.gz` | The AUR package, which runs it on Arch's `electron44` |
+| `wikistow-desktop-<version>-amd64.deb` | Debian 13, Ubuntu 24.04 and Ubuntu 26.04 |
+| `wikistow-desktop-<version>-x86_64.rpm` | Fedora 43 and 44 |
+| `SHA256SUMS` | The checksums of the three |
+
+Check a download before you use it:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+`wikistow-desktop-<version>.tar.gz` holds what the Arch package installs:
 
 | File | Installed as |
 | --- | --- |
@@ -69,13 +91,28 @@ To fix an older release while `main` has moved on, branch `release/<major>.<mino
 | `wikistow-desktop.svg`, `wikistow-desktop.png` | The app's icons |
 | `LICENSE` | `/usr/share/licenses/wikistow-desktop-bin/LICENSE` |
 
-The archive is built the same way every time, from the commit's files and time. Check a download before you use it:
+The archive is built the same way every time, from the commit's files and time.
+
+## The .deb and .rpm
+
+`apps/desktop/scripts/linux-packages.sh` builds both with [nfpm](https://nfpm.goreleaser.com), from `apps/desktop/packaging/nfpm.yaml`. They hold the same files as the archive, with Electron in `/usr/lib/wikistow-desktop`, renamed `wikistow-desktop`, and the app as its `resources/app.asar`. The launcher starts that Electron when it's there. Chromium's sandbox helper, `chrome-sandbox`, is setuid root. Each package also writes the [install source](desktop.md#how-it-was-installed), as the PKGBUILD does. Like the archive, both come out the same every time from the same commit.
+
+The Electron is the one `apps/desktop/package.json` pins, which the desktop tests run on. Arch's `electron44` gets security fixes from Arch, but this copy only changes when WikiStow releases. So:
+
+- Before each release, raise `electron` to the newest patch of its major: `pnpm -C apps/desktop add -DE electron@<version>`. [Electron's releases](https://releases.electronjs.org) list them. `verify` fails until it is the newest.
+- When Electron ships a security fix, raise it and release, even with nothing else to ship.
+- Before Electron's major leaves support, move to a newer one. That changes the PKGBUILD's `electron44`, the launcher, and maybe the packages' dependencies.
+
+The dependencies in `nfpm.yaml` are the libraries Electron links against, plus libsecret for the keyring and `xdg-utils` for signing in. On every push to `main` and every release, `linux-packages-check` installs each package in a container of every supported distribution, and fails if `ldd -r` can't resolve a library or symbol. It doesn't start the app. After a new Electron major, or to support a new distribution release, also start the app on each one and open a `wikistow://` link.
+
+To build them yourself, with nfpm on your `PATH`, after the build in the README. CI gives the files the commit's time:
 
 ```sh
-sha256sum -c SHA256SUMS
+cd apps/desktop
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/linux-packages.sh "$(node ../../scripts/version.ts)" out/packages
 ```
 
-Distribution packages install this archive, as the AUR package does.
+CI pins nfpm's version and checksum in `linux-packages`.
 
 ## The AUR package
 

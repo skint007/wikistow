@@ -29,6 +29,8 @@ sha256sums=('3a1ddcb1dd8c38997a83c7d013062cccb972405a546f737acd9c7846d7214560')
 package() {
     cd "wikistow-desktop-$_version"
     install -Dm644 app.asar "$pkgdir/usr/lib/wikistow-desktop/app.asar"
+    # How the app was installed, for the app to read (docs/desktop.md).
+    echo aur > "$pkgdir/usr/lib/wikistow-desktop/install-source"
     install -Dm755 wikistow-desktop "$pkgdir/usr/bin/wikistow-desktop"
     install -Dm644 wikistow-desktop.desktop "$pkgdir/usr/share/applications/wikistow-desktop.desktop"
     install -Dm644 wikistow-desktop.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/wikistow-desktop.svg"

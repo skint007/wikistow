@@ -234,6 +234,85 @@ jobs:
           path: apps/desktop/test-results
           retention-days: 7
 
+  # The .deb and .rpm: the tested app.asar on the Electron the desktop tests
+  # ran, packaged by nfpm. On a push only, to spare pull requests the time,
+  # so main shows a packaging break before a release tag does.
+  linux-packages:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    container: *node_image
+    env:
+      NFPM_VERSION: 2.47.0
+      NFPM_SHA256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
+    steps:
+      # git first, so the checkout has the commit's time.
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl git >/dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: apps
+      - run: |
+          curl -fsSLo /tmp/nfpm.tar.gz "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "$NFPM_SHA256  /tmp/nfpm.tar.gz" | sha256sum -c
+          tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+      # The commit's time for the files', as the release archive has. The
+      # runner, not root, owns the checkout, which git refuses without this.
+      - working-directory: apps/desktop
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          time=$(git log -1 --format=%ct)
+          version=$(node ../../scripts/version.ts)
+          SOURCE_DATE_EPOCH=$time scripts/linux-packages.sh "$version" out/linux-packages
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-packages
+          path: apps/desktop/out/linux-packages
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each supported distribution installs the packages, and every library
+  # and symbol Electron links against must resolve. It doesn't start the app.
+  linux-packages-check:
+    needs: linux-packages
+    runs-on: ubuntu-24.04
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pinned like the other images. apt and dnf still install each
+        # distribution's current packages.
+        image:
+          - debian:13@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+          - ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+          - ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+          - fedora:43@sha256:a651ddf48ea28a06ed4e1e6519f51c9f47e7a5a138722ade87369b8fbb7e5b42
+          - fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-packages
+          path: packages
+      - run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./packages/*.deb >/dev/null
+            source=deb
+          else
+            dnf install -y -q ./packages/*.rpm
+            source=rpm
+          fi
+          [ "$(cat /usr/lib/wikistow-desktop/install-source)" = "$source" ]
+          for file in /usr/lib/wikistow-desktop/wikistow-desktop /usr/lib/wikistow-desktop/*.so*; do
+            ldd -r "$file" 2>&1
+          done | grep -E 'not found|undefined symbol' && exit 1
+          echo 'Every library and symbol resolves.'
+
   # The one check branch protection needs. A job skipped because another
   # failed would count as passing, so this one runs regardless and looks.
   passed:
@@ -250,9 +329,11 @@ jobs:
 
   # The server image, from the tested build, on a push to main or a release
   # tag. A main push is tagged `sha-` and the commit's first 8 characters,
-  # which never moves; a release with its version (docs/releasing.md).
+  # which never moves; a release with its version (docs/releasing.md). It
+  # waits for the desktop packages too, so a release that can't ship them
+  # publishes nothing.
   image:
-    needs: passed
+    needs: [passed, linux-packages-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:

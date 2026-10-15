@@ -4,6 +4,10 @@ WikiStow is a self-hosted encrypted wiki for people and their agents. It has a b
 
 The clients encrypt page content before sending it to the server. Accounts, permissions, and some operational metadata remain on the server. The optional AI assistant sends the content a person chooses to their configured provider through the server. See the [protocol](wikistow/protocol.md) and [operations guide](docs/operations.md) for the details and limits.
 
+## Install the desktop app
+
+The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead. [docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
+
 ## Run locally
 
 Install Node.js 26 or newer, pnpm 10.34.5, and Docker Compose.
@@ -73,7 +77,7 @@ docker build -f docker/Dockerfile -t wikistow:local .
 
 The root Compose file runs development services only. For a server, configure the environment described in [.env.example](.env.example), provide Postgres and persistent attachment storage, and follow [docs/operations.md](docs/operations.md). Keep real environment files and deployment configuration outside this repository.
 
-- [Linux desktop app and Arch package](docs/desktop.md)
+- [Linux desktop app and its packages](docs/desktop.md)
 - [Images, backup, restore, and AI configuration](docs/operations.md)
 - [Versions and releases](docs/releasing.md)
 - [Restore verification against a test instance](deploy/test-instance/README.md)

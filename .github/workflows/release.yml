@@ -50,6 +50,15 @@ jobs:
           latest=false
           if grep -Eq '^ *origin/main$' <<< "$branches" && [[ "$GITHUB_REF_NAME" != *-* ]]; then latest=true; fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      # The .deb and .rpm bundle this Electron, so it must be its major's
+      # newest patch, with every security fix released so far.
+      - run: |
+          pinned=$(jq -r .devDependencies.electron apps/desktop/package.json)
+          newest=$(npm view "electron@${pinned%%.*}" version --json | jq -r 'if type == "array" then .[-1] else . end')
+          if [ "$pinned" != "$newest" ]; then
+            echo "::error::apps/desktop/package.json pins Electron $pinned, but $newest is out (docs/releasing.md)"
+            exit 1
+          fi
 
   ci:
     needs: verify
@@ -60,8 +69,8 @@ jobs:
       contents: read
       packages: write
 
-  # The desktop app as CI built and tested it, as an archive of what a
-  # package installs, with checksums.
+  # The desktop app as CI built, tested and packaged it: the .deb, the .rpm,
+  # and an archive of what the AUR package installs, with checksums.
   desktop:
     needs: [verify, ci]
     runs-on: ubuntu-24.04
@@ -76,6 +85,10 @@ jobs:
           name: build
           # The artifact's root is apps/, the folder its paths share.
           path: apps
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-packages
+          path: release
       # The same bytes from the same commit: fixed order, owners and times.
       - run: |
           version="${GITHUB_REF_NAME#v}"
@@ -88,7 +101,7 @@ jobs:
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
-          sha256sum "$name.tar.gz" > SHA256SUMS
+          sha256sum "$name.tar.gz" wikistow-desktop-*.deb wikistow-desktop-*.rpm > SHA256SUMS
           cat SHA256SUMS
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -101,7 +114,7 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
-            release/*.tar.gz release/SHA256SUMS
+            release/*.tar.gz release/*.deb release/*.rpm release/SHA256SUMS
 
   # The AUR package follows the newest stable release, once its archive is
   # downloadable. A prerelease or a fix to an older line leaves it alone.

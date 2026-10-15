@@ -17,7 +17,7 @@
     "@types/node": "^26.0.0",
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
-    "electron": "44.6.0",
+    "electron": "44.7.2",
     "esbuild-wasm": "0.28.2",
     "zod": "^4.6.5"
   },

@@ -1,11 +1,14 @@
 #!/bin/sh
-# Start WikiStow on the system Electron. Extra switches, one per line, can go
-# in ~/.config/wikistow-desktop-flags.conf, such as `--password-store=basic`
-# to keep nothing in the keyring (docs/desktop.md).
+# Start WikiStow: on the Electron the .deb or .rpm bundles beside the app, or
+# on Arch's system electron44. Extra switches, one per line, can go in
+# ~/.config/wikistow-desktop-flags.conf, such as `--password-store=basic` to
+# keep nothing in the keyring (docs/desktop.md).
 flags="${XDG_CONFIG_HOME:-$HOME/.config}/wikistow-desktop-flags.conf"
 if [ -r "$flags" ]; then
   # Word-split on purpose: one switch per line, no spaces inside a switch.
   # shellcheck disable=SC2046
   set -- $(grep -v '^[[:space:]]*#' "$flags") "$@"
 fi
-exec electron44 /usr/lib/wikistow-desktop/app.asar "$@"
+app=/usr/lib/wikistow-desktop
+if [ -x "$app/wikistow-desktop" ]; then exec "$app/wikistow-desktop" "$@"; fi
+exec electron44 "$app/app.asar" "$@"
