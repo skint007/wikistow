@@ -13,7 +13,7 @@ async function fresh() {
   const { dir } = await privateDir();
   const path = join(dir, 'state');
   const key = randomBytes(32);
-  return { path, key, state: LocalState.create(path, key, agentId) };
+  return { path, key, state: LocalState.create(path, key, agentId, null) };
 }
 
 describe('the local state', () => {
@@ -34,5 +34,21 @@ describe('the local state', () => {
     expect(after.get(space, other)).toBe(2);
     expect(after.contactsMark).toEqual({ version: 9, contactsHash: 'later' });
     expect(after.load()).toEqual([pin]);
+  });
+
+  it('forgets the marks from before a restore, even when a run from before it writes', async () => {
+    const { path, key, state: before } = await fresh();
+    const other = ShareId.parse('share-2');
+    before.raise(space, share, 4);
+    before.keepContactsMark({ version: 9, contactsHash: 'h' });
+    const restoredAt = '2026-10-15T09:30:00.000Z';
+    LocalState.open(path, key, agentId).startOver(restoredAt);
+    // A run that opened before the restore was seen: its marks don't come back.
+    before.raise(space, other, 3);
+    const after = LocalState.open(path, key, agentId);
+    expect(after.restoredAt).toBe(restoredAt);
+    expect(after.get(space, share)).toBe(0);
+    expect(after.get(space, other)).toBe(0);
+    expect(after.contactsMark).toBeNull();
   });
 });

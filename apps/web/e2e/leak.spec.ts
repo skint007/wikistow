@@ -42,8 +42,9 @@ async function browserStorage(page: Page) {
 }
 
 /**
- * The browser keeps the theme, the editor last picked, scroll positions and
- * session cookie, and none of `secrets`. While the vault is open, the tab
+ * The browser keeps the theme, the editor last picked, the server's last
+ * restore it has seen (none here), scroll positions and session cookie, and
+ * none of `secrets`. While the vault is open, the tab
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
  * wrapping key in IndexedDB that no script can read out. Locking forgets both.
  */
@@ -53,9 +54,11 @@ async function expectNothingStored(
   { open, editor }: { open: boolean; editor?: 'visual' },
 ) {
   const stored = await browserStorage(page);
+  const { installationId } = await (await page.request.get('/api/installation')).json();
   expect(stored.local).toEqual({
     'wikistow.theme': expect.any(String),
     ...(editor ? { 'wikistow.editor': editor } : {}),
+    [`wikistow.restore.${installationId}`]: '',
   });
   // The router's scroll positions, by visit, and the kept unlock.
   expect(Object.keys(stored.session).sort()).toEqual([
@@ -79,8 +82,8 @@ async function expectNothingStored(
  * them and a Markdown export live only in memory, apart from the vault key
  * the tab keeps sealed for a refresh. After a whole page flow, a search and
  * an export, the browser's storage holds the theme choice, the editor
- * picked, the router's scroll positions, the session cookie and that sealed
- * copy, and nothing typed.
+ * picked, the last restore seen, the router's scroll positions, the
+ * session cookie and that sealed copy, and nothing typed.
  */
 test('the browser stores no page content or key material', async ({ page, freshPage, admin }) => {
   const { recoveryKey } = await memberWithVault(page, await adminTab(freshPage, admin.email));

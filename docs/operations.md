@@ -129,13 +129,19 @@ Restoring over the server's existing database works when it was last migrated by
 
 ## What a restore undoes
 
-A restore puts everything back as it was at the backup, including changes made on purpose since. Sessions and agent credentials you revoked work again. Passwords people changed go back to the old ones. People removed from a share get back what they could read then. Deleted accounts return. Redo those changes afterward.
+A restore puts everything back as it was at the backup, including changes made on purpose since. Sessions and agent credentials you revoked work again. Passwords people changed go back to the old ones. People removed from a share get back what they could read then. Deleted accounts return, and agents enrolled since are gone. Redo those changes afterward.
 
-The CLI remembers the newest records it has seen, so it can catch a server that serves older ones. A restore of an older backup looks the same, so an agent may refuse with a rollback error afterward. A restore may need fresh enrollment of affected agents.
+The apps and the CLI remember the newest records they have seen, so they can catch a server that serves older ones. A restore of an older backup looks the same, so `restore.sh` records the restore, and when the backup was taken, and the server reports it in `/api/installation` as `restore`. A client that sees a restore it hasn't seen before takes what the server serves now as its new starting point instead of refusing, and says so:
+
+- The CLI prints "This server was restored from a backup taken on 2026-10-15 09:30 UTC. Changes made after that are gone." on standard error, once, and carries on. Agents enrolled before the backup was taken don't need to enroll again. One enrolled since is gone from the restored server: move its configuration directory (`~/.config/wikistow`) aside and enroll it again.
+- The browser and the desktop app show the same notice, in local time, to each device that used the server before the restore, until it's dismissed. A device meeting the server for the first time says nothing.
+- A browser tab left open through the restore may report a rollback error. Reloading it fixes that.
+
+The backup's time comes from its directory's name, `wikistow-<UTC time>`, as `backup.sh` names it. Keep that name when you copy a backup, or the notice can give only the day it was restored.
 
 ## Checking a restore
 
-- `https://<your host>/api/installation` shows the same `installationId` as before. Write yours down now so you can compare.
+- `https://<your host>/api/installation` shows the same `installationId` as before. Write yours down now so you can compare. Its `restore` shows when you restored, and when the backup was taken.
 - You can sign in with your password.
 - You can unlock your vault with your passphrase.
 - You can open a page with an attachment, and the attachment.
@@ -145,4 +151,4 @@ The CLI remembers the newest records it has seen, so it can catch a server that 
 
 Run it every few months, and after any change to how you deploy. Restore the latest backup into a scratch database and an empty blob directory on a test instance, never the live one. Start a server on them with the same `BETTER_AUTH_SECRET`, and do the checks above. The test instance holds real accounts and sessions, so keep it off the internet, point its `SMTP_URL` somewhere that sends nothing, and delete it when you're done.
 
-CI runs an automated drill on every change, in `apps/server/test/m4-restore.integration.test.ts`. It backs up a running installation and writes more. Then it restores onto another installation and starts the server on it. It checks that the installation ID is unchanged and that people sign in and decrypt their pages and attachments with their own keys. Last, it restores over the original installation and checks that nothing written after the backup came back. Beside it, `apps/server/test/restore-lock.integration.test.ts` starts the real server to check the lock: the script refuses while an idle server holds it, a server or migrations started mid-restore refuse to start, a restore stopped mid-restore cleans up and lets go, and one whose `pg_restore` fails leaves the database as it was. Locally both need `pg_dump`, `pg_restore` and `psql` 17 on your `PATH`, from `postgresql-client-17` on Debian and Ubuntu.
+CI runs an automated drill on every change, in `apps/server/test/m4-restore.integration.test.ts`. It backs up a running installation and writes more. Then it restores onto another installation and starts the server on it. It checks that the installation ID is unchanged, that the restore and the backup's time are reported, and that people sign in and decrypt their pages and attachments with their own keys. Last, it restores over the original installation and checks that nothing written after the backup came back. Beside it, `apps/server/test/restore-lock.integration.test.ts` starts the real server to check the lock: the script refuses while an idle server holds it, a server or migrations started mid-restore refuse to start, a restore stopped mid-restore cleans up and lets go, and one whose `pg_restore` fails leaves the database as it was. Locally both need `pg_dump`, `pg_restore` and `psql` 17 on your `PATH`, from `postgresql-client-17` on Debian and Ubuntu.

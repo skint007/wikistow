@@ -18,6 +18,7 @@ import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
 import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
+import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
@@ -140,6 +141,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
       <SafeModeBanner />
+      <RestoreNotice />
       {signOutFailed && (
         <p
           role="alert"

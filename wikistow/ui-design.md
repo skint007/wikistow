@@ -327,6 +327,10 @@ Desktop only, at `/workshop`, reached by **Build one with the assistant** in Set
 
 A Settings section after Two-factor sign-in, saying the vault locks after the chosen time with nobody using WikiStow, that typing is saved first, and that the choice stays on this browser (or computer, in the desktop app). Its one control is a **Lock after** Picker of Off (the default), 5 minutes, 15 minutes, 30 minutes and 1 hour. An idle lock leaves for the unlock page the way **Lock vault** does; Settings and admin pages stay where they are, locked.
 
+## Restore notice
+
+After an operator restores a backup, a device that used the server before shows "This server was restored from a backup taken on <date and time>. Changes made after that are gone." (or, when the backup's time is unknown, when it was restored) in a dialog titled **Restored from a backup** with an **OK** button, so it hides none of the notices in the bottom right corner (Waiting for you, the desktop's safe mode). It opens on any page behind sign-in, once per restore: closing it any way counts as seen. The last restore seen is kept per installation in `localStorage` (`shell/restore-notice.tsx`), in the browser and the desktop app alike; a device meeting the server first keeps it without a notice.
+
 ## Narrow screens
 
 Chosen 2026-10-02: **I, Drawer**, picked because it matches the desktop layout. Below about 900px:

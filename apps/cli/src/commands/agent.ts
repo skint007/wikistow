@@ -9,6 +9,7 @@ import {
   type ClientContext,
   type Fetch,
 } from '@wikistow/client';
+import { systemRoutes } from '@wikistow/contracts';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -185,6 +186,8 @@ export async function enroll(
     );
   }
   const api = createApiClient({ baseUrl: origin, fetch: deps.send });
+  // A restore from before this agent existed is nothing to tell it about.
+  const { restore } = await api.call(systemRoutes.installation);
   const pending = await agentEnrollment.requestEnrollment(api, () => io.now());
   const cancel = () => agentEnrollment.cancelEnrollment(api, pending).catch(() => {});
   out.note(`Lookup code: ${pending.requested.lookupCode}`);
@@ -251,7 +254,12 @@ export async function enroll(
   });
   // The token came once: keep it, opened by the passphrase, before anything else can fail.
   writePrivateFile(join(dir, KEY_FILE), keyFileBytes(file));
-  const state = LocalState.create(join(dir, STATE_FILE), stateKey, file.agentId);
+  const state = LocalState.create(
+    join(dir, STATE_FILE),
+    stateKey,
+    file.agentId,
+    restore?.restoredAt ?? null,
+  );
   state.keepContactsMark(agentContactsMark(ctx));
   if (secretTool !== null) {
     const { dataKey } = openKeyFile(file, { kind: 'passphrase', passphrase });

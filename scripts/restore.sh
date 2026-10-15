@@ -164,6 +164,26 @@ if [ "$answer" != held ]; then
   exit 1
 fi
 
+# Record the restore, which the server tells clients (GET /api/installation),
+# so they take what it serves now as their new starting point rather than
+# as a rollback. With the backup's time, from the name backup.sh gave its
+# directory, if it has it. The dump brought back the settings row as it was,
+# without these columns if older than them, so they're added as needed. See
+# packages/server/src/db/schema/settings.ts.
+taken=$(basename "$backup" | sed -n 's/^wikistow-\([0-9]\{8\}\)T\([0-9]\{6\}\)Z$/\1T\2Z/p')
+ask <<SQL
+\set taken '$taken'
+set client_min_messages = warning;
+alter table settings add column if not exists restored_at timestamptz,
+  add column if not exists backup_taken_at timestamptz;
+update settings set restored_at = now(), backup_taken_at = nullif(:'taken', '')::timestamptz;
+\! echo recorded
+SQL
+if [ "$answer" != recorded ]; then
+  echo "Could not record the restore; psql says why above." >&2
+  exit 1
+fi
+
 rm -rf "$BLOB_DIR/objects"
 mv "$incoming/objects" "$BLOB_DIR/objects"
 rmdir "$incoming"

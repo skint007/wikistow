@@ -1032,6 +1032,8 @@ A client accepts a contacts record only if:
 
 **Contacts marks.** A client keeps a mark `{version, contactsHash}` for its own record (for an agent, its human's record). A served record with a lower `version` is `contacts-rollback`. One with the same `version` and a different `contactsHash` is `contacts-fork`. One with a higher `version` must chain to the mark: the desktop app and the CLI fetch every version from the mark up (`GET /api/me/contacts?after=n`) and check each signature and `prevHash`. The desktop app and the CLI keep the mark in a local file; the browser keeps it in memory, for one session. Both errors are reported as possible server attacks. A server that keeps each device on its own branch goes undetected (A2). Each device's settings show the record's `version` and the first 8 characters of its `contactsHash`, so a person comparing two devices can notice.
 
+**After a restore.** An operator restoring an older backup rolls back every record, which these marks and the **No going back** marks (section 6.8) would refuse. `scripts/restore.sh` records the restore, and `GET /api/installation` reports it as `restore: {restoredAt, backupTakenAt}`, or null before any. A client that keeps marks keeps the `restoredAt` it last saw with them. When the server reports another, the client drops its contacts mark and its No going back marks, takes what the server serves now as its new starting point, and tells the person, with the backup's date when known (`unseenRestore`, `restoreNotice`). A client meeting the server for the first time keeps the `restoredAt` and says nothing. The report isn't checked: a server can claim a restore to roll records back, but not silently, since every device that used it says so (A2).
+
 **An invalid own record.** When the client's own record is `contacts-invalid`, the client refuses to seal or sign anything until the person resolves it. It MUST NOT write a version that drops pins, `removed`, `agents`, `revokedAgents` or `spaceOwners`. If the person starts a fresh record, the client seeds it from every list it can still read.
 
 ### 8.6 Writing and merging
@@ -1108,7 +1110,7 @@ An agent is a CLI installation, or a chat assistant its person's own app runs (s
 
 - **Its person.** It pins the person's `PublicIdentity` from step 3 only after the user typed yes, and after it verifies the stored `AgentEnrollment` under that key. **It opens folder key envelopes only when that person sealed them** (section 6.4).
 - **Its person's contacts record**, which is sealed to it (section 8.1). It verifies the record with the pinned key, checks record authors against its pins (section 8.4), and never seals anything.
-- **A local file** in the key-file directory (mode `600`), holding its contacts mark, its **No going back** marks (section 6.8) and its own first-seen pins (section 8.3).
+- **A local file** in the key-file directory (mode `600`), holding its contacts mark, its **No going back** marks (section 6.8), its own first-seen pins (section 8.3) and the last restore of the server it has seen (section 8.5, **After a restore**).
 
 `wikistow whoami` prints the agent's label name, `enrolledAt` and ID. That identifies the device only if the device is trustworthy (A8).
 
