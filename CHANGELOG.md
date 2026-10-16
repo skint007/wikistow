@@ -8,17 +8,19 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Upgrade notes
 
-- Apps from before this release show a folder’s emoji instead of its image. Update the app on each device to see and change folder images.
+- Apps from before this release show a folder’s or page’s emoji instead of its image, and list a page’s image among its attachments. Update the app on each device to see and change images.
 
 #### Features
 
 - A folder can show your own picture, logo or drawing instead of an emoji. In New folder or Emoji and colour…, open the emoji tile and choose Image. It’s resized and encrypted on your device.
+- A page can show an image instead of an emoji too. While editing, click the emoji badge (or Add emoji) and choose Image. It shows on the page and in the sidebar, and readers see it once you publish.
 
 ### Changes
 
 #### App
 
 - Folder images: the emoji picker (`EmojiPopover`) has an Image tab when given `image`. A folder's image is stored in its encrypted metadata as the `wikistow.icon` extension (`folderIconOf`, `folderIconChange`), resized in the browser to fit 144 px and at most 16 KB as WebP, or PNG or JPEG where the browser can't write WebP (`iconImage`). SVG is drawn as pixels and never stored. `createFolder` takes an optional `icon`. The sidebar shows the image through `IconImage`, which falls back to the emoji. No server change. ADR 0003. (#59)
+- Page images: `wikistow.cover` gains `icon: {attachmentId}`, one of the page's attachments resized like a folder image (`coverOf`, `reviseCover`). The cover editor uploads it from the picker's Image tab (`uploadIcon`), the badge and the sidebar's page rows show it, and the draft's attachment list leaves it out. `PageLabel` carries the icon's attachment and audience (`pageIconOf`). A copy into another space without the icon's attachment leaves the icon out (`coverLeftBehind`, replacing `bannerLeftBehind`). Decrypted attachment URLs are now kept until the vault locks rather than decrypted again after five minutes. No server change. ADR 0003 is built. (#61)
 
 ## 0.6.0 - 2026-10-16
 
