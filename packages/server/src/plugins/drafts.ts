@@ -320,11 +320,12 @@ export async function changePluginDraft(
     for (const { path, size } of rows) after.set(path, size);
     checkFiles([...after].map(([path, size]) => ({ path, size })));
 
-    if (remove.length > 0) {
+    const removed = remove.filter((path) => current.some((file) => file.path === path));
+    if (removed.length > 0) {
       await tx
         .delete(pluginDraftFiles)
         .where(
-          and(eq(pluginDraftFiles.draftId, draft.draftId), inArray(pluginDraftFiles.path, remove)),
+          and(eq(pluginDraftFiles.draftId, draft.draftId), inArray(pluginDraftFiles.path, removed)),
         );
     }
     if (put.length > 0) {
@@ -336,11 +337,14 @@ export async function changePluginDraft(
           set: { text: sql`excluded.text`, size: sql`excluded.size` },
         });
     }
-    const name = nameFrom(put.find(({ path }) => path === MANIFEST_FILE)?.text);
-    await tx
-      .update(pluginDrafts)
-      .set({ updatedAt: sql`now()`, ...(name === undefined ? {} : { name }) })
-      .where(eq(pluginDrafts.id, draft.draftId));
+    // Only a change to its files moves the draft up the list.
+    if (removed.length > 0 || put.length > 0) {
+      const name = nameFrom(put.find(({ path }) => path === MANIFEST_FILE)?.text);
+      await tx
+        .update(pluginDrafts)
+        .set({ updatedAt: sql`now()`, ...(name === undefined ? {} : { name }) })
+        .where(eq(pluginDrafts.id, draft.draftId));
+    }
     return summaryOf(tx, draft);
   });
 }
