@@ -20,7 +20,8 @@ export default function EmojiGrid({
 }: {
   current: string | null;
   onPick: (emoji: string) => void;
-  onRemove: () => void;
+  /** Offers Remove emoji while there is one. */
+  onRemove: (() => void) | undefined;
 }) {
   const [query, setQuery] = useState('');
   const groups = searchEmoji(GROUPS, query);
@@ -91,7 +92,7 @@ export default function EmojiGrid({
           <p className="py-4 text-center text-sm text-muted-foreground">No emoji match.</p>
         )}
       </div>
-      {current && (
+      {current && onRemove && (
         <Button variant="outline" size="sm" onClick={onRemove}>
           Remove emoji
         </Button>
