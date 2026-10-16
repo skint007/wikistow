@@ -1,4 +1,4 @@
-import { sharingOperations, type FolderId, type SpaceId } from '@wikistow/client';
+import { groupOperations, sharingOperations, type FolderId, type SpaceId } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Folder } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -7,26 +7,32 @@ import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
 import { runCommand } from '../commands/command';
 import { createShare } from '../commands/sharing-commands';
-import { refreshAccess } from '../data/queries';
+import { groupsQuery, refreshAccess } from '../data/queries';
 import { pageTitle } from '../shell/sidebar';
 import { PLAIN, useClient } from '../vault/store';
 import { useOwnerRequirements } from './owner-standing';
 import type { KeyOutcome } from './key-change';
 import { sharingMessage } from './messages';
-import { ACCESS_LABELS, grantOf, historyNotice } from './model';
+import { groupName, HISTORY_NOTICE, peopleIn } from './groups';
+import { ACCESS_LABELS, grantOf, historyNotice, type Access } from './model';
 import { nameOf } from './names';
-import type { Person } from './people';
+import { describePerson, type Person } from './people';
 import { PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { ErrorLine, useAction } from './use-action';
 
 type Preview = sharingOperations.SharePreview;
 
+/** Who the first share is with: a person, or one of the space's groups. */
+type Chosen =
+  | { kind: 'person'; found: Found }
+  | { kind: 'group'; group: groupOperations.Group; access: Access };
+
 /**
  * The first share of a folder or space (protocol sections 6.7 and 7.3):
- * find a person, look over everything that will be shared with them, then
- * share. Milestone 1 spaces take the same path. Once shared, the dialog
- * shows the access list.
+ * find a person or pick a group, look over everything that will be shared
+ * with them, then share. Milestone 1 spaces take the same path. Once
+ * shared, the dialog shows the access list.
  */
 export function FirstShare({
   spaceId,
@@ -39,12 +45,24 @@ export function FirstShare({
   ownerIds: ReadonlySet<string>;
   review: (person: Person) => Promise<KeyOutcome>;
 }) {
-  const [found, setFound] = useState<Found | null>(null);
-  if (!found) {
+  const ctx = useClient();
+  const { data: groups } = useQuery(groupsQuery(ctx, spaceId));
+  const [chosen, setChosen] = useState<Chosen | null>(null);
+  if (!chosen) {
     return (
       <PersonFinder
         submitLabel="Next"
         review={review}
+        groups={
+          groups?.groups
+            .filter((g) => g.name)
+            .map((g) => ({ groupId: g.groupId, name: groupName(g), people: peopleIn(g).length })) ??
+          []
+        }
+        onGroup={(groupId, access) => {
+          const group = groups?.groups.find((g) => g.groupId === groupId);
+          if (group) setChosen({ kind: 'group', group, access });
+        }}
         exclude={(person) =>
           ownerIds.has(person.id) ? (
             <>
@@ -52,24 +70,65 @@ export function FirstShare({
             </>
           ) : null
         }
-        onFound={setFound}
+        onFound={(found) => setChosen({ kind: 'person', found })}
       />
     );
   }
   return (
-    <ConfirmShare spaceId={spaceId} rootId={rootId} found={found} onBack={() => setFound(null)} />
+    <ConfirmShare
+      spaceId={spaceId}
+      rootId={rootId}
+      chosen={chosen}
+      onBack={() => setChosen(null)}
+    />
+  );
+}
+
+/**
+ * A group's people as the preview lists them, by label, each marked if
+ * they would wait for keys: their key changed and nobody confirmed it.
+ */
+function GroupPeople({ group }: { group: groupOperations.Group }) {
+  const ctx = useClient();
+  const members = peopleIn(group);
+  if (members.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No one is in it yet. Everyone you add to it later gets this folder.
+      </p>
+    );
+  }
+  return (
+    <ul className="grid gap-1 text-sm">
+      {members.map((member) => {
+        const who = describePerson(ctx, member.identity.id, member);
+        const waits = who.status === 'changed' || who.status === 'declined';
+        return (
+          <li key={who.id} className="flex flex-wrap justify-between gap-x-2">
+            <span className="truncate">
+              <Name>{who.name}</Name>
+            </span>
+            {waits && (
+              <span className="text-destructive">
+                Waits: their key changed and you haven’t confirmed it
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
 function ConfirmShare({
   spaceId,
   rootId,
-  found,
+  chosen,
   onBack,
 }: {
   spaceId: SpaceId;
   rootId: FolderId | null;
-  found: Found;
+  chosen: Chosen;
   onBack: () => void;
 }) {
   const ctx = useClient();
@@ -84,7 +143,9 @@ function ConfirmShare({
     staleTime: 0,
     gcTime: 0,
   });
-  const { person, access } = found;
+  const access = chosen.kind === 'person' ? chosen.found.access : chosen.access;
+  // Who gets it, as the preview's last line names them.
+  const whom = chosen.kind === 'person' ? chosen.found.person.name : groupName(chosen.group);
   const unreadable = preview.data ? unreadableIn(preview.data) : 0;
 
   const share = (shown: Preview) =>
@@ -93,7 +154,12 @@ function ConfirmShare({
       try {
         await runCommand(
           createShare,
-          { preview: shown, people: [{ person: person.entry, ...grantOf(access) }] },
+          chosen.kind === 'person'
+            ? {
+                preview: shown,
+                people: [{ person: chosen.found.person.entry, ...grantOf(access) }],
+              }
+            : { preview: shown, groups: [{ groupId: chosen.group.groupId, ...grantOf(access) }] },
           {
             satisfies,
             ctx,
@@ -108,22 +174,42 @@ function ConfirmShare({
 
   return (
     <div className="grid gap-4">
-      <p className="text-sm">
-        Share with{' '}
-        <strong>
-          <Name>{person.name}</Name>
-        </strong>
-        {person.email && (
-          <span className="text-muted-foreground">
-            {' '}
-            (<Name>{person.email}</Name>)
-          </span>
-        )}{' '}
-        as <strong>{ACCESS_LABELS[access]}</strong>. {person.status === 'new' && <NewMark />}
-      </p>
-      <p className="rounded-control bg-muted p-3 text-sm">
-        <Name>{person.name}</Name> {historyNotice(access)}
-      </p>
+      {chosen.kind === 'person' ? (
+        <>
+          <p className="text-sm">
+            Share with{' '}
+            <strong>
+              <Name>{chosen.found.person.name}</Name>
+            </strong>
+            {chosen.found.person.email && (
+              <span className="text-muted-foreground">
+                {' '}
+                (<Name>{chosen.found.person.email}</Name>)
+              </span>
+            )}{' '}
+            as <strong>{ACCESS_LABELS[access]}</strong>.{' '}
+            {chosen.found.person.status === 'new' && <NewMark />}
+          </p>
+          <p className="rounded-control bg-muted p-3 text-sm">
+            <Name>{chosen.found.person.name}</Name> {historyNotice(access)}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm">
+            Share with the group{' '}
+            <strong>
+              <Name>{groupName(chosen.group)}</Name>
+            </strong>{' '}
+            as <strong>{ACCESS_LABELS[access]}</strong>.
+          </p>
+          <section aria-label="Who gets it" className="grid gap-2">
+            <h3 className="text-sm font-bold text-subtle-foreground">Who gets it</h3>
+            <GroupPeople group={chosen.group} />
+          </section>
+          <p className="rounded-control bg-muted p-3 text-sm">{HISTORY_NOTICE}</p>
+        </>
+      )}
       <section aria-label="What will be shared" className="grid gap-2">
         <h3 className="text-sm font-bold text-subtle-foreground">What will be shared</h3>
         {preview.error && <ErrorLine error={sharingMessage(preview.error)} />}
@@ -140,8 +226,8 @@ function ConfirmShare({
           </p>
         )}
         <p className="text-xs text-muted-foreground">
-          Check this list: anything in it becomes readable to <Name>{person.name}</Name>. Owners of
-          the space always have access.
+          Check this list: anything in it becomes readable to <Name>{whom}</Name>. Owners of the
+          space always have access.
         </p>
       </section>
       {records !== null && (

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Avatar, initials } from '@/components/avatar';
 import { Name, plainText } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ChevronDown, Download, Share, ShieldAlert, Users } from 'lucide-react';
+import { ChevronDown, Download, Share, ShieldAlert, Users, UsersRound } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,8 +18,8 @@ import { useClient } from '../vault/store';
 
 /**
  * The sidebar's head: the space tile and name, and for owners, how many
- * people have access. Its menu exports the space, and for owners shares it
- * or shows its members.
+ * people have access. Its menu exports the space, and for owners shares it,
+ * shows its members, or its groups.
  * A new owner who hasn't confirmed who added them gets a way back to that
  * question instead (section 6.5). Someone who holds only folders of a
  * space sees no space name (section 7.7), just that the folders were
@@ -88,6 +88,11 @@ export function SpaceHeader({
                 onSelect={() => void navigate({ to: '/s/$spaceId/members', params: { spaceId } })}
               >
                 <Users strokeWidth={1.75} /> Members and owners
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => void navigate({ to: '/s/$spaceId/groups', params: { spaceId } })}
+              >
+                <UsersRound strokeWidth={1.75} /> Groups
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>

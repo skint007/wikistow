@@ -1,13 +1,16 @@
 import {
   agentOperations,
+  groupOperations,
   ownerOperations,
   sharingOperations,
   spaceKeys,
   type ClientContext,
+  type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import { Name } from '@/components/name';
 import { cn } from '@/lib/utils';
@@ -18,29 +21,34 @@ import { runCommand } from '../commands/command';
 import { requirementsHere } from '../commands/ui-commands';
 import { spacesQuery } from '../data/queries';
 import { PLAIN, useClient } from '../vault/store';
+import { GiveAccessDialog } from './give-access-dialog';
 import { nameOf } from './names';
 import { askAgain } from './owner-standing';
 
-type Work = 'confirm-owner' | 'finish-removal' | 'renew-keys' | 'rotate-for-agents';
+type Work = 'confirm-owner' | 'finish-removal' | 'renew-keys' | 'rotate-for-agents' | 'give-access';
 
 const WORK: Record<Work, string> = {
   'confirm-owner': 'confirm who made you an owner',
   'finish-removal': 'finish removing an owner',
   'renew-keys': 'renew the keys you were handed',
   'rotate-for-agents': 'give new keys to a folder an agent kept the keys of',
+  'give-access': 'people wait for their keys',
 };
 
 /**
  * What each owned space still waits on from this person (protocol sections
- * 6.5 and 7.6), worked out once per unlock: a co-owner to confirm, an
- * owner removal that didn't go through, or a transfer's key renewal. Also
- * how many spaces couldn't be checked.
+ * 6.5, 7.6 and 7.9), worked out once per unlock: a co-owner to confirm, an
+ * owner removal that didn't go through, a transfer's key renewal, or people
+ * waiting for keys, with who they are. Also how many spaces couldn't be
+ * checked.
  */
 const pendingOwnerWorkQuery = (ctx: ClientContext, queryClient: QueryClient) =>
   queryOptions({
     queryKey: [PLAIN, 'pending-owner-work'],
     queryFn: async () => {
       const spaces = await queryClient.fetchQuery(spacesQuery(ctx));
+      // The server's list of who waits, for every space this person owns.
+      const waiting = await groupOperations.loadWaiting(ctx).catch(() => null);
       const found = await Promise.all(
         spaces
           .filter((space) => space.role === 'owner')
@@ -61,7 +69,9 @@ const pendingOwnerWorkQuery = (ctx: ClientContext, queryClient: QueryClient) =>
               if (shares.some((share) => share.formerAgents.length > 0)) {
                 work.push('rotate-for-agents');
               }
-              return { spaceId: space.id, name: nameOf(space.metadata), work };
+              const waits = waiting?.filter((w) => w.spaceId === space.id) ?? [];
+              if (waits.length > 0) work.push('give-access');
+              return { spaceId: space.id, name: nameOf(space.metadata), work, waiting: waits };
             } catch {
               return null;
             }
@@ -71,7 +81,7 @@ const pendingOwnerWorkQuery = (ctx: ClientContext, queryClient: QueryClient) =>
         spaces: found.filter(
           (space): space is NonNullable<typeof space> => space !== null && space.work.length > 0,
         ),
-        unchecked: found.filter((space) => space === null).length,
+        unchecked: found.filter((space) => space === null).length + (waiting ? 0 : 1),
       };
     },
     staleTime: Infinity,
@@ -105,8 +115,9 @@ const agentWorkQuery = (ctx: ClientContext) =>
 
 /**
  * After unlocking, a note listing the spaces whose ownership work isn't
- * finished. It is read out politely, and on a narrow screen it folds to one
- * line, so it doesn't sit on the page.
+ * finished, with Give access where people wait for keys. It is read out
+ * politely, and on a narrow screen it folds to one line, so it doesn't sit
+ * on the page.
  */
 export function PendingOwnerWork() {
   const ctx = useClient();
@@ -116,6 +127,7 @@ export function PendingOwnerWork() {
   const { data: agents } = useQuery({ ...agentWorkQuery(ctx), enabled: data !== undefined });
   const [dismissed, setDismissed] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
+  const [giving, setGiving] = useState<SpaceId | null>(null);
   const spaces = data?.spaces ?? [];
   const unchecked = data?.unchecked ?? 0;
   const agentNote = agents?.failed
@@ -124,6 +136,7 @@ export function PendingOwnerWork() {
       ? 'The server lists access for your agents that your own record doesn’t. Check it on the Agents page.'
       : null;
   const shown = !dismissed && (spaces.length > 0 || unchecked > 0 || agentNote !== null);
+  const givingIn = spaces.find((space) => space.spaceId === giving);
   return (
     // Always there, so what appears in it is announced.
     <div aria-live="polite">
@@ -154,7 +167,7 @@ export function PendingOwnerWork() {
           <div className={cn('grid gap-1', !unfolded && 'max-[899px]:hidden')}>
             <ul className="grid gap-1">
               {spaces.map(({ spaceId, name, work }) => (
-                <li key={spaceId}>
+                <li key={spaceId} className="flex flex-wrap items-baseline gap-x-1">
                   <Link
                     to={work.includes('confirm-owner') ? '/s/$spaceId' : '/s/$spaceId/members'}
                     params={{ spaceId }}
@@ -164,7 +177,17 @@ export function PendingOwnerWork() {
                   >
                     <Name>{name ?? 'A space'}</Name>
                   </Link>
-                  : {work.map((w) => WORK[w]).join(', ')}.
+                  <span>: {work.map((w) => WORK[w]).join(', ')}.</span>
+                  {work.includes('give-access') && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="ml-auto"
+                      onClick={() => setGiving(spaceId)}
+                    >
+                      Give access
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -186,6 +209,16 @@ export function PendingOwnerWork() {
             )}
           </div>
         </aside>
+      )}
+      {/* Kept outside the note, so dismissing it doesn't end the dialog. */}
+      {giving && (
+        <GiveAccessDialog
+          spaceId={giving}
+          spaceName={givingIn?.name ?? 'This space'}
+          waiting={givingIn?.waiting ?? []}
+          open
+          onClose={() => setGiving(null)}
+        />
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import {
   type Lookup,
   type PublicIdentity,
 } from '@wikistow/client';
+import { GroupId } from '@wikistow/contracts';
 import { z } from 'zod';
 import type { Command, CommandEnv } from './command';
 
@@ -28,6 +29,7 @@ const made = <T>() => z.custom<T>((value) => typeof value === 'object' && value 
 
 const Person = made<Lookup>();
 const Role = z.enum(['reader', 'editor']);
+const Grant = { role: Role, canPublish: z.boolean() };
 const ShareRef = z.object({ spaceId: SpaceId, shareId: ShareId });
 
 const command = <Input extends z.ZodType>(
@@ -39,18 +41,25 @@ const command = <Input extends z.ZodType>(
 
 const owner = ['unlocked-vault', 'space-owner'] as const;
 
-/** Make a folder, or the space, a share, once the owner has looked over the preview. */
+/**
+ * Make a folder, or the space, a share, once the owner has looked over the
+ * preview: with people, groups of the space, or both.
+ */
 export const createShare = command(
   'share.create',
-  z.object({
-    preview: made<sharingOperations.SharePreview>(),
-    people: z.array(z.object({ person: Person, role: Role, canPublish: z.boolean() })).min(1),
-  }),
+  z
+    .object({
+      preview: made<sharingOperations.SharePreview>(),
+      people: z.array(z.object({ person: Person, ...Grant })).default([]),
+      groups: z.array(z.object({ groupId: GroupId, ...Grant })).default([]),
+    })
+    .refine(({ people, groups }) => people.length + groups.length > 0, 'Nobody to share with'),
   owner,
-  async ({ preview, people }, { ctx, onProgress }) => {
+  async ({ preview, people, groups }, { ctx, onProgress }) => {
     await sharingOperations.shareFolder(ctx, {
       preview,
       people,
+      groups,
       ...(onProgress ? { onProgress } : {}),
     });
   },
@@ -59,7 +68,7 @@ export const createShare = command(
 /** Add someone to a share, make a reader an editor, or share again after a key change. */
 export const addMember = command(
   'share.add-member',
-  ShareRef.extend({ person: Person, role: Role, canPublish: z.boolean() }),
+  ShareRef.extend({ person: Person, ...Grant }),
   owner,
   async (input, { ctx }) => sharingOperations.addMember(ctx, input),
 );
@@ -82,12 +91,42 @@ export const rotateShare = command(
   },
 );
 
-/** Remove someone from every share and group in the space, in one request. */
-export const removeEverywhere = command(
-  'share.remove-everywhere',
+/**
+ * Send a change to who has access that the owner confirmed (protocol
+ * sections 7.8 and 7.9): a group's members or shares, deleting a group,
+ * dropping a direct grant, removing someone from every folder in the space,
+ * or Give access. Its envelopes and rotations go in one request.
+ */
+export const changeAccess = command(
+  'group.change',
   z.object({ change: made<groupOperations.GroupChange>() }),
   owner,
   async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
+);
+
+/** Make a group in a space, its name sealed to the owners. */
+export const createGroup = command(
+  'group.create',
+  z.object({ spaceId: SpaceId, name: z.string().trim().min(1).max(200) }),
+  owner,
+  async (input, { ctx }) => {
+    await groupOperations.createGroup(ctx, input);
+  },
+);
+
+/** Rename a group, as a new version of the name the owner was shown. */
+export const renameGroup = command(
+  'group.rename',
+  z.object({
+    spaceId: SpaceId,
+    groupId: GroupId,
+    current: made<groupOperations.Group['name'] & {}>(),
+    name: z.string().trim().min(1).max(200),
+  }),
+  owner,
+  async (input, { ctx }) => {
+    await groupOperations.renameGroup(ctx, input);
+  },
 );
 
 /** Accept a person's changed key after the warning (protocol section 8.4). */

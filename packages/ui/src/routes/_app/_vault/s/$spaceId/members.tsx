@@ -6,8 +6,8 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { Crown, Share, UserPlus } from 'lucide-react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { Crown, Share, UserPlus, UsersRound } from 'lucide-react';
 import { useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -20,8 +20,15 @@ import {
 } from '@/components/ui/dialog';
 import { AgentName } from '../../../../../agents/agent-name';
 import { runCommand } from '../../../../../commands/command';
-import { removeEverywhere } from '../../../../../commands/sharing-commands';
-import { refreshAccess, sharesQuery, spaceKeysQuery, treeQuery } from '../../../../../data/queries';
+import { changeAccess } from '../../../../../commands/sharing-commands';
+import {
+  groupsQuery,
+  refreshAccess,
+  sharesQuery,
+  spaceKeysQuery,
+  treeQuery,
+} from '../../../../../data/queries';
+import { groupName } from '../../../../../sharing/groups';
 import { PersonRow } from '../../../../../sharing/access-panel';
 import { useKeyReview } from '../../../../../sharing/key-change';
 import { sharingMessage } from '../../../../../sharing/messages';
@@ -56,6 +63,7 @@ function Members() {
   const owner = standing === 'owner';
   const keys = useQuery({ ...spaceKeysQuery(ctx, spaceId), enabled: owner });
   const shares = useQuery({ ...sharesQuery(ctx, spaceId), enabled: owner });
+  const groups = useQuery({ ...groupsQuery(ctx, spaceId), enabled: owner });
   const owners = keys.data?.listed.map((o) => o.identity.id) ?? [];
   const memberIds = shares.data?.flatMap((s) => s.members.map((m) => m.identityId)) ?? [];
   const agentPeople =
@@ -81,6 +89,18 @@ function Members() {
             <Name>{nameOf(tree?.space?.metadata) ?? 'This space'}</Name>: who owns it, and who each
             shared folder is shared with.
           </p>
+          {owner && (
+            <p className="text-sm">
+              <Link
+                to="/s/$spaceId/groups"
+                params={{ spaceId }}
+                className="inline-flex items-center gap-1.5 font-bold text-primary-ink hover:underline"
+              >
+                <UsersRound className="size-4" strokeWidth={1.75} /> Groups
+              </Link>
+              <span className="text-muted-foreground">: people you share folders with as one.</span>
+            </p>
+          )}
         </header>
         {tree && standing === null && (
           <p className="text-sm text-muted-foreground">
@@ -180,6 +200,22 @@ function Members() {
                     </Button>
                   </div>
                   <ul className="grid gap-0.5 text-sm">
+                    {groups.data?.groups.flatMap((group) => {
+                      const held = group.shares.find((s) => s.shareId === share.shareId);
+                      return held
+                        ? [
+                            <li key={group.groupId} className="flex justify-between gap-2">
+                              <span className="truncate">
+                                <Name>{groupName(group)}</Name>{' '}
+                                <span className="text-muted-foreground">(group)</span>
+                              </span>
+                              <span className="text-muted-foreground">
+                                {ACCESS_LABELS[accessOf(held)]}
+                              </span>
+                            </li>,
+                          ]
+                        : [];
+                    })}
                     {share.members.map((member) => (
                       <li key={member.identityId} className="flex justify-between gap-2">
                         <span className="truncate">
@@ -321,11 +357,13 @@ function RemoveEverywhereDialog({
                 title="Who keeps access"
                 confirmLabel="Remove everywhere"
                 none={<NotInAnyShare name={name} />}
+                // Someone only in groups, holding no keys, still leaves them.
+                confirmNone
                 make={() => groupOperations.planRemovalEverywhere(ctx, { spaceId, identityId })}
                 plansOf={({ rotations }) =>
                   rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
                 }
-                apply={(change) => runCommand(removeEverywhere, { change }, { satisfies, ctx })}
+                apply={(change) => runCommand(changeAccess, { change }, { satisfies, ctx })}
                 ownerIds={ownerIds}
                 review={review}
                 onCancel={onClose}

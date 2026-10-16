@@ -1,5 +1,6 @@
 import {
   agentOperations,
+  groupOperations,
   ownerOperations,
   pageOperations,
   publicationOperations,
@@ -90,6 +91,17 @@ export const sharesQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({
     queryKey: [PLAIN, 'shares', spaceId],
     queryFn: () => sharingOperations.listShares(ctx, spaceId),
+  });
+
+/**
+ * A space's groups, with their decrypted names, members and shares, the
+ * direct grants and who waits for keys there, for its owners. Every group
+ * change is planned afresh from the server, so this is for showing only.
+ */
+export const groupsQuery = (ctx: ClientContext, spaceId: SpaceId) =>
+  queryOptions({
+    queryKey: [PLAIN, 'groups', spaceId],
+    queryFn: () => groupOperations.loadGroups(ctx, spaceId),
   });
 
 /** The space as this app sees it: the owners it accepts, and what the server lists. */
@@ -194,6 +206,7 @@ export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext
     [
       'revision',
       'shares',
+      'groups',
       'space-keys',
       'shared-with-me',
       'owner-to-confirm',
