@@ -56,10 +56,9 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
 
   const host: ScriptHost = {
     api: PLUGIN_API,
-    // A worker of the app's origin runs its file from the plugin's own folder,
-    // /plugins/<id>/…; one in the browser's sandboxed frame starts from a
-    // `data:` address and has the ID as its name (ADR 0002).
-    pluginId: /^\/plugins\/([^/]+)\//.exec(location.pathname)?.[1] ?? self.name,
+    // The sandboxed frame starts each script from a `data:` address, named
+    // with its plugin's ID (ADR 0002).
+    pluginId: self.name,
     signal: new AbortController().signal,
     pages: {
       read: (page) => call<PageVersion>('pages.read', [page]),

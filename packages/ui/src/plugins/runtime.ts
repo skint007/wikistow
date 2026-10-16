@@ -34,7 +34,7 @@ import { desktopSource } from './desktop-source';
 import { librarySource } from './library';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
 import { inFrame } from './script-frame';
-import { inWorker, ScriptWorker } from './script-worker';
+import { ScriptWorker } from './script-worker';
 
 /** The page a command runs on or a panel shows, as the page view knows it. */
 export type ShownPage = {
@@ -176,23 +176,6 @@ const isAppPlugin = (value: unknown): value is AppPlugin =>
   'activate' in value &&
   typeof value.activate === 'function';
 
-/**
- * Empty the origin's IndexedDB and Cache Storage. Scripts' workers share
- * the app's origin and can keep data there, and the desktop app itself
- * keeps nothing there (a browser tab's kept unlock, `tab-unlock.ts`, isn't
- * used in it), so whatever is there is a plugin's: page text it cached
- * mustn't outlive the vault's lock. If the desktop app ever stores
- * anything there, scripts need an origin of their own first (ADR 0001).
- */
-async function clearScriptStorage() {
-  try {
-    for (const { name } of await indexedDB.databases()) if (name) indexedDB.deleteDatabase(name);
-    for (const key of await caches.keys()) await caches.delete(key);
-  } catch {
-    // Storage the browser won't list, as in a private window, holds nothing.
-  }
-}
-
 const fire = <E extends keyof PluginEvents>(set: Handlers[E], payload: PluginEvents[E]) =>
   Promise.all([...set].map(async (handler) => handler(payload)));
 
@@ -219,11 +202,6 @@ export type RuntimeSource = {
   handle(caller: Caller, shown: ShownPage): PageHandle;
   /** Turn a plugin off, from where its view failed. */
   disable(pluginId: string): Promise<void>;
-  /**
-   * It empties the origin's script storage as it starts. Only the app's own
-   * runtime does: scripts of every runtime share that storage.
-   */
-  ownsStorage: boolean;
 };
 
 /**
@@ -511,9 +489,7 @@ export function createRuntime(source: RuntimeSource) {
     };
     if (manifest.script) {
       const script = fileUrl(plugin, manifest.script);
-      // The desktop app runs scripts on its own origin until they move to the frame too (ADR 0002).
-      const launch = desktop ? inWorker(script) : inFrame(script, manifest.id);
-      active.worker = new ScriptWorker(launch, host.pages, {
+      active.worker = new ScriptWorker(inFrame(script, manifest.id), host.pages, {
         commands: (commands) => {
           active.scriptCommands = commands;
           if (live()) emit();
@@ -654,16 +630,11 @@ export function createRuntime(source: RuntimeSource) {
         epoch += 1;
         for (const entry of loaded.values()) deactivate(entry);
         emit();
-        if (now.status !== 'unlocked') {
-          access = {};
-          if (source.ownsStorage) void clearScriptStorage();
-        }
+        if (now.status !== 'unlocked') access = {};
         // Listed again: the browser's plugins come and go with the account.
         void refresh();
       });
-      // Left by a run that ended without locking, as when the app quits.
-      if (source.ownsStorage) void clearScriptStorage().then(refresh);
-      else void refresh();
+      void refresh();
     },
     /** Unload everything, for good: a workshop's preview, as the workshop ends. */
     stop() {

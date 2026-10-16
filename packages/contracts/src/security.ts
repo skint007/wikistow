@@ -1,8 +1,8 @@
 /**
  * The Content Security Policy, sent unchanged with every response by the
- * server and by the desktop app's `app://` protocol, except that the server
- * sends the plugin host page with its own (`securityHeadersFor`). It is
- * static so built files stay cacheable.
+ * server and by the desktop app's `app://` protocol, except that both send
+ * the plugin host page with its own (`securityHeadersFor`). It is static so
+ * built files stay cacheable.
  *
  * One recorded exception: `'wasm-unsafe-eval'` lets libsodium compile its
  * WebAssembly. It does not permit JavaScript `eval` or `new Function`.

@@ -26,7 +26,7 @@ The manifest (`src/manifest.ts` has the schema):
 | `access` | `none`, `read` or `write`: the most page access the person may give it. |
 | `blocks` | Fenced block types it claims, written `plugin:<id>/<block>` (#260). |
 
-Its trust level comes from what it holds: **theme** (styles only), **script** (`script`, in a worker with no network or DOM; in the desktop app the browser storage it can use, IndexedDB and Cache Storage, is shared with other scripts and emptied when the vault locks, and in the browser the worker runs inside a sandboxed frame with an opaque origin and has none of the app's storage) or **app** (`ui`, in the app's page with the app's own trust).
+Its trust level comes from what it holds: **theme** (styles only), **script** (`script`, in a worker with no network or DOM, inside a sandboxed frame with an opaque origin, so it has none of the app's storage) or **app** (`ui`, in the app's page with the app's own trust).
 
 ## The host
 
@@ -42,7 +42,7 @@ Both entries get a `Host` (`src/host.ts`); app code gets an `AppHost`, which add
 
 A view is `(element, props) => cleanup`: draw into the element the host gives. `reactView(Component)` from `@wikistow/plugin-sdk/react` mounts a React root with the plugin's own React; style with the app's CSS variables (`var(--primary)` and the rest in `packages/ui/src/styles/theme.css`). Errors are `PluginError` with a `code` (`not-granted`, `conflict`, `timeout`, …); `instanceof PluginError` works on errors from the app's copy of the SDK too.
 
-A script's command or event handler gets 10 seconds, as does its `defineScript` activation, and a block's calculation 1 second (one calculation runs at a time); past that its worker is ended and started again, and three failures in five minutes stop it until it is turned back on or the vault is unlocked again. In the desktop app its file is served with `Content-Security-Policy: default-src 'none'`, so `fetch`, `import()` and workers fail inside it. In the browser it starts from a `data:` address and inherits the sandbox frame's policy, which allows no requests either (only `data:` workers), and `host.pluginId` comes from the worker's name, so build with this SDK or newer.
+A script's command or event handler gets 10 seconds, as does its `defineScript` activation, and a block's calculation 1 second (one calculation runs at a time); past that its worker is ended and started again, and three failures in five minutes stop it until it is turned back on or the vault is unlocked again. It starts from a `data:` address and inherits the sandbox frame's policy, which allows no requests (only `data:` workers), so `fetch`, `import()` and `importScripts` fail inside it. `host.pluginId` comes from the worker's name, so build with this SDK or newer: a script built before the frame reads it empty.
 
 ## Themes
 

@@ -69,6 +69,5 @@ export function desktopSource(bridge: DesktopBridge): Omit<RuntimeSource, 'pages
       if (inRecord(pluginId)) await pluginOperations.setPluginEnabled(openCtx(), pluginId, false);
       else await bridge.setPluginEnabled(pluginId, false);
     },
-    ownsStorage: true,
   };
 }
