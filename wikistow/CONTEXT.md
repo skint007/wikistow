@@ -130,7 +130,7 @@ The plugins members uploaded to their server. Each is **Shared**, listed to ever
 _Avoid_: Store, marketplace (nothing is sold or rated).
 
 **Plugin draft**
-A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. Publishing one uploads a version to the **plugin library**.
+A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person.
 _Avoid_: Draft on its own (pages have drafts), workspace, project.
 
 **Theme plugin**, **script plugin**, **app plugin**
@@ -154,7 +154,7 @@ A fenced code block in a page that names a plugin, which shows and edits it wher
 _Avoid_: Page script; pages never carry code.
 
 **Workshop**
-Where a person builds a plugin with the assistant, in a computer's browser or the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples end with it; the draft stays.
+Where a person builds a plugin with the assistant, in the browser, on a phone or in the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples end with it; the draft stays.
 _Avoid_: Sandbox (the preview isn't one for app code), staging.
 
 **Safe mode**

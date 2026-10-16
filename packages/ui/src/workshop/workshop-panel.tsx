@@ -6,6 +6,7 @@ import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatStore, useChatStore } from '../ai/chat';
+import { useWide } from '../ai/chat-column';
 import { toolActivity, toolResults } from '../ai/chat-model';
 import { Working } from '../ai/working';
 import { useClient } from '../vault/store';
@@ -47,7 +48,10 @@ export function WorkshopConversation({
   const subscribe = useCallback((listener: () => void) => session.subscribe(listener), [session]);
   const ai = useSyncExternalStore(subscribe, session.state);
   const turns = useSyncExternalStore(chat.subscribe, chat.turns);
+  const { copy } = useSyncExternalStore(chat.workshop.subscribe, chat.workshop.state);
   const onWorkshop = useLocation({ select: (location) => location.pathname === '/workshop' });
+  // Below the column's width the conversation is a sheet over the preview: this closes it.
+  const sheet = !useWide();
   const end = useRef<HTMLDivElement>(null);
   // Braces: Chromium's scrollIntoView now answers a promise, which isn't a cleanup.
   useEffect(() => {
@@ -66,8 +70,12 @@ export function WorkshopConversation({
           {provider.model} at {provider.host}
         </span>
         <span className="ml-auto flex gap-3">
-          {!onWorkshop && (
-            <Link to="/workshop" className="font-bold text-primary hover:underline">
+          {(!onWorkshop || sheet) && (
+            <Link
+              to="/workshop"
+              onClick={() => sheet && chatStore.setOpen(false)}
+              className="font-bold text-primary hover:underline"
+            >
               Open the preview
             </Link>
           )}
@@ -81,6 +89,13 @@ export function WorkshopConversation({
         </span>
       </div>
       <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-4 py-3">
+        {copy && (
+          <p role="note" className="rounded-control border p-3 text-sm">
+            This draft is a copy of <strong>{copy.from}</strong>, with a new ID of your own,{' '}
+            <strong>{copy.id}</strong>. It publishes as a different plugin: pages’ blocks and data
+            of {copy.from} aren’t its own.
+          </p>
+        )}
         {ai.messages.length === 0 && <WorkshopDisclosure host={provider.host} />}
         {ai.messages.map((message, index) => {
           if (message.role === 'user') {

@@ -1,4 +1,5 @@
 import { pluginDraftRoutes } from '@wikistow/contracts';
+import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import type { z } from 'zod';
@@ -18,6 +19,7 @@ import { ago } from '../agents/model';
 import { chatStore } from '../ai/chat';
 import { api } from '../api';
 import { errorMessage } from '../errors';
+import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
 import { WorkshopChat } from './workshop-chat';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
@@ -41,21 +43,23 @@ export function openWorkshop(draftId: string) {
  * Make a draft and open the workshop on it. With 10 drafts already, the
  * person is asked first whether to delete the one changed longest ago,
  * named, which the server deletes with the new one made (`replaces`).
- * `start` settles once the workshop opens, or the person cancels; `dialog`
- * goes in the page.
+ * `start` answers true once the workshop opens, false if the person
+ * cancels or it fails (`error`); `dialog` goes in the page.
  */
 export function useNewDraft(): {
-  start: (from: DraftStart) => Promise<void>;
+  start: (from: DraftStart) => Promise<boolean>;
   /** A draft is being made, or the person asked: don't start another. */
   busy: boolean;
   error: string | null;
+  /** Forget `error`, as the page does its own after another action. */
+  clear: () => void;
   dialog: ReactNode;
 } {
   const queryClient = useQueryClient();
   const [asking, setAsking] = useState<{
     from: DraftStart;
     oldest: DraftSummary;
-    done: () => void;
+    done: (opened: boolean) => void;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +70,10 @@ export function useNewDraft(): {
         body: replaces ? { ...from, replaces } : from,
       });
       openWorkshop(draft.id);
+      return true;
     } catch (failure) {
       setError(errorMessage(failure));
+      return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
     }
@@ -81,16 +87,17 @@ export function useNewDraft(): {
       const drafts = await queryClient.fetchQuery({ ...draftsQuery, staleTime: 0 });
       const oldest = drafts.length >= pluginDraftRoutes.MAX_DRAFTS ? drafts.at(-1) : undefined;
       if (!oldest) return await create(from);
-      return await new Promise<void>((done) => setAsking({ from, oldest, done }));
+      return await new Promise<boolean>((done) => setAsking({ from, oldest, done }));
     } catch (failure) {
       setError(errorMessage(failure));
+      return false;
     } finally {
       setMaking(false);
     }
   };
 
-  const close = () => {
-    asking?.done();
+  const close = (opened = false) => {
+    asking?.done(opened);
     setAsking(null);
   };
 
@@ -105,7 +112,7 @@ export function useNewDraft(): {
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={close}>
+          <Button variant="outline" disabled={busy} onClick={() => close()}>
             Cancel
           </Button>
           <Button
@@ -114,9 +121,9 @@ export function useNewDraft(): {
             onClick={() => {
               if (!asking) return;
               setBusy(true);
-              void create(asking.from, asking.oldest.id).finally(() => {
+              void create(asking.from, asking.oldest.id).then((opened) => {
                 setBusy(false);
-                close();
+                close(opened);
               });
             }}
           >
@@ -127,7 +134,52 @@ export function useNewDraft(): {
     </Dialog>
   );
 
-  return { start, busy: making || busy, error, dialog };
+  return { start, busy: making || busy, error, clear: () => setError(null), dialog };
+}
+
+const { draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
+  pluginDraftRoutes;
+
+/**
+ * A plugin project's files, as a new draft's (ADR 0004): its
+ * `wikistow-plugin.json` and every file under `src/` and `public/`, chosen
+ * by path before anything is read, leaving out the rest (`package.json`,
+ * `node_modules`, `dist`, dotfiles). A file the draft can't hold, or the
+ * limits, refuse the whole folder, naming the file.
+ */
+async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[]> {
+  const files = chosen
+    .map((file) => ({ file, path: pathInFolder(file) }))
+    .filter(
+      ({ path }) =>
+        (path === MANIFEST_FILE || path.startsWith('src/') || path.startsWith('public/')) &&
+        !path.split('/').some((name) => name.startsWith('.')),
+    );
+  if (!files.some(({ path }) => path === MANIFEST_FILE))
+    throw new Error(`Choose a plugin project’s folder, with ${MANIFEST_FILE} at the top.`);
+  if (files.length > MAX_DRAFT_FILES)
+    throw new Error(`A draft holds ${MAX_DRAFT_FILES} files at most.`);
+  for (const { file, path } of files) {
+    const problem = draftPathProblem(path);
+    if (problem) throw new Error(problem);
+    if (file.size > MAX_DRAFT_FILE_BYTES)
+      throw new Error(`${path} is too large: a draft file holds 256 KB at most.`);
+  }
+  if (files.reduce((total, { file }) => total + file.size, 0) > MAX_DRAFT_BYTES)
+    throw new Error('A draft holds 4 MB at most.');
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  return Promise.all(
+    files.map(async ({ file, path }) => {
+      let text: string;
+      try {
+        text = decoder.decode(await file.arrayBuffer());
+      } catch {
+        throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+      }
+      if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+      return { path, text };
+    }),
+  );
 }
 
 /** When a draft's files last changed, as the list says it. */
@@ -138,7 +190,7 @@ function changed(iso: string) {
 
 /**
  * The person's drafts, with how long ago each changed, **Open** and
- * **Delete**, beside **New plugin**. The draft the workshop has open says
+ * **Delete**, beside **Upload project folder…** and **New plugin**. The draft the workshop has open says
  * so, and can't be deleted while it is.
  */
 export function DraftsList({ open }: { open: string | null }) {
@@ -148,8 +200,13 @@ export function DraftsList({ open }: { open: string | null }) {
   const [deleting, setDeleting] = useState<DraftSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const remove = async (draft: DraftSummary) => {
+  /** Forget what last went wrong, as another action starts. */
+  const fresh = () => {
     setError(null);
+    newDraft.clear();
+  };
+  const remove = async (draft: DraftSummary) => {
+    fresh();
     try {
       await api.call(pluginDraftRoutes.deleteDraft, { params: { draftId: draft.id } });
     } catch (failure) {
@@ -162,7 +219,27 @@ export function DraftsList({ open }: { open: string | null }) {
     <section aria-label="Plugin drafts" className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="flex-1 text-sm font-bold">Your plugin drafts</h2>
-        <Button size="sm" disabled={newDraft.busy} onClick={() => void newDraft.start({})}>
+        <ChooseFolder
+          label="Upload project folder…"
+          name="Project folder"
+          phone="Uploading a project folder needs a computer."
+          onFolder={async (chosen) => {
+            fresh();
+            try {
+              await newDraft.start({ files: await readProject(chosen) });
+            } catch (failure) {
+              setError(errorMessage(failure));
+            }
+          }}
+        />
+        <Button
+          size="sm"
+          disabled={newDraft.busy}
+          onClick={() => {
+            fresh();
+            void newDraft.start({});
+          }}
+        >
           New plugin
         </Button>
       </div>
@@ -192,7 +269,14 @@ export function DraftsList({ open }: { open: string | null }) {
                 <Badge>Open</Badge>
               ) : (
                 <>
-                  <Button size="sm" variant="outline" onClick={() => openWorkshop(draft.id)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      fresh();
+                      openWorkshop(draft.id);
+                    }}
+                  >
                     Open
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setDeleting(draft)}>

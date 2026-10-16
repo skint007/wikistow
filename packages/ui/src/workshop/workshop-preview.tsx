@@ -1,19 +1,24 @@
 import { PageId, SpaceId } from '@wikistow/client';
-import type { WorkshopVersion } from '@wikistow/contracts';
+import { ApiError } from '@wikistow/client/api';
+import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
 import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
+import { errorMessage } from '../errors';
 import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
+import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
+import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { PageViews, pluginName } from '../plugins/regions';
-import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
+import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PluginView } from '../plugins/views';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
@@ -91,6 +96,8 @@ function Status({ workshop }: { workshop: Workshop }) {
     workshop.subscribe,
     workshop.state,
   );
+  // Here, so how a publish went still shows once another version is in the preview.
+  const [published, setPublished] = useState<Notice | null>(null);
   const latest = versions.at(-1);
   const newest = versions.findLast((version) => version.plugin !== null);
   const plugin = running?.plugin;
@@ -113,6 +120,7 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
+            <Publish workshop={workshop} version={running} onNotice={setPublished} />
           </>
         ) : (
           <span className="text-muted-foreground">
@@ -125,6 +133,14 @@ function Status({ workshop }: { workshop: Workshop }) {
         )}
         {building && <span className="text-muted-foreground">Building…</span>}
       </div>
+      {published && (
+        <p
+          role={published.failed ? 'alert' : 'status'}
+          className={cn('text-sm', published.failed && 'text-destructive')}
+        >
+          {published.text}
+        </p>
+      )}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
@@ -144,6 +160,75 @@ function Status({ workshop }: { workshop: Workshop }) {
         </Alert>
       )}
     </div>
+  );
+}
+
+type Notice = { text: string; failed: boolean };
+
+/**
+ * Publish the version in the preview to the library (ADR 0004): the upload
+ * confirmation, with Shared or Only me, then the upload, after any preview
+ * upload under way, which installs it for the person on all their devices.
+ * `onNotice` says how it went, or null as another publish starts.
+ */
+function Publish({
+  workshop,
+  version,
+  onNotice,
+}: {
+  workshop: Workshop;
+  version: WorkshopVersion;
+  onNotice: (notice: Notice | null) => void;
+}) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const [upload, setUpload] = useState<PluginUpload | null>(null);
+  const shown = version.plugin?.manifest;
+  if (!shown) return null;
+  const publish = async (
+    chosen: PluginUpload,
+    visibility: pluginRoutes.PluginVisibility | undefined,
+  ) => {
+    const { manifest } = chosen;
+    onNotice(null);
+    try {
+      await workshop.oneLargeUpload(() => uploadAndInstall(ctx, chosen, visibility));
+      onNotice({
+        text: `Published ${manifest.name} ${manifest.version} and installed it on all your devices.`,
+        failed: false,
+      });
+    } catch (failure) {
+      onNotice({
+        // The app's words for a refusal hide this one, which the person can fix.
+        text:
+          failure instanceof ApiError && failure.code === 'forbidden'
+            ? `Another account owns the plugin ID ${manifest.id}. Ask the assistant to give it another ID, then publish again.`
+            : errorMessage(failure),
+        failed: true,
+      });
+    }
+    await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
+    await pluginRuntime.refresh();
+  };
+  return (
+    <>
+      <Button
+        size="sm"
+        onClick={() => {
+          onNotice(null);
+          setUpload({ ...workshop.versionFiles(version.version), manifest: shown });
+        }}
+      >
+        Publish…
+      </Button>
+      <ConfirmUpload
+        ctx={ctx}
+        upload={upload}
+        verb="Publish"
+        onDone={() => setUpload(null)}
+        onUpload={publish}
+      />
+    </>
   );
 }
 
