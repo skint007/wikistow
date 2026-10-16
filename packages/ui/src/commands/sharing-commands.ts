@@ -1,4 +1,5 @@
 import {
+  groupOperations,
   IdentityId,
   ownerOperations,
   saveContacts,
@@ -81,12 +82,12 @@ export const rotateShare = command(
   },
 );
 
-/** Remove someone from every share in the space, one rotation per share. */
+/** Remove someone from every share and group in the space, in one request. */
 export const removeEverywhere = command(
   'share.remove-everywhere',
-  z.object({ plans: z.array(made<sharingOperations.PlannedRotation>()) }),
+  z.object({ change: made<groupOperations.GroupChange>() }),
   owner,
-  async ({ plans }, { ctx }) => sharingOperations.applyRemovalEverywhere(ctx, plans),
+  async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
 );
 
 /** Accept a person's changed key after the warning (protocol section 8.4). */

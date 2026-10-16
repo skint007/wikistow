@@ -1,6 +1,7 @@
 import {
   newId,
   newPayload,
+  groupOperations,
   ownerOperations as owners,
   pageOperations as pages,
   RevisionId,
@@ -260,12 +261,12 @@ describe('removing a member', () => {
       people: [await invite(alice, bob, 'editor')],
     });
     expect((await sharing.sharedWithMe(bob.ctx)).length).toBe(2);
-    const plans = await sharing.planRemovalEverywhere(alice.ctx, {
+    const change = await groupOperations.planRemovalEverywhere(alice.ctx, {
       spaceId: lib.spaceId,
       identityId: bob.vault.identity.public.id,
     });
-    expect(plans.length).toBe(2);
-    await sharing.applyRemovalEverywhere(alice.ctx, plans);
+    expect(change.rotations.length).toBe(2);
+    await groupOperations.applyGroupChange(alice.ctx, change);
     expect(await sharing.sharedWithMe(bob.ctx)).toEqual([]);
     expect((await sharing.listShares(alice.ctx, lib.spaceId)).map((s) => s.members)).toEqual([
       [],

@@ -1,5 +1,5 @@
 import {
-  sharingOperations,
+  groupOperations,
   type FolderId,
   type IdentityId,
   type ShareId,
@@ -279,7 +279,10 @@ function Members() {
   );
 }
 
-/** "Remove from every folder in this space": one rotation per share they're in. */
+/**
+ * "Remove from every folder in this space": one request, with a rotation of
+ * each share they hold keys in, that also takes them out of its groups.
+ */
 function RemoveEverywhereDialog({
   spaceId,
   identityId,
@@ -318,11 +321,11 @@ function RemoveEverywhereDialog({
                 title="Who keeps access"
                 confirmLabel="Remove everywhere"
                 none={<NotInAnyShare name={name} />}
-                make={() => sharingOperations.planRemovalEverywhere(ctx, { spaceId, identityId })}
-                plansOf={(plans) =>
-                  plans.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
+                make={() => groupOperations.planRemovalEverywhere(ctx, { spaceId, identityId })}
+                plansOf={({ rotations }) =>
+                  rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
                 }
-                apply={(plans) => runCommand(removeEverywhere, { plans }, { satisfies, ctx })}
+                apply={(change) => runCommand(removeEverywhere, { change }, { satisfies, ctx })}
                 ownerIds={ownerIds}
                 review={review}
                 onCancel={onClose}
