@@ -510,7 +510,9 @@ function RemoveFromLibrary({
  * is uploaded: the approval dialog for its version, as an update of the
  * one installed if there is one, with the choice of Shared or Only me.
  * Uploading installs it for the person, so confirming does both:
- * `onUpload` runs `uploadAndInstall` and says how it went.
+ * `onUpload` runs `uploadAndInstall` and says how it went. `visibility` is
+ * left out unless it changes, so a server from before ADR 0004, which
+ * refuses the field, still takes the upload.
  */
 export function ConfirmUpload({
   ctx,
@@ -521,7 +523,7 @@ export function ConfirmUpload({
   ctx: ClientContext;
   upload: PluginUpload | null;
   onDone: () => void;
-  onUpload: (upload: PluginUpload, visibility: Visibility) => Promise<void>;
+  onUpload: (upload: PluginUpload, visibility: Visibility | undefined) => Promise<void>;
 }) {
   const { data: library } = useQuery(libraryQuery(ctx));
   const { data: onlyMe } = useQuery(privatePluginsQuery);
@@ -530,12 +532,9 @@ export function ConfirmUpload({
     null,
   );
   const id = upload?.manifest.id;
-  const visibility =
-    choice && choice.upload === upload
-      ? choice.visibility
-      : id && onlyMe?.has(id)
-        ? 'private'
-        : 'shared';
+  // Null until the server says, so what is shown is then always sent.
+  const current = onlyMe && (id && onlyMe.has(id) ? 'private' : 'shared');
+  const visibility = choice && choice.upload === upload ? choice.visibility : (current ?? 'shared');
   const approved = pluginOperations.listPluginApprovals(ctx).find((each) => each.id === id);
   const installed = library
     ?.find((plugin) => plugin.id === id)
@@ -554,7 +553,7 @@ export function ConfirmUpload({
       candidate={candidate}
       verb="Upload"
       onDone={onDone}
-      onApprove={(chosen) => onUpload(chosen, visibility)}
+      onApprove={(chosen) => onUpload(chosen, visibility === current ? undefined : visibility)}
     >
       <Picker
         label="Who sees it"

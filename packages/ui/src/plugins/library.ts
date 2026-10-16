@@ -73,8 +73,9 @@ export async function readUpload(files: readonly PluginUploadFile[]): Promise<Pl
 }
 
 /**
- * Upload `upload` to the library as a version of its ID, Shared or Only
- * me, then install it for the person (ADR 0004): approve its hash, or for
+ * Upload `upload` to the library as a version of its ID, as `visibility`
+ * if given (a new ID is otherwise Shared, an existing one stays as it is),
+ * then install it for the person (ADR 0004): approve its hash, or for
  * an ID they installed, approve it in place of the older hash, keeping
  * page access and on or off. Nothing is approved unless the server
  * answers the hash computed here, which the person was shown.
@@ -82,10 +83,13 @@ export async function readUpload(files: readonly PluginUploadFile[]): Promise<Pl
 export async function uploadAndInstall(
   ctx: ClientContext,
   { files, manifest, hash }: PluginUpload,
-  visibility: pluginRoutes.PluginVisibility,
+  visibility?: pluginRoutes.PluginVisibility,
 ) {
   const { version } = await api.call(pluginRoutes.uploadPlugin, {
-    body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })), visibility },
+    body: {
+      files: files.map(({ path, data }) => ({ path, data: toBase64(data) })),
+      ...(visibility && { visibility }),
+    },
   });
   if (version.hash !== hash)
     throw new Error('The server answered with different files, so the plugin wasn’t installed.');
