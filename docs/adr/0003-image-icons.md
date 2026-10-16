@@ -31,7 +31,7 @@ In short: a folder's image is stored inside the folder's own encrypted metadata,
 
   Its key is the metadata's key, so it reaches exactly the people who can read the folder's name, readers included, with nothing new. Key rotation needs nothing: like the name, the next save is wrapped under the new key version, and removed people keep what they could already read (section 7.5). Moves and new co-owners need nothing beyond the rewrap they already do. Shared with me can show it. No server change.
 
-  The cost is size. Each folder's current metadata comes with every tree load, so a folder with an image adds its bytes there (about 1.8 times the image, since the image is base64 inside JSON that is encrypted and sent as base64 again): 2 to 12 KB for the icons measured below, up to about 57 KB at the 32 KB cap. Every metadata version keeps its own copy (a rename or colour change copies the image), and metadata versions are never compacted. Folders change rarely, so this stays small.
+  The cost is size. Each folder's current metadata comes with every tree load, so a folder with an image adds its bytes there (about 1.8 times the image, since the image is base64 inside JSON that is encrypted and sent as base64 again): 2 to 12 KB for the icons measured below, up to about 29 KB at the 16 KB cap. The tree is fetched again whenever the window regains focus and after most changes, and the server doesn't compress responses, so 30 folders with images cost a few hundred KB per fetch. Every metadata version also keeps its own copy (a rename or colour change copies the image), and metadata versions are never compacted; folders change rarely, so that part stays small.
 
 - **B. A folder-owned encrypted blob.** The image is a blob, and the metadata extension holds its key and hash. The tree stays small and the cap could be larger. But the server needs: blobs that can belong to a folder, an upload route for one, metadata versions that list blobs (a `metadata_revision_blobs` table) so the sweep keeps them, a download rule that lets readers of the folder fetch it, and a migration. The protocol's rule that key material lives only in `attachments[].key` (section 5.5) gains an exception. It is one more request per folder per session too.
 
@@ -64,15 +64,15 @@ Removing a folder's image writes `wikistow.icon: null`, since `reviseMetadata` m
 **Recommendation.**
 
 - **Accepted files:** PNG, JPEG, WebP, GIF and SVG, up to 25 MB and 50 megapixels, the banner's limits. An animated GIF keeps one frame.
-- **Resized in the browser** to fit within 144 by 144 px, its shape kept and never enlarged. That is twice the 72 px page badge, the largest place an icon shows. Every place shows it filling its square tile (`object-cover`), so a wide image shows its middle; the full image is kept, so the display can change later without uploading again.
+- **Resized in the browser** to fit within 144 by 144 px, its shape kept. A raster image is never enlarged; an SVG is always drawn to fit 144 px, since icon sets declare sizes like 24 px and browsers report a default size for an SVG that declares none. That is twice the 72 px page badge, the largest place an icon shows. Tiles and the page badge show it filling their square (`object-cover`), so a wide image shows its middle; the full image is kept, so the display can change later without uploading again. A sidebar page row, which has no tile, shows it as a 20 px rounded square where the emoji was.
 - **Encoded afresh** as WebP at quality 0.85, which also drops EXIF and other metadata. A browser that can't write WebP hands back PNG (`banner-image.ts` handles the same case; Safari has been one). Then an opaque image is stored as JPEG and one with transparency as PNG, so logos keep their clear background on the folder's tint.
-- **At most 32 KB encoded.** Past that, it is drawn again at 96 px; still past it, it is refused with a plain message. The spike's 144 px results were 1 to 7 KB as WebP or JPEG; only PNG of a busy photo reached 40 KB, and a photo is opaque, so it gets JPEG.
-- **SVG is rasterised, never stored.** The browser draws it from a `blob:` URL into an `<img>`, then onto a canvas, and stores the result like any other image. In an `<img>`, SVG scripts don't run and nothing outside it is fetched. `createImageBitmap` refuses SVG in all three engines, so this path uses `<img>`. An SVG with `<foreignObject>` taints the canvas in Chromium and WebKit, which then refuse to export it; the app says that SVG can't be used. An SVG with no size of its own is drawn at 144 px. Because only raster images are ever stored, there is no sanitiser and no CSP change.
+- **At most 16 KB encoded.** Past that, it is drawn again at 96 px; still past it, it is refused with a plain message. The spike's 144 px results were 1 to 7 KB as WebP or JPEG; only PNG of a busy photo reached 40 KB, and a photo is opaque, so it gets JPEG. The cap is low because every tree fetch carries each folder's image.
+- **SVG is rasterised, never stored.** The browser draws it from a `blob:` URL into an `<img>`, then onto a canvas, and stores the result like any other image. Browsers never run an SVG's scripts or fetch what it links to when it is shown in an `<img>`, as the avatar code already relies on. `createImageBitmap` refuses SVG in all three engines, so this path uses `<img>`. An SVG with `<foreignObject>` taints the canvas in Chromium and WebKit, which then refuse to export it; the app says that SVG can't be used. Because only raster images are ever stored, there is no sanitiser and no CSP change.
 - **Readers check what they show.** `mediaType` must be one of the three, and `data` at most the cap; anything else counts as no image.
 
 ### 5. Fallback
 
-- **Older clients** ignore `wikistow.icon` and `cover.icon` and keep both when they save: metadata extensions are carried, and `reviseCover` keeps fields it doesn't know. A folder shows its emoji on its tint (⭐ on blue by default); a page shows its emoji, or none. An older client lists a page's icon in the attachment list, since it only hides the banner; deleting it there removes the icon, and newer clients fall back to the emoji.
+- **Older clients** ignore `wikistow.icon` and `cover.icon` and keep both when they save: metadata extensions are carried, and `reviseCover` keeps fields it doesn't know. A folder shows its emoji on its tint (⭐ on blue by default); a page shows its emoji, or none. An older client lists a page's icon in the attachment list, since it only hides the banner; deleting it there removes the icon, and newer clients fall back to the emoji. An older client can't replace an image, though: picking a new emoji there changes only the fallback, and newer clients keep showing the image. Updating fixes that; nothing in the design needs to.
 - **A newer client that can't show the image** (a shape it doesn't accept, an attachment the version doesn't list, a failed download or decode) shows the emoji, using the image's `onError` as the avatar does.
 - **Choosing an image keeps the emoji** as it was, so the fallback is the person's last emoji (recommended). Choosing an emoji removes the image. **Remove image** removes only the image, so the emoji shows again; a folder's **Back to ⭐ on blue** removes the image too.
 
@@ -80,20 +80,20 @@ Removing a folder's image writes `wikistow.icon: null`, since `reviseMetadata` m
 
 ### 6. Quota and storage cost
 
-- A page icon is a blob counted against its uploader, like any attachment: a few KB, at most 32 KB. Later versions list the same blob, so it is stored about once per audience: a draft copy, and a published copy that later publishes reuse (section 12).
+- A page icon is a blob counted against its uploader, like any attachment: a few KB, at most 16 KB. Later versions list the same blob, so it is stored about once per audience: a draft copy, and a published copy that later publishes reuse (section 12).
 - A folder icon counts against the author of each metadata version that holds it, as metadata does today, once per version.
 - On the wire, the tree grows by about 1.8 times each folder image, and the sidebar downloads each page icon once per session.
 
-At the default 5 GiB quota none of this is noticeable. No new limit is needed beyond the 32 KB cap.
+At the default 5 GiB quota none of this is noticeable. No new limit is needed beyond the 16 KB cap.
 
 ### 7. How the picker gains an image tab
 
 `EmojiPopover` gains an optional `image` prop: `{ current: string | null; onPick: (file: File) => void; onRemove?: () => void }`, with `current` a `blob:` URL. When given, the popover shows two toggle buttons at the top, **Emoji** and **Image**, opening on the kind in use. The Image tab has **Upload an image…** (a file input with the accepted types), the current image with **Remove image** when there is one, and one line: "PNG, JPEG, WebP, GIF or SVG. It’s resized to fit." Picking a file closes the popover; the caller prepares and stores it, so pages and folders share the tab and keep their own saving:
 
 - **Pages:** the cover editor resizes, uploads as a draft attachment and sets `cover.icon`, the way `upload` sets a banner, with saves waiting for it (`handle.track`).
-- **Folders:** `FolderLookFields` keeps the prepared image in the dialog until **Save** writes the metadata, in the New folder dialog (`createFolder`'s look gains an optional image) and in **Emoji and colour…**. The 48 px tile and the colour swatches show the image.
+- **Folders:** `FolderLookFields` keeps the prepared image in the dialog until **Save** writes the metadata, in the New folder dialog (`createFolder`'s look gains an optional image) and in **Emoji and colour…**. The 48 px tile shows the image on the tint, which shows through a transparent image. The colour swatches keep showing the emoji, so the colour choice stays visible, and the tint still matters for the fallback.
 
-The image shows wherever the emoji shows now: the sidebar's folder and page rows, the folder look tiles and the page badge. A shared `IconImage` component draws the `blob:` URL and falls back to the emoji. Space icons (rail, space header) and the Shared with me page's folder looks (it shows a generic icon today) can use the same field and component later; they are out of scope.
+The image shows wherever the emoji shows now: the sidebar's folder and page rows, the folder look tiles and the page badge. A shared `IconImage` component draws the `blob:` URL and falls back to the emoji. Page icons get their URL from `decryptedQuery`. A folder's bytes come with the tree, so its URL is cached by the metadata version's ID in the same way, not made again on each tree fetch, which would pile up URLs until the vault locks. Space icons (rail, space header) and the Shared with me page's folder looks (it shows a generic icon today) can use the same field and component later; they are out of scope.
 
 ## Spike evidence (2026-10-16)
 
@@ -111,7 +111,6 @@ A throwaway page served with the app's real CSP (`img-src 'self' blob:`), run in
 | --- | --- | --- | --- |
 | SVG decodes in an `<img>` under the CSP | yes | yes | yes |
 | `createImageBitmap` on an SVG blob | refused | refused | refused |
-| SVG `<script>` runs in an `<img>` | no | no | no |
 | Canvas export after drawing an SVG with `<foreignObject>` | refused (tainted) | allowed | refused (tainted) |
 
 Playwright's Linux WebKit writes WebP; Safari on Apple systems may not, which is why the JPEG and PNG fallbacks stay.
@@ -135,7 +134,7 @@ Playwright's Linux WebKit writes WebP; Safari on Apple systems may not, which is
 1. A folder's image lives inside its encrypted metadata (`wikistow.icon`), not as a server blob. Recommended.
 2. A page's image is an attachment named from `wikistow.cover` (`icon: {attachmentId}`). Recommended.
 3. Each icon is uploaded where it is used; no per-space library. Recommended.
-4. Images are resized to fit 144 px, stored as WebP (JPEG or PNG where WebP can't be written), at most 32 KB; SVG is rasterised, never stored. Recommended.
+4. Images are resized to fit 144 px, stored as WebP (JPEG or PNG where WebP can't be written), at most 16 KB; SVG is rasterised, never stored. Recommended. The cap is the number to change if folder images should be sharper or the tree smaller.
 5. Choosing an image keeps the emoji as the fallback for older clients and failed loads. Recommended.
 
 ## Implementation, in pull requests
