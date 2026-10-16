@@ -286,6 +286,7 @@ export function PluginRow({
   onRemove,
   actions,
   note,
+  pageAccess = true,
 }: {
   status: PluginStatus;
   onEnabled: (on: boolean) => void;
@@ -293,6 +294,8 @@ export function PluginRow({
   actions?: ReactNode;
   /** Shown under the description, such as an update waiting. */
   note?: ReactNode;
+  /** Its page access editor, left out where another install of the ID runs instead. */
+  pageAccess?: boolean;
 }) {
   const { manifest, level, development, enabled } = plugin;
   return (
@@ -328,7 +331,7 @@ export function PluginRow({
           Remove
         </Button>
       </div>
-      {manifest.access !== 'none' && (
+      {pageAccess && manifest.access !== 'none' && (
         <PageAccessEditor pluginId={manifest.id} most={manifest.access} />
       )}
     </li>

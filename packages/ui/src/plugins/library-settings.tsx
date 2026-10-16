@@ -187,6 +187,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
                   void act(() => pluginOperations.setPluginEnabled(ctx, approval.id, on))
                 }
                 onRemove={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+                pageAccess={!replaced}
                 note={
                   <>
                     {replaced && (

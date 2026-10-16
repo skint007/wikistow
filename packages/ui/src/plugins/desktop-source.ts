@@ -14,17 +14,24 @@ import type { RuntimeSource } from './runtime';
  * of the same ID on this computer.
  */
 export function desktopSource(bridge: DesktopBridge): Omit<RuntimeSource, 'pages' | 'handle'> {
-  /** The IDs the last listing ran from the library, where their choices are kept. */
-  let fromLibrary = new Set<string>();
+  /** The IDs installed from a folder here, as last listed: their choices stay on this computer. */
+  let here = new Set<string>();
+  /** Approved in the account's record and not replaced here, so their choices are kept there. */
+  const inRecord = (pluginId: string) => {
+    const vault = vaultStore.get();
+    return (
+      vault.status === 'unlocked' &&
+      !here.has(pluginId) &&
+      pluginOperations.listPluginApprovals(vault.ctx).some(({ id }) => id === pluginId)
+    );
+  };
 
   return {
     async list() {
       const state = await bridge.plugins();
+      here = new Set(state.plugins.map(({ manifest }) => manifest.id));
       const vault = vaultStore.get();
-      if (vault.status !== 'unlocked') {
-        fromLibrary = new Set();
-        return state;
-      }
+      if (vault.status !== 'unlocked') return state;
       const approved = pluginOperations
         .listPluginApprovals(vault.ctx)
         .map(({ id, hash, enabled }) => ({ id, hash, enabled }));
@@ -32,9 +39,7 @@ export function desktopSource(bridge: DesktopBridge): Omit<RuntimeSource, 'pages
       const copies: LibraryCopies = await bridge
         .libraryPlugins(approved)
         .catch(() => ({ plugins: [], problems: {} }));
-      const here = new Set(state.plugins.map(({ manifest }) => manifest.id));
       const library = copies.plugins.filter(({ manifest }) => !here.has(manifest.id));
-      fromLibrary = new Set(library.map(({ manifest }) => manifest.id));
       return {
         safeMode: state.safeMode,
         plugins: [...state.plugins, ...library],
@@ -44,15 +49,15 @@ export function desktopSource(bridge: DesktopBridge): Omit<RuntimeSource, 'pages
     async access() {
       const vault = vaultStore.get();
       if (vault.status !== 'unlocked') return {};
-      const here = await bridge.pluginAccess(vault.vault.accountId);
+      const folders = await bridge.pluginAccess(vault.vault.accountId);
       const approved = pluginOperations
         .listPluginApprovals(vault.ctx)
-        .filter(({ id }) => fromLibrary.has(id))
+        .filter(({ id }) => !here.has(id))
         .map(({ id, access }) => [id, access] as const);
-      return { ...here, ...Object.fromEntries(approved) };
+      return { ...folders, ...Object.fromEntries(approved) };
     },
     async setAccess(pluginId, scopes) {
-      if (fromLibrary.has(pluginId)) {
+      if (inRecord(pluginId)) {
         await pluginOperations.setPluginAccess(openCtx(), pluginId, scopes);
         return;
       }
@@ -61,8 +66,7 @@ export function desktopSource(bridge: DesktopBridge): Omit<RuntimeSource, 'pages
       await bridge.setPluginAccess(vault.vault.accountId, pluginId, scopes);
     },
     async disable(pluginId) {
-      if (fromLibrary.has(pluginId))
-        await pluginOperations.setPluginEnabled(openCtx(), pluginId, false);
+      if (inRecord(pluginId)) await pluginOperations.setPluginEnabled(openCtx(), pluginId, false);
       else await bridge.setPluginEnabled(pluginId, false);
     },
     ownsStorage: true,
