@@ -1,7 +1,11 @@
 import {
   DEFAULT_FOLDER_LOOK,
   FOLDER_TINTS,
+  folderIconChange,
+  folderIconOf,
+  ICON_NAMESPACE,
   spaceOperations,
+  type FolderIcon,
   type FolderId,
   type FolderLook,
   type NodeMetadata,
@@ -10,6 +14,7 @@ import {
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { IconImage } from '@/components/icon-image';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,7 +29,8 @@ import { cn } from '@/lib/utils';
 import { treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { EmojiPopover } from '../page/cover/emoji-picker';
-import { useClient } from '../vault/store';
+import { iconImage } from '../page/cover/icon-image';
+import { PLAIN, useClient, vaultStore } from '../vault/store';
 
 // Written out in full so Tailwind finds each class.
 const TINTS: Record<string, string> = {
@@ -41,9 +47,26 @@ export const folderLook = ({ emoji, tint }: NodeMetadata): FolderLook => ({
   tint: tint ?? DEFAULT_FOLDER_LOOK.tint,
 });
 
-const sameLook = (a: FolderLook, b: FolderLook) => a.emoji === b.emoji && a.tint === b.tint;
+/** An image picked in the folder fields and not yet saved, with a `blob:` URL to show it. */
+type PickedImage = { icon: FolderIcon; url: string };
 
-/** A folder's tile: its emoji on its tint. A tint this app doesn't know shows blue. */
+/**
+ * What the folder fields show and change: a look, and an image, which is
+ * the folder's own (`kept`), none, or one picked here.
+ */
+export type LookChoice = FolderLook & { image: 'kept' | PickedImage | null };
+
+/** How a new folder starts: ⭐ on blue, no image. */
+export const DEFAULT_CHOICE: LookChoice = { ...DEFAULT_FOLDER_LOOK, image: null };
+
+const sameLook = (a: LookChoice, b: LookChoice) =>
+  a.emoji === b.emoji && a.tint === b.tint && a.image === b.image;
+
+/** The image picked in the fields to save, if any. */
+export const pickedIcon = ({ image }: LookChoice) =>
+  image === 'kept' || image === null ? null : image.icon;
+
+/** A folder's tile: its emoji, or image, on its tint. A tint this app doesn't know shows blue. */
 export const tileClass = (tint: string) =>
   cn(
     'grid shrink-0 place-items-center overflow-hidden rounded-folder leading-none',
@@ -51,39 +74,95 @@ export const tileClass = (tint: string) =>
   );
 
 /**
- * A folder's emoji, from the page emoji picker, and its colour, one of the
- * design's tints, with a way back to ⭐ on blue. For a new folder and for
- * changing one.
+ * A `blob:` URL for a folder's image, or null for none. Made once for each
+ * version of its metadata, not on each tree load, and kept until the vault
+ * locks.
+ */
+export function useFolderIcon(
+  loaded: spaceOperations.LoadedMetadata | null | undefined,
+): string | null {
+  const metadata = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
+  const { data } = useQuery({
+    // A version's metadata never changes, so its ID is enough.
+    queryKey: [PLAIN, 'folder-icon', loaded?.head],
+    enabled: metadata?.extensions[ICON_NAMESPACE] != null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    queryFn: () => {
+      const icon = metadata && folderIconOf(metadata);
+      return icon ? vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch()) : null;
+    },
+  });
+  return data ?? null;
+}
+
+/** A folder's tile in the tree: its image, or its emoji when it has none, on its tint. */
+export function FolderTile({
+  metadata,
+  emoji,
+  tint,
+  className,
+}: {
+  metadata: spaceOperations.LoadedMetadata | null;
+  emoji: string;
+  tint: string;
+  className?: string;
+}) {
+  const url = useFolderIcon(metadata);
+  return (
+    <span aria-hidden className={cn(tileClass(tint), className)}>
+      <IconImage src={url} fallback={emoji} />
+    </span>
+  );
+}
+
+/**
+ * A folder's emoji or image, from the page emoji picker, and its colour,
+ * one of the design's tints, with a way back to ⭐ on blue. For a new
+ * folder and for changing one. `kept` is the folder's own image, if any.
  */
 export function FolderLookFields({
   look,
+  kept,
   onChange,
 }: {
-  look: FolderLook;
-  onChange: (look: FolderLook) => void;
+  look: LookChoice;
+  kept: string | null;
+  onChange: (look: LookChoice) => void;
 }) {
   const [picking, setPicking] = useState(false);
   const tile = useRef<HTMLButtonElement>(null);
+  const image = look.image === 'kept' ? kept : (look.image?.url ?? null);
   return (
     <div className="grid gap-4">
       <div className="grid justify-items-start gap-2">
-        <span className="text-sm font-medium">Emoji</span>
+        <span className="text-sm font-medium">Emoji or image</span>
         <EmojiPopover
           current={look.emoji}
           open={picking}
           onOpenChange={setPicking}
-          onPick={(emoji) => onChange({ ...look, emoji })}
+          // Choosing an emoji drops the image; choosing an image keeps the emoji to fall back on.
+          onPick={(emoji) => onChange({ ...look, emoji, image: null })}
+          image={{
+            current: image,
+            onPick: async (file) => {
+              const icon = await iconImage(file);
+              const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
+              onChange({ ...look, image: { icon, url } });
+            },
+            onRemove: () => onChange({ ...look, image: null }),
+          }}
         >
           <button
             ref={tile}
             type="button"
-            aria-label={`Change emoji ${look.emoji}`}
+            aria-label={image ? 'Change image' : `Change emoji ${look.emoji}`}
             className={cn(
               tileClass(look.tint),
               'size-12 cursor-pointer text-2xl outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
             )}
           >
-            {look.emoji}
+            <IconImage src={image} fallback={look.emoji} />
           </button>
         </EmojiPopover>
       </div>
@@ -118,14 +197,14 @@ export function FolderLookFields({
           })}
         </div>
       </fieldset>
-      {!sameLook(look, DEFAULT_FOLDER_LOOK) && (
+      {!sameLook(look, DEFAULT_CHOICE) && (
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="justify-self-start"
           onClick={() => {
-            onChange(DEFAULT_FOLDER_LOOK);
+            onChange(DEFAULT_CHOICE);
             // This button goes once it's done its work; focus stays in the fields.
             tile.current?.focus();
           }}
@@ -179,8 +258,9 @@ function LookForm({
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const loaded = tree?.folders.find((f) => f.id === folderId)?.metadata;
   const opened = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
+  const kept = useFolderIcon(loaded);
   // What the person picked, until they save; null shows the folder as it is.
-  const [picked, setPicked] = useState<FolderLook | null>(null);
+  const [picked, setPicked] = useState<LookChoice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -196,7 +276,7 @@ function LookForm({
       </DialogHeader>
     );
   }
-  const current = folderLook(opened);
+  const current: LookChoice = { ...folderLook(opened), image: folderIconOf(opened) && 'kept' };
   const look = picked ?? current;
 
   async function save() {
@@ -204,11 +284,16 @@ function LookForm({
     setBusy(true);
     setError(null);
     try {
+      const { emoji, tint, image } = look;
       await spaceOperations.updateMetadata(ctx, {
         spaceId,
         subject: { kind: 'folder', folderId },
         current: loaded,
-        changes: look,
+        changes: {
+          emoji,
+          tint,
+          ...(image === current.image ? {} : { extensions: folderIconChange(pickedIcon(look)) }),
+        },
       });
       await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
       onDone();
@@ -236,7 +321,7 @@ function LookForm({
           Everyone who can see the folder sees them. They’re encrypted like its name.
         </DialogDescription>
       </DialogHeader>
-      <FolderLookFields look={look} onChange={setPicked} />
+      <FolderLookFields look={look} kept={kept} onChange={setPicked} />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
