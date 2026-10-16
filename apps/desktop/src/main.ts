@@ -16,6 +16,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   net,
   protocol,
   safeStorage,
@@ -30,6 +31,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
+import { contextMenu } from './context-menu.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
@@ -369,6 +371,17 @@ function openWindow() {
       event.preventDefault();
       setSafeMode(true);
     }
+  });
+  // Right-click on the app's own page; plugin frames get no menu. The
+  // spellchecker uses the system's language, as Electron does by default.
+  window.webContents.on('context-menu', (_event, params) => {
+    if (!window || params.frame?.parent !== null) return;
+    const { webContents } = window;
+    const items = contextMenu(params, {
+      replace: (word) => webContents.replaceMisspelling(word),
+      learn: (word) => webContents.session.addWordToSpellCheckerDictionary(word),
+    });
+    if (items.length > 0) Menu.buildFromTemplate(items).popup({ window });
   });
   window.webContents.on('did-finish-load', () => {
     switching = null;
