@@ -5,7 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { copyPluginFiles, PluginFolderError, readPluginFolder } from '../plugins/folder.ts';
+import {
+  copyPluginFiles,
+  PluginFolderError,
+  readPluginFolder,
+  uploadFiles,
+} from '../plugins/folder.ts';
 import type { PluginAddress, PluginFile } from '../plugins/plugins.ts';
 import type { BuildOutput, BuildRequest } from './builder.ts';
 
@@ -172,6 +177,7 @@ export function desktopWorkshop(data: string, bundler: Bundler) {
           level: trustLevel(read.manifest),
           key: `workshop-${basename(session.folder)}-${version}`,
           development: null,
+          library: false,
           enabled: true,
         },
         hash: read.hash,
@@ -305,6 +311,11 @@ export function desktopWorkshop(data: string, bundler: Bundler) {
     /** A reviewed version's folder, for the usual install with its approval. */
     async installFolder(id: unknown, version: unknown, hash: unknown) {
       return (await reviewed(sessionOf(id), version, hash)).folder;
+    },
+
+    /** A reviewed version's files, to share to the library. */
+    async uploadFiles(id: unknown, version: unknown, hash: unknown) {
+      return uploadFiles(await reviewed(sessionOf(id), version, hash));
     },
 
     /**

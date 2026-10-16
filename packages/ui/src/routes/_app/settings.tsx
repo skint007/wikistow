@@ -73,7 +73,7 @@ function Settings() {
       {desktop ? (
         <Section
           title="Plugins"
-          description="Installed on this computer only. They never come from the server or from a page. If one breaks the app, Ctrl+Shift+Alt+P restarts it without plugins."
+          description="Installed from a folder on this computer, or from this server’s plugin library, which follows your account. A library plugin runs only once its files match the version you approved. If one breaks the app, Ctrl+Shift+Alt+P restarts it without plugins."
         >
           <PluginSettings />
         </Section>

@@ -1,7 +1,7 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
 import type { PluginCandidate, PluginScope } from '@wikistow/contracts';
-import type { PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
@@ -20,6 +20,8 @@ import { Switch } from '@/components/ui/switch';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { useVault } from '../vault/store';
+import { libraryQuery, uploadToLibrary } from './library';
+import { Library, ShareToLibrary } from './library-settings';
 import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
 
 export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
@@ -65,21 +67,30 @@ export function SafeModeNotice() {
 
 /**
  * Settings → Plugins, in the desktop app: install a plugin folder or load
- * one for development, turn each on or off, reload, remove, and choose
- * the pages it may use. Every install asks for approval first. The
- * browser's, with the server's library, is `LibrarySettings`.
+ * one for development, turn each on or off, reload, remove, share an
+ * installed one to the library, and choose the pages it may use; then,
+ * with the vault open, the server's library as the browser shows it.
+ * Every install asks for approval first. The browser's is `LibrarySettings`.
  */
 export function PluginSettings() {
   const { safeMode, plugins } = usePlugins();
+  const vault = useVault();
+  const queryClient = useQueryClient();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
+  const [sharing, setSharing] = useState<Manifest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const bridge = desktop;
   if (!bridge) return null;
+  const here = plugins.filter(({ plugin }) => !plugin.library);
 
+  /** Run a change, then list the plugins afresh. A string it returns is said. */
   const act = async (run: () => Promise<unknown>) => {
     setError(null);
+    setNotice(null);
     try {
-      await run();
+      const done = await run();
+      if (typeof done === 'string') setNotice(done);
     } catch (failure) {
       setError(message(failure));
     }
@@ -103,11 +114,12 @@ export function PluginSettings() {
         )}
       </div>
       {error && <FormMessage>{error}</FormMessage>}
-      {plugins.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No plugins are installed.</p>
+      {notice && <FormMessage tone="notice">{notice}</FormMessage>}
+      {here.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No plugins are installed from a folder.</p>
       ) : (
         <ul className="grid gap-3" aria-label="Installed plugins">
-          {plugins.map((status) => {
+          {here.map((status) => {
             const { manifest, development } = status.plugin;
             return (
               <PluginRow
@@ -116,7 +128,7 @@ export function PluginSettings() {
                 onEnabled={(on) => void act(() => bridge.setPluginEnabled(manifest.id, on))}
                 onRemove={() => void act(() => bridge.removePlugin(manifest.id))}
                 actions={
-                  development && (
+                  development ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -129,6 +141,10 @@ export function PluginSettings() {
                     >
                       Reload
                     </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setSharing(manifest)}>
+                      Share to library…
+                    </Button>
                   )
                 }
               />
@@ -136,10 +152,30 @@ export function PluginSettings() {
           })}
         </ul>
       )}
+      {vault.status === 'unlocked' ? (
+        <Library ctx={vault.ctx} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Unlock your vault to see the plugins you installed from the library. Which ones you
+          installed is encrypted.
+        </p>
+      )}
       <Approval
         candidate={candidate}
         onDone={() => setCandidate(null)}
         onApprove={({ token }) => act(() => bridge.approvePlugin(token))}
+      />
+      <ShareToLibrary
+        manifest={sharing}
+        onDone={() => setSharing(null)}
+        onShare={() =>
+          act(async () => {
+            if (!sharing) return;
+            const { version } = await uploadToLibrary(await bridge.pluginUpload(sharing.id));
+            await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+            return `Shared ${version.manifest.name} ${version.manifest.version} to the library.`;
+          })
+        }
       />
     </div>
   );
@@ -250,6 +286,7 @@ export function PluginRow({
   onRemove,
   actions,
   note,
+  pageAccess = true,
 }: {
   status: PluginStatus;
   onEnabled: (on: boolean) => void;
@@ -257,6 +294,8 @@ export function PluginRow({
   actions?: ReactNode;
   /** Shown under the description, such as an update waiting. */
   note?: ReactNode;
+  /** Its page access editor, left out where another install of the ID runs instead. */
+  pageAccess?: boolean;
 }) {
   const { manifest, level, development, enabled } = plugin;
   return (
@@ -292,7 +331,7 @@ export function PluginRow({
           Remove
         </Button>
       </div>
-      {manifest.access !== 'none' && (
+      {pageAccess && manifest.access !== 'none' && (
         <PageAccessEditor pluginId={manifest.id} most={manifest.access} />
       )}
     </li>

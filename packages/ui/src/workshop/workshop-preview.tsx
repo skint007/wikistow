@@ -1,7 +1,7 @@
 import { PageId, SpaceId } from '@wikistow/client';
 import type { PluginCandidate, WorkshopVersion } from '@wikistow/contracts';
-import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
-import { useQuery } from '@tanstack/react-query';
+import type { AppViewProps, Manifest, SettingsViewProps } from '@wikistow/plugin-sdk';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,8 @@ import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
+import { libraryQuery, uploadToLibrary } from '../plugins/library';
+import { ShareToLibrary } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Approval } from '../plugins/plugin-settings';
 import { PageViews, pluginName } from '../plugins/regions';
@@ -430,10 +432,14 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
   );
 }
 
-/** Every build, newest first: preview any that built, or export or install it by its hash. */
+/** Every build, newest first: preview any that built, or export, install or share it by its hash. */
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
+  const queryClient = useQueryClient();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
+  const [sharing, setSharing] = useState<{ version: WorkshopVersion; manifest: Manifest } | null>(
+    null,
+  );
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
   const act = async (run: () => Promise<string | null>) => {
     setNotice(null);
@@ -508,6 +514,15 @@ function Versions({ workshop }: { workshop: Workshop }) {
                   >
                     Install…
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      version.plugin && setSharing({ version, manifest: version.plugin.manifest })
+                    }
+                  >
+                    Share to library…
+                  </Button>
                 </>
               )}
             </div>
@@ -526,6 +541,18 @@ function Versions({ workshop }: { workshop: Workshop }) {
             await desktop?.approvePlugin(token);
             await pluginRuntime.refresh();
             return 'Installed. It runs across the app now, outside the workshop, as Settings → Plugins lists it.';
+          })
+        }
+      />
+      <ShareToLibrary
+        manifest={sharing?.manifest ?? null}
+        onDone={() => setSharing(null)}
+        onShare={() =>
+          act(async () => {
+            if (!sharing) return null;
+            const { version } = await uploadToLibrary(await workshop.upload(sharing.version));
+            await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+            return `Shared v${sharing.version.version} to the library as ${version.manifest.name} ${version.manifest.version}. Install it from Settings → Plugins to use it outside the workshop.`;
           })
         }
       />

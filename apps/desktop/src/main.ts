@@ -1,7 +1,8 @@
 // The desktop app's main process. It serves the built web app from
 // `app://wikistow`, forwards that origin's API requests to the server with
 // the session only it holds, signs in through the system browser, keeps
-// and serves the plugins installed on this computer, builds and serves
+// and serves the plugins installed on this computer and copies of those
+// approved from the server's library, builds and serves
 // the plugin workshop's versions, and checks for a newer release.
 import {
   DESKTOP_CHANNELS,
@@ -31,6 +32,7 @@ import { APP_ORIGIN, appFile } from './app-files.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
+import { libraryPlugins } from './plugins/library.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
 import {
@@ -50,6 +52,8 @@ import { desktopWorkshop, WorkshopError } from './workshop/workshop.ts';
 const SIGN_IN_MS = 10 * 60_000;
 /** How long quitting waits for the server to end a session nothing kept. */
 const QUIT_SIGN_OUT_MS = 3_000;
+/** How long one request downloading a library plugin may take. */
+const LIBRARY_REQUEST_MS = 60_000;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -123,6 +127,12 @@ let pending: {
 let signInRun = 0;
 let window: BrowserWindow | null = null;
 const plugins = desktopPlugins(app.getPath('userData'));
+// Library plugins download through the session, each request given a minute.
+const library = libraryPlugins(app.getPath('userData'), (path) =>
+  toServer(new Request(`${APP_ORIGIN}${path}`), (url, init) =>
+    fetch(url, { ...init, signal: AbortSignal.timeout(LIBRARY_REQUEST_MS) }),
+  ),
+);
 // The bundler's worker and WebAssembly are beside this bundle (`vite.config.ts`).
 const bundler = workshopBuilder(
   new URL('./workshop-build.mjs', import.meta.url),
@@ -171,6 +181,22 @@ async function saveConfig() {
   await rename(next, configFile());
 }
 
+/**
+ * Send `request` on to the server with the session, keeping any cookie the
+ * server changes. Fails when there is no server, or no answer.
+ */
+async function toServer(request: Request, send: typeof fetch = fetch): Promise<Response> {
+  if (!server) throw new Error('No server');
+  const upstream = { origin: server, cookie };
+  const sent = await forward(request, upstream, send);
+  // Only if nothing replaced the session meanwhile, such as a sign-in.
+  if (sent.cookie !== undefined && server === upstream.origin && cookie === upstream.cookie) {
+    cookie = sent.cookie;
+    void persist();
+  }
+  return sent.response;
+}
+
 async function serve(request: Request): Promise<Response> {
   const url = new URL(request.url);
   // Node gives custom schemes no origin (`null`), so the parts are compared.
@@ -187,23 +213,13 @@ async function serve(request: Request): Promise<Response> {
     if ((from !== null && from !== APP_ORIGIN) || (site !== null && site !== 'same-origin')) {
       return new Response(null, { status: 403 });
     }
-    try {
-      const upstream = { origin: server, cookie };
-      const sent = await forward(request, upstream);
-      // Only if nothing replaced the session meanwhile, such as a sign-in.
-      if (sent.cookie !== undefined && server === upstream.origin && cookie === upstream.cookie) {
-        cookie = sent.cookie;
-        void persist();
-      }
-      return sent.response;
-    } catch {
-      return Response.error();
-    }
+    return toServer(request).catch(() => Response.error());
   }
   if (url.pathname.startsWith('/plugins/')) {
-    // An installed plugin's file, or a workshop version's.
+    // An installed plugin's file, a library plugin's copy, or a workshop version's.
     const address = safeMode ? null : pluginAddress(url.pathname);
-    const plugin = address && (plugins.file(address) ?? workshop.file(address));
+    const plugin =
+      address && (plugins.file(address) ?? library.file(address) ?? workshop.file(address));
     const found = plugin
       ? await net.fetch(pathToFileURL(plugin.path).href).catch(() => null)
       : null;
@@ -638,6 +654,8 @@ void app.whenReady().then(async () => {
   handle('setPluginAccess', (accountId, pluginId, scopes) =>
     plugins.setAccess(accountId, pluginId, scopes),
   );
+  handle('libraryPlugins', (approved) => library.sync(approved));
+  handle('pluginUpload', (id) => plugins.uploadFiles(id));
   handle('setSafeMode', async (on) => setSafeMode(on === true));
   await workshop.load();
   handle('workshopStart', () => workshop.start());
@@ -670,5 +688,8 @@ void app.whenReady().then(async () => {
       throw new WorkshopError('The copy doesn’t match the reviewed version.');
     return candidate;
   });
+  handle('workshopUpload', (session, version, hash) =>
+    workshop.uploadFiles(session, version, hash),
+  );
   openWindow();
 });

@@ -1,5 +1,6 @@
-import { pluginOperations, toBase64, type ClientContext } from '@wikistow/client';
-import { pluginRoutes } from '@wikistow/contracts';
+import { pluginOperations, type ClientContext } from '@wikistow/client';
+import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
+import type { Manifest } from '@wikistow/plugin-sdk';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
@@ -14,9 +15,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { api, meQuery } from '../api';
+import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useVault } from '../vault/store';
-import { asInstalled, libraryQuery, type LibraryPlugin, type LibraryVersion } from './library';
+import {
+  asInstalled,
+  libraryQuery,
+  uploadToLibrary,
+  type LibraryPlugin,
+  type LibraryVersion,
+} from './library';
 import {
   ACCESS,
   Approval,
@@ -60,15 +68,28 @@ export function LibrarySettings() {
       </p>
     );
   }
-  return <Library ctx={vault.ctx} />;
+  return (
+    <div className="grid gap-4">
+      <SafeModeNotice />
+      <Library ctx={vault.ctx} />
+    </div>
+  );
 }
 
-function Library({ ctx }: { ctx: ClientContext }) {
+/**
+ * The library plugins this account installed, then the library. The
+ * browser's whole section; in the desktop app, the part below the plugins
+ * installed from folders. There a plugin runs from the copy the app keeps,
+ * even once the library drops its version, and a folder install of the
+ * same ID replaces it on that computer. The desktop shares to the library
+ * from an installed plugin or a workshop version, not by choosing a folder.
+ */
+export function Library({ ctx }: { ctx: ClientContext }) {
   const queryClient = useQueryClient();
   const { data: library, error: listError } = useQuery(libraryQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
-  const { plugins: running, listed } = usePlugins();
+  const { plugins: running, listed, unavailable } = usePlugins();
   // The runtime lists the library at unlock; if that failed, the library
   // shown here means the server answers again.
   useEffect(() => {
@@ -102,20 +123,27 @@ function Library({ ctx }: { ctx: ClientContext }) {
     });
 
   const inLibrary = (id: string) => library?.find((plugin) => plugin.id === id);
-  const problemOf = (id: string) =>
-    running.find(({ plugin }) => plugin.manifest.id === id)?.problem ?? null;
+  const installedLabel = desktop ? 'Installed from the library' : 'Installed plugins';
 
   return (
     <div className="grid gap-4">
-      <SafeModeNotice />
+      {desktop && approvals.length > 0 && <h3 className="font-bold">{installedLabel}</h3>}
       {approvals.length > 0 && (
-        <ul className="grid gap-3" aria-label="Installed plugins">
+        <ul className="grid gap-3" aria-label={installedLabel}>
           {approvals.map((approval) => {
             const plugin = inLibrary(approval.id);
             const version = plugin?.versions.find((each) => each.hash === approval.hash);
             const newest = plugin?.versions[0];
-            if (!library) return null;
-            if (!version) {
+            const status = running.find(({ plugin }) => plugin.manifest.id === approval.id);
+            // What runs: in a browser the library's version, in the desktop app its copy,
+            // which stays when the library drops the version.
+            const runs =
+              status?.plugin.library && status.plugin.key === approval.hash ? status : null;
+            // In the desktop app, a folder install of the same ID runs instead.
+            const replaced = status !== undefined && !status.plugin.library;
+            const shown = runs?.plugin ?? (version ? asInstalled(version, true) : null);
+            if (!shown) {
+              if (!library) return null;
               return (
                 <li
                   key={approval.id}
@@ -146,20 +174,34 @@ function Library({ ctx }: { ctx: ClientContext }) {
                 </li>
               );
             }
-            const installed = asInstalled(version, approval.enabled);
-            const update = newest && newest.hash !== version.hash ? newest : null;
+            const installed = { ...shown, enabled: approval.enabled };
+            const update = newest && newest.hash !== approval.hash ? newest : null;
             return (
               <PluginRow
                 key={approval.id}
-                status={{ plugin: installed, problem: problemOf(approval.id) }}
+                status={{
+                  plugin: installed,
+                  problem: runs?.problem ?? unavailable[approval.id] ?? null,
+                }}
                 onEnabled={(on) =>
                   void act(() => pluginOperations.setPluginEnabled(ctx, approval.id, on))
                 }
                 onRemove={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+                pageAccess={!replaced}
                 note={
-                  update && (
-                    <p className="text-sm">Version {update.manifest.version} is in the library.</p>
-                  )
+                  <>
+                    {replaced && (
+                      <p className="text-sm text-muted-foreground">
+                        A plugin installed from a folder on this computer replaces it here, until
+                        you remove that one.
+                      </p>
+                    )}
+                    {update && (
+                      <p className="text-sm">
+                        Version {update.manifest.version} is in the library.
+                      </p>
+                    )}
+                  </>
                 }
                 actions={
                   update && (
@@ -169,9 +211,9 @@ function Library({ ctx }: { ctx: ClientContext }) {
                         setRequest({
                           ...requestFor(approval.id, update),
                           replaces: {
-                            version: version.manifest.version,
+                            version: installed.manifest.version,
                             level: installed.level,
-                            access: version.manifest.access,
+                            access: installed.manifest.access,
                           },
                         })
                       }
@@ -190,20 +232,25 @@ function Library({ ctx }: { ctx: ClientContext }) {
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="flex-1 font-bold">Library</h3>
-          <Upload
-            onFolder={(chosen) =>
-              act(async () => {
-                const { pluginId, version } = await api.call(pluginRoutes.uploadPlugin, {
-                  body: { files: await readFolder(chosen) },
-                });
-                const next = approvals.some((approval) => approval.id === pluginId)
-                  ? 'Update it above to use it.'
-                  : 'Install it below to use it.';
-                return `Uploaded ${version.manifest.name} ${version.manifest.version}. ${next}`;
-              })
-            }
-          />
+          {!desktop && (
+            <Upload
+              onFolder={(chosen) =>
+                act(async () => {
+                  const { pluginId, version } = await uploadToLibrary(await readFolder(chosen));
+                  const next = approvals.some((approval) => approval.id === pluginId)
+                    ? 'Update it above to use it.'
+                    : 'Install it below to use it.';
+                  return `Uploaded ${version.manifest.name} ${version.manifest.version}. ${next}`;
+                })
+              }
+            />
+          )}
         </div>
+        {desktop && (
+          <p className="text-sm text-muted-foreground">
+            Share a plugin installed on this computer, or a workshop version, to add it here.
+          </p>
+        )}
         {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}
         {library?.length === 0 && (
           <p className="text-sm text-muted-foreground">Nobody has uploaded a plugin yet.</p>
@@ -247,7 +294,7 @@ function Library({ ctx }: { ctx: ClientContext }) {
  * Paths are checked here as the server checks them, naming the first bad
  * file, and so are the limits, before anything is sent.
  */
-async function readFolder(chosen: File[]) {
+async function readFolder(chosen: File[]): Promise<PluginUploadFile[]> {
   if (chosen.length > pluginRoutes.MAX_VERSION_FILES)
     throw new Error(`A plugin holds at most ${pluginRoutes.MAX_VERSION_FILES} files.`);
   const bytes = chosen.reduce((total, file) => total + file.size, 0);
@@ -259,17 +306,12 @@ async function readFolder(chosen: File[]) {
     // The chosen folder's own name comes first.
     path: file.webkitRelativePath.split('/').slice(1).join('/') || file.name,
   }));
-  const bad = files.find(({ path }) => !pluginRoutes.UploadFile.shape.path.safeParse(path).success);
-  if (bad) {
-    throw new Error(
-      `${bad.shown} can’t be uploaded: file and folder names in a library plugin use only letters, digits, _, . and -.`,
-    );
+  for (const { path, shown } of files) {
+    const problem = pluginRoutes.uploadPathProblem(path, shown);
+    if (problem) throw new Error(problem);
   }
   return Promise.all(
-    files.map(async ({ file, path }) => ({
-      path,
-      data: toBase64(new Uint8Array(await file.arrayBuffer())),
-    })),
+    files.map(async ({ file, path }) => ({ path, data: new Uint8Array(await file.arrayBuffer()) })),
   );
 }
 
@@ -412,6 +454,44 @@ function RemoveFromLibrary({
             <Button variant="destructive" onClick={() => void onRemove(removal).then(onDone)}>
               Remove
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * Confirm sharing a plugin to the library, from the desktop app: everyone
+ * on the server can see it and install it.
+ */
+export function ShareToLibrary({
+  manifest,
+  onDone,
+  onShare,
+}: {
+  manifest: Manifest | null;
+  onDone: () => void;
+  onShare: () => Promise<void>;
+}) {
+  return (
+    <Dialog open={manifest !== null} onOpenChange={(open) => !open && onDone()}>
+      {manifest && (
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Share {manifest.name} {manifest.version} to the library?
+            </DialogTitle>
+            <DialogDescription>
+              Everyone on this server can see it and install it, and its files are plain text on the
+              server. Only the account that first shared {manifest.id} can add versions of it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={onDone}>
+              Cancel
+            </Button>
+            <Button onClick={() => void onShare().then(onDone)}>Share</Button>
           </DialogFooter>
         </DialogContent>
       )}

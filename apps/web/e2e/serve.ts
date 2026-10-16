@@ -109,6 +109,10 @@ const control = createServer((req, res) => {
       if (result.kind === 'promoted') owner = email;
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify(result));
+    } else if (req.method === 'GET' && url.pathname === '/blob-dir') {
+      // Where blobs and library plugins' files are, for tests that change one behind the server.
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ blobDir }));
     } else if (req.method === 'GET' && url.pathname === '/owner') {
       // The first administrator, so a restarted test worker can reuse it.
       res.setHeader('content-type', 'application/json');
