@@ -4,12 +4,30 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.8.0 - 2026-10-16
+
+### Highlights
+
+#### Upgrade notes
+
+- Apps from before this release see only Shared plugins in the library, and keep the plugins they already installed. Update the app on each device to see your Only me plugins and to use plugin drafts.
+- The workshop’s Install and Share to library… are gone. Use Publish… instead, which installs the plugin on all your devices.
+
+#### Features
+
+- The plugin workshop now works in the browser and on phones as well as the desktop app. Plugin drafts are saved on your server as the assistant writes them, so you can carry on from another device. You can keep 10, and the workshop asks before a new one deletes the oldest. The first build on each device downloads a 14 MB build tool, kept for later builds.
+- Publish… in the workshop puts the version you’re previewing in the library, Shared or Only me, and installs it on all your devices.
+- A library plugin can be Shared or Only me. Only me hides it from everyone else, but people who already installed it keep it and its updates.
+- Change with the assistant, on a library plugin in Settings → Plugins, opens the workshop on its source. Someone else’s plugin becomes a copy under a new ID of your own.
+- Upload project folder…, on the workshop page on a computer, turns a plugin project built with the SDK into a draft.
+- Uploading a plugin now installs it for you on all your devices. Upload plugin folder… asks once before it uploads, instead of uploading as soon as you pick the folder.
+
 ### Changes
 
 #### App
 
 - A library plugin is Shared or Only me, chosen by its owner when they upload it or from its row in Settings → Plugins. Only me hides it from other people's listing, except for anyone who already installed it, who keeps it and its updates. Each listing sends the hashes the person approved (`have`); the desktop app's own listing does too. (#65)
-- The plugin workshop works on plugin drafts saved on your server, so you can carry on from another device, and opens in a computer's browser as well as the desktop app. Its page lists your drafts, with Open, Delete and New plugin, and asks before a new one deletes the oldest of 10. Plugins build in the page, so the first build on a device downloads esbuild's WebAssembly (14 MB), cached after. The workshop's Install and Share to library go; Publish replaces them in a later change. (#66)
+- The plugin workshop works on plugin drafts saved on your server, so you can carry on from another device, and opens in a computer's browser as well as the desktop app. Its page lists your drafts, with Open, Delete and New plugin, and asks before a new one deletes the oldest of 10. Plugins build in the page, so the first build on a device downloads esbuild's WebAssembly (14 MB), cached after. The workshop's Install and Share to library go, replaced by Publish (#67). (#66)
 - The plugin workshop works on phones too: one column, with the conversation in a sheet whose Open the preview closes it. Publish… uploads the version in the preview to the library, Shared or Only me, and installs it for you on all your devices, from any device. The draft stays, for the next version. (#67)
 - Change with the assistant, on a library plugin in Settings → Plugins, makes a plugin draft of its newest version's source and opens the workshop on it. Someone else's plugin becomes a copy under a new ID of your own, and the workshop says so. Upload project folder…, on the workshop page on a computer, makes a draft from a project built with the SDK. Settings → Plugins in the browser now links to the workshop. (#67)
 - Uploading a plugin installs it for you on all your devices. Every way of uploading (Upload plugin folder…, and Share to library… on the desktop) asks once first, showing what the approval dialog shows, with Shared or Only me. Settings' folder upload used to upload as soon as the folder was chosen. (#65)
@@ -20,7 +38,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Server
 
-- Plugin drafts on the server (ADR 0004): `pluginDraftRoutes` list, make, read, change, delete and build a person's drafts, people only. A draft starts empty, from files, or from a library version's `source/`, and a version of someone else's plugin gets a new ID (`<id>-copy`, `-copy-2` and on). At most 10 per account, and within the workshop's limits, which move into `packages/contracts`. The library's file route serves a draft's build to its owner under `/plugins/<id>/draft-<hash>/`. Drafts live in Postgres, so backups take them with no script change (migration `0026_plugin_drafts`). The library upload's checks are now `checkUpload`, which draft builds share. (#64)
+- Plugin drafts on the server (ADR 0004): `pluginDraftRoutes` list, make, read, change, delete and build a person's drafts, people only. A draft starts empty, from files, or from a library version's `source/`, and a version of someone else's plugin gets a new ID (`<id>-copy`, `-copy-2` and on). At most 10 per account, and within the workshop's limits, which move into `packages/contracts`. The library's file route serves a draft's build to its owner under `/plugins/<id>/draft-<hash>/`. Drafts live in Postgres, so backups take them with no script change (migration `0026_plugin_drafts`). They don't count against storage quotas: at most about 140 MB per account. The library upload's checks are now `checkUpload`, which draft builds share. (#64)
 - `plugins.visibility` (migration 0027), `PUT /api/plugins/:pluginId/visibility` for the owner, `GET /api/plugins/private` for the owner's Only me IDs, `visibility` on uploads, and `have` on `GET /api/plugins`. The listing's response doesn't change, so older apps keep working and see Shared plugins only. (#65)
 
 #### Development
