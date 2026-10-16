@@ -6,10 +6,12 @@ import {
   agentRoutes,
   type FolderId,
   type FolderKeyEnvelope,
+  type GroupId,
   type IdentityId,
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
+import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
 import { sealForAgent, type MissingVersions } from '../agents.ts';
 import type { AgentShare, ContactsChange, ContactsPayloads, OwnAgent } from '../contacts.ts';
@@ -239,7 +241,8 @@ export async function pickInOwnerRegion(
 /**
  * Grant one of this person's agents a pick inside a share, or change its
  * role there (section 9.4): its `shares` entry first, in a confirmed
- * contacts write, then every version of the share sealed to it again.
+ * contacts write, then every version of the share sealed to it again, with
+ * the draft key also where a confirmed group makes it an editor there.
  */
 export async function grantAgent(
   ctx: ClientContext,
@@ -258,9 +261,35 @@ export async function grantAgent(
       folderId: resolved.folderId,
       role: resolved.role,
       canPublish: resolved.canPublish,
-      envelopes: await sealPick(ctx, agent.enrollment.agent, resolved),
+      envelopes: await sealPick(
+        ctx,
+        agent.enrollment.agent,
+        resolved,
+        resolved.role === 'editor' || (await groupEdits(ctx, agent, resolved)),
+      ),
     },
   });
+}
+
+/**
+ * Whether a group on the agent's own record, with `drafts`, is an editor of
+ * the share as the server lists it, so the agent's keys there carry the
+ * draft key whatever its pick (section 9.4).
+ */
+async function groupEdits(
+  ctx: ClientContext,
+  agent: OwnAgent,
+  share: { spaceId: SpaceId; shareId: ShareId },
+): Promise<boolean> {
+  const recorded = (agent.groups ?? []).filter((g) => g.drafts && g.spaceId === share.spaceId);
+  if (recorded.length === 0) return false;
+  return (await listAgentGroups(ctx)).some(
+    (listed) =>
+      listed.agentId === agent.enrollment.agent.id &&
+      listed.confirmed &&
+      recorded.some((g) => g.groupId === listed.groupId) &&
+      listed.shares.some((s) => s.shareId === share.shareId && s.role === 'editor'),
+  );
 }
 
 /**
@@ -288,11 +317,12 @@ export async function removeAgentPick(
 
 /**
  * At unlock (section 9.4): seal to each of this person's agents that isn't
- * revoked the key versions it lacks in the shares on its list, up to the
- * highest that counts for this app's writing, with draft keys only where
- * the list says so. The server says what is missing; `sealForAgent` seals
- * only what the person's own record allows. Answers how many envelopes
- * went out. One agent the server no longer knows doesn't stop the others.
+ * revoked the key versions it lacks in the shares on its list, and in the
+ * shares of the groups on its list, up to the highest that counts for this
+ * app's writing, with draft keys only where the list says so. The server
+ * says what is missing; `sealForAgent` seals only what the person's own
+ * record allows. Answers how many envelopes went out. One agent the server
+ * no longer knows doesn't stop the others.
  *
  * Agents the server revoked with every other credential of the account (a
  * password reset, an administrator, section 9.7) go into `revokedAgents`
@@ -301,42 +331,138 @@ export async function removeAgentPick(
 export async function resealAgents(ctx: ClientContext): Promise<number> {
   requirePerson(ctx);
   await recordRevokedAgents(ctx);
-  const { shared } = ctx.contacts.book.payloads;
-  let sealed = 0;
+  const groups = await listAgentGroups(ctx);
   // Each space's keys, worked out afresh once for all the agents.
-  const writes = new Map<SpaceId, Awaited<ReturnType<typeof spaceKeys>>>();
-  for (const agent of shared.agents) {
-    const agentId = agent.enrollment.agent.id;
-    if (shared.revokedAgents.some((revoked) => revoked.agentId === agentId)) continue;
-    let missing: MissingVersions[];
-    try {
-      ({ missing } = await ctx.api.call(agentRoutes.missingVersions, { params: { agentId } }));
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'not-found') continue;
-      throw error;
-    }
-    for (const spaceId of new Set(missing.map((m) => m.spaceId))) {
-      if (!writes.has(spaceId))
-        writes.set(spaceId, await spaceKeys(ctx, spaceId, { refresh: true }));
-    }
-    const envelopes = sealForAgent({
-      person: ctx.identity,
-      installationId: ctx.installationId,
-      contacts: shared,
-      agent,
-      missing,
-      keyring: ctx.keyring,
-      writes: (spaceId) => {
-        const keys = writes.get(spaceId);
-        if (!keys) throw new CryptoError('missing-key', `No keys worked out for ${spaceId}`);
-        return keys.owners.writes;
-      },
-    });
-    if (envelopes.length === 0) continue;
-    await ctx.api.call(agentRoutes.addAgentEnvelopes, { params: { agentId }, body: { envelopes } });
-    sealed += envelopes.length;
+  const writes: SpaceWrites = new Map();
+  let sealed = 0;
+  for (const agent of ctx.contacts.book.payloads.shared.agents) {
+    sealed += await resealAgent(ctx, agent, groups, writes);
   }
   return sealed;
+}
+
+type SpaceWrites = Map<SpaceId, Awaited<ReturnType<typeof spaceKeys>>>;
+
+// Seal one agent what it lacks, as `resealAgents` does for each.
+async function resealAgent(
+  ctx: ClientContext,
+  agent: OwnAgent,
+  groups: readonly AgentGroupListing[],
+  writes: SpaceWrites,
+): Promise<number> {
+  const { shared } = ctx.contacts.book.payloads;
+  const agentId = agent.enrollment.agent.id;
+  if (shared.revokedAgents.some((revoked) => revoked.agentId === agentId)) return 0;
+  let missing: MissingVersions[];
+  try {
+    ({ missing } = await ctx.api.call(agentRoutes.missingVersions, { params: { agentId } }));
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'not-found') return 0;
+    throw error;
+  }
+  for (const spaceId of new Set(missing.map((m) => m.spaceId))) {
+    if (!writes.has(spaceId)) writes.set(spaceId, await spaceKeys(ctx, spaceId, { refresh: true }));
+  }
+  const envelopes = sealForAgent({
+    person: ctx.identity,
+    installationId: ctx.installationId,
+    contacts: shared,
+    agent,
+    missing,
+    groups: groups.filter((group) => group.agentId === agentId && group.confirmed),
+    keyring: ctx.keyring,
+    writes: (spaceId) => {
+      const keys = writes.get(spaceId);
+      if (!keys) throw new CryptoError('missing-key', `No keys worked out for ${spaceId}`);
+      return keys.owners.writes;
+    },
+  });
+  if (envelopes.length === 0) return 0;
+  await ctx.api.call(agentRoutes.addAgentEnvelopes, { params: { agentId }, body: { envelopes } });
+  return envelopes.length;
+}
+
+/** A group one of this person's agents is in, as the server lists it (section 9.4). */
+export type AgentGroupListing = z.output<
+  typeof agentRoutes.myAgentGroups.response
+>['groups'][number];
+
+/**
+ * The groups this person's live agents are in, with the shares each has
+ * and whether this person confirmed it. The server's list: only groups
+ * this person's own record lists are ever sealed for. A server from before
+ * agents in groups (Milestone 5) lists none.
+ */
+export async function listAgentGroups(ctx: ClientContext): Promise<AgentGroupListing[]> {
+  requirePerson(ctx);
+  try {
+    return (await ctx.api.call(agentRoutes.myAgentGroups)).groups;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'not-found') return [];
+    throw error;
+  }
+}
+
+/**
+ * Confirm a group an owner put one of this person's agents in (section
+ * 9.4): the group into the agent's `groups` in a confirmed contacts write,
+ * then the server's grants, then every version this app holds of the
+ * group's shares sealed to it, as at unlock. With `drafts` false it gets
+ * the published keys only, as a reader, whatever the group's access.
+ */
+export async function confirmAgentGroup(
+  ctx: ClientContext,
+  {
+    agentId,
+    spaceId,
+    groupId,
+    drafts = true,
+  }: { agentId: IdentityId; spaceId: SpaceId; groupId: GroupId; drafts?: boolean },
+): Promise<void> {
+  ownAgent(ctx, agentId);
+  const group = { spaceId, groupId, drafts };
+  await saveContacts(ctx, [{ kind: 'agent-groups', agentId, set: [group], unset: [] }], {
+    holds: ({ shared }) =>
+      shared.agents.some(
+        (agent) =>
+          agent.enrollment.agent.id === agentId &&
+          agent.groups?.some(
+            (g) => g.spaceId === spaceId && g.groupId === groupId && g.drafts === drafts,
+          ),
+      ),
+  });
+  await ctx.api.call(agentRoutes.confirmAgentGroup, {
+    params: { agentId, groupId },
+    body: { drafts },
+  });
+  await resealAgent(ctx, ownAgent(ctx, agentId), await listAgentGroups(ctx), new Map());
+}
+
+/**
+ * Take one of this person's agents out of a group, confirmed or not: out
+ * of its `groups` in a confirmed write, then out of the group. It keeps
+ * the keys it had (A6); the group's owners can rotate them (section 7.5).
+ */
+export async function leaveAgentGroup(
+  ctx: ClientContext,
+  { agentId, spaceId, groupId }: { agentId: IdentityId; spaceId: SpaceId; groupId: GroupId },
+): Promise<void> {
+  const agent = ownAgent(ctx, agentId);
+  if (agent.groups?.some((g) => g.spaceId === spaceId && g.groupId === groupId)) {
+    await saveContacts(
+      ctx,
+      [{ kind: 'agent-groups', agentId, set: [], unset: [{ spaceId, groupId }] }],
+      {
+        holds: ({ shared }) =>
+          !shared.agents.some(
+            (a) =>
+              a.enrollment.agent.id === agentId &&
+              a.groups?.some((g) => g.spaceId === spaceId && g.groupId === groupId),
+          ),
+      },
+    );
+  }
+  await ctx.api.call(agentRoutes.leaveAgentGroup, { params: { agentId, groupId } });
 }
 
 // Agents on this person's record that the server lists as revoked but the
@@ -546,13 +672,15 @@ function holdsShares(
 
 /**
  * Every version of a picked share this app can pass on, sealed to the
- * agent: both keys for an editor pick, the published key otherwise. The
- * current version must count for this app's writing (section 9.4).
+ * agent: both keys with `drafts` (an editor pick's default), the published
+ * key otherwise. The current version must count for this app's writing
+ * (section 9.4).
  */
 async function sealPick(
   ctx: ClientContext,
   agent: PublicIdentity,
   pick: ResolvedPick,
+  drafts = pick.role === 'editor',
 ): Promise<FolderKeyEnvelope[]> {
   const keys = await spaceKeys(ctx, pick.spaceId);
   return versionsToGive(ctx, keys, {
@@ -570,7 +698,7 @@ async function sealPick(
       keyVersion: held.keyVersion,
       recipient: agent,
       keys: {
-        draftKey: pick.role === 'editor' ? held.draftKey : null,
+        draftKey: drafts ? held.draftKey : null,
         publishedKey: held.publishedKey,
       },
     });

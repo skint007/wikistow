@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { runCommand } from '../commands/command';
 import { pickForAgent, removeAgentPick } from '../commands/agent-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { refreshAccess, treeQuery } from '../data/queries';
+import { agentGroupsQuery, refreshAccess, treeQuery } from '../data/queries';
 import { ACCESS_LABELS, accessChange, accessOf, grantOf, type Access } from '../sharing/model';
 import { nameOf, shareName } from '../sharing/names';
 import { useOwnerStanding } from '../sharing/owner-standing';
@@ -15,6 +15,7 @@ import { RotateKeysDialog } from '../sharing/rotate-keys-dialog';
 import { AccessSelect } from '../sharing/person-finder';
 import { ErrorLine, useAction } from '../sharing/use-action';
 import { useClient } from '../vault/store';
+import { AgentGroups } from './agent-groups';
 import { ownAgentName } from './agent-name';
 import { pickPath } from './add-agent-dialog';
 import { agentMessage, RecordAhead } from './messages';
@@ -59,6 +60,8 @@ export function AgentCard({ agent, onRevoke }: { agent: ListedAgent; onRevoke: (
   );
   const live = agent.revokedAt === null;
   const { agentId } = agent;
+  const { data: allGroups } = useQuery({ ...agentGroupsQuery(ctx), enabled: live });
+  const groups = allGroups?.filter((group) => group.agentId === agentId) ?? [];
   const env = { satisfies: requirementsHere(), ctx };
   const recorded = () => recordedShares(ctx.contacts.book.payloads.shared.agents, agentId);
   // Each change writes the record first, then calls the server; a failure
@@ -112,9 +115,11 @@ export function AgentCard({ agent, onRevoke }: { agent: ListedAgent; onRevoke: (
       {live && (
         <section aria-label={`What ${plainText(name)} can reach`} className="grid gap-2">
           {agent.grants.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nothing yet: it can only check who it is.
-            </p>
+            !groups.some((group) => group.confirmed) && (
+              <p className="text-sm text-muted-foreground">
+                Nothing yet: it can only check who it is.
+              </p>
+            )
           ) : (
             <ul className="grid gap-1">
               {agent.grants.map((grant) => (
@@ -238,6 +243,7 @@ export function AgentCard({ agent, onRevoke }: { agent: ListedAgent; onRevoke: (
           )}
         </section>
       )}
+      {live && <AgentGroups agentId={agentId} groups={groups} />}
       {rotating && (
         <RotateKeysDialog
           spaceId={rotating.spaceId}

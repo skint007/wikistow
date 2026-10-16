@@ -112,6 +112,8 @@ export const groupChangeCommands = {
   'delete-group': groupChange('group.delete', 'delete-group'),
   /** Add someone to a group, sealing them every folder it has. */
   'add-member': groupChange('group.add-member', 'add-member'),
+  /** Put an agent in a group; it gets nothing until its person confirms. */
+  'add-agent': groupChange('group.add-agent', 'add-agent'),
   /** Take someone out of a group, rotating where their access drops. */
   'remove-member': groupChange('group.remove-member', 'remove-member'),
   /** Share a folder with a group, or change its access there. */

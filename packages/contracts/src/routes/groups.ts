@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { PositiveInt } from '../records/encoding.ts';
-import { GroupId, HumanId, IdentityId, ShareId, SpaceId } from '../records/ids.ts';
+import { AgentId, GroupId, HumanId, IdentityId, ShareId, SpaceId } from '../records/ids.ts';
 import { MetadataEnvelopeV2, SealedMetadataV2 } from '../records/metadata.ts';
 import { FolderKeyEnvelope } from '../records/share.ts';
 import type { RouteDef } from '../route.ts';
@@ -31,6 +31,10 @@ export const GroupAccess = z
  * there. `direct` holds every member's direct grant in the space's shares,
  * so an app can say where each person's access comes from. Both are here
  * rather than in `listShares`, whose answer older apps read strictly.
+ * A group's `agents` are the agents in it, each confirmed by its person or
+ * not yet (section 9.4); the top-level `agents` are the live agents of the
+ * space's owners and of the people in its groups, with their person and
+ * the name the server has, which apps show as the server's.
  * `permissionVersion` is the space's, which every group change names.
  */
 export const listGroups = {
@@ -44,11 +48,13 @@ export const listGroups = {
         /** Null when the caller holds no envelope for it. */
         name: ServedMetadata.nullable(),
         members: z.array(DirectoryPerson),
+        agents: z.array(z.strictObject({ agentId: AgentId, confirmed: z.boolean() })),
         shares: z.array(
           z.strictObject({ shareId: ShareId, role: ShareRole, canPublish: z.boolean() }),
         ),
       }),
     ),
+    agents: z.array(z.strictObject({ agentId: AgentId, personId: HumanId, name: z.string() })),
     direct: z.array(
       z.strictObject({
         shareId: ShareId,
@@ -119,9 +125,24 @@ export const addGroupMember = {
 } as const satisfies RouteDef;
 
 /**
+ * Put an agent in a group, for its person, who must be in the group or an
+ * owner of the space. Nothing is sealed: it gets nothing until its person
+ * confirms (`confirmAgentGroup`), since only they seal to it (section 9.4).
+ */
+export const addGroupAgent = {
+  method: 'POST',
+  path: '/api/groups/:groupId/agents',
+  params: GroupParams,
+  body: z.object({ agentId: AgentId, permissionVersion: z.number().int() }),
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/**
  * Take someone out of a group, with one rotation for each share where
  * their keys exceed what they keep through a direct grant or another
- * group, and none anywhere else (section 7.9).
+ * group, and none anywhere else (section 7.9). A person's agents leave
+ * with them. Each share a confirmed agent leaving no longer reaches is
+ * rotated too: a rotation leaves agents out by itself.
  */
 export const removeGroupMember = {
   method: 'POST',

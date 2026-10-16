@@ -2,6 +2,7 @@ import {
   AgentEnrollment,
   AgentId,
   ContactsRecord,
+  GroupId,
   Hash32,
   HumanId,
   IdentityId,
@@ -53,6 +54,8 @@ const Extensions = z.record(z.string(), z.json());
 // IDs never hold a space, so joining two with one is unambiguous.
 const shareKey = (share: Pick<AgentShare, 'spaceId' | 'shareId'>) =>
   `${share.spaceId} ${share.shareId}`;
+const groupKey = (group: Pick<AgentGroup, 'spaceId' | 'groupId'>) =>
+  `${group.spaceId} ${group.groupId}`;
 const ownerKey = (owner: AcceptedOwner) => `${owner.id} ${owner.keyHash}`;
 
 const ascii = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -77,22 +80,40 @@ const Removed = z.looseObject({ id: IdentityId, keyHash: Hash32, removedAt: Time
 const AgentShare = z.looseObject({ spaceId: SpaceId, shareId: ShareId, drafts: z.boolean() });
 export type AgentShare = z.infer<typeof AgentShare>;
 
+/**
+ * A group the person confirmed for their agent (section 9.4), and whether
+ * its draft keys go to the agent where the group's access is editor.
+ */
+const AgentGroup = z.looseObject({ spaceId: SpaceId, groupId: GroupId, drafts: z.boolean() });
+export type AgentGroup = z.infer<typeof AgentGroup>;
+
+// A set may hold an item twice, but not with two answers about drafts.
+function requireOneDrafts<T extends { drafts: boolean }>(
+  ctx: z.RefinementCtx,
+  items: readonly T[],
+  key: (item: T) => string,
+  what: string,
+) {
+  const drafts = new Map<string, boolean>();
+  for (const item of items) {
+    if (drafts.get(key(item)) === !item.drafts) {
+      ctx.addIssue({ code: 'custom', message: `A ${what} is listed with two drafts values` });
+    }
+    drafts.set(key(item), item.drafts);
+  }
+}
+
 const OwnAgent = z
   .looseObject({
     enrollment: AgentEnrollment,
     label: z.looseObject({ name: z.string(), enrolledAt: Timestamp }),
     shares: z.array(AgentShare),
+    /** Milestone 5: absent in records written before, which is an empty list. */
+    groups: z.array(AgentGroup).optional(),
   })
   .superRefine((agent, ctx) => {
-    // A set: the same share twice is fine, but not with two answers about drafts.
-    const drafts = new Map<string, boolean>();
-    for (const share of agent.shares) {
-      const key = shareKey(share);
-      if (drafts.get(key) === !share.drafts) {
-        ctx.addIssue({ code: 'custom', message: 'A share is listed with two drafts values' });
-      }
-      drafts.set(key, share.drafts);
-    }
+    requireOneDrafts(ctx, agent.shares, shareKey, 'share');
+    requireOneDrafts(ctx, agent.groups ?? [], groupKey, 'group');
   });
 export type OwnAgent = z.infer<typeof OwnAgent>;
 const RevokedAgent = z.looseObject({ agentId: AgentId, revokedAt: Timestamp });
@@ -165,15 +186,21 @@ function requireUnique<T>(
 
 /**
  * The shared payload as writers store it (section 8.2): `removed`,
- * `revokedAgents`, each agent's `shares`, and each space's `owners` and
- * `removedOwners` are sets, sorted by their keys without duplicates.
+ * `revokedAgents`, each agent's `shares` and `groups`, and each space's
+ * `owners` and `removedOwners` are sets, sorted by their keys without
+ * duplicates.
  */
 export function normalizeSharedContacts(shared: SharedContacts): SharedContacts {
   return {
     ...shared,
     removed: sortedSet(shared.removed, (entry) => entry.keyHash),
     revokedAgents: sortedSet(shared.revokedAgents, (entry) => entry.agentId),
-    agents: shared.agents.map((agent) => ({ ...agent, shares: sortedSet(agent.shares, shareKey) })),
+    agents: shared.agents.map(({ groups, ...agent }) => ({
+      ...agent,
+      shares: sortedSet(agent.shares, shareKey),
+      // Left out until an agent has one, so older records keep their bytes.
+      ...(groups ? { groups: sortedSet(groups, groupKey) } : {}),
+    })),
     spaceOwners: shared.spaceOwners.map((entry) => ({
       ...entry,
       owners: sortedSet(entry.owners, ownerKey),
@@ -577,6 +604,13 @@ export type ContactsChange =
       set: readonly AgentShare[];
       unset: readonly Pick<AgentShare, 'spaceId' | 'shareId'>[];
     }
+  /** Groups confirmed for an agent, or whose `drafts` changed, and groups it left. */
+  | {
+      kind: 'agent-groups';
+      agentId: string;
+      set: readonly AgentGroup[];
+      unset: readonly Pick<AgentGroup, 'spaceId' | 'groupId'>[];
+    }
   | { kind: 'accept-owner'; spaceId: SpaceId; owner: AcceptedOwner }
   | { kind: 'remove-owner'; spaceId: SpaceId; ownerId: string }
   | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner }
@@ -754,6 +788,22 @@ export function applyContactsChange(
       ];
       return {
         shared: { ...shared, agents: shared.agents.with(index, { ...current, shares }) },
+        private: own,
+      };
+    }
+    case 'agent-groups': {
+      const index = shared.agents.findIndex(
+        (agent) => agent.enrollment.agent.id === change.agentId,
+      );
+      const current = shared.agents[index];
+      if (!current) throw conflict('This agent is not in the newer record');
+      const touched = new Set([...change.set, ...change.unset].map(groupKey));
+      const groups = [
+        ...(current.groups ?? []).filter((group) => !touched.has(groupKey(group))),
+        ...change.set,
+      ];
+      return {
+        shared: { ...shared, agents: shared.agents.with(index, { ...current, groups }) },
         private: own,
       };
     }

@@ -132,6 +132,13 @@ export const agentsQuery = (ctx: ClientContext) =>
     queryFn: () => agentOperations.listAgents(ctx),
   });
 
+/** The groups this person's agents are in, to confirm or leave (protocol section 9.4). */
+export const agentGroupsQuery = (ctx: ClientContext) =>
+  queryOptions({
+    queryKey: [PLAIN, 'agent-groups'],
+    queryFn: () => agentOperations.listAgentGroups(ctx),
+  });
+
 /** How far the search index being built has got, kept beside it so a reopened dialog sees it too. */
 export const searchProgressKey = [PLAIN, 'search-progress'] as const;
 
@@ -215,6 +222,7 @@ export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext
       'people',
       'pending-owner-work',
       'agents',
+      'agent-groups',
       // Seals new key versions to this person's agents, as at unlock.
       'agent-work',
     ].map((kind) => queryClient.invalidateQueries({ queryKey: [PLAIN, kind] })),

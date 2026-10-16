@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AgentEnrollment, CredentialId, EnrollmentRequested } from '../records/agent.ts';
 import { Base64, Hash32, PositiveInt, PublicKey, Timestamp } from '../records/encoding.ts';
 import { PublicIdentity } from '../records/identity.ts';
-import { AgentId, FolderId, ShareId, SpaceId } from '../records/ids.ts';
+import { AgentId, FolderId, GroupId, ShareId, SpaceId } from '../records/ids.ts';
 import { FolderKeyEnvelope } from '../records/share.ts';
 import { PlainName } from '../records/text.ts';
 import type { RouteDef } from '../route.ts';
@@ -237,5 +237,55 @@ export const deleteAgentGrant = {
   method: 'DELETE',
   path: '/api/me/agents/:agentId/grants/:shareId',
   params: AgentParams.extend({ shareId: ShareId }),
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+const AgentGroupParams = AgentParams.extend({ groupId: GroupId });
+
+/**
+ * The groups the caller's live agents are in (section 9.4), with the shares
+ * each group has and its access there, and whether the person confirmed
+ * it. Not the group's name, which only the space's owners read. Separate
+ * from `myAgents`, whose answer older apps read strictly.
+ */
+export const myAgentGroups = {
+  method: 'GET',
+  path: '/api/me/agents/groups',
+  response: z.strictObject({
+    groups: z.array(
+      z.strictObject({
+        agentId: AgentId,
+        spaceId: SpaceId,
+        groupId: GroupId,
+        confirmed: z.boolean(),
+        /** Whether the person lets it have the draft keys of the group's editor shares. */
+        drafts: z.boolean(),
+        shares: z.array(
+          z.strictObject({ shareId: ShareId, role: ShareRole, canPublish: z.boolean() }),
+        ),
+      }),
+    ),
+  }),
+} as const satisfies RouteDef;
+
+/**
+ * The person confirms a group an owner put their agent in, once their
+ * contacts record lists it: the agent gets the group's shares, whole, at
+ * the group's access (a reader's without `drafts`), capped by the person's.
+ * Their app then seals it the keys, as at unlock.
+ */
+export const confirmAgentGroup = {
+  method: 'POST',
+  path: '/api/me/agents/:agentId/groups/:groupId/confirm',
+  params: AgentGroupParams,
+  body: z.object({ drafts: z.boolean() }),
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/** The person takes their agent out of a group. It keeps the keys it had (A6). */
+export const leaveAgentGroup = {
+  method: 'POST',
+  path: '/api/me/agents/:agentId/groups/:groupId/leave',
+  params: AgentGroupParams,
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;

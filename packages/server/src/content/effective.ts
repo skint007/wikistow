@@ -107,16 +107,19 @@ export async function excessKeys(tx: Database, shareIds: readonly string[]) {
  * The server's coverage check for a change that takes access away
  * (section 7.9): it carries a rotation for exactly the shares where
  * someone's keys exceed their new access, and each leaves them out, or
- * demotes someone who keeps reading. Where nobody's keys exceed it,
- * nothing is rotated.
+ * demotes someone who keeps reading, and for `agentsLost`, the shares a
+ * confirmed agent no longer reaches (section 9.4), which a rotation leaves
+ * out by itself, since only its person seals to it. Where nobody's keys
+ * exceed it, nothing is rotated.
  */
 export async function requireRotationsCover(
   tx: Database,
   shareIds: readonly string[],
   rotations: readonly { shareId: string; removed: readonly string[]; demoted: readonly string[] }[],
+  agentsLost: ReadonlySet<string> = new Set(),
 ) {
   const excess = await excessKeys(tx, shareIds);
-  const needed = new Set(excess.map((e) => e.shareId));
+  const needed = new Set([...excess.map((e) => e.shareId), ...agentsLost]);
   const given = new Map(rotations.map((rotation) => [rotation.shareId, rotation]));
   const exact =
     given.size === rotations.length &&

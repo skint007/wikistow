@@ -1,7 +1,9 @@
 import {
+  agentOperations,
   newId,
   newPayload,
   groupOperations,
+  openAgentSession,
   ownerOperations as owners,
   pageOperations as pages,
   RevisionId,
@@ -11,6 +13,7 @@ import {
   spaceOperations,
   unwrapContentKey,
   revisionWrapSubject,
+  type ClientContext,
   type FolderId,
   type PageId,
   type SpaceId,
@@ -34,7 +37,9 @@ import {
   tampering,
   type Person,
 } from './support/sharing.ts';
+import { enrolledAgent, type Agent } from './support/agents.ts';
 import {
+  addAgentToGroup,
   addToGroup,
   giveAccessTo,
   makeGroup,
@@ -772,8 +777,8 @@ describe('the key version check', () => {
   });
 });
 
-/** Whether `person`'s own keys open the stored revision `revisionId`, trying its wrap. */
-async function opensWith(person: Person, revisionId: RevisionId) {
+/** Whether someone's own keys open the stored revision `revisionId`, trying its wrap. */
+async function opensWith(person: { ctx: ClientContext }, revisionId: RevisionId) {
   const [row] = await t.db
     .select({ sealed: schema.revisions.sealed, wrap: schema.revisionWraps.wrap })
     .from(schema.revisions)
@@ -978,6 +983,115 @@ describe('a group', () => {
     expect(fayOpens).not.toContain(draft);
   });
 
+  it('gives an agent its shares once its person confirms, capped by them, and nothing after its removal', async () => {
+    const alice = await personWithVault(t);
+    const bob = await personWithVault(t);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, { spaceId, rootId: lib.shared, people: [] });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    const readers = { role: 'reader', canPublish: false } as const;
+    await shareWithGroup(alice, { spaceId, shareId, groupId: family, access: readers, sealTo: [] });
+    await addToGroup(alice, spaceId, family, bob);
+    const agent = await enrolledAgent(t, bob);
+    await addAgentToGroup(alice, spaceId, family, agent.agentId);
+
+    // Until Bob confirms, the group gives it nothing, and his app seals it nothing.
+    expect(await agentOperations.listAgentGroups(bob.ctx)).toEqual([
+      {
+        agentId: agent.agentId,
+        spaceId,
+        groupId: family,
+        confirmed: false,
+        drafts: false,
+        shares: [{ shareId, ...readers }],
+      },
+    ]);
+    expect(await agentOperations.resealAgents(bob.ctx)).toBe(0);
+    expect(await sharing.sharedWithMe(agent.ctx)).toEqual([]);
+    expect(await rejection(pages.loadPage(agent.ctx, lib.page.pageId))).toBe('not-found');
+    expect((await whatOpens(t, agent)).revisions).toEqual([]);
+
+    // Confirming seals it the share, as the group's readers.
+    await agentOperations.confirmAgentGroup(bob.ctx, {
+      agentId: agent.agentId,
+      spaceId,
+      groupId: family,
+    });
+    const reading = await reopen(agent, bob);
+    expect((await sharing.sharedWithMe(reading)).map((s) => [s.share.shareId, s.role])).toEqual([
+      [shareId, 'reader'],
+    ]);
+    expect((await pages.loadPage(reading, lib.page.pageId)).heads.publishedHead).not.toBeNull();
+
+    // The group becomes editors, but Bob waits for draft keys: his agent reads only.
+    const editors = { role: 'editor', canPublish: false } as const;
+    await shareWithGroup(alice, { spaceId, shareId, groupId: family, access: editors, sealTo: [] });
+    expect((await pages.loadPage(reading, lib.page.pageId)).role).toBe('reader');
+    expect(await agentOperations.resealAgents(bob.ctx)).toBe(0);
+    // Once Bob has them, his app seals the agent the draft keys at unlock.
+    await giveAccessTo(alice, spaceId, bob);
+    expect(await agentOperations.resealAgents(bob.ctx)).toBe(1);
+    const editing = await reopen(agent, bob);
+    await pages.editDraft(editing, lib.page, { markdown: 'the agent’s words' });
+
+    // Alice takes it out of the group: the share rotates, and its keys open nothing saved after.
+    expect(await removeFromGroup(alice, spaceId, family, agent)).toEqual([shareId]);
+    expect(await rejection(pages.loadPage(editing, lib.page.pageId))).toBe('not-found');
+    expect(await sharing.sharedWithMe(editing)).toEqual([]);
+    const after = (await pages.editDraft(alice.ctx, lib.page, { markdown: 'after the agent' }))
+      .revisionId;
+    expect(await opensWith({ ctx: editing }, after)).toBe(false);
+    expect(
+      (await whatOpens(t, { identity: agent.identity, ctx: editing })).revisions.map(
+        (r) => r.record.revisionId,
+      ),
+    ).not.toContain(after);
+    expect(await agentOperations.resealAgents(bob.ctx)).toBe(0);
+  });
+
+  it('takes a person’s agents out of the group with them, rotating what they no longer reach', async () => {
+    const alice = await personWithVault(t);
+    const bob = await personWithVault(t);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: lib.shared,
+      people: [await invite(alice, bob, 'editor')],
+    });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    const editors = { role: 'editor', canPublish: false } as const;
+    await shareWithGroup(alice, { spaceId, shareId, groupId: family, access: editors, sealTo: [] });
+    await addToGroup(alice, spaceId, family, bob);
+    const agent = await enrolledAgent(t, bob);
+    await addAgentToGroup(alice, spaceId, family, agent.agentId);
+    await agentOperations.confirmAgentGroup(bob.ctx, {
+      agentId: agent.agentId,
+      spaceId,
+      groupId: family,
+    });
+    const editing = await reopen(agent, bob);
+    expect((await pages.loadPage(editing, lib.page.pageId)).role).toBe('editor');
+
+    // Bob keeps editing through his direct grant, but his agent leaves with him, so
+    // the share rotates for it alone, and the server refuses a removal without that.
+    expect(await rejection(removeFromGroup(alice, spaceId, family, bob, { rotate: [] }))).toBe(
+      'stale-head',
+    );
+    expect(await removeFromGroup(alice, spaceId, family, bob)).toEqual([shareId]);
+    const [group] = (await groupOperations.loadGroups(alice.ctx, spaceId)).groups;
+    expect(group?.agents).toEqual([]);
+    expect(await agentOperations.listAgentGroups(bob.ctx)).toEqual([]);
+    expect(await rejection(pages.loadPage(editing, lib.page.pageId))).toBe('not-found');
+    const after = (await pages.editDraft(alice.ctx, lib.page, { markdown: 'after Bob left' }))
+      .revisionId;
+    expect(await opensWith({ ctx: editing }, after)).toBe(false);
+    await spaceOperations.loadTree(bob.ctx, spaceId);
+    expect(await opensWith(bob, after)).toBe(true);
+    expect(await agentOperations.resealAgents(bob.ctx)).toBe(0);
+  });
+
   it('serves a member waiting for keys nothing, until an owner gives them access', async () => {
     const alice = await personWithVault(t);
     const [frank, gina] = await Promise.all([personWithVault(t), personWithVault(t)]);
@@ -1026,3 +1140,11 @@ describe('a group', () => {
     expect((await pages.loadPage(frank.ctx, lib.page.pageId)).heads.publishedHead).not.toBeNull();
   });
 });
+
+/** The agent's own session afresh, as its CLI's next run opens it. */
+const reopen = (agent: Agent, person: Person) =>
+  openAgentSession(agent.api, {
+    ...agent.kept,
+    identity: agent.identity,
+    person: person.vault.identity.public,
+  });

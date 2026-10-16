@@ -4,9 +4,12 @@ import {
   approveEnrollment,
   cancelEnrollment,
   claimEnrollment,
+  confirmAgentGroup,
   confirmEnrollment,
   deleteAgentGrant,
   enrollmentState,
+  leaveAgentGroup,
+  listAgentGroups,
   listAgents,
   missingVersions,
   pollEnrollment,
@@ -90,6 +93,30 @@ export function mountAgentRoutes(routes: Routes, { db }: { db: Database }): void
   routes.account(agentRoutes.myAgents, async (_input, { principal }) => ({
     agents: await listAgents(db, principal.accountId),
   }));
+
+  routes.account(agentRoutes.myAgentGroups, async (_input, { principal }) => ({
+    groups: await listAgentGroups(db, principal.accountId),
+  }));
+
+  routes.account(
+    agentRoutes.confirmAgentGroup,
+    async ({ params, body }, { principal }) => {
+      await confirmAgentGroup(db, { accountId: principal.accountId, ...params, ...body }).catch(
+        toApiError,
+      );
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    agentRoutes.leaveAgentGroup,
+    async ({ params }, { principal }) => {
+      await leaveAgentGroup(db, { accountId: principal.accountId, ...params }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
 
   routes.account(
     agentRoutes.revokeAgent,
