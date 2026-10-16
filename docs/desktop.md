@@ -117,4 +117,4 @@ The app holds decrypted pages and, if asked, the key to your vault, so an update
 
 The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. The `.deb` and `.rpm` are `wikistow-desktop` at the release's version, with package release `1`. A prerelease such as `0.3.0-rc.1` becomes `0.3.0~rc.1` there, which apt and dnf sort before `0.3.0`. Later releases must keep versions increasing.
 
-The account menu ends with the version running. A release shows its version, as `0.2.0`. A build of any other commit adds the first 8 characters of that commit, as `0.2.0+5b9e5ec4`.
+The account menu ends with **What’s new**, which lists every release up to this one with its highlights, and the version running. A release shows its version, as `0.2.0`. A build of any other commit adds the first 8 characters of that commit, as `0.2.0+5b9e5ec4`.
