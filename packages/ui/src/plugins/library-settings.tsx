@@ -3,7 +3,7 @@ import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
 import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useVault } from '../vault/store';
 import { useNewDraft } from '../workshop/drafts';
+import { ChooseFolder, pathInFolder } from './choose-folder';
 import {
   asInstalled,
   LIBRARY_KEY,
@@ -260,7 +261,10 @@ export function Library({ ctx }: { ctx: ClientContext }) {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="flex-1 font-bold">Library</h3>
           {!desktop && (
-            <Upload
+            <ChooseFolder
+              label="Upload plugin folder…"
+              name="Plugin folder"
+              phone="Uploading a plugin needs a computer."
               onFolder={(chosen) =>
                 act(async () => setUpload(await readUpload(await readFolder(chosen))))
               }
@@ -355,8 +359,7 @@ async function readFolder(chosen: File[]): Promise<PluginUploadFile[]> {
   const files = chosen.map((file) => ({
     file,
     shown: file.webkitRelativePath || file.name,
-    // The chosen folder's own name comes first.
-    path: file.webkitRelativePath.split('/').slice(1).join('/') || file.name,
+    path: pathInFolder(file),
   }));
   for (const { path, shown } of files) {
     const problem = pluginRoutes.uploadPathProblem(path, shown);
@@ -364,38 +367,6 @@ async function readFolder(chosen: File[]): Promise<PluginUploadFile[]> {
   }
   return Promise.all(
     files.map(async ({ file, path }) => ({ path, data: new Uint8Array(await file.arrayBuffer()) })),
-  );
-}
-
-/** Pick, on a computer, a built plugin's folder to upload. Phones can't choose folders. */
-function Upload({ onFolder }: { onFolder: (files: File[]) => Promise<void> }) {
-  const input = useRef<HTMLInputElement | null>(null);
-  const [computer] = useState(() => window.matchMedia('(any-pointer: fine)').matches);
-  if (!computer) {
-    return <p className="text-sm text-muted-foreground">Uploading a plugin needs a computer.</p>;
-  }
-  return (
-    <>
-      <Button size="sm" variant="outline" onClick={() => input.current?.click()}>
-        Upload plugin folder…
-      </Button>
-      <input
-        ref={(element) => {
-          input.current = element;
-          // Not in React's types: lets the person choose a whole folder.
-          element?.setAttribute('webkitdirectory', '');
-        }}
-        type="file"
-        hidden
-        aria-label="Plugin folder"
-        onChange={(event) => {
-          const files = [...(event.target.files ?? [])];
-          // So choosing the same folder again, once it is fixed, sends it again.
-          event.target.value = '';
-          if (files.length > 0) void onFolder(files);
-        }}
-      />
-    </>
   );
 }
 

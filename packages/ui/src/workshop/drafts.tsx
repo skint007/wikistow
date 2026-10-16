@@ -1,4 +1,5 @@
 import { pluginDraftRoutes } from '@wikistow/contracts';
+import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import type { z } from 'zod';
@@ -18,6 +19,7 @@ import { ago } from '../agents/model';
 import { chatStore } from '../ai/chat';
 import { api } from '../api';
 import { errorMessage } from '../errors';
+import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
 import { WorkshopChat } from './workshop-chat';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
@@ -133,6 +135,51 @@ export function useNewDraft(): {
   return { start, busy: making || busy, error, dialog };
 }
 
+const { draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
+  pluginDraftRoutes;
+
+/**
+ * A plugin project's files, as a new draft's (ADR 0004): its
+ * `wikistow-plugin.json` and every file under `src/` and `public/`, chosen
+ * by path before anything is read, leaving out the rest (`package.json`,
+ * `node_modules`, `dist`, dotfiles). A file the draft can't hold, or the
+ * limits, refuse the whole folder, naming the file.
+ */
+async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[]> {
+  const files = chosen
+    .map((file) => ({ file, path: pathInFolder(file) }))
+    .filter(
+      ({ path }) =>
+        (path === MANIFEST_FILE || path.startsWith('src/') || path.startsWith('public/')) &&
+        !path.split('/').some((name) => name.startsWith('.')),
+    );
+  if (!files.some(({ path }) => path === MANIFEST_FILE))
+    throw new Error(`Choose a plugin project’s folder, with ${MANIFEST_FILE} at the top.`);
+  if (files.length > MAX_DRAFT_FILES)
+    throw new Error(`A draft holds ${MAX_DRAFT_FILES} files at most.`);
+  for (const { file, path } of files) {
+    const problem = draftPathProblem(path);
+    if (problem) throw new Error(problem);
+    if (file.size > MAX_DRAFT_FILE_BYTES)
+      throw new Error(`${path} is too large: a draft file holds 256 KB at most.`);
+  }
+  if (files.reduce((total, { file }) => total + file.size, 0) > MAX_DRAFT_BYTES)
+    throw new Error('A draft holds 4 MB at most.');
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  return Promise.all(
+    files.map(async ({ file, path }) => {
+      let text: string;
+      try {
+        text = decoder.decode(await file.arrayBuffer());
+      } catch {
+        throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+      }
+      if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+      return { path, text };
+    }),
+  );
+}
+
 /** When a draft's files last changed, as the list says it. */
 function changed(iso: string) {
   const said = ago(iso, new Date());
@@ -141,7 +188,7 @@ function changed(iso: string) {
 
 /**
  * The person's drafts, with how long ago each changed, **Open** and
- * **Delete**, beside **New plugin**. The draft the workshop has open says
+ * **Delete**, beside **Upload project folder…** and **New plugin**. The draft the workshop has open says
  * so, and can't be deleted while it is.
  */
 export function DraftsList({ open }: { open: string | null }) {
@@ -165,6 +212,19 @@ export function DraftsList({ open }: { open: string | null }) {
     <section aria-label="Plugin drafts" className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="flex-1 text-sm font-bold">Your plugin drafts</h2>
+        <ChooseFolder
+          label="Upload project folder…"
+          name="Project folder"
+          phone="Uploading a project folder needs a computer."
+          onFolder={async (chosen) => {
+            setError(null);
+            try {
+              await newDraft.start({ files: await readProject(chosen) });
+            } catch (failure) {
+              setError(errorMessage(failure));
+            }
+          }}
+        />
         <Button size="sm" disabled={newDraft.busy} onClick={() => void newDraft.start({})}>
           New plugin
         </Button>
