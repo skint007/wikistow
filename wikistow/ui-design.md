@@ -317,6 +317,16 @@ Agents follow the [protocol](protocol.md) section 9. Every action is a named com
 - **Stop** replaces **Send** while a reply is written or approved proposals are being made. A stopped reply says so, and that approved changes stay made.
 - **Revoked.** The chat says the assistant can't read or change anything now, its proposals were dropped, and what it sent to the provider can't be recalled. The message box is off.
 
+## Plugins in Settings
+
+Settings → Plugins lists what is installed first, one bordered row per plugin: its name, version and trust level badge with an on/off switch, its description, any problem in the destructive colour, **Remove** (and **Reload** for a development folder on the desktop), then **Page access** when its manifest asks for any. The desktop app adds **Install plugin…**, **Load development folder…** and **Build one with the assistant** above the list.
+
+In the browser the plugins come from the server's library. An installed plugin with a newer version in the library says so under its description, with **Update…**; one whose version left the library says it no longer loads, with **Install** for the newest version if there is one, and **Remove**. Below is **Library**, with **Upload plugin folder…** on a computer (a phone says uploading needs a computer), and a row per plugin: name, newest version, trust level, **Installed** if it is, description, what it asks for and who uploaded it, **Install…**, **Remove from library** for its owner or an admin, and a collapsed list of its versions with date, size, hash and **Remove version**. Removing from the library asks first, saying it goes for everyone. While the vault is locked the section only says to unlock it.
+
+Install and Update open the approval dialog: the plugin's name and version as the title, its description, the trust level badge with what that level may do, the page access it asks for, for an update what it replaces and whether the level or access changes (in bold), and the SHA-256 approved. Its button says **Install**, **Update** or **Load**.
+
+Safe mode shows a small card at the bottom right, drawn by the app: "Safe mode: plugins are off.", **Manage plugins** and **Turn plugins back on**. In the browser the unlock page has **Open without plugins** under **Unlock**.
+
 ## Plugin workshop
 
 Desktop only, at `/workshop`, reached by **Build one with the assistant** in Settings → Plugins or **Build a plugin** in the assistant's panel; neither shows in safe mode, where the page says plugins are off. The main card is the preview; the conversation is the assistant's column beside it (a sheet below 1200px), and stays open from page to page like the page chat.

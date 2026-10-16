@@ -41,7 +41,7 @@ function WorkshopPage() {
           <h1 className="text-[32px] leading-tight font-extrabold">Plugin workshop</h1>
           {!desktop ? (
             <p className="text-sm text-muted-foreground">
-              The plugin workshop is in the desktop app, where plugins run.
+              The plugin workshop is in the desktop app.
             </p>
           ) : safeMode && !workshop ? (
             <p className="text-sm text-muted-foreground">

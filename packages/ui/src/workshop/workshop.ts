@@ -104,6 +104,8 @@ export class Workshop {
         return { safeMode, plugins: [{ ...running, manifest }] };
       },
       access: async () => ({}),
+      // The samples are open to the manifest's access; there is none to choose.
+      setAccess: async () => {},
       pages: (caller) => this.samples.pages(caller),
       handle: (caller, shown) => this.samples.handle(caller, shown),
       disable: () => this.unload(),

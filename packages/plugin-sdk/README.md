@@ -1,6 +1,6 @@
 # @wikistow/plugin-sdk
 
-What a WikiStow plugin is written against. The design and its reasons are in [ADR 0001](../../docs/adr/0001-desktop-plugin-runtime.md); `wikistow.md` §Plugins says what a person sees. Plugins run in the desktop app only, for now.
+What a WikiStow plugin is written against. The design and its reasons are in [ADR 0001](../../docs/adr/0001-desktop-plugin-runtime.md); the plugin library and browser plugins in [ADR 0002](../../docs/adr/0002-plugin-library-and-browser-plugins.md); `wikistow.md` §Plugins says what a person sees. Plugins run in the desktop app, installed from a folder, and in the browser and on phones, installed from the server's plugin library.
 
 ## A plugin folder
 
@@ -11,7 +11,7 @@ src/script.ts          script code (optional): calls defineScript(...)
 public/                styles, theme stylesheets, fonts, images, copied as they are
 ```
 
-`wikistow-plugin build [folder]` writes `dist/`: the manifest, `ui.js` and `script.js` each bundled into one self-contained ES module (unminified, for whoever approves it), and `public/`'s files. Install `dist/` in Settings → Plugins, or load it there for development and press **Reload** after each build. The desktop app's plugin workshop builds the same layout itself, with the assistant writing the files. There are four examples in `examples/plugins`: `page-tools` (a panel, commands, a script and a block), `calculator` (a script plugin's block), `reading-room` (a layout: a rail item, a plugin page, a page aside and CSS) and `dusk-theme`, a theme that needs no build, just a manifest and a stylesheet installed as they are.
+`wikistow-plugin build [folder]` writes `dist/`: the manifest, `ui.js` and `script.js` each bundled into one self-contained ES module (unminified, for whoever approves it), and `public/`'s files. Install `dist/` in the desktop app's Settings → Plugins, or load it there for development and press **Reload** after each build. To use it in the browser, upload `dist/` to the library from Settings → Plugins in a computer's browser, then install it there; file and folder names must use only letters, digits, `_`, `.` and `-`. The desktop app's plugin workshop builds the same layout itself, with the assistant writing the files. There are four examples in `examples/plugins`: `page-tools` (a panel, commands, a script and a block), `calculator` (a script plugin's block), `reading-room` (a layout: a rail item, a plugin page, a page aside and CSS) and `dusk-theme`, a theme that needs no build, just a manifest and a stylesheet installed as they are.
 
 The manifest (`src/manifest.ts` has the schema):
 
@@ -46,9 +46,9 @@ A script's command or event handler gets 10 seconds, as does its `defineScript` 
 
 ## Themes
 
-A manifest's `themes` (`{ id, name, base: 'light' | 'dark', stylesheet }`) join Settings → Appearance in the desktop app, under the built-in palettes, while the plugin is enabled. There a person can **Preview** one (shown until they stop or leave Settings), use it, or go back to the account's palette with **Use … here** or any built-in choice. Turning the plugin off shows the palette again, and turning it back on brings the theme back.
+A manifest's `themes` (`{ id, name, base: 'light' | 'dark', stylesheet }`) join Settings → Appearance, under the built-in palettes, while the plugin is enabled. There a person can **Preview** one (shown until they stop or leave Settings), use it, or go back to the account's palette with **Use … here** or any built-in choice. Turning the plugin off shows the palette again, and turning it back on brings the theme back.
 
-How they rank: a preview over a chosen plugin theme, over the account's built-in choice. A plugin theme is kept on this computer only. The account's choice stays what every other device and the browser show. A theme is light or dark by its `base`: it is drawn over Light or Midnight slate, which supply any token it leaves out and the app's dark styles, and it doesn't follow the system's light or dark setting.
+How they rank: a preview over a chosen plugin theme, over the account's built-in choice. A plugin theme is kept on this computer, or in this browser, only. The account's choice stays what every other device shows. A theme is light or dark by its `base`: it is drawn over Light or Midnight slate, which supply any token it leaves out and the app's dark styles, and it doesn't follow the system's light or dark setting.
 
 The stylesheet is loaded after the app's styles, only while the theme is shown. It sets the app's tokens on `:root, [data-theme]`. `ThemeToken` (`src/theme.ts`) lists them: the palette's colours, `--card-shadow` and `--cover`, then `--font-sans`, `--font-mono`, the radii `--radius-card`, `--radius-tile`, `--radius-control`, `--radius-row`, `--radius-folder`, and `--spacing`, the unit every gap and padding is a multiple of. Their built-in values are in `packages/ui/src/styles/theme.css`. Beyond tokens, it can style the app's places through their `data-region` attributes and a page's text through `.page-body`, the same in the reader and the visual editor.
 

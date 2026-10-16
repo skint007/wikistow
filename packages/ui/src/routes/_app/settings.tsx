@@ -21,6 +21,7 @@ import { errorMessage, unwrap } from '../../errors';
 import { ThemePicker } from '../../theme/theme-picker';
 import { desktop } from '../../desktop';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../vault/idle-lock';
+import { LibrarySettings } from '../../plugins/library-settings';
 import { PluginSettings } from '../../plugins/plugin-settings';
 import { pluginName } from '../../plugins/regions';
 import { usePlugins } from '../../plugins/runtime';
@@ -46,7 +47,7 @@ function Settings() {
         description={
           desktop
             ? 'Palettes are synced to your account on every device. Plugin themes stay on this computer.'
-            : 'Synced to your account on every device.'
+            : 'Palettes are synced to your account on every device. Plugin themes stay in this browser.'
         }
       >
         <ThemePicker />
@@ -69,12 +70,19 @@ function Settings() {
       >
         <IdleLock />
       </Section>
-      {desktop && (
+      {desktop ? (
         <Section
           title="Plugins"
           description="Installed on this computer only. They never come from the server or from a page. If one breaks the app, Ctrl+Shift+Alt+P restarts it without plugins."
         >
           <PluginSettings />
+        </Section>
+      ) : (
+        <Section
+          title="Plugins"
+          description="From this server’s plugin library. What you install follows your account to every browser. If one breaks the app, Ctrl+Shift+Alt+P, or ?safe-mode in the address, opens this tab without plugins."
+        >
+          <LibrarySettings />
         </Section>
       )}
       <PluginSections />

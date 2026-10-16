@@ -521,7 +521,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
       <Approval
         candidate={candidate}
         onDone={() => setCandidate(null)}
-        onApprove={(token) =>
+        onApprove={({ token }) =>
           act(async () => {
             await desktop?.approvePlugin(token);
             await pluginRuntime.refresh();

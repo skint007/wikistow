@@ -1,8 +1,13 @@
 import type { Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { expect, serverSnapshot, test } from './fixtures';
-import { adminTab, memberWithVault } from './vault';
+import { fileURLToPath } from 'node:url';
+import { expect, pick, serverSnapshot, test } from './fixtures';
+import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './vault';
+
+const BUILD = fileURLToPath(new URL('../../../packages/plugin-sdk/src/build.ts', import.meta.url));
+const PAGE_TOOLS = fileURLToPath(new URL('../../../examples/plugins/page-tools', import.meta.url));
 
 // The sandboxed frame that holds plugin scripts' workers (ADR 0002), driven
 // from the app's page as `packages/ui/src/plugins/script-frame.ts` drives
@@ -280,4 +285,86 @@ test('a script in a loop is stopped while the page keeps answering', async ({ pa
   await expect.poll(() => scripts().length, { timeout: 10_000 }).toBe(0);
   await start(sandbox, 2, LOOP);
   expect(await ask(sandbox, 2, 'second')).toEqual({ message: { echo: 'second' } });
+});
+
+// A library plugin in the browser, from upload to removal (ADR 0002): its
+// styles, app code and script all come from the server's library route,
+// the script running in a worker in the sandboxed frame, and a version
+// removed from the library stops loading.
+test('a library plugin runs in the browser until it leaves the library', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  execFileSync(process.execPath, [BUILD, 'build', PAGE_TOOLS], { stdio: 'inherit' });
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Tools');
+  await fillSource(page, 'Three short words.');
+  await waitForSave(page);
+  const shownAt = page.url();
+
+  // Uploaded from its built folder, then approved.
+  await page.goto('/settings');
+  await page.getByLabel('Plugin folder').setInputFiles(`${PAGE_TOOLS}/dist`);
+  await expect(page.getByText('Uploaded Page tools 0.1.0.')).toBeVisible({ timeout: 15_000 });
+  const listed = page
+    .getByRole('list', { name: 'Plugin library' })
+    .getByRole('listitem', { name: 'Page tools' });
+  await listed.getByRole('button', { name: 'Install…' }).click();
+  const approval = page.getByRole('dialog');
+  await expect(approval).toContainText('App');
+  await expect(approval).toContainText(/[0-9a-f]{64}/);
+  await approval.getByRole('button', { name: 'Install' }).click();
+  const installed = page
+    .getByRole('list', { name: 'Installed plugins' })
+    .getByRole('listitem', { name: 'Page tools' });
+  await expect(installed.getByRole('switch', { name: 'Page tools enabled' })).toBeChecked();
+  await installed.getByRole('button', { name: /^Where/ }).click();
+  await page
+    .getByRole('menuitemradio', { name: /whole space/ })
+    .first()
+    .click();
+  await pick(installed.getByRole('button', { name: /^Access/ }), 'Read and write');
+  await installed.getByRole('button', { name: 'Add' }).click();
+  await expect(installed.getByRole('list', { name: 'Page access' })).toContainText(
+    'read and write',
+  );
+
+  // On the page, after a reload: its styles, its panel, and its script's
+  // command, which writes a page through the access given.
+  await page.goto(shownAt);
+  const fromLibrary = /^\/plugins\/page-tools\/[0-9a-f]{64}\/page-tools\.css$/;
+  await expect(page.locator('link[data-plugin="page-tools"]')).toHaveAttribute('href', fromLibrary);
+  await page.getByRole('button', { name: 'Plugins' }).click();
+  await page.getByRole('menuitem', { name: 'Page stats' }).click();
+  await expect(page.getByTestId('page-tools-words')).toHaveText('3');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('iframe[src="/plugin-host.html"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Plugins' }).click();
+  await page.getByRole('menuitem', { name: 'Write this folder’s index' }).click();
+  await expect(page.getByRole('treeitem', { name: /^Index/ })).toBeVisible();
+
+  // Safe mode in this tab: nothing loads until it is turned off.
+  await page.goto('/settings?safe-mode');
+  const banner = page.locator('[data-region="safe-mode"]');
+  await expect(banner).toContainText('plugins are off');
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.locator('link[data-plugin]')).toHaveCount(0);
+  await banner.getByRole('button', { name: 'Turn plugins back on' }).click();
+  await expect(banner).toHaveCount(0);
+  await expect(page.locator('link[data-plugin="page-tools"]')).toHaveCount(1);
+
+  // Removed from the library: it stops, and Settings says why.
+  await listed.getByRole('button', { name: 'Remove from library' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
+  await expect(page.getByRole('list', { name: 'Plugin library' })).toHaveCount(0);
+  const gone = page
+    .getByRole('list', { name: 'Installed plugins' })
+    .getByRole('listitem', { name: 'page-tools' });
+  await expect(gone).toContainText('no longer in the library');
+  await expect(page.locator('link[data-plugin]')).toHaveCount(0);
+  await expect(page.locator('iframe[src="/plugin-host.html"]')).toHaveCount(0);
+  await gone.getByRole('button', { name: 'Remove' }).click();
+  await expect(page.getByRole('list', { name: 'Installed plugins' })).toHaveCount(0);
 });

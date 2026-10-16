@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { safeRedirect } from '@/lib/redirect';
 import { meQuery } from '../../../api';
 import { desktop } from '../../../desktop';
+import { tabSafeMode } from '../../../plugins/safe-mode';
 import { vaultMessage } from '../../../vault/messages';
 import { unlockWith } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
@@ -68,6 +69,10 @@ function Unlock() {
     const passphrase = form.get('passphrase');
     if (typeof passphrase !== 'string' || !passphrase) return;
     const started = vaultStore.epoch();
+    // Open without plugins: safe mode for this tab, set before unlocking,
+    // which starts the plugins, and kept only if it opens.
+    const safe = form.get('plugins') === 'off' && !tabSafeMode.on();
+    if (safe) tabSafeMode.set(true);
     setBusy(true);
     setError(null);
     try {
@@ -77,6 +82,7 @@ function Unlock() {
       else await desktop?.forgetVault();
       await navigate({ to: safeRedirect(redirect) });
     } catch (caught) {
+      if (safe) tabSafeMode.set(false);
       setError(vaultMessage(caught));
     } finally {
       setBusy(false);
@@ -115,6 +121,11 @@ function Unlock() {
         <Button type="submit" disabled={busy}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </Button>
+        {!desktop && (
+          <Button type="submit" name="plugins" value="off" variant="outline" disabled={busy}>
+            Open without plugins
+          </Button>
+        )}
         <Link to="/vault/recover" className="text-sm quiet-link">
           Use your recovery key instead
         </Link>
