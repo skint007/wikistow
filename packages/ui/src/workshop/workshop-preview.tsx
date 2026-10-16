@@ -1,7 +1,6 @@
 import { PageId, SpaceId } from '@wikistow/client';
-import type { PluginCandidate, WorkshopVersion } from '@wikistow/contracts';
+import type { WorkshopVersion } from '@wikistow/contracts';
 import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -12,12 +11,9 @@ import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
-import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from '../plugins/library';
-import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
-import { Approval } from '../plugins/plugin-settings';
 import { PageViews, pluginName } from '../plugins/regions';
-import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
+import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PluginView } from '../plugins/views';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
@@ -32,8 +28,8 @@ const LEVELS = { theme: 'Theme', script: 'Script', app: 'App' } as const;
  * The workshop's preview (#257), beside its conversation: which version
  * runs, what its last build said, and the plugin itself, drawn by a
  * runtime of the workshop's own over sample pages. Its themes can be shown
- * across the app. Versions that built can be previewed again, exported or
- * installed, each by the hash the person sees.
+ * across the app. Versions that built can be previewed again, and on the
+ * desktop exported, each by the hash the person sees.
  */
 export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   const state = useSyncExternalStore(workshop.subscribe, workshop.state);
@@ -91,7 +87,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
 
 /** Which version runs, whether the last build failed, and what it said. */
 function Status({ workshop }: { workshop: Workshop }) {
-  const { phase, failure, versions, running, building } = useSyncExternalStore(
+  const { phase, failure, problem, opening, versions, running, building } = useSyncExternalStore(
     workshop.subscribe,
     workshop.state,
   );
@@ -120,13 +116,20 @@ function Status({ workshop }: { workshop: Workshop }) {
           </>
         ) : (
           <span className="text-muted-foreground">
-            {versions.length === 0
-              ? 'Nothing is built yet. Ask the assistant for a plugin.'
-              : 'Nothing is in the preview.'}
+            {opening
+              ? 'Opening the draft…'
+              : versions.length === 0
+                ? 'Nothing is built yet. Ask the assistant for a plugin.'
+                : 'Nothing is in the preview.'}
           </span>
         )}
         {building && <span className="text-muted-foreground">Building…</span>}
       </div>
+      {problem && (
+        <p role="alert" className="text-sm text-destructive">
+          {problem}
+        </p>
+      )}
       {latest && !latest.plugin && (
         <Alert variant="destructive">
           <AlertDescription className="grid gap-1.5">
@@ -220,7 +223,7 @@ function Themes({ workshop }: { workshop: Workshop }) {
         size="sm"
         variant={theme === null ? 'secondary' : 'ghost'}
         aria-pressed={theme === null}
-        onClick={() => workshop.showTheme(null)}
+        onClick={() => void workshop.showTheme(null)}
       >
         Not shown
       </Button>
@@ -230,7 +233,7 @@ function Themes({ workshop }: { workshop: Workshop }) {
           size="sm"
           variant={theme === id ? 'secondary' : 'ghost'}
           aria-pressed={theme === id}
-          onClick={() => workshop.showTheme(id)}
+          onClick={() => void workshop.showTheme(id)}
         >
           {name}
         </Button>
@@ -432,15 +435,9 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
   );
 }
 
-/** Every build, newest first: preview any that built, or export, install or share it by its hash. */
+/** Every build, newest first: preview any that built, or on the desktop export it, by its hash. */
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
-  const queryClient = useQueryClient();
-  const ctx = useClient();
-  const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
-  const [sharing, setSharing] = useState<{ version: WorkshopVersion; upload: PluginUpload } | null>(
-    null,
-  );
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
   const act = async (run: () => Promise<string | null>) => {
     setNotice(null);
@@ -490,47 +487,19 @@ function Versions({ workshop }: { workshop: Workshop }) {
                   Preview
                 </Button>
               )}
-              {version.plugin && (
-                <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void act(async () => {
-                        const folder = await workshop.export(version);
-                        return folder && `Exported v${version.version} to ${folder}.`;
-                      })
-                    }
-                  >
-                    Export…
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      void act(async () => {
-                        setCandidate(await workshop.install(version));
-                        return null;
-                      })
-                    }
-                  >
-                    Install…
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void act(async () => {
-                        setSharing({
-                          version,
-                          upload: await readUpload(await workshop.upload(version)),
-                        });
-                        return null;
-                      })
-                    }
-                  >
-                    Share to library…
-                  </Button>
-                </>
+              {version.plugin && desktop && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    void act(async () => {
+                      const folder = await workshop.export(version.version);
+                      return folder && `Exported v${version.version} to ${folder}.`;
+                    })
+                  }
+                >
+                  Export…
+                </Button>
               )}
             </div>
             {version.hash && (
@@ -540,72 +509,39 @@ function Versions({ workshop }: { workshop: Workshop }) {
           </li>
         ))}
       </ul>
-      <Approval
-        candidate={candidate}
-        onDone={() => setCandidate(null)}
-        onApprove={({ token }) =>
-          act(async () => {
-            await desktop?.approvePlugin(token);
-            await pluginRuntime.refresh();
-            return 'Installed. It runs across the app now, outside the workshop, as Settings → Plugins lists it.';
-          })
-        }
-      />
-      <ConfirmUpload
-        ctx={ctx}
-        upload={sharing?.upload ?? null}
-        onDone={() => setSharing(null)}
-        onUpload={(upload, visibility) =>
-          act(async () => {
-            const { manifest } = await uploadAndInstall(ctx, upload, visibility);
-            await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
-            await pluginRuntime.refresh();
-            return `Shared v${sharing?.version.version} to the library as ${manifest.name} ${manifest.version}, and installed it on all your devices.`;
-          })
-        }
-      />
     </section>
   );
 }
 
-/** The workspace's files, to read what the assistant wrote. */
+/** The draft's files as saved, to read what the assistant wrote. */
 function Files({ workshop }: { workshop: Workshop }) {
-  const { versions } = useSyncExternalStore(workshop.subscribe, workshop.state);
+  const { files } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const [path, setPath] = useState<string | null>(null);
-  // Listed afresh with each build.
-  const files = useQuery({
-    queryKey: ['workshop-files', workshop.id, versions.length],
-    queryFn: () => workshop.files(),
-  });
-  const text = useQuery({
-    queryKey: ['workshop-file', workshop.id, versions.length, path],
-    queryFn: () => (path ? workshop.read(path) : null),
-    enabled: path !== null,
-  });
-  if (!files.data?.length) return null;
+  if (files.size === 0) return null;
+  const text = path === null ? undefined : files.get(path);
   return (
-    <section aria-label="Workspace files" className="grid gap-2">
-      <h2 className="text-sm font-bold">Workspace files</h2>
+    <section aria-label="Draft files" className="grid gap-2">
+      <h2 className="text-sm font-bold">Draft files</h2>
       <div className="flex flex-wrap gap-1">
-        {files.data.map((file) => (
+        {[...files.keys()].sort().map((file) => (
           <Button
-            key={file.path}
+            key={file}
             size="sm"
-            variant={path === file.path ? 'secondary' : 'ghost'}
-            aria-pressed={path === file.path}
-            onClick={() => setPath(path === file.path ? null : file.path)}
+            variant={path === file ? 'secondary' : 'ghost'}
+            aria-pressed={path === file}
+            onClick={() => setPath(path === file ? null : file)}
             className="font-mono"
           >
-            {file.path}
+            {file}
           </Button>
         ))}
       </div>
-      {path && (
+      {path && text !== undefined && (
         <pre
           aria-label={path}
           className="max-h-96 overflow-auto rounded-control bg-muted p-3 font-mono text-xs whitespace-pre"
         >
-          {text.data ?? 'Reading…'}
+          {text}
         </pre>
       )}
     </section>

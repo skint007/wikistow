@@ -4,20 +4,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { readPluginFolder } from '../src/plugins/folder.ts';
 import { pluginAddress } from '../src/plugins/plugins.ts';
-import { desktopWorkshop, type Bundler } from '../src/workshop/workshop.ts';
+import { desktopWorkshop } from '../src/workshop/workshop.ts';
 
-// Each entry's text as its output: what is built doesn't matter here, where it goes does.
-const bundler: Bundler = {
-  build: async ({ files, entries }) => {
-    const texts = new Map(files);
-    return {
-      outputs: Object.fromEntries(
-        entries.map(({ output, entry }) => [output, texts.get(entry) ?? '']),
-      ),
-      diagnostics: [],
-    };
-  },
-};
+const text = (value: string) => new TextEncoder().encode(value);
 
 const MANIFEST = JSON.stringify({
   id: 'probe',
@@ -27,62 +16,61 @@ const MANIFEST = JSON.stringify({
   script: 'script.js',
 });
 
+/** A build as the page hands it over. */
+const BUILD = [
+  { path: 'wikistow-plugin.json', data: text(MANIFEST) },
+  { path: 'script.js', data: text('export {};') },
+  { path: 'source/src/script.ts', data: text('export {};') },
+];
+
 let data = '';
 afterEach(() => rm(data, { recursive: true, force: true }));
 
-async function workshopWithVersion() {
+async function workshopWithPreview() {
   data = await mkdtemp(join(tmpdir(), 'workshop-'));
-  const workshop = desktopWorkshop(data, bundler);
-  const session = await workshop.start();
-  await workshop.write(session, 'wikistow-plugin.json', MANIFEST);
-  await workshop.write(session, 'src/script.ts', 'export {};');
-  const version = await workshop.build(session);
-  if (!version?.hash) throw new Error('It didn’t build');
-  return { workshop, session, version, folder: join(data, 'workshop', session, 'versions', '1') };
+  const workshop = desktopWorkshop(data);
+  const hash = await workshop.preview(BUILD);
+  return { workshop, hash };
 }
 
 describe('desktopWorkshop', () => {
-  // The assistant names these paths: none may reach past its workspace.
-  it('keeps every file inside the workspace', async () => {
-    const { workshop, session, version } = await workshopWithVersion();
+  // App code runs in the page that hands these over: no path may reach past the build.
+  it('keeps every file inside a previewed build', async () => {
+    const { workshop, hash } = await workshopWithPreview();
     await writeFile(join(data, 'secret.json'), '{"key":"x"}');
-    for (const path of [
-      '../secret.json',
-      '../../secret.json',
-      '/etc/passwd.txt',
-      'src/../../x.ts',
-      '.npmrc',
-      'src/run.sh',
-    ]) {
-      await expect(workshop.write(session, path, 'x'), path).rejects.toThrow(
-        /isn’t a workspace file/,
-      );
-      await expect(workshop.read(session, path), path).rejects.toThrow(/isn’t a workspace file/);
+    for (const path of ['../secret.json', '../../secret.json', '/etc/passwd', 'a/../../x.js']) {
+      const files = [...BUILD, { path, data: text('x') }];
+      await expect(workshop.preview(files), path).rejects.toThrow(/isn’t a plain path/);
+      await expect(
+        workshop.exportTo(files, hash, async () => data),
+        path,
+      ).rejects.toThrow(/isn’t a plain path/);
     }
     expect(await readFile(join(data, 'secret.json'), 'utf8')).toBe('{"key":"x"}');
-    const key = version.plugin?.key ?? '';
     const served = (path: string) => {
-      const address = pluginAddress(`/plugins/probe/${key}/${path}`);
+      const address = pluginAddress(`/plugins/probe/draft-${hash}/${path}`);
       return address && workshop.file(address);
     };
-    expect(served('script.js')?.path).toBe(
-      join(data, 'workshop', session, 'versions', '1', 'script.js'),
-    );
-    expect(served('..%2fworkspace%2fsrc%2fscript.ts')).toBeNull();
-    expect(served('..%2f..%2f..%2fsecret.json')).toBeNull();
+    expect(served('script.js')?.path).toBe(join(data, 'workshop', hash, 'script.js'));
+    expect(served('..%2f..%2fsecret.json')).toBeNull();
+    expect(served('..%2fstaging%2fscript.js')).toBeNull();
+    // Only under the ID it was built for, and only once handed over.
+    const elsewhere = pluginAddress(`/plugins/other/draft-${hash}/script.js`);
+    expect(elsewhere && workshop.file(elsewhere)).toBeNull();
+    await workshop.clear();
+    expect(served('script.js')).toBeNull();
   });
 
-  // Export and install bind to the hash the person reviewed, never to files changed since.
-  it('exports and installs only the version reviewed', async () => {
-    const { workshop, session, version, folder } = await workshopWithVersion();
-    const hash = version.hash ?? '';
-    await expect(workshop.installFolder(session, 1, 'not-the-hash')).rejects.toThrow(/reviewed/);
+  // Export binds to the hash the person reviewed, never to other files.
+  it('exports only the version reviewed', async () => {
+    const { workshop, hash } = await workshopWithPreview();
     const out = await mkdtemp(join(data, 'out-'));
-    const exported = await workshop.exportTo(session, 1, hash, out);
-    expect((await readPluginFolder(exported)).hash).toBe(hash);
-    expect(await workshop.installFolder(session, 1, hash)).toBe(folder);
-    await writeFile(join(folder, 'script.js'), 'self.postMessage("changed");');
-    await expect(workshop.installFolder(session, 1, hash)).rejects.toThrow(/reviewed/);
-    await expect(workshop.exportTo(session, 1, hash, out)).rejects.toThrow(/reviewed/);
+    const changed = BUILD.map((file) =>
+      file.path === 'script.js' ? { ...file, data: text('self.postMessage("changed");') } : file,
+    );
+    await expect(workshop.exportTo(changed, hash, async () => out)).rejects.toThrow(/reviewed/);
+    const exported = await workshop.exportTo(BUILD, hash, async () => out);
+    expect(exported).toBe(join(out, `probe-${hash.slice(0, 8)}`));
+    expect((await readPluginFolder(exported ?? '')).hash).toBe(hash);
   });
 });

@@ -91,7 +91,7 @@ export function toolActivity(name: string, input: unknown): string {
     case 'propose_move':
       return 'Proposed a move';
     case 'list_files':
-      return 'Listed the workspace’s files';
+      return 'Listed the draft’s files';
     case 'read_file':
       return `Read ${field('path') ?? 'a file'}`;
     case 'write_file':

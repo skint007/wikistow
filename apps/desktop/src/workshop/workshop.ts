@@ -1,25 +1,14 @@
-import {
-  pluginDraftRoutes,
-  type BuildDiagnostic,
-  type WorkshopFile,
-  type WorkshopVersion,
-} from '@wikistow/contracts';
-import { fileType } from '@wikistow/plugin-sdk/files';
-import { Manifest, MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
+import { pluginRoutes } from '@wikistow/contracts';
+import { checkPlugin, fileType, PluginFolderError } from '@wikistow/plugin-sdk/files';
+import { PluginFile } from '@wikistow/plugin-sdk/manifest';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import {
-  copyPluginFiles,
-  PluginFolderError,
-  readPluginFolder,
-  uploadFiles,
-} from '../plugins/folder.ts';
-import type { PluginAddress, PluginFile } from '../plugins/plugins.ts';
-import type { BuildOutput, BuildRequest } from './builder.ts';
+import { readPluginFolder } from '../plugins/folder.ts';
+import type { PluginAddress, PluginFile as ServedFile } from '../plugins/plugins.ts';
 
-/** A workshop request refused, with a message for the person or the assistant. */
+/** A workshop request refused, with a message for the person. */
 export class WorkshopError extends Error {
   constructor(message: string) {
     super(message);
@@ -27,313 +16,147 @@ export class WorkshopError extends Error {
   }
 }
 
-// A workspace holds what a plugin draft holds.
-const {
-  draftPathProblem,
-  DRAFT_FILE_KINDS,
-  MAX_DRAFT_FILE_BYTES: MAX_FILE,
-  MAX_DRAFT_FILES: MAX_FILES,
-  MAX_DRAFT_BYTES: MAX_TOTAL,
-} = pluginDraftRoutes;
+const Files = z
+  .array(z.object({ path: z.string(), data: z.instanceof(Uint8Array) }))
+  .min(1)
+  .max(pluginRoutes.MAX_VERSION_FILES);
 
-const SessionId = z.uuid();
-const VersionNumber = z.number().int().positive();
-
-/** The URL key a version is served under, `workshop-<session>-<version>`. */
-const KEY = /^workshop-([0-9a-f-]{36})-(\d+)$/;
-
-type Session = {
-  folder: string;
-  versions: WorkshopVersion[];
-  /** Builds started, which number them: failed ones too. */
-  builds: number;
-  /** Counts cancels: a build started before the last one makes no version. */
-  run: number;
-};
-
-/** What a workshop needs from the bundler (`workshopBuilder`). */
-export type Bundler = { build(request: BuildRequest): Promise<BuildOutput> };
+/** The URL key a previewed build is served under, `draft-<hash>` (ADR 0004). */
+const KEY = /^draft-([0-9a-f]{64})$/;
 
 /**
- * Plugin workshops (#257): each a staged workspace under `<data>/workshop`,
- * with its source as the assistant wrote it and every version it built, in
- * `versions/<n>/`. Only the app's main process uses it, and everything it
- * is given is checked again here: a file's path must be a plain one inside
- * the workspace, of a text kind. A workshop lasts until it ends, or the
- * window that holds its conversation reloads or goes; the app deletes any
- * left behind when it starts.
+ * Builds the page made in its workshop (ADR 0004), checked here as the
+ * library checks an upload, since app code runs in the same page: every
+ * path a plain one inside the folder, no file with a folder's name, the
+ * library's limits, and the manifest and the files it names
+ * (`checkPlugin`). The checked files, by path, and their manifest and hash.
  */
-export function desktopWorkshop(data: string, bundler: Bundler) {
+async function checked(input: unknown) {
+  const files = Files.parse(input);
+  const byPath = new Map<string, Uint8Array>();
+  for (const { path, data } of files) {
+    if (!PluginFile.max(200).safeParse(path).success) {
+      throw new WorkshopError(`“${path}” isn’t a plain path inside a plugin.`);
+    }
+    if (byPath.has(path)) throw new WorkshopError(`${path} is listed twice.`);
+    byPath.set(path, data);
+  }
+  const folders = new Set(
+    files.flatMap(({ path }) =>
+      path
+        .split('/')
+        .slice(0, -1)
+        .map((_, i, parts) => parts.slice(0, i + 1).join('/')),
+    ),
+  );
+  if (files.some(({ path }) => folders.has(path))) {
+    throw new WorkshopError('A file has a folder’s name.');
+  }
+  const size = files.reduce((total, { data }) => total + data.length, 0);
+  if (size > pluginRoutes.MAX_VERSION_BYTES) {
+    throw new WorkshopError('A plugin holds 10 MB at most.');
+  }
+  const plugin = await checkPlugin(byPath).catch((error: unknown) => {
+    throw error instanceof PluginFolderError ? new WorkshopError(error.message) : error;
+  });
+  const script = plugin.manifest.script && byPath.get(plugin.manifest.script);
+  if (script && script.length > pluginRoutes.MAX_SCRIPT_BYTES) {
+    throw new WorkshopError('A plugin’s script is 1 MB at most.');
+  }
+  return { ...plugin, byPath };
+}
+
+/** Write `byPath` into the new folder `folder`. */
+async function writeAll(folder: string, byPath: ReadonlyMap<string, Uint8Array>) {
+  for (const [path, data] of byPath) {
+    await mkdir(dirname(join(folder, path)), { recursive: true });
+    await writeFile(join(folder, path), data);
+  }
+}
+
+/**
+ * The plugin workshop's part in the main process (ADR 0004): the page
+ * builds and keeps a draft's versions; main serves the builds it is handed
+ * for the preview, under `/plugins/<id>/draft-<hash>/`, from
+ * `<data>/workshop/<hash>/`, and exports one to a folder. Previewed builds
+ * last until the window navigates; the app deletes any left when it starts.
+ * Whether it holds any tells main a preview ran plugin code in the window.
+ */
+export function desktopWorkshop(data: string) {
   const root = join(data, 'workshop');
-  const sessions = new Map<string, Session>();
-
-  const sessionOf = (id: unknown) => {
-    const session = sessions.get(SessionId.parse(id));
-    if (!session) throw new WorkshopError('That workshop has ended.');
-    return session;
-  };
-  const workspace = (session: Session) => join(session.folder, 'workspace');
-  const versionFolder = (session: Session, version: number) =>
-    join(session.folder, 'versions', String(version));
-
-  /** `path` checked: a plain path inside the workspace, of a kind it holds. */
-  const fileIn = (session: Session, path: unknown) => {
-    const name = z.string().parse(path);
-    if (draftPathProblem(name)) {
-      throw new WorkshopError(
-        `“${name}” isn’t a workspace file. Use a relative path such as src/ui.tsx, with no “..”, ending in ${DRAFT_FILE_KINDS.join(', ')}.`,
-      );
-    }
-    return join(workspace(session), name);
-  };
-
-  /** Every file in the workspace, by path, sorted. */
-  async function list(session: Session): Promise<WorkshopFile[]> {
-    const top = workspace(session);
-    const entries = await readdir(top, { recursive: true, withFileTypes: true });
-    const files: WorkshopFile[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      const full = join(entry.parentPath, entry.name);
-      files.push({
-        path: relative(top, full).split(sep).join('/'),
-        size: (await stat(full)).size,
-      });
-    }
-    return files.sort((a, b) => a.path.localeCompare(b.path));
-  }
-
-  const failed = (version: number, diagnostics: BuildDiagnostic[]): WorkshopVersion => ({
-    version,
-    diagnostics,
-    plugin: null,
-    hash: null,
-  });
-
-  const error = (message: string, file: string | null = null): BuildDiagnostic => ({
-    severity: 'error',
-    file,
-    line: null,
-    column: null,
-    message,
-  });
-
-  /**
-   * Build the workspace as it is into `versions/<n>`: the manifest, `ui.js`
-   * and `script.js` from `src/<name>.ts(x)`, `public/`'s files at the top,
-   * as `wikistow-plugin build` lays them out, and the source it came from
-   * in `source/`, so the folder says what it is. Hashed as an install would.
-   */
-  async function build(session: Session, version: number): Promise<WorkshopVersion> {
-    const top = workspace(session);
-    const files = await list(session);
-    const texts = new Map<string, string>();
-    for (const { path } of files) texts.set(path, await readFile(join(top, path), 'utf8'));
-    const raw = texts.get(MANIFEST_FILE);
-    if (raw === undefined)
-      return failed(version, [error(`The workspace has no ${MANIFEST_FILE}.`)]);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (problem) {
-      const said = problem instanceof Error ? problem.message : 'it isn’t JSON';
-      return failed(version, [error(`${MANIFEST_FILE} isn’t valid JSON: ${said}`, MANIFEST_FILE)]);
-    }
-    const checked = Manifest.safeParse(parsed);
-    if (!checked.success) {
-      return failed(
-        version,
-        checked.error.issues.map((issue) =>
-          error(`${issue.path.join('.') || 'The manifest'}: ${issue.message}`, MANIFEST_FILE),
-        ),
-      );
-    }
-    const manifest = checked.data;
-    const entries: BuildRequest['entries'] = [];
-    for (const output of [manifest.ui, manifest.script]) {
-      if (output === undefined) continue;
-      const name = basename(output, extname(output));
-      const entry = [`src/${name}.tsx`, `src/${name}.ts`].find((path) => texts.has(path));
-      if (!entry)
-        return failed(version, [error(`There’s no src/${name}.ts or .tsx for ${output}.`)]);
-      entries.push({ output, entry });
-    }
-    const built = await bundler.build({ files: [...texts], entries });
-    if (built.diagnostics.some((diagnostic) => diagnostic.severity === 'error')) {
-      return failed(version, built.diagnostics);
-    }
-    const out = versionFolder(session, version);
-    const write = async (path: string, text: string) => {
-      await mkdir(dirname(join(out, path)), { recursive: true });
-      await writeFile(join(out, path), text);
-    };
-    for (const [path, text] of texts) {
-      await write(`source/${path}`, text);
-      if (path.startsWith('public/')) await write(path.slice('public/'.length), text);
-    }
-    for (const [output, text] of Object.entries(built.outputs)) await write(output, text);
-    await write(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
-    try {
-      const read = await readPluginFolder(out);
-      return {
-        version,
-        diagnostics: built.diagnostics,
-        plugin: {
-          manifest: read.manifest,
-          level: trustLevel(read.manifest),
-          key: `workshop-${basename(session.folder)}-${version}`,
-          development: null,
-          library: false,
-          enabled: true,
-        },
-        hash: read.hash,
-      };
-    } catch (problem) {
-      if (!(problem instanceof PluginFolderError)) throw problem;
-      await rm(out, { recursive: true, force: true });
-      return failed(version, [...built.diagnostics, error(problem.message)]);
-    }
-  }
-
-  /** Version `version`'s built folder, if its files still hash to `hash`. */
-  async function reviewed(session: Session, version: unknown, hash: unknown) {
-    const number = VersionNumber.parse(version);
-    const record = session.versions.find((built) => built.version === number);
-    if (!record?.hash) throw new WorkshopError(`Version ${number} didn’t build.`);
-    const read = await readPluginFolder(versionFolder(session, number));
-    if (read.hash !== z.string().parse(hash) || read.hash !== record.hash) {
-      throw new WorkshopError(`Version ${number}’s files changed since they were reviewed.`);
-    }
-    return read;
-  }
+  /** The builds served, by hash, with their plugin's ID. */
+  const held = new Map<string, string>();
 
   return {
-    /** Delete what an earlier run left: workshops end with the app. */
+    /** Delete what an earlier run left. */
     async load() {
       await rm(root, { recursive: true, force: true });
     },
 
-    async start(): Promise<string> {
-      const id = randomUUID();
-      const session: Session = { folder: join(root, id), versions: [], builds: 0, run: 0 };
-      await mkdir(workspace(session), { recursive: true });
-      sessions.set(id, session);
-      return id;
-    },
-
-    async end(id: unknown) {
-      const parsed = SessionId.parse(id);
-      const session = sessions.get(parsed);
-      if (!session) return;
-      sessions.delete(parsed);
-      await rm(session.folder, { recursive: true, force: true });
-    },
-
-    /** End every workshop, as the window that held them reloads or goes. */
-    async endAll() {
-      const ending = [...sessions.values()];
-      sessions.clear();
-      for (const session of ending) await rm(session.folder, { recursive: true, force: true });
-    },
-
-    /** Whether any workshop is open, so the bundler can stop with the last. */
-    open: () => sessions.size > 0,
-
-    files: (id: unknown) => list(sessionOf(id)),
-
-    async read(id: unknown, path: unknown) {
-      const file = fileIn(sessionOf(id), path);
+    /** Serve a build the page made, checked. Its hash, which the page compares with its own. */
+    async preview(input: unknown) {
+      const { manifest, hash, byPath } = await checked(input);
+      if (held.get(hash) === manifest.id) return hash;
+      // Written in full, read back and hashed again, then moved into place.
+      const temporary = join(root, `staging-${randomUUID()}`);
       try {
-        return await readFile(file, 'utf8');
-      } catch {
-        throw new WorkshopError(`There’s no ${String(path)} in the workspace.`);
+        await writeAll(temporary, byPath);
+        if ((await readPluginFolder(temporary)).hash !== hash) {
+          throw new WorkshopError('The preview’s copy doesn’t match the version built.');
+        }
+        await rm(join(root, hash), { recursive: true, force: true });
+        await rename(temporary, join(root, hash));
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
       }
+      held.set(hash, manifest.id);
+      return hash;
     },
 
-    async write(id: unknown, path: unknown, text: unknown) {
-      const session = sessionOf(id);
-      const file = fileIn(session, path);
-      const contents = z.string().parse(text);
-      const bytes = Buffer.byteLength(contents);
-      if (bytes > MAX_FILE) throw new WorkshopError('A workspace file holds 256 KB at most.');
-      const others = (await list(session)).filter(
-        (entry) => join(workspace(session), entry.path) !== file,
-      );
-      if (others.length + 1 > MAX_FILES) {
-        throw new WorkshopError(`A workspace holds ${MAX_FILES} files at most.`);
+    /** Whether any build was previewed since the window last navigated. */
+    previewing: () => held.size > 0,
+
+    /** Stop serving previewed builds, as the page that made them goes. */
+    async clear() {
+      if (held.size === 0) return;
+      held.clear();
+      await rm(root, { recursive: true, force: true });
+    },
+
+    /**
+     * Copy a build the page made, if its files hash to `hash`, the version
+     * the person reviewed, into a new folder in the one `choose` asks for:
+     * `<id>-<first 8 of the hash>`. The folder written, or null if cancelled.
+     */
+    async exportTo(input: unknown, hash: unknown, choose: () => Promise<string | null>) {
+      const plugin = await checked(input);
+      if (plugin.hash !== z.string().parse(hash)) {
+        throw new WorkshopError('The exported files don’t match the reviewed version.');
       }
-      if (others.reduce((total, entry) => total + entry.size, bytes) > MAX_TOTAL) {
-        throw new WorkshopError('A workspace holds 4 MB at most.');
-      }
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, contents);
-    },
-
-    async remove(id: unknown, path: unknown) {
-      await rm(fileIn(sessionOf(id), path), { force: true });
-    },
-
-    /** Build the next version. Null if the workshop ended, or was cancelled, meanwhile. */
-    async build(id: unknown): Promise<WorkshopVersion | null> {
-      const session = sessionOf(id);
-      const { run } = session;
-      const version = ++session.builds;
-      const built = await build(session, version).catch((problem: unknown) =>
-        failed(version, [error(problem instanceof Error ? problem.message : 'The build failed.')]),
-      );
-      if (sessions.get(SessionId.parse(id)) !== session || session.run !== run) {
-        await rm(versionFolder(session, version), { recursive: true, force: true });
-        // Its number goes to the next build, unless another started meanwhile.
-        if (session.builds === version) session.builds -= 1;
-        return null;
-      }
-      session.versions.push(built);
-      return built;
-    },
-
-    cancel(id: unknown) {
-      const session = sessions.get(SessionId.parse(id));
-      if (session) session.run += 1;
-    },
-
-    /** Copy a reviewed version into a new folder in `parent`. The folder written. */
-    async exportTo(id: unknown, version: unknown, hash: unknown, parent: string) {
-      const read = await reviewed(sessionOf(id), version, hash);
-      // Named by the ID and number only: the manifest's version is free text.
-      const target = join(parent, `${read.manifest.id}-v${String(version)}`);
+      const parent = await choose();
+      if (parent === null) return null;
+      const target = join(parent, `${plugin.manifest.id}-${plugin.hash.slice(0, 8)}`);
       const taken = await stat(target).then(
         () => true,
         () => false,
       );
       if (taken) throw new WorkshopError(`${target} already exists.`);
-      await copyPluginFiles(read, target);
+      await writeAll(target, plugin.byPath);
       // What was written is what was reviewed.
-      if ((await readPluginFolder(target)).hash !== read.hash) {
+      if ((await readPluginFolder(target)).hash !== plugin.hash) {
         throw new WorkshopError('The exported files don’t match the reviewed version.');
       }
       return target;
     },
 
-    /** A reviewed version's folder, for the usual install with its approval. */
-    async installFolder(id: unknown, version: unknown, hash: unknown) {
-      return (await reviewed(sessionOf(id), version, hash)).folder;
-    },
-
-    /** A reviewed version's files, to share to the library. */
-    async uploadFiles(id: unknown, version: unknown, hash: unknown) {
-      return uploadFiles(await reviewed(sessionOf(id), version, hash));
-    },
-
     /**
-     * The file for `/plugins/<id>/workshop-<session>-<version>/<path>`: a
-     * built version's, inside its folder. Null for anything else.
+     * The file for `/plugins/<id>/draft-<hash>/<path>`: a previewed build's,
+     * inside its folder. Null for anything else.
      */
-    file({ id, key, path }: PluginAddress): PluginFile | null {
-      const match = KEY.exec(key);
-      const session = match?.[1] ? sessions.get(match[1]) : undefined;
-      const record = session?.versions.find((built) => built.version === Number(match?.[2]));
-      if (!session || !record?.plugin || record.plugin.manifest.id !== id) return null;
-      const base = resolve(versionFolder(session, record.version));
+    file({ id, key, path }: PluginAddress): ServedFile | null {
+      const hash = KEY.exec(key)?.[1];
+      if (!hash || held.get(hash) !== id) return null;
+      const base = resolve(root, hash);
       const file = resolve(base, path);
       const inside = relative(base, file);
       if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) return null;

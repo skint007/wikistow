@@ -1,7 +1,7 @@
 // What a workshop build may import (#257): the plugin SDK and React, as
-// this app carries them. `vite.config.ts` reads these files into the build
-// worker as `virtual:workshop-library`; no other import resolves, so a
-// build reads nothing from disk and installs nothing.
+// this app carries them. The web build's `vite.config.ts` reads these files
+// into the build worker as `virtual:workshop-library`; no other import
+// resolves, so a build fetches nothing and installs nothing.
 
 /** The packages plugin code may import, and the library file that answers each. */
 export const OFFERED = {

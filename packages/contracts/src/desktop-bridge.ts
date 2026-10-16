@@ -33,7 +33,7 @@ export type LibraryCopies = {
   problems: Record<string, string>;
 };
 
-/** A built plugin's file, to share to the library: its path from the folder's top, and its bytes. */
+/** A built plugin's file, to share to the library or preview: its path from the folder's top, and its bytes. */
 export type PluginUploadFile = { path: string; data: Uint8Array };
 
 /** A plugin folder read and checked, waiting for the person to approve it. */
@@ -63,17 +63,17 @@ export type BuildDiagnostic = {
   message: string;
 };
 
-/** A file in a workshop's workspace: its path from the top, with `/` between names. */
+/** A file in a workshop's plugin draft: its path from the top, with `/` between names. */
 export type WorkshopFile = { path: string; size: number };
 
-/** One build of a workshop's workspace, numbered from 1 in its session, failed builds included. */
+/** One build of a workshop's plugin draft, numbered from 1 in its conversation, failed builds included. */
 export type WorkshopVersion = {
   version: number;
   /** Errors, and warnings for a build that worked. */
   diagnostics: BuildDiagnostic[];
   /**
-   * The built plugin, served at a key of its own (`workshop-<session>-<version>`)
-   * for the preview; null when the build failed.
+   * The built plugin, served for the preview under `draft-<hash>` (ADR 0004);
+   * null when the build failed.
    */
   plugin: InstalledPlugin | null;
   /** SHA-256 of the built folder as an install hashes it, or null when the build failed. */
@@ -176,31 +176,19 @@ export type DesktopBridge = {
   pluginUpload(id: string): Promise<PluginUploadFile[]>;
   /** Turn safe mode on or off; the window reloads. */
   setSafeMode(on: boolean): Promise<void>;
-  /** Start a plugin workshop (#257): an empty workspace of its own. Its ID names it from then on. */
-  workshopStart(): Promise<string>;
-  /** End a workshop: its workspace and every version built in it are deleted. */
-  workshopEnd(session: string): Promise<void>;
-  workshopFiles(session: string): Promise<WorkshopFile[]>;
-  workshopRead(session: string, path: string): Promise<string>;
-  /** Create or replace a text file in the workspace. Paths outside it, or of other kinds, fail. */
-  workshopWrite(session: string, path: string, text: string): Promise<void>;
-  workshopDelete(session: string, path: string): Promise<void>;
-  /** Build the workspace as it is now into its next version. Null if it was cancelled meanwhile. */
-  workshopBuild(session: string): Promise<WorkshopVersion | null>;
-  /** Drop the build running now, if any: it makes no version. */
-  workshopCancel(session: string): Promise<void>;
   /**
-   * Copy version `version` into a new folder the person chooses, if its files
-   * still hash to `hash`. The folder written, or null if the person cancelled.
+   * Serve a plugin workshop build the page made (ADR 0004) for its preview,
+   * under `/plugins/<id>/draft-<hash>/`, until the window navigates. Checked
+   * as the library checks an upload. Answers its hash, which must be the
+   * page's own.
    */
-  workshopExport(session: string, version: number, hash: string): Promise<string | null>;
+  workshopPreview(files: PluginUploadFile[]): Promise<string>;
   /**
-   * Install version `version` through the usual approval, if its files still
-   * hash to `hash`: a candidate for `approvePlugin`, with that same hash.
+   * Write a workshop build into a new folder, `<id>-<first 8 of the hash>`,
+   * in one the person chooses, if its files hash to `hash`. The folder
+   * written, or null if the person cancelled.
    */
-  workshopInstall(session: string, version: number, hash: string): Promise<PluginCandidate>;
-  /** Version `version`'s files, if they still hash to `hash`, to share to the library as `pluginUpload`. */
-  workshopUpload(session: string, version: number, hash: string): Promise<PluginUploadFile[]>;
+  workshopExport(files: PluginUploadFile[], hash: string): Promise<string | null>;
   /**
    * A newer stable release, if the last check found one; null otherwise,
    * offline and before any check worked. The app checks GitHub itself.
@@ -233,17 +221,8 @@ export const DESKTOP_CHANNELS = {
   libraryPlugins: 'wikistow:library-plugins',
   pluginUpload: 'wikistow:plugin-upload',
   setSafeMode: 'wikistow:set-safe-mode',
-  workshopStart: 'wikistow:workshop-start',
-  workshopEnd: 'wikistow:workshop-end',
-  workshopFiles: 'wikistow:workshop-files',
-  workshopRead: 'wikistow:workshop-read',
-  workshopWrite: 'wikistow:workshop-write',
-  workshopDelete: 'wikistow:workshop-delete',
-  workshopBuild: 'wikistow:workshop-build',
-  workshopCancel: 'wikistow:workshop-cancel',
+  workshopPreview: 'wikistow:workshop-preview',
   workshopExport: 'wikistow:workshop-export',
-  workshopInstall: 'wikistow:workshop-install',
-  workshopUpload: 'wikistow:workshop-upload',
   update: 'wikistow:update',
 } as const satisfies Record<keyof DesktopBridge, string>;
 

@@ -22,23 +22,25 @@ const REFERENCE = [
 export type WorkshopTurn = { text: string; copied: string | null };
 
 /**
- * A conversation that builds a plugin in a workshop (#257). The model gets
- * the workshop's tools only: the workspace, the build and the preview. It
- * reads none of the person's pages; a real page reaches it only as a copy
- * the person chose to put in the preview. Stop ends the reply and drops a
- * build still on its way, which then makes no version and previews nothing;
- * closing ends the workshop too.
+ * A conversation that builds a plugin in a workshop (#257) on the plugin
+ * draft `draftId`. The model gets the workshop's tools only: the draft's
+ * files, the build and the preview. It reads none of the person's pages; a
+ * real page reaches it only as a copy the person chose to put in the
+ * preview. Stop ends the reply and drops a build still on its way, which
+ * then makes no version and previews nothing; closing ends the workshop
+ * too. The conversation isn't saved; the draft is.
  */
 export class WorkshopChat {
-  readonly workshop = new Workshop();
+  readonly workshop: Workshop;
   readonly session: AiSession;
   #turns: WorkshopTurn[] = [];
   /** The real page the person copied in since their last message, said with the next. */
   #copied: { title: string; pageId: string } | null = null;
   readonly #listeners = new Set<() => void>();
 
-  constructor() {
-    const { workshop } = this;
+  constructor(draftId: string) {
+    const workshop = new Workshop(draftId);
+    this.workshop = workshop;
     const tools = workshopTools.workshopTools({
       files: () => workshop.files(),
       read: (path) => workshop.read(path),
@@ -99,7 +101,7 @@ export class WorkshopChat {
     this.workshop.stop();
   }
 
-  /** End the conversation and the workshop: its workspace and versions are deleted. */
+  /** End the conversation and the workshop, with its versions. The draft stays. */
   close() {
     this.session.close();
     this.workshop.end();
