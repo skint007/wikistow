@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { useVault } from '../vault/store';
-import { libraryQuery, uploadToLibrary } from './library';
+import { LIBRARY_KEY, uploadToLibrary } from './library';
 import { Library, ShareToLibrary } from './library-settings';
 import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
 
@@ -172,7 +172,7 @@ export function PluginSettings() {
           act(async () => {
             if (!sharing) return;
             const { version } = await uploadToLibrary(await bridge.pluginUpload(sharing.id));
-            await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+            await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
             return `Shared ${version.manifest.name} ${version.manifest.version} to the library.`;
           })
         }

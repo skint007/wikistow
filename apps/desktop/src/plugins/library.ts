@@ -122,10 +122,14 @@ export function libraryPlugins(data: string, upstream: Upstream) {
   async function sync(input: unknown): Promise<LibraryCopies> {
     const approved = Approved.parse(input);
     await prune(approved);
-    // Listed once, only if something needs downloading.
+    // Listed once, only if something needs downloading, naming the approved
+    // hashes so Only me plugins the account installed are listed (ADR 0004).
     let listed: Promise<LibraryPlugin[]> | null = null;
+    const have = new URLSearchParams({
+      have: pluginRoutes.haveQuery(approved.map(({ hash }) => hash)),
+    });
     const listing = () =>
-      (listed ??= get('/api/plugins').then(
+      (listed ??= get(`/api/plugins?${have}`).then(
         async (response) => pluginRoutes.listPlugins.response.parse(await response.json()).plugins,
       ));
     const plugins: InstalledPlugin[] = [];

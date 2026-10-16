@@ -12,10 +12,33 @@ import { vaultStore } from '../vault/store';
 import type { RuntimeSource } from './runtime';
 import { tabSafeMode } from './safe-mode';
 
-/** The server's plugin library (ADR 0002): every plugin, newest version first. */
-export const libraryQuery = queryOptions({
-  queryKey: ['plugin-library'],
-  queryFn: async () => (await api.call(pluginRoutes.listPlugins)).plugins,
+/** What every library query's key starts with, to show the library afresh after a change. */
+export const LIBRARY_KEY = ['plugin-library'];
+
+/** The listing's `have`: the hashes the person approved, so the Only me plugins they installed stay listed. */
+const have = (approvals: readonly PluginApproval[]) =>
+  pluginRoutes.haveQuery(approvals.map(({ hash }) => hash));
+
+const listLibrary = async (approvals: readonly PluginApproval[]) =>
+  (await api.call(pluginRoutes.listPlugins, { query: { have: have(approvals) } })).plugins;
+
+/**
+ * The server's plugin library (ADR 0002) as the person in `ctx` may see it
+ * (ADR 0004): every plugin, newest version first. Keyed by the hashes they
+ * approved, so it is listed again as those change.
+ */
+export const libraryQuery = (ctx: ClientContext) => {
+  const approvals = pluginOperations.listPluginApprovals(ctx);
+  return queryOptions({
+    queryKey: [...LIBRARY_KEY, have(approvals)],
+    queryFn: () => listLibrary(approvals),
+  });
+};
+
+/** The IDs of the person's own Only me plugins. */
+export const privatePluginsQuery = queryOptions({
+  queryKey: [...LIBRARY_KEY, 'private'],
+  queryFn: async () => new Set((await api.call(pluginRoutes.privatePlugins)).ids),
 });
 
 export type LibraryPlugin = pluginRoutes.LibraryPlugin;
@@ -77,8 +100,7 @@ export const librarySource: Omit<RuntimeSource, 'pages' | 'handle'> = {
     // Nothing approved needs no request.
     if (approvals.length === 0) return { safeMode, plugins: [] };
     try {
-      const { plugins } = await api.call(pluginRoutes.listPlugins);
-      lastListed = { ctx: vault.ctx, library: plugins };
+      lastListed = { ctx: vault.ctx, library: await listLibrary(approvals) };
     } catch {
       // The server is away: the library as this session last saw it, so
       // what runs keeps running. Before any listing, nothing is known.

@@ -9,7 +9,7 @@ import type { PluginStore } from './store.ts';
 /*
  * The plugin library (ADR 0002). Any person may upload a built plugin; the
  * first to upload an ID owns it for good, and only they upload its later
- * versions.
+ * versions and choose whether it is Shared or Only me (ADR 0004).
  * The owner or an administrator removes a version or the whole plugin.
  * Files go to the store before the rows that list them, and are deleted
  * after, so a crash leaves at worst files no row lists, which
@@ -19,6 +19,11 @@ import type { PluginStore } from './store.ts';
 const MB = 1024 * 1024;
 
 const invalid = (message: string) => new ContentError('invalid-plugin', message);
+
+type Visibility = pluginRoutes.PluginVisibility;
+
+const setVisibility = (db: Pick<Database, 'update'>, pluginId: string, visibility: Visibility) =>
+  db.update(plugins).set({ visibility }).where(eq(plugins.id, pluginId));
 
 const versionOut = (row: typeof pluginVersions.$inferSelect) => ({
   hash: row.hash,
@@ -75,11 +80,23 @@ export async function checkUpload(files: { path: string; data: Uint8Array }[]) {
   return { byPath, manifest, paths, hash, size };
 }
 
-/** A whole built folder, checked (`checkUpload`), then stored as a version. */
+/**
+ * A whole built folder, checked (`checkUpload`), then stored as a version.
+ * `visibility` sets a new ID's, Shared if left out, and changes the
+ * owner's existing one only when given.
+ */
 export async function uploadPlugin(
   db: Database,
   store: PluginStore,
-  { accountId, files }: { accountId: string; files: { path: string; data: Uint8Array }[] },
+  {
+    accountId,
+    files,
+    visibility,
+  }: {
+    accountId: string;
+    files: { path: string; data: Uint8Array }[];
+    visibility?: Visibility | undefined;
+  },
 ) {
   const { byPath, manifest, paths, hash, size } = await checkUpload(files);
 
@@ -93,11 +110,18 @@ export async function uploadPlugin(
     .where(eq(plugins.id, manifest.id));
   if (claimed && claimed.ownerId !== accountId) throw notYours();
   const [stored] = await db.select().from(pluginVersions).where(eq(pluginVersions.hash, hash));
-  if (stored) return { pluginId: manifest.id, version: versionOut(stored) };
+  if (stored) {
+    // The ID is the caller's, since the hash covers the manifest.
+    if (visibility) await setVisibility(db, manifest.id, visibility);
+    return { pluginId: manifest.id, version: versionOut(stored) };
+  }
 
   await store.put(hash, byPath);
   const version = await db.transaction(async (tx) => {
-    await tx.insert(plugins).values({ id: manifest.id, ownerId: accountId }).onConflictDoNothing();
+    await tx
+      .insert(plugins)
+      .values({ id: manifest.id, ownerId: accountId, visibility })
+      .onConflictDoNothing();
     // Held until the version is in, so a removal waits for it. The row only
     // goes with its owner's account.
     const [plugin] = await tx
@@ -107,6 +131,7 @@ export async function uploadPlugin(
       .for('update');
     if (!plugin) throw new Error('plugin row went with its owner');
     if (plugin.ownerId !== accountId) throw notYours();
+    if (visibility) await setVisibility(tx, manifest.id, visibility);
     const [inserted] = await tx
       .insert(pluginVersions)
       .values({ hash, pluginId: manifest.id, manifest, files: paths, size, uploadedBy: accountId })
@@ -120,20 +145,69 @@ export async function uploadPlugin(
   return { pluginId: manifest.id, version: versionOut(version) };
 }
 
-/** Every plugin in the library with its versions, newest first, as `accountId` sees it. */
-export async function listPlugins(db: Database, accountId: string) {
+/**
+ * Every plugin in the library `accountId` may see, with its versions,
+ * newest first: the Shared ones, their own, and each Only me one with a
+ * version whose hash is in `have`, the hashes they approved.
+ */
+export async function listPlugins(db: Database, accountId: string, have: readonly string[] = []) {
   const owned = await db
-    .select({ id: plugins.id, ownerId: plugins.ownerId, ownerName: users.name })
+    .select({
+      id: plugins.id,
+      ownerId: plugins.ownerId,
+      ownerName: users.name,
+      visibility: plugins.visibility,
+    })
     .from(plugins)
     .innerJoin(users, eq(users.id, plugins.ownerId))
     .orderBy(plugins.id);
   const versions = await db.select().from(pluginVersions).orderBy(desc(pluginVersions.createdAt));
-  return owned.flatMap(({ id, ownerId, ownerName }) => {
-    const own = versions.filter((version) => version.pluginId === id).map(versionOut);
-    return own.length === 0
+  const known = new Set(have);
+  return owned.flatMap(({ id, ownerId, ownerName, visibility }) => {
+    const own = versions.filter((version) => version.pluginId === id);
+    const mine = ownerId === accountId;
+    const listed =
+      visibility === 'shared' || mine || own.some((version) => known.has(version.hash));
+    return own.length === 0 || !listed
       ? []
-      : [{ id, owner: { name: ownerName }, mine: ownerId === accountId, versions: own }];
+      : [{ id, owner: { name: ownerName }, mine, versions: own.map(versionOut) }];
   });
+}
+
+/** The IDs of `accountId`'s own Only me plugins. */
+export async function privatePlugins(db: Database, accountId: string) {
+  const rows = await db
+    .select({ id: plugins.id })
+    .from(plugins)
+    .where(and(eq(plugins.ownerId, accountId), eq(plugins.visibility, 'private')))
+    .orderBy(plugins.id);
+  return rows.map(({ id }) => id);
+}
+
+/**
+ * Make `pluginId` Shared or Only me: its owner only, since who sees it is
+ * theirs to choose. Going Only me stops new installs only (`listPlugins`).
+ */
+export async function setPluginVisibility(
+  db: Database,
+  {
+    accountId,
+    pluginId,
+    visibility,
+  }: { accountId: string; pluginId: string; visibility: Visibility },
+) {
+  const changed = await db
+    .update(plugins)
+    .set({ visibility })
+    .where(and(eq(plugins.id, pluginId), eq(plugins.ownerId, accountId)))
+    .returning({ id: plugins.id });
+  if (changed.length > 0) return;
+  const [plugin] = await db
+    .select({ id: plugins.id })
+    .from(plugins)
+    .where(eq(plugins.id, pluginId));
+  if (!plugin) throw new ContentError('not-found', 'No such plugin');
+  throw new ContentError('forbidden', 'Only its owner chooses who sees a plugin.');
 }
 
 type Remover = { accountId: string; admin: boolean };

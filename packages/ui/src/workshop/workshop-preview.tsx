@@ -12,7 +12,7 @@ import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
-import { libraryQuery, uploadToLibrary } from '../plugins/library';
+import { LIBRARY_KEY, uploadToLibrary } from '../plugins/library';
 import { ShareToLibrary } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Approval } from '../plugins/plugin-settings';
@@ -551,7 +551,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
           act(async () => {
             if (!sharing) return null;
             const { version } = await uploadToLibrary(await workshop.upload(sharing.version));
-            await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+            await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
             return `Shared v${sharing.version.version} to the library as ${version.manifest.name} ${version.manifest.version}. Install it from Settings → Plugins to use it outside the workshop.`;
           })
         }

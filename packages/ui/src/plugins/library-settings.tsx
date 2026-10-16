@@ -14,13 +14,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Picker } from '@/components/ui/picker';
 import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useVault } from '../vault/store';
 import {
   asInstalled,
+  LIBRARY_KEY,
   libraryQuery,
+  privatePluginsQuery,
   uploadToLibrary,
   type LibraryPlugin,
   type LibraryVersion,
@@ -44,6 +47,13 @@ const requestFor = (id: string, version: LibraryVersion): Request => ({
   hash: version.hash,
   replaces: null,
 });
+
+type Visibility = pluginRoutes.PluginVisibility;
+
+const VISIBILITY = [
+  { value: 'shared', label: 'Shared' },
+  { value: 'private', label: 'Only me' },
+] as const;
 
 /** What removing from the library takes away: a whole plugin, or one version. */
 type Removal = { plugin: LibraryPlugin; version: LibraryVersion | null };
@@ -83,10 +93,12 @@ export function LibrarySettings() {
  * even once the library drops its version, and a folder install of the
  * same ID replaces it on that computer. The desktop shares to the library
  * from an installed plugin or a workshop version, not by choosing a folder.
+ * The owner of a plugin chooses whether it is Shared or Only me.
  */
 export function Library({ ctx }: { ctx: ClientContext }) {
   const queryClient = useQueryClient();
-  const { data: library, error: listError } = useQuery(libraryQuery);
+  const { data: library, error: listError } = useQuery(libraryQuery(ctx));
+  const { data: onlyMe } = useQuery(privatePluginsQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
   const { plugins: running, listed, unavailable } = usePlugins();
@@ -112,7 +124,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
     } catch (failure) {
       setError(errorMessage(failure));
     }
-    await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+    await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
     await pluginRuntime.refresh();
   };
   const approve = ({ id, hash }: Request) =>
@@ -263,8 +275,17 @@ export function Library({ ctx }: { ctx: ClientContext }) {
                 plugin={plugin}
                 installed={approvals.some((approval) => approval.id === plugin.id)}
                 removable={plugin.mine || admin}
+                visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
                 onInstall={(version) => setRequest(requestFor(plugin.id, version))}
                 onRemove={(version) => setRemoval({ plugin, version })}
+                onVisibility={(visibility) =>
+                  act(() =>
+                    api.call(pluginRoutes.setVisibility, {
+                      params: { pluginId: plugin.id },
+                      body: { visibility },
+                    }),
+                  )
+                }
               />
             ))}
           </ul>
@@ -356,15 +377,20 @@ function LibraryRow({
   plugin,
   installed,
   removable,
+  visibility,
   onInstall,
   onRemove,
+  onVisibility,
 }: {
   plugin: LibraryPlugin;
   installed: boolean;
   removable: boolean;
+  /** Known for the caller's own plugins only. */
+  visibility: Visibility;
   onInstall: (version: LibraryVersion) => void;
   /** Remove one version, or with null the whole plugin. */
   onRemove: (version: LibraryVersion | null) => void;
+  onVisibility: (visibility: Visibility) => Promise<void>;
 }) {
   const [newest] = plugin.versions;
   if (!newest) return null;
@@ -377,6 +403,7 @@ function LibraryRow({
         <span className="text-sm text-muted-foreground">{manifest.version}</span>
         <Badge variant="secondary">{level.label}</Badge>
         {installed && <Badge variant="outline">Installed</Badge>}
+        {plugin.mine && visibility === 'private' && <Badge variant="outline">Only me</Badge>}
       </div>
       {manifest.description && <p className="text-sm">{manifest.description}</p>}
       <p className="text-sm text-muted-foreground">
@@ -384,6 +411,15 @@ function LibraryRow({
         {plugin.mine && ' (you)'}.
       </p>
       <div className="flex flex-wrap gap-2">
+        {plugin.mine && (
+          <Picker
+            label="Who sees it"
+            className="h-8 w-auto"
+            value={visibility}
+            options={VISIBILITY}
+            onChange={(chosen) => void onVisibility(chosen)}
+          />
+        )}
         {!installed && (
           <Button size="sm" onClick={() => onInstall(newest)}>
             Install…

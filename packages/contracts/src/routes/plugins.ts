@@ -4,10 +4,10 @@ import { Timestamp } from '../records/encoding.ts';
 import type { RouteDef } from '../route.ts';
 
 /*
- * The plugin library (ADR 0002): built plugins members upload, which every
- * signed-in account sees and may install. Installing is approving a
+ * The plugin library (ADR 0002): built plugins members upload, which
+ * signed-in accounts see and may install. Installing is approving a
  * version's hash in the person's own account data; the server keeps no
- * record of who installed what.
+ * record of who installed what. A plugin is Shared or Only me (ADR 0004).
  */
 
 /** The most one version may hold, in bytes and files. */
@@ -74,11 +74,57 @@ export const LibraryPlugin = z.strictObject({
 });
 export type LibraryPlugin = z.infer<typeof LibraryPlugin>;
 
-/** Every plugin in the library, by ID. */
+/**
+ * Who a plugin is listed to: everyone, or (`private`, Only me) its owner
+ * and anyone who names one of its versions' hashes in the listing's `have`.
+ * Its files are served by hash either way.
+ */
+export const PluginVisibility = z.enum(['shared', 'private']);
+export type PluginVisibility = z.infer<typeof PluginVisibility>;
+
+/** The most hashes one listing's `have` names. */
+export const MAX_HAVE = 100;
+
+/** Hashes as `have` carries them: comma-separated. */
+export const haveQuery = (hashes: readonly string[]) => hashes.slice(0, MAX_HAVE).join(',');
+
+/**
+ * Every plugin in the library the caller may see, by ID: every Shared one,
+ * their own, and each Only me one with a version whose hash is in `have`,
+ * the hashes the caller approved (`haveQuery`). So a plugin that went Only
+ * me stays listed, with its newer versions, for the people who installed it.
+ */
 export const listPlugins = {
   method: 'GET',
   path: '/api/plugins',
+  query: z.object({
+    have: z
+      .string()
+      .max(MAX_HAVE * 65)
+      .transform((text) => (text === '' ? [] : text.split(',')))
+      .pipe(z.array(PluginHash).max(MAX_HAVE))
+      .optional(),
+  }),
   response: z.strictObject({ plugins: z.array(LibraryPlugin) }),
+} as const satisfies RouteDef;
+
+/**
+ * The IDs of the caller's own Only me plugins. Not a field of the listing,
+ * which older apps parse strictly.
+ */
+export const privatePlugins = {
+  method: 'GET',
+  path: '/api/plugins/private',
+  response: z.strictObject({ ids: z.array(PluginId) }),
+} as const satisfies RouteDef;
+
+/** Make the caller's plugin Shared or Only me. Its owner only. */
+export const setVisibility = {
+  method: 'PUT',
+  path: '/api/plugins/:pluginId/visibility',
+  params: z.object({ pluginId: PluginId }),
+  body: z.strictObject({ visibility: PluginVisibility }),
+  response: z.object({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
 /**
@@ -86,12 +132,17 @@ export const listPlugins = {
  * server checks it as the desktop checks a folder (`checkPlugin`) and
  * within the limits above. Its manifest's ID is claimed for the caller if
  * nobody has it; otherwise only its owner may upload. Uploading a version
- * the library already has answers it again. People only, not agents.
+ * the library already has answers it again. `visibility` sets a new ID's
+ * (Shared if left out) and changes an existing one's only when given.
+ * People only, not agents.
  */
 export const uploadPlugin = {
   method: 'POST',
   path: '/api/plugins',
-  body: z.strictObject({ files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES) }),
+  body: z.strictObject({
+    files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES),
+    visibility: PluginVisibility.optional(),
+  }),
   response: z.strictObject({ pluginId: PluginId, version: LibraryVersion }),
   status: 201,
 } as const satisfies RouteDef;
