@@ -1,3 +1,4 @@
+import { CryptoError } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 
 const MESSAGES: Partial<Record<string, string>> = {
@@ -67,6 +68,35 @@ const SERVER: Partial<Record<ApiError['code'], string>> = {
   'unreadable-response': 'The server sent an answer this app can’t read. Try again in a moment.',
 };
 
+// What this app refused of what the server sent, before sending a write:
+// the stops any write can meet, such as sharing a folder or saving a draft.
+// Several mean the server may be misbehaving, and say so.
+const STOPPED: Partial<Record<CryptoError['code'], string>> = {
+  'unaccepted-owner':
+    'This app hasn’t accepted every owner of this space, so it sealed nothing. If someone made you an owner, confirm who added you first; otherwise check the space’s owners.',
+  'key-version':
+    'The server offered an older key than this app has already seen. It may be hiding a change, so nothing was sent.',
+  'region-mismatch':
+    'The server put something where this app didn’t expect it, so nothing was sent. This could be an attack.',
+  'untrusted-sealer':
+    'Keys here came from someone this app doesn’t accept as an owner, so they weren’t used.',
+  'missing-key': 'This app doesn’t hold every key it needs for this folder.',
+  'unsupported-format':
+    'Something here was saved by a newer version of WikiStow. Update the app, then try again.',
+  'decrypt-failed':
+    'Something here couldn’t be opened. It may have been changed on the server, so nothing was sent.',
+  'bad-signature':
+    'Something the server sent isn’t signed by who it says, so nothing was sent. This could be an attack.',
+  'hash-mismatch':
+    'Something the server sent was altered on the way, so nothing was sent. This could be an attack.',
+  'key-commitment':
+    'A key the server sent doesn’t match what it should open, so nothing was sent. This could be an attack.',
+  'wrong-recipient':
+    'A key the server sent was meant for someone else, so nothing was sent. This could be an attack.',
+  'unknown-identity':
+    'This app hasn’t seen the key of someone involved here, so it can’t check what they signed, and sent nothing.',
+};
+
 const GENERIC = 'Something went wrong. Try again.';
 
 /**
@@ -80,6 +110,10 @@ export function knownMessage(error: unknown): string | undefined {
   }
   return undefined;
 }
+
+/** This app's own message for a write it stopped (a `CryptoError`); undefined when it has none. */
+export const stopMessage = (error: unknown): string | undefined =>
+  error instanceof CryptoError ? STOPPED[error.code] : undefined;
 
 /** A short message for anything the API or Better Auth throws. */
 export function errorMessage(error: unknown): string {
