@@ -193,10 +193,13 @@ function Library({ ctx }: { ctx: ClientContext }) {
           <Upload
             onFolder={(chosen) =>
               act(async () => {
-                const { version } = await api.call(pluginRoutes.uploadPlugin, {
+                const { pluginId, version } = await api.call(pluginRoutes.uploadPlugin, {
                   body: { files: await readFolder(chosen) },
                 });
-                return `Uploaded ${version.manifest.name} ${version.manifest.version}. Install it below to use it.`;
+                const next = approvals.some((approval) => approval.id === pluginId)
+                  ? 'Update it above to use it.'
+                  : 'Install it below to use it.';
+                return `Uploaded ${version.manifest.name} ${version.manifest.version}. ${next}`;
               })
             }
           />
