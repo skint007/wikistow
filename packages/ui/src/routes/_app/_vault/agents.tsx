@@ -12,7 +12,7 @@ import { agentMessage } from '../../../agents/messages';
 import { sharesItHeld } from '../../../agents/model';
 import { RevokeDialog } from '../../../agents/revoke-dialog';
 import { aiStatusQuery } from '../../../ai/session';
-import { agentsQuery } from '../../../data/queries';
+import { agentGroupsQuery, agentsQuery } from '../../../data/queries';
 import { RotateKeysDialog } from '../../../sharing/rotate-keys-dialog';
 import { useClient } from '../../../vault/store';
 
@@ -30,8 +30,13 @@ function Agents() {
   const ctx = useClient();
   const { data: agents, error } = useQuery(agentsQuery(ctx));
   const { data: ai } = useQuery(aiStatusQuery);
+  const { data: groups } = useQuery(agentGroupsQuery(ctx));
   const [adding, setAdding] = useState<'cli' | 'app' | null>(null);
-  const [revoking, setRevoking] = useState<ListedAgent | null>(null);
+  // The agent being revoked, with the folders its groups gave it, kept as they were
+  // when the dialog opened: the server stops listing a revoked agent's groups.
+  const [revoking, setRevoking] = useState<
+    (ListedAgent & { viaGroups: readonly ShareRef[] }) | null
+  >(null);
   const [rotating, setRotating] = useState<ShareRef | null>(null);
   // Shares given new keys from the revoke dialog, which it marks done.
   const [rotated, setRotated] = useState<ReadonlySet<string>>(new Set());
@@ -86,7 +91,20 @@ function Agents() {
         )}
         <ul aria-label="Your agents" className="grid gap-3">
           {sorted?.map((agent) => (
-            <AgentCard key={agent.agentId} agent={agent} onRevoke={() => setRevoking(agent)} />
+            <AgentCard
+              key={agent.agentId}
+              agent={agent}
+              onRevoke={() =>
+                setRevoking({
+                  ...agent,
+                  viaGroups: (groups ?? []).flatMap((group) =>
+                    group.agentId === agent.agentId && group.confirmed
+                      ? group.shares.map(({ shareId }) => ({ spaceId: group.spaceId, shareId }))
+                      : [],
+                  ),
+                })
+              }
+            />
           ))}
         </ul>
       </div>
@@ -102,12 +120,13 @@ function Agents() {
           revoking && {
             agentId: revoking.agentId,
             name: ownAgentName(ctx, revoking.agentId) ?? revoking.name,
-            // The record's shares, which the server can't hide, then the server's.
+            // The record's shares, which the server can't hide, then the server's,
+            // with those of the groups it was confirmed in.
             shares: sharesItHeld<ShareRef>(
               ctx.contacts.book.payloads.shared.agents.find(
                 (entry) => entry.enrollment.agent.id === revoking.agentId,
               )?.shares ?? [],
-              revoking.grants,
+              [...revoking.grants, ...revoking.viaGroups],
             ),
           }
         }

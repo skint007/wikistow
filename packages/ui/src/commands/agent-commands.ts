@@ -7,6 +7,7 @@ import {
   SpaceId,
   type ClientContext,
 } from '@wikistow/client';
+import { GroupId } from '@wikistow/contracts';
 import { z } from 'zod';
 import { PartlyDone } from '../agents/messages';
 import { chatStore } from '../ai/chat';
@@ -154,6 +155,24 @@ export const removeAgentPick = command(
   z.object({ agentId: IdentityId, spaceId: SpaceId, shareId: ShareId }),
   async ({ agentId, spaceId, shareId }, { ctx }) =>
     agentOperations.removeAgentPick(ctx, agentId, { spaceId, shareId }),
+);
+
+/**
+ * Confirm a group an owner put one of this person's agents in: it gets the
+ * group's folders, sealed to it now, at the group's access, never more
+ * than this person's.
+ */
+export const confirmAgentGroup = command(
+  'agent.confirm-group',
+  z.object({ agentId: IdentityId, spaceId: SpaceId, groupId: GroupId }),
+  async (input, { ctx }) => agentOperations.confirmAgentGroup(ctx, input),
+);
+
+/** Take an agent out of a group. It keeps the keys it had; owners can rotate them. */
+export const leaveAgentGroup = command(
+  'agent.leave-group',
+  z.object({ agentId: IdentityId, spaceId: SpaceId, groupId: GroupId }),
+  async (input, { ctx }) => agentOperations.leaveAgentGroup(ctx, input),
 );
 
 /**

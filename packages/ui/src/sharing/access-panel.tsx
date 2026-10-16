@@ -846,10 +846,12 @@ function GroupRow({
 export function AgentRow({
   agent,
   person,
+  detail,
   children,
 }: {
   agent: { agentId: string; name: string };
   person: Person;
+  detail?: ReactNode;
   children: ReactNode;
 }) {
   const ctx = useClient();
@@ -874,6 +876,7 @@ export function AgentRow({
         <span className="truncate text-xs text-muted-foreground">
           via {person.self ? 'you' : <Name>{person.name}</Name>}
         </span>
+        {detail && <span className="text-xs text-muted-foreground">{detail}</span>}
       </span>
       {children}
     </li>

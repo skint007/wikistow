@@ -90,7 +90,8 @@ const pendingOwnerWorkQuery = (ctx: ClientContext, queryClient: QueryClient) =>
 /**
  * At every unlock (protocol section 9.4): seal to this person's agents the
  * key versions they lack, then count the picks the server lists that their
- * own record doesn't back, which get no keys. A failure is kept as this
+ * own record doesn't back, which get no keys, and the groups owners put
+ * their agents in that wait for them to confirm. A failure is kept as this
  * app's message, for the note to show; it is tried again at the next unlock.
  */
 const agentWorkQuery = (ctx: ClientContext) =>
@@ -98,16 +99,18 @@ const agentWorkQuery = (ctx: ClientContext) =>
     queryKey: [PLAIN, 'agent-work'],
     queryFn: async () => {
       const recorded = ctx.contacts.book.payloads.shared.agents;
-      if (recorded.length === 0) return { failed: null, offRecord: 0 };
+      if (recorded.length === 0) return { failed: null, offRecord: 0, toConfirm: 0 };
       try {
         await runCommand(resealAgents, {}, { satisfies: requirementsHere(), ctx });
         const listed = await agentOperations.listAgents(ctx);
+        const groups = await agentOperations.listAgentGroups(ctx);
         return {
           failed: null,
           offRecord: picksOffRecord(listed, ctx.contacts.book.payloads.shared.agents).length,
+          toConfirm: groups.filter((group) => !group.confirmed).length,
         };
       } catch (error) {
-        return { failed: agentMessage(error), offRecord: 0 };
+        return { failed: agentMessage(error), offRecord: 0, toConfirm: 0 };
       }
     },
     staleTime: Infinity,
@@ -135,7 +138,9 @@ export function PendingOwnerWork() {
     ? `Your agents didn’t get the newest keys. ${agents.failed}`
     : agents && agents.offRecord > 0
       ? 'The server lists access for your agents that your own record doesn’t. Check it on the Agents page.'
-      : null;
+      : agents && agents.toConfirm > 0
+        ? 'An owner put one of your agents in a group. Confirm or decline it on the Agents page.'
+        : null;
   const shown = !dismissed && (spaces.length > 0 || unchecked > 0 || agentNote !== null);
   const givingIn = spaces.find((space) => space.spaceId === giving?.spaceId);
   return (

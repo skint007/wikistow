@@ -1,4 +1,10 @@
-import { groupOperations, type IdentityId, type SpaceId } from '@wikistow/client';
+import {
+  groupOperations,
+  isAgentId,
+  type ClientContext,
+  type IdentityId,
+  type SpaceId,
+} from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useState, type ReactNode } from 'react';
 import { submitData } from '@/components/form/submit';
@@ -14,15 +20,19 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ownAgentName } from '../agents/agent-name';
+import { confirmAgentGroup } from '../commands/agent-commands';
 import { runCommand } from '../commands/command';
 import { createGroup, renameGroup, sendGroupChange } from '../commands/sharing-commands';
+import { requirementsHere } from '../commands/ui-commands';
 import { groupsQuery, refreshAccess, spaceKeysQuery, treeQuery } from '../data/queries';
 import { useClient } from '../vault/store';
+import { AgentRow } from './access-panel';
 import { ChangeReview, GrantConfirm, groupName, peopleIn } from './groups';
 import { KeyChangePanel, useKeyReview } from './key-change';
 import { shareNameById } from './names';
 import { useOwnerRequirements } from './owner-standing';
-import type { Person } from './people';
+import { describePerson, peopleQuery, type Person } from './people';
 import { PersonFinder } from './person-finder';
 import { RotationConfirm } from './rotation-confirm';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from './use-action';
@@ -30,6 +40,7 @@ import { ErrorLine, HoldOpen, useAction, useHoldOpen } from './use-action';
 /** What the owner is doing to a group, in its dialog. */
 export type GroupAction =
   | { kind: 'add' }
+  | { kind: 'add-agent' }
   | { kind: 'remove'; identityId: IdentityId; name: string }
   | { kind: 'rename' }
   | { kind: 'delete' }
@@ -38,10 +49,10 @@ export type GroupAction =
 /**
  * The dialog for a change to one group (protocol sections 7.8 and 7.9):
  * add a member, found by exact email, sealing them every folder the group
- * has; remove one, or delete the group, showing for each folder who keeps
- * access and what each person keeps before any keys change; rename it; or
- * review a member's changed key. `onDone` hears what was done, or that the
- * group is gone.
+ * has; add an agent for its person; remove one, or delete the group,
+ * showing for each folder who keeps access and what each person keeps
+ * before any keys change; rename it; or review a member's changed key.
+ * `onDone` hears what was done, or that the group is gone.
  */
 export function GroupDialog({
   spaceId,
@@ -68,6 +79,7 @@ export function GroupDialog({
   const env = { satisfies, ctx };
   const name = groupName(group);
   const ownerIds = new Set(keys?.listed.map((o) => o.identity.id) ?? []);
+  const { data: state } = useQuery(groupsQuery(ctx, spaceId));
   const { groupId } = group;
   // The group's folders as a plan found them, which may be newer than this page.
   const sharesIn = (change: groupOperations.GroupChange) => [
@@ -110,6 +122,8 @@ export function GroupDialog({
         );
       case 'add':
         return <AddMember spaceId={spaceId} group={group} review={review} onDone={finish} />;
+      case 'add-agent':
+        return <AddAgent spaceId={spaceId} group={group} onCancel={onClose} onDone={finish} />;
       case 'rename':
         return (
           <RenameGroup
@@ -130,7 +144,16 @@ export function GroupDialog({
             }}
           />
         );
-      case 'remove':
+      case 'remove': {
+        const agent = isAgentId(action.identityId);
+        // A person's agents leave with them.
+        const theirAgents = agent
+          ? []
+          : group.agents.filter(
+              (a) =>
+                state?.agents.find((listed) => listed.agentId === a.agentId)?.personId ===
+                action.identityId,
+            );
         return (
           <RotationConfirm
             title={
@@ -138,8 +161,21 @@ export function GroupDialog({
                 Remove <Name>{action.name}</Name> from <Name>{name}</Name>?
               </>
             }
+            intro={
+              theirAgents.length > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {theirAgents.length === 1
+                    ? 'Their agent leaves the group with them.'
+                    : `Their ${theirAgents.length} agents leave the group with them.`}
+                </p>
+              )
+            }
             confirmLabel="Remove from group"
-            none="No keys change: the group has no folders, or they keep the same access some other way."
+            none={
+              agent
+                ? 'No keys change: its person hadn’t confirmed it, the group has no folders, or it keeps them some other way.'
+                : 'No keys change: the group has no folders, or they keep the same access some other way.'
+            }
             confirmNone
             make={() =>
               groupOperations.planRemoveMember(ctx, {
@@ -151,16 +187,19 @@ export function GroupDialog({
             plansOf={({ rotations }) =>
               rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
             }
-            summary={(change) => (
-              <Keeps>
-                <ChangeReview
-                  spaceId={spaceId}
-                  change={change}
-                  shareIds={sharesIn(change)}
-                  personIds={[action.identityId]}
-                />
-              </Keeps>
-            )}
+            summary={(change) =>
+              // An agent keeps nothing but what its person gives it; its rotations say enough.
+              !agent && (
+                <Keeps>
+                  <ChangeReview
+                    spaceId={spaceId}
+                    change={change}
+                    shareIds={sharesIn(change)}
+                    personIds={[action.identityId]}
+                  />
+                </Keeps>
+              )
+            }
             apply={(change) => sendGroupChange(change, env)}
             ownerIds={ownerIds}
             review={review}
@@ -174,6 +213,7 @@ export function GroupDialog({
             }
           />
         );
+      }
       case 'delete':
         return (
           <RotationConfirm
@@ -225,11 +265,13 @@ export function GroupDialog({
   const title =
     action?.kind === 'add'
       ? 'Add member'
-      : action?.kind === 'rename'
-        ? 'Rename group'
-        : action?.kind === 'delete'
-          ? 'Delete group'
-          : 'Remove from group';
+      : action?.kind === 'add-agent'
+        ? 'Add agent'
+        : action?.kind === 'rename'
+          ? 'Rename group'
+          : action?.kind === 'delete'
+            ? 'Delete group'
+            : 'Remove from group';
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -356,6 +398,118 @@ function AddMember({
         )
       }
     />
+  );
+}
+
+/**
+ * The name this app gives an agent in a message: the person's own name for
+ * their agent, or the server's in quotes.
+ */
+export const agentLabel = (
+  ctx: Pick<ClientContext, 'contacts'>,
+  agent: groupOperations.GroupAgent,
+) => ownAgentName(ctx, agent.agentId) ?? `“${agent.name}”`;
+
+/**
+ * Add an agent to a group (section 7.8): this owner's own agents, and
+ * those of the group's people, shown as "agent (for person)". Nothing is
+ * sealed: it gets the group's folders once its person confirms, on their
+ * Agents page, as only they seal to it (section 9.4). This owner's own
+ * agent is confirmed in the same step.
+ */
+function AddAgent({
+  spaceId,
+  group,
+  onCancel,
+  onDone,
+}: {
+  spaceId: SpaceId;
+  group: groupOperations.Group;
+  onCancel: () => void;
+  onDone: (message: ReactNode) => Promise<void>;
+}) {
+  const ctx = useClient();
+  const satisfies = useOwnerRequirements(spaceId);
+  const { data: state } = useQuery(groupsQuery(ctx, spaceId));
+  const { busy, error, run } = useAction();
+  const me = ctx.identity.public.id;
+  const { shared } = ctx.contacts.book.payloads;
+  // This person's own agents only while their record lists them live, as confirming needs.
+  const onRecord = (agentId: string) =>
+    shared.agents.some((a) => a.enrollment.agent.id === agentId) &&
+    !shared.revokedAgents.some((r) => r.agentId === agentId);
+  const members = new Set(group.members.map((m) => m.identity.id));
+  const candidates = (state?.agents ?? []).filter(
+    (agent) =>
+      !group.agents.some((a) => a.agentId === agent.agentId) &&
+      (agent.personId === me ? onRecord(agent.agentId) : members.has(agent.personId)),
+  );
+  const personIds = [...new Set(candidates.map((a) => a.personId))];
+  const { data: people } = useQuery({
+    ...peopleQuery(ctx, personIds),
+    enabled: personIds.length > 0,
+  });
+  const person = (id: string) => people?.get(id) ?? describePerson(ctx, id, null);
+  const { groupId } = group;
+
+  const add = (agent: groupOperations.GroupAgent) =>
+    run(async () => {
+      const change = await groupOperations.planAddAgent(ctx, {
+        spaceId,
+        groupId,
+        agentId: agent.agentId,
+      });
+      await sendGroupChange(change, { satisfies, ctx });
+      const label = agentLabel(ctx, agent);
+      if (agent.personId !== me) {
+        const who = person(agent.personId);
+        await onDone(
+          <>
+            <Name>{label}</Name> is in the group. It gets its folders once <Name>{who.name}</Name>{' '}
+            confirms on their Agents page.
+          </>,
+        );
+        return;
+      }
+      await runCommand(
+        confirmAgentGroup,
+        { agentId: agent.agentId, spaceId, groupId },
+        { satisfies: requirementsHere(), ctx },
+      );
+      await onDone(
+        <>
+          <Name>{label}</Name> is in the group, with its folders.
+        </>,
+      );
+    });
+
+  return (
+    <div className="grid gap-4">
+      <p className="text-sm text-muted-foreground">
+        An agent works for its person, and gets the group’s folders only once they confirm on their
+        Agents page, never more than they can do there. Yours are confirmed as you add them.
+      </p>
+      {state && candidates.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No agents to add. You can add your own, and those of the people in this group.
+        </p>
+      )}
+      <ul aria-label="Agents" className="grid gap-1">
+        {candidates.map((agent) => (
+          <AgentRow key={agent.agentId} agent={agent} person={person(agent.personId)}>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void add(agent)}>
+              Add
+            </Button>
+          </AgentRow>
+        ))}
+      </ul>
+      <ErrorLine error={error} />
+      <DialogFooter>
+        <Button variant="ghost" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </DialogFooter>
+    </div>
   );
 }
 

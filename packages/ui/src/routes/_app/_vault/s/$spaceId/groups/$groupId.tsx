@@ -2,14 +2,14 @@ import type { FolderId, groupOperations } from '@wikistow/client';
 import { GroupId } from '@wikistow/contracts';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { Pencil, ShieldAlert, Trash2, UserPlus } from 'lucide-react';
+import { Bot, Pencil, ShieldAlert, Trash2, UserPlus } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { groupsQuery, treeQuery } from '../../../../../../data/queries';
-import { PersonRow } from '../../../../../../sharing/access-panel';
+import { AgentRow, PersonRow } from '../../../../../../sharing/access-panel';
 import { GiveAccessDialog } from '../../../../../../sharing/give-access-dialog';
-import { GroupDialog, type GroupAction } from '../../../../../../sharing/group-dialogs';
+import { agentLabel, GroupDialog, type GroupAction } from '../../../../../../sharing/group-dialogs';
 import { groupName, peopleIn, WaitingMark } from '../../../../../../sharing/groups';
 import { GroupsPage } from '../../../../../../sharing/groups-page';
 import { needsKeyReview } from '../../../../../../sharing/key-change';
@@ -43,12 +43,17 @@ function Group() {
   const groups = useQuery({ ...groupsQuery(ctx, spaceId), enabled: owner });
   const group = groups.data?.groups.find((g) => g.groupId === groupId);
   const members = group ? peopleIn(group) : [];
+  // Its agents, each with its person and the server's name for it.
+  const agents = (group?.agents ?? []).flatMap(({ agentId, confirmed }) => {
+    const listed = groups.data?.agents.find((a) => a.agentId === agentId);
+    return listed ? [{ ...listed, confirmed }] : [];
+  });
+  const peopleIds = [
+    ...new Set([...members.map((m) => m.identity.id), ...agents.map((a) => a.personId)]),
+  ];
   const { data: people } = useQuery({
-    ...peopleQuery(
-      ctx,
-      members.map((m) => m.identity.id),
-    ),
-    enabled: members.length > 0,
+    ...peopleQuery(ctx, peopleIds),
+    enabled: peopleIds.length > 0,
   });
   const person = (id: string) => people?.get(id) ?? describePerson(ctx, id, null);
   const [action, setAction] = useState<GroupAction | null>(null);
@@ -144,8 +149,11 @@ function Group() {
               <Button size="sm" variant="secondary" onClick={() => act({ kind: 'add' })}>
                 <UserPlus strokeWidth={1.75} /> Add member
               </Button>
+              <Button size="sm" variant="outline" onClick={() => act({ kind: 'add-agent' })}>
+                <Bot strokeWidth={1.75} /> Add agent
+              </Button>
             </div>
-            {members.length === 0 && (
+            {members.length === 0 && agents.length === 0 && (
               <p className="text-sm text-muted-foreground">No one is in this group yet.</p>
             )}
             <ul className="grid gap-1">
@@ -183,6 +191,38 @@ function Group() {
                       Remove from group
                     </Button>
                   </PersonRow>
+                );
+              })}
+              {agents.map((agent) => {
+                const who = person(agent.personId);
+                return (
+                  <AgentRow
+                    key={agent.agentId}
+                    agent={agent}
+                    person={who}
+                    detail={
+                      !agent.confirmed && (
+                        <>
+                          Gets nothing until {who.self ? 'you confirm' : <Name>{who.name}</Name>}
+                          {who.self ? ' on your Agents page' : ' confirms'}
+                        </>
+                      )
+                    }
+                  >
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        act({
+                          kind: 'remove',
+                          identityId: agent.agentId,
+                          name: agentLabel(ctx, agent),
+                        })
+                      }
+                    >
+                      Remove from group
+                    </Button>
+                  </AgentRow>
                 );
               })}
             </ul>
