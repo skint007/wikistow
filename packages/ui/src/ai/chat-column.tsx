@@ -11,7 +11,8 @@ import { aiStatusQuery } from './session';
 /** Wide enough for the chat beside the page, rather than over it. */
 const WIDE = '(min-width: 1200px)';
 
-const useWide = () =>
+/** Whether the screen is wide enough for the chat beside the page. */
+export const useWide = () =>
   useSyncExternalStore(
     (listener) => {
       const query = window.matchMedia(WIDE);

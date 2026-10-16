@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useSyncExternalStore } from 'react';
 import { cn } from '@/lib/utils';
 import { AgentChat, useChatStore } from '../../../ai/chat';
-import { ChatColumn, useChatColumn } from '../../../ai/chat-column';
+import { AssistantButton, ChatColumn, useChatColumn } from '../../../ai/chat-column';
 import { aiStatusQuery } from '../../../ai/session';
 import { usePlugins } from '../../../plugins/runtime';
 import { draftsQuery, DraftsList } from '../../../workshop/drafts';
@@ -40,7 +40,11 @@ function WorkshopPage() {
         className="h-full min-h-0 overflow-y-auto rounded-card bg-card shadow-card"
       >
         <div className="mx-auto grid w-full max-w-[960px] gap-6 px-11 py-10 max-[899px]:px-[18px] max-[899px]:py-8">
-          <h1 className="text-[32px] leading-tight font-extrabold">Plugin workshop</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="flex-1 text-[32px] leading-tight font-extrabold">Plugin workshop</h1>
+            {/* The conversation again, once its column or sheet is closed. */}
+            {workshop && <AssistantButton />}
+          </div>
           {safeMode && !workshop ? (
             <p className="text-sm text-muted-foreground">
               Plugins are off in safe mode, so the workshop is too. Turn them back on in Settings →
