@@ -15,7 +15,8 @@ import { ErrorLine, useAction } from './use-action';
  * and shown again, never sent unseen. Confirming a changed key from here
  * works them out again too. With nothing to rotate, `none` says why, and
  * the owner can confirm only if `confirmNone` (an owner's removal still
- * has to be sent, for one).
+ * has to be sent, for one). `summary` shows more of what was worked out,
+ * such as what someone keeps through a group.
  */
 export function RotationConfirm<T>({
   title,
@@ -26,6 +27,7 @@ export function RotationConfirm<T>({
   confirmNone = false,
   make,
   plansOf,
+  summary,
   apply,
   ownerIds,
   review,
@@ -40,6 +42,7 @@ export function RotationConfirm<T>({
   confirmNone?: boolean;
   make: () => Promise<T>;
   plansOf: (made: T) => LabelledPlan[];
+  summary?: (made: T) => ReactNode;
   apply: (made: T) => Promise<void>;
   ownerIds: ReadonlySet<string>;
   review: (person: Person) => Promise<KeyOutcome>;
@@ -89,6 +92,7 @@ export function RotationConfirm<T>({
       {!made && !error && (
         <p className="text-sm text-muted-foreground">Working out who keeps access…</p>
       )}
+      {made && summary?.(made.value)}
       {made && plans.length === 0 && <p className="text-sm text-muted-foreground">{none}</p>}
       {plans.length > 0 && (
         <RotationReview
@@ -126,12 +130,12 @@ export function RotationConfirm<T>({
 }
 
 /**
- * Why "Remove from every folder" has nothing to do. Only the server says
- * which shares someone is in, so this says so.
+ * Why "Remove from every folder" has no keys to change. Only the server says
+ * which shares someone holds keys to, so this says so.
  */
 export const NotInAnyShare = ({ name }: { name: string }) => (
   <>
-    <Name>{name}</Name> isn’t a member of any shared folder here, as far as the server says, so no
-    keys change.
+    <Name>{name}</Name> holds the keys to no shared folder here, as far as the server says, so no
+    keys change. They still leave every group and folder in this space.
   </>
 );

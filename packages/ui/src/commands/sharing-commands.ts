@@ -10,8 +10,9 @@ import {
   type Lookup,
   type PublicIdentity,
 } from '@wikistow/client';
+import { GroupId } from '@wikistow/contracts';
 import { z } from 'zod';
-import type { Command, CommandEnv } from './command';
+import { runCommand, type Command, type CommandEnv } from './command';
 
 /**
  * Where a sharing command runs: the open session, and who hears how a long
@@ -28,6 +29,7 @@ const made = <T>() => z.custom<T>((value) => typeof value === 'object' && value 
 
 const Person = made<Lookup>();
 const Role = z.enum(['reader', 'editor']);
+const Grant = { role: Role, canPublish: z.boolean() };
 const ShareRef = z.object({ spaceId: SpaceId, shareId: ShareId });
 
 const command = <Input extends z.ZodType>(
@@ -39,27 +41,34 @@ const command = <Input extends z.ZodType>(
 
 const owner = ['unlocked-vault', 'space-owner'] as const;
 
-/** Make a folder, or the space, a share, once the owner has looked over the preview. */
+/**
+ * Make a folder, or the space, a share, once the owner has looked over the
+ * preview: with people, groups of the space, or both.
+ */
 export const createShare = command(
   'share.create',
-  z.object({
-    preview: made<sharingOperations.SharePreview>(),
-    people: z.array(z.object({ person: Person, role: Role, canPublish: z.boolean() })).min(1),
-  }),
+  z
+    .object({
+      preview: made<sharingOperations.SharePreview>(),
+      people: z.array(z.object({ person: Person, ...Grant })).default([]),
+      groups: z.array(z.object({ groupId: GroupId, ...Grant })).default([]),
+    })
+    .refine(({ people, groups }) => people.length + groups.length > 0, 'Nobody to share with'),
   owner,
-  async ({ preview, people }, { ctx, onProgress }) => {
+  async ({ preview, people, groups }, { ctx, onProgress }) => {
     await sharingOperations.shareFolder(ctx, {
       preview,
       people,
+      groups,
       ...(onProgress ? { onProgress } : {}),
     });
   },
 );
 
-/** Add someone to a share, make a reader an editor, or share again after a key change. */
+/** Give someone a direct grant in a share, or change it, sealing their keys by their access. */
 export const addMember = command(
   'share.add-member',
-  ShareRef.extend({ person: Person, role: Role, canPublish: z.boolean() }),
+  ShareRef.extend({ person: Person, ...Grant }),
   owner,
   async (input, { ctx }) => sharingOperations.addMember(ctx, input),
 );
@@ -82,12 +91,68 @@ export const rotateShare = command(
   },
 );
 
-/** Remove someone from every share and group in the space, in one request. */
-export const removeEverywhere = command(
-  'share.remove-everywhere',
-  z.object({ change: made<groupOperations.GroupChange>() }),
+// A change to who has access that the owner confirmed (protocol sections
+// 7.8 and 7.9), worked out by the client's `plan*` operations: its
+// envelopes and rotations go in one request. Each kind is its own command.
+const groupChange = (id: string, kind: groupOperations.GroupAction['kind']) =>
+  command(
+    id,
+    z.object({
+      change: made<groupOperations.GroupChange>().refine(
+        (change) => change.action.kind === kind,
+        `Not a ${kind}`,
+      ),
+    }),
+    owner,
+    async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
+  );
+
+export const groupChangeCommands = {
+  /** Delete a group, out of every folder it has. */
+  'delete-group': groupChange('group.delete', 'delete-group'),
+  /** Add someone to a group, sealing them every folder it has. */
+  'add-member': groupChange('group.add-member', 'add-member'),
+  /** Take someone out of a group, rotating where their access drops. */
+  'remove-member': groupChange('group.remove-member', 'remove-member'),
+  /** Share a folder with a group, or change its access there. */
+  'set-share-group': groupChange('share.set-group', 'set-share-group'),
+  /** Take a group out of a folder. */
+  'remove-share-group': groupChange('share.remove-group', 'remove-share-group'),
+  /** Drop someone's direct grant, keeping what their groups give them. */
+  'remove-direct': groupChange('share.remove-direct', 'remove-direct'),
+  /** Remove someone from every share and group in the space. */
+  'remove-everywhere': groupChange('share.remove-everywhere', 'remove-everywhere'),
+  /** Seal their keys to someone waiting for them. */
+  'give-access': groupChange('share.give-access', 'give-access'),
+} satisfies Record<groupOperations.GroupAction['kind'], unknown>;
+
+/** Send a group change the owner confirmed, as the command named for what it does. */
+export const sendGroupChange = (change: groupOperations.GroupChange, env: SharingEnv) =>
+  runCommand(groupChangeCommands[change.action.kind], { change }, env);
+
+/** Make a group in a space, its name sealed to the owners. */
+export const createGroup = command(
+  'group.create',
+  z.object({ spaceId: SpaceId, name: z.string().trim().min(1).max(200) }),
   owner,
-  async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
+  async (input, { ctx }) => {
+    await groupOperations.createGroup(ctx, input);
+  },
+);
+
+/** Rename a group, as a new version of the name the owner was shown. */
+export const renameGroup = command(
+  'group.rename',
+  z.object({
+    spaceId: SpaceId,
+    groupId: GroupId,
+    current: made<groupOperations.Group['name'] & {}>(),
+    name: z.string().trim().min(1).max(200),
+  }),
+  owner,
+  async (input, { ctx }) => {
+    await groupOperations.renameGroup(ctx, input);
+  },
 );
 
 /** Accept a person's changed key after the warning (protocol section 8.4). */

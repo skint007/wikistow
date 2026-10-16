@@ -1,4 +1,6 @@
 import { sharingOperations, type Lookup } from '@wikistow/client';
+import type { GroupId } from '@wikistow/contracts';
+import { Users } from 'lucide-react';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -49,11 +51,16 @@ export function AccessSelect({
   );
 }
 
+/** A group of the space that can be chosen instead of a person. */
+export type GroupChoice = { groupId: GroupId; name: string; people: number };
+
 /**
  * Find someone by the exact email of their account (protocol section 7.3).
  * The typed email travels with them, so a key that differs from the pin or
  * from that email's label is a key change, which `review` must clear first.
- * With `withAccess`, the owner also picks their access.
+ * With `withAccess`, the owner also picks their access. With `groups`, the
+ * space's groups whose names hold what is typed are offered beside it, and
+ * `onGroup` hears which one is chosen, with the access.
  */
 export function PersonFinder({
   withAccess = true,
@@ -61,8 +68,12 @@ export function PersonFinder({
   submitLabel,
   review,
   onFound,
+  groups = [],
+  onGroup,
 }: {
   withAccess?: boolean;
+  groups?: readonly GroupChoice[];
+  onGroup?: (groupId: GroupId, access: Access) => void;
   /** Why this person can't be chosen here, such as already having access; null if they can. */
   exclude?: (person: Person) => ReactNode;
   submitLabel: string;
@@ -133,9 +144,16 @@ export function PersonFinder({
     }
   }
 
+  const typed = email.trim().toLocaleLowerCase();
+  const offered = onGroup
+    ? groups.filter((group) => group.name.toLocaleLowerCase().includes(typed))
+    : [];
+
   return (
     <form onSubmit={(event) => void submit(event)} className="grid gap-2">
-      <Label htmlFor={`${id}-email`}>Email</Label>
+      <Label htmlFor={`${id}-email`}>
+        {onGroup && groups.length > 0 ? 'Email or group' : 'Email'}
+      </Label>
       <div className="flex flex-wrap gap-2">
         <Input
           id={`${id}-email`}
@@ -156,6 +174,26 @@ export function PersonFinder({
       <p className="text-xs text-muted-foreground">
         Type their whole email address. Only an exact match finds someone.
       </p>
+      {offered.length > 0 && (
+        <ul aria-label="Groups" className="flex flex-wrap gap-2">
+          {offered.map((group) => (
+            <li key={group.groupId}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => onGroup?.(group.groupId, access)}
+              >
+                <Users strokeWidth={1.75} /> <Name>{group.name}</Name>
+                <span className="text-muted-foreground">
+                  {group.people === 1 ? '1 person' : `${group.people} people`}
+                </span>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

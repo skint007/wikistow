@@ -2,6 +2,7 @@ import { expect, pick, test } from './fixtures';
 import {
   addPerson,
   editDraft,
+  folderMenu,
   newFolder,
   newSpace,
   openShared,
@@ -16,18 +17,20 @@ const TEXT = {
   draft: 'Plant the beans after the last frost. Maybe tomatoes too?',
   edited: 'Beans in May, tomatoes in June.',
   diary: 'Nobody else reads this diary.',
+  apples: 'Prune the apple trees in February.',
 };
 
 /**
  * Three people in their own browsers. The owner shares one folder of a
- * space with an editor and a reader, and keeps another to themself.
+ * space with an editor and a reader, and keeps another to themself. Then
+ * they share a third folder with a group, and take the reader out of it.
  */
 test('a shared folder: readers see publications, editors drafts, and removal takes access away', async ({
   page: owner,
   freshPage,
   admin,
 }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(420_000);
   const adminPage = await adminTab(freshPage, admin.email);
   const editor = await freshPage();
   const reader = await freshPage();
@@ -125,5 +128,64 @@ test('a shared folder: readers see publications, editors drafts, and removal tak
     await expect(reader.getByText('Nothing has been shared with you yet.')).toBeVisible();
     await reader.goBack();
     await expect(reader.getByText(TEXT.edited)).toHaveCount(0);
+  });
+
+  await test.step('a group shares a folder, and leaving the group takes it away', async () => {
+    await owner.getByRole('button', { name: 'Space menu' }).click();
+    await owner.getByRole('menuitem', { name: 'Groups' }).click();
+    await expect(owner.getByRole('heading', { name: 'Groups', level: 1 })).toBeVisible();
+    await owner.getByRole('button', { name: 'New group' }).click();
+    await owner.getByRole('dialog').getByLabel('Name').fill('Neighbours');
+    await owner.getByRole('button', { name: 'Create group' }).click();
+    await owner.getByRole('link', { name: 'Neighbours' }).click();
+    await expect(owner.getByRole('heading', { name: 'Neighbours', level: 1 })).toBeVisible();
+
+    await owner.getByRole('button', { name: 'Add member' }).click();
+    const adding = owner.getByRole('dialog', { name: 'Add member' });
+    await adding.getByLabel('Email').fill(readerEmail);
+    await adding.getByRole('button', { name: 'Next' }).click();
+    await expect(adding.getByText('The group has no folders yet')).toBeVisible();
+    await adding.getByRole('button', { name: 'Add to group' }).click();
+    await expect(owner.getByRole('status')).toHaveText('Rita Reader is in the group now.');
+
+    await newFolder(owner, 'Orchard');
+    await publishedPageIn(owner, 'Orchard', 'Apple trees', TEXT.apples);
+    await folderMenu(owner, 'Orchard', 'Share…');
+    const dialog = shareDialog(owner, 'Orchard');
+    await dialog.getByLabel('Email or group').fill('Neigh');
+    await dialog
+      .getByRole('list', { name: 'Groups' })
+      .getByRole('button', { name: /Neighbours/ })
+      .click();
+    await expect(dialog.getByRole('region', { name: 'Who gets it' })).toContainText('Rita Reader');
+    await dialog.getByRole('button', { name: 'Share', exact: true }).click();
+    const listed = dialog.getByRole('region', { name: 'People with access' });
+    await expect(listed.getByLabel('Access for Neighbours')).toHaveText('Reader', {
+      timeout: 30_000,
+    });
+    // Through the group alone: no picker of her own, and where it comes from.
+    await expect(listed.getByText('via Neighbours')).toBeVisible();
+    await expect(listed.getByLabel('Access for Rita Reader')).toHaveCount(0);
+    await owner.keyboard.press('Escape');
+
+    await openShared(reader, 'Orchard', 'Apple trees');
+    await expect(reader.getByText(TEXT.apples)).toBeVisible();
+
+    await owner.getByRole('button', { name: 'Space menu' }).click();
+    await owner.getByRole('menuitem', { name: 'Groups' }).click();
+    await owner.getByRole('link', { name: 'Neighbours' }).click();
+    await owner.getByRole('button', { name: 'Remove from group' }).click();
+    const removing = owner.getByRole('dialog', { name: 'Remove from group' });
+    await expect(removing.getByRole('region', { name: 'What each keeps' })).toContainText(
+      'No access',
+    );
+    await expect(removing.getByRole('region', { name: 'Orchard' })).toContainText('Loses access');
+    await removing.getByRole('button', { name: 'Remove from group' }).click();
+    await expect(owner.getByRole('status')).toHaveText('Rita Reader is out of the group.');
+
+    await reader.getByRole('link', { name: 'Shared', exact: true }).click();
+    await expect(reader.getByText('Nothing has been shared with you yet.')).toBeVisible();
+    await reader.goBack();
+    await expect(reader.getByText(TEXT.apples)).toHaveCount(0);
   });
 });

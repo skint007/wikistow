@@ -33,6 +33,8 @@ import { Route as AppVaultSSpaceIdRouteImport } from './routes/_app/_vault/s/$sp
 import { Route as AppVaultPluginPluginIdViewIdRouteImport } from './routes/_app/_vault/plugin/$pluginId/$viewId'
 import { Route as AppVaultSSpaceIdIndexRouteImport } from './routes/_app/_vault/s/$spaceId/index'
 import { Route as AppVaultSSpaceIdMembersRouteImport } from './routes/_app/_vault/s/$spaceId/members'
+import { Route as AppVaultSSpaceIdGroupsIndexRouteImport } from './routes/_app/_vault/s/$spaceId/groups/index'
+import { Route as AppVaultSSpaceIdGroupsGroupIdRouteImport } from './routes/_app/_vault/s/$spaceId/groups/$groupId'
 import { Route as AppVaultSSpaceIdPPageIdRouteImport } from './routes/_app/_vault/s/$spaceId/p/$pageId'
 
 const AppRoute = AppRouteImport.update({
@@ -154,6 +156,18 @@ const AppVaultSSpaceIdMembersRoute = AppVaultSSpaceIdMembersRouteImport.update({
   path: '/members',
   getParentRoute: () => AppVaultSSpaceIdRoute,
 } as any)
+const AppVaultSSpaceIdGroupsIndexRoute =
+  AppVaultSSpaceIdGroupsIndexRouteImport.update({
+    id: '/groups/',
+    path: '/groups/',
+    getParentRoute: () => AppVaultSSpaceIdRoute,
+  } as any)
+const AppVaultSSpaceIdGroupsGroupIdRoute =
+  AppVaultSSpaceIdGroupsGroupIdRouteImport.update({
+    id: '/groups/$groupId',
+    path: '/groups/$groupId',
+    getParentRoute: () => AppVaultSSpaceIdRoute,
+  } as any)
 const AppVaultSSpaceIdPPageIdRoute = AppVaultSSpaceIdPPageIdRouteImport.update({
   id: '/p/$pageId',
   path: '/p/$pageId',
@@ -183,7 +197,9 @@ export interface FileRoutesByFullPath {
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
+  '/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
+  '/s/$spaceId/groups/': typeof AppVaultSSpaceIdGroupsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppVaultIndexRoute
@@ -206,7 +222,9 @@ export interface FileRoutesByTo {
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId': typeof AppVaultSSpaceIdIndexRoute
+  '/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
+  '/s/$spaceId/groups': typeof AppVaultSSpaceIdGroupsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -234,7 +252,9 @@ export interface FileRoutesById {
   '/_app/_vault/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/_app/_vault/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/_app/_vault/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
+  '/_app/_vault/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/_app/_vault/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
+  '/_app/_vault/s/$spaceId/groups/': typeof AppVaultSSpaceIdGroupsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -261,7 +281,9 @@ export interface FileRouteTypes {
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId/'
+    | '/s/$spaceId/groups/$groupId'
     | '/s/$spaceId/p/$pageId'
+    | '/s/$spaceId/groups/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -284,7 +306,9 @@ export interface FileRouteTypes {
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId'
+    | '/s/$spaceId/groups/$groupId'
     | '/s/$spaceId/p/$pageId'
+    | '/s/$spaceId/groups'
   id:
     | '__root__'
     | '/_app'
@@ -311,7 +335,9 @@ export interface FileRouteTypes {
     | '/_app/_vault/plugin/$pluginId/$viewId'
     | '/_app/_vault/s/$spaceId/members'
     | '/_app/_vault/s/$spaceId/'
+    | '/_app/_vault/s/$spaceId/groups/$groupId'
     | '/_app/_vault/s/$spaceId/p/$pageId'
+    | '/_app/_vault/s/$spaceId/groups/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -493,6 +519,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultSSpaceIdMembersRouteImport
       parentRoute: typeof AppVaultSSpaceIdRoute
     }
+    '/_app/_vault/s/$spaceId/groups/': {
+      id: '/_app/_vault/s/$spaceId/groups/'
+      path: '/groups'
+      fullPath: '/s/$spaceId/groups/'
+      preLoaderRoute: typeof AppVaultSSpaceIdGroupsIndexRouteImport
+      parentRoute: typeof AppVaultSSpaceIdRoute
+    }
+    '/_app/_vault/s/$spaceId/groups/$groupId': {
+      id: '/_app/_vault/s/$spaceId/groups/$groupId'
+      path: '/groups/$groupId'
+      fullPath: '/s/$spaceId/groups/$groupId'
+      preLoaderRoute: typeof AppVaultSSpaceIdGroupsGroupIdRouteImport
+      parentRoute: typeof AppVaultSSpaceIdRoute
+    }
     '/_app/_vault/s/$spaceId/p/$pageId': {
       id: '/_app/_vault/s/$spaceId/p/$pageId'
       path: '/p/$pageId'
@@ -506,13 +546,17 @@ declare module '@tanstack/react-router' {
 interface AppVaultSSpaceIdRouteChildren {
   AppVaultSSpaceIdMembersRoute: typeof AppVaultSSpaceIdMembersRoute
   AppVaultSSpaceIdIndexRoute: typeof AppVaultSSpaceIdIndexRoute
+  AppVaultSSpaceIdGroupsGroupIdRoute: typeof AppVaultSSpaceIdGroupsGroupIdRoute
   AppVaultSSpaceIdPPageIdRoute: typeof AppVaultSSpaceIdPPageIdRoute
+  AppVaultSSpaceIdGroupsIndexRoute: typeof AppVaultSSpaceIdGroupsIndexRoute
 }
 
 const AppVaultSSpaceIdRouteChildren: AppVaultSSpaceIdRouteChildren = {
   AppVaultSSpaceIdMembersRoute: AppVaultSSpaceIdMembersRoute,
   AppVaultSSpaceIdIndexRoute: AppVaultSSpaceIdIndexRoute,
+  AppVaultSSpaceIdGroupsGroupIdRoute: AppVaultSSpaceIdGroupsGroupIdRoute,
   AppVaultSSpaceIdPPageIdRoute: AppVaultSSpaceIdPPageIdRoute,
+  AppVaultSSpaceIdGroupsIndexRoute: AppVaultSSpaceIdGroupsIndexRoute,
 }
 
 const AppVaultSSpaceIdRouteWithChildren =
