@@ -45,7 +45,8 @@ export const HISTORY_NOTICE =
 /**
  * What a change leaves each of `personIds` with in each of `shareIds`, by
  * folder: their access and where it comes from, whether keys are sealed to
- * them now, whether they wait, or that they have no access left.
+ * them now, whether they wait (their key changed unconfirmed, or still
+ * nobody sealed to them), or that they have no access left.
  */
 export function ChangeReview({
   spaceId,
@@ -100,6 +101,7 @@ export function ChangeReview({
                       <span className="text-muted-foreground">
                         {ACCESS_LABELS[accessOf(now.access)]} · {sourcesText(after, now.sources)}
                         {sealed && ', gets the keys now'}
+                        {now.waiting && !sealed && !waits && ', still waits for keys'}
                         {waits && (
                           <span className="text-destructive">
                             , waits: their key changed and you haven’t confirmed it

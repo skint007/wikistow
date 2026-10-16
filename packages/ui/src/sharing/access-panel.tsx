@@ -503,9 +503,16 @@ export function AccessPanel({
         title={pending.title}
         confirmLabel={pending.confirmLabel}
         make={pending.make}
-        review={(change) => (
-          <ChangeReview spaceId={spaceId} change={change} {...pending.showing(change)} />
-        )}
+        review={(change) => {
+          const shown = pending.showing(change);
+          return shown.personIds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No one is in it yet. Everyone you add to it later gets this folder.
+            </p>
+          ) : (
+            <ChangeReview spaceId={spaceId} change={change} {...shown} />
+          );
+        }}
         apply={(change) => sendGroupChange(change, env)}
         onCancel={() => setPending(null)}
         onDone={() => finish(pending.done)}
