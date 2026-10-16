@@ -369,27 +369,47 @@ export class Workshop {
 
   /**
    * Make version `version`'s files loadable under `draft-<hash>`: on the
-   * desktop main serves what it is handed; in the browser the draft's build
-   * on the server is replaced, and served from the library's file route.
-   * Either way the answer must be the hash built here.
+   * desktop main serves what it is handed; in the browser it becomes the
+   * draft's one build on the server, served from the library's file route.
+   * Either way the answer must be the hash built here. In the browser the
+   * check runs in its turn among the uploads, so it sees what the server
+   * holds by then.
    */
   async #serve(version: number) {
     const { files, hash } = this.versionFiles(version);
-    if (this.#served.has(hash)) return;
-    const served = desktop
-      ? await desktop.workshopPreview(files)
-      : (
-          await this.oneLargeUpload(() =>
-            api.call(pluginDraftRoutes.putDraftBuild, {
-              params: { draftId: this.draftId },
-              body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
-            }),
-          )
-        ).hash;
-    if (served !== hash) throw new Error('The preview’s copy doesn’t match the version built.');
-    // The server keeps one build a draft; main keeps every one it was handed.
-    if (!desktop) this.#served.clear();
-    this.#served.add(hash);
+    const mismatch = () => new Error('The preview’s copy doesn’t match the version built.');
+    if (desktop) {
+      if (this.#served.has(hash)) return;
+      if ((await desktop.workshopPreview(files)) !== hash) throw mismatch();
+      // Main keeps every build it was handed.
+      this.#served.add(hash);
+      return;
+    }
+    await this.oneLargeUpload(async () => {
+      if (this.#served.has(hash)) return;
+      const answer = await api.call(pluginDraftRoutes.putDraftBuild, {
+        params: { draftId: this.draftId },
+        body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
+      });
+      if (answer.hash !== hash) throw mismatch();
+      // The server keeps one build a draft.
+      this.#served.clear();
+      this.#served.add(hash);
+    });
+  }
+
+  /**
+   * Serve the version the preview runs, before it fetches more of its files
+   * (app code once allowed, a theme): a stopped load may have replaced it.
+   */
+  async #serveRunning() {
+    const running = this.#state.running;
+    if (!running) return;
+    try {
+      await this.#serve(running.version);
+    } catch (error) {
+      this.#set({ problem: message(error) });
+    }
   }
 
   /** Run version `version` in the preview, in place of what runs now. */
@@ -401,9 +421,6 @@ export class Workshop {
     const generation = this.#generation;
     await this.#serve(version);
     if (generation !== this.#generation || signal?.aborted || this.#state.phase !== 'ready') {
-      // The server keeps one build a draft: put back the one the preview runs.
-      const shown = this.#state.running;
-      if (!desktop && shown && shown !== record) await this.#serve(shown.version);
       return;
     }
     this.#set({ running: record, errors: [], problem: null });
@@ -422,6 +439,7 @@ export class Workshop {
    * inside WikiStow with the app's own trust, as an installed App plugin's.
    */
   async allowAppCode(allow: boolean) {
+    if (allow) await this.#serveRunning();
     this.#set({ appCode: allow });
     this.#holding = true;
     await this.preview.refresh();
@@ -430,7 +448,8 @@ export class Workshop {
   }
 
   /** Show one of the running version's themes across the app, or none. */
-  showTheme(themeId: string | null) {
+  async showTheme(themeId: string | null) {
+    if (themeId !== null) await this.#serveRunning();
     this.#set({ theme: themeId });
     this.#showTheme();
   }

@@ -223,7 +223,7 @@ function Themes({ workshop }: { workshop: Workshop }) {
         size="sm"
         variant={theme === null ? 'secondary' : 'ghost'}
         aria-pressed={theme === null}
-        onClick={() => workshop.showTheme(null)}
+        onClick={() => void workshop.showTheme(null)}
       >
         Not shown
       </Button>
@@ -233,7 +233,7 @@ function Themes({ workshop }: { workshop: Workshop }) {
           size="sm"
           variant={theme === id ? 'secondary' : 'ghost'}
           aria-pressed={theme === id}
-          onClick={() => workshop.showTheme(id)}
+          onClick={() => void workshop.showTheme(id)}
         >
           {name}
         </Button>
