@@ -127,7 +127,8 @@ export function PendingOwnerWork() {
   const { data: agents } = useQuery({ ...agentWorkQuery(ctx), enabled: data !== undefined });
   const [dismissed, setDismissed] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
-  const [giving, setGiving] = useState<SpaceId | null>(null);
+  // The space whose waiting people are shown, named as it was when opened.
+  const [giving, setGiving] = useState<{ spaceId: SpaceId; name: string | null } | null>(null);
   const spaces = data?.spaces ?? [];
   const unchecked = data?.unchecked ?? 0;
   const agentNote = agents?.failed
@@ -136,7 +137,7 @@ export function PendingOwnerWork() {
       ? 'The server lists access for your agents that your own record doesn’t. Check it on the Agents page.'
       : null;
   const shown = !dismissed && (spaces.length > 0 || unchecked > 0 || agentNote !== null);
-  const givingIn = spaces.find((space) => space.spaceId === giving);
+  const givingIn = spaces.find((space) => space.spaceId === giving?.spaceId);
   return (
     // Always there, so what appears in it is announced.
     <div aria-live="polite">
@@ -183,7 +184,7 @@ export function PendingOwnerWork() {
                       size="xs"
                       variant="outline"
                       className="ml-auto"
-                      onClick={() => setGiving(spaceId)}
+                      onClick={() => setGiving({ spaceId, name })}
                     >
                       Give access
                     </Button>
@@ -213,8 +214,8 @@ export function PendingOwnerWork() {
       {/* Kept outside the note, so dismissing it doesn't end the dialog. */}
       {giving && (
         <GiveAccessDialog
-          spaceId={giving}
-          spaceName={givingIn?.name ?? 'This space'}
+          spaceId={giving.spaceId}
+          spaceName={giving.name ?? 'This space'}
           waiting={givingIn?.waiting ?? []}
           open
           onClose={() => setGiving(null)}

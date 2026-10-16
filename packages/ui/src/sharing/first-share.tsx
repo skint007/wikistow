@@ -107,8 +107,15 @@ function GroupPeople({ spaceId, group }: { spaceId: SpaceId; group: groupOperati
         const waits = who.status === 'changed' || who.status === 'declined';
         return (
           <li key={who.id} className="flex flex-wrap justify-between gap-x-2">
-            <span className="truncate">
-              <Name>{who.name}</Name>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate">
+                <Name>{who.name}</Name>
+              </span>
+              {who.status === 'new' && (
+                <span className="shrink-0">
+                  <NewMark />
+                </span>
+              )}
             </span>
             {waits && (
               <span className="text-destructive">

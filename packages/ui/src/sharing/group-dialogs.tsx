@@ -68,8 +68,17 @@ export function GroupDialog({
   const env = { satisfies, ctx };
   const name = groupName(group);
   const ownerIds = new Set(keys?.listed.map((o) => o.identity.id) ?? []);
-  const shareIds = group.shares.map((s) => s.shareId);
   const { groupId } = group;
+  // The group's folders as a plan found them, which may be newer than this page.
+  const sharesIn = (change: groupOperations.GroupChange) => [
+    ...new Set([
+      ...group.shares.map((s) => s.shareId),
+      ...(change.after.groups.find((g) => g.groupId === groupId)?.shares ?? []).map(
+        (s) => s.shareId,
+      ),
+      ...change.rotations.map(({ plan }) => plan.shareId),
+    ]),
+  ];
 
   const finish = async (message: ReactNode, deleted = false) => {
     // A deleted group's page says so first, so it never shows the group missing.
@@ -147,7 +156,7 @@ export function GroupDialog({
                 <ChangeReview
                   spaceId={spaceId}
                   change={change}
-                  shareIds={shareIds}
+                  shareIds={sharesIn(change)}
                   personIds={[action.identityId]}
                 />
               </Keeps>
@@ -191,7 +200,7 @@ export function GroupDialog({
                 <ChangeReview
                   spaceId={spaceId}
                   change={change}
-                  shareIds={shareIds}
+                  shareIds={sharesIn(change)}
                   personIds={peopleIn(group).map((m) => m.identity.id)}
                 />
               </Keeps>
@@ -283,7 +292,6 @@ function AddMember({
   const { data: keys } = useQuery(spaceKeysQuery(ctx, spaceId));
   const [found, setFound] = useState<Person | null>(null);
   const { groupId } = group;
-  const shareIds = group.shares.map((s) => s.shareId);
   if (!found?.entry) {
     return (
       <PersonFinder
@@ -316,8 +324,12 @@ function AddMember({
       }
       confirmLabel="Add to group"
       make={() => groupOperations.planAddMember(ctx, { spaceId, groupId, person })}
-      review={(change) =>
-        shareIds.length === 0 ? (
+      review={(change) => {
+        // The folders the group has now, as the plan seals them.
+        const shareIds = (change.after.groups.find((g) => g.groupId === groupId)?.shares ?? []).map(
+          (s) => s.shareId,
+        );
+        return shareIds.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             The group has no folders yet, so nothing is shared with them now. They get every folder
             the group is given later.
@@ -332,8 +344,8 @@ function AddMember({
               personIds={[person.identity.id]}
             />
           </section>
-        )
-      }
+        );
+      }}
       apply={(change) => sendGroupChange(change, { satisfies, ctx })}
       onCancel={() => setFound(null)}
       onDone={() =>
