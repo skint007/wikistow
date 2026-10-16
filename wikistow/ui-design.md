@@ -52,7 +52,7 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 | Folder tree | Scrolls inside the card. See [Folder tree](#folder-tree). |
 | Agent activity | Pinned to the bottom of the sidebar. `muted` card, `rounded-control`, bot icon in `primary`, showing the most recent agent edit in this space and whether it touched only a draft. |
 | Cover band | 120px, `bg-cover-band` (the `--cover` gradient), top corners match the card. It holds a glass toolbar: breadcrumbs pill (Space › Folder), viewers, **History**, **Share**, then the view's main action in solid `primary`: **Edit** on the published view, **Publish** on the draft view. See [Page views](#page-views). |
-| Page emoji | 72px badge, `card` background, `rounded-card`, overlapping the cover bottom by 26px at 44px from the left. |
+| Page emoji | 72px badge, `card` background, `rounded-card`, overlapping the cover bottom by 26px at 44px from the left. A page image fills it, cropped to the square. |
 | Page header | Title 32px / 800 weight, then the status pill row. |
 | Body | As wide as the card, less its padding, 40px 44px, and the table of contents beside it. Wide code and tables scroll within their own box, and long words break, so nothing widens the page. 15.5px / 1.65. H2 20px / 800. |
 | Table of contents | Published view, on a page with two or more headings: **On this page**, its headings in order, indented by level, each a link to its own heading, repeated text included (the reader's unique heading ids). Where the card is at least 960px wide it's a 208px column beside the body that stays in view as the card scrolls; narrower, a collapsed disclosure above the body. The draft view has none, so the editor gets the width. |
@@ -61,7 +61,7 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 
 - Folder row: 28px tinted tile (`folder-*`, `rounded-folder`) with the folder's emoji, or its image filling the tile, bold name, a count pill (`muted`), and a chevron that rotates 90° when open. Row hover is `accent`, `rounded-control`.
 - Children indent 20px. A 2px `tree-guide` line runs down the left of each open folder.
-- Page row: `subtle-foreground`, `rounded-row`, padding 6px 10px 6px 18px. Selected: `primary-soft` fill, `primary-ink` text, bold.
+- Page row: `subtle-foreground`, `rounded-row`, padding 6px 10px 6px 18px. Selected: `primary-soft` fill, `primary-ink` text, bold. Before the title, the page's emoji, or its image as a 20px rounded square, cropped to fill it; the emoji shows while the image loads or if it can't.
 - A 7px `draft-dot` marks a page with unpublished changes or no published version. The dot carries an "Unpublished changes" label for assistive technology.
 - Order: folders, then loose pages, as in the mocks. Sorting rules are not decided.
 
@@ -110,14 +110,15 @@ Pills are full radius, 12.5px, 700 weight, padding 3px 10px, gap 6px.
 
 ### Banners and page emoji
 
-Each page can set its own banner and emoji, and both are optional.
+Each page can set its own banner and emoji, or an image in place of the emoji, and all are optional.
 
 - **Banner**: one of three kinds.
   - The theme gradient, which follows the active palette. This is the default.
   - One of six preset gradients: Sunrise, Ocean, Meadow, Lavender, Dusk, and Stone (`--banner-*` in `theme.css`). Presets look the same in every palette.
   - An uploaded image. It covers the 120px band (`background-size: cover`). The person choosing it sets a vertical focal point so faces and subjects stay in view.
-- **Emoji**: any emoji, shown in the 72px badge. Pages have no default emoji. Without one, the badge is hidden and the title moves up into the space it used.
-- **Where it changes**: on the draft view, from a **Banner** button in the cover toolbar or by clicking the emoji badge. Banner and emoji belong to the page version, so readers see a change after it is published, like any other edit.
+- **Emoji**: any emoji, shown in the 72px badge. Pages have no default emoji. Without one, or an image, the badge is hidden and the title moves up into the space it used.
+- **Image**: the picker's **Image** tab uploads a picture, logo or drawing, resized on the device to fit 144px and encrypted as one of the page's attachments, which the attachment list leaves out like an image banner. It fills the badge and the page's sidebar row. Choosing an image keeps the emoji, which shows while the image loads, if it can't, and in apps from before images; choosing an emoji removes the image, and **Remove image** brings the emoji back.
+- **Where it changes**: on the draft view, from a **Banner** button in the cover toolbar or by clicking the badge. Banner, emoji and image belong to the page version, so readers see a change after it is published, like any other edit.
 - **Image banners are attachments.** They are encrypted on the client and share the audience of the version that includes them, as the spec requires for attachments. Only uploads are allowed, not remote URLs; this keeps the spec's rule that reading a private page must not contact third-party hosts. *Proposed:* resize on the client before encrypting, for example to 1600px wide in WebP, so banners stay small.
 - **How it renders**: the page card overrides `--cover`, which `bg-cover-band` paints. Use `--cover: var(--banner-ocean)` for a preset, or `--cover: url(<decrypted blob URL>)` with `--cover-focal: 30%` for an image. Without an override the palette's gradient shows. Decrypted images become local blob URLs, never server URLs.
 - **Toolbar legibility**: the glass toolbar keeps its text at 5.2:1 or better over every preset and over pure white or black images in all four palettes (see [Contrast](#contrast)). The reference mock's **Banner** buttons show the theme gradient, all six presets, and an image.
@@ -253,7 +254,7 @@ Proposed shadcn/Radix building blocks. Check each against the interaction it nee
 | Formatting toolbar | In the visual editor only, a strip along the top of its box, `border-b` under it, above the area that scrolls, so it stays in view; it wraps on narrow windows. A text style DropdownMenu, then icon buttons (lucide) in groups split by Separators: bold, italic, inline code; quote, code block; bulleted, numbered list; link, which opens a Popover form (Text when inserting, Link to, then Remove link, Cancel and Add link or Save) while the text it works on keeps a `primary-soft` highlight; attachment (paperclip), which opens a DropdownMenu of the page's attachments (an image or file icon, the name, then kind and size in `muted-foreground`), a disabled "No attachments yet" item when there are none, and Upload a file… under a separator. Quote is a split button: the toggle, showing an alert's lucide icon while the cursor is in one, then a 16px chevron opening a DropdownMenu of radio items (Quote, Note, Tip, Important, Warning, Caution, each with its icon), the quote's kind checked. 32px controls in `muted-foreground`, `tint` on hover and `tint-strong` while held, `primary-soft` with `primary-ink` while pressed (`aria-pressed`), half opacity while they don't apply (`aria-disabled`). Tooltips give the name and shortcut. `role="toolbar"` with a roving tabindex. |
 | Wikilink autocomplete | Command list in a Popover anchored at the cursor after `[[`: page titles with their folder, then headings after `#`, with a "Create page" option for editors. |
 | Banner and emoji pickers | Popover with the preset gradients, an upload button, and a focal-point slider; a separate emoji picker. Both appear only on the draft view. Folders use the same emoji picker. |
-| Image tab | In the emoji picker for folders: **Emoji** and **Image** toggle buttons at the top, opening on the kind in use. **Image** shows the current image (64px, `rounded-tile`) with **Remove image**, an **Upload an image…** button for PNG, JPEG, WebP, GIF or SVG, and "PNG, JPEG, WebP, GIF or SVG. It’s resized to fit." The picker stays open while the image is resized, says why a file can't be used, and closes once it's ready. The image is resized on the device to fit 144px, at most 16 KB, and shown filling its tile (`object-cover`). |
+| Image tab | In the emoji picker for folders and pages: **Emoji** and **Image** toggle buttons at the top, opening on the kind in use. **Image** shows the current image (64px, `rounded-tile`) with **Remove image**, an **Upload an image…** button for PNG, JPEG, WebP, GIF or SVG, and "PNG, JPEG, WebP, GIF or SVG. It’s resized to fit." The picker stays open while the image is resized (and for a page, encrypted and uploaded, its button saying Encrypting…), says why a file can't be used, and closes once it's ready. The image is resized on the device to fit 144px, at most 16 KB, and shown filling its tile (`object-cover`). |
 
 ## Sharing
 
@@ -384,7 +385,7 @@ None.
 - Reaching the published version and Access: see [Page views](#page-views). Pages open on the published version, editing happens in the draft view, and Access lives in Share.
 - Light theme accent: each palette keeps its own accent.
 - Theme preference scope: synced to the account.
-- Cover band per page: pages choose a theme, preset, or uploaded-image banner, plus an optional emoji. See [Banners and page emoji](#banners-and-page-emoji).
+- Cover band per page: pages choose a theme, preset, or uploaded-image banner, plus an optional emoji or image. See [Banners and page emoji](#banners-and-page-emoji).
 - Folder defaults: ⭐ on the blue tint.
 - Import button: removed from the sidebar.
 

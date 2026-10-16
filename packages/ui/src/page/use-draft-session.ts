@@ -158,6 +158,7 @@ function appPorts(
               ...entry,
               title: payload.title,
               emoji: coverOf(payload).emoji,
+              icon: pageOperations.pageIconOf(payload, 'draft'),
               region,
               draftHead: revisionId,
               draftChanges: true,

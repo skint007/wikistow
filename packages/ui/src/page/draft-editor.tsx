@@ -49,6 +49,8 @@ export type DraftEditorHandle = {
   saved(): RevisionId | null;
 };
 
+const NONE: readonly string[] = [];
+
 const STATUS_TEXT: Record<SaveStatus, string> = {
   saved: 'All changes saved',
   pending: 'Unsaved changes',
@@ -87,7 +89,7 @@ export function DraftEditor({
   payload,
   region,
   onReload,
-  hiddenAttachment = null,
+  hiddenAttachments = NONE,
   ref,
 }: {
   ctx: ClientContext;
@@ -101,8 +103,8 @@ export function DraftEditor({
   region: Region;
   /** Throw away local edits and load the draft as it is now. */
   onReload: () => void;
-  /** An attachment kept out of the list because something else manages it (the banner). */
-  hiddenAttachment?: string | null;
+  /** Attachments kept out of the list because something else manages them (the banner, the icon). */
+  hiddenAttachments?: readonly string[];
   ref?: Ref<DraftEditorHandle>;
 }) {
   const surface = useRef<EditorSurfaceHandle>(null);
@@ -118,8 +120,8 @@ export function DraftEditor({
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const queryClient = useQueryClient();
   const listed = useMemo(
-    () => snapshot.attachments.filter((a) => a.id !== hiddenAttachment),
-    [snapshot.attachments, hiddenAttachment],
+    () => snapshot.attachments.filter((a) => !hiddenAttachments.includes(a.id)),
+    [snapshot.attachments, hiddenAttachments],
   );
   const attachments = useMemo<AttachmentAssist>(
     () => ({
