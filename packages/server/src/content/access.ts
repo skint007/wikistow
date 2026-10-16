@@ -1,14 +1,19 @@
 import type { PublicIdentity } from '@wikistow/contracts';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import {
   agentGrants,
+  groupMembers,
+  groups,
+  identities,
   nodes,
+  shareGroups,
   shareMembers,
   shares,
   spaceOwners,
   spaces,
 } from '../db/schema/index.ts';
+import { highest } from './effective.ts';
 import { ContentError } from './errors.ts';
 import { lookupIdentities } from './identities.ts';
 
@@ -164,10 +169,16 @@ export async function accessTo(
   const share = await shareAt(db, spaceId, nodeId);
   if (who.personId !== null) {
     if (!share) return null;
-    const grant = await agentGrantIn(db, who.identity.id, share.id);
-    if (!grant || !(await withinPick(db, spaceId, nodeId, grant.folderId))) return null;
-    const person = await personAccess(db, who.personId, share);
-    return person && { ...capAgent(grant, person), share };
+    const covering = [];
+    for (const grant of await agentGrantsOf(db, {
+      agentIds: [who.identity.id],
+      shareIds: [share.id],
+    })) {
+      if (await withinPick(db, spaceId, nodeId, grant.folderId)) covering.push(grant);
+    }
+    const grant = highest(covering);
+    const person = grant && (await personAccess(db, who.personId, share));
+    return person && grant && { ...capAgent(grant, person), share };
   }
   if (await isOwner(db, who.identity.id, spaceId))
     return { role: 'owner', canPublish: true, share };
@@ -200,14 +211,91 @@ export function capAgent(
   return { role, canPublish: role === 'editor' && grant.canPublish && person.canPublish };
 }
 
-/** An agent's grant in a share, if any. */
-export async function agentGrantIn(db: Database, agentId: string, shareId: string) {
-  const [grant] = await db
-    .select()
+/** One way an agent reaches a share: its own pick, or a group its person confirmed. */
+export type AgentGrant = {
+  agentId: string;
+  shareId: string;
+  spaceId: string;
+  /** The picked folder, or null for the whole share, as a group's always is. */
+  folderId: string | null;
+  role: 'reader' | 'editor';
+  canPublish: boolean;
+};
+
+/**
+ * Agents' grants (section 9.4), by agent, space or share: their own picks,
+ * and each share of every group their person confirmed for them, whole, at
+ * the group's access, or as a reader when the person kept the draft keys
+ * from it. One share can have several; the highest that covers a node
+ * counts, capped by the person's access (`capAgent`). A revoked agent's
+ * groups give it nothing.
+ */
+export async function agentGrantsOf(
+  db: Database,
+  where: { agentIds?: readonly string[]; spaceId?: string; shareIds?: readonly string[] },
+): Promise<AgentGrant[]> {
+  if (where.agentIds?.length === 0 || where.shareIds?.length === 0) return [];
+  const picks = await db
+    .select({
+      agentId: agentGrants.agentId,
+      shareId: agentGrants.shareId,
+      spaceId: agentGrants.spaceId,
+      folderId: agentGrants.folderId,
+      role: agentGrants.role,
+      canPublish: agentGrants.canPublish,
+    })
     .from(agentGrants)
-    .where(and(eq(agentGrants.agentId, agentId), eq(agentGrants.shareId, shareId)));
-  return grant ?? null;
+    .where(
+      and(
+        where.agentIds && inArray(agentGrants.agentId, [...where.agentIds]),
+        where.spaceId === undefined ? undefined : eq(agentGrants.spaceId, where.spaceId),
+        where.shareIds && inArray(agentGrants.shareId, [...where.shareIds]),
+      ),
+    );
+  const viaGroups = await db
+    .select({
+      agentId: groupMembers.identityId,
+      shareId: shareGroups.shareId,
+      spaceId: groups.spaceId,
+      role: shareGroups.role,
+      canPublish: shareGroups.canPublish,
+      drafts: groupMembers.agentDrafts,
+    })
+    .from(groupMembers)
+    .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+    .innerJoin(shareGroups, eq(shareGroups.groupId, groupMembers.groupId))
+    .innerJoin(
+      identities,
+      and(eq(identities.id, groupMembers.identityId), eq(identities.keyVersion, 1)),
+    )
+    .where(
+      and(
+        isNotNull(groupMembers.agentDrafts),
+        isNull(identities.revokedAt),
+        where.agentIds && inArray(groupMembers.identityId, [...where.agentIds]),
+        where.spaceId === undefined ? undefined : eq(groups.spaceId, where.spaceId),
+        where.shareIds && inArray(shareGroups.shareId, [...where.shareIds]),
+      ),
+    );
+  return [
+    ...picks,
+    ...viaGroups.map(({ drafts, role, canPublish, ...grant }) => ({
+      ...grant,
+      folderId: null,
+      role: drafts ? role : ('reader' as const),
+      canPublish: drafts === true && canPublish,
+    })),
+  ];
 }
+
+/**
+ * Where an agent's view of a share starts, from its grants there: the
+ * share root when one gives the whole share, else its pick.
+ */
+export const agentStart = (share: ShareRow, grants: readonly Pick<AgentGrant, 'folderId'>[]) =>
+  grants.some((grant) => grant.folderId === null)
+    ? share.rootId
+    : (grants[0]?.folderId ?? share.rootId);
 
 // Whether a node (or the space root, `null`) is at or under the folder an
 // agent was granted; a grant of the whole share covers everything in it.
@@ -307,23 +395,21 @@ export async function treeView(
     };
   }
   // An agent sees what it was granted, within its person's current access,
-  // starting at the folder it was granted, or at the share root.
-  const grants = await db
-    .select()
-    .from(agentGrants)
-    .where(and(eq(agentGrants.agentId, caller.identity.id), eq(agentGrants.spaceId, spaceId)));
-  const allowed = new Map<string, { access: Access; folderId: string | null }>();
+  // starting at the folder of its pick, or at the share root.
+  const grants = await agentGrantsOf(db, { agentIds: [caller.identity.id], spaceId });
+  const allowed = new Map<string, { grants: AgentGrant[]; person: Access; start: string | null }>();
   const starts = new Set<string>();
-  for (const grant of grants) {
-    const share = spaceShares.find((s) => s.id === grant.shareId);
+  for (const [shareId, held] of Map.groupBy(grants, (grant) => grant.shareId)) {
+    const share = spaceShares.find((s) => s.id === shareId);
     const person = share && (await personAccess(db, caller.personId, share));
     if (!share || !person) continue;
-    allowed.set(share.id, { access: capAgent(grant, person), folderId: grant.folderId });
-    const start = grant.folderId ?? share.rootId;
+    const start = agentStart(share, held);
+    allowed.set(share.id, { grants: held, person, start });
     if (start) starts.add(start);
   }
   if (allowed.size === 0) return null;
-  const within = (nodeId: string | null, folderId: string) => {
+  const within = (nodeId: string | null, folderId: string | null) => {
+    if (folderId === null) return true;
     let at = nodeId;
     for (let depth = 0; at && depth <= MAX_DEPTH; depth++) {
       if (at === folderId) return true;
@@ -335,14 +421,15 @@ export async function treeView(
     owner: false,
     at: (share, nodeId) => {
       const held = share && allowed.get(share.id);
-      if (!held) return null;
-      return held.folderId === null || within(nodeId, held.folderId) ? held.access : null;
+      const grant = held && highest(held.grants.filter((g) => within(nodeId, g.folderId)));
+      return held && grant ? capAgent(grant, held.person) : null;
     },
     starts,
     // Its pick stands in for the share root, which may be above it, unnamed.
     held: (share) => {
       const held = allowed.get(share.id);
-      return held ? { access: held.access, rootId: held.folderId ?? share.rootId } : null;
+      const grant = held && highest(held.grants);
+      return held && grant ? { access: capAgent(grant, held.person), rootId: held.start } : null;
     },
   };
 }

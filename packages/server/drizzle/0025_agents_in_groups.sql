@@ -1,0 +1,2 @@
+ALTER TABLE "group_members" ADD COLUMN "agent_drafts" boolean;--> statement-breakpoint
+ALTER TABLE "group_members" ADD CONSTRAINT "group_members_agent_drafts" CHECK ("group_members"."agent_drafts" is null or "group_members"."identity_id" like 'agent-%');

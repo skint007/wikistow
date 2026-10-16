@@ -47,6 +47,7 @@ import {
   checkMover,
   moveNode,
   removeOwner,
+  addGroupAgent,
   addGroupMember,
   checkGroupOwner,
   createGroup,
@@ -419,6 +420,19 @@ export function mountContentRoutes(
     groupRoutes.addGroupMember,
     async ({ params, body }, { principal }) => {
       await addGroupMember(db, {
+        accountId: principal.accountId,
+        groupId: params.groupId,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    groupChange,
+  );
+
+  routes.account(
+    groupRoutes.addGroupAgent,
+    async ({ params, body }, { principal }) => {
+      await addGroupAgent(db, {
         accountId: principal.accountId,
         groupId: params.groupId,
         ...body,

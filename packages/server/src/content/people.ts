@@ -3,10 +3,10 @@
 // email only to label a key they see for the first time.
 import { AgentEnrollment, PublicIdentity } from '@wikistow/contracts';
 import { normalizeEmail } from '@wikistow/client';
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { inArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { agentGrants, shares } from '../db/schema/index.ts';
-import { personAccess, subtreeOf } from './access.ts';
+import { shares } from '../db/schema/index.ts';
+import { agentGrantsOf, personAccess, subtreeOf } from './access.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { requireIdentity } from './structure.ts';
 
@@ -128,20 +128,31 @@ const authoredIn = (id: SQL, shareIds: SQL) => sql`(
              join metadata_revisions r on r.id = w.metadata_revision_id
              where w.share_id in (${shareIds}) and r.author_identity_id = ${id}))`;
 
-/** Where an agent reads: its pick in each share its person can still use. */
+/** Where an agent reads: its grants in each share its person can still use. */
 type Pick = { spaceId: string; shareId: string; folderId: string | null };
 
 async function agentPicks(db: Database, caller: Caller): Promise<Pick[]> {
   const { personId } = caller;
   if (personId === null) return [];
-  const rows = await db
-    .select({ share: shares, folderId: agentGrants.folderId })
-    .from(agentGrants)
-    .innerJoin(shares, eq(shares.id, agentGrants.shareId))
-    .where(eq(agentGrants.agentId, caller.identity.id));
+  const grants = await agentGrantsOf(db, { agentIds: [caller.identity.id] });
+  const rows =
+    grants.length === 0
+      ? []
+      : await db
+          .select()
+          .from(shares)
+          .where(
+            inArray(
+              shares.id,
+              grants.map((grant) => grant.shareId),
+            ),
+          );
   const picks: Pick[] = [];
-  for (const { share, folderId } of rows) {
+  for (const share of rows) {
     if (await personAccess(db, personId, share)) {
+      // A grant of the whole share covers its pick, if any.
+      const held = grants.filter((g) => g.shareId === share.id);
+      const folderId = held.some((g) => g.folderId === null) ? null : (held[0]?.folderId ?? null);
       picks.push({ spaceId: share.spaceId, shareId: share.id, folderId });
     }
   }

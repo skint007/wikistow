@@ -36,14 +36,25 @@ import {
   agentProfiles,
   appRateLimits,
   folderKeyEnvelopes,
+  groupMembers,
+  groups,
   identities,
   nodes,
+  shareGroups,
   shares,
   users,
 } from '../db/schema/index.ts';
 import { consumeRateLimit } from '../rate-limit.ts';
 import { readSettings } from '../settings.ts';
-import { ancestorsOf, personAccess, type Access, type ShareRow } from './access.ts';
+import {
+  agentGrantsOf,
+  ancestorsOf,
+  lockSpace,
+  personAccess,
+  type Access,
+  type AgentGrant,
+  type ShareRow,
+} from './access.ts';
 import { ContentError } from './errors.ts';
 import { checkFolderEnvelopes, storeFolderEnvelopes } from './sharing.ts';
 import { requireIdentity } from './structure.ts';
@@ -740,36 +751,74 @@ export async function deleteAgentGrant(
 }
 
 /**
+ * Whether an agent gets draft keys in a share: some grant there is for an
+ * editor, and its person isn't only a reader there (section 9.5).
+ */
+const editsThere = (grants: readonly AgentGrant[], own: Access) =>
+  grants.some((grant) => grant.role === 'editor') && own.role !== 'reader';
+
+/**
+ * The key versions of a share the agent holds as it needs them: any
+ * envelope, or for an editor, one with the draft key. A version held
+ * without it, where the agent now edits (a group's access raised), is
+ * sealed again.
+ */
+async function versionsHeld(tx: Database, shareId: string, agentId: string, editor: boolean) {
+  const rows = await tx
+    .select({ keyVersion: folderKeyEnvelopes.keyVersion, drafts: folderKeyEnvelopes.drafts })
+    .from(folderKeyEnvelopes)
+    .where(
+      and(
+        eq(folderKeyEnvelopes.shareId, shareId),
+        eq(folderKeyEnvelopes.recipientIdentityId, agentId),
+      ),
+    );
+  return {
+    held: new Set(rows.flatMap((row) => (row.drafts || !editor ? [row.keyVersion] : []))),
+    any: new Set(rows.map((row) => row.keyVersion)),
+  };
+}
+
+// The shares an agent has grants in, by its picks and confirmed groups.
+async function grantedShares(tx: Database, agentId: string, shareIds?: readonly string[]) {
+  const grants = await agentGrantsOf(tx, {
+    agentIds: [agentId],
+    ...(shareIds ? { shareIds } : {}),
+  });
+  const rows =
+    grants.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(shares)
+          .where(
+            inArray(
+              shares.id,
+              grants.map((grant) => grant.shareId),
+            ),
+          )
+          .orderBy(shares.id);
+  return rows.map((share) => ({
+    share,
+    grants: grants.filter((grant) => grant.shareId === share.id),
+  }));
+}
+
+/**
  * Key versions the agent lacks in the shares it has a grant in (section
- * 9.4), for its person's app to seal at unlock. Only shares its person can
- * still reach: they hold nothing newer of any other.
+ * 9.4), through a pick or a group its person confirmed, for its person's
+ * app to seal at unlock. Only shares its person can still reach: they hold
+ * nothing newer of any other.
  */
 export async function missingVersions(db: Database, input: { accountId: string; agentId: string }) {
   const person = await requireIdentity(db, input.accountId);
   // Only read: the person's app seals what is missing in a write of its own.
   const agent = await requireOwnAgent(db, input.accountId, input.agentId, { lock: false });
-  const granted = await db
-    .select({ share: shares })
-    .from(agentGrants)
-    .innerJoin(shares, eq(shares.id, agentGrants.shareId))
-    .where(eq(agentGrants.agentId, agent.id))
-    .orderBy(shares.id);
   const missing = [];
-  for (const { share } of granted) {
-    if (!(await personAccess(db, person.id, share))) continue;
-    const held = new Set(
-      (
-        await db
-          .select({ keyVersion: folderKeyEnvelopes.keyVersion })
-          .from(folderKeyEnvelopes)
-          .where(
-            and(
-              eq(folderKeyEnvelopes.shareId, share.id),
-              eq(folderKeyEnvelopes.recipientIdentityId, agent.id),
-            ),
-          )
-      ).map((row) => row.keyVersion),
-    );
+  for (const { share, grants } of await grantedShares(db, agent.id)) {
+    const own = await personAccess(db, person.id, share);
+    if (!own) continue;
+    const { held } = await versionsHeld(db, share.id, agent.id, editsThere(grants, own));
     const keyVersions = Array.from({ length: share.currentKeyVersion }, (_, i) => i + 1).filter(
       (version) => !held.has(version),
     );
@@ -783,8 +832,9 @@ export async function missingVersions(db: Database, input: { accountId: string; 
 /**
  * Key versions the agent lacked, sealed to it by its person (section 6.4):
  * each in a share it has a grant in that its person can still reach, at a
- * version up to the current one it holds no envelope for, with the draft
- * key exactly when the agent may edit there now.
+ * version up to the current one it holds no envelope for, or holds without
+ * the draft key it now needs, with the draft key exactly when the agent
+ * may edit there now. Those replace the envelopes it held.
  */
 export async function addAgentEnvelopes(
   db: Database,
@@ -796,26 +846,11 @@ export async function addAgentEnvelopes(
     const byShare = Map.groupBy(input.envelopes, (envelope) => envelope.shareId);
     for (const [shareId, envelopes] of byShare) {
       const share = await lockShareRow(tx, shareId);
-      const [grant] = await tx
-        .select()
-        .from(agentGrants)
-        .where(and(eq(agentGrants.agentId, agent.id), eq(agentGrants.shareId, shareId)));
-      const own = grant && (await personAccess(tx, person.id, share));
-      if (!grant || !own) throw new ContentError('not-found');
-      const editor = grant.role === 'editor' && own.role !== 'reader';
-      const held = new Set(
-        (
-          await tx
-            .select({ keyVersion: folderKeyEnvelopes.keyVersion })
-            .from(folderKeyEnvelopes)
-            .where(
-              and(
-                eq(folderKeyEnvelopes.shareId, shareId),
-                eq(folderKeyEnvelopes.recipientIdentityId, agent.id),
-              ),
-            )
-        ).map((row) => row.keyVersion),
-      );
+      const grants = await agentGrantsOf(tx, { agentIds: [agent.id], shareIds: [shareId] });
+      const own = grants.length > 0 ? await personAccess(tx, person.id, share) : null;
+      if (!own) throw new ContentError('not-found');
+      const editor = editsThere(grants, own);
+      const { held, any } = await versionsHeld(tx, shareId, agent.id, editor);
       const versions = envelopes.map((envelope) => envelope.keyVersion);
       if (versions.some((v) => v > share.currentKeyVersion || held.has(v))) {
         throw new ContentError('stale-head', 'The agent holds that version, or it doesn’t exist');
@@ -831,8 +866,129 @@ export async function addAgentEnvelopes(
           drafts: editor,
         })),
       });
+      const replaced = versions.filter((v) => any.has(v));
+      if (replaced.length > 0) {
+        await tx
+          .delete(folderKeyEnvelopes)
+          .where(
+            and(
+              eq(folderKeyEnvelopes.shareId, shareId),
+              eq(folderKeyEnvelopes.recipientIdentityId, agent.id),
+              inArray(folderKeyEnvelopes.keyVersion, replaced),
+            ),
+          );
+      }
       await storeFolderEnvelopes(tx, envelopes);
     }
+  });
+}
+
+/**
+ * The groups the caller's live agents are in (section 9.4), each with the
+ * shares it has and its access there, and whether the person confirmed it:
+ * their Agents page shows each one to confirm, or to take the agent out.
+ * The group's name is the owners' alone.
+ */
+export async function listAgentGroups(db: Database, accountId: string) {
+  const rows = await db
+    .select({
+      agentId: groupMembers.identityId,
+      groupId: groupMembers.groupId,
+      spaceId: groups.spaceId,
+      drafts: groupMembers.agentDrafts,
+    })
+    .from(groupMembers)
+    .innerJoin(groups, eq(groups.id, groupMembers.groupId))
+    .innerJoin(agentProfiles, eq(agentProfiles.agentId, groupMembers.identityId))
+    .innerJoin(
+      identities,
+      and(eq(identities.id, agentProfiles.agentId), eq(identities.keyVersion, 1)),
+    )
+    .where(and(eq(agentProfiles.accountId, accountId), isNull(identities.revokedAt)))
+    .orderBy(groupMembers.identityId, groupMembers.groupId);
+  const held =
+    rows.length === 0
+      ? []
+      : await db
+          .select()
+          .from(shareGroups)
+          .where(
+            inArray(
+              shareGroups.groupId,
+              rows.map((row) => row.groupId),
+            ),
+          )
+          .orderBy(shareGroups.shareId);
+  return rows.map(({ drafts, ...row }) => ({
+    ...row,
+    confirmed: drafts !== null,
+    drafts: drafts === true,
+    shares: held
+      .filter((g) => g.groupId === row.groupId)
+      .map(({ shareId, role, canPublish }) => ({ shareId, role, canPublish })),
+  }));
+}
+
+// The caller's agent's place in a group, with the group's space held
+// against owners' changes to it until the transaction ends.
+async function lockAgentGroup(tx: Database, input: { groupId: string }) {
+  const [group] = await tx.select().from(groups).where(eq(groups.id, input.groupId));
+  if (!group) throw new ContentError('not-found');
+  await lockSpace(tx, group.spaceId);
+  return group;
+}
+
+/**
+ * The person confirms a group an owner put their agent in (section 9.4),
+ * after recording it in their contacts record: from now on the agent has
+ * the group's shares, whole, at the group's access (as a reader without
+ * `drafts`), capped by the person's own. Their app seals it the keys.
+ */
+export async function confirmAgentGroup(
+  db: Database,
+  input: { accountId: string; agentId: string; groupId: string; drafts: boolean },
+) {
+  await db.transaction(async (tx) => {
+    const agent = await requireOwnAgent(tx, input.accountId, input.agentId);
+    const group = await lockAgentGroup(tx, input);
+    const confirmed = await tx
+      .update(groupMembers)
+      .set({ agentDrafts: input.drafts })
+      .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.identityId, agent.id)))
+      .returning({ id: groupMembers.identityId });
+    if (confirmed.length === 0) throw new ContentError('not-found', 'Not in that group');
+    await audit(tx, {
+      actor: input.accountId,
+      action: 'agent.group-confirmed',
+      target: { kind: 'agent', id: agent.id },
+      details: { groupId: group.id, drafts: input.drafts },
+    });
+  });
+}
+
+/**
+ * The person takes their agent out of a group, confirmed or not. It keeps
+ * the keys it had (A6); the group's owners see it among the agents holding
+ * keys with no grant, and can rotate them.
+ */
+export async function leaveAgentGroup(
+  db: Database,
+  input: { accountId: string; agentId: string; groupId: string },
+) {
+  await db.transaction(async (tx) => {
+    const agent = await requireOwnAgent(tx, input.accountId, input.agentId);
+    const group = await lockAgentGroup(tx, input);
+    const left = await tx
+      .delete(groupMembers)
+      .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.identityId, agent.id)))
+      .returning({ id: groupMembers.identityId });
+    if (left.length === 0) throw new ContentError('not-found', 'Not in that group');
+    await audit(tx, {
+      actor: input.accountId,
+      action: 'agent.group-left',
+      target: { kind: 'agent', id: agent.id },
+      details: { groupId: group.id },
+    });
   });
 }
 

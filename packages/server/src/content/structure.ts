@@ -12,11 +12,10 @@ import {
   sealedBytes,
   verifySignature,
 } from '@wikistow/client';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import {
-  agentGrants,
   keyEnvelopes,
   metadataRevisions,
   metadataWraps,
@@ -30,6 +29,7 @@ import { readSettings } from '../settings.ts';
 import {
   accessTo,
   canEdit,
+  agentGrantsOf,
   capAgent,
   lockShare,
   lockSpace,
@@ -43,6 +43,7 @@ import {
   type Holder,
   type ShareRow,
 } from './access.ts';
+import { highest } from './effective.ts';
 import { ContentError } from './errors.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
@@ -383,15 +384,29 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
   const { identity } = caller;
   const bySpace = new Map<string, { space: typeof spaces.$inferSelect; access: Access }>();
   if (caller.personId !== null) {
-    const granted = await db
-      .select({ space: spaces, share: shares, grant: agentGrants })
-      .from(agentGrants)
-      .innerJoin(shares, and(eq(shares.id, agentGrants.shareId), isNull(shares.rootId)))
-      .innerJoin(spaces, eq(spaces.id, shares.spaceId))
-      .where(and(eq(agentGrants.agentId, identity.id), isNull(agentGrants.folderId)));
-    for (const { space, share, grant } of granted) {
+    const whole = (await agentGrantsOf(db, { agentIds: [identity.id] })).filter(
+      (grant) => grant.folderId === null,
+    );
+    const granted =
+      whole.length === 0
+        ? []
+        : await db
+            .select({ space: spaces, share: shares })
+            .from(shares)
+            .innerJoin(spaces, eq(spaces.id, shares.spaceId))
+            .where(
+              and(
+                isNull(shares.rootId),
+                inArray(
+                  shares.id,
+                  whole.map((grant) => grant.shareId),
+                ),
+              ),
+            );
+    for (const { space, share } of granted) {
       const person = await personAccess(db, caller.personId, share);
-      if (person) bySpace.set(space.id, { space, access: capAgent(grant, person) });
+      const grant = highest(whole.filter((g) => g.shareId === share.id));
+      if (person && grant) bySpace.set(space.id, { space, access: capAgent(grant, person) });
     }
   } else {
     const owned = await db

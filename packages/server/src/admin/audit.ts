@@ -75,6 +75,9 @@ const DETAILS = {
     canPublish: z.boolean(),
   }),
   'agent.grant-removed': z.strictObject({ shareId: z.string() }),
+  // A person confirms a group an owner put their agent in, or takes it out.
+  'agent.group-confirmed': z.strictObject({ groupId: z.string(), drafts: z.boolean() }),
+  'agent.group-left': z.strictObject({ groupId: z.string() }),
   'agent.revoked': z.strictObject({}),
 };
 

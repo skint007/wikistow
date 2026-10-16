@@ -4,11 +4,12 @@
 // sharing with or removing them one by one would, in one request under the
 // lock on the space, and recomputes the member rows it touches.
 import type { FolderKeyEnvelope, PublicIdentity, sharingRoutes } from '@wikistow/contracts';
-import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
+  agentProfiles,
   groupMembers,
   groups,
   identities,
@@ -20,7 +21,7 @@ import {
   spaceOwners,
   spaces,
 } from '../db/schema/index.ts';
-import { currentOwners, isOwner, type ShareRow } from './access.ts';
+import { agentGrantsOf, currentOwners, isOwner, type ShareRow } from './access.ts';
 import {
   effectiveAccess,
   keysCover,
@@ -95,7 +96,11 @@ export async function listGroups(
     ids.length === 0
       ? []
       : await db
-          .select({ groupId: groupMembers.groupId, identityId: groupMembers.identityId })
+          .select({
+            groupId: groupMembers.groupId,
+            identityId: groupMembers.identityId,
+            agentDrafts: groupMembers.agentDrafts,
+          })
           .from(groupMembers)
           .where(inArray(groupMembers.groupId, ids))
           .orderBy(groupMembers.identityId);
@@ -105,6 +110,8 @@ export async function listGroups(
       p,
     ]),
   );
+  const agents = await agentsFor(db, spaceId, members);
+  const live = new Set(agents.map((agent) => agent.agentId));
   const held =
     ids.length === 0
       ? []
@@ -121,6 +128,11 @@ export async function listGroups(
         const person = m.groupId === row.id ? people.get(m.identityId) : undefined;
         return person ? [person] : [];
       }),
+      agents: members.flatMap((m) =>
+        m.groupId === row.id && live.has(m.identityId)
+          ? [{ agentId: m.identityId, confirmed: m.agentDrafts !== null }]
+          : [],
+      ),
       shares: held
         .filter((g) => g.groupId === row.id)
         .map(({ shareId, role, canPublish }) => ({ shareId, role, canPublish })),
@@ -144,8 +156,48 @@ export async function listGroups(
             },
           ],
     ),
+    agents,
     permissionVersion: space.permissionVersion,
   };
+}
+
+/**
+ * The live agents an owner may see in a space's groups, or add to one
+ * (section 7.8): those in its groups, and those of its owners and of the
+ * people in its groups, each with its person and the name the server has.
+ */
+async function agentsFor(
+  db: Database,
+  spaceId: string,
+  members: readonly { identityId: string }[],
+) {
+  const owners = db
+    .select({ id: spaceOwners.identityId })
+    .from(spaceOwners)
+    .where(and(eq(spaceOwners.spaceId, spaceId), isNull(spaceOwners.removedAt)));
+  const ids = [...new Set(members.map((m) => m.identityId))];
+  return db
+    .select({
+      agentId: agentProfiles.agentId,
+      personId: agentProfiles.ownerIdentityId,
+      name: agentProfiles.name,
+    })
+    .from(agentProfiles)
+    .innerJoin(
+      identities,
+      and(eq(identities.id, agentProfiles.agentId), eq(identities.keyVersion, 1)),
+    )
+    .where(
+      and(
+        isNull(identities.revokedAt),
+        or(
+          inArray(agentProfiles.ownerIdentityId, owners),
+          ids.length === 0 ? undefined : inArray(agentProfiles.ownerIdentityId, ids),
+          ids.length === 0 ? undefined : inArray(agentProfiles.agentId, ids),
+        ),
+      ),
+    )
+    .orderBy(agentProfiles.agentId);
 }
 
 /**
@@ -249,6 +301,7 @@ async function settle(
     sealer,
     accountId,
     groupId,
+    reach,
   }: {
     spaceId: string;
     changed: readonly ShareRow[];
@@ -256,10 +309,17 @@ async function settle(
     sealer: PublicIdentity;
     accountId: string;
     groupId?: string;
+    /** Which agents reached which of `changed` before the change (`agentReach`). */
+    reach?: ReadonlySet<string>;
   },
 ) {
   const shareIds = changed.map((share) => share.id);
-  await requireRotationsCover(tx, shareIds, rotations);
+  // A confirmed agent leaving rotates the shares it no longer reaches, as a person would.
+  const now = reach ? await agentReach(tx, shareIds) : new Set<string>();
+  const lost = new Set(
+    [...(reach ?? [])].filter((key) => !now.has(key)).map((key) => key.split(' ')[0] ?? ''),
+  );
+  await requireRotationsCover(tx, shareIds, rotations, lost);
   const owners = await currentOwners(tx, spaceId);
   for (const rotation of rotations) {
     const share = changed.find((s) => s.id === rotation.shareId);
@@ -281,6 +341,17 @@ async function settle(
   const nodeIds = [];
   for (const share of changed) nodeIds.push(...(await nodesUnder(tx, spaceId, share.rootId)));
   await bumpPermissions(tx, spaceId, nodeIds);
+}
+
+/**
+ * Which agents reach which of `shareIds`, by a pick or a confirmed group,
+ * as `shareId agentId` keys: taken before a change that can take an agent
+ * out of a group, so `settle` can tell which shares it stops reaching.
+ */
+async function agentReach(tx: Database, shareIds: readonly string[]) {
+  return new Set(
+    (await agentGrantsOf(tx, { shareIds })).map((grant) => `${grant.shareId} ${grant.agentId}`),
+  );
 }
 
 /** The shares a group has, held for update. */
@@ -315,6 +386,10 @@ export async function deleteGroup(
     const { group, space } = await lockGroup(tx, identity, input.groupId);
     requirePermissionVersion(space.permissionVersion, input.permissionVersion);
     const changed = await sharesOf(tx, group.spaceId, group.id);
+    const reach = await agentReach(
+      tx,
+      changed.map((share) => share.id),
+    );
     await tx.delete(groups).where(eq(groups.id, group.id));
     await settle(tx, {
       spaceId: group.spaceId,
@@ -323,6 +398,7 @@ export async function deleteGroup(
       sealer: identity,
       accountId: input.accountId,
       groupId: group.id,
+      reach,
     });
     // Its name versions point at it by ID, not by foreign key.
     const names = tx
@@ -503,24 +579,100 @@ export async function removeGroupMember(
     const identity = await requireIdentity(tx, input.accountId);
     const { group, space } = await lockGroup(tx, identity, input.groupId);
     requirePermissionVersion(space.permissionVersion, input.permissionVersion);
+    const changed = await sharesOf(tx, group.spaceId, group.id);
+    const reach = await agentReach(
+      tx,
+      changed.map((share) => share.id),
+    );
+    // A person's agents leave the group with them.
     const removed = await tx
       .delete(groupMembers)
-      .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.identityId, input.identityId)))
+      .where(
+        and(
+          eq(groupMembers.groupId, group.id),
+          or(
+            eq(groupMembers.identityId, input.identityId),
+            inArray(groupMembers.identityId, agentsOf(tx, input.identityId)),
+          ),
+        ),
+      )
       .returning({ id: groupMembers.identityId });
-    if (removed.length === 0) throw new ContentError('not-found', 'Not in the group');
+    if (!removed.some((m) => m.id === input.identityId)) {
+      throw new ContentError('not-found', 'Not in the group');
+    }
     await settle(tx, {
       spaceId: group.spaceId,
-      changed: await sharesOf(tx, group.spaceId, group.id),
+      changed,
       rotations: input.rotations,
       sealer: identity,
       accountId: input.accountId,
       groupId: group.id,
+      reach,
     });
+    for (const { id } of removed) {
+      await audit(tx, {
+        actor: input.accountId,
+        action: 'group.member-removed',
+        target: { kind: 'group', id: group.id },
+        details: { identityId: id },
+      });
+    }
+  });
+}
+
+/** The IDs of a person's agents, as a subquery. */
+const agentsOf = (tx: Database, personId: string) =>
+  tx
+    .select({ id: agentProfiles.agentId })
+    .from(agentProfiles)
+    .where(eq(agentProfiles.ownerIdentityId, personId));
+
+/**
+ * Put an agent in a group for its person, who must be in the group or an
+ * owner of the space (section 7.8). It gets nothing until its person
+ * confirms (`confirmAgentGroup`), since only they seal to it, so nothing
+ * changes access here and nothing is sealed.
+ */
+export async function addGroupAgent(
+  db: Database,
+  input: { accountId: string; groupId: string; agentId: string; permissionVersion: number },
+) {
+  await db.transaction(async (tx) => {
+    const identity = await requireIdentity(tx, input.accountId);
+    const { group, space } = await lockGroup(tx, identity, input.groupId);
+    requirePermissionVersion(space.permissionVersion, input.permissionVersion);
+    const [agent] = await tx
+      .select({ accountId: agentProfiles.accountId, personId: agentProfiles.ownerIdentityId })
+      .from(agentProfiles)
+      .innerJoin(
+        identities,
+        and(eq(identities.id, agentProfiles.agentId), eq(identities.keyVersion, 1)),
+      )
+      .where(and(eq(agentProfiles.agentId, input.agentId), isNull(identities.revokedAt)));
+    if (!agent) throw new ContentError('not-found', 'No such agent');
+    const [withPerson] = await tx
+      .select({ id: groupMembers.identityId })
+      .from(groupMembers)
+      .where(and(eq(groupMembers.groupId, group.id), eq(groupMembers.identityId, agent.personId)));
+    if (!withPerson && !(await isOwner(tx, agent.personId, group.spaceId))) {
+      throw new ContentError('forbidden', 'An agent joins a group only for someone in it');
+    }
+    const added = await tx
+      .insert(groupMembers)
+      .values({
+        groupId: group.id,
+        identityId: input.agentId,
+        accountId: agent.accountId,
+        addedBy: input.accountId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: groupMembers.identityId });
+    if (added.length === 0) throw new ContentError('duplicate', 'Already in the group');
     await audit(tx, {
       actor: input.accountId,
-      action: 'group.member-removed',
+      action: 'group.member-added',
       target: { kind: 'group', id: group.id },
-      details: { identityId: input.identityId },
+      details: { identityId: input.agentId },
     });
   });
 }
@@ -646,6 +798,7 @@ export async function removeShareGroup(
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
     const { share, group } = await lockShareAndGroup(tx, identity, input);
+    const reach = await agentReach(tx, [share.id]);
     const removed = await tx
       .delete(shareGroups)
       .where(and(eq(shareGroups.shareId, share.id), eq(shareGroups.groupId, group.id)))
@@ -658,6 +811,7 @@ export async function removeShareGroup(
       sealer: identity,
       accountId: input.accountId,
       groupId: group.id,
+      reach,
     });
     await audit(tx, {
       actor: input.accountId,
@@ -738,19 +892,27 @@ export async function removeFromSpace(
       throw new ContentError('forbidden', 'Remove an owner as an owner');
     }
     const changed = await lockShares(tx, input.spaceId);
+    const reach = await agentReach(
+      tx,
+      changed.map((share) => share.id),
+    );
     const spaceGroups = tx
       .select({ id: groups.id })
       .from(groups)
       .where(eq(groups.spaceId, input.spaceId));
+    // Their agents leave the space's groups with them.
     const left = await tx
       .delete(groupMembers)
       .where(
         and(
-          eq(groupMembers.identityId, input.identityId),
+          or(
+            eq(groupMembers.identityId, input.identityId),
+            inArray(groupMembers.identityId, agentsOf(tx, input.identityId)),
+          ),
           inArray(groupMembers.groupId, spaceGroups),
         ),
       )
-      .returning({ groupId: groupMembers.groupId });
+      .returning({ groupId: groupMembers.groupId, identityId: groupMembers.identityId });
     const held =
       changed.length === 0
         ? []
@@ -767,20 +929,23 @@ export async function removeFromSpace(
               ),
             )
             .returning({ shareId: shareMembers.shareId });
-    if (left.length === 0 && held.length === 0) throw new ContentError('not-found');
+    if (!left.some((m) => m.identityId === input.identityId) && held.length === 0) {
+      throw new ContentError('not-found');
+    }
     await settle(tx, {
       spaceId: input.spaceId,
       changed,
       rotations: input.rotations,
       sealer: identity,
       accountId: input.accountId,
+      reach,
     });
-    for (const { groupId } of left) {
+    for (const { groupId, identityId } of left) {
       await audit(tx, {
         actor: input.accountId,
         action: 'group.member-removed',
         target: { kind: 'group', id: groupId },
-        details: { identityId: input.identityId },
+        details: { identityId },
       });
     }
   });

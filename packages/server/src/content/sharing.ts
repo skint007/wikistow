@@ -33,6 +33,8 @@ import {
 import { readSettings } from '../settings.ts';
 import {
   accessTo,
+  agentGrantsOf,
+  agentStart,
   ancestorsOf,
   currentOwners,
   isOwner,
@@ -995,6 +997,15 @@ export async function listShares(db: Database, accountId: string, spaceId: strin
             ),
           )
           .orderBy(agentProfiles.agentId);
+  // Agents a group gives the share to hold its keys rightly (section 9.4).
+  const viaGroups = new Set(
+    (
+      await agentGrantsOf(db, {
+        shareIds: [...new Set(former.map((held) => held.shareId))],
+        agentIds: [...new Set(former.map((held) => held.agentId))],
+      })
+    ).map((grant) => `${grant.shareId} ${grant.agentId}`),
+  );
   return rows.map((row) => ({
     ...shareOf(row),
     members: members
@@ -1016,7 +1027,9 @@ export async function listShares(db: Database, accountId: string, spaceId: strin
         canPublish,
       })),
     formerAgents: former
-      .filter((held) => held.shareId === row.id)
+      .filter(
+        (held) => held.shareId === row.id && !viaGroups.has(`${held.shareId} ${held.agentId}`),
+      )
       .map(({ agentId, personId, name }) => ({ agentId, personId, name })),
   }));
 }
@@ -1132,24 +1145,31 @@ export async function myEnvelopes(
  * can still use, with its access there (section 9.5) and its pick.
  */
 async function agentShares(db: Database, caller: Caller, spaceId?: string) {
-  const rows = await db
-    .select({ share: shares, grant: agentGrants })
-    .from(agentGrants)
-    .innerJoin(shares, eq(shares.id, agentGrants.shareId))
-    .where(
-      and(
-        eq(agentGrants.agentId, caller.identity.id),
-        spaceId === undefined ? sql`true` : eq(agentGrants.spaceId, spaceId),
-      ),
-    )
-    .orderBy(shares.id);
+  const grants = await agentGrantsOf(db, {
+    agentIds: [caller.identity.id],
+    ...(spaceId === undefined ? {} : { spaceId }),
+  });
+  const rows =
+    grants.length === 0
+      ? []
+      : await db
+          .select()
+          .from(shares)
+          .where(
+            inArray(
+              shares.id,
+              grants.map((grant) => grant.shareId),
+            ),
+          )
+          .orderBy(shares.id);
   const held = [];
-  for (const { share, grant } of rows) {
-    const access = await accessTo(db, caller, {
-      spaceId: share.spaceId,
-      nodeId: grant.folderId ?? share.rootId,
-    });
-    if (access) held.push({ share, access, rootId: grant.folderId ?? share.rootId });
+  for (const share of rows) {
+    const rootId = agentStart(
+      share,
+      grants.filter((grant) => grant.shareId === share.id),
+    );
+    const access = await accessTo(db, caller, { spaceId: share.spaceId, nodeId: rootId });
+    if (access) held.push({ share, access, rootId });
   }
   return held;
 }

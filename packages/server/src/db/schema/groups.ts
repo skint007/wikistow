@@ -29,9 +29,9 @@ export const groups = pgTable(
 );
 
 /**
- * Who is in each group: a person, or later an agent for its person. Not
- * signed: a membership is only the owners' instruction about whom to seal
- * to. `accountId` is the identity's account, so deleting it removes them.
+ * Who is in each group: a person, or an agent for its person. Not signed:
+ * a membership is only the owners' instruction about whom to seal to.
+ * `accountId` is the identity's account, so deleting it removes them.
  */
 export const groupMembers = pgTable(
   'group_members',
@@ -44,11 +44,20 @@ export const groupMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     addedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * For an agent: null until its person confirms the group (section 9.4),
+     * then whether it gets draft keys through it. Always null for a person.
+     */
+    agentDrafts: boolean(),
     createdAt: timestamptz().notNull().defaultNow(),
   },
   (table) => [
     primaryKey({ columns: [table.groupId, table.identityId] }),
     index('group_members_identity_idx').on(table.identityId),
+    check(
+      'group_members_agent_drafts',
+      sql`${table.agentDrafts} is null or ${table.identityId} like 'agent-%'`,
+    ),
   ],
 );
 
