@@ -34,8 +34,8 @@ export type WorkshopState = {
   /** The draft's files as saved, by path. */
   files: ReadonlyMap<string, string>;
   /**
-   * For a draft of someone else's plugin, the ID it started from and the
-   * new one the server gave it, as they were when it opened.
+   * For a draft of someone else's plugin, the ID it started from and its
+   * new one: the server's when it opened, then as its manifest changes.
    */
   copy: { from: string; id: string } | null;
   /** What last went wrong outside the plugin's own code, such as previewing on opening. */
@@ -320,7 +320,9 @@ export class Workshop {
     // From the files as they are now: another change may have landed meanwhile.
     const files = new Map(this.#state.files);
     apply(files);
-    this.#set({ draft, files });
+    // A copy's note names the ID it has now, such as one chosen after Publish found its first taken.
+    const { copy } = this.#state;
+    this.#set({ draft, files, copy: copy && (copyOf(draft, files) ?? copy) });
   }
 
   /** Build the draft's files into the next version. Null if stopped or unloaded meanwhile. */

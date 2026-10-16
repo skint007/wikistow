@@ -51,6 +51,8 @@ export function useNewDraft(): {
   /** A draft is being made, or the person asked: don't start another. */
   busy: boolean;
   error: string | null;
+  /** Forget `error`, as the page does its own after another action. */
+  clear: () => void;
   dialog: ReactNode;
 } {
   const queryClient = useQueryClient();
@@ -132,7 +134,7 @@ export function useNewDraft(): {
     </Dialog>
   );
 
-  return { start, busy: making || busy, error, dialog };
+  return { start, busy: making || busy, error, clear: () => setError(null), dialog };
 }
 
 const { draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
@@ -200,6 +202,7 @@ export function DraftsList({ open }: { open: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const remove = async (draft: DraftSummary) => {
     setError(null);
+    newDraft.clear();
     try {
       await api.call(pluginDraftRoutes.deleteDraft, { params: { draftId: draft.id } });
     } catch (failure) {
@@ -225,7 +228,14 @@ export function DraftsList({ open }: { open: string | null }) {
             }
           }}
         />
-        <Button size="sm" disabled={newDraft.busy} onClick={() => void newDraft.start({})}>
+        <Button
+          size="sm"
+          disabled={newDraft.busy}
+          onClick={() => {
+            setError(null);
+            void newDraft.start({});
+          }}
+        >
           New plugin
         </Button>
       </div>

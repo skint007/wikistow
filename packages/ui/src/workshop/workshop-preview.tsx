@@ -96,6 +96,8 @@ function Status({ workshop }: { workshop: Workshop }) {
     workshop.subscribe,
     workshop.state,
   );
+  // Here, so how a publish went still shows once another version is in the preview.
+  const [published, setPublished] = useState<Notice | null>(null);
   const latest = versions.at(-1);
   const newest = versions.findLast((version) => version.plugin !== null);
   const plugin = running?.plugin;
@@ -118,8 +120,7 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
-            {/* Its notice goes once another version is in the preview. */}
-            <Publish key={running.version} workshop={workshop} version={running} />
+            <Publish workshop={workshop} version={running} onNotice={setPublished} />
           </>
         ) : (
           <span className="text-muted-foreground">
@@ -132,6 +133,14 @@ function Status({ workshop }: { workshop: Workshop }) {
         )}
         {building && <span className="text-muted-foreground">Building…</span>}
       </div>
+      {published && (
+        <p
+          role={published.failed ? 'alert' : 'status'}
+          className={cn('text-sm', published.failed && 'text-destructive')}
+        >
+          {published.text}
+        </p>
+      )}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
@@ -154,31 +163,42 @@ function Status({ workshop }: { workshop: Workshop }) {
   );
 }
 
+type Notice = { text: string; failed: boolean };
+
 /**
  * Publish the version in the preview to the library (ADR 0004): the upload
  * confirmation, with Shared or Only me, then the upload, after any preview
  * upload under way, which installs it for the person on all their devices.
+ * `onNotice` says how it went, or null as another publish starts.
  */
-function Publish({ workshop, version }: { workshop: Workshop; version: WorkshopVersion }) {
+function Publish({
+  workshop,
+  version,
+  onNotice,
+}: {
+  workshop: Workshop;
+  version: WorkshopVersion;
+  onNotice: (notice: Notice | null) => void;
+}) {
   const ctx = useClient();
   const queryClient = useQueryClient();
   const [upload, setUpload] = useState<PluginUpload | null>(null);
-  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
-  const manifest = version.plugin?.manifest;
-  if (!manifest) return null;
+  const shown = version.plugin?.manifest;
+  if (!shown) return null;
   const publish = async (
     chosen: PluginUpload,
     visibility: pluginRoutes.PluginVisibility | undefined,
   ) => {
-    setNotice(null);
+    const { manifest } = chosen;
+    onNotice(null);
     try {
       await workshop.oneLargeUpload(() => uploadAndInstall(ctx, chosen, visibility));
-      setNotice({
+      onNotice({
         text: `Published ${manifest.name} ${manifest.version} and installed it on all your devices.`,
         failed: false,
       });
     } catch (failure) {
-      setNotice({
+      onNotice({
         // The app's words for a refusal hide this one, which the person can fix.
         text:
           failure instanceof ApiError && failure.code === 'forbidden'
@@ -195,20 +215,12 @@ function Publish({ workshop, version }: { workshop: Workshop; version: WorkshopV
       <Button
         size="sm"
         onClick={() => {
-          setNotice(null);
-          setUpload({ ...workshop.versionFiles(version.version), manifest });
+          onNotice(null);
+          setUpload({ ...workshop.versionFiles(version.version), manifest: shown });
         }}
       >
         Publish…
       </Button>
-      {notice && (
-        <p
-          role={notice.failed ? 'alert' : 'status'}
-          className={cn('basis-full text-sm', notice.failed && 'text-destructive')}
-        >
-          {notice.text}
-        </p>
-      )}
       <ConfirmUpload
         ctx={ctx}
         upload={upload}

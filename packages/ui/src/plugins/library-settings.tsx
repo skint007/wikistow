@@ -134,6 +134,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
   const act = async (run: () => Promise<unknown>) => {
     setError(null);
     setNotice(null);
+    newDraft.clear();
     try {
       const done = await run();
       if (typeof done === 'string') setNotice(done);
