@@ -40,8 +40,6 @@ function Unlock() {
   // Once per page: React may run the effect twice, and two unlocks at once
   // would trip over each other's staged keys.
   const tried = useRef(false);
-  // Pressed Open without plugins: this tab unlocks in safe mode.
-  const withoutPlugins = useRef(false);
 
   // At launch, a remembered unlock opens the vault without asking.
   useEffect(() => {
@@ -71,9 +69,9 @@ function Unlock() {
     const passphrase = form.get('passphrase');
     if (typeof passphrase !== 'string' || !passphrase) return;
     const started = vaultStore.epoch();
-    // Before unlocking, which starts the plugins; only if it opens.
-    const safe = withoutPlugins.current && !tabSafeMode.on();
-    withoutPlugins.current = false;
+    // Open without plugins: safe mode for this tab, set before unlocking,
+    // which starts the plugins, and kept only if it opens.
+    const safe = form.get('plugins') === 'off' && !tabSafeMode.on();
     if (safe) tabSafeMode.set(true);
     setBusy(true);
     setError(null);
@@ -124,12 +122,7 @@ function Unlock() {
           {busy ? 'Unlocking…' : 'Unlock'}
         </Button>
         {!desktop && (
-          <Button
-            type="submit"
-            variant="outline"
-            disabled={busy}
-            onClick={() => (withoutPlugins.current = true)}
-          >
+          <Button type="submit" name="plugins" value="off" variant="outline" disabled={busy}>
             Open without plugins
           </Button>
         )}
