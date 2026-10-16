@@ -1,9 +1,7 @@
 import {
-  DEFAULT_FOLDER_LOOK,
   pageOperations,
   spaceOperations,
   type FolderId,
-  type FolderLook,
   type PageId,
   type SpaceId,
 } from '@wikistow/client';
@@ -41,7 +39,15 @@ import { useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { useClient } from '../vault/store';
 import { ExportDialog, type Exporting } from './export-dialog';
-import { FolderLookDialog, FolderLookFields, folderLook, tileClass } from './folder-look';
+import {
+  DEFAULT_CHOICE,
+  FolderLookDialog,
+  FolderLookFields,
+  FolderTile,
+  folderLook,
+  pickedIcon,
+  type LookChoice,
+} from './folder-look';
 import { SpaceHeader } from './space-header';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -56,6 +62,7 @@ type Row =
       name: string;
       emoji: string;
       tint: string;
+      metadata: spaceOperations.LoadedMetadata | null;
       count: number;
       expanded: boolean;
     }
@@ -108,6 +115,7 @@ function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string):
         name,
         emoji,
         tint,
+        metadata: folder.metadata,
         count,
         expanded: open,
       });
@@ -408,9 +416,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   )}
                   strokeWidth={1.75}
                 />
-                <span aria-hidden className={cn(tileClass(row.tint), 'size-7 text-sm')}>
-                  {row.emoji}
-                </span>
+                <FolderTile
+                  metadata={row.metadata}
+                  emoji={row.emoji}
+                  tint={row.tint}
+                  className="size-7 text-sm"
+                />
                 <span className="min-w-0 flex-1 truncate font-extrabold">
                   <Name>{row.name}</Name>
                 </span>
@@ -651,10 +662,10 @@ function CreateDialog({
   const ctx = useClient();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [look, setLook] = useState<FolderLook>(DEFAULT_FOLDER_LOOK);
+  const [look, setLook] = useState<LookChoice>(DEFAULT_CHOICE);
   const kind = creating?.kind ?? 'page';
   const close = () => {
-    setLook(DEFAULT_FOLDER_LOOK);
+    setLook(DEFAULT_CHOICE);
     onClose();
   };
 
@@ -668,7 +679,8 @@ function CreateDialog({
           spaceId,
           parentId: creating.parentId,
           name: name.trim(),
-          look,
+          look: { emoji: look.emoji, tint: look.tint },
+          icon: pickedIcon(look),
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
@@ -695,7 +707,7 @@ function CreateDialog({
             <DialogTitle>{kind === 'folder' ? 'New folder' : 'New page'}</DialogTitle>
             <DialogDescription>
               {kind === 'folder'
-                ? 'Its name, emoji and colour are encrypted.'
+                ? 'Its name, emoji or image, and colour are encrypted.'
                 : 'It starts as a private draft. Publish it when it’s ready.'}
             </DialogDescription>
           </DialogHeader>
@@ -703,7 +715,7 @@ function CreateDialog({
             <Label htmlFor="create-name">{kind === 'folder' ? 'Name' : 'Title'}</Label>
             <Input id="create-name" name="name" required autoFocus maxLength={200} />
           </div>
-          {kind === 'folder' && <FolderLookFields look={look} onChange={setLook} />}
+          {kind === 'folder' && <FolderLookFields look={look} kept={null} onChange={setLook} />}
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}

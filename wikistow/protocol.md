@@ -526,6 +526,17 @@ Rules (`payload.ts`, `metadata.ts`):
 - Readers fall back part by part: an emoji they don't accept is left out, and a banner of an unknown kind, or an image the version doesn't list, shows the theme gradient. A writer changing one part keeps the other, and unknown fields, as they were.
 - Publishing into another space (section 13) without the banner's attachment writes `banner: {kind: "theme"}` in the copy.
 
+**Folder icon** (`metadata.ts`), the node metadata extension `wikistow.icon`:
+
+```
+{ format: 1, mediaType: "image/webp" | "image/jpeg" | "image/png", data: base64url }
+```
+
+- A folder's own image, shown in place of its emoji. The writer resizes it to fit 144 by 144 pixels and encodes it afresh (an SVG is drawn as pixels; SVG is never stored). `data` is the encoded image, at most 16 KB (16,384 bytes), since every tree load carries each folder's current metadata.
+- It has no key of its own: it is encrypted with the rest of the metadata, so it reaches exactly the people who can read the folder's name, and moves, shares and rotations need nothing more. The key-material rule above is unchanged.
+- Readers show it only when `format` is 1, `mediaType` is one of the three, and `data` decodes to 1 to 16,384 bytes. Anything else, or an image that fails to decode, counts as no image, and the folder shows its emoji; it never makes the metadata `malformed`. Writers refuse what readers would not show.
+- Extensions are merged into the next version, so removing the image writes `wikistow.icon: null`. Choosing an emoji removes the image; choosing an image keeps the emoji, which older clients and failed loads show.
+
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
 
 ```
