@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Image icons for folders and pages
@@ -129,13 +129,15 @@ Playwright's Linux WebKit writes WebP; Safari on Apple systems may not, which is
 - `ui-design.md` describes the picker's Image tab, where icons show, and the fallback.
 - Nothing changes on the server, and no migration is needed.
 
-## Decisions for Scott
+## Decided
 
-1. A folder's image lives inside its encrypted metadata (`wikistow.icon`), not as a server blob. Recommended.
-2. A page's image is an attachment named from `wikistow.cover` (`icon: {attachmentId}`). Recommended.
-3. Each icon is uploaded where it is used; no per-space library. Recommended.
-4. Images are resized to fit 144 px, stored as WebP (JPEG or PNG where WebP can't be written), at most 16 KB; SVG is rasterised, never stored. Recommended. The cap is the number to change if folder images should be sharper or the tree smaller.
-5. Choosing an image keeps the emoji as the fallback for older clients and failed loads. Recommended.
+Scott accepted all five recommendations on 2026-10-16:
+
+1. A folder's image lives inside its encrypted metadata (`wikistow.icon`), not as a server blob.
+2. A page's image is an attachment named from `wikistow.cover` (`icon: {attachmentId}`).
+3. Each icon is uploaded where it is used; no per-space library.
+4. Images are resized to fit 144 px, stored as WebP (JPEG or PNG where WebP can't be written), at most 16 KB; SVG is rasterised, never stored. The cap is the number to change if folder images should be sharper or the tree smaller.
+5. Choosing an image keeps the emoji as the fallback for older clients and failed loads.
 
 ## Implementation, in pull requests
 
