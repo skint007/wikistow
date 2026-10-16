@@ -1,13 +1,9 @@
 import { sql } from 'drizzle-orm';
-import { check, customType, pgTable, text, uuid } from 'drizzle-orm/pg-core';
-import { timestamptz } from './helpers.ts';
+import { check, pgTable, text, uuid } from 'drizzle-orm/pg-core';
+import { bytea, timestamptz } from './helpers.ts';
 import { users } from './users.ts';
 
 export const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/svg+xml'] as const;
-
-const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
-  dataType: () => 'bytea',
-});
 
 /**
  * One avatar per account, kept in the database in the clear like the

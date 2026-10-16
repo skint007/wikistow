@@ -183,6 +183,13 @@
       "when": 1792118719874,
       "tag": "0025_agents_in_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792178137585,
+      "tag": "0026_plugin_drafts",
+      "breakpoints": true
     }
   ]
 }

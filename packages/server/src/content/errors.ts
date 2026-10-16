@@ -29,6 +29,7 @@ export type ContentFailure =
   | 'space-limit'
   | 'folder-limit'
   | 'page-limit'
+  | 'draft-limit'
   | 'last-owner'
   | 'invalid-plugin';
 

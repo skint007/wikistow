@@ -28,6 +28,7 @@ import { mountAiRoutes } from './routes/ai.ts';
 import { mountAgentRoutes } from './routes/agents.ts';
 import { mountContentRoutes } from './routes/content.ts';
 import { mountDesktopRoutes } from './routes/desktop.ts';
+import { mountPluginDraftRoutes } from './routes/plugin-drafts.ts';
 import { mountPluginRoutes } from './routes/plugins.ts';
 import { mountSystemRoutes } from './routes/system.ts';
 
@@ -168,7 +169,9 @@ export function createApp({ db, config, log, deliver, blobs }: AppDeps) {
   mountDesktopRoutes(routes, { db, auth });
   mountAiRoutes(routes, { ai: config.ai ?? null, log });
   // Library plugins' files live beside the attachment blobs, so backups take both.
-  mountPluginRoutes(routes, { db, plugins: filePluginStore(config.blobDir) });
+  const pluginStore = filePluginStore(config.blobDir);
+  mountPluginRoutes(routes, { db, plugins: pluginStore });
+  mountPluginDraftRoutes(routes, { db, plugins: pluginStore });
   if (config.webDist) serveWebApp(app, config.webDist);
 
   app.notFound((c) => errorResponse(c, new ApiError('not-found', 'Not found')));
