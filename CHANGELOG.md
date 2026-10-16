@@ -4,6 +4,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-16
+
 ### Highlights
 
 #### Upgrade notes
@@ -21,6 +23,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Folder images: the emoji picker (`EmojiPopover`) has an Image tab when given `image`. A folder's image is stored in its encrypted metadata as the `wikistow.icon` extension (`folderIconOf`, `folderIconChange`), resized in the browser to fit 144 px and at most 16 KB as WebP, or PNG or JPEG where the browser can't write WebP (`iconImage`). SVG is drawn as pixels and never stored. `createFolder` takes an optional `icon`. The sidebar shows the image through `IconImage`, which falls back to the emoji. No server change. ADR 0003. (#59)
 - Page images: `wikistow.cover` gains `icon: {attachmentId}`, one of the page's attachments resized like a folder image (`coverOf`, `reviseCover`). The cover editor uploads it from the picker's Image tab (`uploadIcon`), the badge and the sidebar's page rows show it, and the draft's attachment list leaves it out. `PageLabel` carries the icon's attachment and audience (`pageIconOf`). A copy into another space without the icon's attachment leaves the icon out (`coverLeftBehind`, replacing `bannerLeftBehind`). Decrypted attachment URLs are now kept until the vault locks rather than decrypted again after five minutes. No server change. ADR 0003 is built. (#61)
+
+#### Development
+
+- ADR 0003 (`docs/adr/0003-image-icons.md`) records where folder and page images live, their limits and the fallback. (#57)
 
 ## 0.6.0 - 2026-10-16
 
