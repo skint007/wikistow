@@ -475,7 +475,7 @@ function PageBody({
                           className="min-[900px]:hidden"
                           onSelect={() => openFromMenu(changeEmoji)}
                         >
-                          Change emoji
+                          {icon ? 'Change image' : 'Change emoji'}
                         </DropdownMenuItem>
                       </>
                     )}

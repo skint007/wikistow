@@ -44,14 +44,21 @@ export const BadgeIcon = ({ emoji, image }: { emoji: string | null; image: strin
   <IconImage src={image} fallback={emoji} />
 );
 
+/** The published view's badge, named for what it shows. */
 export function PageBadge({ emoji, image }: { emoji: string | null; image: string | null }) {
   return (
-    <span
-      role="img"
-      aria-label={image ? 'Page image' : `Page emoji ${emoji}`}
-      className={badgeClass}
-    >
-      <BadgeIcon emoji={emoji} image={image} />
+    <span className={badgeClass}>
+      <IconImage
+        src={image}
+        alt="Page image"
+        fallback={
+          emoji && (
+            <span role="img" aria-label={`Page emoji ${emoji}`}>
+              {emoji}
+            </span>
+          )
+        }
+      />
     </span>
   );
 }
