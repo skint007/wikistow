@@ -29,7 +29,7 @@ The one AI service an installation's operator configures for the assistant. The 
 A person whose key your app has pinned. The contact keeps the name and email it had when first seen, which you may rename, and the app always shows the contact by those, never by names the server supplies later. Your contacts are kept in an encrypted record that only you and your agents can read; their names and emails are readable by you alone.
 
 **Group**
-A named set of people, and their agents, within one space, that a folder or the space is shared with as one. Only the space's owners manage it and read its name. It holds no keys: each member gets the folder keys sealed to them. Built in Milestone 5 for people; agents in groups are not built yet.
+A named set of people, and their agents, within one space, that a folder or the space is shared with as one. Only the space's owners manage it and read its name. It holds no keys: each member gets the folder keys sealed to them. Built in Milestone 5. An agent in a group gets nothing until its person confirms the group, on their Agents page.
 _Avoid_: Team, role.
 
 **Effective access**
