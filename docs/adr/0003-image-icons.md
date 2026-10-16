@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Image icons for folders and pages
@@ -48,7 +48,7 @@ Removing a folder's image writes `wikistow.icon: null`, since `reviseMetadata` m
 - **A. An attachment named from `wikistow.cover` (recommended).** The cover gains `icon: { attachmentId }`, a loose object beside `emoji` and `banner`. It works like an image banner: upload as a draft attachment, list it in `attachments[]`, publish re-encrypts it, readers download the published copy, a move doesn't touch it, and a copy into another space drops it when it leaves the attachment behind (generalise `bannerLeftBehind`). `coverOf` returns it only when the version lists the attachment. The sidebar gets the ref from the version `pageLabels` already opens and downloads the blob through `decryptedQuery`.
 - **B. Inside the cover extension, like folders.** No download for the sidebar, but every page version carries the image. Autosave writes a version per save, kept for 30 days, so an image of 5 KB is uploaded and stored again on every save.
 
-**Recommendation: A.** Pages are saved often and folders rarely, which is why the two differ. A page icon costs one small download per page in the sidebar. Its query keeps the `blob:` URL until the vault locks (`gcTime: Infinity`; `decryptedQuery` today keeps the default five minutes, after which it decrypts again and makes a new URL while the old one lives until lock). The attachment is hidden from the attachment list as the banner's is (`hiddenAttachment` becomes a list), and export writes it out as an attachment, as it does a banner.
+**Recommendation: A.** Pages are saved often and folders rarely, which is why the two differ. A page icon costs one small download per page in the sidebar. Its query keeps the `blob:` URL until the vault locks (`gcTime: Infinity`; `decryptedQuery` kept the default five minutes, after which it decrypted again and made a new URL while the old one lived until lock, so PR 2 sets it there for every attachment). The attachment is hidden from the attachment list as the banner's is (`hiddenAttachment` becomes a list), and export writes it out as an attachment, as it does a banner.
 
 ### 3. Uploading each time, or a per-space icon library
 
@@ -145,3 +145,5 @@ Scott accepted all five recommendations on 2026-10-16:
 2. **Page images.** Client: `cover.icon` in `Cover`, `coverOf`, `reviseCover`, the generalised left-behind check for copies into another space, and the icon's ref and audience in `PageLabel`, and in the sidebar entry the draft session writes after a save (`use-draft-session.ts`), so a new icon shows at once. UI: the cover editor's image upload, the badge, the sidebar's page rows through `decryptedQuery`, hiding the icon from the attachment list. Spec and `ui-design.md`. Evidence: screenshots of the badge and sidebar; a temporary check that a reader sees the image after publish and not before, that a copy into another space leaves it out, and that a version whose icon attachment is gone shows the emoji; the existing cover unit tests updated where `Cover` changes. No new permanent tests unless one meets the testing standard.
 
 PR 2 needs PR 1's Image tab and `IconImage`. Neither touches the server.
+
+Status (2026-10-16): built, 1 and 2.

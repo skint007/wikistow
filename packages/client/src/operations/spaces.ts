@@ -93,6 +93,7 @@ export async function loadSpaces(ctx: ClientContext) {
 const UNLABELLED = {
   title: null,
   emoji: null,
+  icon: null,
   region: null,
 } satisfies Record<keyof PageLabel, null>;
 

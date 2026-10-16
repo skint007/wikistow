@@ -518,13 +518,15 @@ Rules (`payload.ts`, `metadata.ts`):
 ```
 { format: 1, emoji?: string,
   banner?: {kind: "theme"} | {kind: "preset", name: "sunrise" | "ocean" | "meadow" | "lavender" | "dusk" | "stone"}
-         | {kind: "image", attachmentId, focal: integer 0–100} }
+         | {kind: "image", attachmentId, focal: integer 0–100},
+  icon?: {attachmentId} }
 ```
 
 - `emoji` is one RGI emoji (Unicode UTS #51): a pictograph, a flag, a keycap, or a modifier, tag or ZWJ sequence, with nothing stacked after it. A reader whose Unicode data predates an emoji leaves it out. `focal` is the image's vertical focal point, 0 at the top. `format` and `banner.focal` are integers (section 3.3, rule 6).
 - An image banner names one of the version's own attachments by ID; its key stays in `attachments[]`, so publishing re-encrypts it with the rest.
-- Readers fall back part by part: an emoji they don't accept is left out, and a banner of an unknown kind, or an image the version doesn't list, shows the theme gradient. A writer changing one part keeps the other, and unknown fields, as they were.
-- Publishing into another space (section 13) without the banner's attachment writes `banner: {kind: "theme"}` in the copy.
+- `icon` is the page's own image, shown in place of its emoji. It names one of the version's attachments the same way: an image the writer resized to fit 144 by 144 pixels and encoded afresh as WebP, JPEG or PNG, as for a folder icon below. The emoji stays beside it: choosing an image keeps the emoji, which older clients and failed loads show; choosing an emoji removes `icon`, and replacing or removing the image drops its attachment from `attachments[]` unless the text links to it.
+- Readers fall back part by part: an emoji they don't accept is left out, a banner of an unknown kind, or an image the version doesn't list, shows the theme gradient, and an icon the version doesn't list, or whose image doesn't load, shows the emoji. A writer changing one part keeps the others, and unknown fields, as they were.
+- Publishing into another space (section 13) without the banner's attachment writes `banner: {kind: "theme"}` in the copy, and without the icon's attachment leaves `icon` out.
 
 **Folder icon** (`metadata.ts`), the node metadata extension `wikistow.icon`:
 
@@ -1347,7 +1349,7 @@ A publication copies explicitly chosen versions of a source page into a destinat
      sourceRecordHash: base64url(BLAKE2b-256(the source record's own signed bytes)) }
    ```
    The signed bytes are `revision-record/v1` or `revision-record/v2`, chosen by the source record's `protocol`;
-3. **reseals every chosen attachment** under a fresh key, with the destination AD `attachment/v1 [installationId, T, D, "published", attachmentId]`, and recomputes `plainHash` for `T` and `D`. It never reuses a source copy. Attachments the publisher didn't choose are dropped, and a `wikistow.cover` banner naming one of them becomes the theme gradient (section 5.5);
+3. **reseals every chosen attachment** under a fresh key, with the destination AD `attachment/v1 [installationId, T, D, "published", attachmentId]`, and recomputes `plainHash` for `T` and `D`. It never reuses a source copy. Attachments the publisher didn't choose are dropped, and a `wikistow.cover` banner naming one of them becomes the theme gradient, and an icon naming one is left out (section 5.5);
 4. wraps the content key under the published key of `D`'s share at its current version, which must count for writing (section 6.5, **Writing**) and pass section 6.8, or seals it to `T`'s sealing owners in the owner region (section 6.5).
 
 **Provenance lives only inside the encrypted payload.** The server's `publications` row (destination, source space and page, last source revision sent) is visible metadata (A7). Destination readers can't verify the source fields, so the interface treats them as a label ("Published from another page"), never as a link. It names the source only for a viewer whose app opens `sourceRevisionId` of `sourcePageId` and finds its `sourceRecordHash`, title and Markdown match the copy, since anyone who can publish at `D` can write any source into it.

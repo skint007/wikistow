@@ -1,7 +1,8 @@
-// A page's banner and emoji, kept in the `wikistow.cover` payload extension
-// so they belong to the version like any other edit. An image banner names
-// one of the page's own attachments by ID; its key stays in the attachment
-// list, so publishing re-encrypts it with the rest (section 5.5).
+// A page's banner, emoji and image icon, kept in the `wikistow.cover`
+// payload extension so they belong to the version like any other edit. An
+// image banner or icon names one of the page's own attachments by ID; its
+// key stays in the attachment list, so publishing re-encrypts it with the
+// rest (section 5.5).
 import { z } from 'zod';
 import { AttachmentId } from './ids.ts';
 import type { PagePayload } from './payload.ts';
@@ -53,23 +54,33 @@ export const Banner = z.discriminatedUnion('kind', [
 ]);
 export type Banner = z.infer<typeof Banner>;
 
+/** An image shown in place of the emoji: one of the page's attachments, resized to fit 144 px. */
+export const CoverIcon = z.looseObject({ attachmentId: AttachmentId });
+export type CoverIcon = z.infer<typeof CoverIcon>;
+
 /** The extension as written. Loose, so fields a newer client adds survive an edit here. */
 export const Cover = z.looseObject({
   format: z.literal(1),
   emoji: PageEmoji.optional(),
   banner: Banner.optional(),
+  icon: CoverIcon.optional(),
 });
 export type Cover = z.infer<typeof Cover>;
 
-/** The cover as shown: the theme gradient and no emoji unless the version says otherwise. */
-export type ShownCover = { emoji: string | null; banner: Banner };
+/**
+ * The cover as shown: the theme gradient, and no emoji or image, unless the
+ * version says otherwise. The emoji stays beside an image, for older apps
+ * and an image that doesn't load.
+ */
+export type ShownCover = { emoji: string | null; banner: Banner; icon: CoverIcon | null };
 
 const THEME: Banner = { kind: 'theme' };
 
 /**
  * The cover a version shows. Each part falls back on its own: an emoji this
- * app doesn't accept is left out, and a banner of a kind it doesn't know,
- * or an image the version doesn't list, shows the theme gradient.
+ * app doesn't accept is left out, a banner of a kind it doesn't know, or an
+ * image the version doesn't list, shows the theme gradient, and an icon the
+ * version doesn't list is no icon.
  */
 export function coverOf(payload: Pick<PagePayload, 'extensions' | 'attachments'>): ShownCover {
   const raw = z
@@ -77,18 +88,21 @@ export function coverOf(payload: Pick<PagePayload, 'extensions' | 'attachments'>
       format: z.literal(1),
       emoji: z.unknown().optional(),
       banner: z.unknown().optional(),
+      icon: z.unknown().optional(),
     })
     .safeParse(payload.extensions[COVER_NAMESPACE]);
-  if (!raw.success) return { emoji: null, banner: THEME };
+  if (!raw.success) return { emoji: null, banner: THEME, icon: null };
+  const listed = (id: string) => payload.attachments.some((ref) => ref.id === id);
   const emoji = PageEmoji.safeParse(raw.data.emoji);
   const banner = Banner.safeParse(raw.data.banner);
-  const listed =
-    banner.success &&
-    (banner.data.kind !== 'image' ||
-      payload.attachments.some((ref) => ref.id === banner.data.attachmentId));
+  const icon = CoverIcon.safeParse(raw.data.icon);
   return {
     emoji: emoji.success ? emoji.data : null,
-    banner: banner.success && listed ? banner.data : THEME,
+    banner:
+      banner.success && (banner.data.kind !== 'image' || listed(banner.data.attachmentId))
+        ? banner.data
+        : THEME,
+    icon: icon.success && listed(icon.data.attachmentId) ? icon.data : null,
   };
 }
 
@@ -104,23 +118,31 @@ type JsonObject = { [key: string]: Json };
 const isObject = (value: Json | undefined): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+/** What a writer changes in a cover: null removes that part. */
+export type CoverChanges = {
+  emoji?: string | null;
+  banner?: BannerChoice | null;
+  icon?: { attachmentId: AttachmentId } | null;
+};
+
 /**
  * The extension namespace with `changes` applied over what the version had,
  * fields this app doesn't know included: pass it as `extensions` to
- * `revisePayload`. Null removes the emoji or banner. Throws on an emoji or
- * banner that isn't valid; what was there before is kept as it was.
+ * `revisePayload`. Throws on an emoji, banner or icon that isn't valid;
+ * what was there before is kept as it was.
  */
 export function reviseCover(
   extensions: PagePayload['extensions'],
-  changes: { emoji?: string | null; banner?: BannerChoice | null },
+  changes: CoverChanges,
 ): { [COVER_NAMESPACE]: Json } {
   if (changes.emoji) PageEmoji.parse(changes.emoji);
   if (changes.banner) Banner.parse(changes.banner);
+  if (changes.icon) CoverIcon.parse(changes.icon);
   // Spread the original rather than Zod's copy, which would drop a key named "__proto__".
   const old = extensions[COVER_NAMESPACE];
   const kept = isObject(old) && old['format'] === 1 ? old : {};
   const next: JsonObject = { ...kept, format: 1 };
-  for (const key of ['emoji', 'banner'] as const) {
+  for (const key of ['emoji', 'banner', 'icon'] as const) {
     const value = changes[key];
     if (value === null) delete next[key];
     else if (value !== undefined) next[key] = value;
@@ -133,16 +155,24 @@ export const bannerAttachment = (cover: ShownCover) =>
   cover.banner.kind === 'image' ? cover.banner.attachmentId : null;
 
 /**
- * Whether the banner as written, accepted here or not, names an attachment
- * other than those in `kept`: a copy that leaves its image behind.
+ * The cover changes a copy needs when it keeps only the attachments in
+ * `kept`: a banner or icon as written, accepted here or not, that names
+ * another attachment would be left behind, so the copy shows the theme
+ * gradient, or no icon, instead. Empty when the copy keeps them all.
  */
-export function bannerLeftBehind(
+export function coverLeftBehind(
   extensions: PagePayload['extensions'],
   kept: ReadonlySet<string>,
-): boolean {
+): CoverChanges {
   const cover = extensions[COVER_NAMESPACE];
-  const banner = isObject(cover) ? cover['banner'] : undefined;
-  if (!isObject(banner) || !('attachmentId' in banner)) return false;
-  const id = banner['attachmentId'];
-  return typeof id !== 'string' || !kept.has(id);
+  const behind = (part: Json | undefined) => {
+    if (!isObject(part) || !('attachmentId' in part)) return false;
+    const id = part['attachmentId'];
+    return typeof id !== 'string' || !kept.has(id);
+  };
+  if (!isObject(cover)) return {};
+  return {
+    ...(behind(cover['banner']) && { banner: { kind: 'theme' } }),
+    ...(behind(cover['icon']) && { icon: null }),
+  };
 }

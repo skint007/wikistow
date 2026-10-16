@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { errorMessage } from '../../errors';
-import { badgeClass } from './cover-band';
+import { BadgeIcon, badgeClass } from './cover-band';
 import { ICON_ACCEPT } from './icon-image';
 
 const EmojiGrid = lazy(() => import('./emoji-grid'));
@@ -195,17 +195,22 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
 }
 
 /**
- * The draft view's emoji badge, which opens the picker, or an Add emoji
- * button in its place when the page has none.
+ * The draft view's badge, which opens the picker, or an Add emoji button in
+ * its place when the page has neither an emoji nor an image.
  */
 export function EmojiPicker({
   emoji,
+  hasImage,
+  image,
   open,
   onOpenChange,
   onPick,
   returnFocus,
 }: {
   emoji: string | null;
+  /** Whether the page has an image, which `image.current` shows once it's decrypted. */
+  hasImage: boolean;
+  image: ImageChoice;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Null removes the emoji. */
@@ -220,18 +225,19 @@ export function EmojiPicker({
       onOpenChange={onOpenChange}
       onPick={onPick}
       onRemove={() => onPick(null)}
+      image={image}
       returnFocus={returnFocus}
     >
-      {emoji ? (
+      {emoji || hasImage ? (
         <button
           type="button"
-          aria-label={`Change emoji ${emoji}`}
+          aria-label={hasImage ? 'Change image' : `Change emoji ${emoji}`}
           className={cn(
             badgeClass,
             'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
           )}
         >
-          {emoji}
+          <BadgeIcon emoji={emoji} image={image.current} />
         </button>
       ) : (
         <button

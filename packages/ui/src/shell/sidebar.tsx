@@ -10,6 +10,7 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import { ChevronRight, FolderPlus, MoreHorizontal, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
+import { IconImage } from '@/components/icon-image';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -31,6 +32,7 @@ import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { searchIndexChanged, treeQuery } from '../data/queries';
+import { decryptedQuery } from '../page/attachments';
 import { destinationsIn, MoveDialog, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { errorMessage } from '../errors';
@@ -73,6 +75,7 @@ type Row =
       level: number;
       title: string;
       emoji: string | null;
+      icon: pageOperations.PageIcon | null;
       unpublished: boolean;
     };
 
@@ -132,6 +135,7 @@ function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string):
         level,
         title: pageTitle(page.title),
         emoji: page.emoji,
+        icon: page.icon,
         unpublished: page.draftChanges || page.publishedHead === null,
       });
     }
@@ -153,6 +157,39 @@ function contentsOf(tree: Tree, folderId: FolderId) {
   };
   walk(folderId);
   return { folders, pages };
+}
+
+/**
+ * A page row's image as a 20px rounded square, or its emoji, which also
+ * shows while the image loads or if it fails to.
+ */
+function PageRowIcon({
+  page,
+  emoji,
+  icon,
+}: {
+  page: pageOperations.PageRef;
+  emoji: string | null;
+  icon: pageOperations.PageIcon | null;
+}) {
+  const ctx = useClient();
+  const { data: url } = useQuery(
+    decryptedQuery({ ctx, page, audience: icon?.audience ?? 'published' }, icon?.ref),
+  );
+  return (
+    <IconImage
+      src={url ?? null}
+      className="size-5 shrink-0 rounded-[6px]"
+      fallback={
+        emoji && (
+          // Clipped to its own line, whatever the emoji draws.
+          <span aria-hidden className="max-w-[1.5em] shrink-0 overflow-hidden leading-none">
+            {emoji}
+          </span>
+        )
+      }
+    />
+  );
 }
 
 type Creating = { kind: 'page' | 'folder'; parentId: FolderId | null } | null;
@@ -464,12 +501,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               )}
               style={indent}
             >
-              {row.emoji && (
-                // Clipped to its own line, whatever the emoji draws.
-                <span aria-hidden className="max-w-[1.5em] shrink-0 overflow-hidden leading-none">
-                  {row.emoji}
-                </span>
-              )}
+              <PageRowIcon page={{ spaceId, pageId: row.id }} emoji={row.emoji} icon={row.icon} />
               <span className="min-w-0 flex-1 truncate">
                 <Name>{row.title}</Name>
               </span>

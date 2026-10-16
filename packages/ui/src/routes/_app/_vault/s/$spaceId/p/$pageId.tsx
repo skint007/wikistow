@@ -54,8 +54,9 @@ import {
 } from '../../../../../../data/queries';
 import { PLAIN } from '../../../../../../vault/store';
 import { errorMessage, pageOpenMessage } from '../../../../../../errors';
+import { decryptedQuery } from '../../../../../../page/attachments';
 import { BannerPicker } from '../../../../../../page/cover/banner-picker';
-import { bodyTop, CoverBand, EmojiBadge } from '../../../../../../page/cover/cover-band';
+import { bodyTop, CoverBand, PageBadge } from '../../../../../../page/cover/cover-band';
 import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
 import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
@@ -283,6 +284,19 @@ function PageBody({
       ? coverEditor.shown
       : payload && { cover: coverOf(payload), attachments: payload.attachments };
   const emoji = shown?.cover.emoji ?? null;
+  const icon = shown?.cover.icon ?? null;
+  const { data: iconUrl } = useQuery(
+    decryptedQuery(
+      { ctx, page, audience: model.view },
+      icon ? shown?.attachments.find((a) => a.id === icon.attachmentId) : undefined,
+    ),
+  );
+  // The attachments the cover shows, which the draft's attachment list leaves out.
+  const banner = shown ? bannerAttachment(shown.cover) : null;
+  const coverParts = useMemo(
+    () => [banner, icon?.attachmentId ?? null].filter((id) => id !== null),
+    [banner, icon?.attachmentId],
+  );
   const coverEnv = {
     ...commandEnv,
     openBannerPicker: () => setPicker('banner'),
@@ -461,7 +475,7 @@ function PageBody({
                           className="min-[900px]:hidden"
                           onSelect={() => openFromMenu(changeEmoji)}
                         >
-                          Change emoji
+                          {icon ? 'Change image' : 'Change emoji'}
                         </DropdownMenuItem>
                       </>
                     )}
@@ -514,13 +528,21 @@ function PageBody({
         {editingCover ? (
           <EmojiPicker
             emoji={emoji}
+            hasImage={icon !== null}
+            image={{
+              current: iconUrl ?? null,
+              onPick: coverEditor.uploadIcon,
+              onRemove: coverEditor.removeIcon,
+              working: 'Encrypting…',
+            }}
             open={picker === 'emoji'}
             onOpenChange={(open) => setPicker(open ? 'emoji' : null)}
             onPick={coverEditor.setEmoji}
             returnFocus={pickerFocus.content}
           />
         ) : (
-          emoji && <EmojiBadge emoji={emoji} />
+          // An image with no emoji shows once it's decrypted, not as an empty badge.
+          (emoji || iconUrl) && <PageBadge emoji={emoji} image={iconUrl ?? null} />
         )}
       </CoverBand>
       {/* The page's column, as wide as the card, and beside it, where the card is wide enough,
@@ -529,7 +551,7 @@ function PageBody({
         data-region="page.body"
         className={cn(
           'flex w-full flex-1 flex-wrap gap-10 px-11 pb-10 @min-[960px]:flex-nowrap max-[899px]:px-[18px] max-[899px]:pb-8',
-          bodyTop(emoji),
+          bodyTop(emoji !== null || icon !== null),
         )}
       >
         <div data-region="page.content" className="flex min-w-0 flex-1 flex-col gap-4">
@@ -644,7 +666,7 @@ function PageBody({
                 payload={payload}
                 region={revision.region}
                 onReload={() => void onReopen()}
-                hiddenAttachment={shown ? bannerAttachment(shown.cover) : null}
+                hiddenAttachments={coverParts}
               />
             ) : (
               <>
