@@ -748,14 +748,14 @@ export function AccessPanel({
               <>
                 <Name>{found.name}</Name> owns this space and has access already.
               </>
-            ) : listed.some((p) => p.identityId === found.id && p.sources[0]?.kind === 'direct') ? (
-              <>
-                <Name>{found.name}</Name> has access already. Change it in the list above.
-              </>
             ) : listed.some((p) => p.identityId === found.id && p.waiting) ? (
               <>
                 <Name>{found.name}</Name> waits for keys here. Use Give access in the list above
                 first.
+              </>
+            ) : listed.some((p) => p.identityId === found.id && p.sources[0]?.kind === 'direct') ? (
+              <>
+                <Name>{found.name}</Name> has access already. Change it in the list above.
               </>
             ) : null
           }
