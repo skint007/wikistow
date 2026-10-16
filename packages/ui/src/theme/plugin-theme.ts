@@ -52,8 +52,8 @@ function keep(theme: Kept | null) {
 }
 
 /**
- * Which plugin theme this device shows. A plugin theme ranks above the
- * account's built-in choice, which every other device (and the browser)
+ * Which plugin theme this device (a computer or a browser) shows. A plugin
+ * theme ranks above the account's built-in choice, which every other device
  * keeps showing, and a preview ranks above both. `ThemeProvider` applies it.
  */
 function createPluginTheme() {
