@@ -526,14 +526,16 @@ export function ConfirmUpload({
   onUpload: (upload: PluginUpload, visibility: Visibility | undefined) => Promise<void>;
 }) {
   const { data: library } = useQuery(libraryQuery(ctx));
-  const { data: onlyMe } = useQuery(privatePluginsQuery);
+  const { data: onlyMe, isError } = useQuery(privatePluginsQuery);
   // The person's choice for this upload; until they make one, the plugin's own.
   const [choice, setChoice] = useState<{ upload: PluginUpload; visibility: Visibility } | null>(
     null,
   );
   const id = upload?.manifest.id;
-  // Null until the server says, so what is shown is then always sent.
-  const current = onlyMe && (id && onlyMe.has(id) ? 'private' : 'shared');
+  // Unknown until the server says, and what is shown is then always sent.
+  // A server without the route (from before ADR 0004) has no Only me.
+  const known = onlyMe ?? (isError ? new Set<string>() : null);
+  const current = known && (id && known.has(id) ? 'private' : 'shared');
   const visibility = choice && choice.upload === upload ? choice.visibility : (current ?? 'shared');
   const approved = pluginOperations.listPluginApprovals(ctx).find((each) => each.id === id);
   const installed = library
