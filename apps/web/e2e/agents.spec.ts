@@ -1,7 +1,7 @@
 import { expect, pick, serverSnapshot, test } from './fixtures';
 import { buildCli, cleanUpCli, cliInstall } from './cli';
 import { addAgent, agentsPage } from './enroll';
-import { newFolder, publishedPageIn } from './sharing';
+import { folderMenu, newFolder, publishedPageIn, shareDialog } from './sharing';
 import { adminTab, expectSource, memberWithVault } from './vault';
 
 let bin = '';
@@ -19,7 +19,7 @@ const TEXT = {
 
 /**
  * One person enrolls the real CLI from their browser, picks a folder for
- * it, sees what it wrote attributed to it, and revokes it.
+ * it, sees what it wrote attributed to it, puts it in a group, and revokes it.
  */
 test('an agent enrolled from the browser reads, drafts and publishes, then is revoked', async ({
   page,
@@ -125,24 +125,72 @@ test('an agent enrolled from the browser reads, drafts and publishes, then is re
     await page.keyboard.press('Escape');
   });
 
-  await test.step('revoking it ends its credential, and the folder can get new keys', async () => {
+  await test.step('a group Pat puts it in shows in its spaces list', async () => {
+    await newFolder(page, 'Pantry');
+    await page.getByRole('button', { name: 'Space menu' }).click();
+    await page.getByRole('menuitem', { name: 'Groups' }).click();
+    await page.getByRole('button', { name: 'New group' }).click();
+    await page.getByRole('dialog').getByLabel('Name').fill('Cooks');
+    await page.getByRole('button', { name: 'Create group' }).click();
+
+    await folderMenu(page, 'Pantry', 'Share…');
+    const sharing = shareDialog(page, 'Pantry');
+    await sharing.getByLabel('Email or group').fill('Coo');
+    await sharing
+      .getByRole('list', { name: 'Groups' })
+      .getByRole('button', { name: /Cooks/ })
+      .click();
+    await sharing.getByRole('button', { name: 'Share', exact: true }).click();
+    await expect(
+      sharing.getByRole('region', { name: 'People with access' }).getByLabel('Access for Cooks'),
+    ).toHaveText('Reader', { timeout: 30_000 });
+    await page.keyboard.press('Escape');
+
+    // Pat's own agent is confirmed as it is added, and sealed the group's folder.
+    await page.getByRole('button', { name: 'Space menu' }).click();
+    await page.getByRole('menuitem', { name: 'Groups' }).click();
+    await page.getByRole('link', { name: 'Cooks' }).click();
+    await page.getByRole('button', { name: 'Add agent' }).click();
+    await page
+      .getByRole('dialog', { name: 'Add agent' })
+      .getByRole('listitem')
+      .filter({ hasText: 'kitchen agent' })
+      .getByRole('button', { name: 'Add' })
+      .click();
+    await expect(page.getByRole('status')).toHaveText(
+      'kitchen agent is in the group, with its folders.',
+    );
+    const spaces = await cli.json(['spaces', 'list']);
+    expect(spaces.code, spaces.stderr).toBe(0);
+    const names = (spaces.answer['spaces'] as { name: string; role: string }[]).map(
+      (s) => `${s.name} ${s.role}`,
+    );
+    expect(names.sort()).toEqual(['Kitchen editor', 'Pantry reader']);
+  });
+
+  await test.step('revoking it ends its credential, and the folders can get new keys', async () => {
     await agentsPage(page);
     const card = page.getByRole('listitem', { name: 'kitchen agent', exact: true });
     await expect(card).toContainText(/last edit (just now|\d+ min)/);
+    await expect(card.getByRole('region', { name: 'Through groups' })).toContainText('Pantry');
     await card.getByRole('button', { name: 'Revoke' }).click();
     const dialog = page.getByRole('dialog', { name: 'Revoke kitchen agent?' });
     await expect(dialog).toContainText('stops working at once');
     await expect(dialog).toContainText('It keeps the keys it already has');
-    await expect(dialog.getByRole('region', { name: 'Folders it could read' })).toContainText(
-      'Kitchen',
-    );
+    const held = dialog.getByRole('region', { name: 'Folders it could read' });
+    await expect(held).toContainText('Kitchen');
+    await expect(held).toContainText('Pantry');
     await dialog.getByRole('button', { name: 'Revoke' }).click();
     const done = page.getByRole('dialog', { name: 'kitchen agent is revoked' });
     await expect(done).toBeVisible();
     const status = await cli.json(['agent', 'status']);
     expect(status.code, status.stdout).toBe(6);
 
-    await done.getByRole('button', { name: 'Rotate keys' }).click();
+    await done
+      .getByRole('listitem')
+      .filter({ hasText: 'Kitchen' })
+      .getByRole('button', { name: 'Rotate keys' })
+      .click();
     const rotating = page.getByRole('dialog', { name: 'New keys for “Kitchen”' });
     await rotating.getByRole('button', { name: 'Rotate keys' }).click();
     await expect(rotating).toBeHidden({ timeout: 30_000 });

@@ -1,7 +1,12 @@
 // An owner's app driving the group routes through the client's group
 // operations, with the overrides the server tests need: sealing to only
 // some members, or sending rotations the server must refuse.
-import { groupOperations as groups, sharingOperations, type SpaceId } from '@wikistow/client';
+import {
+  groupOperations as groups,
+  sharingOperations,
+  type IdentityId,
+  type SpaceId,
+} from '@wikistow/client';
 import { groupRoutes, type GroupId, type ShareId } from '@wikistow/contracts';
 import { find, type Person } from './sharing.ts';
 
@@ -24,6 +29,19 @@ export async function addToGroup(
     person: await find(owner, person),
   });
   await groups.applyGroupChange(owner.ctx, change);
+}
+
+/** Put an agent in a group, for its person to confirm. */
+export async function addAgentToGroup(
+  owner: Person,
+  spaceId: SpaceId,
+  groupId: GroupId,
+  agentId: IdentityId,
+) {
+  await groups.applyGroupChange(
+    owner.ctx,
+    await groups.planAddAgent(owner.ctx, { spaceId, groupId, agentId }),
+  );
 }
 
 /**
@@ -55,7 +73,7 @@ export async function shareWithGroup(
 }
 
 /**
- * Take `person` out of a group, rotating the shares the plan says. `rotate`
+ * Take a person or an agent out of a group, rotating the shares the plan says. `rotate`
  * overrides which of its rotations are sent, for a test of the server's
  * coverage check. Returns the shares rotated.
  */
@@ -63,13 +81,13 @@ export async function removeFromGroup(
   owner: Person,
   spaceId: SpaceId,
   groupId: GroupId,
-  person: Person,
+  member: Person | { agentId: IdentityId },
   { rotate }: { rotate?: readonly ShareId[] } = {},
 ) {
   const change = await groups.planRemoveMember(owner.ctx, {
     spaceId,
     groupId,
-    identityId: person.vault.identity.public.id,
+    identityId: 'agentId' in member ? member.agentId : member.vault.identity.public.id,
   });
   const extra = rotate
     ? await Promise.all(
