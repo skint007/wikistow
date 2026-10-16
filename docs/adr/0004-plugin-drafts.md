@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Private plugins, plugin drafts on the server, and the workshop on every device
