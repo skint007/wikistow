@@ -13,7 +13,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - One installation for family and friends. Registration starts closed to uninvited users, and an administrator can enable it.
 - Accounts support verified email, password login, password reset, and optional authenticator-app two-factor authentication.
 - Administrators invite people by email or single-use link, manage accounts, suspend access, and revoke sessions and agent credentials. Invitations expire after seven days.
-- Spaces contain folders and pages. People can receive access to an entire space or a folder, never a single page. A grant covers the folder's existing and future descendants. Groups, named sets of people a space or folder is shared with as one, are designed in Milestone 5 and not built yet.
+- Spaces contain folders and pages. People can receive access to an entire space or a folder, never a single page. A grant covers the folder's existing and future descendants. Groups, named sets of people a space or folder is shared with as one, come in Milestone 5: built for people, with agents in groups not built yet.
 - Personal and shared spaces use the same content model. Shared content requires authentication and authorization; anonymous web publishing is outside this version.
 - Markdown is the canonical page source. People can switch between visual editing and source editing. The application supplies the theme.
 - Drafts autosave. Readers see published versions; editors see drafts. Publishing is a separate permission. Published history records the person or agent responsible and supports restoration.
@@ -97,7 +97,7 @@ Proposed default: the common library is an ordinary shared space with owner-mana
 | Manage sharing and ownership | No | No | No | Yes |
 | Move or delete content across permission boundaries | No | No | No | Yes |
 
-Groups are designed in [Milestone 5](#milestone-5-groups) and not built yet. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
+Groups come in [Milestone 5](#milestone-5-groups): built for people, with agents in groups not built yet. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
 
 Access comes from a share of a space or folder, and covers everything beneath it. Shares don't nest: a folder inside a shared folder can't be shared on its own, and a folder that contains a shared folder can't be shared. A person has one role in each share; with groups it is the highest their direct grant and their groups give (Milestone 5). There are no deny exceptions, so a private child cannot live beneath a shared folder.
 
@@ -465,7 +465,7 @@ Status: built (2026-10-11), tracked in #109. It merged as #113 (desktop sign-in 
 
 ### Milestone 5 Groups
 
-Add groups for sharing (#1). Status: designed and approved 2026-10-15, and being built. Built: the server and protocol (part 1 below): the tables and their migration, effective access on the member rows, the group routes, sharing with a group, the batched rotations with the server's coverage check, the waiting list and Give access, and the audit events (protocol sections 7.8 and 7.9); and the client operations (part 2): making, renaming and deleting groups, adding and removing members, sharing with a group and changing or removing its access, dropping a direct grant, Give access, Remove from every folder in this space in one request, and each person's effective access with its sources. Not built yet: the interface, and agents in groups.
+Add groups for sharing (#1). Status: designed and approved 2026-10-15, and being built. Built: the server and protocol (part 1 below): the tables and their migration, effective access on the member rows, the group routes, sharing with a group, the batched rotations with the server's coverage check, the waiting list and Give access, and the audit events (protocol sections 7.8 and 7.9); and the client operations (part 2): making, renaming and deleting groups, adding and removing members, sharing with a group and changing or removing its access, dropping a direct grant, Give access, Remove from every folder in this space in one request, and each person's effective access with its sources. and the interface (part 3): the Groups page, groups in the share dialog and the access list, each person's access with where it comes from, and waiting members with Give access in the "Waiting for you" note. Not built yet: agents in groups.
 
 A group is a named set of people in one space, and their agents, that a folder or the space is shared with as one. Sharing with a group shares with each member at the group's access, adding someone to the group gives them every folder the group has, and removing them takes it away. The encryption doesn't change: folder keys are still sealed to each person (see **Content keys and sharing**), and a group holds no keys of its own. The design keeps the Milestone 2 records and checks and adds the least beside them.
 
