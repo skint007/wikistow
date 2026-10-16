@@ -13,7 +13,6 @@ import {
   openSandbox,
   outsideServer,
   PROBE as SANDBOX_PROBE,
-  probedRequests,
   refusedAll,
   start,
 } from '../../web/e2e/sandbox';
@@ -179,7 +178,9 @@ test('a script in the host frame reaches nothing of the app, and a loop stops', 
       'undefined',
     );
 
-    const before = await probedRequests();
+    // The server's log can't show it here: main serves the app's files
+    // itself and refuses API requests from any origin but the app's. The
+    // refusals and the outside server show the frame's policy holds.
     await start(sandbox, 1, SANDBOX_PROBE);
     expect(await ask(sandbox, 1, { app: 'app://wikistow', outside: outside.url })).toEqual({
       message: {
@@ -193,7 +194,6 @@ test('a script in the host frame reaches nothing of the app, and a loop stops', 
       },
     });
     expect(outside.arrived).toEqual([]);
-    expect(await probedRequests()).toBe(before);
 
     // Removing the frame ends its workers, as the app does when it stops answering.
     await sandbox.evaluate((frame) => frame.iframe.remove());
