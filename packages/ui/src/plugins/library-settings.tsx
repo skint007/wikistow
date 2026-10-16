@@ -1,7 +1,8 @@
 import { pluginOperations, type ClientContext } from '@wikistow/client';
 import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
-import { trustLevel } from '@wikistow/plugin-sdk/manifest';
+import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
@@ -15,10 +16,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Picker } from '@/components/ui/picker';
+import { aiStatusQuery } from '../ai/session';
 import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useVault } from '../vault/store';
+import { useNewDraft } from '../workshop/drafts';
 import {
   asInstalled,
   LIBRARY_KEY,
@@ -73,6 +76,7 @@ const size = (bytes: number) =>
  */
 export function LibrarySettings() {
   const vault = useVault();
+  const { safeMode } = usePlugins();
   if (vault.status !== 'unlocked') {
     return (
       <p className="text-sm text-muted-foreground">
@@ -83,6 +87,11 @@ export function LibrarySettings() {
   return (
     <div className="grid gap-4">
       <SafeModeNotice />
+      {!safeMode && (
+        <Button variant="outline" asChild className="justify-self-start">
+          <Link to="/workshop">Build one with the assistant</Link>
+        </Button>
+      )}
       <Library ctx={vault.ctx} />
     </div>
   );
@@ -103,7 +112,10 @@ export function Library({ ctx }: { ctx: ClientContext }) {
   const { data: onlyMe } = useQuery(privatePluginsQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
-  const { plugins: running, listed, unavailable } = usePlugins();
+  const { plugins: running, listed, unavailable, safeMode } = usePlugins();
+  const { data: ai } = useQuery(aiStatusQuery);
+  const newDraft = useNewDraft();
+  const navigate = useNavigate();
   // The runtime lists the library at unlock; if that failed, the library
   // shown here means the server answers again.
   useEffect(() => {
@@ -242,7 +254,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
           })}
         </ul>
       )}
-      {error && <FormMessage>{error}</FormMessage>}
+      {(error ?? newDraft.error) && <FormMessage>{error ?? newDraft.error}</FormMessage>}
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -274,6 +286,16 @@ export function Library({ ctx }: { ctx: ClientContext }) {
                 removable={plugin.mine || admin}
                 visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
                 onInstall={(version) => setRequest(requestFor(plugin.id, version))}
+                onChange={
+                  ai?.enabled && !safeMode && !newDraft.busy
+                    ? async (version) => {
+                        setError(null);
+                        setNotice(null);
+                        const from = { pluginId: plugin.id, hash: version.hash };
+                        if (await newDraft.start({ from })) await navigate({ to: '/workshop' });
+                      }
+                    : null
+                }
                 onRemove={(version) => setRemoval({ plugin, version })}
                 onVisibility={(visibility) =>
                   act(() =>
@@ -288,6 +310,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
           </ul>
         )}
       </div>
+      {newDraft.dialog}
       <Approval candidate={request} onDone={() => setRequest(null)} onApprove={approve} />
       <ConfirmUpload
         ctx={ctx}
@@ -379,7 +402,8 @@ function Upload({ onFolder }: { onFolder: (files: File[]) => Promise<void> }) {
 /**
  * One plugin in the library: its newest version's name, description, trust
  * level and most page access, its owner, Install unless it is installed,
- * and its versions with their hashes.
+ * Change with the assistant if the version carries its source, and its
+ * versions with their hashes.
  */
 function LibraryRow({
   plugin,
@@ -387,6 +411,7 @@ function LibraryRow({
   removable,
   visibility,
   onInstall,
+  onChange,
   onRemove,
   onVisibility,
 }: {
@@ -396,6 +421,8 @@ function LibraryRow({
   /** Known for the caller's own plugins only. */
   visibility: Visibility;
   onInstall: (version: LibraryVersion) => void;
+  /** Start a draft from a version's source in the workshop, or null where there's no workshop now. */
+  onChange: ((version: LibraryVersion) => Promise<void>) | null;
   /** Remove one version, or with null the whole plugin. */
   onRemove: (version: LibraryVersion | null) => void;
   onVisibility: (visibility: Visibility) => Promise<void>;
@@ -431,6 +458,11 @@ function LibraryRow({
         {!installed && (
           <Button size="sm" onClick={() => onInstall(newest)}>
             Install…
+          </Button>
+        )}
+        {onChange && newest.files.includes(`source/${MANIFEST_FILE}`) && (
+          <Button size="sm" variant="outline" onClick={() => void onChange(newest)}>
+            Change with the assistant
           </Button>
         )}
         {removable && (

@@ -41,11 +41,11 @@ export function openWorkshop(draftId: string) {
  * Make a draft and open the workshop on it. With 10 drafts already, the
  * person is asked first whether to delete the one changed longest ago,
  * named, which the server deletes with the new one made (`replaces`).
- * `start` settles once the workshop opens, or the person cancels; `dialog`
- * goes in the page.
+ * `start` answers true once the workshop opens, false if the person
+ * cancels or it fails (`error`); `dialog` goes in the page.
  */
 export function useNewDraft(): {
-  start: (from: DraftStart) => Promise<void>;
+  start: (from: DraftStart) => Promise<boolean>;
   /** A draft is being made, or the person asked: don't start another. */
   busy: boolean;
   error: string | null;
@@ -55,7 +55,7 @@ export function useNewDraft(): {
   const [asking, setAsking] = useState<{
     from: DraftStart;
     oldest: DraftSummary;
-    done: () => void;
+    done: (opened: boolean) => void;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +66,10 @@ export function useNewDraft(): {
         body: replaces ? { ...from, replaces } : from,
       });
       openWorkshop(draft.id);
+      return true;
     } catch (failure) {
       setError(errorMessage(failure));
+      return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
     }
@@ -81,16 +83,17 @@ export function useNewDraft(): {
       const drafts = await queryClient.fetchQuery({ ...draftsQuery, staleTime: 0 });
       const oldest = drafts.length >= pluginDraftRoutes.MAX_DRAFTS ? drafts.at(-1) : undefined;
       if (!oldest) return await create(from);
-      return await new Promise<void>((done) => setAsking({ from, oldest, done }));
+      return await new Promise<boolean>((done) => setAsking({ from, oldest, done }));
     } catch (failure) {
       setError(errorMessage(failure));
+      return false;
     } finally {
       setMaking(false);
     }
   };
 
-  const close = () => {
-    asking?.done();
+  const close = (opened = false) => {
+    asking?.done(opened);
     setAsking(null);
   };
 
@@ -105,7 +108,7 @@ export function useNewDraft(): {
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={close}>
+          <Button variant="outline" disabled={busy} onClick={() => close()}>
             Cancel
           </Button>
           <Button
@@ -114,9 +117,9 @@ export function useNewDraft(): {
             onClick={() => {
               if (!asking) return;
               setBusy(true);
-              void create(asking.from, asking.oldest.id).finally(() => {
+              void create(asking.from, asking.oldest.id).then((opened) => {
                 setBusy(false);
-                close();
+                close(opened);
               });
             }}
           >
