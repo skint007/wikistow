@@ -72,8 +72,10 @@ export function GroupDialog({
   const { groupId } = group;
 
   const finish = async (message: ReactNode, deleted = false) => {
+    // A deleted group's page goes first, so it never shows the group missing.
+    if (deleted) onDone(message, deleted);
     await refreshAccess(queryClient, ctx);
-    onDone(message, deleted);
+    if (!deleted) onDone(message, deleted);
   };
 
   const body = () => {

@@ -130,12 +130,12 @@ export function RotationConfirm<T>({
 }
 
 /**
- * Why "Remove from every folder" has nothing to do. Only the server says
- * which shares someone is in, so this says so.
+ * Why "Remove from every folder" has no keys to change. Only the server says
+ * which shares someone holds keys to, so this says so.
  */
 export const NotInAnyShare = ({ name }: { name: string }) => (
   <>
-    <Name>{name}</Name> isn’t a member of any shared folder here, as far as the server says, so no
-    keys change.
+    <Name>{name}</Name> holds the keys to no shared folder here, as far as the server says, so no
+    keys change. They still leave every group and folder in this space.
   </>
 );

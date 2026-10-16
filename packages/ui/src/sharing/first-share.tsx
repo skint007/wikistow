@@ -88,9 +88,11 @@ export function FirstShare({
  * A group's people as the preview lists them, by label, each marked if
  * they would wait for keys: their key changed and nobody confirmed it.
  */
-function GroupPeople({ group }: { group: groupOperations.Group }) {
+function GroupPeople({ spaceId, group }: { spaceId: SpaceId; group: groupOperations.Group }) {
   const ctx = useClient();
-  const members = peopleIn(group);
+  // Loaded again as it shows, since sharing seals to the group's people as they are then.
+  const { data } = useQuery({ ...groupsQuery(ctx, spaceId), refetchOnMount: 'always' });
+  const members = peopleIn(data?.groups.find((g) => g.groupId === group.groupId) ?? group);
   if (members.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -205,7 +207,7 @@ function ConfirmShare({
           </p>
           <section aria-label="Who gets it" className="grid gap-2">
             <h3 className="text-sm font-bold text-subtle-foreground">Who gets it</h3>
-            <GroupPeople group={chosen.group} />
+            <GroupPeople spaceId={spaceId} group={chosen.group} />
           </section>
           <p className="rounded-control bg-muted p-3 text-sm">{HISTORY_NOTICE}</p>
         </>

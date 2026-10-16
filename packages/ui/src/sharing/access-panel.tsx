@@ -329,8 +329,9 @@ export function AccessPanel({
     });
   };
 
-  const membersOf = (groupId: GroupId) => {
-    const group = state?.groups.find((g) => g.groupId === groupId);
+  // The group's people as the plan found them, which may be newer than this list.
+  const membersOf = (change: GroupChange, groupId: GroupId) => {
+    const group = change.after.groups.find((g) => g.groupId === groupId);
     return group ? peopleIn(group).map((m) => m.identity.id) : [];
   };
 
@@ -348,7 +349,7 @@ export function AccessPanel({
       confirmLabel: 'Share',
       make: () =>
         groupOperations.planShareGroup(ctx, { spaceId, shareId, groupId, access: grantOf(to) }),
-      showing: () => ({ shareIds: [shareId], personIds: membersOf(groupId) }),
+      showing: (change) => ({ shareIds: [shareId], personIds: membersOf(change, groupId) }),
       done: (
         <>
           <Name>{name}</Name> has access now.
@@ -363,15 +364,18 @@ export function AccessPanel({
     const name = groupName(group);
     const make = () =>
       groupOperations.planShareGroup(ctx, { spaceId, shareId, groupId, access: grantOf(to) });
-    const showing = () => ({ shareIds: [shareId], personIds: membersOf(groupId) });
+    const showing = (change: GroupChange) => ({
+      shareIds: [shareId],
+      personIds: membersOf(change, groupId),
+    });
     const change = accessChange(from, to);
     switch (change.kind) {
       case 'none':
         return;
       case 'publish':
-        // Publish rights alone change no keys.
+        // Publish rights alone change no keys: anyone short of keys keeps waiting for Give access.
         return run(async () => {
-          await runCommand(changeAccess, { change: await make() }, env);
+          await runCommand(changeAccess, { change: { ...(await make()), seals: [] } }, env);
           await finish(
             <>
               <Name>{name}</Name>{' '}
@@ -427,7 +431,7 @@ export function AccessPanel({
       confirmLabel: 'Remove',
       none: 'Everyone in it keeps their access some other way, so no keys change.',
       make: () => groupOperations.planRemoveShareGroup(ctx, { spaceId, shareId, groupId }),
-      showing: () => ({ shareIds: [shareId], personIds: membersOf(groupId) }),
+      showing: (change) => ({ shareIds: [shareId], personIds: membersOf(change, groupId) }),
       done: rotatedOrNot,
     });
   };
@@ -638,7 +642,8 @@ export function AccessPanel({
                       id={`access-${p.identityId}`}
                       label={`Access for ${plainText(who.name)}`}
                       value={accessOf(direct)}
-                      disabled={busy}
+                      // Changing it would seal their keys: Give access shows what it gives first.
+                      disabled={busy || p.waiting}
                       onChange={(to) => void changeDirect(p, accessOf(direct), to)}
                     />
                   ) : (
