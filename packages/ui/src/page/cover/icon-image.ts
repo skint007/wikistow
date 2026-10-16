@@ -56,13 +56,27 @@ const opaque = (context: CanvasRenderingContext2D, { width, height }: Size) => {
  * JPEG for an opaque image and PNG for one with transparency, so a logo
  * keeps its clear background on the folder's tint.
  */
-async function encode(source: CanvasImageSource, size: Size, svg: boolean) {
+async function encode(source: HTMLImageElement | ImageBitmap, size: Size) {
   const canvas = document.createElement('canvas');
   canvas.width = size.width;
   canvas.height = size.height;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('This browser can’t resize images.');
-  context.drawImage(source, 0, 0, size.width, size.height);
+  if (source instanceof ImageBitmap) {
+    // Shrunk 10 to 30 times over, drawImage alone samples too few pixels
+    // and leaves fine lines as moiré, so the bitmap is resized first.
+    const resized = await createImageBitmap(source, {
+      resizeWidth: size.width,
+      resizeHeight: size.height,
+      resizeQuality: 'high',
+    });
+    // Sized here too, for a browser that doesn't resize bitmaps.
+    context.drawImage(resized, 0, 0, size.width, size.height);
+    resized.close();
+  } else {
+    // An SVG is drawn afresh at this size.
+    context.drawImage(source, 0, 0, size.width, size.height);
+  }
   try {
     const webp = await toBlob(canvas, 'image/webp');
     if (webp?.type === 'image/webp') return { mediaType: 'image/webp' as const, blob: webp };
@@ -70,7 +84,11 @@ async function encode(source: CanvasImageSource, size: Size, svg: boolean) {
     return { mediaType, blob: await toBlob(canvas, mediaType) };
   } catch (error) {
     // Chromium and WebKit refuse to export a canvas an SVG with <foreignObject> drew on.
-    if (svg && error instanceof DOMException && error.name === 'SecurityError') {
+    if (
+      source instanceof HTMLImageElement &&
+      error instanceof DOMException &&
+      error.name === 'SecurityError'
+    ) {
       throw new Error(SVG_REFUSED);
     }
     throw error;
@@ -105,7 +123,7 @@ export async function iconImage(
         : source;
     for (const max of [ICON_SIZE, SMALLER_SIZE]) {
       const size = svg ? fitSvg(natural, max) : fitWithin(natural, max);
-      const { mediaType, blob } = await encode(source, size, svg);
+      const { mediaType, blob } = await encode(source, size);
       if (!blob) throw new Error('This browser can’t resize images.');
       if (blob.size <= ICON_MAX_BYTES) {
         const extension = mediaType.slice('image/'.length).replace('jpeg', 'jpg');
