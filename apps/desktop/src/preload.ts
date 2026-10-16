@@ -35,6 +35,8 @@ const bridge: DesktopBridge = {
   pluginAccess: (accountId) => call(DESKTOP_CHANNELS.pluginAccess, accountId),
   setPluginAccess: (accountId, pluginId, scopes) =>
     call(DESKTOP_CHANNELS.setPluginAccess, accountId, pluginId, scopes),
+  libraryPlugins: (approved) => call(DESKTOP_CHANNELS.libraryPlugins, approved),
+  pluginUpload: (id) => call(DESKTOP_CHANNELS.pluginUpload, id),
   setSafeMode: (on) => call(DESKTOP_CHANNELS.setSafeMode, on),
   workshopStart: () => call(DESKTOP_CHANNELS.workshopStart),
   workshopEnd: (session) => call(DESKTOP_CHANNELS.workshopEnd, session),
@@ -48,6 +50,8 @@ const bridge: DesktopBridge = {
     call(DESKTOP_CHANNELS.workshopExport, session, version, hash),
   workshopInstall: (session, version, hash) =>
     call(DESKTOP_CHANNELS.workshopInstall, session, version, hash),
+  workshopUpload: (session, version, hash) =>
+    call(DESKTOP_CHANNELS.workshopUpload, session, version, hash),
   update: () => call(DESKTOP_CHANNELS.update),
 };
 

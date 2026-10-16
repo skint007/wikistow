@@ -3,7 +3,10 @@ import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/mani
 /** A space, or a folder and what is under it, that a plugin may read or write for one account. */
 export type PluginScope = { spaceId: string; folderId: string | null; access: 'read' | 'write' };
 
-/** A plugin installed on this computer, or loaded from a development folder. */
+/**
+ * A plugin installed on this computer or loaded from a development folder,
+ * or one approved from the server's library.
+ */
 export type InstalledPlugin = {
   manifest: Manifest;
   level: TrustLevel;
@@ -11,8 +14,27 @@ export type InstalledPlugin = {
   key: string;
   /** The folder a development plugin is read from, or null once installed. */
   development: string | null;
+  /**
+   * From the server's library (ADR 0002): approved in the account's contacts
+   * record, where its on/off and page access are kept too. False for a
+   * folder or development install, whose choices stay on this computer.
+   */
+  library: boolean;
   enabled: boolean;
 };
+
+/** A library plugin approved in the account's contacts record, for the desktop to hold a copy of. */
+export type LibraryApproval = { id: string; hash: string; enabled: boolean };
+
+/** The approved library plugins this computer holds, each checked against its hash. */
+export type LibraryCopies = {
+  plugins: InstalledPlugin[];
+  /** Approved plugins it couldn't install, by ID, with why. */
+  problems: Record<string, string>;
+};
+
+/** A built plugin's file, to share to the library: its path from the folder's top, and its bytes. */
+export type PluginUploadFile = { path: string; data: Uint8Array };
 
 /** A plugin folder read and checked, waiting for the person to approve it. */
 export type PluginCandidate = {
@@ -138,6 +160,20 @@ export type DesktopBridge = {
   /** Each plugin's page access for this account. */
   pluginAccess(accountId: string): Promise<Record<string, PluginScope[]>>;
   setPluginAccess(accountId: string, pluginId: string, scopes: PluginScope[]): Promise<void>;
+  /**
+   * Hold a copy of each library plugin the account approved (ADR 0002):
+   * those this computer lacks are downloaded through the app's session,
+   * every file is checked against the approved hash, and the copy goes
+   * into the app's data, as a folder install's does. Copies no longer
+   * approved are deleted. Served under `/plugins/<id>/<hash>/` while the
+   * last call names them enabled.
+   */
+  libraryPlugins(approved: LibraryApproval[]): Promise<LibraryCopies>;
+  /**
+   * An installed plugin's files, to share to the library. Fails, naming the
+   * file, if a path is one the library refuses, or past its limits.
+   */
+  pluginUpload(id: string): Promise<PluginUploadFile[]>;
   /** Turn safe mode on or off; the window reloads. */
   setSafeMode(on: boolean): Promise<void>;
   /** Start a plugin workshop (#257): an empty workspace of its own. Its ID names it from then on. */
@@ -163,6 +199,8 @@ export type DesktopBridge = {
    * hash to `hash`: a candidate for `approvePlugin`, with that same hash.
    */
   workshopInstall(session: string, version: number, hash: string): Promise<PluginCandidate>;
+  /** Version `version`'s files, if they still hash to `hash`, to share to the library as `pluginUpload`. */
+  workshopUpload(session: string, version: number, hash: string): Promise<PluginUploadFile[]>;
   /**
    * A newer stable release, if the last check found one; null otherwise,
    * offline and before any check worked. The app checks GitHub itself.
@@ -192,6 +230,8 @@ export const DESKTOP_CHANNELS = {
   removePlugin: 'wikistow:remove-plugin',
   pluginAccess: 'wikistow:plugin-access',
   setPluginAccess: 'wikistow:set-plugin-access',
+  libraryPlugins: 'wikistow:library-plugins',
+  pluginUpload: 'wikistow:plugin-upload',
   setSafeMode: 'wikistow:set-safe-mode',
   workshopStart: 'wikistow:workshop-start',
   workshopEnd: 'wikistow:workshop-end',
@@ -203,6 +243,7 @@ export const DESKTOP_CHANNELS = {
   workshopCancel: 'wikistow:workshop-cancel',
   workshopExport: 'wikistow:workshop-export',
   workshopInstall: 'wikistow:workshop-install',
+  workshopUpload: 'wikistow:workshop-upload',
   update: 'wikistow:update',
 } as const satisfies Record<keyof DesktopBridge, string>;
 

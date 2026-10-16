@@ -22,6 +22,7 @@ export const asInstalled = (version: LibraryVersion, enabled: boolean): Installe
   level: trustLevel(version.manifest),
   key: version.hash,
   development: null,
+  library: true,
   enabled,
 });
 

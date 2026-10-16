@@ -35,6 +35,16 @@ export const UploadFile = z.strictObject({
   data: FileData,
 });
 
+/**
+ * Why an upload can't carry the file at `path`, naming it as `shown`, or
+ * null when it can. Checked before anything is sent, since the server's
+ * refusal names only the file's position.
+ */
+export const uploadPathProblem = (path: string, shown = path) =>
+  UploadFile.shape.path.safeParse(path).success
+    ? null
+    : `${shown} can’t be uploaded: file and folder names in a library plugin use only letters, digits, _, . and -.`;
+
 export const LibraryVersion = z.strictObject({
   hash: PluginHash,
   manifest: Manifest,

@@ -14,6 +14,7 @@ import {
   copyPluginFiles,
   PluginFolderError,
   readPluginFolder,
+  uploadFiles,
   type PluginFolder,
 } from './folder.ts';
 
@@ -96,6 +97,7 @@ export function desktopPlugins(data: string) {
     level: trustLevel(plugin.manifest),
     key: keyOf(plugin),
     development: plugin.development,
+    library: false,
     enabled: plugin.enabled,
   });
 
@@ -208,6 +210,15 @@ export function desktopPlugins(data: string) {
       await save();
       if (!plugin.development)
         await rm(join(root, plugin.manifest.id), { recursive: true, force: true });
+    },
+
+    /** An installed plugin's files, read from its copy, to share to the library. */
+    async uploadFiles(id: unknown) {
+      const plugin = find(z.string().parse(id));
+      if (!plugin || plugin.development) {
+        throw new PluginFolderError('Only a plugin installed on this computer can be shared.');
+      }
+      return uploadFiles(await readPluginFolder(installed(plugin)));
     },
 
     access: (accountId: unknown): Record<string, PluginScope[]> =>

@@ -4,6 +4,7 @@ import {
   PluginFolderError,
   type CheckedPlugin,
 } from '@wikistow/plugin-sdk/files';
+import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { access, copyFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
@@ -54,4 +55,28 @@ export async function copyPluginFiles({ folder, files }: PluginFolder, destinati
     await mkdir(dirname(to), { recursive: true });
     await copyFile(join(folder, file), to);
   }
+}
+
+/**
+ * The files `read` listed, to upload to the library. Checked first as the
+ * library checks them, naming the first file whose path it refuses, and
+ * against its limits, so nothing is sent that it would turn away.
+ */
+export async function uploadFiles({ folder, files }: PluginFolder): Promise<PluginUploadFile[]> {
+  for (const file of files) {
+    const problem = pluginRoutes.uploadPathProblem(file);
+    if (problem) throw new PluginFolderError(problem);
+  }
+  if (files.length > pluginRoutes.MAX_VERSION_FILES) {
+    throw new PluginFolderError(
+      `A library plugin holds at most ${pluginRoutes.MAX_VERSION_FILES} files.`,
+    );
+  }
+  const read = await Promise.all(
+    files.map(async (path) => ({ path, data: new Uint8Array(await readFile(join(folder, path))) })),
+  );
+  if (read.reduce((total, file) => total + file.data.length, 0) > pluginRoutes.MAX_VERSION_BYTES) {
+    throw new PluginFolderError('A library plugin holds at most 10 MB.');
+  }
+  return read;
 }
