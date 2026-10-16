@@ -401,6 +401,9 @@ export class Workshop {
     const generation = this.#generation;
     await this.#serve(version);
     if (generation !== this.#generation || signal?.aborted || this.#state.phase !== 'ready') {
+      // The server keeps one build a draft: put back the one the preview runs.
+      const shown = this.#state.running;
+      if (!desktop && shown && shown !== record) await this.#serve(shown.version);
       return;
     }
     this.#set({ running: record, errors: [], problem: null });
