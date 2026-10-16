@@ -10,7 +10,8 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'conflict' | 'too-larg
  * conflict (someone else saved first, found by a save or reported with
  * `conflict()`) stops autosave until the person decides what to keep. An
  * edit too large to save (`PageTooLarge`) waits for the next, which is tried
- * as usual.
+ * as usual. Any other refusal stops autosave too, and `onStatus` gets it
+ * with the `'error'` status, so the person can be told why.
  */
 export class Autosave<T> {
   #status: SaveStatus = 'saved';
@@ -20,12 +21,12 @@ export class Autosave<T> {
   #running: Promise<void> | null = null;
   #stopped = false;
   readonly #save: (value: T) => Promise<void>;
-  readonly #onStatus: (status: SaveStatus) => void;
+  readonly #onStatus: (status: SaveStatus, error?: unknown) => void;
   readonly #timing: { debounceMs: number; maxWaitMs: number };
 
   constructor(
     save: (value: T) => Promise<void>,
-    onStatus: (status: SaveStatus) => void,
+    onStatus: (status: SaveStatus, error?: unknown) => void,
     timing = { debounceMs: 1000, maxWaitMs: 10_000 },
   ) {
     this.#save = save;
@@ -37,9 +38,9 @@ export class Autosave<T> {
     return this.#status;
   }
 
-  #set(status: SaveStatus) {
+  #set(status: SaveStatus, error?: unknown) {
     this.#status = status;
-    this.#onStatus(status);
+    this.#onStatus(status, error);
   }
 
   /** Save the pending edit; with `chain`, then any edits made during the save too. */
@@ -63,7 +64,8 @@ export class Autosave<T> {
         tooLarge = error instanceof PageTooLarge;
         if (tooLarge) return this.#set('too-large');
         this.#stopped = true;
-        this.#set(error instanceof ApiError && error.code === 'stale-head' ? 'conflict' : 'error');
+        if (error instanceof ApiError && error.code === 'stale-head') this.#set('conflict');
+        else this.#set('error', error);
       },
     );
     try {

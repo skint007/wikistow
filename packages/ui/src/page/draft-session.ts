@@ -84,6 +84,8 @@ export type DraftSnapshot = {
   uploadError: string | null;
   /** Why the last save was refused as too large (`PageTooLarge`); null once one ends otherwise. */
   tooLarge: string | null;
+  /** What refused the save that stopped saving, while `status` is `'error'`. */
+  saveError: unknown;
 };
 
 type Content = Pick<PagePayload, 'title' | 'markdown' | 'attachments'>;
@@ -153,7 +155,7 @@ export class DraftSession {
         if (trimming) await trimming;
         return this.#save(build());
       },
-      (status) => this.#set({ status: this.#shown(status) }),
+      (status, saveError) => this.#set({ status: this.#shown(status), saveError }),
       timing,
     );
     this.#snapshot = {
@@ -163,6 +165,7 @@ export class DraftSession {
       uploading: false,
       uploadError: null,
       tooLarge: null,
+      saveError: undefined,
     };
   }
 

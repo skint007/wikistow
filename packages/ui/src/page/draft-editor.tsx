@@ -1,4 +1,5 @@
 import {
+  CryptoError,
   linkablePages,
   linkKey,
   PageId,
@@ -19,7 +20,7 @@ import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { revisionQuery, treeQuery } from '../data/queries';
-import { errorMessage } from '../errors';
+import { errorMessage, stopMessage } from '../errors';
 import { decryptedQuery } from './attachments';
 import type { SaveStatus } from './autosave';
 import { LinkChooser } from './editor/link-chooser';
@@ -56,6 +57,22 @@ const STATUS_TEXT: Record<SaveStatus, string> = {
   'too-large': 'Not saved: too large',
   error: 'Not saved',
 };
+
+/**
+ * Why a save failed, in this app's words where it has them, and whether
+ * trying again can help. A stop it explains (`stopMessage`) comes back the
+ * same while the server sends the same, unless a key was since sealed for
+ * this app or an owner accepted.
+ */
+function saveFailure(error: unknown) {
+  const stopped = stopMessage(error);
+  if (stopped === undefined)
+    return { message: 'Your last changes could not be saved.', retry: true };
+  const retry =
+    error instanceof CryptoError &&
+    (error.code === 'missing-key' || error.code === 'unaccepted-owner');
+  return { message: `Your last changes could not be saved. ${stopped}`, retry };
+}
 
 /**
  * The draft view: a title and the page's Markdown, its body in the source
@@ -128,6 +145,8 @@ export function DraftEditor({
     [session],
   );
 
+  const failed = snapshot.status === 'error' ? saveFailure(snapshot.saveError) : null;
+
   return (
     <div className="flex flex-1 flex-col gap-4">
       {/* Until it saves, or someone else's save stops it saving. */}
@@ -145,28 +164,30 @@ export function DraftEditor({
           className="grid gap-3 rounded-control bg-status-draft p-3 text-sm text-status-draft-foreground"
         >
           <p>
-            {snapshot.status === 'error'
-              ? 'Your last changes could not be saved.'
+            {failed
+              ? failed.message
               : session.hasUnsaved()
                 ? 'Someone else saved this draft while you were editing. Your changes are not saved yet.'
                 : 'Someone else saved a newer version of this draft.'}
           </p>
-          <div className="flex flex-wrap gap-2">
-            {snapshot.status === 'conflict' ? (
-              <>
-                <Button size="sm" onClick={() => void session.saveMineOnTop()}>
-                  Save mine on top
-                </Button>
-                <Button size="sm" variant="outline" onClick={onReload}>
-                  Discard mine and view theirs
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" onClick={() => void session.retry()}>
-                Try again
+          {snapshot.status === 'conflict' ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => void session.saveMineOnTop()}>
+                Save mine on top
               </Button>
-            )}
-          </div>
+              <Button size="sm" variant="outline" onClick={onReload}>
+                Discard mine and view theirs
+              </Button>
+            </div>
+          ) : (
+            failed?.retry && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void session.retry()}>
+                  Try again
+                </Button>
+              </div>
+            )
+          )}
         </div>
       )}
       <label className="sr-only" htmlFor="page-title">
