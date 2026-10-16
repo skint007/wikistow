@@ -9,7 +9,7 @@ import {
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -63,6 +63,7 @@ export function FolderLookFields({
   onChange: (look: FolderLook) => void;
 }) {
   const [picking, setPicking] = useState(false);
+  const tile = useRef<HTMLButtonElement>(null);
   return (
     <div className="grid gap-4">
       <div className="grid justify-items-start gap-2">
@@ -74,6 +75,7 @@ export function FolderLookFields({
           onPick={(emoji) => onChange({ ...look, emoji })}
         >
           <button
+            ref={tile}
             type="button"
             aria-label={`Change emoji ${look.emoji}`}
             className={cn(
@@ -122,7 +124,11 @@ export function FolderLookFields({
           variant="outline"
           size="sm"
           className="justify-self-start"
-          onClick={() => onChange(DEFAULT_FOLDER_LOOK)}
+          onClick={() => {
+            onChange(DEFAULT_FOLDER_LOOK);
+            // This button goes once it's done its work; focus stays in the fields.
+            tile.current?.focus();
+          }}
         >
           Back to ⭐ on blue
         </Button>
