@@ -241,7 +241,8 @@ export async function pickInOwnerRegion(
 /**
  * Grant one of this person's agents a pick inside a share, or change its
  * role there (section 9.4): its `shares` entry first, in a confirmed
- * contacts write, then every version of the share sealed to it again.
+ * contacts write, then every version of the share sealed to it again, with
+ * the draft key also where a confirmed group makes it an editor there.
  */
 export async function grantAgent(
   ctx: ClientContext,
@@ -260,9 +261,35 @@ export async function grantAgent(
       folderId: resolved.folderId,
       role: resolved.role,
       canPublish: resolved.canPublish,
-      envelopes: await sealPick(ctx, agent.enrollment.agent, resolved),
+      envelopes: await sealPick(
+        ctx,
+        agent.enrollment.agent,
+        resolved,
+        resolved.role === 'editor' || (await groupEdits(ctx, agent, resolved)),
+      ),
     },
   });
+}
+
+/**
+ * Whether a group on the agent's own record, with `drafts`, is an editor of
+ * the share as the server lists it, so the agent's keys there carry the
+ * draft key whatever its pick (section 9.4).
+ */
+async function groupEdits(
+  ctx: ClientContext,
+  agent: OwnAgent,
+  share: { spaceId: SpaceId; shareId: ShareId },
+): Promise<boolean> {
+  const recorded = (agent.groups ?? []).filter((g) => g.drafts && g.spaceId === share.spaceId);
+  if (recorded.length === 0) return false;
+  return (await listAgentGroups(ctx)).some(
+    (listed) =>
+      listed.agentId === agent.enrollment.agent.id &&
+      listed.confirmed &&
+      recorded.some((g) => g.groupId === listed.groupId) &&
+      listed.shares.some((s) => s.shareId === share.shareId && s.role === 'editor'),
+  );
 }
 
 /**
@@ -643,13 +670,15 @@ function holdsShares(
 
 /**
  * Every version of a picked share this app can pass on, sealed to the
- * agent: both keys for an editor pick, the published key otherwise. The
- * current version must count for this app's writing (section 9.4).
+ * agent: both keys with `drafts` (an editor pick's default), the published
+ * key otherwise. The current version must count for this app's writing
+ * (section 9.4).
  */
 async function sealPick(
   ctx: ClientContext,
   agent: PublicIdentity,
   pick: ResolvedPick,
+  drafts = pick.role === 'editor',
 ): Promise<FolderKeyEnvelope[]> {
   const keys = await spaceKeys(ctx, pick.spaceId);
   return versionsToGive(ctx, keys, {
@@ -667,7 +696,7 @@ async function sealPick(
       keyVersion: held.keyVersion,
       recipient: agent,
       keys: {
-        draftKey: pick.role === 'editor' ? held.draftKey : null,
+        draftKey: drafts ? held.draftKey : null,
         publishedKey: held.publishedKey,
       },
     });

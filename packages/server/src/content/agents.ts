@@ -543,8 +543,8 @@ async function lockShareRow(tx: Database, shareId: string): Promise<ShareRow> {
  * Check one grant against the person's own access in its share (section
  * 9.4) and store it, with the agent's envelopes there replaced by
  * `envelopes`: versions 1 to current, sealed by the person, with the draft
- * key exactly for an editor pick. A pick is a folder at or under the
- * share's root, or the whole share.
+ * key exactly where the agent edits, through this pick or a confirmed
+ * group. A pick is a folder at or under the share's root, or the whole share.
  */
 async function putGrant(
   tx: Database,
@@ -562,6 +562,10 @@ async function putGrant(
   if (!own) throw new ContentError('not-found');
   requireWithin(grant, own);
   if (grant.folderId !== null) await requirePickable(tx, share, grant.folderId);
+  const groups = (
+    await agentGrantsOf(tx, { agentIds: [input.agent.id], shareIds: [share.id] })
+  ).filter((held) => held.source === 'group');
+  const drafts = editsThere([...groups, grant], own);
   await checkFolderEnvelopes(tx, input.envelopes, {
     spaceId: share.spaceId,
     shareId: share.id,
@@ -570,7 +574,7 @@ async function putGrant(
       recipientId: input.agent.id,
       recipientKeyVersion: 1,
       keyVersion: i + 1,
-      drafts: grant.role === 'editor',
+      drafts,
     })),
   });
   await tx
@@ -754,7 +758,7 @@ export async function deleteAgentGrant(
  * Whether an agent gets draft keys in a share: some grant there is for an
  * editor, and its person isn't only a reader there (section 9.5).
  */
-const editsThere = (grants: readonly AgentGrant[], own: Access) =>
+const editsThere = (grants: readonly Pick<AgentGrant, 'role'>[], own: Access) =>
   grants.some((grant) => grant.role === 'editor') && own.role !== 'reader';
 
 /**

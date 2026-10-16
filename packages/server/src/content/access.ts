@@ -213,6 +213,7 @@ export function capAgent(
 
 /** One way an agent reaches a share: its own pick, or a group its person confirmed. */
 export type AgentGrant = {
+  source: 'pick' | 'group';
   agentId: string;
   shareId: string;
   spaceId: string;
@@ -278,9 +279,10 @@ export async function agentGrantsOf(
       ),
     );
   return [
-    ...picks,
+    ...picks.map((pick) => ({ ...pick, source: 'pick' as const })),
     ...viaGroups.map(({ drafts, role, canPublish, ...grant }) => ({
       ...grant,
+      source: 'group' as const,
       folderId: null,
       role: drafts ? role : ('reader' as const),
       canPublish: drafts === true && canPublish,
@@ -426,9 +428,11 @@ export async function treeView(
     },
     starts,
     // Its pick stands in for the share root, which may be above it, unnamed.
+    // Its access there, from the grants that cover where its view starts.
     held: (share) => {
       const held = allowed.get(share.id);
-      const grant = held && highest(held.grants);
+      const whole = held?.grants.filter((g) => g.folderId === null) ?? [];
+      const grant = held && highest(whole.length > 0 ? whole : held.grants);
       return held && grant ? { access: capAgent(grant, held.person), rootId: held.start } : null;
     },
   };
