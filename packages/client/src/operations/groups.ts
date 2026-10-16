@@ -58,10 +58,15 @@ export type Group = {
   groupId: GroupId;
   /** Null when this app can't open it. */
   name: LoadedMetadata | null;
-  /** Its members at their current keys, as the directory names them. */
+  /** Its people at their current keys, as the directory names them. */
   members: DirectoryEntry[];
+  /** Its agents, each for its person, and whether that person confirmed it (section 9.4). */
+  agents: { agentId: IdentityId; confirmed: boolean }[];
   shares: ({ shareId: ShareId } & Access)[];
 };
+
+/** An agent an owner sees in a space's groups, or may add: its person, and the server's name. */
+export type GroupAgent = { agentId: IdentityId; personId: IdentityId; name: string };
 
 /**
  * A space's groups, shares and direct grants as its owner's app loads them,
@@ -73,6 +78,8 @@ export type SpaceGroups = {
   groups: Group[];
   direct: ({ shareId: ShareId; identityId: IdentityId } & Access)[];
   shares: Awaited<ReturnType<typeof listShares>>;
+  /** The live agents of the space's owners and of the people in its groups. */
+  agents: GroupAgent[];
   waiting: WaitingEntry[];
   /** The space's permission version, which every group change names. */
   permissionVersion: number;
@@ -94,7 +101,7 @@ export async function loadGroups(ctx: ClientContext, spaceId: SpaceId): Promise<
     ctx,
     listed.groups.flatMap((group) => (group.name ? [group.name.metadata.record] : [])),
   );
-  const groups = listed.groups.map(({ groupId, name, members, shares: held }) => {
+  const groups = listed.groups.map(({ groupId, name, members, agents, shares: held }) => {
     let opened: LoadedMetadata | null = null;
     try {
       opened =
@@ -110,13 +117,14 @@ export async function loadGroups(ctx: ClientContext, spaceId: SpaceId): Promise<
     } catch (error) {
       if (!(error instanceof CryptoError)) throw error;
     }
-    return { groupId, name: opened, members, shares: held };
+    return { groupId, name: opened, members, agents, shares: held };
   });
   return {
     spaceId,
     groups,
     direct: listed.direct,
     shares,
+    agents: listed.agents,
     waiting: waiting.filter((w) => w.spaceId === spaceId),
     permissionVersion: listed.permissionVersion,
   };
@@ -295,6 +303,7 @@ export async function renameGroup(
 export type GroupAction =
   | { kind: 'delete-group'; groupId: GroupId }
   | { kind: 'add-member'; groupId: GroupId; person: Lookup }
+  | { kind: 'add-agent'; groupId: GroupId; agentId: IdentityId }
   | { kind: 'remove-member'; groupId: GroupId; identityId: IdentityId }
   | { kind: 'set-share-group'; shareId: ShareId; groupId: GroupId; access: Access }
   | { kind: 'remove-share-group'; shareId: ShareId; groupId: GroupId }
@@ -346,11 +355,31 @@ const withGroupShare = (
     ],
   }));
 
+// Someone out of a group: a person's agents leave with them.
 const withoutMember = (state: SpaceGroups, groupId: GroupId, identityId: string) =>
   editGroup(state, groupId, (group) => ({
     ...group,
     members: group.members.filter((m) => m.identity.id !== identityId),
+    agents: group.agents.filter(
+      ({ agentId }) =>
+        agentId !== identityId &&
+        state.agents.find((a) => a.agentId === agentId)?.personId !== identityId,
+    ),
   }));
+
+/**
+ * The agents reaching a share, by a pick or a confirmed group (section
+ * 9.4), as the server works it out for its coverage check.
+ */
+const agentsIn = (state: SpaceGroups, shareId: ShareId) =>
+  new Set<string>([
+    ...requireListed(state, shareId).agents.map((pick) => pick.agentId),
+    ...state.groups.flatMap((group) =>
+      group.shares.some((s) => s.shareId === shareId)
+        ? group.agents.filter((a) => a.confirmed).map((a) => a.agentId)
+        : [],
+    ),
+  ]);
 
 const withoutDirect = (state: SpaceGroups, identityId: string, shareId?: ShareId) => ({
   ...state,
@@ -362,10 +391,13 @@ const withoutDirect = (state: SpaceGroups, identityId: string, shareId?: ShareId
 /**
  * A rotation of each of `shareIds` where someone the share lists holds
  * keys beyond their access in `after`: leaving them out where nothing is
- * left, demoting them where they keep reading (section 7.9).
+ * left, demoting them where they keep reading (section 7.9). Also where a
+ * confirmed agent reaches the share `before` but not `after`: a rotation
+ * leaves it out by itself, as only its person seals to it.
  */
 async function rotationsFor(
   ctx: ClientContext,
+  before: SpaceGroups,
   after: SpaceGroups,
   shareIds: readonly ShareId[],
 ): Promise<PlannedRotation[]> {
@@ -379,7 +411,9 @@ async function rotationsFor(
       if (access === null) leaveOut.push(row.identityId);
       else if (row.role === 'editor' && access.role === 'reader') demote.push(row.identityId);
     }
-    if (leaveOut.length === 0 && demote.length === 0) continue;
+    const stays = agentsIn(after, shareId);
+    const agentLeaves = [...agentsIn(before, shareId)].some((id) => !stays.has(id));
+    if (leaveOut.length === 0 && demote.length === 0 && !agentLeaves) continue;
     plans.push(
       await planShareRotation(ctx, { spaceId: after.spaceId, shareId, leaveOut, demote, keys }),
     );
@@ -433,7 +467,7 @@ const takingAway = async (
 ): Promise<GroupChange> => ({
   spaceId: state.spaceId,
   action,
-  rotations: await rotationsFor(ctx, after, shareIds),
+  rotations: await rotationsFor(ctx, state, after, shareIds),
   seals: [],
   waits: [],
   after,
@@ -500,9 +534,40 @@ export async function planAddMember(
 }
 
 /**
+ * Put an agent in a group, for its person, who is in the group or owns the
+ * space (section 7.8). Nothing is sealed: it gets nothing until its person
+ * confirms, on their Agents page, since only they seal to it (section
+ * 9.4). An owner adding their own agent confirms next (`confirmAgentGroup`).
+ */
+export async function planAddAgent(
+  ctx: ClientContext,
+  { spaceId, groupId, agentId }: { spaceId: SpaceId; groupId: GroupId; agentId: IdentityId },
+): Promise<GroupChange> {
+  const state = await loadGroups(ctx, spaceId);
+  const group = requireGroup(state, groupId);
+  if (group.agents.some((a) => a.agentId === agentId)) {
+    throw new ApiError(409, 'duplicate', 'Already in the group');
+  }
+  return {
+    spaceId,
+    action: { kind: 'add-agent', groupId, agentId },
+    rotations: [],
+    seals: [],
+    waits: [],
+    after: editGroup(state, groupId, (g) => ({
+      ...g,
+      agents: [...g.agents, { agentId, confirmed: false }],
+    })),
+    permissionVersion: state.permissionVersion,
+  };
+}
+
+/**
  * Take someone out of a group: for each of its shares, a rotation where
  * their keys exceed what they keep through a direct grant or another
- * group, leaving them out or demoting them (section 7.9).
+ * group, leaving them out or demoting them (section 7.9). A person's
+ * agents leave with them. For an agent, a rotation of each share it no
+ * longer reaches once its person confirmed the group, as for a person.
  */
 export async function planRemoveMember(
   ctx: ClientContext,
@@ -510,7 +575,10 @@ export async function planRemoveMember(
 ): Promise<GroupChange> {
   const state = await loadGroups(ctx, spaceId);
   const group = requireGroup(state, groupId);
-  if (!group.members.some((m) => m.identity.id === identityId)) {
+  if (
+    !group.members.some((m) => m.identity.id === identityId) &&
+    !group.agents.some((a) => a.agentId === identityId)
+  ) {
     throw new ApiError(404, 'not-found', 'Not in the group');
   }
   return takingAway(
@@ -726,6 +794,12 @@ export async function applyGroupChange(ctx: ClientContext, change: GroupChange):
           envelopes,
           permissionVersion,
         },
+      });
+      break;
+    case 'add-agent':
+      await ctx.api.call(groupRoutes.addGroupAgent, {
+        params: { groupId: action.groupId },
+        body: { agentId: action.agentId, permissionVersion },
       });
       break;
     case 'remove-member':

@@ -1,4 +1,4 @@
-import type { FolderKeyEnvelope, ShareId, SpaceId } from '@wikistow/contracts';
+import type { FolderKeyEnvelope, GroupId, ShareId, SpaceId } from '@wikistow/contracts';
 import type { OwnAgent, SharedContacts } from './contacts.ts';
 import { CryptoError } from './errors.ts';
 import { sealFolderKeys, type FolderKeyring } from './folder-keys.ts';
@@ -15,17 +15,29 @@ export type MissingVersions = {
 };
 
 /**
+ * A group the agent is in, as the server lists it: the shares it has, and
+ * its access there (`GET /api/me/agents/groups`).
+ */
+export type ListedGroup = {
+  spaceId: SpaceId;
+  groupId: GroupId;
+  shares: readonly { shareId: ShareId; role: 'reader' | 'editor' }[];
+};
+
+/**
  * Seal to one of the person's own agents the key versions it lacks (section
  * 9.4), at unlock or when the person grants it a share. Only shares on the
- * agent's `shares` list in the person's own contacts record, and only
- * versions this app holds that count for its own writing (`writes`, per
- * space), so never one above the highest that does. The class comes from
- * that list's `drafts`, never from the server: both keys only if `drafts` is
- * true and this app holds the draft key. A revoked agent, or one whose
- * enrollment doesn't verify under the person's key, gets nothing, so one
- * broken entry doesn't stop the others at unlock. Whatever the server lists
- * beyond that is ignored, so a person who loses access stops sealing new
- * versions too.
+ * agent's `shares` list in the person's own contacts record, or that a
+ * group on its `groups` list has (`groups`, the server's listing, which
+ * the person accepts: the agent is theirs), and only versions this app
+ * holds that count for its own writing (`writes`, per space), so never one
+ * above the highest that does. The class comes from those lists' `drafts`,
+ * never from the server's grant: both keys only if a pick there has
+ * `drafts`, or a group with `drafts` is an editor there, and this app holds
+ * the draft key. A revoked agent, or one whose enrollment doesn't verify
+ * under the person's key, gets nothing, so one broken entry doesn't stop
+ * the others at unlock. Whatever the server lists beyond that is ignored,
+ * so a person who loses access stops sealing new versions too.
  */
 export function sealForAgent({
   person,
@@ -33,6 +45,7 @@ export function sealForAgent({
   contacts,
   agent,
   missing,
+  groups = [],
   keyring,
   writes,
 }: {
@@ -43,6 +56,8 @@ export function sealForAgent({
   /** The agent's entry in that payload. */
   agent: OwnAgent;
   missing: readonly MissingVersions[];
+  /** The groups the server lists for the agent; only those its entry records count. */
+  groups?: readonly ListedGroup[];
   keyring: FolderKeyring;
   /** The person's accepted owners for writing in a space. */
   writes: (spaceId: SpaceId) => WritesOwner;
@@ -55,11 +70,26 @@ export function sealForAgent({
     if (error instanceof CryptoError) return [];
     throw error;
   }
+  const confirmed = groups.flatMap((listed) => {
+    const recorded = agent.groups?.find(
+      (g) => g.spaceId === listed.spaceId && g.groupId === listed.groupId,
+    );
+    return recorded ? [{ ...listed, drafts: recorded.drafts }] : [];
+  });
   return missing.flatMap(({ spaceId, shareId, keyVersions }) => {
-    const granted = agent.shares.find(
+    const pick = agent.shares.find(
       (share) => share.spaceId === spaceId && share.shareId === shareId,
     );
-    if (!granted) return [];
+    const viaGroups = confirmed.flatMap((group) =>
+      group.spaceId === spaceId
+        ? group.shares
+            .filter((s) => s.shareId === shareId)
+            .map((s) => ({ role: s.role, drafts: group.drafts }))
+        : [],
+    );
+    if (!pick && viaGroups.length === 0) return [];
+    const drafts =
+      pick?.drafts === true || viaGroups.some((held) => held.drafts && held.role === 'editor');
     const counts = writes(spaceId);
     const wanted = new Set(keyVersions);
     const sealed = new Set<number>();
@@ -77,7 +107,7 @@ export function sealForAgent({
           keyVersion: held.keyVersion,
           recipient: enrollment.agent,
           keys: {
-            draftKey: granted.drafts ? held.draftKey : null,
+            draftKey: drafts ? held.draftKey : null,
             publishedKey: held.publishedKey,
           },
         }),
