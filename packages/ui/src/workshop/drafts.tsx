@@ -200,9 +200,13 @@ export function DraftsList({ open }: { open: string | null }) {
   const [deleting, setDeleting] = useState<DraftSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const remove = async (draft: DraftSummary) => {
+  /** Forget what last went wrong, as another action starts. */
+  const fresh = () => {
     setError(null);
     newDraft.clear();
+  };
+  const remove = async (draft: DraftSummary) => {
+    fresh();
     try {
       await api.call(pluginDraftRoutes.deleteDraft, { params: { draftId: draft.id } });
     } catch (failure) {
@@ -220,7 +224,7 @@ export function DraftsList({ open }: { open: string | null }) {
           name="Project folder"
           phone="Uploading a project folder needs a computer."
           onFolder={async (chosen) => {
-            setError(null);
+            fresh();
             try {
               await newDraft.start({ files: await readProject(chosen) });
             } catch (failure) {
@@ -232,7 +236,7 @@ export function DraftsList({ open }: { open: string | null }) {
           size="sm"
           disabled={newDraft.busy}
           onClick={() => {
-            setError(null);
+            fresh();
             void newDraft.start({});
           }}
         >
@@ -265,7 +269,14 @@ export function DraftsList({ open }: { open: string | null }) {
                 <Badge>Open</Badge>
               ) : (
                 <>
-                  <Button size="sm" variant="outline" onClick={() => openWorkshop(draft.id)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      fresh();
+                      openWorkshop(draft.id);
+                    }}
+                  >
                     Open
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setDeleting(draft)}>
