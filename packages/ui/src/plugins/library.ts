@@ -1,4 +1,4 @@
-import { pluginOperations, type PluginApproval } from '@wikistow/client';
+import { pluginOperations, type ClientContext, type PluginApproval } from '@wikistow/client';
 import { pluginRoutes, type InstalledPlugin } from '@wikistow/contracts';
 import { trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions } from '@tanstack/react-query';
@@ -41,6 +41,9 @@ export const approvedPlugins = (
     return version ? [asInstalled(version, enabled)] : [];
   });
 
+/** The library as last listed, with the session it was listed in. */
+let lastListed: { ctx: ClientContext; library: LibraryPlugin[] } | null = null;
+
 const openCtx = () => {
   const vault = vaultStore.get();
   if (vault.status !== 'unlocked') throw new Error('Unlock your vault first.');
@@ -63,11 +66,13 @@ export const librarySource: Omit<RuntimeSource, 'pages' | 'handle'> = {
     if (approvals.length === 0) return { safeMode, plugins: [] };
     try {
       const { plugins } = await api.call(pluginRoutes.listPlugins);
-      return { safeMode, plugins: approvedPlugins(plugins, approvals) };
+      lastListed = { ctx: vault.ctx, library: plugins };
     } catch {
-      // The server is away: nothing is known to run until the next listing.
-      return { safeMode, plugins: null };
+      // The server is away: the library as this session last saw it, so
+      // what runs keeps running. Before any listing, nothing is known.
+      if (lastListed?.ctx !== vault.ctx) return { safeMode, plugins: null };
     }
+    return { safeMode, plugins: approvedPlugins(lastListed.library, approvals) };
   },
   async access() {
     const vault = vaultStore.get();
