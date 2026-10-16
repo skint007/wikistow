@@ -120,7 +120,7 @@ let frame: HostFrame | null = null;
 
 /**
  * Run the script at `url`, a plugin's file on the app's origin, in the
- * host frame: the browser's way, which keeps it off the app's origin.
+ * host frame, which keeps it off the app's origin.
  * `pluginId` becomes the worker's name, which the SDK reads as
  * `host.pluginId` (a `data:` worker's address doesn't hold it).
  */

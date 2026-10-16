@@ -13,7 +13,10 @@ import type { RouteDef } from '../route.ts';
 /** The most one version may hold, in bytes and files. */
 export const MAX_VERSION_BYTES = 10 * 1024 * 1024;
 export const MAX_VERSION_FILES = 500;
-/** A version's `script` at most: Chromium won't start a `data:` worker over 2 MB. */
+/**
+ * A version's `script` at most: Chromium won't start a `data:` worker over
+ * 2 MB. The desktop app holds its folder installs and workshop versions to it too.
+ */
 export const MAX_SCRIPT_BYTES = 1024 * 1024;
 
 /** A version's hash: SHA-256 in hex over its files (`pluginHash` in the SDK). */

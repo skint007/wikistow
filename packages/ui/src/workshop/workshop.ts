@@ -109,7 +109,6 @@ export class Workshop {
       pages: (caller) => this.samples.pages(caller),
       handle: (caller, shown) => this.samples.handle(caller, shown),
       disable: () => this.unload(),
-      ownsStorage: false,
     });
     this.preview.start(null);
     // Settings' picker shares the preview: one it shows, or stops, ends this one.

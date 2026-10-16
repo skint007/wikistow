@@ -7,6 +7,7 @@
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
+  securityHeadersFor,
   type DesktopBridge,
   type DesktopResult,
 } from '@wikistow/contracts';
@@ -161,7 +162,7 @@ async function endWorkshops() {
  */
 let safeMode = process.argv.includes('--safe-mode');
 
-/** A plugin file's response is refused everything a response's policy governs: a worker's requests above all. */
+/** A plugin file's response is refused everything a response's policy governs, as the server's library route does. */
 const PLUGIN_FILE_CSP = "default-src 'none'";
 
 // A missing or damaged file means no server chosen yet, never a dead app.
@@ -233,7 +234,10 @@ async function serve(request: Request): Promise<Response> {
   const found = file ? await net.fetch(pathToFileURL(file).href).catch(() => null) : null;
   if (!found?.ok) return new Response(null, { status: 404 });
   const headers = new Headers(found.headers);
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+  // The plugin host frame's page and script get the server's exceptions (ADR 0002).
+  for (const [name, value] of Object.entries(securityHeadersFor(url.pathname, APP_ORIGIN))) {
+    headers.set(name, value);
+  }
   return new Response(found.body, { status: 200, headers });
 }
 

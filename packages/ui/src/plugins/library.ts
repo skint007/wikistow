@@ -99,5 +99,4 @@ export const librarySource: Omit<RuntimeSource, 'pages' | 'handle'> = {
   async disable(pluginId) {
     await pluginOperations.setPluginEnabled(openCtx(), pluginId, false);
   },
-  ownsStorage: false,
 };

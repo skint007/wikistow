@@ -6,6 +6,17 @@ import { fileURLToPath } from 'node:url';
 import { showIn, visual } from '../../web/e2e/editor';
 import { expect, pick, serverBlobDir, test } from '../../web/e2e/fixtures';
 import {
+  ask,
+  expectLoopStopped,
+  fromFrame,
+  frameRefusedAll,
+  openSandbox,
+  outsideServer,
+  PROBE as SANDBOX_PROBE,
+  refusedAll,
+  start,
+} from '../../web/e2e/sandbox';
+import {
   adminTab,
   expectSource,
   fillSource,
@@ -100,7 +111,7 @@ test('a script plugin gets only the page access it is given', async ({
 
   await backToPage(window);
   // The worker's own policy refuses every request, the app's API included.
-  expect(await runCommand(window, 'Try the network')).toContain('network blocked');
+  expect(await runCommand(window, 'Try the network')).toContain('probe: network blocked');
   // The page shown needs no access. What was typed just before is kept:
   // the handle reads the draft as it is now, not as it opened.
   await fillSource(window, 'Typed before appending.');
@@ -131,6 +142,67 @@ test('a script plugin gets only the page access it is given', async ({
   await backToPage(window);
   await expect(window.locator('#page-source')).toContainText('The probe wrote this.');
   await expect(window.getByRole('button', { name: 'Plugins' })).toHaveCount(0);
+});
+
+// The frame scripts run in, under `app://` as in the browser (ADR 0002): it
+// and its workers reach none of the app's storage, document, bridge or
+// network, and a script in a loop is stopped while the window keeps answering.
+test('a script in the host frame reaches nothing of the app, and a loop stops', async ({
+  page,
+  freshPage,
+  admin,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const outside = await outsideServer();
+  try {
+    // Signed in and unlocked: main holds a session the app's requests use.
+    await memberWithVault(page, await adminTab(freshPage, admin.email));
+    desktop = await launch(await newProfile());
+    const { window } = desktop;
+    await signInThroughBrowser(desktop, page, baseURL ?? '');
+    await window.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await window.getByRole('button', { name: 'Unlock' }).click();
+    await expect(window.getByText('Pick a page')).toBeVisible();
+    await window.evaluate(async () => {
+      localStorage.setItem('sandbox-secret', 'local');
+      sessionStorage.setItem('sandbox-secret', 'session');
+      await caches.open('sandbox-secret');
+      indexedDB.open('sandbox-secret');
+    });
+    const sandbox = await openSandbox(window);
+    expect(await fromFrame(window)).toEqual(frameRefusedAll);
+    // Main's preload gives the bridge to the app's own document only.
+    const frame = window.frames().find((each) => each.url() === 'app://wikistow/plugin-host.html');
+    expect(await frame?.evaluate(() => typeof Reflect.get(window, 'wikistowDesktop'))).toBe(
+      'undefined',
+    );
+
+    // The server's log can't show it here: main serves the app's files
+    // itself and refuses API requests from any origin but the app's. The
+    // refusals and the outside server show the frame's policy holds.
+    await start(sandbox, 1, SANDBOX_PROBE);
+    expect(await ask(sandbox, 1, { app: 'app://wikistow', outside: outside.url })).toEqual({
+      message: {
+        origin: 'null',
+        name: 'sandbox-test',
+        indexedDB: expect.stringMatching(/^refused: /),
+        caches: expect.stringMatching(/^refused: /),
+        session: 'refused: TypeError',
+        app: refusedAll,
+        outside: refusedAll,
+      },
+    });
+    expect(outside.arrived).toEqual([]);
+
+    // Removing the frame ends its workers, as the app does when it stops answering.
+    await sandbox.evaluate((frame) => frame.iframe.remove());
+    const scripts = () => window.workers().filter((worker) => worker.url().startsWith('data:'));
+    await expect.poll(() => scripts().length, { timeout: 10_000 }).toBe(0);
+    await expectLoopStopped(window);
+  } finally {
+    outside.close();
+  }
 });
 
 // A plugin shared to the library from one computer and approved there
@@ -185,7 +257,7 @@ test('a library plugin installs at unlock, checked against its hash', async ({
       .getByRole('listitem', { name: 'Probe' }),
   ).toBeVisible();
   await backToPage(first.window);
-  expect(await runCommand(first.window, 'Try the network')).toContain('network blocked');
+  expect(await runCommand(first.window, 'Try the network')).toContain('probe: network blocked');
   // Copied by now: it ran from the copy.
   const [hash = ''] = await copies(first.profile);
   expect(hash).toMatch(/^[0-9a-f]{64}$/);
@@ -215,7 +287,7 @@ test('a library plugin installs at unlock, checked against its hash', async ({
   await expect(second.window.locator('#page-title')).toHaveValue('Second computer');
   await accountMenu(second.window, 'Lock vault');
   await unlock(second.window);
-  expect(await runCommand(second.window, 'Try the network')).toContain('network blocked');
+  expect(await runCommand(second.window, 'Try the network')).toContain('probe: network blocked');
   expect(await copies(second.profile)).toEqual([hash]);
 });
 

@@ -63,28 +63,8 @@ export type ScriptPort = {
   close: () => void;
 };
 
-/**
- * Start a script: `inFrame` (`script-frame.ts`) in the browser's sandboxed
- * frame, `inWorker` as a worker of the app's own origin.
- */
+/** Start a script: `inFrame` (`script-frame.ts`) starts it in the sandboxed host frame. */
 export type LaunchScript = (on: ScriptHandlers) => ScriptPort;
-
-/**
- * Run the script at `url` as a module worker of the app's origin, as the
- * desktop app does: it serves the file with a policy that allows the
- * worker no requests (no fetch, imports or workers).
- */
-export const inWorker =
-  (url: string): LaunchScript =>
-  (on) => {
-    const worker = new Worker(url, { type: 'module' });
-    worker.onmessage = (event: MessageEvent<unknown>) => on.message(event.data);
-    worker.onerror = (event) => {
-      event.preventDefault();
-      on.error(event.message);
-    };
-    return { post: (message) => worker.postMessage(message), close: () => worker.terminate() };
-  };
 
 type Invocation = {
   resolve: (outputs: Outputs | undefined) => void;
