@@ -1,0 +1,252 @@
+import {
+  DEFAULT_FOLDER_LOOK,
+  FOLDER_TINTS,
+  spaceOperations,
+  type FolderId,
+  type FolderLook,
+  type NodeMetadata,
+  type SpaceId,
+} from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Name } from '@/components/name';
+import { cn } from '@/lib/utils';
+import { treeQuery } from '../data/queries';
+import { errorMessage } from '../errors';
+import { EmojiPopover } from '../page/cover/emoji-picker';
+import { useClient } from '../vault/store';
+
+// Written out in full so Tailwind finds each class.
+const TINTS: Record<string, string> = {
+  green: 'bg-folder-green',
+  orange: 'bg-folder-orange',
+  blue: 'bg-folder-blue',
+  pink: 'bg-folder-pink',
+  purple: 'bg-folder-purple',
+};
+
+/** A folder's look from its metadata, ⭐ on blue for what it doesn't name. */
+export const folderLook = ({ emoji, tint }: NodeMetadata): FolderLook => ({
+  emoji: emoji ?? DEFAULT_FOLDER_LOOK.emoji,
+  tint: tint ?? DEFAULT_FOLDER_LOOK.tint,
+});
+
+const sameLook = (a: FolderLook, b: FolderLook) => a.emoji === b.emoji && a.tint === b.tint;
+
+/** A folder's tile: its emoji on its tint. A tint this app doesn't know shows blue. */
+export const tileClass = (tint: string) =>
+  cn(
+    'grid shrink-0 place-items-center overflow-hidden rounded-folder leading-none',
+    TINTS[tint] ?? TINTS['blue'],
+  );
+
+/**
+ * A folder's emoji, from the page emoji picker, and its colour, one of the
+ * design's tints, with a way back to ⭐ on blue. For a new folder and for
+ * changing one.
+ */
+export function FolderLookFields({
+  look,
+  onChange,
+}: {
+  look: FolderLook;
+  onChange: (look: FolderLook) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const tile = useRef<HTMLButtonElement>(null);
+  return (
+    <div className="grid gap-4">
+      <div className="grid justify-items-start gap-2">
+        <span className="text-sm font-medium">Emoji</span>
+        <EmojiPopover
+          current={look.emoji}
+          open={picking}
+          onOpenChange={setPicking}
+          onPick={(emoji) => onChange({ ...look, emoji })}
+        >
+          <button
+            ref={tile}
+            type="button"
+            aria-label={`Change emoji ${look.emoji}`}
+            className={cn(
+              tileClass(look.tint),
+              'size-12 cursor-pointer text-2xl outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
+            )}
+          >
+            {look.emoji}
+          </button>
+        </EmojiPopover>
+      </div>
+      <fieldset className="grid gap-2">
+        <legend className="mb-2 text-sm font-medium">Colour</legend>
+        <div className="flex flex-wrap gap-3">
+          {FOLDER_TINTS.map((tint) => {
+            const current = look.tint === tint;
+            return (
+              <button
+                key={tint}
+                type="button"
+                aria-pressed={current}
+                onClick={() => onChange({ ...look, tint })}
+                className="group grid justify-items-center gap-1 rounded-row text-xs font-bold text-subtle-foreground outline-offset-2 hover:text-foreground"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    tileClass(tint),
+                    'size-9 text-base ring-offset-2 ring-offset-card group-active:opacity-80',
+                    current
+                      ? 'ring-2 ring-primary'
+                      : 'group-hover:ring-2 group-hover:ring-foreground/25',
+                  )}
+                >
+                  {look.emoji}
+                </span>
+                {tint[0]?.toUpperCase() + tint.slice(1)}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+      {!sameLook(look, DEFAULT_FOLDER_LOOK) && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="justify-self-start"
+          onClick={() => {
+            onChange(DEFAULT_FOLDER_LOOK);
+            // This button goes once it's done its work; focus stays in the fields.
+            tile.current?.focus();
+          }}
+        >
+          Back to ⭐ on blue
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** The folder menu's Emoji and colour…: changes a folder's look for everyone who can see it. */
+export function FolderLookDialog({
+  spaceId,
+  folderId,
+  onOpenChange,
+}: {
+  spaceId: SpaceId;
+  /** Null while closed. */
+  folderId: FolderId | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={folderId !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        {folderId && (
+          <LookForm
+            key={folderId}
+            spaceId={spaceId}
+            folderId={folderId}
+            onDone={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LookForm({
+  spaceId,
+  folderId,
+  onDone,
+}: {
+  spaceId: SpaceId;
+  folderId: FolderId;
+  onDone: () => void;
+}) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  // Read from the tree each time, so a save after a refusal is based on what it reloaded.
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const loaded = tree?.folders.find((f) => f.id === folderId)?.metadata;
+  const opened = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
+  // What the person picked, until they save; null shows the folder as it is.
+  const [picked, setPicked] = useState<FolderLook | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!loaded || !opened) {
+    return (
+      <DialogHeader>
+        <DialogTitle>Emoji and colour</DialogTitle>
+        <DialogDescription>
+          {loaded?.opened.kind === 'newer-format'
+            ? 'This folder was saved by a newer version of WikiStow. Update the app to change it.'
+            : 'This app can’t read this folder, so it can’t change its emoji or colour.'}
+        </DialogDescription>
+      </DialogHeader>
+    );
+  }
+  const current = folderLook(opened);
+  const look = picked ?? current;
+
+  async function save() {
+    if (!loaded || sameLook(look, current)) return onDone();
+    setBusy(true);
+    setError(null);
+    try {
+      await spaceOperations.updateMetadata(ctx, {
+        spaceId,
+        subject: { kind: 'folder', folderId },
+        current: loaded,
+        changes: look,
+      });
+      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      onDone();
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === 'stale-head') {
+        // Show what the other change made it, to choose again from.
+        await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+        setPicked(null);
+        setError('Someone changed this folder meanwhile, so nothing changed. Choose again.');
+      } else {
+        setError(errorMessage(caught));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>
+          Emoji and colour for “<Name>{opened.name}</Name>”
+        </DialogTitle>
+        <DialogDescription>
+          Everyone who can see the folder sees them. They’re encrypted like its name.
+        </DialogDescription>
+      </DialogHeader>
+      <FolderLookFields look={look} onChange={setPicked} />
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      <DialogFooter>
+        <Button disabled={busy} onClick={() => void save()}>
+          Save
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
