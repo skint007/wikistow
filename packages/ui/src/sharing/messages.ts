@@ -1,6 +1,6 @@
 import { CryptoError } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { knownMessage } from '../errors';
+import { knownMessage, stopMessage } from '../errors';
 
 // The server's refusals of an owner action. Every sharing request is all or
 // nothing, so a refusal always means nothing changed.
@@ -43,42 +43,19 @@ const REFUSED: Partial<Record<ApiError['code'], string>> = {
 // one is the clearest sign of a server misbehaving.
 const MISBEHAVING = 'The server may be misbehaving or under attack, so nothing was shared.';
 
-// What this app refused before sending anything. Several mean the server
-// may be misbehaving, and say so.
+// What this app refused before sending a sharing change, beyond the stops
+// any write can meet (`stopMessage`).
 const STOPPED: Partial<Record<CryptoError['code'], string>> = {
   'identity-key-changed':
     'Someone’s key changed since this app last saw it. Review the change before sharing with them.',
-  'unaccepted-owner':
-    'This app hasn’t accepted every owner of this space, so it sealed nothing. If someone made you an owner, confirm who added you first; otherwise check the space’s owners.',
-  'key-version':
-    'The server offered an older key than this app has already seen. It may be hiding a change, so nothing was sent.',
   'binding-mismatch':
     'What the server sent doesn’t match what you were shown, so nothing was shared. This could be an attack.',
-  'region-mismatch':
-    'The server put something where this app didn’t expect it, so nothing was sent. This could be an attack.',
-  'untrusted-sealer':
-    'Keys here came from someone this app doesn’t accept as an owner, so they weren’t used.',
-  'missing-key': 'This app doesn’t hold every key it needs for this folder.',
   'contacts-unconfirmed':
     'Your contacts couldn’t be saved, so nothing was shared. Check your connection and try again.',
   'contacts-conflict':
     'Another of your devices saw this person with a different key. Review it before going on.',
   'contacts-rollback': `${MISBEHAVING} It sent an older copy of your contacts than this app has already seen. Try again later, and if it keeps happening, tell whoever runs your server.`,
   'contacts-fork': `${MISBEHAVING} It sent a copy of your contacts that doesn’t follow on from the one this app saw. Don’t share from this device until whoever runs your server has looked into it.`,
-  'unsupported-format':
-    'Something here was saved by a newer version of WikiStow. Update the app, then try again.',
-  'decrypt-failed':
-    'Something here couldn’t be opened. It may have been changed on the server, so nothing was sent.',
-  'bad-signature':
-    'Something the server sent isn’t signed by who it says, so nothing was sent. This could be an attack.',
-  'hash-mismatch':
-    'Something the server sent was altered on the way, so nothing was sent. This could be an attack.',
-  'key-commitment':
-    'A key the server sent doesn’t match what it should open, so nothing was sent. This could be an attack.',
-  'wrong-recipient':
-    'A key the server sent was meant for someone else, so nothing was sent. This could be an attack.',
-  'unknown-identity':
-    'This app hasn’t seen the key of someone involved here, so it can’t check what they signed, and sent nothing.',
   'bad-key': 'Someone involved has a key this app can’t use, so nothing was shared with them.',
   'fingerprint-mismatch': 'The fingerprints don’t match, so nothing changed.',
   malformed:
@@ -93,7 +70,7 @@ const GENERIC = 'Something went wrong, so nothing changed. Try again.';
  */
 export function sharingMessage(error: unknown): string {
   if (error instanceof ApiError) return REFUSED[error.code] ?? knownMessage(error.code) ?? GENERIC;
-  if (error instanceof CryptoError) return STOPPED[error.code] ?? GENERIC;
+  if (error instanceof CryptoError) return STOPPED[error.code] ?? stopMessage(error) ?? GENERIC;
   return knownMessage(error) ?? GENERIC;
 }
 

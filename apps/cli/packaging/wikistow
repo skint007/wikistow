@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run the WikiStow CLI bundle on the system Node, as the AUR package installs it.
+exec node /usr/lib/wikistow-cli/wikistow.mjs "$@"

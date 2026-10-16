@@ -8,6 +8,10 @@ The clients encrypt page content before sending it to the server. Accounts, perm
 
 The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead. [docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
 
+## Install the command-line client
+
+The `wikistow` command is how an agent reads and writes the pages shared with it, once enrolled with `wikistow agent enroll`. Run `wikistow --help` for the rest. On Arch Linux, install `wikistow-cli-bin` from the AUR, which runs it on the system `nodejs`. Elsewhere, install Node.js 26 or newer, download `wikistow-cli-<version>.tar.gz` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.6.0 on, and run `node wikistow.mjs` from the folder it unpacks to. It installs beside the desktop app, whose command is `wikistow-desktop`.
+
 ## Run locally
 
 Install Node.js 26 or newer, pnpm 10.34.5, and Docker Compose.
@@ -59,7 +63,7 @@ Integration tests use the local Postgres service. The backup and restore tests a
 
 Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).
 
-GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version and the desktop app as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need.
+GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version, and the desktop app and the CLI as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need.
 
 ## Deploy and operate
 
