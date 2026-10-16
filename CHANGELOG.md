@@ -4,6 +4,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-16
+
 ### Highlights
 
 #### Features
