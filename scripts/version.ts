@@ -1,7 +1,7 @@
 // The release version. WikiStow has one, kept in every workspace
 // package.json: the account menu shows the web app's, the desktop app's goes
-// into its app.asar, and the CLI prints its own. The AUR package takes the
-// version of the release it is published for (.github/workflows/aur.yml).
+// into its app.asar, and the CLI prints its own. The AUR packages take the
+// version of the release they are published for (.github/workflows/aur.yml).
 //
 //   node scripts/version.ts         prints it, and fails if any disagree
 //   node scripts/version.ts 0.3.0   sets it everywhere
