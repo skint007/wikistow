@@ -76,7 +76,7 @@ export const tileClass = (tint: string) =>
 /**
  * A `blob:` URL for a folder's image, or null for none. Made once for each
  * version of its metadata, not on each tree load, and kept until the vault
- * locks.
+ * locks. It needs no network: the image came with the tree.
  */
 export function useFolderIcon(
   loaded: spaceOperations.LoadedMetadata | null | undefined,
@@ -88,6 +88,8 @@ export function useFolderIcon(
     enabled: metadata?.extensions[ICON_NAMESPACE] != null,
     staleTime: Infinity,
     gcTime: Infinity,
+    networkMode: 'always',
+    retry: false,
     queryFn: () => {
       const icon = metadata && folderIconOf(metadata);
       return icon ? vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch()) : null;
