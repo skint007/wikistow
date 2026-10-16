@@ -6,7 +6,7 @@ import { pluginName } from '../../../../../plugins/regions';
 import { usePlugins } from '../../../../../plugins/runtime';
 import { PluginView } from '../../../../../plugins/views';
 
-// `/plugin/…`, not `/plugins/…`: the desktop app serves plugins' files there.
+// `/plugin/…`, not `/plugins/…`: plugins' files are served there (by the server, or by the desktop app).
 export const Route = createFileRoute('/_app/_vault/plugin/$pluginId/$viewId')({
   component: PluginPage,
 });

@@ -9,8 +9,8 @@
  *
  * Theme selection: the theme provider sets data-theme on <html>.
  * Values: light | warm | slate | oled. "System" resolves to light or slate.
- * The choice is an account setting, synced across devices. In the desktop app a plugin theme
- * adds its stylesheet over light or slate and sets these tokens; the plugin SDK lists them
+ * The choice is an account setting, synced across devices. A plugin theme, chosen on one
+ * device, adds its stylesheet over light or slate and sets these tokens; the plugin SDK lists them
  * (`ThemeToken` in packages/plugin-sdk/src/theme.ts), so keep that list in step.
  */
 

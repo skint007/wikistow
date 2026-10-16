@@ -80,7 +80,7 @@ export type PluginsSnapshot = {
   /**
    * What is installed is known: false as the desktop app starts, until it
    * answers, and in the browser while the vault is locked, since the
-   * approvals are encrypted.
+   * approvals are encrypted, or until the library is first listed.
    */
   listed: boolean;
   safeMode: boolean;

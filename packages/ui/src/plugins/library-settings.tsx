@@ -1,7 +1,7 @@
 import { pluginOperations, toBase64, type ClientContext } from '@wikistow/client';
 import { pluginRoutes } from '@wikistow/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -68,7 +68,12 @@ function Library({ ctx }: { ctx: ClientContext }) {
   const { data: library, error: listError } = useQuery(libraryQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
-  const { plugins: running } = usePlugins();
+  const { plugins: running, listed } = usePlugins();
+  // The runtime lists the library at unlock; if that failed, the library
+  // shown here means the server answers again.
+  useEffect(() => {
+    if (library && !listed) void pluginRuntime.refresh();
+  }, [library, listed]);
   const approvals = pluginOperations.listPluginApprovals(ctx);
   const [request, setRequest] = useState<Request | null>(null);
   const [removal, setRemoval] = useState<Removal | null>(null);
