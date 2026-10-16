@@ -541,7 +541,8 @@ function PageBody({
             returnFocus={pickerFocus.content}
           />
         ) : (
-          (emoji || icon) && <PageBadge emoji={emoji} image={iconUrl ?? null} />
+          // An image with no emoji shows once it's decrypted, not as an empty badge.
+          (emoji || iconUrl) && <PageBadge emoji={emoji} image={iconUrl ?? null} />
         )}
       </CoverBand>
       {/* The page's column, as wide as the card, and beside it, where the card is wide enough,

@@ -75,8 +75,8 @@ export type AttachmentAssist = {
   list: readonly AttachmentRef[];
   /**
    * Those the Attachments panel lists, which the visual editor's picker
-   * offers: all of `list` if not given, or all but one something else
-   * manages, such as the banner image.
+   * offers: all of `list` if not given, or all but those something else
+   * manages, such as the banner image and the page's icon.
    */
   listed?: readonly AttachmentRef[];
   /** A `blob:` URL of one of them, decrypted here and kept until the vault locks; null if it can't be opened. */
