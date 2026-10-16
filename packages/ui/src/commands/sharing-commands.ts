@@ -65,7 +65,7 @@ export const createShare = command(
   },
 );
 
-/** Add someone to a share, make a reader an editor, or share again after a key change. */
+/** Give someone a direct grant in a share, or change it, sealing their keys by their access. */
 export const addMember = command(
   'share.add-member',
   ShareRef.extend({ person: Person, ...Grant }),
