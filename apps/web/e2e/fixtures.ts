@@ -192,6 +192,12 @@ export async function swapKey(email: string): Promise<void> {
   if (!res.ok) throw new Error(`swap-key: ${await res.text()}`);
 }
 
+/** The test server's blob folder, where library plugins' files are kept too (`plugins/<hash>/`). */
+export async function serverBlobDir(): Promise<string> {
+  const { blobDir }: { blobDir: string } = await (await fetch(`${CONTROL}/blob-dir`)).json();
+  return blobDir;
+}
+
 let counter = 0;
 export const uniqueEmail = (label: string) => `${label}${Date.now()}${++counter}@example.test`;
 

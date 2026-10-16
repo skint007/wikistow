@@ -1,8 +1,10 @@
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { showIn, visual } from '../../web/e2e/editor';
-import { expect, pick, test } from '../../web/e2e/fixtures';
+import { expect, pick, serverBlobDir, test } from '../../web/e2e/fixtures';
 import {
   adminTab,
   expectSource,
@@ -12,7 +14,7 @@ import {
   PASSPHRASE,
   waitForSave,
 } from '../../web/e2e/vault';
-import { launch, newProfile, signInThroughBrowser, type Desktop } from './desktop';
+import { accountMenu, launch, newProfile, signInThroughBrowser, type Desktop } from './desktop';
 
 const PROBE = fileURLToPath(new URL('probe-plugin', import.meta.url));
 const BUILD = fileURLToPath(new URL('../../../packages/plugin-sdk/src/build.ts', import.meta.url));
@@ -129,6 +131,91 @@ test('a script plugin gets only the page access it is given', async ({
   await backToPage(window);
   await expect(window.locator('#page-source')).toContainText('The probe wrote this.');
   await expect(window.getByRole('button', { name: 'Plugins' })).toHaveCount(0);
+});
+
+// A plugin shared to the library from one computer and approved there
+// installs on another at unlock, from the server, only once every file
+// matches the approved hash; a file changed on the server is refused.
+test('a library plugin installs at unlock, checked against its hash', async ({
+  page,
+  freshPage,
+  admin,
+  baseURL,
+}) => {
+  test.setTimeout(300_000);
+  execFileSync(process.execPath, [BUILD, 'build', PROBE], { stdio: 'inherit' });
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  const unlock = async (window: Page) => {
+    await window.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await window.getByRole('button', { name: 'Unlock' }).click();
+  };
+  const copies = (profile: string) =>
+    readdir(join(profile, 'library-plugins', 'probe')).catch(() => []);
+
+  // The first computer installs the probe from its folder, shares it, and
+  // installs it again from the library in its place.
+  desktop = await launch(await newProfile());
+  const first = desktop;
+  await signInThroughBrowser(first, page, baseURL ?? '');
+  await unlock(first.window);
+  await newPage(first.window, 'Probed');
+  await first.app.evaluate(({ dialog }, folder) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
+  }, `${PROBE}/dist`);
+  await toSettings(first.window);
+  await first.window.getByRole('button', { name: 'Install plugin…' }).click();
+  await first.window.getByRole('dialog').getByRole('button', { name: 'Install' }).click();
+  const folderInstall = first.window
+    .getByRole('list', { name: 'Installed plugins' })
+    .getByRole('listitem', { name: 'Probe' });
+  await folderInstall.getByRole('button', { name: 'Share to library…' }).click();
+  await first.window.getByRole('dialog').getByRole('button', { name: 'Share' }).click();
+  await expect(first.window.getByText('Shared Probe 1.0.0 to the library.')).toBeVisible();
+  await folderInstall.getByRole('button', { name: 'Remove Probe' }).click();
+  await expect(folderInstall).toHaveCount(0);
+  await first.window
+    .getByRole('list', { name: 'Plugin library' })
+    .getByRole('listitem', { name: 'Probe' })
+    .getByRole('button', { name: 'Install…' })
+    .click();
+  await first.window.getByRole('dialog').getByRole('button', { name: 'Install' }).click();
+  await expect(
+    first.window
+      .getByRole('list', { name: 'Installed from the library' })
+      .getByRole('listitem', { name: 'Probe' }),
+  ).toBeVisible();
+  const [hash = ''] = await copies(first.profile);
+  expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  await backToPage(first.window);
+  expect(await runCommand(first.window, 'Try the network')).toContain('network blocked');
+  await first.app.close();
+
+  // Changed on the server after it was approved: the second computer refuses it.
+  const script = join(await serverBlobDir(), 'plugins', hash, 'script.js');
+  const original = await readFile(script);
+  await writeFile(script, Buffer.concat([original, Buffer.from('\n// changed\n')]));
+  desktop = await launch(await newProfile());
+  const second = desktop;
+  await signInThroughBrowser(second, page, baseURL ?? '');
+  await unlock(second.window);
+  await newPage(second.window, 'Second computer');
+  await toSettings(second.window);
+  await expect(
+    second.window
+      .getByRole('list', { name: 'Installed from the library' })
+      .getByRole('listitem', { name: 'Probe' })
+      .getByRole('alert'),
+  ).toContainText('don’t match the version you approved');
+  expect(await copies(second.profile)).toEqual([]);
+
+  // Put back, it installs at the next unlock, with nothing to approve, and runs.
+  await writeFile(script, original);
+  await second.window.goBack();
+  await expect(second.window.locator('#page-title')).toHaveValue('Second computer');
+  await accountMenu(second.window, 'Lock vault');
+  await unlock(second.window);
+  expect(await runCommand(second.window, 'Try the network')).toContain('network blocked');
+  expect(await copies(second.profile)).toEqual([hash]);
 });
 
 // A plugin block is the fence's text, drawn as a form for its script: each
