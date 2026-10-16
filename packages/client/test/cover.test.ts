@@ -8,6 +8,7 @@ import {
   newPayload,
   type AttachmentRef,
   type PagePayload,
+  type ShownCover,
 } from '../src/index.ts';
 
 const image = newId(AttachmentId);
@@ -34,18 +35,25 @@ describe('page emoji', () => {
 
 describe('cover', () => {
   it('falls back part by part, never failing on what a newer client wrote', () => {
-    const theme = { kind: 'theme' };
-    const cases: [PagePayload['extensions'][string], { emoji: string | null; banner: unknown }][] =
+    const theme = { kind: 'theme' } as const;
+    const cases: [PagePayload['extensions'][string], ShownCover][] = [
       [
-        [
-          { format: 1, emoji: '🍞', banner: { kind: 'video', src: 'x' } },
-          { emoji: '🍞', banner: theme },
-        ],
-        [
-          { format: 2, emoji: '🍞' },
-          { emoji: null, banner: theme },
-        ],
-      ];
+        { format: 1, emoji: '🍞', banner: { kind: 'video', src: 'x' } },
+        { emoji: '🍞', banner: theme, icon: null },
+      ],
+      [
+        { format: 2, emoji: '🍞' },
+        { emoji: null, banner: theme, icon: null },
+      ],
+      [
+        { format: 1, emoji: '🍞', icon: { attachmentId: image } },
+        { emoji: '🍞', banner: theme, icon: { attachmentId: image } },
+      ],
+      [
+        { format: 1, emoji: '🍞', icon: { attachmentId: newId(AttachmentId) } },
+        { emoji: '🍞', banner: theme, icon: null },
+      ],
+    ];
     for (const [cover, shown] of cases)
       expect(coverOf(withCover(cover)), JSON.stringify(cover)).toEqual(shown);
   });

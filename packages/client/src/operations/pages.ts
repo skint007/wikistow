@@ -463,12 +463,34 @@ export async function shownVersions(
 }
 
 /**
- * What a page is listed by: its title, and its emoji if it has one, and
- * the region its version's key material puts it in, which `writeLinks`
- * goes by rather than the tree. All three come from the one version opened.
- * One in a format this app doesn't know has a region but no title or emoji.
+ * A page's image icon as a list shows it: the attachment the version's
+ * cover names, and the audience of that version, to download it from.
  */
-export type PageLabel = { title: string | null; emoji: string | null; region: Region };
+export type PageIcon = { ref: AttachmentRef; audience: Audience };
+
+/** The image icon a version shows (`coverOf`), if it has one. */
+export function pageIconOf(
+  payload: Pick<PagePayload, 'extensions' | 'attachments'>,
+  audience: Audience,
+): PageIcon | null {
+  const id = coverOf(payload).icon?.attachmentId;
+  const ref = payload.attachments.find((attachment) => attachment.id === id);
+  return ref ? { ref, audience } : null;
+}
+
+/**
+ * What a page is listed by: its title, and its emoji and image icon if it
+ * has them, and the region its version's key material puts it in, which
+ * `writeLinks` goes by rather than the tree. All of them come from the one
+ * version opened. One in a format this app doesn't know has a region but
+ * no title, emoji or icon.
+ */
+export type PageLabel = {
+  title: string | null;
+  emoji: string | null;
+  icon: PageIcon | null;
+  region: Region;
+};
 
 /**
  * Each page's label from the version this person sees (`shownVersions`),
@@ -486,11 +508,17 @@ export async function pageLabels(
       const version = versions.get(page.id);
       if (!version) return [page.id, null];
       const { opened, region } = version;
+      const audience = page.draftHead === null ? 'published' : 'draft';
       return [
         page.id,
         opened.kind === 'current'
-          ? { title: opened.payload.title, emoji: coverOf(opened.payload).emoji, region }
-          : { title: null, emoji: null, region },
+          ? {
+              title: opened.payload.title,
+              emoji: coverOf(opened.payload).emoji,
+              icon: pageIconOf(opened.payload, audience),
+              region,
+            }
+          : { title: null, emoji: null, icon: null, region },
       ];
     }),
   );

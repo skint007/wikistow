@@ -16,7 +16,7 @@ import {
 } from '@wikistow/contracts';
 import { z } from 'zod';
 import { ApiError } from '../api/client.ts';
-import { bannerLeftBehind, reviseCover } from '../cover.ts';
+import { coverLeftBehind, reviseCover } from '../cover.ts';
 import { hash, Hash32 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import {
@@ -409,12 +409,10 @@ export async function publishToSpace(
     sourceAudience: preview.sourceAudience,
     sourceRecordHash: recordHash(preview.opened.record),
   } satisfies Provenance;
-  // A banner image left behind would name an attachment the copy doesn't
-  // list, so the copy shows the theme gradient instead.
-  const copied = new Set(attachments.map((ref) => ref.id));
-  const cover = bannerLeftBehind(original.extensions, copied)
-    ? reviseCover(original.extensions, { banner: { kind: 'theme' } })
-    : {};
+  // A banner image or icon left behind would name an attachment the copy
+  // doesn't list, so the copy shows the theme gradient, or no icon, instead.
+  const behind = coverLeftBehind(original.extensions, new Set(attachments.map((ref) => ref.id)));
+  const cover = Object.keys(behind).length > 0 ? reviseCover(original.extensions, behind) : {};
   // The source's link table names pages of its own space: the copy has
   // none, and its readers resolve its links by title in their own tree.
   const { [LINKS_NAMESPACE]: _links, ...extensions } = original.extensions;
