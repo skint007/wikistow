@@ -34,8 +34,8 @@ export type WorkshopState = {
   /** The draft's files as saved, by path. */
   files: ReadonlyMap<string, string>;
   /**
-   * For a draft of someone else's plugin, the ID it started from and its
-   * new one: the server's when it opened, then as its manifest changes.
+   * For a copy of a library plugin, such as someone else's, the ID it
+   * started from and its new one, as its manifest has it now.
    */
   copy: { from: string; id: string } | null;
   /** What last went wrong outside the plugin's own code, such as previewing on opening. */
@@ -96,9 +96,9 @@ const message = (error: unknown) =>
 const ManifestId = z.object({ id: z.string() });
 
 /**
- * Whether `draft` is a copy of someone else's plugin: it started from a
- * library version, and its manifest names another ID, the one the server
- * gave it then. Its own plugin keeps its ID.
+ * Whether `draft` is a copy of another plugin: it started from a library
+ * version, and its manifest names another ID, such as the one the server
+ * gave a copy of someone else's plugin. The person's own plugin keeps its ID.
  */
 function copyOf(draft: pluginDraftRoutes.DraftSummary, files: ReadonlyMap<string, string>) {
   const from = draft.from?.pluginId;

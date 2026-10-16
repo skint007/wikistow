@@ -36,7 +36,7 @@ export class WorkshopChat {
   #turns: WorkshopTurn[] = [];
   /** The real page the person copied in since their last message, said with the next. */
   #copied: { title: string; pageId: string } | null = null;
-  /** The model was told the draft is a copy of someone else's plugin. */
+  /** The model was told the draft is a copy of another plugin, under its own ID. */
   #toldCopy = false;
   readonly #listeners = new Set<() => void>();
 
@@ -80,7 +80,7 @@ export class WorkshopChat {
     const { copy } = this.workshop.state();
     const told =
       copy && !this.#toldCopy
-        ? `(This draft is a copy of someone else’s plugin ${copy.from}, under a new ID of my own, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
+        ? `(This draft is a copy of the plugin ${copy.from}, under a new ID of my own, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
         : '';
     if (copy) this.#toldCopy = true;
     await this.session.send(`${told}${said}${text}`);
