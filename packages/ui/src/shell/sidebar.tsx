@@ -1,7 +1,9 @@
 import {
+  DEFAULT_FOLDER_LOOK,
   pageOperations,
   spaceOperations,
   type FolderId,
+  type FolderLook,
   type PageId,
   type SpaceId,
 } from '@wikistow/client';
@@ -39,6 +41,7 @@ import { useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { useClient } from '../vault/store';
 import { ExportDialog, type Exporting } from './export-dialog';
+import { FolderLookDialog, FolderLookFields, folderLook, tileClass } from './folder-look';
 import { SpaceHeader } from './space-header';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -66,24 +69,12 @@ type Row =
       unpublished: boolean;
     };
 
-const TINTS: Record<string, string> = {
-  green: 'bg-folder-green',
-  orange: 'bg-folder-orange',
-  blue: 'bg-folder-blue',
-  pink: 'bg-folder-pink',
-  purple: 'bg-folder-purple',
-};
-
 export const pageTitle = (title: string | null) => (title?.trim() ? title : 'Untitled');
 
 function folderName(folder: Tree['folders'][number]) {
   const opened = folder.metadata?.opened;
   return opened?.kind === 'current'
-    ? {
-        name: opened.metadata.name,
-        emoji: opened.metadata.emoji ?? '⭐',
-        tint: opened.metadata.tint ?? 'blue',
-      }
+    ? { name: opened.metadata.name, ...folderLook(opened.metadata) }
     : { name: 'Unreadable folder', emoji: '⚠️', tint: 'orange' };
 }
 
@@ -180,6 +171,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState<Creating>(null);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
+  const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
   const [exporting, setExporting] = useState<Exporting | null>(null);
@@ -416,13 +408,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   )}
                   strokeWidth={1.75}
                 />
-                <span
-                  aria-hidden
-                  className={cn(
-                    'grid size-7 shrink-0 place-items-center rounded-folder text-sm',
-                    TINTS[row.tint] ?? TINTS['blue'],
-                  )}
-                >
+                <span aria-hidden className={cn(tileClass(row.tint), 'size-7 text-sm')}>
                   {row.emoji}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-extrabold">
@@ -438,6 +424,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                       ? {
                           onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
                           onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
+                          onRestyle: () => setRestyling(row.id),
                           onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
                           onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
                           onDelete: sharer ? () => setDeleting(row.id) : undefined,
@@ -525,6 +512,11 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         }}
         onCreatedPage={openPage}
       />
+      <FolderLookDialog
+        spaceId={spaceId}
+        folderId={restyling}
+        onOpenChange={(open) => !open && setRestyling(null)}
+      />
       <MoveDialog
         spaceId={spaceId}
         moving={moving}
@@ -604,6 +596,7 @@ function FolderMenu({
   editing: {
     onNewPage: () => void;
     onNewFolder: () => void;
+    onRestyle: () => void;
     onMove: () => void;
     onShare: (() => void) | undefined;
     onDelete: (() => void) | undefined;
@@ -624,6 +617,7 @@ function FolderMenu({
           <>
             <DropdownMenuItem onSelect={editing.onNewPage}>New page here</DropdownMenuItem>
             <DropdownMenuItem onSelect={editing.onNewFolder}>New folder here</DropdownMenuItem>
+            <DropdownMenuItem onSelect={editing.onRestyle}>Emoji and colour…</DropdownMenuItem>
             <DropdownMenuItem onSelect={editing.onMove}>Move…</DropdownMenuItem>
             {editing.onShare && (
               <DropdownMenuItem onSelect={editing.onShare}>Share…</DropdownMenuItem>
@@ -657,7 +651,12 @@ function CreateDialog({
   const ctx = useClient();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [look, setLook] = useState<FolderLook>(DEFAULT_FOLDER_LOOK);
   const kind = creating?.kind ?? 'page';
+  const close = () => {
+    setLook(DEFAULT_FOLDER_LOOK);
+    onClose();
+  };
 
   async function submit(form: FormData) {
     const name = form.get('name');
@@ -669,6 +668,7 @@ function CreateDialog({
           spaceId,
           parentId: creating.parentId,
           name: name.trim(),
+          look,
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
@@ -681,21 +681,21 @@ function CreateDialog({
       }
       searchIndexChanged(queryClient);
       await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-      onClose();
+      close();
     } catch (caught) {
       setError(errorMessage(caught));
     }
   }
 
   return (
-    <Dialog open={creating !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={creating !== null} onOpenChange={(open) => !open && close()}>
       <DialogContent>
         <form onSubmit={submitData(submit)} className="grid gap-4">
           <DialogHeader>
             <DialogTitle>{kind === 'folder' ? 'New folder' : 'New page'}</DialogTitle>
             <DialogDescription>
               {kind === 'folder'
-                ? 'It starts with ⭐ on blue. Its name is encrypted.'
+                ? 'Its name, emoji and colour are encrypted.'
                 : 'It starts as a private draft. Publish it when it’s ready.'}
             </DialogDescription>
           </DialogHeader>
@@ -703,6 +703,7 @@ function CreateDialog({
             <Label htmlFor="create-name">{kind === 'folder' ? 'Name' : 'Title'}</Label>
             <Input id="create-name" name="name" required autoFocus maxLength={200} />
           </div>
+          {kind === 'folder' && <FolderLookFields look={look} onChange={setLook} />}
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}

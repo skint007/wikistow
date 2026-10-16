@@ -65,7 +65,9 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 - A 7px `draft-dot` marks a page with unpublished changes or no published version. The dot carries an "Unpublished changes" label for assistive technology.
 - Order: folders, then loose pages, as in the mocks. Sorting rules are not decided.
 
-Five folder tints exist: green, orange, blue, pink, purple. A new folder starts with ⭐ on the blue tint (`folder-blue`) until someone changes it, so nobody has to choose when creating one. The emoji and tint are folder metadata. Like names, they are content, so they must be encrypted with the folder's other client-side metadata rather than stored as plain server fields.
+Five folder tints exist: green, orange, blue, pink, purple. A new folder starts with ⭐ on the blue tint (`folder-blue`) unless the person picks otherwise, so nobody has to choose when creating one. The emoji and tint are folder metadata. Like names, they are content, so they must be encrypted with the folder's other client-side metadata rather than stored as plain server fields.
+
+Editors set them in the **New folder** dialog, under the name, and later from **Emoji and colour…** in the folder's menu. Both show a 48px tile of the folder's emoji on its tint, which opens the page emoji picker, then a **Colour** row of the five tints, each a 36px tile with the emoji and the tint's name, the current one with a `primary` ring, and **Back to ⭐ on blue** while the choice is anything else. **Save** writes a new version of the folder's metadata. If someone changed the folder meanwhile, nothing is saved, and the dialog shows the folder as it is now to choose again. A folder this app can't read, or one saved by a newer version, says so instead. A tint this app doesn't know shows blue, and is kept unless someone picks another.
 
 ### Page views
 
@@ -250,7 +252,7 @@ Proposed shadcn/Radix building blocks. Check each against the interaction it nee
 | Properties box | Collapsible wrapping a plain monospace textarea. Not a form: this version keeps frontmatter as raw text. |
 | Formatting toolbar | In the visual editor only, a strip along the top of its box, `border-b` under it, above the area that scrolls, so it stays in view; it wraps on narrow windows. A text style DropdownMenu, then icon buttons (lucide) in groups split by Separators: bold, italic, inline code; quote, code block; bulleted, numbered list; link, which opens a Popover form (Text when inserting, Link to, then Remove link, Cancel and Add link or Save) while the text it works on keeps a `primary-soft` highlight; attachment (paperclip), which opens a DropdownMenu of the page's attachments (an image or file icon, the name, then kind and size in `muted-foreground`), a disabled "No attachments yet" item when there are none, and Upload a file… under a separator. Quote is a split button: the toggle, showing an alert's lucide icon while the cursor is in one, then a 16px chevron opening a DropdownMenu of radio items (Quote, Note, Tip, Important, Warning, Caution, each with its icon), the quote's kind checked. 32px controls in `muted-foreground`, `tint` on hover and `tint-strong` while held, `primary-soft` with `primary-ink` while pressed (`aria-pressed`), half opacity while they don't apply (`aria-disabled`). Tooltips give the name and shortcut. `role="toolbar"` with a roving tabindex. |
 | Wikilink autocomplete | Command list in a Popover anchored at the cursor after `[[`: page titles with their folder, then headings after `#`, with a "Create page" option for editors. |
-| Banner and emoji pickers | Popover with the preset gradients, an upload button, and a focal-point slider; a separate emoji picker. Both appear only on the draft view. |
+| Banner and emoji pickers | Popover with the preset gradients, an upload button, and a focal-point slider; a separate emoji picker. Both appear only on the draft view. Folders use the same emoji picker. |
 
 ## Sharing
 
