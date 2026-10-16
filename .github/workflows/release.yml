@@ -1,7 +1,8 @@
 # A release: push a tag `v<version>` on a commit of main (docs/releasing.md).
 # This checks the tag names the version in the source, runs CI on that
 # commit, which publishes the server image under the version, and publishes
-# the desktop app from the same build as a GitHub Release, then to the AUR.
+# the desktop app and the CLI from the same build as a GitHub Release, then
+# to the AUR.
 name: Release
 
 on:
@@ -70,8 +71,9 @@ jobs:
       packages: write
 
   # The desktop app as CI built, tested and packaged it: the .deb, the .rpm,
-  # and an archive of what the AUR package installs, with checksums.
-  desktop:
+  # and an archive of what the AUR package installs. The CLI's bundle in an
+  # archive of what its AUR package installs. Checksums for them all.
+  github-release:
     needs: [verify, ci]
     runs-on: ubuntu-24.04
     permissions:
@@ -80,6 +82,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build
@@ -101,7 +106,23 @@ jobs:
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
-          sha256sum "$name.tar.gz" wikistow-desktop-*.deb wikistow-desktop-*.rpm > SHA256SUMS
+      # The CLI the same way. Unpacked away from the workspace, it runs with
+      # nothing but Node and says it is this release.
+      - run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="wikistow-cli-$version"
+          mkdir -p "release/$name"
+          cp apps/cli/dist/wikistow.mjs apps/cli/packaging/wikistow LICENSE "release/$name/"
+          cd release
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
+            --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
+          tar -xzf "$name.tar.gz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/$name"
+          [ "$(node wikistow.mjs --version)" = "wikistow $version" ]
+          node wikistow.mjs --help >/dev/null
+      - working-directory: release
+        run: |
+          sha256sum wikistow-desktop-*.tar.gz wikistow-cli-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm > SHA256SUMS
           cat SHA256SUMS
       - env:
           GH_TOKEN: ${{ github.token }}
@@ -116,10 +137,10 @@ jobs:
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
             release/*.tar.gz release/*.deb release/*.rpm release/SHA256SUMS
 
-  # The AUR package follows the newest stable release, once its archive is
-  # downloadable. A prerelease or a fix to an older line leaves it alone.
+  # The AUR packages follow the newest stable release, once their archives
+  # are downloadable. A prerelease or a fix to an older line leaves them alone.
   aur:
-    needs: [verify, desktop]
+    needs: [verify, github-release]
     if: needs.verify.outputs.latest == 'true'
     uses: ./.github/workflows/aur.yml
     with:
