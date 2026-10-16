@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # A plugin library on the server, and plugins in the browser
@@ -12,7 +12,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 - Plugins can come from the server's library as well as from a folder. Folder installs and development loading stay, on the desktop only.
 - Approvals of library plugins, with their page access and on/off state, are kept per account and follow the person. Folder and development installs stay per device.
-- In the browser, and on the desktop too (in its own PR), a script's worker runs in a sandboxed frame, not on the app's origin. Its consequence about needing "an origin of its own" is met by an opaque origin, not a `wikistow-plugin:` scheme.
+- In the browser and on the desktop, a script's worker runs in a sandboxed frame, not on the app's origin. Its consequence about needing "an origin of its own" is met by an opaque origin, not a `wikistow-plugin:` scheme.
 - The app's CSP gains `frame-src 'self'`. Nothing else in it changes.
 
 ## Decisions
@@ -41,7 +41,8 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 - `plugin-host.html` and `plugin-host.js` are part of the web build and run only host code. The document is served with `Content-Security-Policy: default-src 'none'; script-src <origin>/plugin-host.js; worker-src data:; frame-ancestors 'self'; sandbox allow-scripts` and no `X-Frame-Options`; its script with `Cross-Origin-Resource-Policy: cross-origin`, since the app's usual `same-origin` blocks it from an opaque origin. Naming the one script, not `'self'`, matters: a worker inherits this policy, and with `'self'` its `import()` and a nested worker's `importScripts` still reached the server.
 - For each script the app fetches `script.js` from the library route and hands its text to the frame, which starts it as `new Worker('data:text/javascript;base64,…', { type: 'module', name: <plugin ID> })`. Module workers from `blob:` URLs fail in Chromium in an opaque frame, and from the server's URL in every browser; `data:` works in all three. The worker inherits the frame's policy: no requests, imports or WebSockets.
 - The frame relays messages between each worker and a `MessagePort` the app gave it, so the protocol of ADR 0001 is unchanged, already built plugins run as they are (except `host.pluginId`: the SDK read it from the worker's address, which a `data:` worker doesn't have, so it now falls back to the worker's name, and a script built before that reads it empty in the frame until built again), and `ScriptWorker` drives a port where it drove a `Worker`, with the same checks, budgets, restarts and three-failure stop. Ending a script asks the frame to terminate its worker, which happens at once: plugin code never runs on the frame's own thread, because in Firefox and WebKit that thread is the tab's, and a loop there freezes the app. If the frame ever stopped answering, the app removes it, which ends all its workers, and makes a new one.
-- Scripts in the browser have none of the app's storage, so nothing needs emptying at lock. (WebKit gives the worker an empty Cache Storage of its own, at its opaque origin; Chromium and Firefox refuse it.)
+- Scripts have none of the app's storage, so nothing needs emptying at lock. (WebKit gives the worker an empty Cache Storage of its own, at its opaque origin; Chromium and Firefox refuse it.)
+- The desktop app runs scripts through the same frame. Main serves `plugin-host.html` and its script under `app://wikistow` with the same headers, the page's policy naming `app://wikistow/plugin-host.js`, and the app fetches each script from main's own `/plugins/` route, whichever kind of install it comes from: a folder, a library copy, a development folder or a workshop version. Chromium accepts the custom scheme in `script-src` and `frame-ancestors 'self'`, and starts the `data:` worker there. The runtime no longer empties IndexedDB and Cache Storage at lock and start, as it did while scripts were workers of the app's origin.
 
 ### Desktop, phones, safe mode
 
@@ -113,4 +114,4 @@ Scott approved every recommendation:
 
 1, 2 and 3 are independent; 4 needs all three; 5 needs 1 and 2.
 
-Status (2026-10-16): 1 to 5 are built. Desktop scripts still run as workers of the app's own origin until 6.
+Status (2026-10-16): built, 1 to 6.
