@@ -517,11 +517,14 @@ function RemoveFromLibrary({
 export function ConfirmUpload({
   ctx,
   upload,
+  verb = 'Upload',
   onDone,
   onUpload,
 }: {
   ctx: ClientContext;
   upload: PluginUpload | null;
+  /** What confirming says it does, such as Publish in the workshop. */
+  verb?: string;
   onDone: () => void;
   onUpload: (upload: PluginUpload, visibility: Visibility | undefined) => Promise<void>;
 }) {
@@ -553,7 +556,7 @@ export function ConfirmUpload({
   return (
     <Approval
       candidate={candidate}
-      verb="Upload"
+      verb={verb}
       onDone={onDone}
       onApprove={(chosen) => onUpload(chosen, visibility === current ? undefined : visibility)}
     >
@@ -571,8 +574,8 @@ export function ConfirmUpload({
         Its files are plain text on the server.
       </p>
       <p>
-        Uploading installs it for you, on all your devices. Only the account that first uploaded{' '}
-        {id} can add versions of it.
+        This installs it for you, on all your devices. Only the account that first uploaded {id} can
+        add versions of it.
       </p>
     </Approval>
   );

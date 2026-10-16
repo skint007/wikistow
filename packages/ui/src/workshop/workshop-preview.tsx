@@ -1,19 +1,24 @@
 import { PageId, SpaceId } from '@wikistow/client';
-import type { WorkshopVersion } from '@wikistow/contracts';
+import { ApiError } from '@wikistow/client/api';
+import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
 import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
+import { errorMessage } from '../errors';
 import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
+import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
+import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { PageViews, pluginName } from '../plugins/regions';
-import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
+import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PluginView } from '../plugins/views';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
@@ -113,6 +118,8 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
+            {/* Its notice goes once another version is in the preview. */}
+            <Publish key={running.version} workshop={workshop} version={running} />
           </>
         ) : (
           <span className="text-muted-foreground">
@@ -144,6 +151,72 @@ function Status({ workshop }: { workshop: Workshop }) {
         </Alert>
       )}
     </div>
+  );
+}
+
+/**
+ * Publish the version in the preview to the library (ADR 0004): the upload
+ * confirmation, with Shared or Only me, then the upload, after any preview
+ * upload under way, which installs it for the person on all their devices.
+ */
+function Publish({ workshop, version }: { workshop: Workshop; version: WorkshopVersion }) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const [upload, setUpload] = useState<PluginUpload | null>(null);
+  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
+  const manifest = version.plugin?.manifest;
+  if (!manifest) return null;
+  const publish = async (
+    chosen: PluginUpload,
+    visibility: pluginRoutes.PluginVisibility | undefined,
+  ) => {
+    setNotice(null);
+    try {
+      await workshop.oneLargeUpload(() => uploadAndInstall(ctx, chosen, visibility));
+      setNotice({
+        text: `Published ${manifest.name} ${manifest.version} and installed it on all your devices.`,
+        failed: false,
+      });
+    } catch (failure) {
+      setNotice({
+        // The app's words for a refusal hide this one, which the person can fix.
+        text:
+          failure instanceof ApiError && failure.code === 'forbidden'
+            ? `Another account owns the plugin ID ${manifest.id}. Ask the assistant to give it another ID, then publish again.`
+            : errorMessage(failure),
+        failed: true,
+      });
+    }
+    await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
+    await pluginRuntime.refresh();
+  };
+  return (
+    <>
+      <Button
+        size="sm"
+        onClick={() => {
+          setNotice(null);
+          setUpload({ ...workshop.versionFiles(version.version), manifest });
+        }}
+      >
+        Publish…
+      </Button>
+      {notice && (
+        <p
+          role={notice.failed ? 'alert' : 'status'}
+          className={cn('basis-full text-sm', notice.failed && 'text-destructive')}
+        >
+          {notice.text}
+        </p>
+      )}
+      <ConfirmUpload
+        ctx={ctx}
+        upload={upload}
+        verb="Publish"
+        onDone={() => setUpload(null)}
+        onUpload={publish}
+      />
+    </>
   );
 }
 
