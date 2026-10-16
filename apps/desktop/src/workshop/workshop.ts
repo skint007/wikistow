@@ -1,4 +1,9 @@
-import type { BuildDiagnostic, WorkshopFile, WorkshopVersion } from '@wikistow/contracts';
+import {
+  pluginDraftRoutes,
+  type BuildDiagnostic,
+  type WorkshopFile,
+  type WorkshopVersion,
+} from '@wikistow/contracts';
 import { fileType } from '@wikistow/plugin-sdk/files';
 import { Manifest, MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { randomUUID } from 'node:crypto';
@@ -22,13 +27,14 @@ export class WorkshopError extends Error {
   }
 }
 
-/** The kinds of file a workspace holds: source, styles, data and notes, all text. */
-const KINDS = new Set(['.ts', '.tsx', '.js', '.jsx', '.json', '.css', '.svg', '.md', '.txt']);
-/** Folders and names, each starting with a letter, digit or `_`: no `..`, no hidden files. */
-const PATH = /^([A-Za-z0-9_][A-Za-z0-9._-]{0,63}\/){0,5}[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/;
-const MAX_FILE = 256 * 1024;
-const MAX_FILES = 200;
-const MAX_TOTAL = 4 * 1024 * 1024;
+// A workspace holds what a plugin draft holds.
+const {
+  draftPathProblem,
+  DRAFT_FILE_KINDS,
+  MAX_DRAFT_FILE_BYTES: MAX_FILE,
+  MAX_DRAFT_FILES: MAX_FILES,
+  MAX_DRAFT_BYTES: MAX_TOTAL,
+} = pluginDraftRoutes;
 
 const SessionId = z.uuid();
 const VersionNumber = z.number().int().positive();
@@ -73,9 +79,9 @@ export function desktopWorkshop(data: string, bundler: Bundler) {
   /** `path` checked: a plain path inside the workspace, of a kind it holds. */
   const fileIn = (session: Session, path: unknown) => {
     const name = z.string().parse(path);
-    if (!PATH.test(name) || !KINDS.has(extname(name).toLowerCase())) {
+    if (draftPathProblem(name)) {
       throw new WorkshopError(
-        `“${name}” isn’t a workspace file. Use a relative path such as src/ui.tsx, with no “..”, ending in ${[...KINDS].join(', ')}.`,
+        `“${name}” isn’t a workspace file. Use a relative path such as src/ui.tsx, with no “..”, ending in ${DRAFT_FILE_KINDS.join(', ')}.`,
       );
     }
     return join(workspace(session), name);
