@@ -6,9 +6,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- A library plugin is Shared or Only me, chosen by its owner when they upload it or from its row in Settings → Plugins. Only me hides it from other people's listing, except for anyone who already installed it, who keeps it and its updates. Each listing sends the hashes the person approved (`have`); the desktop app's own listing does too. (#PR)
+- Uploading a plugin installs it for you on all your devices. Every way of uploading (Upload plugin folder…, and Share to library… on the desktop) asks once first, showing what the approval dialog shows, with Shared or Only me. Settings' folder upload used to upload as soon as the folder was chosen. (#PR)
+
 #### Server
 
 - Plugin drafts on the server (ADR 0004): `pluginDraftRoutes` list, make, read, change, delete and build a person's drafts, people only. A draft starts empty, from files, or from a library version's `source/`, and a version of someone else's plugin gets a new ID (`<id>-copy`, `-copy-2` and on). At most 10 per account, and within the workshop's limits, which move into `packages/contracts`. The library's file route serves a draft's build to its owner under `/plugins/<id>/draft-<hash>/`. Drafts live in Postgres, so backups take them with no script change (migration `0026_plugin_drafts`). The library upload's checks are now `checkUpload`, which draft builds share. (#64)
+- `plugins.visibility` (migration 0027), `PUT /api/plugins/:pluginId/visibility` for the owner, `GET /api/plugins/private` for the owner's Only me IDs, `visibility` on uploads, and `have` on `GET /api/plugins`. The listing's response doesn't change, so older apps keep working and see Shared plugins only. (#PR)
 
 #### Development
 
