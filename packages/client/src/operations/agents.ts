@@ -331,11 +331,7 @@ export async function removeAgentPick(
 export async function resealAgents(ctx: ClientContext): Promise<number> {
   requirePerson(ctx);
   await recordRevokedAgents(ctx);
-  // A server from before agents in groups (Milestone 5) lists none.
-  const groups = await listAgentGroups(ctx).catch((error: unknown) => {
-    if (error instanceof ApiError && error.code === 'not-found') return [];
-    throw error;
-  });
+  const groups = await listAgentGroups(ctx);
   // Each space's keys, worked out afresh once for all the agents.
   const writes: SpaceWrites = new Map();
   let sealed = 0;
@@ -394,11 +390,17 @@ export type AgentGroupListing = z.output<
 /**
  * The groups this person's live agents are in, with the shares each has
  * and whether this person confirmed it. The server's list: only groups
- * this person's own record lists are ever sealed for.
+ * this person's own record lists are ever sealed for. A server from before
+ * agents in groups (Milestone 5) lists none.
  */
 export async function listAgentGroups(ctx: ClientContext): Promise<AgentGroupListing[]> {
   requirePerson(ctx);
-  return (await ctx.api.call(agentRoutes.myAgentGroups)).groups;
+  try {
+    return (await ctx.api.call(agentRoutes.myAgentGroups)).groups;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'not-found') return [];
+    throw error;
+  }
 }
 
 /**

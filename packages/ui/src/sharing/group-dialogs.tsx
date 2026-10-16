@@ -21,6 +21,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ownAgentName } from '../agents/agent-name';
+import { agentMessage } from '../agents/messages';
 import { confirmAgentGroup } from '../commands/agent-commands';
 import { runCommand } from '../commands/command';
 import { createGroup, renameGroup, sendGroupChange } from '../commands/sharing-commands';
@@ -471,11 +472,22 @@ function AddAgent({
         );
         return;
       }
-      await runCommand(
-        confirmAgentGroup,
-        { agentId: agent.agentId, spaceId, groupId },
-        { satisfies: requirementsHere(), ctx },
-      );
+      try {
+        await runCommand(
+          confirmAgentGroup,
+          { agentId: agent.agentId, spaceId, groupId },
+          { satisfies: requirementsHere(), ctx },
+        );
+      } catch (error) {
+        // It is in the group either way; the page shows where it stands.
+        await onDone(
+          <>
+            <Name>{label}</Name> is in the group, but confirming it didn’t finish:{' '}
+            {agentMessage(error)} Confirm it on your Agents page.
+          </>,
+        );
+        return;
+      }
       await onDone(
         <>
           <Name>{label}</Name> is in the group, with its folders.
