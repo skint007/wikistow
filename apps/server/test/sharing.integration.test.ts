@@ -1,6 +1,7 @@
 import {
   newId,
   newPayload,
+  groupOperations,
   ownerOperations as owners,
   pageOperations as pages,
   RevisionId,
@@ -33,7 +34,16 @@ import {
   tampering,
   type Person,
 } from './support/sharing.ts';
+import {
+  addToGroup,
+  giveAccessTo,
+  makeGroup,
+  removeFromGroup,
+  shareWithGroup,
+  waitingIn,
+} from './support/groups.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
+import { keysOf, whatOpens } from './support/opens.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -251,12 +261,12 @@ describe('removing a member', () => {
       people: [await invite(alice, bob, 'editor')],
     });
     expect((await sharing.sharedWithMe(bob.ctx)).length).toBe(2);
-    const plans = await sharing.planRemovalEverywhere(alice.ctx, {
+    const change = await groupOperations.planRemovalEverywhere(alice.ctx, {
       spaceId: lib.spaceId,
       identityId: bob.vault.identity.public.id,
     });
-    expect(plans.length).toBe(2);
-    await sharing.applyRemovalEverywhere(alice.ctx, plans);
+    expect(change.rotations.length).toBe(2);
+    await groupOperations.applyGroupChange(alice.ctx, change);
     expect(await sharing.sharedWithMe(bob.ctx)).toEqual([]);
     expect((await sharing.listShares(alice.ctx, lib.spaceId)).map((s) => s.members)).toEqual([
       [],
@@ -759,5 +769,260 @@ describe('the key version check', () => {
     // checked against first; either way nothing is stored under version 1.
     expect(await save).toBe('permission-version');
     expect(await draftHead(alice, lib.page)).toBe(head);
+  });
+});
+
+/** Whether `person`'s own keys open the stored revision `revisionId`, trying its wrap. */
+async function opensWith(person: Person, revisionId: RevisionId) {
+  const [row] = await t.db
+    .select({ sealed: schema.revisions.sealed, wrap: schema.revisionWraps.wrap })
+    .from(schema.revisions)
+    .innerJoin(schema.revisionWraps, eq(schema.revisionWraps.revisionId, schema.revisions.id))
+    .where(eq(schema.revisions.id, revisionId));
+  const record = RevisionRecordV2.parse((row?.sealed as { record?: unknown } | undefined)?.record);
+  try {
+    unwrapContentKey({
+      installationId: person.ctx.installationId,
+      subject: revisionWrapSubject(record),
+      wrap: KeyWrap.parse(row?.wrap),
+      keyring: person.ctx.keyring,
+      commitment: record.keyCommitment,
+    });
+    return true;
+  } catch (error) {
+    expect(error).toMatchObject({ code: 'missing-key' });
+    return false;
+  }
+}
+
+describe('a group', () => {
+  it('loses a removed member every share it has, rotating each, so their keys open nothing saved after', async () => {
+    const alice = await personWithVault(t);
+    const [bob, carol] = await Promise.all([personWithVault(t), personWithVault(t)]);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const second = await spaceOperations.createFolder(alice.ctx, {
+      spaceId,
+      parentId: lib.above,
+      name: 'Second',
+    });
+    const notes = {
+      spaceId,
+      pageId: await pages.createPage(alice.ctx, {
+        spaceId,
+        parentId: second,
+        title: 'Notes',
+        markdown: 'second words',
+      }),
+    };
+    const first = await shareFolder(alice.ctx, { spaceId, rootId: lib.shared, people: [] });
+    const other = await shareFolder(alice.ctx, { spaceId, rootId: second, people: [] });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    await addToGroup(alice, spaceId, family, carol);
+    for (const [shareId, role] of [
+      [first, 'reader'],
+      [other, 'editor'],
+    ] as const) {
+      await shareWithGroup(alice, {
+        spaceId,
+        shareId,
+        groupId: family,
+        access: { role, canPublish: false },
+        sealTo: [carol],
+      });
+    }
+    // Bob joins later, and gets both folders in the same request.
+    await addToGroup(alice, spaceId, family, bob);
+    expect((await sharing.sharedWithMe(bob.ctx)).map((s) => s.share.shareId).sort()).toEqual(
+      [first, other].sort(),
+    );
+    await spaceOperations.loadTree(bob.ctx, spaceId);
+    expect((await pages.loadPage(bob.ctx, notes.pageId)).heads.draftHead).not.toBeNull();
+
+    // The server refuses a removal that leaves his keys in either share.
+    expect(await rejection(removeFromGroup(alice, spaceId, family, bob, { rotate: [first] }))).toBe(
+      'stale-head',
+    );
+    expect((await removeFromGroup(alice, spaceId, family, bob)).sort()).toEqual(
+      [first, other].sort(),
+    );
+    const shares = await sharing.listShares(alice.ctx, spaceId);
+    expect(new Map(shares.map((s) => [s.shareId, s.currentKeyVersion]))).toEqual(
+      new Map([
+        [first, 2],
+        [other, 2],
+      ]),
+    );
+
+    const after = [
+      (await pages.editDraft(alice.ctx, lib.page, { markdown: 'after Bob left' })).revisionId,
+      (await pages.editDraft(alice.ctx, notes, { markdown: 'after Bob left too' })).revisionId,
+    ];
+    for (const call of [
+      () => pages.loadPage(bob.ctx, lib.page.pageId),
+      () => pages.loadPage(bob.ctx, notes.pageId),
+      () => spaceOperations.loadTree(bob.ctx, spaceId),
+      () => bob.api.call(sharingRoutes.myEnvelopes, { params: { spaceId } }),
+    ]) {
+      expect(await rejection(call())).toBe('not-found');
+    }
+    // His keys open what he could read before, and nothing saved since.
+    const bobOpens = (await whatOpens(t, keysOf(bob))).revisions.map((r) => r.record.revisionId);
+    expect(bobOpens.length).toBeGreaterThan(0);
+    for (const revisionId of after) {
+      expect(bobOpens).not.toContain(revisionId);
+      expect(await opensWith(bob, revisionId)).toBe(false);
+    }
+    // Carol, still in the group, reads on, through version 2.
+    const [, later] = after;
+    if (!later) throw new Error('expected a draft');
+    expect((await pages.loadPage(carol.ctx, notes.pageId)).heads.draftHead).toBe(later);
+    const { opened } = await pages.openRevisionOf(carol.ctx, notes, 'draft', later);
+    expect(opened).toMatchObject({ payload: { markdown: 'after Bob left too' } });
+    expect(await opensWith(carol, later)).toBe(true);
+  });
+
+  it('leaves a member with a direct grant or another group their access, rotating nothing', async () => {
+    const alice = await personWithVault(t);
+    const [dave, erin] = await Promise.all([personWithVault(t), personWithVault(t)]);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: lib.shared,
+      people: [await invite(alice, dave, 'editor')],
+    });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    const friends = await makeGroup(alice, spaceId, 'Friends');
+    await addToGroup(alice, spaceId, family, dave);
+    await addToGroup(alice, spaceId, family, erin);
+    await addToGroup(alice, spaceId, friends, erin);
+    const editors = { role: 'editor', canPublish: false } as const;
+    await shareWithGroup(alice, {
+      spaceId,
+      shareId,
+      groupId: family,
+      access: editors,
+      sealTo: [erin],
+    });
+    // Erin holds the editor keys already: Friends seals nothing.
+    await shareWithGroup(alice, {
+      spaceId,
+      shareId,
+      groupId: friends,
+      access: editors,
+      sealTo: [],
+    });
+
+    // Their roles don't change, so nothing rotates, and a rotation sent anyway is refused.
+    expect(
+      await rejection(removeFromGroup(alice, spaceId, family, dave, { rotate: [shareId] })),
+    ).toBe('stale-head');
+    expect(await removeFromGroup(alice, spaceId, family, dave)).toEqual([]);
+    expect(await removeFromGroup(alice, spaceId, family, erin)).toEqual([]);
+    const share = await shareOf(alice, spaceId);
+    expect(share.currentKeyVersion).toBe(1);
+    expect(new Map(share.members.map((m) => [m.identityId, m.role]))).toEqual(
+      new Map([
+        [dave.vault.identity.public.id, 'editor'],
+        [erin.vault.identity.public.id, 'editor'],
+      ]),
+    );
+    for (const person of [dave, erin]) {
+      expect((await pages.loadPage(person.ctx, lib.page.pageId)).heads.draftHead).not.toBeNull();
+    }
+    // Once Erin leaves Friends too, nothing is left, and the share rotates without her.
+    expect(await removeFromGroup(alice, spaceId, friends, erin)).toEqual([shareId]);
+    expect(await rejection(pages.loadPage(erin.ctx, lib.page.pageId))).toBe('not-found');
+  });
+
+  it('demotes a direct reader leaving a group that made them an editor, who reads on', async () => {
+    const alice = await personWithVault(t);
+    const fay = await personWithVault(t);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: lib.shared,
+      people: [await invite(alice, fay, 'reader')],
+    });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    await shareWithGroup(alice, {
+      spaceId,
+      shareId,
+      groupId: family,
+      access: { role: 'editor', canPublish: false },
+      sealTo: [],
+    });
+    // Joining seals her the draft keys.
+    await addToGroup(alice, spaceId, family, fay);
+    expect((await pages.loadPage(fay.ctx, lib.page.pageId)).heads.draftHead).not.toBeNull();
+
+    // Leaving takes them away again, but not her reading: a demotion, not a removal.
+    expect(await removeFromGroup(alice, spaceId, family, fay)).toEqual([shareId]);
+    const share = await shareOf(alice, spaceId);
+    expect(share.members).toMatchObject([
+      { identityId: fay.vault.identity.public.id, role: 'reader' },
+    ]);
+    await pages.editDraft(alice.ctx, lib.page, { markdown: 'published after Fay left' });
+    const published = (await pages.publishPage(alice.ctx, lib.page)).revisionId;
+    const draft = (await pages.editDraft(alice.ctx, lib.page, { markdown: 'drafted after' }))
+      .revisionId;
+    expect((await pages.loadPage(fay.ctx, lib.page.pageId)).heads).toMatchObject({
+      publishedHead: published,
+      draftHead: null,
+    });
+    await spaceOperations.loadTree(fay.ctx, spaceId);
+    const fayOpens = (await whatOpens(t, keysOf(fay))).revisions.map((r) => r.record.revisionId);
+    expect(fayOpens).toContain(published);
+    expect(fayOpens).not.toContain(draft);
+  });
+
+  it('serves a member waiting for keys nothing, until an owner gives them access', async () => {
+    const alice = await personWithVault(t);
+    const [frank, gina] = await Promise.all([personWithVault(t), personWithVault(t)]);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, { spaceId, rootId: lib.shared, people: [] });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    await addToGroup(alice, spaceId, family, frank);
+    await addToGroup(alice, spaceId, family, gina);
+    // Alice's app seals only to Gina, so Frank waits.
+    await shareWithGroup(alice, {
+      spaceId,
+      shareId,
+      groupId: family,
+      access: { role: 'reader', canPublish: false },
+      sealTo: [gina],
+    });
+    expect(await waitingIn(alice)).toEqual([
+      { identityId: frank.vault.identity.public.id, shareId, role: 'reader' },
+    ]);
+    expect(await sharing.sharedWithMe(frank.ctx)).toEqual([]);
+    for (const call of [
+      () => spaceOperations.loadTree(frank.ctx, spaceId),
+      () => pages.loadPage(frank.ctx, lib.page.pageId),
+      () => frank.api.call(sharingRoutes.myEnvelopes, { params: { spaceId } }),
+      () => frank.api.call(sharingRoutes.versionEnvelopes, { params: { shareId, keyVersion: 1 } }),
+    ]) {
+      expect(await rejection(call())).toBe('not-found');
+    }
+    const ids = (
+      await t.db
+        .select({ id: schema.revisions.id })
+        .from(schema.revisions)
+        .where(eq(schema.revisions.spaceId, spaceId))
+    ).map((r) => RevisionId.parse(r.id));
+    expect(ids.length).toBeGreaterThan(0);
+    expect((await frank.api.call(pageRoutes.fetchRevisions, { body: { ids } })).revisions).toEqual(
+      [],
+    );
+    const opens = await whatOpens(t, keysOf(frank));
+    expect([opens.revisions, [...opens.names]]).toEqual([[], []]);
+    expect((await pages.loadPage(gina.ctx, lib.page.pageId)).heads.publishedHead).not.toBeNull();
+
+    await giveAccessTo(alice, spaceId, frank);
+    expect(await waitingIn(alice)).toEqual([]);
+    expect((await pages.loadPage(frank.ctx, lib.page.pageId)).heads.publishedHead).not.toBeNull();
   });
 });

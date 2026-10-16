@@ -1,4 +1,9 @@
-import { sharingOperations, type IdentityId, type SpaceId } from '@wikistow/client';
+import {
+  groupOperations,
+  sharingOperations,
+  type IdentityId,
+  type SpaceId,
+} from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, MoreHorizontal, ShieldAlert } from 'lucide-react';
@@ -139,6 +144,8 @@ export function AccessPanel({
 
   const removeEverywhereFor = (member: Member) => {
     const { name } = person(member.identityId);
+    // The latest plan, which is what the owner confirms.
+    let change: groupOperations.GroupChange | null = null;
     startRotation({
       title: (
         <>
@@ -147,14 +154,17 @@ export function AccessPanel({
       ),
       confirmLabel: 'Remove everywhere',
       none: <NotInAnyShare name={name} />,
-      make: async () =>
-        (
-          await sharingOperations.planRemovalEverywhere(ctx, {
-            spaceId,
-            identityId: member.identityId,
-          })
-        ).map((planned) => ({ label: shareNameById(tree, planned.plan.shareId), planned })),
-      apply: (plans) => runCommand(removeEverywhere, { plans: plans.map((p) => p.planned) }, env),
+      make: async () => {
+        change = await groupOperations.planRemovalEverywhere(ctx, {
+          spaceId,
+          identityId: member.identityId,
+        });
+        return change.rotations.map((planned) => ({
+          label: shareNameById(tree, planned.plan.shareId),
+          planned,
+        }));
+      },
+      apply: () => (change ? runCommand(removeEverywhere, { change }, env) : Promise.resolve()),
     });
   };
 

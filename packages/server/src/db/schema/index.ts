@@ -14,6 +14,7 @@ export * from './key-envelopes.ts';
 export * from './metadata-revisions.ts';
 export * from './owners.ts';
 export * from './shares.ts';
+export * from './groups.ts';
 export * from './spaces.ts';
 export * from './vault-wrappers.ts';
 export * from './blobs.ts';

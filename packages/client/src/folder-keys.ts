@@ -47,7 +47,8 @@ export const folderKeyOf = <K extends { draftKey: Uint8Array | null; publishedKe
 export type WrapSubject = {
   spaceId: SpaceId;
   audienceClass: AudienceClass;
-  subjectKind: 'page' | 'space' | 'folder';
+  /** A group's name is never wrapped (section 7.8); the server keeps it in the owner region. */
+  subjectKind: 'page' | MetadataRecord['subjectKind'];
   subjectId: string;
   versionId: string;
 };

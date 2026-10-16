@@ -4,10 +4,12 @@
 // Each seals only to people the trust store allows, and draws a rotation's
 // recipients from envelopes this app verified, never from the server alone.
 import {
+  groupRoutes,
   peopleRoutes,
   sharingRoutes,
   type FolderId,
   type FolderKeyEnvelope,
+  type GroupId,
   type IdentityId,
   type KeyWrap,
   type PageId,
@@ -28,7 +30,7 @@ import {
   type FolderKeys,
   type HeldKeyVersion,
 } from '../folder-keys.ts';
-import { keyHash, type PublicIdentity } from '../identity.ts';
+import { isAgentId, keyHash, type PublicIdentity } from '../identity.ts';
 import { FolderId as FolderIdSchema, newId, ShareId as ShareIdSchema } from '../ids.ts';
 import { highestWritable, requireNotBehind } from '../key-versions.ts';
 import { unsealMetadataKey } from '../metadata.ts';
@@ -54,6 +56,39 @@ export type ShareRole = sharingRoutes.ShareRole;
 
 /** Someone to share with: found by email (`findPerson`), with a role. */
 export type Invitee = { person: Lookup; role: ShareRole; canPublish?: boolean };
+
+/** One of the space's groups to share with, with its access (section 7.8). */
+export type GroupGrant = { groupId: GroupId; role: ShareRole; canPublish?: boolean };
+
+const higherRole = (a: ShareRole, b: ShareRole | undefined): ShareRole =>
+  a === 'editor' || b === 'editor' ? 'editor' : a;
+
+/**
+ * The role each human member of the space's groups gets through them, by
+ * identity, with their directory entry, where `roleOf` gives each group's
+ * role (null for none). Agents are left to their person (section 9.4).
+ */
+async function groupRoles(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  roleOf: (group: {
+    groupId: GroupId;
+    shares: readonly { shareId: ShareId; role: ShareRole }[];
+  }) => ShareRole | null,
+) {
+  const out = new Map<string, { person: Lookup; role: ShareRole }>();
+  const { groups } = await ctx.api.call(groupRoutes.listGroups, { params: { spaceId } });
+  for (const group of groups) {
+    const role = roleOf(group);
+    if (!role) continue;
+    for (const member of group.members) {
+      if (isAgentId(member.identity.id)) continue;
+      const best = higherRole(role, out.get(member.identity.id)?.role);
+      out.set(member.identity.id, { person: { ...member, foundBy: null }, role: best });
+    }
+  }
+  return out;
+}
 
 /**
  * The person whose account has exactly this email, if they have a vault
@@ -312,19 +347,22 @@ export async function previewShare(
  * lead to the root: every record of the owner region opens for an owner, so
  * such an entry is a lie or damage, and wrapping it would share what the
  * owner couldn't see. A key change anywhere stops it (`identity-key-changed`).
- * `onProgress` hears as each part of the records is wrapped. Returns the
- * share's ID.
+ * `onProgress` hears as each part of the records is wrapped. With `groups`,
+ * each member of them gets version 1 too, at their highest role, unless
+ * their key changed: they wait (section 7.9). Returns the share's ID.
  */
 export async function shareFolder(
   ctx: ClientContext,
   {
     preview,
     people,
+    groups = [],
     agents = [],
     onProgress,
   }: {
     preview: SharePreview;
     people: readonly Invitee[];
+    groups?: readonly GroupGrant[];
     /**
      * This person's own agents to grant the whole new share, for a pick in
      * the owner region (section 9.4). Each gets version 1 from this app.
@@ -337,7 +375,29 @@ export async function shareFolder(
   requireReviewable(preview);
   const keys = await ownerKeys(ctx, spaceId);
   const owners = keys.owners.sealingOwners();
-  const invited = withKeys(ctx, people);
+  const viaGroups =
+    groups.length === 0
+      ? new Map<string, { person: Lookup; role: ShareRole }>()
+      : await groupRoles(
+          ctx,
+          spaceId,
+          (group) => groups.find((g) => g.groupId === group.groupId)?.role ?? null,
+        );
+  // A direct member in a group gets their higher role; the rest of the
+  // groups' members are sealed to unless their key changed.
+  const invited = withKeys(ctx, people).map((invitee) => ({
+    ...invitee,
+    sealed: higherRole(invitee.role, viaGroups.get(invitee.identity.id)?.role),
+  }));
+  const groupOnly = [...viaGroups.values()].filter(({ person }) => {
+    const check = ctx.trust.check(person.identity, person.email);
+    return (
+      !invited.some((i) => i.identity.id === person.identity.id) &&
+      check.kind !== 'changed' &&
+      check.kind !== 'removed'
+    );
+  });
+  const grouped = withKeys(ctx, groupOnly);
   const ownAgents = agents.map((grant) => ({
     ...grant,
     agent: ownAgentToSeal(ctx, grant.agentId),
@@ -349,7 +409,9 @@ export async function shareFolder(
   const unseen = new Set<string>([...folders, ...pages, ...(rootId === null ? [spaceId] : [])]);
   // The keys about to be sealed to are pinned first (section 8.3), so a
   // later session warns if one changes.
-  await saveContacts(ctx, [], { sealTo: invited.map(({ identity }) => identity) });
+  await saveContacts(ctx, [], {
+    sealTo: [...invited, ...grouped].map(({ identity }) => identity),
+  });
   const shareId = newId(ShareIdSchema);
   if (ownAgents.length > 0) {
     // The agents' lists hold the share before its keys are sealed to them.
@@ -424,7 +486,8 @@ export async function shareFolder(
     }
     const envelopes = sealVersion(ctx, spaceId, shareId, 1, folderKeys, [
       ...owners.map((identity) => ({ identity, role: 'editor' as const })),
-      ...invited,
+      ...invited.map(({ identity, sealed }) => ({ identity, role: sealed })),
+      ...grouped.map(({ identity, role }) => ({ identity, role })),
       ...ownAgents.map(({ agent, role }) => ({ identity: agent, role })),
     ]);
     await ctx.api.call(sharingRoutes.makeShare, {
@@ -443,6 +506,11 @@ export async function shareFolder(
         agentGrants: ownAgents.map(({ agentId, role, canPublish = false }) => ({
           agentId,
           folderId: null,
+          role,
+          canPublish: role === 'editor' && canPublish,
+        })),
+        groups: groups.map(({ groupId, role, canPublish = false }) => ({
+          groupId,
           role,
           canPublish: role === 'editor' && canPublish,
         })),
@@ -594,10 +662,15 @@ export function versionsToGive(
 }
 
 /**
- * Add `person` to a share, or make a reader an editor, or share again with
- * a member whose key change was confirmed (sections 7.3 and 7.4): every key
- * version, with the draft key for an editor. Demoting an editor is a
- * rotation (`demoteMember`); publish rights alone are `setPublishRights`.
+ * Give `person` a direct grant in a share: add them, or raise their grant
+ * (sections 7.3 and 7.4), sealing every key version, with the draft key
+ * when they will be an editor, directly or through a group (section 7.8).
+ * Lowering a direct grant that a group still covers needs no rotation, so
+ * it is this too, sealing the same keys again, which the server allows.
+ * Demoting an editor is a rotation (`demoteMember`); dropping a direct
+ * grant is `planRemoveDirectGrant`; publish rights alone are
+ * `setPublishRights`. After a key change, Give access (`planGiveAccess`)
+ * seals to the new key instead.
  */
 export async function addMember(
   ctx: ClientContext,
@@ -615,8 +688,14 @@ export async function addMember(
   if (!identity) throw new CryptoError('malformed', 'Nobody to add');
   await saveContacts(ctx, [], { sealTo: [identity] });
   const share = await requireShare(ctx, spaceId, shareId);
+  const viaGroups = await groupRoles(
+    ctx,
+    spaceId,
+    (group) => group.shares.find((s) => s.shareId === shareId)?.role ?? null,
+  );
+  const sealed = higherRole(role, viaGroups.get(identity.id)?.role);
   const envelopes = versionsToGive(ctx, keys, share).flatMap((held) =>
-    sealVersion(ctx, spaceId, shareId, held.keyVersion, held, [{ identity, role }]),
+    sealVersion(ctx, spaceId, shareId, held.keyVersion, held, [{ identity, role: sealed }]),
   );
   const { permissionVersion } = await treeTarget(ctx, spaceId, share.rootId);
   await ctx.api.call(sharingRoutes.addMember, {
@@ -799,42 +878,6 @@ export const demoteMember = async (
   { spaceId, shareId, identityId }: { spaceId: SpaceId; shareId: ShareId; identityId: IdentityId },
 ) =>
   applyShareRotation(ctx, await planShareRotation(ctx, { spaceId, shareId, demote: [identityId] }));
-
-/**
- * The shares of a space that hold someone as a member, each with a rotation
- * leaving them out, for "Remove from every folder in this space" (section
- * 7.5) to show in one dialog. An owner is removed as an owner instead
- * (`planOwnerRemoval`).
- */
-export async function planRemovalEverywhere(
-  ctx: ClientContext,
-  { spaceId, identityId }: { spaceId: SpaceId; identityId: IdentityId },
-): Promise<PlannedRotation[]> {
-  const keys = await ownerKeys(ctx, spaceId);
-  const holding = (await listShares(ctx, spaceId)).filter((share) =>
-    share.members.some((m) => m.identityId === identityId),
-  );
-  const plans: PlannedRotation[] = [];
-  for (const share of holding) {
-    plans.push(
-      await planShareRotation(ctx, {
-        spaceId,
-        shareId: share.shareId,
-        leaveOut: [identityId],
-        keys,
-      }),
-    );
-  }
-  return plans;
-}
-
-/** Apply the rotations of "Remove from every folder in this space", one share after another. */
-export async function applyRemovalEverywhere(
-  ctx: ClientContext,
-  plans: readonly PlannedRotation[],
-): Promise<void> {
-  for (const planned of plans) await applyShareRotation(ctx, planned);
-}
 
 /** A share as Shared with me lists it, with its root's name and who shared it. */
 export type SharedItem = {

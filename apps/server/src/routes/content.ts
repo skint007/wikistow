@@ -1,5 +1,6 @@
 import {
   contactsRoutes,
+  groupRoutes,
   ownerRoutes,
   PageId,
   pageRoutes,
@@ -46,6 +47,19 @@ import {
   checkMover,
   moveNode,
   removeOwner,
+  addGroupMember,
+  checkGroupOwner,
+  createGroup,
+  deleteGroup,
+  giveAccess,
+  listGroups,
+  listWaiting,
+  removeDirectGrant,
+  removeFromSpace,
+  removeGroupMember,
+  removeShareGroup,
+  renameGroup,
+  setShareGroup,
   rotateShare,
   scanRecords,
   sharedWithMe,
@@ -162,6 +176,8 @@ export function mountContentRoutes(
     checkSpaceOwner(db, accountId, params['spaceId'] ?? '').catch(toApiError);
   const shareOwnerFirst = (params: Record<string, string>, { accountId }: EarlyCaller) =>
     checkShareOwner(db, accountId, params['shareId'] ?? '').catch(toApiError);
+  const groupOwnerFirst = (params: Record<string, string>, { accountId }: EarlyCaller) =>
+    checkGroupOwner(db, accountId, params['groupId'] ?? '').catch(toApiError);
 
   // A stored row a listing left out: named by table and ID, never content.
   const report: ReportUnreadable = ({ table, id }) =>
@@ -343,6 +359,169 @@ export function mountContentRoutes(
 
   routes.content(sharingRoutes.sharedWithMe, async (_input, { actor }) => ({
     shares: await sharedWithMe(db, actor, report).catch(toApiError),
+  }));
+
+  // Groups (section 7.8). Changes that seal to someone in every share a
+  // group has, or rotate them, carry as much as an owner's removal.
+  routes.account(groupRoutes.listGroups, async ({ params }, { principal }) =>
+    listGroups(db, principal.accountId, params.spaceId, report).catch(toApiError),
+  );
+
+  routes.account(
+    groupRoutes.createGroup,
+    async ({ params, body }, { principal }) => {
+      await createGroup(db, {
+        accountId: principal.accountId,
+        spaceId: params.spaceId,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError);
+      return { groupId: body.groupId };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    groupRoutes.renameGroup,
+    async ({ params, body }, { principal }) => {
+      await renameGroup(db, {
+        accountId: principal.accountId,
+        groupId: params.groupId,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  const groupChange = {
+    rateLimit: WRITE_LIMIT,
+    bodyLimit: OWNER_REMOVAL_BODY,
+    bodyPool: 'rotation',
+    beforeBody: groupOwnerFirst,
+  } as const;
+
+  routes.account(
+    groupRoutes.deleteGroup,
+    async ({ params, body }, { principal }) => {
+      await deleteGroup(db, {
+        accountId: principal.accountId,
+        groupId: params.groupId,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    groupChange,
+  );
+
+  routes.account(
+    groupRoutes.addGroupMember,
+    async ({ params, body }, { principal }) => {
+      await addGroupMember(db, {
+        accountId: principal.accountId,
+        groupId: params.groupId,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    groupChange,
+  );
+
+  routes.account(
+    groupRoutes.removeGroupMember,
+    async ({ params, body }, { principal }) => {
+      await removeGroupMember(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    groupChange,
+  );
+
+  const shareChange = {
+    rateLimit: WRITE_LIMIT,
+    bodyLimit: ROTATION_BODY,
+    bodyPool: 'rotation',
+    beforeBody: shareOwnerFirst,
+  } as const;
+
+  routes.account(
+    groupRoutes.setShareGroup,
+    async ({ params, body }, { principal }) => {
+      await setShareGroup(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    shareChange,
+  );
+
+  routes.account(
+    groupRoutes.removeShareGroup,
+    async ({ params, body }, { principal }) => {
+      await removeShareGroup(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    shareChange,
+  );
+
+  routes.account(
+    groupRoutes.removeDirectGrant,
+    async ({ params, body }, { principal }) => {
+      await removeDirectGrant(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    shareChange,
+  );
+
+  const spaceChange = {
+    rateLimit: WRITE_LIMIT,
+    bodyLimit: OWNER_REMOVAL_BODY,
+    bodyPool: 'rotation',
+    beforeBody: spaceOwnerFirst,
+  } as const;
+
+  routes.account(
+    groupRoutes.removeFromSpace,
+    async ({ params, body }, { principal }) => {
+      await removeFromSpace(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    spaceChange,
+  );
+
+  routes.account(
+    groupRoutes.giveAccess,
+    async ({ params, body }, { principal }) => {
+      await giveAccess(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    spaceChange,
+  );
+
+  routes.account(groupRoutes.waiting, async (_input, { principal }) => ({
+    waiting: await listWaiting(db, principal.accountId).catch(toApiError),
   }));
 
   routes.account(
