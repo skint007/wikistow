@@ -87,7 +87,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
 
 /** Which version runs, whether the last build failed, and what it said. */
 function Status({ workshop }: { workshop: Workshop }) {
-  const { phase, failure, problem, versions, running, building } = useSyncExternalStore(
+  const { phase, failure, problem, opening, versions, running, building } = useSyncExternalStore(
     workshop.subscribe,
     workshop.state,
   );
@@ -116,7 +116,7 @@ function Status({ workshop }: { workshop: Workshop }) {
           </>
         ) : (
           <span className="text-muted-foreground">
-            {phase === 'starting'
+            {opening
               ? 'Opening the draft…'
               : versions.length === 0
                 ? 'Nothing is built yet. Ask the assistant for a plugin.'

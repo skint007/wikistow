@@ -34,6 +34,8 @@ export type WorkshopState = {
   files: ReadonlyMap<string, string>;
   /** What last went wrong outside the plugin's own code, such as previewing on opening. */
   problem: string | null;
+  /** Reading the draft, then building and previewing it, as it opens. */
+  opening: boolean;
   /** Every build so far, failed ones too, oldest first. */
   versions: readonly WorkshopVersion[];
   building: boolean;
@@ -119,6 +121,7 @@ export class Workshop {
     draft: null,
     files: new Map(),
     problem: null,
+    opening: true,
     versions: [],
     building: false,
     running: null,
@@ -199,16 +202,18 @@ export class Workshop {
       });
     } catch (error) {
       if (this.#state.phase !== 'ended') {
-        this.#set({ phase: 'failed', failure: errorMessage(error) });
+        this.#set({ phase: 'failed', failure: errorMessage(error), opening: false });
       }
       return;
     }
-    if (this.#state.files.size === 0) return;
     try {
+      if (this.#state.files.size === 0) return;
       const version = await this.build();
       if (version?.plugin) await this.load(version.version);
     } catch (error) {
       this.#set({ problem: message(error) });
+    } finally {
+      this.#set({ opening: false });
     }
   }
 

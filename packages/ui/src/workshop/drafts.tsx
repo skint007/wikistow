@@ -46,6 +46,8 @@ export function openWorkshop(draftId: string) {
  */
 export function useNewDraft(): {
   start: (from: DraftStart) => Promise<void>;
+  /** A draft is being made, or the person asked: don't start another. */
+  busy: boolean;
   error: string | null;
   dialog: ReactNode;
 } {
@@ -71,17 +73,20 @@ export function useNewDraft(): {
     }
   };
 
+  const [making, setMaking] = useState(false);
   const start = async (from: DraftStart) => {
     setError(null);
-    let drafts: DraftSummary[];
+    setMaking(true);
     try {
-      drafts = await queryClient.fetchQuery({ ...draftsQuery, staleTime: 0 });
+      const drafts = await queryClient.fetchQuery({ ...draftsQuery, staleTime: 0 });
+      const oldest = drafts.length >= pluginDraftRoutes.MAX_DRAFTS ? drafts.at(-1) : undefined;
+      if (!oldest) return await create(from);
+      return await new Promise<void>((done) => setAsking({ from, oldest, done }));
     } catch (failure) {
-      return setError(errorMessage(failure));
+      setError(errorMessage(failure));
+    } finally {
+      setMaking(false);
     }
-    const oldest = drafts.length >= pluginDraftRoutes.MAX_DRAFTS ? drafts.at(-1) : undefined;
-    if (!oldest) return create(from);
-    return new Promise<void>((done) => setAsking({ from, oldest, done }));
   };
 
   const close = () => {
@@ -122,7 +127,7 @@ export function useNewDraft(): {
     </Dialog>
   );
 
-  return { start, error, dialog };
+  return { start, busy: making || busy, error, dialog };
 }
 
 /** When a draft's files last changed, as the list says it. */
@@ -157,7 +162,7 @@ export function DraftsList({ open }: { open: string | null }) {
     <section aria-label="Plugin drafts" className="grid gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="flex-1 text-sm font-bold">Your plugin drafts</h2>
-        <Button size="sm" onClick={() => void newDraft.start({})}>
+        <Button size="sm" disabled={newDraft.busy} onClick={() => void newDraft.start({})}>
           New plugin
         </Button>
       </div>
