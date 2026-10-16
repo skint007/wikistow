@@ -21,7 +21,8 @@ export type PluginFolder = CheckedPlugin & { folder: string };
  * Read a built plugin folder: its manifest, the files the manifest names,
  * and a hash of everything in it (`checkPlugin`, shared with the server's
  * library). A link anywhere in it is refused, so every file read is the
- * folder's own.
+ * folder's own, and a script over the library's limit too, as the
+ * sandboxed frame couldn't start it.
  */
 export async function readPluginFolder(folder: string): Promise<PluginFolder> {
   // Checked before the folder is walked, as it could be any folder at all.
@@ -41,7 +42,12 @@ export async function readPluginFolder(folder: string): Promise<PluginFolder> {
       throw new PluginFolderError('This plugin folder is too large (500 files or 50 MB at most).');
     }
   }
-  return { folder, ...(await checkPlugin(files)) };
+  const checked = await checkPlugin(files);
+  const script = checked.manifest.script && files.get(checked.manifest.script);
+  if (script && script.length > pluginRoutes.MAX_SCRIPT_BYTES) {
+    throw new PluginFolderError('This plugin’s script is too large (1 MB at most).');
+  }
+  return { folder, ...checked };
 }
 
 /**
