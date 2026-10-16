@@ -1,6 +1,6 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
 import type { PluginCandidate, PluginScope } from '@wikistow/contracts';
-import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
+import type { PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
@@ -20,8 +20,8 @@ import { Switch } from '@/components/ui/switch';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { useVault } from '../vault/store';
-import { libraryQuery, uploadToLibrary } from './library';
-import { Library, ShareToLibrary } from './library-settings';
+import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
+import { ConfirmUpload, Library } from './library-settings';
 import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
 
 export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
@@ -68,7 +68,8 @@ export function SafeModeNotice() {
 /**
  * Settings → Plugins, in the desktop app: install a plugin folder or load
  * one for development, turn each on or off, reload, remove, share an
- * installed one to the library, and choose the pages it may use; then,
+ * installed one to the library (which installs it from there on every
+ * device), and choose the pages it may use; then,
  * with the vault open, the server's library as the browser shows it.
  * Every install asks for approval first. The browser's is `LibrarySettings`.
  */
@@ -77,7 +78,7 @@ export function PluginSettings() {
   const vault = useVault();
   const queryClient = useQueryClient();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
-  const [sharing, setSharing] = useState<Manifest | null>(null);
+  const [sharing, setSharing] = useState<PluginUpload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const bridge = desktop;
@@ -142,9 +143,19 @@ export function PluginSettings() {
                       Reload
                     </Button>
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => setSharing(manifest)}>
-                      Share to library…
-                    </Button>
+                    vault.status === 'unlocked' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void act(async () =>
+                            setSharing(await readUpload(await bridge.pluginUpload(manifest.id))),
+                          )
+                        }
+                      >
+                        Share to library…
+                      </Button>
+                    )
                   )
                 }
               />
@@ -165,18 +176,20 @@ export function PluginSettings() {
         onDone={() => setCandidate(null)}
         onApprove={({ token }) => act(() => bridge.approvePlugin(token))}
       />
-      <ShareToLibrary
-        manifest={sharing}
-        onDone={() => setSharing(null)}
-        onShare={() =>
-          act(async () => {
-            if (!sharing) return;
-            const { version } = await uploadToLibrary(await bridge.pluginUpload(sharing.id));
-            await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
-            return `Shared ${version.manifest.name} ${version.manifest.version} to the library.`;
-          })
-        }
-      />
+      {vault.status === 'unlocked' && (
+        <ConfirmUpload
+          ctx={vault.ctx}
+          upload={sharing}
+          onDone={() => setSharing(null)}
+          onUpload={(upload, visibility) =>
+            act(async () => {
+              const { manifest } = await uploadAndInstall(vault.ctx, upload, visibility);
+              await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
+              return `Shared ${manifest.name} ${manifest.version} to the library and installed it on all your devices.`;
+            })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -194,18 +207,25 @@ export type ApprovalRequest = Pick<
  * Ask the person to approve a plugin before it runs: its name, version,
  * trust level, the most page access it may ask for and the hash approved,
  * and for an update what it replaces, with any change of level or access.
+ * `verb` names what confirming does, if not installing, updating or
+ * loading; `children` go after the hash.
  */
 export function Approval<T extends ApprovalRequest>({
   candidate,
   onDone,
   onApprove,
+  verb: action,
+  children,
 }: {
   candidate: T | null;
   onDone: () => void;
   onApprove: (candidate: T) => Promise<void>;
+  verb?: string;
+  children?: ReactNode;
 }) {
   const level = candidate ? LEVELS[candidate.level] : null;
-  const verb = candidate?.replaces ? 'Update' : candidate?.development ? 'Load' : 'Install';
+  const verb =
+    action ?? (candidate?.replaces ? 'Update' : candidate?.development ? 'Load' : 'Install');
   return (
     <Dialog open={candidate !== null} onOpenChange={(open) => !open && onDone()}>
       {candidate && level && (
@@ -236,6 +256,7 @@ export function Approval<T extends ApprovalRequest>({
                 <code className="break-all">{candidate.hash}</code>
               </p>
             )}
+            {children}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={onDone}>

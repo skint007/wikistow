@@ -4,7 +4,9 @@ import {
   listPlugins,
   pluginDraftBuildFile,
   pluginFile,
+  privatePlugins,
   removePlugin,
+  setPluginVisibility,
   uploadPlugin,
   type Database,
   type PluginStore,
@@ -36,8 +38,29 @@ export function mountPluginRoutes(
 ) {
   routes.account(
     pluginRoutes.listPlugins,
-    async (_input, { principal }) => ({ plugins: await listPlugins(db, principal.accountId) }),
+    async ({ query }, { principal }) => ({
+      plugins: await listPlugins(db, principal.accountId, query.have),
+    }),
     { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.account(
+    pluginRoutes.privatePlugins,
+    async (_input, { principal }) => ({ ids: await privatePlugins(db, principal.accountId) }),
+    { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.account(
+    pluginRoutes.setVisibility,
+    async ({ params, body }, { principal }) => {
+      await setPluginVisibility(db, {
+        accountId: principal.accountId,
+        pluginId: params.pluginId,
+        visibility: body.visibility,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
   );
 
   routes.account(
@@ -46,6 +69,7 @@ export function mountPluginRoutes(
       uploadPlugin(db, plugins, {
         accountId: principal.accountId,
         files: body.files.map(({ path, data }) => ({ path, data: Buffer.from(data, 'base64url') })),
+        visibility: body.visibility,
       }).catch(toApiError),
     { rateLimit: UPLOAD_LIMIT, bodyLimit: UPLOAD_BODY },
   );

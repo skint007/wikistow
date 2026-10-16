@@ -1,6 +1,6 @@
 import { pluginOperations, type ClientContext } from '@wikistow/client';
 import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
-import type { Manifest } from '@wikistow/plugin-sdk';
+import { trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
@@ -14,16 +14,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Picker } from '@/components/ui/picker';
 import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useVault } from '../vault/store';
 import {
   asInstalled,
+  LIBRARY_KEY,
   libraryQuery,
-  uploadToLibrary,
+  privatePluginsQuery,
+  readUpload,
+  uploadAndInstall,
   type LibraryPlugin,
   type LibraryVersion,
+  type PluginUpload,
 } from './library';
 import {
   ACCESS,
@@ -45,6 +50,13 @@ const requestFor = (id: string, version: LibraryVersion): Request => ({
   replaces: null,
 });
 
+type Visibility = pluginRoutes.PluginVisibility;
+
+const VISIBILITY = [
+  { value: 'shared', label: 'Shared' },
+  { value: 'private', label: 'Only me' },
+] as const;
+
 /** What removing from the library takes away: a whole plugin, or one version. */
 type Removal = { plugin: LibraryPlugin; version: LibraryVersion | null };
 
@@ -56,8 +68,8 @@ const size = (bytes: number) =>
  * Settings → Plugins in the browser (ADR 0002): the plugins this account
  * installed from the server's library, each on or off with its page access
  * and any update waiting, then the library itself, to install from, upload
- * to and remove from. What is installed is in the account's encrypted
- * contacts record, so it shows only while the vault is open.
+ * to (which installs it) and remove from. What is installed is in the
+ * account's encrypted contacts record, so it shows only while the vault is open.
  */
 export function LibrarySettings() {
   const vault = useVault();
@@ -83,10 +95,12 @@ export function LibrarySettings() {
  * even once the library drops its version, and a folder install of the
  * same ID replaces it on that computer. The desktop shares to the library
  * from an installed plugin or a workshop version, not by choosing a folder.
+ * The owner of a plugin chooses whether it is Shared or Only me.
  */
 export function Library({ ctx }: { ctx: ClientContext }) {
   const queryClient = useQueryClient();
-  const { data: library, error: listError } = useQuery(libraryQuery);
+  const { data: library, error: listError } = useQuery(libraryQuery(ctx));
+  const { data: onlyMe } = useQuery(privatePluginsQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
   const { plugins: running, listed, unavailable } = usePlugins();
@@ -98,6 +112,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
   const approvals = pluginOperations.listPluginApprovals(ctx);
   const [request, setRequest] = useState<Request | null>(null);
   const [removal, setRemoval] = useState<Removal | null>(null);
+  const [upload, setUpload] = useState<PluginUpload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const admin = me?.account.role === 'admin';
@@ -112,7 +127,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
     } catch (failure) {
       setError(errorMessage(failure));
     }
-    await queryClient.invalidateQueries({ queryKey: libraryQuery.queryKey });
+    await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
     await pluginRuntime.refresh();
   };
   const approve = ({ id, hash }: Request) =>
@@ -235,13 +250,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
           {!desktop && (
             <Upload
               onFolder={(chosen) =>
-                act(async () => {
-                  const { pluginId, version } = await uploadToLibrary(await readFolder(chosen));
-                  const next = approvals.some((approval) => approval.id === pluginId)
-                    ? 'Update it above to use it.'
-                    : 'Install it below to use it.';
-                  return `Uploaded ${version.manifest.name} ${version.manifest.version}. ${next}`;
-                })
+                act(async () => setUpload(await readUpload(await readFolder(chosen))))
               }
             />
           )}
@@ -263,14 +272,34 @@ export function Library({ ctx }: { ctx: ClientContext }) {
                 plugin={plugin}
                 installed={approvals.some((approval) => approval.id === plugin.id)}
                 removable={plugin.mine || admin}
+                visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
                 onInstall={(version) => setRequest(requestFor(plugin.id, version))}
                 onRemove={(version) => setRemoval({ plugin, version })}
+                onVisibility={(visibility) =>
+                  act(() =>
+                    api.call(pluginRoutes.setVisibility, {
+                      params: { pluginId: plugin.id },
+                      body: { visibility },
+                    }),
+                  )
+                }
               />
             ))}
           </ul>
         )}
       </div>
       <Approval candidate={request} onDone={() => setRequest(null)} onApprove={approve} />
+      <ConfirmUpload
+        ctx={ctx}
+        upload={upload}
+        onDone={() => setUpload(null)}
+        onUpload={(chosen, visibility) =>
+          act(async () => {
+            const { manifest } = await uploadAndInstall(ctx, chosen, visibility);
+            return `Uploaded and installed ${manifest.name} ${manifest.version}.`;
+          })
+        }
+      />
       <RemoveFromLibrary
         removal={removal}
         onDone={() => setRemoval(null)}
@@ -356,15 +385,20 @@ function LibraryRow({
   plugin,
   installed,
   removable,
+  visibility,
   onInstall,
   onRemove,
+  onVisibility,
 }: {
   plugin: LibraryPlugin;
   installed: boolean;
   removable: boolean;
+  /** Known for the caller's own plugins only. */
+  visibility: Visibility;
   onInstall: (version: LibraryVersion) => void;
   /** Remove one version, or with null the whole plugin. */
   onRemove: (version: LibraryVersion | null) => void;
+  onVisibility: (visibility: Visibility) => Promise<void>;
 }) {
   const [newest] = plugin.versions;
   if (!newest) return null;
@@ -377,6 +411,7 @@ function LibraryRow({
         <span className="text-sm text-muted-foreground">{manifest.version}</span>
         <Badge variant="secondary">{level.label}</Badge>
         {installed && <Badge variant="outline">Installed</Badge>}
+        {plugin.mine && visibility === 'private' && <Badge variant="outline">Only me</Badge>}
       </div>
       {manifest.description && <p className="text-sm">{manifest.description}</p>}
       <p className="text-sm text-muted-foreground">
@@ -384,6 +419,15 @@ function LibraryRow({
         {plugin.mine && ' (you)'}.
       </p>
       <div className="flex flex-wrap gap-2">
+        {plugin.mine && (
+          <Picker
+            label="Who sees it"
+            className="h-8 w-auto"
+            value={visibility}
+            options={VISIBILITY}
+            onChange={(chosen) => void onVisibility(chosen)}
+          />
+        )}
         {!installed && (
           <Button size="sm" onClick={() => onInstall(newest)}>
             Install…
@@ -462,39 +506,74 @@ function RemoveFromLibrary({
 }
 
 /**
- * Confirm sharing a plugin to the library, from the desktop app: everyone
- * on the server can see it and install it.
+ * Confirm uploading a plugin to the library (ADR 0004), whichever way it
+ * is uploaded: the approval dialog for its version, as an update of the
+ * one installed if there is one, with the choice of Shared or Only me.
+ * Uploading installs it for the person, so confirming does both:
+ * `onUpload` runs `uploadAndInstall` and says how it went. `visibility` is
+ * left out unless it changes, so a server from before ADR 0004, which
+ * refuses the field, still takes the upload.
  */
-export function ShareToLibrary({
-  manifest,
+export function ConfirmUpload({
+  ctx,
+  upload,
   onDone,
-  onShare,
+  onUpload,
 }: {
-  manifest: Manifest | null;
+  ctx: ClientContext;
+  upload: PluginUpload | null;
   onDone: () => void;
-  onShare: () => Promise<void>;
+  onUpload: (upload: PluginUpload, visibility: Visibility | undefined) => Promise<void>;
 }) {
+  const { data: library } = useQuery(libraryQuery(ctx));
+  const { data: onlyMe, isError } = useQuery(privatePluginsQuery);
+  // The person's choice for this upload; until they make one, the plugin's own.
+  const [choice, setChoice] = useState<{ upload: PluginUpload; visibility: Visibility } | null>(
+    null,
+  );
+  const id = upload?.manifest.id;
+  // Unknown until the server says, and what is shown is then always sent.
+  // A server without the route (from before ADR 0004) has no Only me.
+  const known = onlyMe ?? (isError ? new Set<string>() : null);
+  const current = known && (id && known.has(id) ? 'private' : 'shared');
+  const visibility = choice && choice.upload === upload ? choice.visibility : (current ?? 'shared');
+  const approved = pluginOperations.listPluginApprovals(ctx).find((each) => each.id === id);
+  const installed = library
+    ?.find((plugin) => plugin.id === id)
+    ?.versions.find((version) => version.hash === approved?.hash)?.manifest;
+  const candidate = upload && {
+    ...upload,
+    level: trustLevel(upload.manifest),
+    development: null,
+    replaces:
+      installed && approved?.hash !== upload.hash
+        ? { version: installed.version, level: trustLevel(installed), access: installed.access }
+        : null,
+  };
   return (
-    <Dialog open={manifest !== null} onOpenChange={(open) => !open && onDone()}>
-      {manifest && (
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Share {manifest.name} {manifest.version} to the library?
-            </DialogTitle>
-            <DialogDescription>
-              Everyone on this server can see it and install it, and its files are plain text on the
-              server. Only the account that first shared {manifest.id} can add versions of it.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={onDone}>
-              Cancel
-            </Button>
-            <Button onClick={() => void onShare().then(onDone)}>Share</Button>
-          </DialogFooter>
-        </DialogContent>
-      )}
-    </Dialog>
+    <Approval
+      candidate={candidate}
+      verb="Upload"
+      onDone={onDone}
+      onApprove={(chosen) => onUpload(chosen, visibility === current ? undefined : visibility)}
+    >
+      <Picker
+        label="Who sees it"
+        className="w-auto justify-self-start"
+        value={visibility}
+        options={VISIBILITY}
+        onChange={(chosen) => upload && setChoice({ upload, visibility: chosen })}
+      />
+      <p>
+        {visibility === 'shared'
+          ? 'Everyone on this server can see it in the library and install it.'
+          : 'Only you see it in the library. Anyone who already installed it keeps it and its updates.'}{' '}
+        Its files are plain text on the server.
+      </p>
+      <p>
+        Uploading installs it for you, on all your devices. Only the account that first uploaded{' '}
+        {id} can add versions of it.
+      </p>
+    </Approval>
   );
 }

@@ -1,6 +1,6 @@
 // The plugin library on the server (ADR 0002, PR 1): what an upload must
-// be, its limits, who owns an ID and may remove it, and the headers a
-// library file is served with.
+// be, its limits, who owns an ID and may remove it, the headers a library
+// file is served with, and who an Only me plugin is listed to (ADR 0004).
 import { createApiClient } from '@wikistow/client';
 import { pluginRoutes } from '@wikistow/contracts';
 import { pluginHash } from '@wikistow/plugin-sdk/files';
@@ -34,7 +34,7 @@ const notes = (version = '1.0.0') =>
     { 'script.js': `export const v = '${version}';`, 'style.css': 'p{}', 'icons/a.svg': '<svg/>' },
   );
 
-const upload = (person: Person | Browser, files: Files) =>
+const upload = (person: Person | Browser, files: Files, visibility?: 'shared' | 'private') =>
   ('browser' in person ? person.browser : person).request('/api/plugins', {
     method: 'POST',
     json: {
@@ -42,15 +42,26 @@ const upload = (person: Person | Browser, files: Files) =>
         path,
         data: Buffer.from(bytesOf(data)).toString('base64url'),
       })),
+      ...(visibility && { visibility }),
     },
   });
 
 const hashOf = (files: Files) =>
   pluginHash(new Map(Object.entries(files).map(([path, data]) => [path, bytesOf(data)])));
 
-/** The library as `person` sees it, through the API client and its contract. */
-const list = async (person: Person) =>
-  (await createApiClient({ fetch: person.browser.fetch }).call(pluginRoutes.listPlugins)).plugins;
+/** The library as `person` sees it, naming hashes `have`, through the API client and its contract. */
+const list = async (person: Person, have: string[] = []) =>
+  (
+    await createApiClient({ fetch: person.browser.fetch }).call(pluginRoutes.listPlugins, {
+      query: { have: pluginRoutes.haveQuery(have) },
+    })
+  ).plugins;
+
+const setVisibility = (person: Person, pluginId: string, visibility: string) =>
+  person.browser.request(`/api/plugins/${pluginId}/visibility`, {
+    method: 'PUT',
+    json: { visibility },
+  });
 
 const remove = (person: Person, path: string) =>
   person.browser.request(`/api/plugins/${path}`, { method: 'DELETE' });
@@ -220,5 +231,59 @@ describe('the plugin library', () => {
     expect((await upload(bob, notes('3.0.0'))).status).toBe(403);
     expect((await upload(ann, notes('3.0.0'))).status).toBe(201);
     expect((await list(ann)).find((p) => p.id === 'notes')?.mine).toBe(true);
+  });
+
+  it('lists an Only me plugin to its owner, and to others only by one of its hashes', async () => {
+    const v1files = plugin(
+      { id: 'diary', script: 'script.js' },
+      { 'script.js': 'export const v = 1;' },
+    );
+    const v1 = await hashOf(v1files);
+    expect((await upload(ann, v1files, 'private')).status).toBe(201);
+    const ids = async (person: Person, have?: string[]) =>
+      (await list(person, have)).map((p) => p.id);
+    const onlyMe = async (person: Person) =>
+      (await person.browser.request('/api/plugins/private').then((res) => res.json())) as {
+        ids: string[];
+      };
+
+    // Hidden from other members, admins too; the owner sees it, and which of theirs are Only me.
+    expect(await ids(bob)).not.toContain('diary');
+    expect(await ids(admin)).not.toContain('diary');
+    expect(await ids(ann)).toContain('diary');
+    expect(await onlyMe(ann)).toEqual({ ids: ['diary'] });
+    expect(await onlyMe(bob)).toEqual({ ids: [] });
+    // A hash of another plugin doesn't list it.
+    expect(await ids(bob, [await hashOf(notes('3.0.0'))])).not.toContain('diary');
+
+    // Whoever names one of its hashes sees it with every version, newer ones
+    // too, so an install keeps its updates. Later uploads keep it Only me.
+    const v2files = plugin(
+      { id: 'diary', version: '2.0.0', script: 'script.js' },
+      { 'script.js': 'export const v = 2;' },
+    );
+    const v2 = await hashOf(v2files);
+    expect((await upload(ann, v2files)).status).toBe(201);
+    expect(await ids(bob)).not.toContain('diary');
+    const listed = (await list(bob, [v1])).find((p) => p.id === 'diary');
+    expect(listed).toMatchObject({ mine: false });
+    expect(listed?.versions.map((v) => v.hash)).toEqual([v2, v1]);
+    // Its files are served by hash, as every version's are.
+    expect((await bob.browser.request(`/plugins/diary/${v2}/script.js`)).status).toBe(200);
+
+    // Only its owner chooses who sees it: not another member, nor an admin.
+    expect((await setVisibility(bob, 'diary', 'shared')).status).toBe(403);
+    expect((await setVisibility(admin, 'diary', 'shared')).status).toBe(403);
+    expect((await setVisibility(ann, 'missing', 'shared')).status).toBe(404);
+    expect((await setVisibility(ann, 'diary', 'everyone')).status).toBe(400);
+    expect(await ids(bob)).not.toContain('diary');
+    expect((await setVisibility(ann, 'diary', 'shared')).status).toBe(200);
+    expect(await ids(bob)).toContain('diary');
+    expect(await onlyMe(ann)).toEqual({ ids: [] });
+
+    // Uploading a version the library already has still sets it.
+    expect((await upload(ann, v1files, 'private')).status).toBe(201);
+    expect(await ids(bob)).not.toContain('diary');
+    expect(await onlyMe(ann)).toEqual({ ids: ['diary'] });
   });
 });

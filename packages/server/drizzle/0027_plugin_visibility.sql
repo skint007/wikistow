@@ -1,0 +1,2 @@
+ALTER TABLE "plugins" ADD COLUMN "visibility" text DEFAULT 'shared' NOT NULL;--> statement-breakpoint
+ALTER TABLE "plugins" ADD CONSTRAINT "plugins_visibility" CHECK ("plugins"."visibility" in ('shared', 'private'));

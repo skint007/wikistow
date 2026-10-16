@@ -126,7 +126,7 @@ Code, styles or both that a person installs to change how WikiStow looks and wor
 _Avoid_: Extension, add-on.
 
 **Plugin library**
-The plugins members uploaded to their server, which anyone signed in there may install. Installing is **approving** one version's hash; the approvals live in the person's own encrypted account data and follow them to every device.
+The plugins members uploaded to their server. Each is **Shared**, listed to everyone signed in there, or **Only me**, listed only to its owner and to people who already installed it; its owner chooses. Installing is **approving** one version's hash; the approvals live in the person's own encrypted account data and follow them to every device. Uploading a plugin installs it for its owner.
 _Avoid_: Store, marketplace (nothing is sold or rated).
 
 **Plugin draft**

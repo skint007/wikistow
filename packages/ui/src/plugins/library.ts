@@ -5,17 +5,43 @@ import {
   type PluginApproval,
 } from '@wikistow/client';
 import { pluginRoutes, type InstalledPlugin, type PluginUploadFile } from '@wikistow/contracts';
-import { trustLevel } from '@wikistow/plugin-sdk/manifest';
-import { queryOptions } from '@tanstack/react-query';
+import { checkPlugin } from '@wikistow/plugin-sdk/files';
+import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
 import { vaultStore } from '../vault/store';
 import type { RuntimeSource } from './runtime';
 import { tabSafeMode } from './safe-mode';
 
-/** The server's plugin library (ADR 0002): every plugin, newest version first. */
-export const libraryQuery = queryOptions({
-  queryKey: ['plugin-library'],
-  queryFn: async () => (await api.call(pluginRoutes.listPlugins)).plugins,
+/** What every library query's key starts with, to show the library afresh after a change. */
+export const LIBRARY_KEY = ['plugin-library'];
+
+/** The listing's `have`: the hashes the person approved, so the Only me plugins they installed stay listed. */
+const have = (approvals: readonly PluginApproval[]) =>
+  pluginRoutes.haveQuery(approvals.map(({ hash }) => hash));
+
+const listLibrary = async (approvals: readonly PluginApproval[]) =>
+  (await api.call(pluginRoutes.listPlugins, { query: { have: have(approvals) } })).plugins;
+
+/**
+ * The server's plugin library (ADR 0002) as the person in `ctx` may see it
+ * (ADR 0004): every plugin, newest version first. Keyed by the hashes they
+ * approved, so it is listed again as those change, showing the last
+ * listing meanwhile.
+ */
+export const libraryQuery = (ctx: ClientContext) => {
+  const approvals = pluginOperations.listPluginApprovals(ctx);
+  return queryOptions({
+    queryKey: [...LIBRARY_KEY, have(approvals)],
+    queryFn: () => listLibrary(approvals),
+    placeholderData: keepPreviousData,
+  });
+};
+
+/** The IDs of the person's own Only me plugins. */
+export const privatePluginsQuery = queryOptions({
+  queryKey: [...LIBRARY_KEY, 'private'],
+  queryFn: async () => new Set((await api.call(pluginRoutes.privatePlugins)).ids),
 });
 
 export type LibraryPlugin = pluginRoutes.LibraryPlugin;
@@ -31,11 +57,48 @@ export const asInstalled = (version: LibraryVersion, enabled: boolean): Installe
   enabled,
 });
 
-/** Upload a built plugin's files to the library as a new version of its ID. */
-export const uploadToLibrary = async (files: readonly PluginUploadFile[]) =>
-  api.call(pluginRoutes.uploadPlugin, {
-    body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
+/** A built plugin's files to upload, read and hashed here as the server will: what the confirmation shows. */
+export type PluginUpload = {
+  files: readonly PluginUploadFile[];
+  manifest: Manifest;
+  hash: string;
+};
+
+/** Check `files` as one built plugin folder (`checkPlugin`), throwing what is wrong with it. */
+export async function readUpload(files: readonly PluginUploadFile[]): Promise<PluginUpload> {
+  const { manifest, hash } = await checkPlugin(
+    new Map(files.map(({ path, data }) => [path, data])),
+  );
+  return { files, manifest, hash };
+}
+
+/**
+ * Upload `upload` to the library as a version of its ID, as `visibility`
+ * if given (a new ID is otherwise Shared, an existing one stays as it is),
+ * then install it for the person (ADR 0004): approve its hash, or for
+ * an ID they installed, approve it in place of the older hash, keeping
+ * page access and on or off. Nothing is approved unless the server
+ * answers the hash computed here, which the person was shown.
+ */
+export async function uploadAndInstall(
+  ctx: ClientContext,
+  { files, manifest, hash }: PluginUpload,
+  visibility?: pluginRoutes.PluginVisibility,
+) {
+  const { version } = await api.call(pluginRoutes.uploadPlugin, {
+    body: {
+      files: files.map(({ path, data }) => ({ path, data: toBase64(data) })),
+      ...(visibility && { visibility }),
+    },
   });
+  if (version.hash !== hash)
+    throw new Error('The server answered with different files, so the plugin wasn’t installed.');
+  const { id } = manifest;
+  if (pluginOperations.listPluginApprovals(ctx).some((approval) => approval.id === id))
+    await pluginOperations.updatePlugin(ctx, id, hash);
+  else await pluginOperations.approvePlugin(ctx, { id, hash, access: [] });
+  return version;
+}
 
 /**
  * Each approval whose version the library still has, in the record's
@@ -77,8 +140,7 @@ export const librarySource: Omit<RuntimeSource, 'pages' | 'handle'> = {
     // Nothing approved needs no request.
     if (approvals.length === 0) return { safeMode, plugins: [] };
     try {
-      const { plugins } = await api.call(pluginRoutes.listPlugins);
-      lastListed = { ctx: vault.ctx, library: plugins };
+      lastListed = { ctx: vault.ctx, library: await listLibrary(approvals) };
     } catch {
       // The server is away: the library as this session last saw it, so
       // what runs keeps running. Before any listing, nothing is known.
