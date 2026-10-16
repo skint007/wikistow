@@ -7,7 +7,7 @@ import {
 import { pluginRoutes, type InstalledPlugin, type PluginUploadFile } from '@wikistow/contracts';
 import { checkPlugin } from '@wikistow/plugin-sdk/files';
 import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
-import { queryOptions } from '@tanstack/react-query';
+import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
 import { vaultStore } from '../vault/store';
 import type { RuntimeSource } from './runtime';
@@ -26,13 +26,15 @@ const listLibrary = async (approvals: readonly PluginApproval[]) =>
 /**
  * The server's plugin library (ADR 0002) as the person in `ctx` may see it
  * (ADR 0004): every plugin, newest version first. Keyed by the hashes they
- * approved, so it is listed again as those change.
+ * approved, so it is listed again as those change, showing the last
+ * listing meanwhile.
  */
 export const libraryQuery = (ctx: ClientContext) => {
   const approvals = pluginOperations.listPluginApprovals(ctx);
   return queryOptions({
     queryKey: [...LIBRARY_KEY, have(approvals)],
     queryFn: () => listLibrary(approvals),
+    placeholderData: keepPreviousData,
   });
 };
 
