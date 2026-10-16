@@ -49,6 +49,7 @@ Open the printed invitation, create the account, and verify its email through Ma
 ```sh
 pnpm check
 node scripts/version.ts
+node scripts/changelog.ts
 pnpm exec vp test --project client --project unit
 pnpm exec vp test --project integration
 pnpm exec vp test --project client-browser --project ui-browser
@@ -63,7 +64,7 @@ Integration tests use the local Postgres service. The backup and restore tests a
 
 Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).
 
-GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version, and the desktop app and the CLI as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need.
+GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version, and the desktop app and the CLI as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need. A pull request that changes what ships adds a line to [`CHANGELOG.md`](CHANGELOG.md), as [Releasing](docs/releasing.md#the-changelog) describes.
 
 ## Deploy and operate
 

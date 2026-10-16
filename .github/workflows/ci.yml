@@ -30,7 +30,8 @@ env:
   POSTGRES_ADMIN_URL: postgres://wikistow:wikistow@postgres:5432/postgres
 
 jobs:
-  # Format, lint, and type checks, and one version everywhere.
+  # Format, lint, and type checks, one version everywhere, and its changelog
+  # entry (docs/releasing.md#the-changelog).
   check:
     runs-on: ubuntu-24.04
     # Both images are glibc, so the same lockfile installs the native binaries
@@ -43,6 +44,7 @@ jobs:
       - uses: ./.github/actions/setup
       - run: ./node_modules/.bin/vp check
       - run: node scripts/version.ts
+      - run: node scripts/changelog.ts
 
   test:
     runs-on: ubuntu-24.04
