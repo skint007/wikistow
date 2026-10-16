@@ -184,10 +184,11 @@ test('a library plugin installs at unlock, checked against its hash', async ({
       .getByRole('list', { name: 'Installed from the library' })
       .getByRole('listitem', { name: 'Probe' }),
   ).toBeVisible();
-  const [hash = ''] = await copies(first.profile);
-  expect(hash).toMatch(/^[0-9a-f]{64}$/);
   await backToPage(first.window);
   expect(await runCommand(first.window, 'Try the network')).toContain('network blocked');
+  // Copied by now: it ran from the copy.
+  const [hash = ''] = await copies(first.profile);
+  expect(hash).toMatch(/^[0-9a-f]{64}$/);
   await first.app.close();
 
   // Changed on the server after it was approved: the second computer refuses it.
