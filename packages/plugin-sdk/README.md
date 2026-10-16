@@ -1,6 +1,6 @@
 # @wikistow/plugin-sdk
 
-What a WikiStow plugin is written against. The design and its reasons are in [ADR 0001](../../docs/adr/0001-desktop-plugin-runtime.md); the plugin library and browser plugins in [ADR 0002](../../docs/adr/0002-plugin-library-and-browser-plugins.md); `wikistow.md` §Plugins says what a person sees. Plugins run in the desktop app, installed from a folder, and in the browser and on phones, installed from the server's plugin library.
+What a WikiStow plugin is written against. The design and its reasons are in [ADR 0001](../../docs/adr/0001-desktop-plugin-runtime.md); the plugin library and browser plugins in [ADR 0002](../../docs/adr/0002-plugin-library-and-browser-plugins.md); `wikistow.md` §Plugins says what a person sees. Plugins run in the desktop app, installed from a folder or from the server's plugin library, and in the browser and on phones, installed from the library.
 
 ## A plugin folder
 
@@ -11,7 +11,7 @@ src/script.ts          script code (optional): calls defineScript(...)
 public/                styles, theme stylesheets, fonts, images, copied as they are
 ```
 
-`wikistow-plugin build [folder]` writes `dist/`: the manifest, `ui.js` and `script.js` each bundled into one self-contained ES module (unminified, for whoever approves it), and `public/`'s files. Install `dist/` in the desktop app's Settings → Plugins, or load it there for development and press **Reload** after each build. To use it in the browser, upload `dist/` to the library from Settings → Plugins in a computer's browser, then install it there; file and folder names must use only letters, digits, `_`, `.` and `-`. The desktop app's plugin workshop builds the same layout itself, with the assistant writing the files. There are four examples in `examples/plugins`: `page-tools` (a panel, commands, a script and a block), `calculator` (a script plugin's block), `reading-room` (a layout: a rail item, a plugin page, a page aside and CSS) and `dusk-theme`, a theme that needs no build, just a manifest and a stylesheet installed as they are.
+`wikistow-plugin build [folder]` writes `dist/`: the manifest, `ui.js` and `script.js` each bundled into one self-contained ES module (unminified, for whoever approves it), and `public/`'s files. Install `dist/` in the desktop app's Settings → Plugins, or load it there for development and press **Reload** after each build. To use it in the browser or on other computers, upload `dist/` to the library from Settings → Plugins in a computer's browser, or install it in the desktop app and use **Share to library…** there, then install it from the library; file and folder names must use only letters, digits, `_`, `.` and `-`. The desktop app's plugin workshop builds the same layout itself, with the assistant writing the files. There are four examples in `examples/plugins`: `page-tools` (a panel, commands, a script and a block), `calculator` (a script plugin's block), `reading-room` (a layout: a rail item, a plugin page, a page aside and CSS) and `dusk-theme`, a theme that needs no build, just a manifest and a stylesheet installed as they are.
 
 The manifest (`src/manifest.ts` has the schema):
 

@@ -122,7 +122,7 @@ A secret used to unlock a person's encrypted keys. It is distinct from the accou
 ## Plugins
 
 **Plugin**
-Code, styles or both that a person installs to change how WikiStow looks and works. In the desktop app it comes from a folder on that computer; in the browser, from the server's **plugin library**. Never from a page.
+Code, styles or both that a person installs to change how WikiStow looks and works. In the desktop app it comes from a folder on that computer or from the server's **plugin library**; in the browser, from the library. Never from a page.
 _Avoid_: Extension, add-on.
 
 **Plugin library**

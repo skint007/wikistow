@@ -45,7 +45,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 ### Desktop, phones, safe mode
 
-- **Desktop** shows the library in Settings → Plugins. Approving there writes the account record like anywhere else. At unlock, main downloads each approved library plugin it lacks (through its session), checks the files against the approved hash, and copies them into `userData/plugins/<id>/<hash>/` as a folder install is copied; it deletes library copies no longer approved. A folder or development install of the same ID replaces the library's on that computer until it is removed.
+- **Desktop** shows the library in Settings → Plugins. Approving there writes the account record like anywhere else. At unlock, main downloads each approved library plugin it lacks (through its session), checks the files against the approved hash, and copies them into `userData/library-plugins/<id>/<hash>/` as a folder install is copied (beside `userData/plugins/`, not in it, so removing a folder install and deleting library copies never touch each other's files); it deletes library copies no longer approved. A folder or development install of the same ID replaces the library's on that computer until it is removed.
 - **Phones** install from the library, which needs no folder, and run plugins as any browser does; every region already shows at phone sizes. Uploading needs a computer.
 - **Safe mode in the browser** is per tab: `?safe-mode` in the address, **Open without plugins** on the unlock page, or Ctrl+Shift+Alt+P, then the desktop's banner with **Manage plugins** and **Turn plugins back on**. Plugins load only after unlock (their approvals are encrypted), so the unlock page never runs one. A browser can't see its tab crash, so there is no automatic safe mode there.
 
@@ -112,3 +112,5 @@ Scott approved every recommendation:
 6. **Desktop scripts through the frame,** dropping the storage emptying at lock.
 
 1, 2 and 3 are independent; 4 needs all three; 5 needs 1 and 2.
+
+Status (2026-10-16): 1 to 5 are built. Desktop scripts still run as workers of the app's own origin until 6.
