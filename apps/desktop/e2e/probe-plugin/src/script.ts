@@ -1,6 +1,8 @@
 // A script that tries the network and saving a draft, each ending by
 // throwing what happened, so the page's plugin notice shows it to the test;
 // and one that appends a line to the draft shown, through its page handle.
+// It runs from a `data:` address in the host frame, so the app's API is
+// named in full.
 import { defineScript } from '@wikistow/plugin-sdk';
 
 const outcome = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -12,11 +14,11 @@ defineScript((host) => {
     async run() {
       let result: string;
       try {
-        result = `reached it (${(await fetch('/api/me')).status})`;
+        result = `reached it (${(await fetch('app://wikistow/api/me')).status})`;
       } catch (error) {
         result = `blocked: ${outcome(error)}`;
       }
-      throw new Error(`network ${result}`);
+      throw new Error(`${host.pluginId}: network ${result}`);
     },
   });
   host.commands.register({
