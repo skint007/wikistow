@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Lock,
   LogOut,
+  Megaphone,
   Plus,
   Search,
   Settings,
@@ -357,6 +358,9 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {update && <UpdateEntry update={update} />}
+        <DropdownMenuItem onSelect={() => void navigate({ to: '/whats-new' })}>
+          <Megaphone strokeWidth={1.75} /> What’s new
+        </DropdownMenuItem>
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
           Version {__APP_VERSION__}
         </DropdownMenuLabel>

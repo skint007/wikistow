@@ -19,6 +19,7 @@ import { Route as AppVaultRouteImport } from './routes/_app/_vault'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppDesktopSignInRouteImport } from './routes/_app/desktop-sign-in'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppWhatsNewRouteImport } from './routes/_app/whats-new'
 import { Route as AppVaultIndexRouteImport } from './routes/_app/_vault/index'
 import { Route as AppVaultAgentsRouteImport } from './routes/_app/_vault/agents'
 import { Route as AppVaultSharedRouteImport } from './routes/_app/_vault/shared'
@@ -83,6 +84,11 @@ const AppDesktopSignInRoute = AppDesktopSignInRouteImport.update({
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWhatsNewRoute = AppWhatsNewRouteImport.update({
+  id: '/whats-new',
+  path: '/whats-new',
   getParentRoute: () => AppRoute,
 } as any)
 const AppVaultIndexRoute = AppVaultIndexRouteImport.update({
@@ -184,6 +190,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRouteWithChildren
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/settings': typeof AppSettingsRoute
+  '/whats-new': typeof AppWhatsNewRoute
   '/agents': typeof AppVaultAgentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/workshop': typeof AppVaultWorkshopRoute
@@ -210,6 +217,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/settings': typeof AppSettingsRoute
+  '/whats-new': typeof AppWhatsNewRoute
   '/agents': typeof AppVaultAgentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/workshop': typeof AppVaultWorkshopRoute
@@ -238,6 +246,7 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/desktop-sign-in': typeof AppDesktopSignInRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/_app/whats-new': typeof AppWhatsNewRoute
   '/_app/_vault/agents': typeof AppVaultAgentsRoute
   '/_app/_vault/shared': typeof AppVaultSharedRoute
   '/_app/_vault/workshop': typeof AppVaultWorkshopRoute
@@ -268,6 +277,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/desktop-sign-in'
     | '/settings'
+    | '/whats-new'
     | '/agents'
     | '/shared'
     | '/workshop'
@@ -294,6 +304,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/desktop-sign-in'
     | '/settings'
+    | '/whats-new'
     | '/agents'
     | '/shared'
     | '/workshop'
@@ -321,6 +332,7 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/desktop-sign-in'
     | '/_app/settings'
+    | '/_app/whats-new'
     | '/_app/_vault/agents'
     | '/_app/_vault/shared'
     | '/_app/_vault/workshop'
@@ -419,6 +431,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/whats-new': {
+      id: '/_app/whats-new'
+      path: '/whats-new'
+      fullPath: '/whats-new'
+      preLoaderRoute: typeof AppWhatsNewRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/_vault/': {
@@ -605,6 +624,7 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
   AppDesktopSignInRoute: typeof AppDesktopSignInRoute
   AppSettingsRoute: typeof AppSettingsRoute
+  AppWhatsNewRoute: typeof AppWhatsNewRoute
   AppVaultRecoverRoute: typeof AppVaultRecoverRoute
   AppVaultSetupRoute: typeof AppVaultSetupRoute
   AppVaultUnlockRoute: typeof AppVaultUnlockRoute
@@ -615,6 +635,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
   AppDesktopSignInRoute: AppDesktopSignInRoute,
   AppSettingsRoute: AppSettingsRoute,
+  AppWhatsNewRoute: AppWhatsNewRoute,
   AppVaultRecoverRoute: AppVaultRecoverRoute,
   AppVaultSetupRoute: AppVaultSetupRoute,
   AppVaultUnlockRoute: AppVaultUnlockRoute,
