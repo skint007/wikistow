@@ -1,4 +1,5 @@
 import {
+  Base64,
   MetadataEnvelope,
   MetadataEnvelopeV2,
   MetadataRecord,
@@ -17,6 +18,7 @@ import {
   parseJson,
   parseWith,
   sealedBytes,
+  toBase64,
   utf8,
 } from './encoding.ts';
 import {
@@ -88,15 +90,66 @@ export type FolderLook = { emoji: string; tint: string };
  */
 export const DEFAULT_FOLDER_LOOK: FolderLook = { emoji: '⭐', tint: 'blue' };
 
+/** The extension holding a folder's image, inside its encrypted metadata (section 5.5). */
+export const ICON_NAMESPACE = 'wikistow.icon';
+
+/** The formats an icon image is stored in. */
+export const ICON_MEDIA_TYPES = ['image/webp', 'image/jpeg', 'image/png'] as const;
+export type IconMediaType = (typeof ICON_MEDIA_TYPES)[number];
+
+/** The largest icon image kept, encoded: every tree load carries each folder's. */
+export const ICON_MAX_BYTES = 16 * 1024;
+
+/** An icon image, already resized and encoded. */
+export type FolderIcon = { mediaType: IconMediaType; bytes: Uint8Array };
+
+const StoredIcon = z.looseObject({
+  format: z.literal(1),
+  mediaType: z.enum(ICON_MEDIA_TYPES),
+  data: Base64,
+});
+
+/**
+ * A folder's image, or null for none: anything other than an image of an
+ * accepted type and size counts as none, so the folder shows its emoji.
+ */
+export function folderIconOf({ extensions }: NodeMetadata): FolderIcon | null {
+  const stored = StoredIcon.safeParse(extensions[ICON_NAMESPACE]);
+  if (!stored.success) return null;
+  try {
+    const bytes = fromBase64(stored.data.data);
+    return bytes.length > 0 && bytes.length <= ICON_MAX_BYTES
+      ? { mediaType: stored.data.mediaType, bytes }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `extensions` change that sets a folder's image, or removes it with
+ * null: extensions are merged, so a removed one is written as null.
+ */
+export function folderIconChange(icon: FolderIcon | null): NodeMetadata['extensions'] {
+  const size = icon?.bytes.length ?? 0;
+  if (icon && (!ICON_MEDIA_TYPES.includes(icon.mediaType) || size === 0 || size > ICON_MAX_BYTES)) {
+    throw new CryptoError('malformed', 'An icon must be a WebP, JPEG or PNG of at most 16 KB');
+  }
+  return {
+    [ICON_NAMESPACE]: icon && { format: 1, mediaType: icon.mediaType, data: toBase64(icon.bytes) },
+  };
+}
+
 export const newFolderMetadata = (
   name: string,
   { emoji, tint }: FolderLook = DEFAULT_FOLDER_LOOK,
+  icon: FolderIcon | null = null,
 ): NodeMetadata => ({
   format: { ...METADATA_FORMAT },
   name,
   emoji,
   tint,
-  extensions: {},
+  extensions: icon ? folderIconChange(icon) : {},
 });
 
 export const newSpaceMetadata = (name: string, emoji?: string): NodeMetadata => ({
