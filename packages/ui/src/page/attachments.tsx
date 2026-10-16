@@ -32,7 +32,9 @@ export const decryptedQuery = (
   queryOptions({
     queryKey: decryptedKey(attachments, ref),
     enabled: ref !== undefined,
+    // Kept, not decrypted again into a new URL while the old one lives on until the lock.
     staleTime: Infinity,
+    gcTime: Infinity,
     queryFn: async () => {
       if (!ref) throw new Error('unreachable: disabled without a ref');
       const epoch = vaultStore.epoch();
