@@ -11,8 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { runCommand } from '../commands/command';
-import { changeAccess } from '../commands/sharing-commands';
+import { sendGroupChange } from '../commands/sharing-commands';
 import { refreshAccess, treeQuery } from '../data/queries';
 import { useClient } from '../vault/store';
 import { PersonRow } from './access-panel';
@@ -82,7 +81,7 @@ export function GiveAccessDialog({
             personIds={[who.id]}
           />
         )}
-        apply={(change) => runCommand(changeAccess, { change }, { satisfies, ctx })}
+        apply={(change) => sendGroupChange(change, { satisfies, ctx })}
         onCancel={() => setGiving(null)}
         onDone={async () => {
           setGiving(null);

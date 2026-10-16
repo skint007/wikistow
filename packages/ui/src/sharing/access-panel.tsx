@@ -23,7 +23,7 @@ import {
 import { runCommand } from '../commands/command';
 import {
   addMember,
-  changeAccess,
+  sendGroupChange,
   rotateShare,
   setPublishRights,
 } from '../commands/sharing-commands';
@@ -375,7 +375,7 @@ export function AccessPanel({
       case 'publish':
         // Publish rights alone change no keys: anyone short of keys keeps waiting for Give access.
         return run(async () => {
-          await runCommand(changeAccess, { change: { ...(await make()), seals: [] } }, env);
+          await sendGroupChange({ ...(await make()), seals: [] }, env);
           await finish(
             <>
               <Name>{name}</Name>{' '}
@@ -477,7 +477,8 @@ export function AccessPanel({
         confirmLabel={pending.confirmLabel}
         none={pending.none}
         confirmNone
-        make={pending.make}
+        // Taking access away seals nothing: anyone short of keys keeps waiting for Give access.
+        make={async () => ({ ...(await pending.make()), seals: [] })}
         plansOf={({ rotations }) =>
           rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
         }
@@ -485,7 +486,7 @@ export function AccessPanel({
           <ChangeReview spaceId={spaceId} change={change} {...pending.showing(change)} />
         )}
         apply={async (change) => {
-          await runCommand(changeAccess, { change }, env);
+          await sendGroupChange(change, env);
           sent.current = change;
         }}
         ownerIds={ownerIds}
@@ -505,7 +506,7 @@ export function AccessPanel({
         review={(change) => (
           <ChangeReview spaceId={spaceId} change={change} {...pending.showing(change)} />
         )}
-        apply={(change) => runCommand(changeAccess, { change }, env)}
+        apply={(change) => sendGroupChange(change, env)}
         onCancel={() => setPending(null)}
         onDone={() => finish(pending.done)}
       />
@@ -515,6 +516,14 @@ export function AccessPanel({
   if (pending?.kind === 'add' || pending?.kind === 'promote') {
     const who = pending.kind === 'add' ? pending.found.person : pending.person;
     const to = pending.kind === 'add' ? pending.found.access : pending.access;
+    // Someone there through a group gets no keys they don't hold already, unless this makes
+    // them an editor.
+    const there =
+      pending.kind === 'add' ? access?.people.find((p) => p.identityId === who.id) : undefined;
+    const viaGroup =
+      there && (there.access.role === 'editor' || grantOf(to).role === 'reader')
+        ? there
+        : undefined;
     return (
       <div className="grid gap-4">
         <h3 className="font-extrabold">
@@ -529,7 +538,10 @@ export function AccessPanel({
           </p>
         )}
         <p className="rounded-control bg-muted p-3 text-sm">
-          <Name>{who.name}</Name> {historyNotice(to)}
+          <Name>{who.name}</Name>{' '}
+          {viaGroup
+            ? `has ${ACCESS_LABELS[accessOf(viaGroup.access)]} through a group already, and keeps it. This gives them access of their own as well.`
+            : historyNotice(to)}
         </p>
         {busy && (
           <p role="status" className="text-sm font-bold">
@@ -739,6 +751,11 @@ export function AccessPanel({
             ) : listed.some((p) => p.identityId === found.id && p.sources[0]?.kind === 'direct') ? (
               <>
                 <Name>{found.name}</Name> has access already. Change it in the list above.
+              </>
+            ) : listed.some((p) => p.identityId === found.id && p.waiting) ? (
+              <>
+                <Name>{found.name}</Name> waits for keys here. Use Give access in the list above
+                first.
               </>
             ) : null
           }

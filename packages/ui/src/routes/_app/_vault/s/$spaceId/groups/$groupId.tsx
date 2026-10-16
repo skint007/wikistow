@@ -1,7 +1,7 @@
 import type { FolderId, groupOperations } from '@wikistow/client';
 import { GroupId } from '@wikistow/contracts';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { Pencil, ShieldAlert, Trash2, UserPlus } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Name } from '@/components/name';
@@ -38,7 +38,6 @@ export const Route = createFileRoute('/_app/_vault/s/$spaceId/groups/$groupId')(
 function Group() {
   const { spaceId, groupId } = Route.useParams();
   const ctx = useClient();
-  const navigate = useNavigate();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const owner = useOwnerStanding(spaceId) === 'owner';
   const groups = useQuery({ ...groupsQuery(ctx, spaceId), enabled: owner });
@@ -56,6 +55,8 @@ function Group() {
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [done, setDone] = useState<ReactNode>(null);
   const [giving, setGiving] = useState<Person | null>(null);
+  // Once it's deleted, the page says so instead of showing the group gone.
+  const [deleted, setDeleted] = useState(false);
   const waiting = (id: string) =>
     !!group &&
     !!groups.data?.waiting.some(
@@ -93,7 +94,8 @@ function Group() {
       spaceId={spaceId}
       back={{ to: '/s/$spaceId/groups', label: 'Groups' }}
       actions={
-        group && (
+        group &&
+        !deleted && (
           <>
             <Button
               size="sm"
@@ -115,7 +117,7 @@ function Group() {
           {sharingMessage(groups.error)}
         </p>
       )}
-      {groups.data && !group && (
+      {groups.data && !group && !deleted && (
         <p className="text-sm text-muted-foreground">This group isn’t there any more.</p>
       )}
       {done && (
@@ -123,7 +125,16 @@ function Group() {
           {done}
         </p>
       )}
-      {group && (
+      {deleted && (
+        <Link
+          to="/s/$spaceId/groups"
+          params={{ spaceId }}
+          className="text-sm font-bold text-primary-ink hover:underline"
+        >
+          Back to Groups
+        </Link>
+      )}
+      {group && !deleted && (
         <>
           <section aria-labelledby="members-heading" className="grid gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -220,10 +231,10 @@ function Group() {
             group={group}
             action={action}
             onClose={() => setAction(null)}
-            onDone={(message, deleted) => {
+            onDone={(message, gone) => {
               setAction(null);
-              if (deleted) void navigate({ to: '/s/$spaceId/groups', params: { spaceId } });
-              else setDone(message);
+              setDeleted(!!gone);
+              setDone(message);
             }}
           />
         </>

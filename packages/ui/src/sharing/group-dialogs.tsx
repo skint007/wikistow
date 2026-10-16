@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { runCommand } from '../commands/command';
-import { changeAccess, createGroup, renameGroup } from '../commands/sharing-commands';
+import { createGroup, renameGroup, sendGroupChange } from '../commands/sharing-commands';
 import { groupsQuery, refreshAccess, spaceKeysQuery, treeQuery } from '../data/queries';
 import { useClient } from '../vault/store';
 import { ChangeReview, GrantConfirm, groupName, peopleIn } from './groups';
@@ -72,7 +72,7 @@ export function GroupDialog({
   const { groupId } = group;
 
   const finish = async (message: ReactNode, deleted = false) => {
-    // A deleted group's page goes first, so it never shows the group missing.
+    // A deleted group's page says so first, so it never shows the group missing.
     if (deleted) onDone(message, deleted);
     await refreshAccess(queryClient, ctx);
     if (!deleted) onDone(message, deleted);
@@ -152,7 +152,7 @@ export function GroupDialog({
                 />
               </Keeps>
             )}
-            apply={(change) => runCommand(changeAccess, { change }, env)}
+            apply={(change) => sendGroupChange(change, env)}
             ownerIds={ownerIds}
             review={review}
             onCancel={onClose}
@@ -196,7 +196,7 @@ export function GroupDialog({
                 />
               </Keeps>
             )}
-            apply={(change) => runCommand(changeAccess, { change }, env)}
+            apply={(change) => sendGroupChange(change, env)}
             ownerIds={ownerIds}
             review={review}
             onCancel={onClose}
@@ -334,7 +334,7 @@ function AddMember({
           </section>
         )
       }
-      apply={(change) => runCommand(changeAccess, { change }, { satisfies, ctx })}
+      apply={(change) => sendGroupChange(change, { satisfies, ctx })}
       onCancel={() => setFound(null)}
       onDone={() =>
         onDone(

@@ -12,7 +12,7 @@ import {
 } from '@wikistow/client';
 import { GroupId } from '@wikistow/contracts';
 import { z } from 'zod';
-import type { Command, CommandEnv } from './command';
+import { runCommand, type Command, type CommandEnv } from './command';
 
 /**
  * Where a sharing command runs: the open session, and who hears how a long
@@ -91,18 +91,44 @@ export const rotateShare = command(
   },
 );
 
-/**
- * Send a change to who has access that the owner confirmed (protocol
- * sections 7.8 and 7.9): a group's members or shares, deleting a group,
- * dropping a direct grant, removing someone from every folder in the space,
- * or Give access. Its envelopes and rotations go in one request.
- */
-export const changeAccess = command(
-  'group.change',
-  z.object({ change: made<groupOperations.GroupChange>() }),
-  owner,
-  async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
-);
+// A change to who has access that the owner confirmed (protocol sections
+// 7.8 and 7.9), worked out by the client's `plan*` operations: its
+// envelopes and rotations go in one request. Each kind is its own command.
+const groupChange = (id: string, kind: groupOperations.GroupAction['kind']) =>
+  command(
+    id,
+    z.object({
+      change: made<groupOperations.GroupChange>().refine(
+        (change) => change.action.kind === kind,
+        `Not a ${kind}`,
+      ),
+    }),
+    owner,
+    async ({ change }, { ctx }) => groupOperations.applyGroupChange(ctx, change),
+  );
+
+export const groupChangeCommands = {
+  /** Delete a group, out of every folder it has. */
+  'delete-group': groupChange('group.delete', 'delete-group'),
+  /** Add someone to a group, sealing them every folder it has. */
+  'add-member': groupChange('group.add-member', 'add-member'),
+  /** Take someone out of a group, rotating where their access drops. */
+  'remove-member': groupChange('group.remove-member', 'remove-member'),
+  /** Share a folder with a group, or change its access there. */
+  'set-share-group': groupChange('share.set-group', 'set-share-group'),
+  /** Take a group out of a folder. */
+  'remove-share-group': groupChange('share.remove-group', 'remove-share-group'),
+  /** Drop someone's direct grant, keeping what their groups give them. */
+  'remove-direct': groupChange('share.remove-direct', 'remove-direct'),
+  /** Remove someone from every share and group in the space. */
+  'remove-everywhere': groupChange('share.remove-everywhere', 'remove-everywhere'),
+  /** Seal their keys to someone waiting for them. */
+  'give-access': groupChange('share.give-access', 'give-access'),
+} satisfies Record<groupOperations.GroupAction['kind'], unknown>;
+
+/** Send a group change the owner confirmed, as the command named for what it does. */
+export const sendGroupChange = (change: groupOperations.GroupChange, env: SharingEnv) =>
+  runCommand(groupChangeCommands[change.action.kind], { change }, env);
 
 /** Make a group in a space, its name sealed to the owners. */
 export const createGroup = command(
