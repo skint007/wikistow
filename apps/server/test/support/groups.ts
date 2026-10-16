@@ -1,107 +1,15 @@
-// An owner's app driving the group routes, as far as the server tests need:
-// the real client operations come later. Each helper seals and rotates with
-// the same client functions sharing uses.
-import {
-  MetadataRevisionId,
-  newFolderMetadata,
-  newId,
-  saveContacts,
-  sealMetadataV2,
-  sharingOperations as sharing,
-  type SpaceId,
-} from '@wikistow/client';
-import { GroupId, groupRoutes, structureRoutes, type ShareId } from '@wikistow/contracts';
+// An owner's app driving the group routes through the client's group
+// operations, with the overrides the server tests need: sealing to only
+// some members, or sending rotations the server must refuse.
+import { groupOperations as groups, sharingOperations, type SpaceId } from '@wikistow/client';
+import { groupRoutes, type GroupId, type ShareId } from '@wikistow/contracts';
 import { find, type Person } from './sharing.ts';
 
-type Role = 'reader' | 'editor';
-type Access = { role: Role; canPublish: boolean };
-const rank = (a: Access | null) =>
-  a === null ? 0 : a.role === 'reader' ? 1 : a.canPublish ? 3 : 2;
-const highest = (grants: (Access | null)[]) =>
-  grants.reduce<Access | null>((best, g) => (rank(g) > rank(best) ? g : best), null);
+type Access = groups.Access;
 
 /** Make a group named `name`, its name sealed to the space's owners. */
-export async function makeGroup(owner: Person, spaceId: SpaceId, name: string) {
-  const { ctx } = owner;
-  const keys = await sharing.ownerKeys(ctx, spaceId);
-  const groupId = newId(GroupId);
-  const { metadata, envelopes } = sealMetadataV2({
-    author: ctx.identity,
-    target: {
-      installationId: ctx.installationId,
-      spaceId,
-      subjectKind: 'group',
-      subjectId: groupId,
-      metadataRevisionId: newId(MetadataRevisionId),
-      basedOn: null,
-    },
-    metadata: newFolderMetadata(name),
-    recipients: keys.owners.sealingOwners(),
-  });
-  await owner.api.call(groupRoutes.createGroup, {
-    params: { spaceId },
-    body: { groupId, metadata, envelopes },
-  });
-  return groupId;
-}
-
-/** The space's groups and shares as the owner's app reads them. */
-async function state(owner: Person, spaceId: SpaceId) {
-  const listed = await owner.api.call(groupRoutes.listGroups, { params: { spaceId } });
-  return { ...listed, shares: await sharing.listShares(owner.ctx, spaceId) };
-}
-
-type State = Awaited<ReturnType<typeof state>>;
-
-/** Someone's effective access in a share, from the listings, leaving out `without`. */
-function accessIn(
-  { groups, shares, direct }: State,
-  shareId: ShareId,
-  identityId: string,
-  without?: GroupId,
-) {
-  const share = shares.find((s) => s.shareId === shareId);
-  if (!share) throw new Error(`no share ${shareId}`);
-  const own = direct.find((d) => d.shareId === shareId && d.identityId === identityId) ?? null;
-  const viaGroups = groups.flatMap((group) =>
-    group.groupId !== without && group.members.some((m) => m.identity.id === identityId)
-      ? group.shares.filter((s) => s.shareId === shareId)
-      : [],
-  );
-  return { share, access: highest([own, ...viaGroups]) };
-}
-
-/**
- * Seal every version of `shareIds` to `person` at their access there, for
- * each share where the keys they hold fall short of it, given the space as
- * it will be once the change lands (`after`).
- */
-async function sealWhereLacking(
-  owner: Person,
-  spaceId: SpaceId,
-  person: Person,
-  shareIds: readonly ShareId[],
-  after: State,
-) {
-  const keys = await sharing.ownerKeys(owner.ctx, spaceId);
-  const identity = person.vault.identity.public;
-  return shareIds.flatMap((shareId) => {
-    const { share, access } = accessIn(after, shareId, identity.id);
-    if (!access) return [];
-    const row = share.members.find((m) => m.identityId === identity.id);
-    const holds =
-      row?.keyVersion === identity.keyVersion &&
-      (row.role === 'editor' || access.role === 'reader');
-    if (holds) return [];
-    return sharing
-      .versionsToGive(owner.ctx, keys, share)
-      .flatMap((held) =>
-        sharing.sealVersion(owner.ctx, spaceId, shareId, held.keyVersion, held, [
-          { identity, role: access.role },
-        ]),
-      );
-  });
-}
+export const makeGroup = (owner: Person, spaceId: SpaceId, name: string) =>
+  groups.createGroup(owner.ctx, { spaceId, name });
 
 /** Add `person` to a group, sealing the group's shares to them where they lack keys. */
 export async function addToGroup(
@@ -110,41 +18,16 @@ export async function addToGroup(
   groupId: GroupId,
   person: Person,
 ) {
-  const [identity] = owner.ctx.trust.recipients([await find(owner, person)]);
-  if (!identity) throw new Error('nobody to add');
-  await saveContacts(owner.ctx, [], { sealTo: [identity] });
-  const before = await state(owner, spaceId);
-  const group = before.groups.find((g) => g.groupId === groupId);
-  if (!group) throw new Error(`no group ${groupId}`);
-  // The group as it will be, with them in it.
-  const after = {
-    ...before,
-    groups: before.groups.map((g) =>
-      g.groupId === groupId
-        ? { ...g, members: [...g.members, { identity, name: person.email, email: person.email }] }
-        : g,
-    ),
-  };
-  const envelopes = await sealWhereLacking(
-    owner,
+  const change = await groups.planAddMember(owner.ctx, {
     spaceId,
-    person,
-    group.shares.map((s) => s.shareId),
-    after,
-  );
-  await owner.api.call(groupRoutes.addGroupMember, {
-    params: { groupId },
-    body: {
-      identityId: identity.id,
-      keyVersion: identity.keyVersion,
-      envelopes,
-      permissionVersion: before.permissionVersion,
-    },
+    groupId,
+    person: await find(owner, person),
   });
+  await groups.applyGroupChange(owner.ctx, change);
 }
 
 /**
- * Share `shareId` with a group at `access`, sealing to the members in
+ * Share `shareId` with a group at `access`, sealing only to the members in
  * `sealTo` where they lack keys. Anyone left out waits.
  */
 export async function shareWithGroup(
@@ -163,40 +46,18 @@ export async function shareWithGroup(
     sealTo: readonly Person[];
   },
 ) {
-  const before = await state(owner, spaceId);
-  const group = before.groups.find((g) => g.groupId === groupId);
-  if (!group) throw new Error(`no group ${groupId}`);
-  const after = {
-    ...before,
-    groups: before.groups.map((g) =>
-      g.groupId === groupId
-        ? {
-            ...g,
-            shares: [...g.shares.filter((s) => s.shareId !== shareId), { shareId, ...access }],
-          }
-        : g,
-    ),
-  };
-  const envelopes = [];
-  for (const person of sealTo) {
-    envelopes.push(...(await sealWhereLacking(owner, spaceId, person, [shareId], after)));
-  }
-  const share = after.shares.find((s) => s.shareId === shareId);
-  const { permissionVersion } = await owner.api.call(structureRoutes.target, {
-    params: { spaceId },
-    query: share?.rootId ? { nodeId: share.rootId } : {},
-  });
-  await owner.api.call(groupRoutes.setShareGroup, {
-    params: { shareId, groupId },
-    body: { access, envelopes, rotation: null, permissionVersion },
+  const change = await groups.planShareGroup(owner.ctx, { spaceId, shareId, groupId, access });
+  const ids = new Set<string>(sealTo.map((p) => p.vault.identity.public.id));
+  await groups.applyGroupChange(owner.ctx, {
+    ...change,
+    seals: change.seals.filter((s) => ids.has(s.person.identity.id)),
   });
 }
 
 /**
- * Take `person` out of a group, with a rotation of each of its shares
- * where their keys exceed what they keep: leaving them out, or demoting
- * them where they keep reading. `rotate` overrides which shares rotate,
- * for a test of the server's coverage check.
+ * Take `person` out of a group, rotating the shares the plan says. `rotate`
+ * overrides which of its rotations are sent, for a test of the server's
+ * coverage check. Returns the shares rotated.
  */
 export async function removeFromGroup(
   owner: Person,
@@ -205,28 +66,23 @@ export async function removeFromGroup(
   person: Person,
   { rotate }: { rotate?: readonly ShareId[] } = {},
 ) {
-  const before = await state(owner, spaceId);
-  const group = before.groups.find((g) => g.groupId === groupId);
-  if (!group) throw new Error(`no group ${groupId}`);
-  const id = person.vault.identity.public.id;
-  const plans = [];
-  for (const { shareId } of group.shares) {
-    const { share, access } = accessIn(before, shareId, id, groupId);
-    const row = share.members.find((m) => m.identityId === id);
-    const exceeds = row && (access === null || (row.role === 'editor' && access.role === 'reader'));
-    if (rotate ? !rotate.includes(shareId) : !exceeds) continue;
-    const planned = await sharing.planShareRotation(owner.ctx, {
-      spaceId,
-      shareId,
-      ...(exceeds && access === null ? { leaveOut: [id] } : exceeds ? { demote: [id] } : {}),
-    });
-    plans.push({ shareId, ...sharing.sealPlanned(owner.ctx, planned.plan) });
-  }
-  await owner.api.call(groupRoutes.removeGroupMember, {
-    params: { groupId, identityId: id },
-    body: { rotations: plans, permissionVersion: before.permissionVersion },
+  const change = await groups.planRemoveMember(owner.ctx, {
+    spaceId,
+    groupId,
+    identityId: person.vault.identity.public.id,
   });
-  return plans.map((p) => p.shareId);
+  const extra = rotate
+    ? await Promise.all(
+        rotate
+          .filter((shareId) => !change.rotations.some((r) => r.plan.shareId === shareId))
+          .map((shareId) => sharingOperations.planShareRotation(owner.ctx, { spaceId, shareId })),
+      )
+    : [];
+  const rotations = [...change.rotations, ...extra].filter(
+    (r) => !rotate || rotate.includes(r.plan.shareId),
+  );
+  await groups.applyGroupChange(owner.ctx, { ...change, rotations });
+  return rotations.map((r) => r.plan.shareId);
 }
 
 /** Who waits for keys in the owner's spaces, as person and share IDs. */
@@ -241,21 +97,9 @@ export async function waitingIn(owner: Person) {
 
 /** Give `person` the keys they wait for in every share of the space. */
 export async function giveAccessTo(owner: Person, spaceId: SpaceId, person: Person) {
-  const identity = person.vault.identity.public;
-  const before = await state(owner, spaceId);
-  const envelopes = await sealWhereLacking(
-    owner,
+  const change = await groups.planGiveAccess(owner.ctx, {
     spaceId,
-    person,
-    before.shares.map((s) => s.shareId),
-    before,
-  );
-  await owner.api.call(groupRoutes.giveAccess, {
-    params: { spaceId, identityId: identity.id },
-    body: {
-      keyVersion: identity.keyVersion,
-      envelopes,
-      permissionVersion: before.permissionVersion,
-    },
+    person: await find(owner, person),
   });
+  await groups.applyGroupChange(owner.ctx, change);
 }

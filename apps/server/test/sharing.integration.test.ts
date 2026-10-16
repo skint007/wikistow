@@ -1,6 +1,7 @@
 import {
   newId,
   newPayload,
+  groupOperations,
   ownerOperations as owners,
   pageOperations as pages,
   RevisionId,
@@ -260,12 +261,12 @@ describe('removing a member', () => {
       people: [await invite(alice, bob, 'editor')],
     });
     expect((await sharing.sharedWithMe(bob.ctx)).length).toBe(2);
-    const plans = await sharing.planRemovalEverywhere(alice.ctx, {
+    const change = await groupOperations.planRemovalEverywhere(alice.ctx, {
       spaceId: lib.spaceId,
       identityId: bob.vault.identity.public.id,
     });
-    expect(plans.length).toBe(2);
-    await sharing.applyRemovalEverywhere(alice.ctx, plans);
+    expect(change.rotations.length).toBe(2);
+    await groupOperations.applyGroupChange(alice.ctx, change);
     expect(await sharing.sharedWithMe(bob.ctx)).toEqual([]);
     expect((await sharing.listShares(alice.ctx, lib.spaceId)).map((s) => s.members)).toEqual([
       [],
@@ -933,6 +934,48 @@ describe('a group', () => {
     // Once Erin leaves Friends too, nothing is left, and the share rotates without her.
     expect(await removeFromGroup(alice, spaceId, friends, erin)).toEqual([shareId]);
     expect(await rejection(pages.loadPage(erin.ctx, lib.page.pageId))).toBe('not-found');
+  });
+
+  it('demotes a direct reader leaving a group that made them an editor, who reads on', async () => {
+    const alice = await personWithVault(t);
+    const fay = await personWithVault(t);
+    const lib = await library(alice);
+    const { spaceId } = lib;
+    const shareId = await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: lib.shared,
+      people: [await invite(alice, fay, 'reader')],
+    });
+    const family = await makeGroup(alice, spaceId, 'Family');
+    await shareWithGroup(alice, {
+      spaceId,
+      shareId,
+      groupId: family,
+      access: { role: 'editor', canPublish: false },
+      sealTo: [],
+    });
+    // Joining seals her the draft keys.
+    await addToGroup(alice, spaceId, family, fay);
+    expect((await pages.loadPage(fay.ctx, lib.page.pageId)).heads.draftHead).not.toBeNull();
+
+    // Leaving takes them away again, but not her reading: a demotion, not a removal.
+    expect(await removeFromGroup(alice, spaceId, family, fay)).toEqual([shareId]);
+    const share = await shareOf(alice, spaceId);
+    expect(share.members).toMatchObject([
+      { identityId: fay.vault.identity.public.id, role: 'reader' },
+    ]);
+    await pages.editDraft(alice.ctx, lib.page, { markdown: 'published after Fay left' });
+    const published = (await pages.publishPage(alice.ctx, lib.page)).revisionId;
+    const draft = (await pages.editDraft(alice.ctx, lib.page, { markdown: 'drafted after' }))
+      .revisionId;
+    expect((await pages.loadPage(fay.ctx, lib.page.pageId)).heads).toMatchObject({
+      publishedHead: published,
+      draftHead: null,
+    });
+    await spaceOperations.loadTree(fay.ctx, spaceId);
+    const fayOpens = (await whatOpens(t, keysOf(fay))).revisions.map((r) => r.record.revisionId);
+    expect(fayOpens).toContain(published);
+    expect(fayOpens).not.toContain(draft);
   });
 
   it('serves a member waiting for keys nothing, until an owner gives them access', async () => {

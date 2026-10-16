@@ -51,6 +51,7 @@ export * as contactsOperations from './operations/contacts.ts';
 export * as pluginOperations from './operations/plugins.ts';
 export * as spaceOperations from './operations/spaces.ts';
 export * as sharingOperations from './operations/sharing.ts';
+export * as groupOperations from './operations/groups.ts';
 export * as moveOperations from './operations/moves.ts';
 export * as publicationOperations from './operations/publications.ts';
 export * as ownerOperations from './operations/owners.ts';
