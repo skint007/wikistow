@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Development
+
+- ADR 0004 (`docs/adr/0004-plugin-drafts.md`) records private plugins, plugin drafts on the server and the plugin workshop in the browser and on phones, amending ADR 0002. (#63)
+
 ## 0.7.0 - 2026-10-16
 
 ### Highlights

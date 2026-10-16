@@ -4,6 +4,8 @@ status: built
 
 # A plugin library on the server, and plugins in the browser
 
+[ADR 0004](0004-plugin-drafts.md) (accepted) amends this one: library plugins can be Only me, an upload installs the plugin for its owner, and the workshop saves plugin drafts on the server and runs in the browser and on phones too.
+
 WikiStow's server gains a shared plugin library (#5). Members upload built plugins, and anyone on the server can install them, in the browser, on a phone or in the desktop app. Installing is approving the plugin's hash; the approvals live in the person's encrypted, signed account data, so they follow the person to every device and the server can't add one. The browser runs approved plugins from the server's own origin, a script's code in a worker inside a sandboxed frame with an opaque origin, so it can't reach the tab's storage.
 
 This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the server never supplies plugin code, because "a server that could push code could read every page". That still holds where it mattered: the desktop app installs only hashes the person approved and checks the files against them, so the server can't push it code. The browser already runs whatever code the server sends, the web app itself included ([spec, What the service can see](../../wikistow.md#what-the-service-can-see)), so serving plugin files there gives the server no new power. A shared plugin can still be malicious, as in any plugin system; the answer is to install only plugins you trust, and the approval dialog keeps naming the trust level. App plugins stay unsandboxed.
