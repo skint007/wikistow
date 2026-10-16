@@ -71,8 +71,8 @@ jobs:
       packages: write
 
   # The desktop app as CI built, tested and packaged it: the .deb, the .rpm,
-  # and an archive of what the AUR package installs. The CLI's bundle in an
-  # archive of what its AUR package installs. Checksums for them all.
+  # and an archive of what its AUR package installs. Beside them, an archive
+  # of what the CLI's AUR package installs, and checksums for every file.
   github-release:
     needs: [verify, ci]
     runs-on: ubuntu-24.04
