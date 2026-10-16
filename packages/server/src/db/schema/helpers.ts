@@ -1,4 +1,4 @@
-import { timestamp, uuid } from 'drizzle-orm/pg-core';
+import { customType, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /** A Postgres-generated UUID primary key. Better Auth runs with `generateId: false`. */
 export const primaryId = () => uuid().primaryKey().defaultRandom();
@@ -12,3 +12,8 @@ export const timestamps = {
     .defaultNow()
     .$onUpdate(() => new Date()),
 };
+
+/** Raw bytes. */
+export const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType: () => 'bytea',
+});

@@ -28,24 +28,27 @@ const versionOut = (row: typeof pluginVersions.$inferSelect) => ({
   uploadedAt: row.createdAt.toISOString(),
 });
 
-/** A whole built folder, checked as the desktop checks one, then stored as a version. */
-export async function uploadPlugin(
-  db: Database,
-  store: PluginStore,
-  { accountId, files }: { accountId: string; files: { path: string; data: Uint8Array }[] },
-) {
-  const byPath = new Map(files.map(({ path, data }) => [path, data]));
-  if (byPath.size !== files.length) throw invalid('A file is listed twice.');
-  // A file and a folder can't share a name, as they can't on disk.
+/** The first of `paths` that is also a folder of another, as can't be on disk. */
+export function folderNamed(paths: string[]) {
   const folders = new Set(
-    files.flatMap(({ path }) =>
+    paths.flatMap((path) =>
       path
         .split('/')
         .slice(0, -1)
         .map((_, i, parts) => parts.slice(0, i + 1).join('/')),
     ),
   );
-  if (files.some(({ path }) => folders.has(path))) throw invalid('A file has a folder’s name.');
+  return paths.find((path) => folders.has(path));
+}
+
+/**
+ * A whole built folder, checked as the desktop checks one and within the
+ * library's limits: what a library upload and a draft build must be.
+ */
+export async function checkUpload(files: { path: string; data: Uint8Array }[]) {
+  const byPath = new Map(files.map(({ path, data }) => [path, data]));
+  if (byPath.size !== files.length) throw invalid('A file is listed twice.');
+  if (folderNamed(files.map(({ path }) => path))) throw invalid('A file has a folder’s name.');
   const size = files.reduce((total, { data }) => total + data.length, 0);
   if (size > pluginRoutes.MAX_VERSION_BYTES) {
     throw new ContentError(
@@ -69,6 +72,16 @@ export async function uploadPlugin(
       `A plugin’s script may be ${pluginRoutes.MAX_SCRIPT_BYTES / MB} MB at most.`,
     );
   }
+  return { byPath, manifest, paths, hash, size };
+}
+
+/** A whole built folder, checked (`checkUpload`), then stored as a version. */
+export async function uploadPlugin(
+  db: Database,
+  store: PluginStore,
+  { accountId, files }: { accountId: string; files: { path: string; data: Uint8Array }[] },
+) {
+  const { byPath, manifest, paths, hash, size } = await checkUpload(files);
 
   const notYours = () =>
     new ContentError('forbidden', `Another account owns the plugin ID ${manifest.id}.`);

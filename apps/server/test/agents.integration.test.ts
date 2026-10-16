@@ -21,6 +21,7 @@ import {
   ownerRoutes,
   pageRoutes,
   peopleRoutes,
+  pluginDraftRoutes,
   publicationRoutes,
   sharingRoutes,
   structureRoutes,
@@ -233,6 +234,7 @@ describe('an agent’s token', () => {
       ownerRoutes,
       pageRoutes,
       peopleRoutes,
+      pluginDraftRoutes,
       publicationRoutes,
       sharingRoutes,
       structureRoutes,
@@ -300,6 +302,9 @@ describe('an agent’s token', () => {
       if (forAgents.has(route)) expect(res.status, route).not.toBe(401);
       else expect(res.status, route).toBe(401);
     }
+    // Nor plugin drafts' builds, which the library's file route serves.
+    const draftFile = pluginDraftRoutes.draftFileUrl('notes', '0'.repeat(64), 'ui.js');
+    expect((await asAgent(t, agent.token, draftFile)).status).toBe(401);
   });
 });
 

@@ -129,6 +129,10 @@ _Avoid_: Extension, add-on.
 The plugins members uploaded to their server, which anyone signed in there may install. Installing is **approving** one version's hash; the approvals live in the person's own encrypted account data and follow them to every device.
 _Avoid_: Store, marketplace (nothing is sold or rated).
 
+**Plugin draft**
+A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. Publishing one uploads a version to the **plugin library**.
+_Avoid_: Draft on its own (pages have drafts), workspace, project.
+
 **Theme plugin**, **script plugin**, **app plugin**
 A plugin's trust level, from what it contains: styles only; code in an isolated worker that reaches pages only through checked requests; or code running in the app's page with the app's own trust.
 _Avoid_: Sandboxed app plugin; app plugins aren't isolated.

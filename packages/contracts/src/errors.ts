@@ -35,6 +35,7 @@ export const ERROR_STATUS = {
   'space-limit': 409,
   'folder-limit': 409,
   'page-limit': 409,
+  'draft-limit': 409,
   'last-owner': 409,
   duplicate: 409,
   'request-timeout': 408,

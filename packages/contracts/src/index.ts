@@ -23,6 +23,7 @@ export * as desktopRoutes from './routes/desktop.ts';
 export * as ownerRoutes from './routes/owners.ts';
 export * as pageRoutes from './routes/pages.ts';
 export * as peopleRoutes from './routes/people.ts';
+export * as pluginDraftRoutes from './routes/plugin-drafts.ts';
 export * as pluginRoutes from './routes/plugins.ts';
 export * as publicationRoutes from './routes/publications.ts';
 export * as sharingRoutes from './routes/sharing.ts';

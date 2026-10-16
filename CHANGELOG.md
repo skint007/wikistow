@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### Server
+
+- Plugin drafts on the server (ADR 0004): `pluginDraftRoutes` list, make, read, change, delete and build a person's drafts, people only. A draft starts empty, from files, or from a library version's `source/`, and a version of someone else's plugin gets a new ID (`<id>-copy`, `-copy-2` and on). At most 10 per account, and within the workshop's limits, which move into `packages/contracts`. The library's file route serves a draft's build to its owner under `/plugins/<id>/draft-<hash>/`. Drafts live in Postgres, so backups take them with no script change (migration `0026_plugin_drafts`). The library upload's checks are now `checkUpload`, which draft builds share. (#64)
+
 #### Development
 
 - ADR 0004 (`docs/adr/0004-plugin-drafts.md`) records private plugins, plugin drafts on the server and the plugin workshop in the browser and on phones, amending ADR 0002. (#63)

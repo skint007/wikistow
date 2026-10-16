@@ -115,6 +115,7 @@ const CONTENT_ERRORS = {
   'space-limit': 'space-limit',
   'folder-limit': 'folder-limit',
   'page-limit': 'page-limit',
+  'draft-limit': 'draft-limit',
   'last-owner': 'last-owner',
   'invalid-plugin': 'invalid-request',
 } as const satisfies Record<ContentFailure, ErrorCode>;

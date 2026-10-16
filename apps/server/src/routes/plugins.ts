@@ -2,6 +2,7 @@ import { pluginRoutes } from '@wikistow/contracts';
 import { fileType } from '@wikistow/plugin-sdk/files';
 import {
   listPlugins,
+  pluginDraftBuildFile,
   pluginFile,
   removePlugin,
   uploadPlugin,
@@ -25,6 +26,8 @@ const FETCH_LIMIT = { windowSeconds: 60, max: 120 };
 const FILE_LIMIT = { windowSeconds: 60, max: 2000 };
 
 const FILE = /^\/plugins\/([^/]+)\/([^/]+)\/(.+)$/;
+// A draft build's key (ADR 0004), apart from the installed copy's bare hash.
+const DRAFT_KEY = /^draft-([0-9a-f]{64})$/;
 
 /** The plugin library (ADR 0002, `pluginRoutes`): people only, never agents. */
 export function mountPluginRoutes(
@@ -73,13 +76,23 @@ export function mountPluginRoutes(
     { rateLimit: WRITE_LIMIT },
   );
 
+  // A library version's file under its hash, or one of the caller's own
+  // draft builds' under `draft-<hash>`.
+  const fileFor = (accountId: string, pluginId: string, key: string, path: string) => {
+    const draft = DRAFT_KEY.exec(key)?.[1];
+    if (draft !== undefined) {
+      return pluginDraftBuildFile(db, { accountId, pluginId, hash: draft, path });
+    }
+    return pluginRoutes.PluginHash.safeParse(key).success
+      ? pluginFile(db, plugins, { pluginId, hash: key, path })
+      : null;
+  };
+
   routes.file(
     pluginRoutes.FILE_PATH,
-    async (c) => {
-      const [, pluginId = '', hash = '', path = ''] = FILE.exec(c.req.path) ?? [];
-      const bytes = pluginRoutes.PluginHash.safeParse(hash).success
-        ? await pluginFile(db, plugins, { pluginId, hash, path })
-        : null;
+    async (c, principal) => {
+      const [, pluginId = '', key = '', path = ''] = FILE.exec(c.req.path) ?? [];
+      const bytes = await fileFor(principal.accountId, pluginId, key, path);
       if (!bytes) throw new ApiError('not-found', 'Not found');
       // A hash's files never change. Its own policy, which the app-wide
       // headers leave in place: whatever the file is, nothing in it runs
