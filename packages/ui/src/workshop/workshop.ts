@@ -403,10 +403,13 @@ export class Workshop {
    * (app code once allowed, a theme): a stopped load may have replaced it.
    */
   async #serveRunning() {
-    const running = this.#state.running;
-    if (!running) return;
+    // Again if a load took the preview meanwhile: its upload went first.
+    let served: WorkshopVersion | null = null;
     try {
-      await this.#serve(running.version);
+      while (this.#state.running && this.#state.running !== served) {
+        served = this.#state.running;
+        await this.#serve(served.version);
+      }
     } catch (error) {
       this.#set({ problem: message(error) });
     }
