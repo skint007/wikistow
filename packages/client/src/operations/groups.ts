@@ -524,10 +524,11 @@ export async function planRemoveMember(
 
 /**
  * Share a share with a group at `access`, or change its access there
- * (section 7.8). Raising it seals every version to each member whose keys
- * fall short; lowering it rotates the share, leaving out or demoting the
- * members whose keys exceed their access. Publish rights alone do neither.
- * A member whose key changed waits. To share a folder that isn't a share
+ * (section 7.8). Sharing it, or raising it to editor, seals every version
+ * to each member whose keys fall short; lowering it rotates the share,
+ * leaving out or demoting the members whose keys exceed their access.
+ * Publish rights alone do neither, and nothing but sharing or raising
+ * seals to someone already waiting. A member whose key changed waits. To share a folder that isn't a share
  * yet with a group, make the share with it (`shareFolder`'s `groups`).
  */
 export async function planShareGroup(
@@ -552,8 +553,10 @@ export async function planShareGroup(
     [shareId],
     await rootVersion(ctx, state, shareId),
   );
-  // Lowering it seals nothing: anyone short of keys there waits, as before.
-  if (change.rotations.length > 0) return change;
+  // Only sharing it, or making the group editors, seals; publish rights or
+  // lowering it seal nothing, so anyone short of keys waits, as before.
+  const before = group.shares.find((s) => s.shareId === shareId);
+  if (before && !(before.role === 'reader' && granted.role === 'editor')) return change;
   return { ...change, ...sealsFor(ctx, after, [shareId], group.members.map(asLookup)) };
 }
 

@@ -375,7 +375,7 @@ export function AccessPanel({
       case 'publish':
         // Publish rights alone change no keys: anyone short of keys keeps waiting for Give access.
         return run(async () => {
-          await sendGroupChange({ ...(await make()), seals: [] }, env);
+          await sendGroupChange(await make(), env);
           await finish(
             <>
               <Name>{name}</Name>{' '}
@@ -478,7 +478,7 @@ export function AccessPanel({
         none={pending.none}
         confirmNone
         // Taking access away seals nothing: anyone short of keys keeps waiting for Give access.
-        make={async () => ({ ...(await pending.make()), seals: [] })}
+        make={pending.make}
         plansOf={({ rotations }) =>
           rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
         }
