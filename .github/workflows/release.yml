@@ -1,8 +1,8 @@
 # A release: push a tag `v<version>` on a commit of main (docs/releasing.md).
 # This checks the tag names the version in the source, runs CI on that
 # commit, which publishes the server image under the version, and publishes
-# the desktop app and the CLI from the same build as a GitHub Release, then
-# to the AUR.
+# the desktop app and the CLI from the same build as a GitHub Release, with
+# the notes from its CHANGELOG.md entry, then to the AUR.
 name: Release
 
 on:
@@ -39,6 +39,9 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Every release in this history has its notes, this one too, dated the
+      # day its tag was made. Publishing uses them.
+      - run: node scripts/changelog.ts --tags
       # Only reviewed commits: main's, or a release/ branch's for a fix to
       # an older release. Only a stable release from main becomes `latest`.
       - id: branch
@@ -124,6 +127,8 @@ jobs:
         run: |
           sha256sum wikistow-desktop-*.tar.gz wikistow-cli-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm > SHA256SUMS
           cat SHA256SUMS
+      # The notes are the release's entry in CHANGELOG.md, reviewed in its
+      # version change. Without one, nothing is published.
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -131,9 +136,10 @@ jobs:
           # a fix to an older one.
           LATEST: ${{ needs.verify.outputs.latest }}
         run: |
+          node scripts/changelog.ts notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
           prerelease=()
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+          gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" \
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
             release/*.tar.gz release/*.deb release/*.rpm release/SHA256SUMS
 
