@@ -29,7 +29,7 @@ A push to `main` or a release tag also runs two more jobs, which pull requests s
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
 
-Only that job can write packages, and only that job and the release's `desktop` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
+Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
 
 ## Versions
 
@@ -42,7 +42,7 @@ node scripts/version.ts 0.3.0   # sets it everywhere
 
 A release build shows the version alone in the account menu, as `0.2.0`. Any other build adds the commit it was built from, as `0.2.0+5b9e5ec4`, the same 8 characters as its image's `sha-` tag. The desktop app's `app.asar`, the CLI's `wikistow --version`, the image's `org.opencontainers.image.version` label and the desktop packages all carry the same version.
 
-Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-rc.1`, is a prerelease. Its GitHub Release is marked as one, its image gets only its own tag, and the AUR package doesn't take it. Its `.deb` and `.rpm` carry `0.3.0~rc.1`, which apt and dnf sort before `0.3.0`.
+Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-rc.1`, is a prerelease. Its GitHub Release is marked as one, its image gets only its own tag, and the AUR packages don't take it. Its `.deb` and `.rpm` carry `0.3.0~rc.1`, which apt and dnf sort before `0.3.0`.
 
 ## Cut a release
 
@@ -57,12 +57,12 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, and that Electron is its major's newest patch.
    2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
-   3. `desktop` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads) and their `SHA256SUMS`.
-   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` to the AUR ([below](#the-aur-package)).
+   3. `github-release` publishes a GitHub Release named after the version, with notes listing the merged pull requests. It holds the [desktop downloads](#the-desktop-downloads), the [CLI download](#the-cli-download) and their `SHA256SUMS`.
+   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)).
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
-To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Its GitHub Release isn't marked as the latest, and the AUR package stays on the newest release. Only `main` builds get `sha-` images.
+To fix an older release while `main` has moved on, branch `release/<major>.<minor>` from its tag, merge the fix and the version change into that branch through a pull request, and tag there. Its image gets its version and `<major>.<minor>` tags, but not `latest`. Its GitHub Release isn't marked as the latest, and the AUR packages stay on the newest release. Only `main` builds get `sha-` images.
 
 ## The desktop downloads
 
@@ -73,7 +73,7 @@ Each release has the desktop app, for x86_64, from the tested build:
 | `wikistow-desktop-<version>.tar.gz` | The AUR package, which runs it on Arch's `electron44` |
 | `wikistow-desktop-<version>-amd64.deb` | Debian 13, Ubuntu 24.04 and Ubuntu 26.04 |
 | `wikistow-desktop-<version>-x86_64.rpm` | Fedora 43 and 44 |
-| `SHA256SUMS` | The checksums of the three |
+| `SHA256SUMS` | The checksums of the three, and of the [CLI's archive](#the-cli-download) |
 
 Check a download before you use it:
 
@@ -92,6 +92,18 @@ sha256sum -c --ignore-missing SHA256SUMS
 | `LICENSE` | `/usr/share/licenses/wikistow-desktop-bin/LICENSE` |
 
 The archive is built the same way every time, from the commit's files and time.
+
+## The CLI download
+
+Each release also has the `wikistow` command-line client as `wikistow-cli-<version>.tar.gz`. It is the one-file bundle CI built and ran in its `smoke` job, and needs nothing but Node.js 26 or newer, on any system. It holds what the Arch package installs:
+
+| File | Installed as |
+| --- | --- |
+| `wikistow.mjs` | `/usr/lib/wikistow-cli/wikistow.mjs` |
+| `wikistow` | `/usr/bin/wikistow`, which runs it on the system Node |
+| `LICENSE` | `/usr/share/licenses/wikistow-cli-bin/LICENSE` |
+
+Without the package, run it as `node wikistow.mjs`. Before publishing, the release unpacks the archive outside the workspace and checks that `node wikistow.mjs --version` prints the release's version. Like the desktop archive, it comes out the same every time from the same commit.
 
 ## The .deb and .rpm
 
@@ -115,13 +127,13 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/linux-packages.sh "$(node .
 
 CI pins nfpm's version and checksum in `linux-packages`.
 
-## The AUR package
+## The AUR packages
 
-The packaging source is `aur/wikistow-desktop-bin/PKGBUILD`. Change it through a pull request like any other file. Its version and checksum are the release it was last checked against; publishing replaces them.
+Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
 
-`.github/workflows/aur.yml` publishes it, once the release's archive is downloadable. It sets the PKGBUILD's version, `pkgrel` and checksum from the release, builds the package as a user who isn't root, checking the downloaded archive against the release's `SHA256SUMS`, and generates `.SRCINFO`. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/wikistow-desktop-bin.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped.
+`.github/workflows/aur.yml` publishes both, once the release's archives are downloadable, in a job for each. Each job sets its PKGBUILD's version, `pkgrel` and checksum from the release, builds the package as a user who isn't root, checking the downloaded archive against the release's `SHA256SUMS`, and generates `.SRCINFO`. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/<package>.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped. The AUR creates a package on its first push. One package failing doesn't stop the other.
 
-To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version and the next `pkgrel`, such as `2`. The next release starts again at `pkgrel` 1.
+To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version, the package (or both) and the next `pkgrel`, such as `2`. Each package counts its own `pkgrel`, and the next release starts both again at 1.
 
 ## The server image
 

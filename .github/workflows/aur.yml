@@ -1,7 +1,7 @@
-# Publishes wikistow-desktop-bin to the AUR for a GitHub Release that already
-# has its desktop archive. The release workflow runs it after each stable
-# release from main. Run it by hand to publish a release again, such as with
-# a packaging fix and a higher pkgrel (docs/releasing.md).
+# Publishes wikistow-desktop-bin and wikistow-cli-bin to the AUR for a GitHub
+# Release that already has their archives. The release workflow runs it for
+# both after each stable release from main. Run it by hand to publish either
+# again, such as with a packaging fix and a higher pkgrel (docs/releasing.md).
 name: AUR
 
 on:
@@ -13,6 +13,9 @@ on:
       pkgrel:
         type: string
         default: '1'
+      package:
+        type: string
+        default: both
   workflow_dispatch:
     inputs:
       version:
@@ -23,11 +26,22 @@ on:
         description: The package release; raise it for a packaging fix
         type: string
         default: '1'
+      package:
+        description: The package to publish
+        type: choice
+        options: [both, wikistow-desktop-bin, wikistow-cli-bin]
+        default: both
 
 permissions: {}
 
 jobs:
   publish:
+    strategy:
+      # One package failing to publish doesn't hold the other back.
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(inputs.package == 'both' && '["wikistow-desktop-bin", "wikistow-cli-bin"]' || format('["{0}"]', inputs.package)) }}
+    name: ${{ matrix.package }}
     runs-on: ubuntu-24.04
     # Holds the AUR key, for release tags and main only.
     environment: aur
@@ -47,29 +61,32 @@ jobs:
       # isn't root, as makepkg requires.
       - name: Build
         env:
+          PACKAGE: ${{ matrix.package }}
           VERSION: ${{ inputs.version }}
           PKGREL: ${{ inputs.pkgrel }}
           AUR_USERNAME: ${{ vars.AUR_USERNAME }}
           AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && "$PKGREL" =~ ^[1-9][0-9]*$ ]]
-          archive="wikistow-desktop-$VERSION.tar.gz"
+          # wikistow-desktop-bin installs wikistow-desktop-<version>.tar.gz.
+          archive="${PACKAGE%-bin}-$VERSION.tar.gz"
           sha=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS" \
             | awk -v f="$archive" '$2 == f { print $1 }')
           [ -n "$sha" ]
           useradd -m builder
-          cp -r aur/wikistow-desktop-bin /home/builder/pkg
+          cp -r "aur/$PACKAGE" /home/builder/pkg
           cd /home/builder/pkg
           sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" \
             -e "s/^sha256sums=.*/sha256sums=('$sha')/" \
             -e "s|^# Maintainer:.*|# Maintainer: $AUR_USERNAME <$AUR_EMAIL>|" PKGBUILD
           chown -R builder: .
-          # Electron isn't needed to package the app, only to run it.
+          # Electron and Node aren't needed to package the apps, only to run them.
           runuser -u builder -- makepkg --nodeps --noconfirm
           runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
           cat PKGBUILD .SRCINFO
       - name: Publish
         env:
+          PACKAGE: ${{ matrix.package }}
           VERSION: ${{ inputs.version }}
           PKGREL: ${{ inputs.pkgrel }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
@@ -87,8 +104,9 @@ jobs:
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/key" && chmod 600 "$ssh_dir/key"
           printf '%s\n' "$AUR_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
-          # Only the PKGBUILD and its .SRCINFO go to the AUR.
-          git clone ssh://aur@aur.archlinux.org/wikistow-desktop-bin.git "$RUNNER_TEMP/aur"
+          # Only the PKGBUILD and its .SRCINFO go to the AUR. A package's first
+          # push creates it there.
+          git clone "ssh://aur@aur.archlinux.org/$PACKAGE.git" "$RUNNER_TEMP/aur"
           cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO "$RUNNER_TEMP/aur/"
           cd "$RUNNER_TEMP/aur"
           git add PKGBUILD .SRCINFO
