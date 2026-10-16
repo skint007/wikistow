@@ -6,7 +6,8 @@ import {
   type WorkshopFile,
   type WorkshopVersion,
 } from '@wikistow/contracts';
-import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { MANIFEST_FILE, trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { z } from 'zod';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
@@ -32,6 +33,11 @@ export type WorkshopState = {
   draft: pluginDraftRoutes.DraftSummary | null;
   /** The draft's files as saved, by path. */
   files: ReadonlyMap<string, string>;
+  /**
+   * For a draft of someone else's plugin, the ID it started from and the
+   * new one the server gave it, as they were when it opened.
+   */
+  copy: { from: string; id: string } | null;
   /** What last went wrong outside the plugin's own code, such as previewing on opening. */
   problem: string | null;
   /** Reading the draft, then building and previewing it, as it opens. */
@@ -87,6 +93,25 @@ const failedVersion = (version: number, diagnostics: BuildDiagnostic[]): Worksho
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
 
+const ManifestId = z.object({ id: z.string() });
+
+/**
+ * Whether `draft` is a copy of someone else's plugin: it started from a
+ * library version, and its manifest names another ID, the one the server
+ * gave it then. Its own plugin keeps its ID.
+ */
+function copyOf(draft: pluginDraftRoutes.DraftSummary, files: ReadonlyMap<string, string>) {
+  const from = draft.from?.pluginId;
+  const text = files.get(MANIFEST_FILE);
+  if (!from || text === undefined) return null;
+  try {
+    const parsed = ManifestId.safeParse(JSON.parse(text));
+    return parsed.success && parsed.data.id !== from ? { from, id: parsed.data.id } : null;
+  } catch {
+    return null;
+  }
+}
+
 const encoder = new TextEncoder();
 const byteSize = (text: string) => encoder.encode(text).length;
 
@@ -120,6 +145,7 @@ export class Workshop {
     failure: null,
     draft: null,
     files: new Map(),
+    copy: null,
     problem: null,
     opening: true,
     versions: [],
@@ -195,11 +221,8 @@ export class Workshop {
         params: { draftId: this.draftId },
       });
       if (this.#state.phase === 'ended') return;
-      this.#set({
-        phase: 'ready',
-        draft,
-        files: new Map(files.map(({ path, text }) => [path, text])),
-      });
+      const texts = new Map(files.map(({ path, text }) => [path, text]));
+      this.#set({ phase: 'ready', draft, files: texts, copy: copyOf(draft, texts) });
     } catch (error) {
       if (this.#state.phase !== 'ended') {
         this.#set({ phase: 'failed', failure: errorMessage(error), opening: false });
