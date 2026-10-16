@@ -79,12 +79,23 @@ export type OpenedMetadata =
   | { kind: 'current'; metadata: NodeMetadata }
   | { kind: 'newer-format'; format: z.infer<typeof Format> };
 
-/** New folders start as ⭐ on blue, so nobody has to choose when creating one. */
-export const newFolderMetadata = (name: string): NodeMetadata => ({
+/** A folder's emoji and tint. */
+export type FolderLook = { emoji: string; tint: string };
+
+/**
+ * ⭐ on blue: how a new folder starts, so nobody has to choose when creating
+ * one, and how a folder whose metadata names neither shows.
+ */
+export const DEFAULT_FOLDER_LOOK: FolderLook = { emoji: '⭐', tint: 'blue' };
+
+export const newFolderMetadata = (
+  name: string,
+  { emoji, tint }: FolderLook = DEFAULT_FOLDER_LOOK,
+): NodeMetadata => ({
   format: { ...METADATA_FORMAT },
   name,
-  emoji: '⭐',
-  tint: 'blue',
+  emoji,
+  tint,
   extensions: {},
 });
 

@@ -10,6 +10,7 @@ import {
   newSpaceMetadata,
   reviseMetadata,
   sealMetadataV2,
+  type FolderLook,
   type MetadataChanges,
 } from '../metadata.ts';
 import { CryptoError } from '../errors.ts';
@@ -205,10 +206,18 @@ function placing(tree: {
   };
 }
 
-/** A new folder (⭐ on blue until someone changes it) at the root or inside `parentId`. */
+/**
+ * A new folder at the root or inside `parentId`, with `look`, or ⭐ on blue
+ * until someone changes it.
+ */
 export async function createFolder(
   ctx: ClientContext,
-  { spaceId, parentId, name }: { spaceId: SpaceId; parentId: FolderId | null; name: string },
+  {
+    spaceId,
+    parentId,
+    name,
+    look,
+  }: { spaceId: SpaceId; parentId: FolderId | null; name: string; look?: FolderLook },
 ): Promise<FolderId> {
   const folderId = newId(FolderIdSchema);
   await withFreshKeys(ctx, spaceId, async (keys) => {
@@ -223,7 +232,7 @@ export async function createFolder(
         metadataRevisionId: newId(MetadataRevisionId),
         basedOn: null,
       },
-      metadata: newFolderMetadata(name),
+      metadata: newFolderMetadata(name, look),
       ...keyTargetFor(ctx, keys, region, share),
     });
     await ctx.api.call(structureRoutes.createFolder, {
