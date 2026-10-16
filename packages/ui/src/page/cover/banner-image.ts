@@ -7,7 +7,7 @@ export const BANNER_MAX_UPLOAD = 25 * 1024 * 1024;
 /** Nor are images with more pixels than this, however small the file. */
 export const BANNER_MAX_PIXELS = 50_000_000;
 
-type Size = { width: number; height: number };
+export type Size = { width: number; height: number };
 
 // JPEG's start-of-frame markers, which carry the image's size; not DHT, JPG or DAC.
 const JPEG_FRAMES = new Set([
@@ -22,7 +22,7 @@ const ascii = (bytes: Uint8Array, at: number, text: string) =>
  * The size a PNG, JPEG, WebP or GIF declares in its header, read without
  * decoding it. Null for anything else, or a header cut short.
  */
-function imageSize(bytes: Uint8Array): Size | null {
+export function imageSize(bytes: Uint8Array): Size | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const has = (end: number) => end <= bytes.length;
   const u16 = (at: number, little = false) => (has(at + 2) ? view.getUint16(at, little) : 0);
@@ -75,7 +75,7 @@ function imageSize(bytes: Uint8Array): Size | null {
 }
 
 /** The size to draw an image at: within `max` each way, never enlarged, its shape kept. */
-function fitWithin({ width, height }: Size, max = BANNER_MAX_SIZE): Size {
+export function fitWithin({ width, height }: Size, max = BANNER_MAX_SIZE): Size {
   const scale = Math.min(1, max / width, max / height);
   return {
     width: Math.max(1, Math.round(width * scale)),
@@ -90,7 +90,7 @@ function fitWithin({ width, height }: Size, max = BANNER_MAX_SIZE): Size {
  */
 const bannerFormat = (written: string | undefined) => (written === 'image/webp' ? 'webp' : 'jpeg');
 
-const toBlob = (canvas: HTMLCanvasElement, type: string) =>
+export const toBlob = (canvas: HTMLCanvasElement, type: string) =>
   new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.85));
 
 /**
