@@ -11,7 +11,6 @@ import { AddAgentDialog } from '../agents/add-agent-dialog';
 import { PLAIN, useClient } from '../vault/store';
 import { saveOpenDraft } from '../page/use-draft-session';
 import { searchIndexChanged } from '../data/queries';
-import { desktop } from '../desktop';
 import { usePlugins } from '../plugins/runtime';
 import { WorkshopChat } from '../workshop/workshop-chat';
 import { WorkshopConversation } from '../workshop/workshop-panel';
@@ -123,7 +122,7 @@ function ChooseAgent({ host }: { host: string }) {
       >
         <Plus strokeWidth={1.75} /> Add an assistant
       </Button>
-      {desktop && !safeMode && (
+      {!safeMode && (
         <Button variant="outline" onClick={() => void navigate({ to: '/workshop' })}>
           <Puzzle strokeWidth={1.75} /> Build a plugin
         </Button>

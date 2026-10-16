@@ -1,21 +1,14 @@
-// The workshop's bundler (#257), in a worker thread of the main process:
+// The workshop's bundler (ADR 0004), in a module worker of the page:
 // esbuild's WebAssembly build, with every file handed to it in memory. It
-// has no disk or network of its own, so an import resolves only to the
-// workspace's own files, or to the SDK and React the app carries.
+// fetches nothing but its WebAssembly, so an import resolves only to the
+// draft's own files, or to the SDK and React the app carries. It only
+// bundles; it never runs plugin code.
 import type { BuildDiagnostic } from '@wikistow/contracts';
 import * as esbuild from 'esbuild-wasm/esm/browser.js';
+import wasmURL from 'esbuild-wasm/esbuild.wasm?url';
 import library from 'virtual:workshop-library';
-import { readFile } from 'node:fs/promises';
-import { posix } from 'node:path';
-import { parentPort, workerData } from 'node:worker_threads';
-import { z } from 'zod';
-import { IMPORTS, OFFERED } from './library.ts';
-
-const Request = z.object({
-  id: z.number(),
-  files: z.array(z.tuple([z.string(), z.string()])),
-  entries: z.array(z.object({ output: z.string(), entry: z.string() })),
-});
+import { IMPORTS, OFFERED } from './library';
+import type { BuildAnswer, BuildRequest } from './builder';
 
 const LOADERS: Readonly<Record<string, esbuild.Loader>> = {
   '.ts': 'ts',
@@ -24,20 +17,25 @@ const LOADERS: Readonly<Record<string, esbuild.Loader>> = {
   '.jsx': 'jsx',
   '.json': 'json',
 };
-const loaderOf = (path: string) => LOADERS[posix.extname(path)];
+const loaderOf = (path: string) => LOADERS[/\.[^./]+$/.exec(path)?.[0] ?? ''];
+
+const dirname = (path: string) => path.split('/').slice(0, -1).join('/');
+
+/** `path` with `.` and `..` resolved; a leading `..` stays, as outside the top. */
+function normalize(path: string) {
+  const parts: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..' && parts.length > 0 && parts.at(-1) !== '..') parts.pop();
+    else parts.push(part);
+  }
+  return parts.join('/');
+}
 
 const LIBRARY = new Map(Object.entries(library));
 const NAMED = Object.keys(OFFERED).join(', ');
 
-// esbuild's browser build runs here without a worker of its own, and looks
-// for the worker global `self`: this thread has nothing else to confuse.
-Reflect.set(globalThis, 'self', globalThis);
-const { wasm } = z.object({ wasm: z.string() }).parse(workerData);
-const ready = readFile(wasm)
-  .then((bytes) => WebAssembly.compile(bytes))
-  .then((wasmModule) => esbuild.initialize({ wasmModule, worker: false }));
-
-/** Resolve imports to the workspace's files and the library, refusing everything else. */
+/** Resolve imports to the draft's files and the library, refusing everything else. */
 function confined(files: ReadonlyMap<string, string>): esbuild.Plugin {
   return {
     name: 'workshop',
@@ -55,14 +53,14 @@ function confined(files: ReadonlyMap<string, string>): esbuild.Plugin {
             ],
           };
         }
-        const joined = posix.normalize(posix.join(posix.dirname(importer), path));
+        const joined = normalize(`${dirname(importer)}/${path}`);
         if (namespace === 'library') {
           return LIBRARY.has(joined)
             ? { path: joined, namespace }
             : { errors: [{ text: `The library has no ${joined}` }] };
         }
         if (joined === '..' || joined.startsWith('../')) {
-          return { errors: [{ text: `“${path}” is outside the workspace.` }] };
+          return { errors: [{ text: `“${path}” is outside the draft.` }] };
         }
         const found = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js']
           .map((suffix) => joined + suffix)
@@ -130,9 +128,35 @@ async function bundle(files: ReadonlyMap<string, string>, entry: string, output:
   }
 }
 
-parentPort?.on('message', async (message: unknown) => {
-  const { id, files, entries } = Request.parse(message);
-  await ready;
+// esbuild runs here, not in a worker of its own: that would be a `blob:`
+// worker, which the app's CSP refuses. WebAssembly compiles under its
+// 'wasm-unsafe-eval'.
+const ready = esbuild.initialize({ wasmURL, worker: false });
+ready.catch(() => {});
+
+// Set before anything is awaited, so no early request is lost.
+self.onmessage = async ({ data }: MessageEvent<BuildRequest>) => {
+  const { id, files, entries } = data;
+  try {
+    await ready;
+  } catch (error) {
+    const said = error instanceof Error ? error.message : 'it didn’t load';
+    self.postMessage({
+      id,
+      outputs: {},
+      diagnostics: [
+        {
+          severity: 'error',
+          file: null,
+          line: null,
+          column: null,
+          message: `The plugin bundler couldn’t start: ${said}`,
+        },
+      ],
+      failed: true,
+    } satisfies BuildAnswer);
+    return;
+  }
   const workspace = new Map(files);
   const outputs: Record<string, string> = {};
   const diagnostics: BuildDiagnostic[] = [];
@@ -142,5 +166,5 @@ parentPort?.on('message', async (message: unknown) => {
     diagnostics.push(...built.warnings.map(diagnostic('warning')));
     if (built.text !== null) outputs[output] = built.text;
   }
-  parentPort?.postMessage({ id, outputs, diagnostics });
-});
+  self.postMessage({ id, outputs, diagnostics, failed: false } satisfies BuildAnswer);
+};

@@ -94,7 +94,7 @@ export function LibrarySettings() {
  * installed from folders. There a plugin runs from the copy the app keeps,
  * even once the library drops its version, and a folder install of the
  * same ID replaces it on that computer. The desktop shares to the library
- * from an installed plugin or a workshop version, not by choosing a folder.
+ * from an installed plugin, not by choosing a folder.
  * The owner of a plugin chooses whether it is Shared or Only me.
  */
 export function Library({ ctx }: { ctx: ClientContext }) {
@@ -257,7 +257,7 @@ export function Library({ ctx }: { ctx: ClientContext }) {
         </div>
         {desktop && (
           <p className="text-sm text-muted-foreground">
-            Share a plugin installed on this computer, or a workshop version, to add it here.
+            Share a plugin installed on this computer to add it here.
           </p>
         )}
         {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}

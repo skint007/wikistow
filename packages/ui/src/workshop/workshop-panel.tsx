@@ -22,8 +22,10 @@ export function WorkshopDisclosure({ host }: { host: string }) {
         it into the preview.
       </p>
       <p>
-        The workshop lasts until you end it, lock your vault, sign out, or reload or close the app.
-        Export or install the plugin first to keep it.
+        The plugin’s files are saved as a draft on your WikiStow server as the assistant writes
+        them, so you can carry on from any device. Like library plugins, they’re plain text on the
+        server. The conversation isn’t saved: it ends when you end the workshop, lock your vault,
+        sign out, or reload or close the app.
       </p>
     </div>
   );

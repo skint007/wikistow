@@ -63,6 +63,7 @@ const SERVER: Partial<Record<ApiError['code'], string>> = {
   'request-timeout': 'The server took too long, so nothing changed. Try again.',
   'vault-missing': 'This account has no vault yet. Reload to set one up.',
   'ai-off': 'AI isn’t set up on this server.',
+  'draft-limit': 'You have 10 plugin drafts already. Delete one, then try again.',
   'vault-exists': 'This account set up its vault elsewhere meanwhile. Reload, then unlock it.',
   'stale-vault-version': 'Your vault changed elsewhere meanwhile, so nothing changed. Try again.',
   'unreadable-response': 'The server sent an answer this app can’t read. Try again in a moment.',

@@ -1,10 +1,24 @@
-import type { PluginCandidate, WorkshopFile, WorkshopVersion } from '@wikistow/contracts';
-import type { Manifest } from '@wikistow/plugin-sdk';
+import { toBase64 } from '@wikistow/client';
+import {
+  pluginDraftRoutes,
+  type BuildDiagnostic,
+  type PluginUploadFile,
+  type WorkshopFile,
+  type WorkshopVersion,
+} from '@wikistow/contracts';
+import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { api } from '../api';
+import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
+import { tabSafeMode } from '../plugins/safe-mode';
 import { SCRIPT_BUDGET_MS } from '../plugins/script-worker';
 import { pluginTheme } from '../theme/plugin-theme';
+import { buildDraft, Bundler, type Built } from './builder';
 import { SAMPLE_SPACE, sampleStore } from './samples';
+
+const { draftKey, draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
+  pluginDraftRoutes;
 
 /** Errors from the previewed plugin's code kept for the report, newest last. */
 const MAX_ERRORS = 20;
@@ -14,6 +28,12 @@ const MAX_SAMPLE_TEXT = 8000;
 export type WorkshopState = {
   phase: 'starting' | 'ready' | 'failed' | 'ended';
   failure: string | null;
+  /** The draft as the server last answered, once it is read. */
+  draft: pluginDraftRoutes.DraftSummary | null;
+  /** The draft's files as saved, by path. */
+  files: ReadonlyMap<string, string>;
+  /** What last went wrong outside the plugin's own code, such as previewing on opening. */
+  problem: string | null;
   /** Every build so far, failed ones too, oldest first. */
   versions: readonly WorkshopVersion[];
   building: boolean;
@@ -54,12 +74,30 @@ export function pluginFences(markdown: string): Fence[] {
 /** `manifest` without its app code, for a preview the person hasn't let run it. */
 const withoutUi = ({ ui: _ui, ...rest }: Manifest): Manifest => rest;
 
+/** Failed, with what was said, as a version. */
+const failedVersion = (version: number, diagnostics: BuildDiagnostic[]): WorkshopVersion => ({
+  version,
+  diagnostics,
+  plugin: null,
+  hash: null,
+});
+
+const message = (error: unknown) =>
+  error instanceof Error ? error.message : 'Something went wrong.';
+
+const encoder = new TextEncoder();
+const byteSize = (text: string) => encoder.encode(text).length;
+
 /**
- * A plugin workshop in the desktop app (#257): a staged workspace the main
- * process keeps and builds (`DesktopBridge.workshop*`), and a preview of a
- * built version running in a plugin runtime of its own, against sample
- * pages that never reach the server. Its themes can be shown across the
- * app, its regions, blocks and commands only in the preview.
+ * A plugin workshop on a plugin draft (#257, ADR 0004): the draft's files,
+ * read from the server when it opens and held here, each change saved
+ * before it counts; builds made in the page's build worker and kept for
+ * the conversation; and a preview of a built version running in a plugin
+ * runtime of its own, against sample pages that never reach the server.
+ * Its themes can be shown across the app, its regions, blocks and commands
+ * only in the preview. The browser previews a build from the draft's
+ * build on the server, the desktop from what main is handed, both under
+ * `draft-<hash>`.
  *
  * What the preview runs is always one version that built, chosen by
  * number: a failed build leaves it running. Stopping or unloading counts
@@ -70,12 +108,17 @@ const withoutUi = ({ ui: _ui, ...rest }: Manifest): Manifest => rest;
 export class Workshop {
   /** Names this workshop in the app's queries. */
   readonly id = crypto.randomUUID();
+  /** The plugin draft it works on. */
+  readonly draftId: string;
   readonly samples = sampleStore();
   readonly preview: PluginRuntime;
-  #session: string | null = null;
+  readonly #bundler = new Bundler();
   #state: WorkshopState = {
     phase: 'starting',
     failure: null,
+    draft: null,
+    files: new Map(),
+    problem: null,
     versions: [],
     building: false,
     running: null,
@@ -84,20 +127,27 @@ export class Workshop {
     errors: [],
   };
   readonly #listeners = new Set<() => void>();
+  /** Each version that built, by number, with its files. */
+  readonly #built = new Map<number, Built>();
+  /** Builds whose files the preview can load now, by hash. */
+  readonly #served = new Set<string>();
+  /** The last large upload: the account sends one at a time. */
+  #uploading: Promise<unknown> = Promise.resolve();
   /** Counts stops and unloads: a build or load begun before one is dropped. */
   #generation = 0;
   /** Lists nothing for one refresh, so a version loads afresh. */
   #holding = false;
-  /** Builds under way, a stopped one included until main answers. */
+  /** Builds under way, a stopped one included until it answers. */
   #building = 0;
   /** The stylesheet of the theme this workshop shows across the app, while it does. */
   #theming: string | null = null;
   readonly #unwatchTheme: () => void;
 
-  constructor() {
+  constructor(draftId: string) {
+    this.draftId = draftId;
     this.preview = createRuntime({
       list: async () => {
-        const safeMode = desktop ? (await desktop.plugins()).safeMode : true;
+        const safeMode = desktop ? (await desktop.plugins()).safeMode : tabSafeMode.on();
         const running = this.#state.running?.plugin;
         if (!running || this.#holding) return { safeMode, plugins: [] };
         const manifest = this.#state.appCode ? running.manifest : withoutUi(running.manifest);
@@ -135,23 +185,35 @@ export class Workshop {
     for (const listener of this.#listeners) listener();
   }
 
+  /** Read the draft whole, then build it and preview what built, without the assistant. */
   async #start() {
     try {
-      if (!desktop) throw new Error('The plugin workshop is in the desktop app.');
-      const session = await desktop.workshopStart();
-      if (this.#state.phase === 'ended') return void desktop.workshopEnd(session);
-      this.#session = session;
-      this.#set({ phase: 'ready' });
+      const { draft, files } = await api.call(pluginDraftRoutes.getDraft, {
+        params: { draftId: this.draftId },
+      });
+      if (this.#state.phase === 'ended') return;
+      this.#set({
+        phase: 'ready',
+        draft,
+        files: new Map(files.map(({ path, text }) => [path, text])),
+      });
     } catch (error) {
-      this.#set({ phase: 'failed', failure: error instanceof Error ? error.message : null });
+      if (this.#state.phase !== 'ended') {
+        this.#set({ phase: 'failed', failure: errorMessage(error) });
+      }
+      return;
+    }
+    if (this.#state.files.size === 0) return;
+    try {
+      const version = await this.build();
+      if (version?.plugin) await this.load(version.version);
+    } catch (error) {
+      this.#set({ problem: message(error) });
     }
   }
 
-  #bridge() {
-    if (!desktop || !this.#session || this.#state.phase !== 'ready') {
-      throw new Error('The workshop isn’t open.');
-    }
-    return { desktop, session: this.#session };
+  #open() {
+    if (this.#state.phase !== 'ready') throw new Error('The workshop isn’t open.');
   }
 
   // Errors thrown by the running version's code, which its files' address names.
@@ -174,41 +236,155 @@ export class Workshop {
     this.#set({ errors: [...this.#state.errors, message].slice(-MAX_ERRORS) });
   }
 
-  files = (): Promise<WorkshopFile[]> => {
-    const { desktop, session } = this.#bridge();
-    return desktop.workshopFiles(session);
+  /** The draft's files, with their sizes in bytes, by path. */
+  files = (): WorkshopFile[] => {
+    this.#open();
+    return [...this.#state.files]
+      .map(([path, text]) => ({ path, size: byteSize(text) }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   };
 
   read = (path: string) => {
-    const { desktop, session } = this.#bridge();
-    return desktop.workshopRead(session, path);
+    this.#open();
+    const text = this.#state.files.get(path);
+    if (text === undefined) throw new Error(`There’s no ${path} in the draft.`);
+    return text;
   };
 
-  write = (path: string, text: string) => {
-    const { desktop, session } = this.#bridge();
-    return desktop.workshopWrite(session, path, text);
-  };
+  /**
+   * Save a file to the draft on the server; the copy here changes only once
+   * the server has it. The draft's limits are checked here first, to say
+   * which one a file breaks; the server checks them again.
+   */
+  async write(path: string, text: string) {
+    this.#open();
+    const problem = draftPathProblem(path);
+    if (problem) throw new Error(problem);
+    if (text.includes('\0')) throw new Error('A draft file can’t hold a NUL character.');
+    const size = byteSize(text);
+    if (size > MAX_DRAFT_FILE_BYTES) throw new Error('A draft file holds 256 KB at most.');
+    const others = [...this.#state.files].filter(([other]) => other !== path);
+    if (others.length + 1 > MAX_DRAFT_FILES) {
+      throw new Error(`A draft holds ${MAX_DRAFT_FILES} files at most.`);
+    }
+    if (others.reduce((total, [, other]) => total + byteSize(other), size) > MAX_DRAFT_BYTES) {
+      throw new Error('A draft holds 4 MB at most.');
+    }
+    await this.#change({ put: [{ path, text }] }, (files) => files.set(path, text));
+  }
 
-  remove = (path: string) => {
-    const { desktop, session } = this.#bridge();
-    return desktop.workshopDelete(session, path);
-  };
+  async remove(path: string) {
+    this.#open();
+    const problem = draftPathProblem(path);
+    if (problem) throw new Error(problem);
+    await this.#change({ remove: [path] }, (files) => files.delete(path));
+  }
 
-  /** Build the workspace into its next version. Null if stopped or unloaded meanwhile. */
+  async #change(
+    body: { put?: pluginDraftRoutes.DraftFile[]; remove?: string[] },
+    apply: (files: Map<string, string>) => void,
+  ) {
+    const { draft } = await api.call(pluginDraftRoutes.changeDraft, {
+      params: { draftId: this.draftId },
+      body,
+    });
+    if (this.#state.phase === 'ended') return;
+    // From the files as they are now: another change may have landed meanwhile.
+    const files = new Map(this.#state.files);
+    apply(files);
+    this.#set({ draft, files });
+  }
+
+  /** Build the draft's files into the next version. Null if stopped or unloaded meanwhile. */
   async build(signal?: AbortSignal): Promise<WorkshopVersion | null> {
-    const { desktop, session } = this.#bridge();
+    this.#open();
     const generation = this.#generation;
     this.#building += 1;
     this.#set({ building: true });
     try {
-      const built = await desktop.workshopBuild(session);
-      if (!built || generation !== this.#generation || signal?.aborted) return null;
-      this.#set({ versions: [...this.#state.versions, built] });
-      return built;
+      const result = await buildDraft(this.#state.files, this.#bundler).catch(
+        (problem: unknown): Awaited<ReturnType<typeof buildDraft>> => ({
+          diagnostics: [
+            { severity: 'error', file: null, line: null, column: null, message: message(problem) },
+          ],
+          built: null,
+        }),
+      );
+      if (generation !== this.#generation || signal?.aborted || this.#state.phase !== 'ready') {
+        return null;
+      }
+      const number = this.#state.versions.length + 1;
+      const { built } = result;
+      const version: WorkshopVersion = built
+        ? {
+            version: number,
+            diagnostics: result.diagnostics,
+            plugin: {
+              manifest: built.manifest,
+              level: trustLevel(built.manifest),
+              key: draftKey(built.hash),
+              development: null,
+              library: false,
+              enabled: true,
+            },
+            hash: built.hash,
+          }
+        : failedVersion(number, result.diagnostics);
+      if (built) this.#built.set(number, built);
+      this.#set({ versions: [...this.#state.versions, version] });
+      return version;
     } finally {
       this.#building -= 1;
       this.#set({ building: this.#building > 0 });
     }
+  }
+
+  /**
+   * A version that built, as its folder's files and its hash: what the
+   * preview and an export use, and what Publish uploads.
+   */
+  versionFiles(version: number): { files: PluginUploadFile[]; hash: string } {
+    const built = this.#built.get(version);
+    if (!built) throw new Error(`Version ${version} didn’t build.`);
+    return {
+      files: [...built.bytes].map(([path, data]) => ({ path, data })),
+      hash: built.hash,
+    };
+  }
+
+  /**
+   * Send one large upload (a preview's build, a version to publish) after
+   * any this workshop is sending: the server takes one at a time from an account.
+   */
+  oneLargeUpload<T>(send: () => Promise<T>): Promise<T> {
+    const sent = this.#uploading.then(send);
+    this.#uploading = sent.catch(() => {});
+    return sent;
+  }
+
+  /**
+   * Make version `version`'s files loadable under `draft-<hash>`: on the
+   * desktop main serves what it is handed; in the browser the draft's build
+   * on the server is replaced, and served from the library's file route.
+   * Either way the answer must be the hash built here.
+   */
+  async #serve(version: number) {
+    const { files, hash } = this.versionFiles(version);
+    if (this.#served.has(hash)) return;
+    const served = desktop
+      ? await desktop.workshopPreview(files)
+      : (
+          await this.oneLargeUpload(() =>
+            api.call(pluginDraftRoutes.putDraftBuild, {
+              params: { draftId: this.draftId },
+              body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
+            }),
+          )
+        ).hash;
+    if (served !== hash) throw new Error('The preview’s copy doesn’t match the version built.');
+    // The server keeps one build a draft; main keeps every one it was handed.
+    if (!desktop) this.#served.clear();
+    this.#served.add(hash);
   }
 
   /** Run version `version` in the preview, in place of what runs now. */
@@ -217,7 +393,12 @@ export class Workshop {
     if (!record?.plugin)
       throw new Error(`Version ${version} didn’t build, so it can’t be previewed.`);
     if (signal?.aborted || this.#state.phase !== 'ready') return;
-    this.#set({ running: record, errors: [] });
+    const generation = this.#generation;
+    await this.#serve(version);
+    if (generation !== this.#generation || signal?.aborted || this.#state.phase !== 'ready') {
+      return;
+    }
+    this.#set({ running: record, errors: [], problem: null });
     await this.preview.refresh();
     this.#showTheme();
     // What it registers as it starts, for the report that follows. App code
@@ -268,7 +449,6 @@ export class Workshop {
    */
   stop() {
     this.#generation += 1;
-    if (desktop && this.#session) void desktop.workshopCancel(this.#session);
   }
 
   /** Stop, and run nothing in the preview. */
@@ -279,38 +459,27 @@ export class Workshop {
     await this.preview.refresh();
   }
 
-  /** End the workshop: the preview stops, and the workspace and its versions are deleted. */
+  /**
+   * End the workshop: the preview stops, and the versions built go with the
+   * conversation. The draft stays on the server.
+   */
   end() {
     if (this.#state.phase === 'ended') return;
     this.stop();
     this.#set({ phase: 'ended', running: null, theme: null });
     this.#showTheme();
     this.preview.stop();
+    this.#bundler.stop();
     this.#unwatchTheme();
     window.removeEventListener('error', this.#caught);
     window.removeEventListener('unhandledrejection', this.#rejected);
-    if (desktop && this.#session) void desktop.workshopEnd(this.#session);
   }
 
-  /** Export a version that built into a folder the person picks. The folder, or null. */
-  export(version: WorkshopVersion) {
-    const { desktop, session } = this.#bridge();
-    if (!version.hash) throw new Error(`Version ${version.version} didn’t build.`);
-    return desktop.workshopExport(session, version.version, version.hash);
-  }
-
-  /** Read a version that built for the usual install, bound to the hash reviewed. */
-  install(version: WorkshopVersion): Promise<PluginCandidate> {
-    const { desktop, session } = this.#bridge();
-    if (!version.hash) throw new Error(`Version ${version.version} didn’t build.`);
-    return desktop.workshopInstall(session, version.version, version.hash);
-  }
-
-  /** A version that built's files, bound to the hash reviewed, to share to the library. */
-  upload(version: WorkshopVersion) {
-    const { desktop, session } = this.#bridge();
-    if (!version.hash) throw new Error(`Version ${version.version} didn’t build.`);
-    return desktop.workshopUpload(session, version.version, version.hash);
+  /** On the desktop, export a version that built into a folder the person picks. The folder, or null. */
+  export(version: number) {
+    if (!desktop) throw new Error('Exporting to a folder is in the desktop app.');
+    const { files, hash } = this.versionFiles(version);
+    return desktop.workshopExport(files, hash);
   }
 
   /**

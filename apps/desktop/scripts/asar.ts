@@ -14,8 +14,8 @@ const here = fileURLToPath(new URL('..', import.meta.url));
 const stage = await mkdtemp(join(tmpdir(), 'wikistow-desktop-'));
 try {
   const { productName, version } = JSON.parse(await readFile(join(here, 'package.json'), 'utf8'));
-  // Only what the app loads: its bundles (with the workshop's bundler and
-  // its WebAssembly), the web build and the icon.
+  // Only what the app loads: its bundles, the web build (with the
+  // workshop's bundler and its WebAssembly) and the icon.
   const noMaps = { recursive: true, filter: (source: string) => !source.endsWith('.map') };
   await cp(join(here, 'dist'), join(stage, 'dist'), noMaps);
   await cp(join(here, '../web/dist'), join(stage, 'web'), noMaps);

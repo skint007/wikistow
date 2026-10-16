@@ -2,8 +2,8 @@
 // `app://wikistow`, forwards that origin's API requests to the server with
 // the session only it holds, signs in through the system browser, keeps
 // and serves the plugins installed on this computer and copies of those
-// approved from the server's library, builds and serves
-// the plugin workshop's versions, and checks for a newer release.
+// approved from the server's library, serves the builds the plugin
+// workshop previews, and checks for a newer release.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
@@ -28,7 +28,7 @@ import {
 import { existsSync } from 'node:fs';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
 import { contextMenu } from './context-menu.ts';
@@ -48,7 +48,6 @@ import {
   SignInError,
 } from './sign-in.ts';
 import { desktopUpdates } from './updates.ts';
-import { workshopBuilder } from './workshop/builder.ts';
 import { desktopWorkshop, WorkshopError } from './workshop/workshop.ts';
 
 /** How long a browser sign-in may take before the app stops waiting for it. */
@@ -136,12 +135,7 @@ const library = libraryPlugins(app.getPath('userData'), (path) =>
     fetch(url, { ...init, signal: AbortSignal.timeout(LIBRARY_REQUEST_MS) }),
   ),
 );
-// The bundler's worker and WebAssembly are beside this bundle (`vite.config.ts`).
-const bundler = workshopBuilder(
-  new URL('./workshop-build.mjs', import.meta.url),
-  fileURLToPath(new URL('./esbuild.wasm', import.meta.url)),
-);
-const workshop = desktopWorkshop(app.getPath('userData'), bundler);
+const workshop = desktopWorkshop(app.getPath('userData'));
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
 const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
@@ -151,12 +145,6 @@ async function removeKept() {
   await Promise.all([searchIndex.remove(), trustMarks.remove()]).catch(() => {});
 }
 
-/** End every workshop, as the page that held them goes, and the bundler with them. */
-async function endWorkshops() {
-  if (!workshop.open()) return;
-  await workshop.endAll();
-  bundler.stop();
-}
 /**
  * No plugins load: asked for with `--safe-mode` or Ctrl+Shift+Alt+P, or
  * after the window crashed with plugins on. Until the person turns them
@@ -219,7 +207,7 @@ async function serve(request: Request): Promise<Response> {
     return toServer(request).catch(() => Response.error());
   }
   if (url.pathname.startsWith('/plugins/')) {
-    // An installed plugin's file, a library plugin's copy, or a workshop version's.
+    // An installed plugin's file, a library plugin's copy, or a workshop build's.
     const address = safeMode ? null : pluginAddress(url.pathname);
     const plugin =
       address && (plugins.file(address) ?? library.file(address) ?? workshop.file(address));
@@ -420,14 +408,14 @@ function openWindow() {
     safeMode = switching.before;
     switching = null;
   });
-  // A workshop lives as long as the page that holds its conversation: a new
-  // document committed ends it, and a navigation `will-navigate` refuses doesn't.
-  window.webContents.on('did-navigate', () => void endWorkshops());
+  // A workshop's previews last as long as the page that made them: a new
+  // document committed ends them, and a navigation `will-navigate` refuses doesn't.
+  window.webContents.on('did-navigate', () => void workshop.clear());
   window.webContents.on('render-process-gone', (_event, details) => {
     clearTimeout(stuck);
     // A workshop's preview runs plugin code too.
-    const previewing = workshop.open();
-    void endWorkshops();
+    const previewing = workshop.previewing();
+    void workshop.clear();
     const forced = ended;
     ended = false;
     if (switching) {
@@ -675,38 +663,15 @@ void app.whenReady().then(async () => {
   handle('pluginUpload', (id) => plugins.uploadFiles(id));
   handle('setSafeMode', async (on) => setSafeMode(on === true));
   await workshop.load();
-  handle('workshopStart', () => workshop.start());
-  handle('workshopEnd', async (session) => {
-    await workshop.end(session);
-    if (!workshop.open()) bundler.stop();
-  });
-  handle('workshopFiles', (session) => workshop.files(session));
-  handle('workshopRead', (session, path) => workshop.read(session, path));
-  handle('workshopWrite', (session, path, text) => workshop.write(session, path, text));
-  handle('workshopDelete', (session, path) => workshop.remove(session, path));
-  handle('workshopBuild', (session) => workshop.build(session));
-  handle('workshopCancel', async (session) => workshop.cancel(session));
-  handle('workshopExport', async (session, version, hash) => {
-    const parent = await chooseFolder({
-      title: 'Export the plugin into a folder',
-      buttonLabel: 'Export here',
-      properties: ['openDirectory', 'createDirectory'],
-    });
-    return parent === null ? null : workshop.exportTo(session, version, hash, parent);
-  });
-  // The usual install, from the reviewed version's folder: copied, hashed
-  // again, and approved by the person in the app's own dialog.
-  handle('workshopInstall', async (session, version, hash) => {
-    const candidate = await plugins.pick(
-      await workshop.installFolder(session, version, hash),
-      false,
-    );
-    if (candidate.hash !== hash)
-      throw new WorkshopError('The copy doesn’t match the reviewed version.');
-    return candidate;
-  });
-  handle('workshopUpload', (session, version, hash) =>
-    workshop.uploadFiles(session, version, hash),
+  handle('workshopPreview', (files) => workshop.preview(files));
+  handle('workshopExport', (files, hash) =>
+    workshop.exportTo(files, hash, () =>
+      chooseFolder({
+        title: 'Export the plugin into a folder',
+        buttonLabel: 'Export here',
+        properties: ['openDirectory', 'createDirectory'],
+      }),
+    ),
   );
   openWindow();
 });
