@@ -88,18 +88,19 @@ test('a library plugin runs in the browser until it leaves the library', async (
   await waitForSave(page);
   const shownAt = page.url();
 
-  // Uploaded from its built folder, then approved.
+  // Uploaded from its built folder, which installs it once approved.
   await page.goto('/settings');
   await page.getByLabel('Plugin folder').setInputFiles(`${PAGE_TOOLS}/dist`);
-  await expect(page.getByText('Uploaded Page tools 0.1.0.')).toBeVisible({ timeout: 15_000 });
-  const listed = page
-    .getByRole('list', { name: 'Plugin library' })
-    .getByRole('listitem', { name: 'Page tools' });
-  await listed.getByRole('button', { name: 'Install…' }).click();
   const approval = page.getByRole('dialog');
   await expect(approval).toContainText('App');
   await expect(approval).toContainText(/[0-9a-f]{64}/);
-  await approval.getByRole('button', { name: 'Install' }).click();
+  await approval.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByText('Uploaded and installed Page tools 0.1.0.')).toBeVisible({
+    timeout: 15_000,
+  });
+  const listed = page
+    .getByRole('list', { name: 'Plugin library' })
+    .getByRole('listitem', { name: 'Page tools' });
   const installed = page
     .getByRole('list', { name: 'Installed plugins' })
     .getByRole('listitem', { name: 'Page tools' });

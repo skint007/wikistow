@@ -224,8 +224,8 @@ test('a library plugin installs at unlock, checked against its hash', async ({
   const copies = (profile: string) =>
     readdir(join(profile, 'library-plugins', 'probe')).catch(() => []);
 
-  // The first computer installs the probe from its folder, shares it, and
-  // installs it again from the library in its place.
+  // The first computer installs the probe from its folder and shares it,
+  // which installs it from the library, used once the folder install goes.
   desktop = await launch(await newProfile());
   const first = desktop;
   await signInThroughBrowser(first, page, baseURL ?? '');
@@ -241,16 +241,14 @@ test('a library plugin installs at unlock, checked against its hash', async ({
     .getByRole('list', { name: 'Installed plugins' })
     .getByRole('listitem', { name: 'Probe' });
   await folderInstall.getByRole('button', { name: 'Share to library…' }).click();
-  await first.window.getByRole('dialog').getByRole('button', { name: 'Share' }).click();
-  await expect(first.window.getByText('Shared Probe 1.0.0 to the library.')).toBeVisible();
+  await first.window.getByRole('dialog').getByRole('button', { name: 'Upload' }).click();
+  await expect(
+    first.window.getByText(
+      'Shared Probe 1.0.0 to the library and installed it on all your devices.',
+    ),
+  ).toBeVisible();
   await folderInstall.getByRole('button', { name: 'Remove Probe' }).click();
   await expect(folderInstall).toHaveCount(0);
-  await first.window
-    .getByRole('list', { name: 'Plugin library' })
-    .getByRole('listitem', { name: 'Probe' })
-    .getByRole('button', { name: 'Install…' })
-    .click();
-  await first.window.getByRole('dialog').getByRole('button', { name: 'Install' }).click();
   await expect(
     first.window
       .getByRole('list', { name: 'Installed from the library' })

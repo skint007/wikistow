@@ -5,7 +5,8 @@ import {
   type PluginApproval,
 } from '@wikistow/client';
 import { pluginRoutes, type InstalledPlugin, type PluginUploadFile } from '@wikistow/contracts';
-import { trustLevel } from '@wikistow/plugin-sdk/manifest';
+import { checkPlugin } from '@wikistow/plugin-sdk/files';
+import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
 import { vaultStore } from '../vault/store';
@@ -54,11 +55,44 @@ export const asInstalled = (version: LibraryVersion, enabled: boolean): Installe
   enabled,
 });
 
-/** Upload a built plugin's files to the library as a new version of its ID. */
-export const uploadToLibrary = async (files: readonly PluginUploadFile[]) =>
-  api.call(pluginRoutes.uploadPlugin, {
-    body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
+/** A built plugin's files to upload, read and hashed here as the server will: what the confirmation shows. */
+export type PluginUpload = {
+  files: readonly PluginUploadFile[];
+  manifest: Manifest;
+  hash: string;
+};
+
+/** Check `files` as one built plugin folder (`checkPlugin`), throwing what is wrong with it. */
+export async function readUpload(files: readonly PluginUploadFile[]): Promise<PluginUpload> {
+  const { manifest, hash } = await checkPlugin(
+    new Map(files.map(({ path, data }) => [path, data])),
+  );
+  return { files, manifest, hash };
+}
+
+/**
+ * Upload `upload` to the library as a version of its ID, Shared or Only
+ * me, then install it for the person (ADR 0004): approve its hash, or for
+ * an ID they installed, approve it in place of the older hash, keeping
+ * page access and on or off. Nothing is approved unless the server
+ * answers the hash computed here, which the person was shown.
+ */
+export async function uploadAndInstall(
+  ctx: ClientContext,
+  { files, manifest, hash }: PluginUpload,
+  visibility: pluginRoutes.PluginVisibility,
+) {
+  const { version } = await api.call(pluginRoutes.uploadPlugin, {
+    body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })), visibility },
   });
+  if (version.hash !== hash)
+    throw new Error('The server answered with different files, so the plugin wasn’t installed.');
+  const { id } = manifest;
+  if (pluginOperations.listPluginApprovals(ctx).some((approval) => approval.id === id))
+    await pluginOperations.updatePlugin(ctx, id, hash);
+  else await pluginOperations.approvePlugin(ctx, { id, hash, access: [] });
+  return version;
+}
 
 /**
  * Each approval whose version the library still has, in the record's

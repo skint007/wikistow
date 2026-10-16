@@ -1,6 +1,6 @@
 import { PageId, SpaceId } from '@wikistow/client';
 import type { PluginCandidate, WorkshopVersion } from '@wikistow/contracts';
-import type { AppViewProps, Manifest, SettingsViewProps } from '@wikistow/plugin-sdk';
+import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -12,8 +12,8 @@ import type { EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
-import { LIBRARY_KEY, uploadToLibrary } from '../plugins/library';
-import { ShareToLibrary } from '../plugins/library-settings';
+import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from '../plugins/library';
+import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Approval } from '../plugins/plugin-settings';
 import { PageViews, pluginName } from '../plugins/regions';
@@ -436,8 +436,9 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const queryClient = useQueryClient();
+  const ctx = useClient();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
-  const [sharing, setSharing] = useState<{ version: WorkshopVersion; manifest: Manifest } | null>(
+  const [sharing, setSharing] = useState<{ version: WorkshopVersion; upload: PluginUpload } | null>(
     null,
   );
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
@@ -518,7 +519,13 @@ function Versions({ workshop }: { workshop: Workshop }) {
                     size="sm"
                     variant="outline"
                     onClick={() =>
-                      version.plugin && setSharing({ version, manifest: version.plugin.manifest })
+                      void act(async () => {
+                        setSharing({
+                          version,
+                          upload: await readUpload(await workshop.upload(version)),
+                        });
+                        return null;
+                      })
                     }
                   >
                     Share to library…
@@ -544,15 +551,16 @@ function Versions({ workshop }: { workshop: Workshop }) {
           })
         }
       />
-      <ShareToLibrary
-        manifest={sharing?.manifest ?? null}
+      <ConfirmUpload
+        ctx={ctx}
+        upload={sharing?.upload ?? null}
         onDone={() => setSharing(null)}
-        onShare={() =>
+        onUpload={(upload, visibility) =>
           act(async () => {
-            if (!sharing) return null;
-            const { version } = await uploadToLibrary(await workshop.upload(sharing.version));
+            const { manifest } = await uploadAndInstall(ctx, upload, visibility);
             await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
-            return `Shared v${sharing.version.version} to the library as ${version.manifest.name} ${version.manifest.version}. Install it from Settings → Plugins to use it outside the workshop.`;
+            await pluginRuntime.refresh();
+            return `Shared v${sharing?.version.version} to the library as ${manifest.name} ${manifest.version}, and installed it on all your devices.`;
           })
         }
       />
