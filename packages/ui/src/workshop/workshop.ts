@@ -307,6 +307,13 @@ export class Workshop {
     return desktop.workshopInstall(session, version.version, version.hash);
   }
 
+  /** A version that built's files, bound to the hash reviewed, to share to the library. */
+  upload(version: WorkshopVersion) {
+    const { desktop, session } = this.#bridge();
+    if (!version.hash) throw new Error(`Version ${version.version} didn’t build.`);
+    return desktop.workshopUpload(session, version.version, version.hash);
+  }
+
   /**
    * The person typed in the preview's editor, drawn for the sample's
    * `outside` count: the sample changes, and the plugin is told, as of a save.

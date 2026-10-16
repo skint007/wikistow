@@ -1,5 +1,10 @@
-import { pluginOperations, type ClientContext, type PluginApproval } from '@wikistow/client';
-import { pluginRoutes, type InstalledPlugin } from '@wikistow/contracts';
+import {
+  pluginOperations,
+  toBase64,
+  type ClientContext,
+  type PluginApproval,
+} from '@wikistow/client';
+import { pluginRoutes, type InstalledPlugin, type PluginUploadFile } from '@wikistow/contracts';
 import { trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
@@ -26,6 +31,12 @@ export const asInstalled = (version: LibraryVersion, enabled: boolean): Installe
   enabled,
 });
 
+/** Upload a built plugin's files to the library as a new version of its ID. */
+export const uploadToLibrary = async (files: readonly PluginUploadFile[]) =>
+  api.call(pluginRoutes.uploadPlugin, {
+    body: { files: files.map(({ path, data }) => ({ path, data: toBase64(data) })) },
+  });
+
 /**
  * Each approval whose version the library still has, in the record's
  * order, as the runtime runs it. An approval whose version was removed is
@@ -45,7 +56,7 @@ export const approvedPlugins = (
 /** The library as last listed, with the session it was listed in. */
 let lastListed: { ctx: ClientContext; library: LibraryPlugin[] } | null = null;
 
-const openCtx = () => {
+export const openCtx = () => {
   const vault = vaultStore.get();
   if (vault.status !== 'unlocked') throw new Error('Unlock your vault first.');
   return vault.ctx;

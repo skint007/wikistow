@@ -30,6 +30,7 @@ import { pagesFor, pluginError, writeLimit, type Caller } from './pages';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { formView, readFields, type ReadField } from './block-form';
 import { editorDrafts } from './drafts';
+import { desktopSource } from './desktop-source';
 import { librarySource } from './library';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
 import { inFrame } from './script-frame';
@@ -85,6 +86,8 @@ export type PluginsSnapshot = {
   listed: boolean;
   safeMode: boolean;
   plugins: PluginStatus[];
+  /** Plugins the source knows of but couldn't load, by ID, with why: a desktop's library plugin it couldn't install. */
+  unavailable: Readonly<Record<string, string>>;
   commands: PluginCommand[];
   /** What running plugins put in each region, in plugin order, then registration order. */
   regions: { [R in keyof Regions]: Contribution<R>[] };
@@ -200,7 +203,12 @@ export type RuntimeSource = {
    * null: not known now, as the browser's while the vault is locked. The
    * runtime lists again whenever the vault locks or unlocks.
    */
-  list(): Promise<{ safeMode: boolean; plugins: InstalledPlugin[] | null }>;
+  list(): Promise<{
+    safeMode: boolean;
+    plugins: InstalledPlugin[] | null;
+    /** Plugins it couldn't load, by ID, with why. */
+    unavailable?: Record<string, string>;
+  }>;
   /** The open account's page access settings, by plugin. */
   access(): Promise<Record<string, PluginScope[]>>;
   /** Replace one plugin's page access for the open account. */
@@ -237,10 +245,12 @@ export function createRuntime(source: RuntimeSource) {
   let queryClient: QueryClient | null = null;
   const listeners = new Set<() => void>();
   let listed = false;
+  let unavailable: Readonly<Record<string, string>> = {};
   let snapshot: PluginsSnapshot = {
     listed,
     safeMode: false,
     plugins: [],
+    unavailable,
     commands: [],
     regions: contributions([]),
     themes: [],
@@ -254,6 +264,7 @@ export function createRuntime(source: RuntimeSource) {
     snapshot = {
       listed,
       safeMode,
+      unavailable,
       plugins: [
         ...entries.map(({ plugin, problems }) => ({
           plugin,
@@ -598,7 +609,10 @@ export function createRuntime(source: RuntimeSource) {
     );
     for (const entry of [...loaded.values()]) {
       const next = wanted.get(entry.plugin.manifest.id);
-      if (!next || next.key !== entry.plugin.key) unload(entry);
+      // Another version, or the same files from elsewhere: a folder install
+      // replacing a library copy keeps its choices in another place.
+      if (!next || next.key !== entry.plugin.key || next.library !== entry.plugin.library)
+        unload(entry);
     }
     if (unlocked()) await readAccess();
     for (const plugin of wanted.values()) {
@@ -613,6 +627,7 @@ export function createRuntime(source: RuntimeSource) {
       if (unlocked() && !entry.active) entry.starting = activate(entry);
     }
     idle = plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
+    unavailable = state.unavailable ?? {};
     listed = state.plugins !== null;
     emit();
   }
@@ -768,31 +783,12 @@ export type PluginRuntime = ReturnType<typeof createRuntime>;
 
 const drafts = editorDrafts();
 
-/** The desktop's plugins: folder and development installs on this computer, per device. */
-const desktopSource = (
-  bridge: NonNullable<typeof desktop>,
-): Omit<RuntimeSource, 'pages' | 'handle'> => ({
-  list: () => bridge.plugins(),
-  async access() {
-    const vault = vaultStore.get();
-    if (vault.status !== 'unlocked') return {};
-    return bridge.pluginAccess(vault.vault.accountId);
-  },
-  async setAccess(pluginId, scopes) {
-    const vault = vaultStore.get();
-    if (vault.status !== 'unlocked') return;
-    await bridge.setPluginAccess(vault.vault.accountId, pluginId, scopes);
-  },
-  disable: (pluginId) => bridge.setPluginEnabled(pluginId, false),
-  ownsStorage: true,
-});
-
 const ownSource = desktop ? desktopSource(desktop) : librarySource;
 
 /**
  * The app's own plugins, running in its page: in the desktop app those
- * installed on this computer, in the browser the library plugins the
- * person approved.
+ * installed on this computer and the library plugins it holds copies of,
+ * in the browser the library plugins the person approved.
  */
 const ownRuntime = createRuntime({
   ...ownSource,
