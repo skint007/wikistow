@@ -17,7 +17,7 @@ import { Markdown } from '../page/markdown';
 import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
-import { PageViews, pluginName } from '../plugins/regions';
+import { PageViews, pluginName, TitlebarViews } from '../plugins/regions';
 import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PluginView } from '../plugins/views';
 import { useClient } from '../vault/store';
@@ -447,7 +447,7 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
 
 const NO_SETTINGS: SettingsViewProps = {};
 
-/** The plugin's own pages, rail items and Settings sections, opened here. */
+/** The plugin's own pages, rail items, Settings sections and titlebar buttons, opened here. */
 function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
   const { regions, plugins } = usePlugins();
   const [open, setOpen] = useState<string | null>(null);
@@ -480,6 +480,20 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
         />
       ),
     })),
+    // All its titlebar buttons, as the desktop app's titlebar shows them.
+    ...(regions['app.titlebar'].length > 0
+      ? [
+          {
+            key: 'app.titlebar',
+            label: 'Titlebar',
+            draw: () => (
+              <div className="flex h-9 items-center justify-end gap-1">
+                <TitlebarViews />
+              </div>
+            ),
+          },
+        ]
+      : []),
   ];
   const rail = regions.rail;
   if (places.length === 0 && rail.length === 0) return null;

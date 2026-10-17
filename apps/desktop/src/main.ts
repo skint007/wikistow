@@ -4,13 +4,17 @@
 // and serves the plugins installed on this computer and copies of those
 // approved from the server's library, serves the builds the plugin
 // workshop previews, checks for a newer release, and opens its window where
-// it was last left.
+// it was last left. The window has no system frame or menu: the pages draw
+// its titlebar, and main answers the menu's old shortcuts.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
   securityHeadersFor,
+  WINDOW_ACTIONS,
   type DesktopBridge,
   type DesktopResult,
+  type WindowAction,
+  type WindowState,
 } from '@wikistow/contracts';
 import {
   app,
@@ -39,6 +43,7 @@ import { PluginFolderError } from './plugins/folder.ts';
 import { libraryPlugins } from './plugins/library.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
+import { shortcut } from './shortcuts.ts';
 import {
   checkServer,
   handoffCode,
@@ -339,6 +344,10 @@ function openWindow() {
     ...kept.bounds,
     title: 'WikiStow',
     icon: join(app.getAppPath(), 'packaging', 'wikistow-desktop.png'),
+    // The page's titlebar stands in for the frame (shell/titlebar.tsx). Its
+    // empty part moves the window and double-clicking it maximizes; the
+    // window still resizes from a few pixels inside each edge.
+    frame: false,
     show: false,
     webPreferences: {
       preload: join(import.meta.dirname, 'preload.cjs'),
@@ -351,6 +360,14 @@ function openWindow() {
   place.track(window);
   // Maximizing shows the window too.
   window.once('ready-to-show', () => (kept.maximized ? window?.maximize() : window?.show()));
+  // The titlebar shows the maximize button as restore while the window fills the screen.
+  const tellState = () => {
+    if (window) window.webContents.send(DESKTOP_CHANNELS.onWindowState, windowState(window));
+  };
+  window.on('maximize', tellState);
+  window.on('unmaximize', tellState);
+  window.on('enter-full-screen', tellState);
+  window.on('leave-full-screen', tellState);
   // Main sees these keys before the page does, so this works however a
   // plugin left the page.
   window.webContents.on('before-input-event', (event, input) => {
@@ -363,7 +380,13 @@ function openWindow() {
     ) {
       event.preventDefault();
       setSafeMode(true);
+      return;
     }
+    const action = shortcut(input);
+    if (!action) return;
+    event.preventDefault();
+    if (action === 'quit') app.quit();
+    else windowAction(action);
   });
   // Right-click on the app's own page; plugin frames get no menu. The
   // spellchecker uses the system's language, as Electron does by default.
@@ -378,6 +401,7 @@ function openWindow() {
   });
   window.webContents.on('did-finish-load', () => {
     switching = null;
+    reloading = false;
     clearTimeout(stuck);
   });
   // Emitted before the page's beforeunload, so the handler below can tell
@@ -387,29 +411,36 @@ function openWindow() {
   });
   // A draft with changes still to save asks before it is left. Electron
   // refuses that silently, so main asks the person instead: for a close,
-  // whether to close once they're saved, and for a reload for safe mode, which
-  // leaves the mode as it was if they stay.
+  // whether to close once they're saved, and for a reload, whether to lose
+  // them. One for safe mode leaves the mode as it was if they stay.
   window.webContents.on('will-prevent-unload', (event) => {
     const closed = closing;
+    const reloaded = reloading;
     closing = false;
+    reloading = false;
     if (!window) return;
     if (closed && !switching) return askToClose(window, event);
-    if (!switching) return;
+    if (!switching && !reloaded) return;
     // The page answered, so it isn't stuck; the person decides.
     clearTimeout(stuck);
     const answer = dialog.showMessageBoxSync(window, {
       type: 'question',
-      buttons: ['Restart', 'Stay'],
+      buttons: [switching ? 'Restart' : 'Reload', 'Stay'],
       defaultId: 0,
       cancelId: 1,
-      message: safeMode ? 'Restart without plugins?' : 'Restart with plugins?',
+      message: !switching
+        ? 'Reload WikiStow?'
+        : safeMode
+          ? 'Restart without plugins?'
+          : 'Restart with plugins?',
       detail: 'What you typed in the last few seconds isn’t saved yet and would be lost.',
     });
     if (answer === 0) {
       event.preventDefault();
-      watchReload();
+      if (switching) watchReload();
       return;
     }
+    if (!switching) return;
     safeMode = switching.before;
     switching = null;
   });
@@ -431,9 +462,8 @@ function openWindow() {
       switching = null;
       return setSafeMode(true);
     }
-    if (details.reason === 'clean-exit' || safeMode || !(plugins.anyEnabled() || previewing)) {
-      return;
-    }
+    if (details.reason === 'clean-exit') return;
+    if (safeMode || !(plugins.anyEnabled() || previewing)) return void askAfterCrash();
     setSafeMode(true);
   });
   window.on('closed', () => {
@@ -443,10 +473,69 @@ function openWindow() {
   void window.loadURL(`${APP_ORIGIN}/`);
 }
 
+/**
+ * The page stopped with no plugin to blame. The window has no frame, so
+ * without its page nothing would close it: ask whether to load it again,
+ * or close.
+ */
+async function askAfterCrash() {
+  if (!window) return;
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'error',
+    buttons: ['Reload', 'Close'],
+    defaultId: 0,
+    cancelId: 0,
+    message: 'WikiStow stopped working',
+    detail: 'Its page closed unexpectedly. Reload to open it again.',
+  });
+  if (response === 0) window?.webContents.reload();
+  else window?.close();
+}
+
 /** How long "Close when saved" waits for the save before asking again. */
 const CLOSE_WAIT_MS = 10_000;
 /** The window is closing, for the page's beforeunload that follows. */
 let closing = false;
+/** The person asked for a reload (Ctrl+R, or the titlebar's menu), for the beforeunload that follows. */
+let reloading = false;
+
+const windowState = (window: BrowserWindow): WindowState => ({
+  maximized: window.isMaximized(),
+  fullScreen: window.isFullScreen(),
+});
+
+/**
+ * What the titlebar or a shortcut asks of the window. Maximize and restore go
+ * through `maximize()` and `unmaximize()` so `place` keeps the state, and
+ * closing through `close()`, as the window manager's close does.
+ */
+function windowAction(action: WindowAction) {
+  if (!window) return;
+  const { webContents } = window;
+  switch (action) {
+    case 'minimize':
+      return window.minimize();
+    case 'toggle-maximize':
+      if (window.isFullScreen()) return window.setFullScreen(false);
+      return window.isMaximized() ? window.unmaximize() : window.maximize();
+    case 'close':
+      return window.close();
+    case 'reload':
+      reloading = true;
+      return webContents.reload();
+    // The steps the default menu's zoom took.
+    case 'zoom-in':
+      return webContents.setZoomLevel(webContents.getZoomLevel() + 0.5);
+    case 'zoom-out':
+      return webContents.setZoomLevel(webContents.getZoomLevel() - 0.5);
+    case 'zoom-reset':
+      return webContents.setZoomLevel(0);
+    case 'toggle-full-screen':
+      return window.setFullScreen(!window.isFullScreen());
+    case 'toggle-developer-tools':
+      return webContents.toggleDevTools();
+  }
+}
 /** Waiting to close once the changes are saved: when to give up and ask again. */
 let closeBy: number | null = null;
 let closeRetry: ReturnType<typeof setInterval> | undefined;
@@ -535,7 +624,7 @@ app.on('web-contents-created', (_event, contents) => {
 
 app.on('window-all-closed', () => app.quit());
 
-// Quitting (the menu's Quit) closes the window first, as its close button
+// Quitting (Ctrl+Q) closes the window first, as its close button
 // does, so a draft with changes still to save can ask while the session
 // still works; closing the last window quits again.
 // A forget written as the app quits (lock, then close) must land first, or
@@ -607,6 +696,8 @@ void app.whenReady().then(async () => {
     (_contents, permission) => permission === 'clipboard-sanitized-write',
   );
   protocol.handle('app', serve);
+  // No menu bar, and none of its shortcuts: `shortcut` keeps the useful ones.
+  Menu.setApplicationMenu(null);
   updates.start();
   handle('update', () => updates.state());
   handle('server', async () => server);
@@ -667,6 +758,10 @@ void app.whenReady().then(async () => {
   handle('libraryPlugins', (approved) => library.sync(approved));
   handle('pluginUpload', (id) => plugins.uploadFiles(id));
   handle('setSafeMode', async (on) => setSafeMode(on === true));
+  handle('windowAction', async (action) => windowAction(z.enum(WINDOW_ACTIONS).parse(action)));
+  handle('windowState', async () =>
+    window ? windowState(window) : { maximized: false, fullScreen: false },
+  );
   await workshop.load();
   handle('workshopPreview', (files) => workshop.preview(files));
   handle('workshopExport', (files, hash) =>

@@ -109,6 +109,7 @@ const noneRegistered = (): Registered => ({
   'app.view': new Map(),
   rail: new Map(),
   'settings.section': new Map(),
+  'app.titlebar': new Map(),
 });
 
 type Handlers = {
@@ -167,6 +168,7 @@ function contributions(entries: Loaded[]): PluginsSnapshot['regions'] {
     'app.view': of('app.view'),
     rail: of('rail'),
     'settings.section': of('settings.section'),
+    'app.titlebar': of('app.titlebar'),
   };
 }
 

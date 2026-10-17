@@ -486,8 +486,8 @@ export function PageEditor({
       <div
         onPasteCapture={pasteIntoEmpty}
         className={cn(
-          'relative min-h-[max(16rem,40svh)] flex-1 max-[899px]:min-h-[calc(100svh-5rem)]',
-          chosen === 'split' && '@max-[799px]:min-h-[calc(100svh-5rem)]',
+          'relative min-h-[max(16rem,40svh)] flex-1 max-[899px]:min-h-[calc(100svh-5rem-var(--titlebar-height))]',
+          chosen === 'split' && '@max-[799px]:min-h-[calc(100svh-5rem-var(--titlebar-height))]',
         )}
       >
         <div

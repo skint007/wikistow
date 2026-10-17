@@ -92,6 +92,27 @@ export type DesktopUpdate = {
   source: 'aur' | 'deb' | 'rpm' | null;
 };
 
+/** Whether the desktop window fills the screen, for its titlebar's buttons (#74). */
+export type WindowState = { maximized: boolean; fullScreen: boolean };
+
+/**
+ * What the titlebar asks of the window. `toggle-maximize` leaves full screen
+ * first; `close` closes as the window manager's close does, so changes still
+ * to save ask first.
+ */
+export const WINDOW_ACTIONS = [
+  'minimize',
+  'toggle-maximize',
+  'close',
+  'reload',
+  'zoom-in',
+  'zoom-out',
+  'zoom-reset',
+  'toggle-full-screen',
+  'toggle-developer-tools',
+] as const;
+export type WindowAction = (typeof WINDOW_ACTIONS)[number];
+
 /**
  * What the desktop app's preload script gives its pages, as
  * `window.wikistowDesktop`. The browser has none. Every call crosses into the
@@ -194,6 +215,15 @@ export type DesktopBridge = {
    * offline and before any check worked. The app checks GitHub itself.
    */
   update(): Promise<DesktopUpdate | null>;
+  /** Do what the titlebar's button or menu item asks of the window. */
+  windowAction(action: WindowAction): Promise<void>;
+  windowState(): Promise<WindowState>;
+  /**
+   * Hear of each change to `windowState`, as the window is maximized,
+   * restored or put in full screen, however that happened. The returned
+   * function stops it. The one call main makes to the page, not the other way.
+   */
+  onWindowState(listener: (state: WindowState) => void): () => void;
 };
 
 /** The IPC channels behind `DesktopBridge`, one per method. */
@@ -224,6 +254,9 @@ export const DESKTOP_CHANNELS = {
   workshopPreview: 'wikistow:workshop-preview',
   workshopExport: 'wikistow:workshop-export',
   update: 'wikistow:update',
+  windowAction: 'wikistow:window-action',
+  windowState: 'wikistow:window-state',
+  onWindowState: 'wikistow:window-state-changed',
 } as const satisfies Record<keyof DesktopBridge, string>;
 
 /** What a channel answers: the value, or the message for a failure. */

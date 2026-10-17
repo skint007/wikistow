@@ -3,7 +3,7 @@
   "name": "Reading room",
   "version": "0.1.0",
   "api": 1,
-  "description": "A narrower, centred column for a page's text, its reading time beside it, and a Recent item in the rail listing the pages read since the vault opened.",
+  "description": "A narrower, centred column for a page's text, with a desktop titlebar button to turn it off, its reading time beside it, and a Recent item in the rail listing the pages read since the vault opened.",
   "ui": "ui.js",
   "styles": ["reading-room.css"]
 }

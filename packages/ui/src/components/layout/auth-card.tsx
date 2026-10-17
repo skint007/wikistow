@@ -12,7 +12,7 @@ export function AuthCard({
   children: ReactNode;
 }) {
   return (
-    <main className="grid min-h-svh place-items-center bg-background p-4">
+    <main className="grid min-h-[calc(100svh-var(--titlebar-height))] place-items-center bg-background p-4">
       <div className="grid w-full max-w-sm gap-6">
         <p className="text-center text-2xl font-extrabold tracking-tight text-foreground">
           Wiki<span className="text-primary">Stow</span>

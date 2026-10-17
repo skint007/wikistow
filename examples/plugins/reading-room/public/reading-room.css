@@ -4,7 +4,8 @@
  * in the page card, with roomier lines. The views style themselves with the
  * app's theme tokens, so they follow whichever theme is on.
  */
-[data-region='page.content'] {
+/* Unless the titlebar's button turned the narrow column off. */
+:root:not([data-reading-room-wide]) [data-region='page.content'] {
   max-width: 44rem;
   margin-inline: auto;
 }
@@ -43,4 +44,21 @@
 
 .reading-room-recent button:hover {
   background: var(--accent);
+}
+
+.reading-room-toggle {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-row);
+  font-size: 0.875rem;
+}
+
+.reading-room-toggle:hover {
+  background: var(--accent);
+}
+
+.reading-room-toggle[aria-pressed='true'] {
+  background: var(--primary-soft);
 }

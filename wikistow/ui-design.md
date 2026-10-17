@@ -366,6 +366,10 @@ After an operator restores a backup, a device that used the server before shows 
 
 **What’s new** in the account menu opens `/whats-new`, in the shell beside the rail, locked or not. It shows every release's highlights from `CHANGELOG.md`, as built into the app: title 32px / 800, a line naming the running version, then **Go to a release**, a row of outline pills, one per version. Each release is a disclosure, a `rounded-control` box with a `border`: a chevron, the version (18px / 800, a heading), its date in long form, a `status-draft` **Prerelease** pill for a prerelease, and a `status-published` **✓ This version** pill for the one running. The newest starts open, the rest closed. Inside, the kinds of highlight that have any (Upgrade notes, Features, Fixes, Optimizations, UI polish, Maintenance), each a bold 14px heading over a bulleted list, then **All changes in <version>**, a link to its GitHub Release, which the desktop app opens in the system browser. A pill opens its release, scrolls to it and focuses its summary. Below 900px the notes lose the chevron's indent, and nothing scrolls sideways.
 
+## Desktop titlebar
+
+The desktop window has no system frame (#74). A 36px titlebar in `background` runs across the top of every screen, outside the router so an error screen has it too, and the page starts below it. Left, over the rail, the wordmark at 13px / 800 (hidden below 900px, where the top bar has it). Right: plugins' `app.titlebar` buttons in 28px boxes, then 44px-wide buttons with 16px icons in `muted-foreground`, hover `tint`: **Window menu** (⋯: Reload, Zoom in, Zoom out, Actual size, Full screen, Developer tools, each with its keys), **Minimize**, **Maximize** or **Restore** (**Leave full screen** in full screen), and **Close**, whose hover is `destructive`. The rest moves the window and double-clicking it maximizes. It comes after the page in the DOM, so Tab reaches the page first. The browser has none.
+
 ## Narrow screens
 
 Chosen 2026-10-02: **I, Drawer**, picked because it matches the desktop layout. Below about 900px:
