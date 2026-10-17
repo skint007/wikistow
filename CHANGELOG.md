@@ -4,6 +4,24 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.9.0 - 2026-10-17
+
+### Highlights
+
+#### Upgrade notes
+
+- The desktop app has no menu bar now. Its items are in the ⋯ Window menu at the top right, and their keys still work.
+- On generic invitations, New link is now Copy link.
+
+#### Features
+
+- You can change your email address in Settings → Email. A link goes to the new address, and nothing changes until you open it. People you share with keep seeing your old address in their contacts, and your authenticator app keeps its old name. Both keep working.
+- Copy link on a pending invitation, email ones too, makes a new link and copies it without sending an email. The link sent or copied earlier stops working, and it asks first.
+- The sidebar remembers which folders you opened, on each device, through reloads and restarts.
+- On this page marks the section you’re reading as you scroll.
+- The desktop app opens at the size and place you left it, and maximized if it was.
+- The desktop window has WikiStow’s own titlebar instead of the system’s title bar and menu bar. App plugins can add a button to it.
+
 ### Changes
 
 #### App
@@ -22,6 +40,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - `POST /api/admin/invitations/:id/link` replaces an invitation's token and expiry and returns the link without mailing it. The `invitation.resent` audit event now records `mailed`. (#75)
+
+#### Releases and packaging
+
+- Electron 44.9.0, from 44.8.0. (#81)
 
 ## 0.8.0 - 2026-10-16
 
