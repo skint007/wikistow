@@ -16,6 +16,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Desktop
 
 - The desktop app opens its window at the size and place it was last left, fitted to the screen, and maximized if it was. They're kept in `window.json` in the app's `userData`, for the device rather than an account. (#77)
+- The desktop window has WikiStow’s own titlebar in place of the system title bar and the menu bar. Drag it to move the window and double-click it to maximize. **Window menu** (⋯) has Reload, the zoom items, Full screen and Developer tools, whose keys still work, and Ctrl+W closes. Reloading with changes not saved yet now asks first, and if the window’s page stops, the app asks whether to reload or close. (#80)
+- App plugins can add a small button to the desktop titlebar with the `app.titlebar` region. The reading room example has one. (#80)
 
 #### Server
 
