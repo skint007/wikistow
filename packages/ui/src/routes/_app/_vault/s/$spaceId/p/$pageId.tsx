@@ -219,6 +219,8 @@ function PageBody({
   // The published body as shown, whose headings the table of contents lists.
   const [shownBody, setShownBody] = useState<HTMLElement | null>(null);
   const headings = useHeadings(shownBody);
+  // The page's card, whose scrolling says which heading is being read.
+  const [card, setCard] = useState<HTMLElement | null>(null);
   const contents = model.view === 'published' && headings.length > 1;
 
   const go = (view: 'draft' | 'published') =>
@@ -360,7 +362,7 @@ function PageBody({
   };
 
   return (
-    <PageCard>
+    <PageCard ref={setCard}>
       <CoverBand
         banner={shown?.cover.banner ?? { kind: 'theme' }}
         attachments={{ ctx, page, audience: model.view, attachments: shown?.attachments ?? [] }}
@@ -671,7 +673,12 @@ function PageBody({
             ) : (
               <>
                 {contents && (
-                  <TableOfContents headings={headings} collapsed className="@min-[960px]:hidden" />
+                  <TableOfContents
+                    headings={headings}
+                    card={card}
+                    collapsed
+                    className="@min-[960px]:hidden"
+                  />
                 )}
                 <div ref={setShownBody} className="contents">
                   <Markdown
@@ -705,7 +712,11 @@ function PageBody({
             className="grid w-full content-start gap-4 @min-[960px]:sticky @min-[960px]:top-6 @min-[960px]:max-h-[calc(100svh-5rem)] @min-[960px]:w-52 @min-[960px]:shrink-0 @min-[960px]:self-start @min-[960px]:overflow-y-auto"
           >
             {contents && (
-              <TableOfContents headings={headings} className="hidden @min-[960px]:grid" />
+              <TableOfContents
+                headings={headings}
+                card={card}
+                className="hidden @min-[960px]:grid"
+              />
             )}
             <PageViews place="page.aside" shown={pluginShown} />
           </div>
@@ -713,6 +724,7 @@ function PageBody({
           contents && (
             <TableOfContents
               headings={headings}
+              card={card}
               className="sticky top-6 hidden max-h-[calc(100svh-5rem)] w-52 shrink-0 self-start overflow-y-auto @min-[960px]:grid"
             />
           )
@@ -892,9 +904,10 @@ function Pills({
  * placed in it, such as `sr-only` text, which would otherwise stretch the
  * window to wherever it sits in a long page.
  */
-function PageCard({ children }: { children: React.ReactNode }) {
+function PageCard({ children, ref }: { children: React.ReactNode; ref?: React.Ref<HTMLElement> }) {
   return (
     <article
+      ref={ref}
       data-region="page"
       className="@container relative flex h-full min-h-0 flex-col overflow-y-auto rounded-card bg-card shadow-card"
     >
