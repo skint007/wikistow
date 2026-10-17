@@ -41,6 +41,7 @@ export const ERROR_STATUS = {
   'request-timeout': 408,
   'invitation-expired': 410,
   'setup-link-invalid': 410,
+  'email-link-invalid': 410,
   'handoff-invalid': 410,
   'payload-too-large': 413,
   'unsupported-image': 415,

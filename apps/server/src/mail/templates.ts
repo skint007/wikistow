@@ -1,4 +1,4 @@
-import { SETUP_LINK_TTL_HOURS } from '@wikistow/server';
+import { EMAIL_CHANGE_LINK_TTL_HOURS, SETUP_LINK_TTL_HOURS } from '@wikistow/server';
 import type { Mail } from './mailer.ts';
 
 // Plain text only: nothing to sanitize, and every client renders it.
@@ -45,4 +45,23 @@ export const setPasswordMail = (to: string, url: string): Mail => ({
     `Then sign in with this address and your new password.\n\n` +
     `If you didn't ask for an account, ignore this message. Nobody can sign in to it until ` +
     `this link is used.\n`,
+});
+
+export const confirmNewEmailMail = (to: string, url: string): Mail => ({
+  to,
+  subject: 'Confirm your new email for WikiStow',
+  text:
+    `Use this link to make this your WikiStow account's email address. ` +
+    `It works once and expires in ${EMAIL_CHANGE_LINK_TTL_HOURS} hours.\n\n${url}\n\n` +
+    `Until then, the account keeps its current address.\n\n` +
+    `If you didn't ask for this, ignore this message. Nothing changes.\n`,
+});
+
+export const emailChangedMail = (to: string, newEmail: string): Mail => ({
+  to,
+  subject: 'Your WikiStow email changed',
+  text:
+    `Your WikiStow account now uses ${newEmail}. Sign in with that address from now on, ` +
+    `and account mail goes there.\n\n` +
+    `If you didn't make this change, ask your WikiStow administrator for help.\n`,
 });

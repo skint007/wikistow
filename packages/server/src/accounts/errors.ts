@@ -14,7 +14,8 @@ export type AccountFailure =
   | 'cannot-target-self'
   | 'last-admin'
   | 'details-required'
-  | 'setup-link-invalid';
+  | 'setup-link-invalid'
+  | 'email-link-invalid';
 
 export class AccountError extends Error {
   readonly code: AccountFailure;

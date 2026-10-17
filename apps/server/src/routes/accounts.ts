@@ -4,12 +4,15 @@ import {
   AvatarRefused,
   avatarOf,
   avatarPart,
+  confirmEmailChange,
   consumeRateLimit,
+  createEmailChangeToken,
   currentIdentity,
   createAccount,
   findAvatar,
   finishAccountSetup,
   inspectInvitation,
+  normalizeEmail,
   removeAvatar,
   schema,
   setAvatar,
@@ -26,7 +29,12 @@ import { ApiError } from '../http/errors.ts';
 import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
 import { sendInBackground, type Deliver } from '../mail/mailer.ts';
-import { accountExistsMail, verifyEmailMail } from '../mail/templates.ts';
+import {
+  accountExistsMail,
+  confirmNewEmailMail,
+  emailChangedMail,
+  verifyEmailMail,
+} from '../mail/templates.ts';
 import { APIError, createEmailVerificationToken } from 'better-auth/api';
 
 const ACCOUNT_ERRORS = {
@@ -45,6 +53,7 @@ const ACCOUNT_ERRORS = {
   'last-admin': 'last-admin',
   'details-required': 'invalid-request',
   'setup-link-invalid': 'setup-link-invalid',
+  'email-link-invalid': 'email-link-invalid',
 } as const satisfies Record<AccountFailure, ErrorCode>;
 
 /** Turn a refused account operation into its API error; rethrow anything else. */
@@ -75,6 +84,9 @@ const FORM_LIMIT = { windowSeconds: 60, max: 10 };
 // Every confirmation is a password guess. With two-factor on it takes two
 // requests, so twice sign-in's five a minute, counted per account.
 const REAUTH_LIMIT = { windowSeconds: 60, max: 10 };
+
+// Each request mails a link to an address the account doesn't own yet.
+const EMAIL_CHANGE_LIMIT = { windowSeconds: 60, max: 3 };
 
 // Changing an avatar a few times while picking one, not filling the database.
 const AVATAR_LIMIT = { windowSeconds: 60, max: 10 };
@@ -313,6 +325,33 @@ export function mountAccountRoutes(
       return { status: 'confirmed' as const };
     },
     { rateLimit: REAUTH_LIMIT },
+  );
+
+  // The new address gets a link and the same answer whether or not another
+  // account has it; only opening the link changes anything.
+  routes.account(
+    accountRoutes.requestEmailChange,
+    async ({ body }, { principal }) => {
+      const email = normalizeEmail(body.email);
+      if (email === principal.email) {
+        throw new ApiError('invalid-request', 'That is already the account’s address');
+      }
+      const token = await createEmailChangeToken(db, principal.accountId, email);
+      const url = `${publicOrigin}/confirm-email?token=${token}`;
+      sendInBackground(deliver, log, confirmNewEmailMail(email, url));
+      return {};
+    },
+    { recentAuth: true, rateLimit: EMAIL_CHANGE_LIMIT },
+  );
+
+  routes.public(
+    accountRoutes.confirmEmailChange,
+    async ({ body }) => {
+      const change = await confirmEmailChange(db, body.token).catch(toApiError);
+      sendInBackground(deliver, log, emailChangedMail(change.from, change.to));
+      return { email: change.to };
+    },
+    { rateLimit: FORM_LIMIT },
   );
 
   routes.account(accountRoutes.setTheme, async ({ body }, { principal }) => {

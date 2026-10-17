@@ -143,6 +143,36 @@ export const reauthenticate = {
   response: z.object({ status: z.enum(['confirmed', 'code-required']) }),
 } as const satisfies RouteDef;
 
+/**
+ * Ask to move the signed-in account to another address. It needs a recent
+ * sign-in (`reauthenticate`). A link goes to the new address, and nothing
+ * changes until it is opened (`confirmEmailChange`), so the current address
+ * keeps working. The answer is the same whether another account has the new
+ * address or not.
+ */
+export const requestEmailChange = {
+  method: 'POST',
+  path: '/api/me/email',
+  body: z.object({ email: Email }),
+  response: z.object({}),
+} as const satisfies RouteDef;
+
+/** Email change link tokens are 32 random bytes, base64url, like invitation tokens. */
+export const EmailChangeToken = InvitationToken;
+
+/**
+ * Open the link mailed to the new address: the account signs in with it from
+ * then on, and the old address hears of it. The link works once. Answers
+ * `email-link-invalid` for a used or expired link, and `email-taken`, changing
+ * nothing, when another account has the address by then.
+ */
+export const confirmEmailChange = {
+  method: 'POST',
+  path: '/api/accounts/email/confirm',
+  body: z.object({ token: EmailChangeToken }),
+  response: z.object({ email: Email }),
+} as const satisfies RouteDef;
+
 export const setTheme = {
   method: 'PUT',
   path: '/api/me/theme',

@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   Browser,
+  ORIGIN,
   createTestApp,
   lastMailTo,
   linkIn,
@@ -127,6 +128,37 @@ describe('password reset', () => {
     expect((await signIn(new Browser(t.app), email, 'a different long passphrase')).status).toBe(
       200,
     );
+  });
+});
+
+describe('changing the email address', () => {
+  it('needs a recent sign-in, and changes nothing until the new address opens its link', async () => {
+    const { browser, email } = await signedInAccount();
+    await t.db
+      .update(schema.sessions)
+      .set({ authenticatedAt: sql`now() - interval '11 minutes'` })
+      .where(eq(schema.sessions.userId, sql`(select id from users where email = ${email})`));
+    const next = uniqueEmail();
+    const ask = () => browser.request('/api/me/email', { method: 'POST', json: { email: next } });
+    expect(await errorCode(await ask())).toBe('reauth-required');
+    const reauth = { method: 'POST', json: { password: PASSWORD } };
+    expect((await browser.request('/api/me/reauth', reauth)).status).toBe(200);
+    expect((await ask()).status).toBe(200);
+
+    expect((await signIn(new Browser(t.app), next)).status).toBe(401);
+    expect((await signIn(new Browser(t.app), email)).status).toBe(200);
+
+    const token = new URL(linkIn(lastMailTo(t.mails, next)), ORIGIN).searchParams.get('token');
+    const confirm = () =>
+      new Browser(t.app).request('/api/accounts/email/confirm', {
+        method: 'POST',
+        json: { token },
+      });
+    expect(await (await confirm()).json()).toEqual({ email: next });
+    expect((await signIn(new Browser(t.app), next)).status).toBe(200);
+    expect((await signIn(new Browser(t.app), email)).status).toBe(401);
+    expect(lastMailTo(t.mails, email)?.text).toContain(next);
+    expect(await errorCode(await confirm())).toBe('email-link-invalid');
   });
 });
 
