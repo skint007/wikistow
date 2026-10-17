@@ -10,6 +10,14 @@ import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import {
   Table,
@@ -25,6 +33,8 @@ import { errorMessage } from '../../../errors';
 
 export const Route = createFileRoute('/_app/admin/invitations')({ component: Invitations });
 
+type Invitation = z.infer<typeof adminRoutes.PendingInvitation>;
+
 const invitationsQuery = {
   queryKey: ['admin', 'invitations'],
   queryFn: () => api.call(adminRoutes.listInvitations),
@@ -38,12 +48,28 @@ const Values = z.object({
   role: z.enum(['user', 'admin']),
 });
 
+/**
+ * Copy text, saying whether the clipboard took it. Given a promise, the copy
+ * starts at once, in the click as Safari requires, and ends when it settles.
+ */
+async function copyText(text: string | Promise<string>) {
+  try {
+    const blob = Promise.resolve(text).then((value) => new Blob([value], { type: 'text/plain' }));
+    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function Invitations() {
   const { data } = useQuery(invitationsQuery);
   const queryClient = useQueryClient();
   const withReauth = useReauth();
   const [link, setLink] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: string } | null>(null);
+  // The invitation whose link is about to be replaced, while that is confirmed.
+  const [replacing, setReplacing] = useState<Invitation | null>(null);
   const form = useForm({
     resolver: zodResolver(Values),
     defaultValues: { email: '', role: 'user' as const },
@@ -82,6 +108,25 @@ function Invitations() {
     onError: fail,
     onSettled: refresh,
   });
+  // Tokens are stored only as hashes, so copying a link means making a new one.
+  const copyNewLink = async (id: string) => {
+    const made = withReauth(() => api.call(adminRoutes.newInvitationLink, { params: { id } }));
+    const copied = copyText(made.then((result) => result.link));
+    try {
+      setLink((await made).link);
+      setMessage(
+        (await copied)
+          ? { tone: 'notice', text: 'New link copied. The earlier link no longer works.' }
+          : {
+              tone: 'error',
+              text: 'A new link replaced the earlier one, but it couldn’t be copied. Copy it from below.',
+            },
+      );
+    } catch (caught) {
+      fail(caught);
+    }
+    await refresh();
+  };
   const revoke = useMutation({
     mutationFn: (id: string) =>
       withReauth(() => api.call(adminRoutes.revokeInvitation, { params: { id } })),
@@ -135,7 +180,15 @@ function Invitations() {
             variant="outline"
             size="sm"
             className="justify-self-start"
-            onClick={() => void navigator.clipboard.writeText(link)}
+            onClick={() =>
+              void copyText(link).then((copied) =>
+                setMessage(
+                  copied
+                    ? { tone: 'notice', text: 'Link copied.' }
+                    : { tone: 'error', text: 'Couldn’t copy the link. Select it and copy it.' },
+                ),
+              )
+            }
           >
             Copy link
           </Button>
@@ -166,13 +219,18 @@ function Invitations() {
                   </TableCell>
                   <TableCell>{new Date(invitation.expiresAt).toLocaleDateString()}</TableCell>
                   <TableCell className="flex justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => resend.mutate(invitation.id)}
-                    >
-                      {invitation.email ? 'Resend' : 'New link'}
+                    <Button variant="outline" size="sm" onClick={() => setReplacing(invitation)}>
+                      Copy link
                     </Button>
+                    {invitation.email && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => resend.mutate(invitation.id)}
+                      >
+                        Resend
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -187,6 +245,31 @@ function Invitations() {
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={replacing !== null} onOpenChange={(open) => !open && setReplacing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Copy a new link?</DialogTitle>
+            <DialogDescription>
+              {replacing?.email
+                ? `This makes a new link for ${replacing.email} and copies it, without sending an email. The link sent or copied earlier stops working.`
+                : 'This makes a new link and copies it. The link copied earlier stops working.'}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setReplacing(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (replacing) void copyNewLink(replacing.id);
+                setReplacing(null);
+              }}
+            >
+              Copy new link
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

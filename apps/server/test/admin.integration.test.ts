@@ -97,6 +97,7 @@ describe('a recent sign-in', () => {
       ['POST', `/api/admin/accounts/${id}/resend-verification`],
       ['POST', '/api/admin/invitations', { email: null, role: 'user' }],
       ['POST', `/api/admin/invitations/${invitationId}/resend`],
+      ['POST', `/api/admin/invitations/${invitationId}/link`],
       ['DELETE', `/api/admin/invitations/${invitationId}`],
       ['PUT', '/api/admin/settings', { publicRegistration: true }],
     ];

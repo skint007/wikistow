@@ -43,9 +43,14 @@ export function inviteAccount(
 
 /**
  * Issue a fresh token and expiry for a pending invitation. The old link stops
- * working, so a resend also replaces a link that may have leaked.
+ * working, so this also replaces a link that may have leaked. A resend also
+ * marks `lastSentAt`, and the route mails an email-bound invitation's new
+ * link; a copy only returns it, for the administrator to pass on.
  */
-export function resendInvitation(db: Database, { actor, id }: { actor: string; id: string }) {
+function replaceLink(
+  db: Database,
+  { actor, id, resend }: { actor: string; id: string; resend: boolean },
+) {
   return asAdmin(db, actor, async (tx) => {
     const token = randomBytes(32).toString('base64url');
     const [invitation] = await tx
@@ -53,7 +58,7 @@ export function resendInvitation(db: Database, { actor, id }: { actor: string; i
       .set({
         tokenHash: createHash('sha256').update(token).digest('hex'),
         expiresAt: sql`now() + make_interval(days => ${INVITATION_TTL_DAYS})`,
-        lastSentAt: sql`now()`,
+        ...(resend && { lastSentAt: sql`now()` }),
       })
       .where(and(eq(invitations.id, id), pending))
       .returning();
@@ -62,10 +67,20 @@ export function resendInvitation(db: Database, { actor, id }: { actor: string; i
       actor,
       action: 'invitation.resent',
       target: { kind: 'invitation', id },
-      details: {},
+      details: { mailed: resend && invitation.email !== null },
     });
     return { invitation, token };
   });
+}
+
+/** A new link, mailed if the invitation is bound to an email address. */
+export function resendInvitation(db: Database, input: { actor: string; id: string }) {
+  return replaceLink(db, { ...input, resend: true });
+}
+
+/** A new link for the administrator to copy, never mailed. */
+export function newInvitationLink(db: Database, input: { actor: string; id: string }) {
+  return replaceLink(db, { ...input, resend: false });
 }
 
 export function revokeInvitation(db: Database, { actor, id }: { actor: string; id: string }) {

@@ -4,6 +4,7 @@ import {
   inviteAccount,
   listAccounts,
   listPendingInvitations,
+  newInvitationLink,
   reactivateAccount,
   readSettings,
   recordVerificationResend,
@@ -143,6 +144,15 @@ export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, lo
     },
     { rateLimit: MAIL_LIMIT },
   );
+
+  // Mails nothing, so it isn't under the mail limit.
+  routes.admin(adminRoutes.newInvitationLink, async ({ params }, { principal }) => {
+    const { invitation, token } = await newInvitationLink(db, {
+      actor: principal.accountId,
+      id: params.id,
+    }).catch(toApiError);
+    return { invitation: toPending(invitation), link: inviteLink(token) };
+  });
 
   routes.admin(adminRoutes.revokeInvitation, async ({ params }, { principal }) => {
     await revokeInvitation(db, { actor: principal.accountId, id: params.id }).catch(toApiError);

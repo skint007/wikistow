@@ -18,7 +18,8 @@ const DETAILS = {
   'account.sessions-revoked': z.strictObject({ sessionsRevoked: z.number().int() }),
   'account.verification-resent': z.strictObject({}),
   'invitation.created': z.strictObject({ role: z.enum(ROLES), emailBound: z.boolean() }),
-  'invitation.resent': z.strictObject({}),
+  // A new link replaced the old one; `mailed` if it went to the invited address.
+  'invitation.resent': z.strictObject({ mailed: z.boolean() }),
   'invitation.revoked': z.strictObject({}),
   'settings.updated': z.strictObject({ publicRegistration: z.boolean() }),
   // Sharing: who was given or lost keys, by identity ID, never by name.

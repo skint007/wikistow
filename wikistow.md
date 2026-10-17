@@ -109,7 +109,7 @@ Moving a subtree previews the resulting audience change and requires space owner
 
 ## Accounts and invitations
 
-The administrator dashboard lists accounts, email-verification state, role, suspension state, and pending invitations. It supports resending invitations, granting or removing administrator status, suspending or reactivating accounts, and revoking sessions and agent credentials. It must not expose decrypted document content or encryption secrets.
+The administrator dashboard lists accounts, email-verification state, role, suspension state, and pending invitations. It supports resending invitations, copying a new link for one without mailing it, granting or removing administrator status, suspending or reactivating accounts, and revoking sessions and agent credentials. Both a resend and a new link stop the invitation's old link working. It must not expose decrypted document content or encryption secrets.
 
 The public-registration setting controls uninvited account creation. When disabled, hide the public registration page and reject uninvited requests on the server. Invitation registration remains available. Apply the same rule to every enabled account-creation route, rather than protecting only the user interface.
 
