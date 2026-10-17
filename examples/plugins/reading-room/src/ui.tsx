@@ -1,6 +1,7 @@
 // A layout plugin: a Recent item in the rail, opening a page of its own that
 // lists the pages read lately; each page's reading time beside it; and CSS
-// (public/reading-room.css) that sets a page's text in a narrower column.
+// (public/reading-room.css) that sets a page's text in a narrower column,
+// which a button in the desktop app's titlebar turns off and on.
 // It needs no page access: its views only read the page shown.
 import {
   definePlugin,
@@ -8,6 +9,7 @@ import {
   type AppViewProps,
   type PageRef,
   type PageViewProps,
+  type TitlebarViewProps,
 } from '@wikistow/plugin-sdk';
 import { reactView } from '@wikistow/plugin-sdk/react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -86,6 +88,29 @@ function Recent({ openPage }: AppViewProps) {
   );
 }
 
+/** The narrow column is on unless `<html>` carries `data-reading-room-wide`. */
+const WIDE = 'data-reading-room-wide';
+
+/** In the desktop titlebar: the narrow column, on or off. */
+function ColumnToggle() {
+  const [narrow, setNarrow] = useState(() => !document.documentElement.hasAttribute(WIDE));
+  return (
+    <button
+      type="button"
+      className="reading-room-toggle"
+      aria-label="Narrow column"
+      aria-pressed={narrow}
+      title="Narrow column"
+      onClick={() => {
+        document.documentElement.toggleAttribute(WIDE, narrow);
+        setNarrow(!narrow);
+      }}
+    >
+      📖
+    </button>
+  );
+}
+
 export default definePlugin({
   activate(host) {
     host.ui.register('rail', { id: 'recent', title: 'Recent', icon: '📖', opens: 'recent' });
@@ -96,9 +121,15 @@ export default definePlugin({
       view: reactView((props: PageViewProps) => <ReadingTime {...props} host={host} />),
     });
 
-    // Locking the vault unloads the plugin: forget what was read.
+    host.ui.register('app.titlebar', {
+      id: 'column',
+      view: reactView<TitlebarViewProps>(ColumnToggle),
+    });
+
+    // Locking the vault unloads the plugin: forget what was read, and the column goes.
     host.signal.addEventListener('abort', () => {
       recent = [];
+      document.documentElement.removeAttribute(WIDE);
     });
   },
 });
