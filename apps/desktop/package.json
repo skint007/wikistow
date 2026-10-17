@@ -1,6 +1,6 @@
 {
   "name": "@wikistow/desktop",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -17,7 +17,7 @@
     "@types/node": "^26.0.0",
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
-    "electron": "44.8.0",
+    "electron": "44.9.0",
     "zod": "^4.6.5"
   },
   "productName": "WikiStow"
