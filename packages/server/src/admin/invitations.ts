@@ -43,9 +43,9 @@ export function inviteAccount(
 
 /**
  * Issue a fresh token and expiry for a pending invitation. The old link stops
- * working, so this also replaces a link that may have leaked. A resend mails
- * an email-bound invitation's new link (`lastSentAt`); a copy only returns it,
- * for the administrator to pass on.
+ * working, so this also replaces a link that may have leaked. A resend also
+ * marks `lastSentAt`, and the route mails an email-bound invitation's new
+ * link; a copy only returns it, for the administrator to pass on.
  */
 function replaceLink(
   db: Database,

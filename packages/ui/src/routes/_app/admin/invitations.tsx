@@ -48,10 +48,14 @@ const Values = z.object({
   role: z.enum(['user', 'admin']),
 });
 
-/** Whether the clipboard took the text (it may be missing, or refuse without a recent click). */
-async function copyText(text: string) {
+/**
+ * Copy text, saying whether the clipboard took it. Given a promise, the copy
+ * starts at once, in the click as Safari requires, and ends when it settles.
+ */
+async function copyText(text: string | Promise<string>) {
   try {
-    await navigator.clipboard.writeText(text);
+    const blob = Promise.resolve(text).then((value) => new Blob([value], { type: 'text/plain' }));
+    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
     return true;
   } catch {
     return false;
@@ -105,27 +109,24 @@ function Invitations() {
     onSettled: refresh,
   });
   // Tokens are stored only as hashes, so copying a link means making a new one.
-  const newLink = useMutation({
-    mutationFn: async (id: string) => {
-      const { link } = await withReauth(() =>
-        api.call(adminRoutes.newInvitationLink, { params: { id } }),
-      );
-      return { link, copied: await copyText(link) };
-    },
-    onSuccess: ({ link, copied }) => {
-      setLink(link);
+  const copyNewLink = async (id: string) => {
+    const made = withReauth(() => api.call(adminRoutes.newInvitationLink, { params: { id } }));
+    const copied = copyText(made.then((result) => result.link));
+    try {
+      setLink((await made).link);
       setMessage(
-        copied
+        (await copied)
           ? { tone: 'notice', text: 'New link copied. The earlier link no longer works.' }
           : {
               tone: 'error',
               text: 'A new link replaced the earlier one, but it couldn’t be copied. Copy it from below.',
             },
       );
-    },
-    onError: fail,
-    onSettled: refresh,
-  });
+    } catch (caught) {
+      fail(caught);
+    }
+    await refresh();
+  };
   const revoke = useMutation({
     mutationFn: (id: string) =>
       withReauth(() => api.call(adminRoutes.revokeInvitation, { params: { id } })),
@@ -260,7 +261,7 @@ function Invitations() {
             </Button>
             <Button
               onClick={() => {
-                if (replacing) newLink.mutate(replacing.id);
+                if (replacing) void copyNewLink(replacing.id);
                 setReplacing(null);
               }}
             >
