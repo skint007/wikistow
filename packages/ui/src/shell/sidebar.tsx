@@ -230,8 +230,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     () => (tree ? visibleRows(tree, expanded, filter) : []),
     [tree, expanded, filter],
   );
-  // Saving drops folders the tree no longer has, deleted or out of reach.
-  const toggle = (id: string, open?: boolean) =>
+  // While filtering, every folder shows open, and the kept state waits
+  // unchanged for the filter to clear. Saving drops folders the tree no
+  // longer has, deleted or out of reach.
+  const filtering = filter.trim() !== '';
+  const toggle = (id: string, open?: boolean) => {
+    if (filtering) return;
     setExpanded((current) => {
       const next = new Set(
         tree ? [...current].filter((kept) => tree.folders.some((f) => f.id === kept)) : current,
@@ -240,6 +244,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       else next.delete(id);
       return next;
     });
+  };
 
   if (!tree) return <SidebarCard>{null}</SidebarCard>;
   // Someone who holds only folders in the space sees no space name: their
@@ -305,7 +310,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         return;
       case 'ArrowLeft':
         handled();
-        if (row.kind === 'folder' && row.expanded) return toggle(row.id, false);
+        if (row.kind === 'folder' && row.expanded && !filtering) return toggle(row.id, false);
         return focusRow(rows.find((r) => r.id === row.parentId));
       case 'Enter':
         handled();
