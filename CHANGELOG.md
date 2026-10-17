@@ -11,6 +11,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Pending invitations each have Copy link, email invitations too. It asks first, then makes a new link, copies it and sends no email. The link sent or copied earlier stops working. If the clipboard refuses, the link stays shown to copy by hand. Generic invitations' New link is folded into it. (#75)
 - Settings has an Email section for changing the account’s address. It asks you to confirm it’s you, then mails a link to the new address. Nothing changes until that link is opened (`/confirm-email`), and then the old address gets a notice. (#76)
 - The sidebar remembers which folders are open, on the device, per server, account and space, through reloads, space changes and app restarts. Filtering still opens every folder with a match until the filter is cleared. (#78)
+- On this page marks the section you’re reading, as you scroll and after following a link to a heading, with a bar at its left and `aria-current`. Beside the page, a long list scrolls to keep the mark in view. (#79)
 
 #### Desktop
 
