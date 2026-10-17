@@ -257,7 +257,6 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       ? opened.metadata.name
       : 'Space'
     : null;
-  const spaceEmoji = opened?.kind === 'current' ? opened.metadata.emoji : undefined;
   // Sharing and deleting folders wait until a new owner has confirmed who added them.
   const sharer = standing === 'owner';
   // Whether the person can change what is under `parentId`: their role in
@@ -373,7 +372,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       <SpaceHeader
         spaceId={spaceId}
         name={spaceName}
-        emoji={spaceEmoji}
+        metadata={tree.space?.metadata}
         onShare={topOpened ? () => setSharing({ rootId: null }) : undefined}
         onExport={() => setExporting({ folderId: null, name: spaceName ?? 'Shared with you' })}
       />

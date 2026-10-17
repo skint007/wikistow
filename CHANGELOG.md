@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - **Rename…** in a folder’s menu, for editors, changes only its name through `spaceOperations.updateMetadata`, so its emoji, colour and image stay. (#85)
+- **Name and look…** in the space menu, for owners, changes a space’s name and its emoji or image, kept as `wikistow.icon` as for folders. The rail and the sidebar header show the image, else the emoji, else the initials. (#86)
 
 ## 0.9.0 - 2026-10-17
 

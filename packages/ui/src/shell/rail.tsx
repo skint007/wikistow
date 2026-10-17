@@ -15,7 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
-import { Avatar, initials } from '@/components/avatar';
+import { Avatar } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,7 @@ import { spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
 import { isApple } from './search-model';
+import { SpaceIcon } from './space-look';
 import { useVault, vaultStore, type VaultState } from '../vault/store';
 
 // The running build's version, set by the web app's Vite config.
@@ -194,10 +195,6 @@ function SpaceTiles({
         {spaces.map((space) => {
           const name =
             space.metadata?.opened.kind === 'current' ? space.metadata.opened.metadata.name : '?';
-          const emoji =
-            space.metadata?.opened.kind === 'current'
-              ? space.metadata.opened.metadata.emoji
-              : undefined;
           const active = params.spaceId === space.id;
           return (
             <li key={space.id} className="relative">
@@ -212,11 +209,11 @@ function SpaceTiles({
                 aria-current={active ? 'page' : undefined}
                 title={plainText(name)}
                 className={cn(
-                  'grid size-11 place-items-center rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
+                  'grid size-11 place-items-center overflow-hidden rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
                   active && 'bg-primary-soft ring-2 ring-primary',
                 )}
               >
-                {emoji ?? initials(plainText(name))}
+                <SpaceIcon metadata={space.metadata} name={name} />
               </Link>
             </li>
           );
@@ -271,7 +268,7 @@ function NewSpaceDialog({
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="space-name">Name</Label>
-            <Input id="space-name" name="name" required autoFocus maxLength={100} />
+            <Input id="space-name" name="name" required autoFocus maxLength={200} />
           </div>
           {error && (
             <p role="alert" className="text-sm text-destructive">
