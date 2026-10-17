@@ -40,6 +40,7 @@ import { shareCovering } from '../sharing/model';
 import { useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { useClient } from '../vault/store';
+import { useExpandedFolders } from './expanded-folders';
 import { ExportDialog, type Exporting } from './export-dialog';
 import {
   DEFAULT_CHOICE,
@@ -212,7 +213,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const params = useParams({ strict: false });
   const navigate = useNavigate();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useExpandedFolders(spaceId);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState<Creating>(null);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
@@ -229,13 +230,21 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     () => (tree ? visibleRows(tree, expanded, filter) : []),
     [tree, expanded, filter],
   );
-  const toggle = (id: string, open?: boolean) =>
+  // While filtering, every folder shows open, and the kept state waits
+  // unchanged for the filter to clear. Saving drops folders the tree no
+  // longer has, deleted or out of reach.
+  const filtering = filter.trim() !== '';
+  const toggle = (id: string, open?: boolean) => {
+    if (filtering) return;
     setExpanded((current) => {
-      const next = new Set(current);
+      const next = new Set(
+        tree ? [...current].filter((kept) => tree.folders.some((f) => f.id === kept)) : current,
+      );
       if (open ?? !next.has(id)) next.add(id);
       else next.delete(id);
       return next;
     });
+  };
 
   if (!tree) return <SidebarCard>{null}</SidebarCard>;
   // Someone who holds only folders in the space sees no space name: their
@@ -301,7 +310,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         return;
       case 'ArrowLeft':
         handled();
-        if (row.kind === 'folder' && row.expanded) return toggle(row.id, false);
+        if (row.kind === 'folder' && row.expanded && !filtering) return toggle(row.id, false);
         return focusRow(rows.find((r) => r.id === row.parentId));
       case 'Enter':
         handled();

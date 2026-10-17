@@ -5,6 +5,7 @@ import {
   folderMenu,
   newFolder,
   newSpace,
+  openFolder,
   openShared,
   publishedPageIn,
   shareDialog,
@@ -78,7 +79,7 @@ test('a shared folder: readers see publications, editors drafts, and removal tak
   });
 
   await test.step('the reader sees the publication only, with no draft controls', async () => {
-    await reader.getByRole('treeitem', { name: /Garden/ }).click();
+    await openFolder(reader, 'Garden');
     await reader.getByRole('treeitem', { name: 'Planting plan' }).click();
     await expect(reader.getByText(TEXT.published)).toBeVisible();
     await expect(reader.getByText(TEXT.draft)).toHaveCount(0);
