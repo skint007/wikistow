@@ -59,12 +59,16 @@ export function folderActions({
 }
 
 /**
- * The version of a page that opening it shows, which the sidebar publishes
- * elsewhere as the page's menu publishes the one on screen. None for a copy
- * unpublished here.
+ * The version of a page that its page shows with `requested`'s view and
+ * version, by default what opening it shows: the one the sidebar publishes
+ * elsewhere, as the page's own menu publishes the one on screen. None for a
+ * copy unpublished here.
  */
-export function shownVersion(info: PageInfo): Version | null {
-  const shown = pageViewModel({ viewer: info, heads: info.heads, requested: {} });
+export function shownVersion(
+  info: PageInfo,
+  requested: Parameters<typeof pageViewModel>[0]['requested'] = {},
+): Version | null {
+  const shown = pageViewModel({ viewer: info, heads: info.heads, requested });
   return shown.found
     ? { revisionId: RevisionId.parse(shown.revision), audience: shown.view }
     : null;

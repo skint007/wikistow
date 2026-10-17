@@ -6,7 +6,7 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { ChevronRight, FolderPlus, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
@@ -792,6 +792,7 @@ function PageRowDialog({
   onClose: () => void;
 }) {
   const params = useParams({ strict: false });
+  const search = useSearch({ strict: false });
   const navigate = useNavigate();
   const { action, pageId, title, info, open } = dialog;
   const page = { spaceId, pageId };
@@ -799,7 +800,8 @@ function PageRowDialog({
   // Whether the page is the one open, which then shows what's left, as its own menu does.
   const here = params.pageId === pageId;
   const { publishedHead } = info.heads;
-  const version = shownVersion(info);
+  // The open page publishes the version on screen, as from its own menu.
+  const version = shownVersion(info, here ? search : {});
   if (action === 'publish') {
     return (
       version && (
