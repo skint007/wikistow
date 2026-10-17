@@ -462,9 +462,8 @@ function openWindow() {
       switching = null;
       return setSafeMode(true);
     }
-    if (details.reason === 'clean-exit' || safeMode || !(plugins.anyEnabled() || previewing)) {
-      return;
-    }
+    if (details.reason === 'clean-exit') return;
+    if (safeMode || !(plugins.anyEnabled() || previewing)) return void askAfterCrash();
     setSafeMode(true);
   });
   window.on('closed', () => {
@@ -472,6 +471,25 @@ function openWindow() {
     window = null;
   });
   void window.loadURL(`${APP_ORIGIN}/`);
+}
+
+/**
+ * The page stopped with no plugin to blame. The window has no frame, so
+ * without its page nothing would close it: ask whether to load it again,
+ * or close.
+ */
+async function askAfterCrash() {
+  if (!window) return;
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'error',
+    buttons: ['Reload', 'Close'],
+    defaultId: 0,
+    cancelId: 0,
+    message: 'WikiStow stopped working',
+    detail: 'Its page closed unexpectedly. Reload to open it again.',
+  });
+  if (response === 0) window?.webContents.reload();
+  else window?.close();
 }
 
 /** How long "Close when saved" waits for the save before asking again. */

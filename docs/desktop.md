@@ -56,7 +56,7 @@ The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikis
 
 ## The window
 
-The window has no system title bar or menu bar. WikiStow draws its own titlebar across the top of every screen, sign-in included. Drag its empty part to move the window, and double-click it to maximize or restore, as your desktop does with a system title bar. The window resizes from its edges as usual, within a few pixels of each one. On the right are buttons plugins add, **Window menu** (⋯), and **Minimize**, **Maximize** (**Restore** while maximized) and **Close**. Close asks first if a page has changes not saved yet, as closing always has. Tab reaches the titlebar's buttons after the page's own.
+The window has no system title bar or menu bar. WikiStow draws its own titlebar across the top of every screen, sign-in included. Drag its empty part to move the window, and double-click it to maximize or restore, as your desktop does with a system title bar. The window resizes from its edges as usual, within a few pixels of each one. On the right are buttons plugins add, **Window menu** (⋯), and **Minimize**, **Maximize** (**Restore** while maximized) and **Close**. Close asks first if a page has changes not saved yet, as closing always has. Tab reaches the titlebar's buttons after the page's own. While a dialog or sheet is open, close it first: the titlebar's buttons wait behind it, though dragging still works.
 
 The window opens at the size and place it was last left, and maximized if it was.
 
@@ -64,14 +64,15 @@ What the old menu bar did is in **Window menu**, and these keys still work:
 
 | Keys | Does |
 | --- | --- |
-| Ctrl+R or F5 | Reload. With changes not saved yet, it asks first. |
+| Ctrl+R, Ctrl+Shift+R or F5 | Reload. With changes not saved yet, it asks first. |
 | Ctrl+= and Ctrl+- | Zoom in and out |
 | Ctrl+0 | Actual size |
 | F11 | Full screen, and back |
 | Ctrl+Shift+I or F12 | Developer tools |
+| Ctrl+W | Close the window, which quits |
 | Ctrl+Q | Quit, which closes the window first |
 
-Cut, copy, paste, undo, redo and select all work in both editors with their usual keys. Ctrl+Shift+Alt+P still restarts the app without plugins.
+Cut, copy, paste, undo, redo and select all work in both editors with their usual keys. Ctrl+Shift+Alt+P still restarts the app without plugins. If the window's page ever stops, the app asks whether to reload it or close, since the window has no frame of its own to close it by.
 
 This is tested on X11. On Wayland, moving, double-clicking and resizing depend on the compositor, as they do for any app that draws its own titlebar.
 

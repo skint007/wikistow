@@ -10,6 +10,7 @@ import type { Input } from 'electron';
  */
 const SHORTCUTS = new Map<string, WindowAction | 'quit'>([
   ['Ctrl+R', 'reload'],
+  ['Ctrl+Shift+R', 'reload'],
   ['F5', 'reload'],
   ['Ctrl+=', 'zoom-in'],
   ['Ctrl++', 'zoom-in'],
@@ -19,6 +20,7 @@ const SHORTCUTS = new Map<string, WindowAction | 'quit'>([
   ['F11', 'toggle-full-screen'],
   ['Ctrl+Shift+I', 'toggle-developer-tools'],
   ['F12', 'toggle-developer-tools'],
+  ['Ctrl+W', 'close'],
   ['Ctrl+Q', 'quit'],
 ]);
 
