@@ -62,9 +62,9 @@
 :root[data-titlebar] body {
   padding-top: var(--titlebar-height);
 }
-/* Its empty part moves the window, even under what opens over it, so dialogs and menus
- * click instead. */
-:root[data-titlebar] :is(dialog, [data-radix-popper-content-wrapper]) {
+/* Its empty part moves the window, even under what opens over it, so dialogs and whatever
+ * is portalled beside the app (menus, the link list) click instead. */
+:root[data-titlebar] :is(dialog, body > :not(#root)) {
   app-region: no-drag;
 }
 
