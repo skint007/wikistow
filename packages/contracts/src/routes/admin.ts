@@ -100,6 +100,17 @@ export const resendInvitation = {
   response: z.strictObject({ invitation: PendingInvitation, link: z.url().nullable() }),
 } as const satisfies RouteDef;
 
+/**
+ * New token and expiry, returned to copy and never mailed; the old link stops
+ * working, as on resend.
+ */
+export const newInvitationLink = {
+  method: 'POST',
+  path: '/api/admin/invitations/:id/link',
+  params: AccountId,
+  response: z.strictObject({ invitation: PendingInvitation, link: z.url() }),
+} as const satisfies RouteDef;
+
 export const revokeInvitation = {
   method: 'DELETE',
   path: '/api/admin/invitations/:id',
