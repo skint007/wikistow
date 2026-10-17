@@ -68,8 +68,9 @@ App plugins put interface in these places with `host.ui.register(region, { id, â
 | `page.aside` | `{ id, view }` | Beside the text, under its contents, where the page card is 960px wide or more | Below the page |
 | `page.panel` | `{ id, title, view }` | A sheet opened from the Plugins menu | The same |
 | `settings.section` | `{ id, title, view }` | A card in Settings, after Plugins | The same |
+| `app.titlebar` | `{ id, view }` | The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers | Not in the browser, which has no titlebar of its own |
 
-The page places' views get `{ page }`, the same handle a command gets. Rail items and plugin pages show only while the vault is open, as app code runs only then.
+The page places' views get `{ page }`, the same handle a command gets; settings sections and titlebar buttons get nothing yet. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
 
-The `data-region` hooks, for CSS: `app` (the whole window), `rail`, `topbar` (the phone's top bar), `main` (beside the rail), `sidebar` (a space's page tree), `page` (the page card), `page.cover`, `page.toolbar`, `page.body` (the text and its aside), `page.content` (the page's column: header, title, text, footer), `page.header`, `page.footer` and `page.aside` (these three only while a plugin fills them), `app.view`, `settings` and `safe-mode`. If a plugin hides the way back, Ctrl+Shift+Alt+P restarts the app without plugins.
+The `data-region` hooks, for CSS: `app` (the whole window), `titlebar` (the desktop app's), `rail`, `topbar` (the phone's top bar), `main` (beside the rail), `sidebar` (a space's page tree), `page` (the page card), `page.cover`, `page.toolbar`, `page.body` (the text and its aside), `page.content` (the page's column: header, title, text, footer), `page.header`, `page.footer` and `page.aside` (these three only while a plugin fills them), `app.view`, `settings` and `safe-mode`. If a plugin hides the way back, Ctrl+Shift+Alt+P restarts the app without plugins.
 

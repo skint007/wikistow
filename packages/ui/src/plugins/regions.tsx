@@ -1,4 +1,4 @@
-import type { PageViewProps, View } from '@wikistow/plugin-sdk';
+import type { PageViewProps, TitlebarViewProps, View } from '@wikistow/plugin-sdk';
 import { usePluginRuntime, usePlugins, type PluginsSnapshot, type ShownPage } from './runtime';
 import { PluginView } from './views';
 
@@ -45,4 +45,28 @@ export function PageView({
   const props = usePluginRuntime().pageViewProps(pluginId, viewId, shown);
   if (!props) return null;
   return <PluginView pluginId={pluginId} name={name} view={view} props={props} />;
+}
+
+const NO_PROPS: TitlebarViewProps = {};
+
+/**
+ * Plugins' buttons in the desktop titlebar (`app.titlebar`), each in a box
+ * that clicks rather than moves the window. Only while the vault is open, as
+ * app code runs only then, and never in safe mode.
+ */
+export function TitlebarViews() {
+  const { regions, plugins } = usePlugins();
+  return regions['app.titlebar'].map(({ pluginId, id, view }) => (
+    <div
+      key={`${pluginId}:${id}`}
+      className="flex h-7 max-w-40 items-center overflow-hidden [app-region:no-drag]"
+    >
+      <PluginView
+        pluginId={pluginId}
+        name={pluginName(plugins, pluginId)}
+        view={view}
+        props={NO_PROPS}
+      />
+    </div>
+  ));
 }

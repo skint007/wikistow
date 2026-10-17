@@ -143,6 +143,9 @@ export type AppViewProps = {
 /** What a settings section is given: nothing yet. */
 export type SettingsViewProps = Record<string, never>;
 
+/** What a titlebar button is given: nothing yet. */
+export type TitlebarViewProps = Record<string, never>;
+
 /** The info string of a fenced block a plugin claims: `plugin:<id>/<block>`. */
 export const blockLanguage = (pluginId: string, type: string) => `plugin:${pluginId}/${type}`;
 
@@ -272,6 +275,12 @@ export type Regions = {
   rail: { id: string; title: string; icon?: string | undefined; opens: string };
   /** A section of Settings, under Plugins. */
   'settings.section': { id: string; title: string; view: View<SettingsViewProps> };
+  /**
+   * In the desktop app's titlebar, before its menu: a small button or two,
+   * which the view names for screen readers. Not in the browser, which has
+   * no titlebar of its own.
+   */
+  'app.titlebar': { id: string; view: View<TitlebarViewProps> };
 };
 
 const REGIONS: Record<keyof Regions, true> = {
@@ -283,6 +292,7 @@ const REGIONS: Record<keyof Regions, true> = {
   'app.view': true,
   rail: true,
   'settings.section': true,
+  'app.titlebar': true,
 };
 
 /** Whether `name` is a region, for checking what a plugin asks for. */
