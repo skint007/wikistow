@@ -1,4 +1,4 @@
-import { pageOperations, RevisionId } from '@wikistow/client';
+import { pageOperations, RevisionId, type PageId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { MoreHorizontal } from 'lucide-react';
 import { useRef, useState, type ReactElement, type ReactNode } from 'react';
@@ -74,21 +74,19 @@ export function shownVersion(info: PageInfo): Version | null {
 export type PageAction = 'move' | 'publish' | 'unpublish' | 'delete';
 
 /**
- * A page's actions, by the rules of its own page's menu: Move and Publish
- * for editors, Publish only with publish rights, Unpublish with those and a
- * publication, Delete for owners who can share.
+ * A page's actions after Open, by the rules of its own page's menu: Move
+ * and Publish for editors, Publish only with publish rights, Unpublish with
+ * those and a publication, Delete for owners who can share.
  */
 function pageActions(
   info: PageInfo,
   sharer: boolean,
-  onOpen: () => void,
   onAction: (action: PageAction, info: PageInfo) => void,
 ): MenuAction[] {
   const canEdit = info.role !== 'reader';
   const when = (allowed: boolean, which: PageAction) =>
     allowed ? () => onAction(which, info) : undefined;
   return [
-    action('Open', onOpen),
     action('Move…', when(canEdit, 'move')),
     action(
       'Publish to another space…',
@@ -176,20 +174,22 @@ export function PageMenuItems({
   onOpen,
   onAction,
 }: {
-  pageId: pageOperations.PageRef['pageId'];
+  pageId: PageId;
   sharer: boolean;
   onOpen: () => void;
   onAction: (action: PageAction, info: PageInfo) => void;
 }) {
   const ctx = useClient();
   const { data: info, isPending } = useQuery(pageQuery(ctx, pageId));
-  if (!info) {
-    return (
-      <>
-        <ContextMenuItem onSelect={onOpen}>Open</ContextMenuItem>
-        {isPending && <ContextMenuItem disabled>Loading…</ContextMenuItem>}
-      </>
-    );
-  }
-  return <Items actions={pageActions(info, sharer, onOpen, onAction)} Item={ContextMenuItem} />;
+  // Open stays the same item as the rest load, so a menu opened from the keyboard keeps its focus.
+  return (
+    <>
+      <ContextMenuItem onSelect={onOpen}>Open</ContextMenuItem>
+      {info ? (
+        <Items actions={pageActions(info, sharer, onAction)} Item={ContextMenuItem} />
+      ) : (
+        isPending && <ContextMenuItem disabled>Loading…</ContextMenuItem>
+      )}
+    </>
+  );
 }
