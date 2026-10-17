@@ -3,6 +3,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { useVault } from '../vault/store';
 
+const PREFIX = 'wikistow.expanded.';
 const Kept = z.array(z.string());
 const NONE: ReadonlySet<string> = new Set();
 
@@ -10,6 +11,18 @@ const NONE: ReadonlySet<string> = new Set();
 // showing a space (the wide layout's and the phone drawer's) shares one.
 const sets = new Map<string, ReadonlySet<string>>();
 const listeners = new Set<() => void>();
+const emit = () => {
+  for (const listener of listeners) listener();
+};
+
+// Folders opened or closed in another tab show here too, and this tab's
+// next save keeps them.
+window.addEventListener('storage', (event) => {
+  if (event.key === null) sets.clear();
+  else if (event.key.startsWith(PREFIX)) sets.delete(event.key);
+  else return;
+  emit();
+});
 
 function load(key: string): ReadonlySet<string> {
   let set = sets.get(key);
@@ -31,7 +44,7 @@ function save(key: string, set: ReadonlySet<string>) {
   } catch {
     // Not kept past this run; it still applies now.
   }
-  for (const listener of listeners) listener();
+  emit();
 }
 
 const subscribe = (listener: () => void) => {
@@ -50,7 +63,7 @@ const subscribe = (listener: () => void) => {
 export function useExpandedFolders(spaceId: SpaceId) {
   const current = useVault();
   if (current.status !== 'unlocked') throw new Error('The vault is locked');
-  const key = `wikistow.expanded.${current.ctx.installationId}.${current.vault.accountId}.${spaceId}`;
+  const key = `${PREFIX}${current.ctx.installationId}.${current.vault.accountId}.${spaceId}`;
   const expanded = useSyncExternalStore(subscribe, () => load(key));
   const update = useCallback(
     (change: (current: ReadonlySet<string>) => ReadonlySet<string>) => save(key, change(load(key))),
