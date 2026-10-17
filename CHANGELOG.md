@@ -4,6 +4,21 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.10.0 - 2026-10-17
+
+### Highlights
+
+#### Features
+
+- You can rename a folder with Rename… in its menu. Its emoji, colour, image and contents stay as they are.
+- Owners can change a space’s name, emoji and image with Name and look… in the space menu. The rail and the sidebar show the image, else the emoji, else the initials.
+- Right-click a folder or page in the sidebar, or press the menu key or Shift+F10 on it, to open its menu. Folders show their ⋯ items, and pages show Open and what you can do with them.
+
+#### UI polish
+
+- New space takes names up to 200 characters, like folders.
+- Publish to another space… now says “Copies the draft as it is now” or “Copies this published version”.
+
 ### Changes
 
 #### App
