@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Pending invitations each have Copy link, email invitations too. It asks first, then makes a new link, copies it and sends no email. The link sent or copied earlier stops working. If the clipboard refuses, the link stays shown to copy by hand. Generic invitations' New link is folded into it. (#75)
 
+#### Desktop
+
+- The desktop app opens its window at the size and place it was last left, fitted to the screen, and maximized if it was. They're kept in `window.json` in the app's `userData`, for the device rather than an account. (#77)
+
 #### Server
 
 - `POST /api/admin/invitations/:id/link` replaces an invitation's token and expiry and returns the link without mailing it. The `invitation.resent` audit event now records `mailed`. (#75)
