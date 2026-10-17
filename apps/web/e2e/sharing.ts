@@ -42,6 +42,13 @@ export async function editDraft(page: Page, text: string) {
   await waitForSave(page);
 }
 
+/** Open `folder` in the sidebar, unless the sidebar kept it open from before. */
+export async function openFolder(page: Page, folder: string) {
+  const row = page.getByRole('treeitem', { name: new RegExp(folder) });
+  if ((await row.getAttribute('aria-expanded')) !== 'true') await row.click();
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+}
+
 /** Pick an item from a folder's menu in the sidebar. */
 export async function folderMenu(page: Page, folder: string, item: string) {
   await page.getByRole('treeitem', { name: new RegExp(folder) }).hover();
@@ -101,7 +108,7 @@ export async function openShared(page: Page, folder: string, title: string) {
   await page.getByRole('link', { name: 'Shared', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Shared with me' })).toBeVisible();
   await page.getByRole('link', { name: new RegExp(folder) }).click();
-  await page.getByRole('treeitem', { name: new RegExp(folder) }).click();
+  await openFolder(page, folder);
   await page.getByRole('treeitem', { name: title }).click();
   await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
 }

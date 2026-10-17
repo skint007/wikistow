@@ -1,6 +1,13 @@
 import type { Page } from '@playwright/test';
 import { expect, pick, test } from './fixtures';
-import { folderMenu, newFolder, newSpace, publishedPageIn, shareFolder } from './sharing';
+import {
+  folderMenu,
+  newFolder,
+  newSpace,
+  openFolder,
+  publishedPageIn,
+  shareFolder,
+} from './sharing';
 import { adminTab, memberWithVault } from './vault';
 
 const TEXT = {
@@ -13,7 +20,7 @@ async function sharedTree(page: Page, folder: string) {
   await page.getByRole('link', { name: 'Shared', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Shared with me' })).toBeVisible();
   await page.getByRole('link', { name: new RegExp(folder) }).click();
-  await page.getByRole('treeitem', { name: new RegExp(folder) }).click();
+  await openFolder(page, folder);
 }
 
 /**
@@ -59,7 +66,7 @@ test('moving a folder between shares changes who can read it', async ({
 
   await test.step('Kim reads the moved page, and Rita no longer sees it', async () => {
     await sharedTree(kim, 'Kitchen');
-    await kim.getByRole('treeitem', { name: /Beans/ }).click();
+    await openFolder(kim, 'Beans');
     await kim.getByRole('treeitem', { name: 'Bean plan' }).click();
     await expect(kim.getByText(TEXT.beans)).toBeVisible();
 

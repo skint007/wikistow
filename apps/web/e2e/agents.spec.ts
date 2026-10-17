@@ -1,7 +1,7 @@
 import { expect, pick, serverSnapshot, test } from './fixtures';
 import { buildCli, cleanUpCli, cliInstall } from './cli';
 import { addAgent, agentsPage } from './enroll';
-import { folderMenu, newFolder, publishedPageIn, shareDialog } from './sharing';
+import { folderMenu, newFolder, openFolder, publishedPageIn, shareDialog } from './sharing';
 import { adminTab, expectSource, memberWithVault } from './vault';
 
 let bin = '';
@@ -86,7 +86,7 @@ test('an agent enrolled from the browser reads, drafts and publishes, then is re
   await test.step('the browser opens the agent’s draft', async () => {
     await page.getByRole('link', { name: 'Personal' }).click();
     const activity = page.getByRole('region', { name: 'Agent activity' });
-    await page.getByRole('treeitem', { name: /Kitchen/ }).click();
+    await openFolder(page, 'Kitchen');
     await page.getByRole('treeitem', { name: 'Soup' }).click();
     await activity.click();
     await expectSource(page, TEXT.drafted);
