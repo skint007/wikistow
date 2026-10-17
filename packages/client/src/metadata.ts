@@ -179,7 +179,10 @@ export function parseMetadata(json: unknown): OpenedMetadata {
   return { kind: 'current', metadata: json };
 }
 
-export type MetadataChanges = Partial<Pick<NodeMetadata, 'name' | 'emoji' | 'tint' | 'extensions'>>;
+/** What a writer changes. An `emoji` of null removes it, as for a space shown by its initials. */
+export type MetadataChanges = Partial<Pick<NodeMetadata, 'name' | 'tint' | 'extensions'>> & {
+  emoji?: string | null;
+};
 
 /** The next version: everything this client doesn't change is carried over unchanged. */
 export function reviseMetadata(previous: OpenedMetadata, changes: MetadataChanges): NodeMetadata {
@@ -191,9 +194,11 @@ export function reviseMetadata(previous: OpenedMetadata, changes: MetadataChange
     );
   }
   const { metadata } = previous;
-  return {
+  const { emoji, ...rest } = changes;
+  const next: NodeMetadata = {
     ...metadata,
-    ...changes,
+    ...rest,
+    ...(emoji == null ? {} : { emoji }),
     format: {
       ...metadata.format,
       major: METADATA_FORMAT.major,
@@ -201,6 +206,8 @@ export function reviseMetadata(previous: OpenedMetadata, changes: MetadataChange
     },
     extensions: { ...metadata.extensions, ...changes.extensions },
   };
+  if (emoji === null) delete next.emoji;
+  return next;
 }
 
 /** The fields a writer chooses; the rest of the record is derived when sealing. */

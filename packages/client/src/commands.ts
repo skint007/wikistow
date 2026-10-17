@@ -123,7 +123,9 @@ const LoadedMetadata = exactly<spaces.LoadedMetadata>(
 );
 
 const Changes = exactly<MetadataChanges>(
-  NodeMetadata.pick({ name: true, emoji: true, tint: true, extensions: true }).partial(),
+  NodeMetadata.pick({ name: true, tint: true, extensions: true })
+    .extend({ emoji: NodeMetadata.shape.emoji.unwrap().nullable() })
+    .partial(),
 );
 
 // Setting up is two commands, like the operations: the recovery key is shown
