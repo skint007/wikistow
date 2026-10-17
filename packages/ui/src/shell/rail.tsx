@@ -268,7 +268,7 @@ function NewSpaceDialog({
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="space-name">Name</Label>
-            <Input id="space-name" name="name" required autoFocus maxLength={100} />
+            <Input id="space-name" name="name" required autoFocus maxLength={200} />
           </div>
           {error && (
             <p role="alert" className="text-sm text-destructive">
