@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as ConfirmEmailRouteImport } from './routes/confirm-email'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as RegisterRouteImport } from './routes/register'
@@ -40,6 +41,11 @@ import { Route as AppVaultSSpaceIdPPageIdRouteImport } from './routes/_app/_vaul
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfirmEmailRoute = ConfirmEmailRouteImport.update({
+  id: '/confirm-email',
+  path: '/confirm-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -182,6 +188,7 @@ const AppVaultSSpaceIdPPageIdRoute = AppVaultSSpaceIdPPageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof AppVaultIndexRoute
+  '/confirm-email': typeof ConfirmEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
@@ -210,6 +217,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof AppVaultIndexRoute
+  '/confirm-email': typeof ConfirmEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
@@ -237,6 +245,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/confirm-email': typeof ConfirmEmailRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
@@ -269,6 +278,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/confirm-email'
     | '/forgot-password'
     | '/invite'
     | '/register'
@@ -297,6 +307,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/confirm-email'
     | '/forgot-password'
     | '/invite'
     | '/register'
@@ -323,6 +334,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/confirm-email'
     | '/forgot-password'
     | '/invite'
     | '/register'
@@ -354,6 +366,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  ConfirmEmailRoute: typeof ConfirmEmailRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   InviteRoute: typeof InviteRoute
   RegisterRoute: typeof RegisterRoute
@@ -368,6 +381,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/confirm-email': {
+      id: '/confirm-email'
+      path: '/confirm-email'
+      fullPath: '/confirm-email'
+      preLoaderRoute: typeof ConfirmEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -645,6 +665,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  ConfirmEmailRoute: ConfirmEmailRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   InviteRoute: InviteRoute,
   RegisterRoute: RegisterRoute,

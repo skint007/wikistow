@@ -276,7 +276,8 @@ describe('an agent’s token', () => {
         peopleRoutes.directory,
       ].map((route) => `${route.method} ${route.path}`),
     );
-    // Open to anyone: the installation, joining, and the CLI's enrollment steps.
+    // Open to anyone: the installation, joining, an email change link, and the
+    // CLI's enrollment steps.
     const open = new Set(
       [
         systemRoutes.health,
@@ -284,6 +285,7 @@ describe('an agent’s token', () => {
         accountRoutes.createAccount,
         accountRoutes.finishAccountSetup,
         accountRoutes.inspectInvitation,
+        accountRoutes.confirmEmailChange,
         agentRoutes.requestEnrollment,
         agentRoutes.pollEnrollment,
         agentRoutes.confirmEnrollment,

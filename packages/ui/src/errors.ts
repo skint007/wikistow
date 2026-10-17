@@ -26,6 +26,7 @@ const MESSAGES: Partial<Record<string, string>> = {
   'rate-limited': 'Too many attempts. Wait a minute and try again.',
   'account-rate-limited': 'Too many attempts for this account. Wait a few minutes and try again.',
   'setup-link-invalid': 'This link has expired or was already used. Ask for a new one.',
+  'email-link-invalid': 'This link has expired or was already used. Ask for a new one in Settings.',
   'handoff-invalid': 'This sign-in has expired. Start it again from the desktop app.',
   network: 'This app couldn’t reach the server. Check your connection and try again.',
   // Both locks last 15 minutes (TWO_FACTOR_LOCKOUT on the server).

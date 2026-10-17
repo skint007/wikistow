@@ -117,6 +117,8 @@ Invitation tokens are random, single-use, stored as hashes, and expire after sev
 
 An account invitation does not contain vault keys or grant space access. After a person verifies their email and initializes their vault, a space owner can share content with that account. This avoids putting content secrets in email links.
 
+People change their own email in Settings. It needs a recent sign-in, with the second factor when it's on. A single-use link, valid for 24 hours, goes to the new address, and only opening it changes the account's address, which stays verified. The old address then gets a notice. Until then the old address keeps working, and asking again replaces the earlier link. The request gets the same answer whether or not another account has the address; if one has it when the link is opened, nothing changes. Keys are pinned by identity, so other people's contacts and shares keep working. Their contact labels keep the old email, and a lookup of the old address that finds another key is a key change (protocol section 8.4).
+
 Configure password reset to revoke existing account sessions. Application-managed agent credentials require their own revocation path. Administrative suspension blocks all API and blob access, invalidates active sessions and agent credentials, and closes active subscriptions. Check account state on every authenticated request rather than relying solely on the lifetime of a session token.
 
 An administrator reset cannot unlock a vault. TOTP recovery codes recover the second authentication factor; the vault recovery key recovers encrypted content. Name and explain these separately.

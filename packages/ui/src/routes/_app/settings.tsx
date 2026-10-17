@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { desktopRoutes } from '@wikistow/contracts';
+import { accountRoutes, desktopRoutes } from '@wikistow/contracts';
 import { createFileRoute } from '@tanstack/react-router';
 import { useId, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Picker } from '@/components/ui/picker';
 import { AvatarSettings } from '../../account/avatar-settings';
 import { AiSettings } from '../../ai/ai-settings';
-import { api } from '../../api';
+import { api, meQuery } from '../../api';
 import { authClient } from '../../auth/client';
 import { useReauth } from '../../auth/reauth';
 import { errorMessage, unwrap } from '../../errors';
@@ -51,6 +51,12 @@ function Settings() {
         }
       >
         <ThemePicker />
+      </Section>
+      <Section
+        title="Email"
+        description="You sign in with it, and mail about your account goes there. A new address works once you open the link we send to it."
+      >
+        <ChangeEmail />
       </Section>
       <Section
         title="Password"
@@ -156,6 +162,69 @@ function IdleLock() {
         onChange={(value) => idleLockDelay.set(value === 'off' ? null : Number(value))}
       />
     </div>
+  );
+}
+
+const NewEmail = z.object({ email: z.string().trim().email('Enter an email address') });
+
+/**
+ * The account's address, and asking to change it after confirming it's
+ * you. Nothing changes until the link mailed to the new address is opened
+ * (`/confirm-email`).
+ */
+function ChangeEmail() {
+  const { data: me } = useQuery(meQuery);
+  const withReauth = useReauth();
+  const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: ReactNode } | null>(
+    null,
+  );
+  const form = useForm({ resolver: zodResolver(NewEmail), defaultValues: { email: '' } });
+  const { errors, isSubmitting } = form.formState;
+  const current = me?.account.email;
+
+  const submit = form.handleSubmit(async ({ email }) => {
+    setMessage(null);
+    if (email.toLowerCase() === current) {
+      form.setError('email', { message: 'That’s already your email' });
+      return;
+    }
+    try {
+      await withReauth(() => api.call(accountRoutes.requestEmailChange, { body: { email } }));
+      form.reset();
+      setMessage({
+        tone: 'notice',
+        text: (
+          <>
+            We sent a link to <strong>{email}</strong>. Your email changes when you open it. Until
+            then, keep using {current}.
+          </>
+        ),
+      });
+    } catch (caught) {
+      setMessage({ tone: 'error', text: errorMessage(caught) });
+    }
+  });
+
+  return (
+    <form onSubmit={submit} className="grid max-w-sm gap-4" noValidate>
+      {current && (
+        <p className="text-sm">
+          Your email is <strong>{current}</strong>.
+        </p>
+      )}
+      <Field
+        id="new-email"
+        label="New email"
+        type="email"
+        autoComplete="email"
+        error={errors.email?.message}
+        {...form.register('email')}
+      />
+      {message && <FormMessage tone={message.tone}>{message.text}</FormMessage>}
+      <Button type="submit" disabled={isSubmitting} className="justify-self-start">
+        Change email
+      </Button>
+    </form>
   );
 }
 
