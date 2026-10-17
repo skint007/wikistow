@@ -47,8 +47,8 @@ export const folderLook = ({ emoji, tint }: NodeMetadata): FolderLook => ({
   tint: tint ?? DEFAULT_FOLDER_LOOK.tint,
 });
 
-/** An image picked in the folder fields and not yet saved, with a `blob:` URL to show it. */
-type PickedImage = { icon: FolderIcon; url: string };
+/** An image picked in the folder or space fields and not yet saved, with a `blob:` URL to show it. */
+export type PickedImage = { icon: FolderIcon; url: string };
 
 /**
  * What the folder fields show and change: a look, and an image, which is
@@ -63,7 +63,7 @@ const sameLook = (a: LookChoice, b: LookChoice) =>
   a.emoji === b.emoji && a.tint === b.tint && a.image === b.image;
 
 /** The image picked in the fields to save, if any. */
-export const pickedIcon = ({ image }: LookChoice) =>
+export const pickedIcon = ({ image }: Pick<LookChoice, 'image'>) =>
   image === 'kept' || image === null ? null : image.icon;
 
 /** A folder's tile: its emoji, or image, on its tint. A tint this app doesn't know shows blue. */
@@ -74,9 +74,9 @@ export const tileClass = (tint: string) =>
   );
 
 /**
- * A `blob:` URL for a folder's image, or null for none. Made once for each
- * version of its metadata, not on each tree load, and kept until the vault
- * locks. It needs no network: the image came with the tree.
+ * A `blob:` URL for a folder's or space's image, or null for none. Made once
+ * for each version of its metadata, not on each tree load, and kept until
+ * the vault locks. It needs no network: the image came with the metadata.
  */
 export function useFolderIcon(
   loaded: spaceOperations.LoadedMetadata | null | undefined,
