@@ -40,6 +40,7 @@ import { shareCovering } from '../sharing/model';
 import { useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { useClient } from '../vault/store';
+import { useExpandedFolders } from './expanded-folders';
 import { ExportDialog, type Exporting } from './export-dialog';
 import {
   DEFAULT_CHOICE,
@@ -212,7 +213,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const params = useParams({ strict: false });
   const navigate = useNavigate();
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [expanded, setExpanded] = useExpandedFolders(spaceId);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState<Creating>(null);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
@@ -229,9 +230,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     () => (tree ? visibleRows(tree, expanded, filter) : []),
     [tree, expanded, filter],
   );
+  // Saving drops folders the tree no longer has, deleted or out of reach.
   const toggle = (id: string, open?: boolean) =>
     setExpanded((current) => {
-      const next = new Set(current);
+      const next = new Set(
+        tree ? [...current].filter((kept) => tree.folders.some((f) => f.id === kept)) : current,
+      );
       if (open ?? !next.has(id)) next.add(id);
       else next.delete(id);
       return next;

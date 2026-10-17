@@ -64,6 +64,7 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 - Page row: `subtle-foreground`, `rounded-row`, padding 6px 10px 6px 18px. Selected: `primary-soft` fill, `primary-ink` text, bold. Before the title, the page's emoji, or its image as a 20px rounded square, cropped to fill it; the emoji shows while the image loads or if it can't.
 - A 7px `draft-dot` marks a page with unpublished changes or no published version. The dot carries an "Unpublished changes" label for assistive technology.
 - Order: folders, then loose pages, as in the mocks. Sorting rules are not decided.
+- Which folders are open is kept on the device in `localStorage` (`shell/expanded-folders.ts`), per server, account and space, by folder ID, so a rename or move keeps it and a folder that's gone is skipped. Each folder keeps its own state, so closing and reopening a parent brings its children back as they were. The filter opens the folders around its matches for as long as it has text; clearing it shows the kept state again.
 
 Five folder tints exist: green, orange, blue, pink, purple. A new folder starts with ⭐ on the blue tint (`folder-blue`) unless the person picks otherwise, so nobody has to choose when creating one. The emoji, tint and an optional image are folder metadata. Like names, they are content, so they must be encrypted with the folder's other client-side metadata rather than stored as plain server fields.
 
