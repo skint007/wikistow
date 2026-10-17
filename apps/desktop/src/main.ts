@@ -3,7 +3,8 @@
 // the session only it holds, signs in through the system browser, keeps
 // and serves the plugins installed on this computer and copies of those
 // approved from the server's library, serves the builds the plugin
-// workshop previews, and checks for a newer release.
+// workshop previews, checks for a newer release, and opens its window where
+// it was last left.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
@@ -48,6 +49,7 @@ import {
   SignInError,
 } from './sign-in.ts';
 import { desktopUpdates } from './updates.ts';
+import { windowPlace } from './window-place.ts';
 import { desktopWorkshop, WorkshopError } from './workshop/workshop.ts';
 
 /** How long a browser sign-in may take before the app stops waiting for it. */
@@ -139,6 +141,7 @@ const workshop = desktopWorkshop(app.getPath('userData'));
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
 const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
+const place = windowPlace(app.getPath('userData'));
 
 /** Delete what the pages kept sealed: the search index and the trust marks. */
 async function removeKept() {
@@ -331,9 +334,9 @@ async function linkArrived(link: string) {
 }
 
 function openWindow() {
+  const kept = place.read();
   window = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...kept.bounds,
     title: 'WikiStow',
     icon: join(app.getAppPath(), 'packaging', 'wikistow-desktop.png'),
     show: false,
@@ -345,7 +348,9 @@ function openWindow() {
       webviewTag: false,
     },
   });
-  window.once('ready-to-show', () => window?.show());
+  place.track(window);
+  // Maximizing shows the window too.
+  window.once('ready-to-show', () => (kept.maximized ? window?.maximize() : window?.show()));
   // Main sees these keys before the page does, so this works however a
   // plugin left the page.
   window.webContents.on('before-input-event', (event, input) => {
