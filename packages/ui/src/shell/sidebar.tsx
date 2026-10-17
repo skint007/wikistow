@@ -6,8 +6,8 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from '@tanstack/react-router';
-import { ChevronRight, FolderPlus, MoreHorizontal, Plus } from 'lucide-react';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { ChevronRight, FolderPlus, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
 import { IconImage } from '@/components/icon-image';
@@ -20,12 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Name, plainText } from '@/components/name';
@@ -33,8 +27,11 @@ import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { searchIndexChanged, treeQuery } from '../data/queries';
 import { decryptedQuery } from '../page/attachments';
+import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
+import { PublishDialog } from '../page/publish-dialog';
+import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
 import { useOwnerStanding } from '../sharing/owner-standing';
@@ -53,6 +50,16 @@ import {
 } from './folder-look';
 import { FolderRenameDialog } from './folder-rename';
 import { SpaceHeader } from './space-header';
+import {
+  FolderMenu,
+  folderActions,
+  FolderMenuItems,
+  PageMenuItems,
+  RowMenu,
+  shownVersion,
+  type PageAction,
+  type PageInfo,
+} from './tree-menus';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -197,6 +204,18 @@ function PageRowIcon({
 type Creating = { kind: 'page' | 'folder'; parentId: FolderId | null } | null;
 
 /**
+ * A page's Publish to another space, Unpublish or Delete chosen in its row's
+ * menu, with the page's info loaded then. Kept while its dialog closes.
+ */
+type PageDialog = {
+  action: Exclude<PageAction, 'move'>;
+  pageId: PageId;
+  title: string;
+  info: PageInfo;
+  open: boolean;
+};
+
+/**
  * A page or folder being dragged in the tree, where it can be dropped, and
  * the place it is over now, if it can go there.
  */
@@ -223,6 +242,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
   const [exporting, setExporting] = useState<Exporting | null>(null);
+  const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const standing = useOwnerStanding(spaceId);
   const [focused, setFocused] = useState<string | null>(null);
@@ -438,90 +458,111 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             onDrop: (event: DragEvent) => drop(event, dropTarget(row)),
           } as const;
           if (row.kind === 'folder') {
-            return (
-              <li
-                key={row.id}
-                {...common}
-                aria-expanded={row.expanded}
-                onClick={() => toggle(row.id)}
-                draggable={canEditAt(row.id)}
-                onDragStart={(event) =>
-                  startDrag(event, { id: row.id, kind: 'folder', name: row.name })
-                }
-                className={cn(
-                  'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none',
-                  dragging?.over?.parentId === row.id &&
-                    'bg-primary-soft ring-2 ring-primary ring-inset',
-                )}
-                style={indent}
-              >
-                <ChevronRight
-                  aria-hidden
-                  className={cn(
-                    'size-3.5 shrink-0 text-muted-foreground transition-transform',
-                    row.expanded && 'rotate-90',
-                  )}
-                  strokeWidth={1.75}
-                />
-                <FolderTile
-                  metadata={row.metadata}
-                  emoji={row.emoji}
-                  tint={row.tint}
-                  className="size-7 text-sm"
-                />
-                <span className="min-w-0 flex-1 truncate font-extrabold">
-                  <Name>{row.name}</Name>
-                </span>
-                <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
-                  {row.count}
-                </span>
-                <FolderMenu
-                  name={row.name}
-                  editing={
-                    canEditAt(row.id)
-                      ? {
-                          onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
-                          onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
-                          onRename: () => setRenaming(row.id),
-                          onRestyle: () => setRestyling(row.id),
-                          onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
-                          onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
-                          onDelete: sharer ? () => setDeleting(row.id) : undefined,
-                        }
-                      : null
+            // One list for both menus, so they can't differ.
+            const actions = folderActions({
+              editing: canEditAt(row.id)
+                ? {
+                    onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
+                    onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
+                    onRename: () => setRenaming(row.id),
+                    onRestyle: () => setRestyling(row.id),
+                    onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
+                    onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
+                    onDelete: sharer ? () => setDeleting(row.id) : undefined,
                   }
-                  onExport={() => setExporting({ folderId: row.id, name: row.name })}
-                />
-              </li>
+                : null,
+              onExport: () => setExporting({ folderId: row.id, name: row.name }),
+            });
+            return (
+              <RowMenu key={row.id} items={<FolderMenuItems actions={actions} />}>
+                <li
+                  {...common}
+                  aria-expanded={row.expanded}
+                  onClick={() => toggle(row.id)}
+                  draggable={canEditAt(row.id)}
+                  onDragStart={(event) =>
+                    startDrag(event, { id: row.id, kind: 'folder', name: row.name })
+                  }
+                  className={cn(
+                    'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none',
+                    dragging?.over?.parentId === row.id &&
+                      'bg-primary-soft ring-2 ring-primary ring-inset',
+                  )}
+                  style={indent}
+                >
+                  <ChevronRight
+                    aria-hidden
+                    className={cn(
+                      'size-3.5 shrink-0 text-muted-foreground transition-transform',
+                      row.expanded && 'rotate-90',
+                    )}
+                    strokeWidth={1.75}
+                  />
+                  <FolderTile
+                    metadata={row.metadata}
+                    emoji={row.emoji}
+                    tint={row.tint}
+                    className="size-7 text-sm"
+                  />
+                  <span className="min-w-0 flex-1 truncate font-extrabold">
+                    <Name>{row.name}</Name>
+                  </span>
+                  <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
+                    {row.count}
+                  </span>
+                  <FolderMenu name={row.name} actions={actions} />
+                </li>
+              </RowMenu>
             );
           }
           const selected = params.pageId === row.id;
           return (
-            <li
+            <RowMenu
               key={row.id}
-              {...common}
-              aria-selected={selected}
-              onClick={() => openPage(row.id)}
-              draggable={canEditAt(row.parentId)}
-              onDragStart={(event) =>
-                startDrag(event, { id: row.id, kind: 'page', name: row.title })
+              items={
+                <PageMenuItems
+                  pageId={row.id}
+                  sharer={sharer}
+                  onOpen={() => openPage(row.id)}
+                  onAction={(action, info) =>
+                    action === 'move'
+                      ? setMoving({ id: row.id, kind: 'page', name: row.title })
+                      : setPageDialog({
+                          action,
+                          pageId: row.id,
+                          title: row.title,
+                          info,
+                          open: true,
+                        })
+                  }
+                />
               }
-              className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
-                selected && 'bg-primary-soft font-bold text-primary-ink',
-              )}
-              style={indent}
             >
-              <PageRowIcon page={{ spaceId, pageId: row.id }} emoji={row.emoji} icon={row.icon} />
-              <span className="min-w-0 flex-1 truncate">
-                <Name>{row.title}</Name>
-              </span>
-              {canEditAt(row.parentId) && row.unpublished && (
-                <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
-                  <span className="sr-only">Unpublished changes</span>
+              <li
+                {...common}
+                aria-selected={selected}
+                onClick={() => openPage(row.id)}
+                draggable={canEditAt(row.parentId)}
+                onDragStart={(event) =>
+                  startDrag(event, { id: row.id, kind: 'page', name: row.title })
+                }
+                className={cn(
+                  'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
+                  selected && 'bg-primary-soft font-bold text-primary-ink',
+                )}
+                style={indent}
+              >
+                <PageRowIcon page={{ spaceId, pageId: row.id }} emoji={row.emoji} icon={row.icon} />
+                <span className="min-w-0 flex-1 truncate">
+                  <Name>{row.title}</Name>
                 </span>
-              )}
-            </li>
+                {canEditAt(row.parentId) && row.unpublished && (
+                  <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
+                    <span className="sr-only">Unpublished changes</span>
+                  </span>
+                )}
+              </li>
+            </RowMenu>
           );
         })}
         {rows.length === 0 && (
@@ -586,6 +627,13 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         exporting={exporting}
         onOpenChange={(open) => !open && setExporting(null)}
       />
+      {pageDialog && (
+        <PageRowDialog
+          spaceId={spaceId}
+          dialog={pageDialog}
+          onClose={() => setPageDialog({ ...pageDialog, open: false })}
+        />
+      )}
       {sharer && (
         <ShareDialog
           spaceId={spaceId}
@@ -642,57 +690,6 @@ function SidebarCard({ children }: { children: React.ReactNode }) {
     <aside className="flex h-full min-h-0 flex-col gap-3 rounded-card bg-card p-3.5 shadow-card">
       {children}
     </aside>
-  );
-}
-
-/** A folder's menu: for editors, what they can do there; for everyone, Export. */
-function FolderMenu({
-  name,
-  editing,
-  onExport,
-}: {
-  name: string;
-  editing: {
-    onNewPage: () => void;
-    onNewFolder: () => void;
-    onRename: () => void;
-    onRestyle: () => void;
-    onMove: () => void;
-    onShare: (() => void) | undefined;
-    onDelete: (() => void) | undefined;
-  } | null;
-  onExport: () => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={`Actions for ${plainText(name)}`}
-        onClick={(event) => event.stopPropagation()}
-        className="grid size-6 place-items-center rounded-row text-muted-foreground opacity-0 group-hover:opacity-100 hover:tint focus:opacity-100 active:tint-strong pointer-coarse:opacity-100 data-[state=open]:opacity-100"
-      >
-        <MoreHorizontal className="size-4" strokeWidth={1.75} />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-        {editing && (
-          <>
-            <DropdownMenuItem onSelect={editing.onNewPage}>New page here</DropdownMenuItem>
-            <DropdownMenuItem onSelect={editing.onNewFolder}>New folder here</DropdownMenuItem>
-            <DropdownMenuItem onSelect={editing.onRename}>Rename…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={editing.onRestyle}>Emoji and colour…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={editing.onMove}>Move…</DropdownMenuItem>
-            {editing.onShare && (
-              <DropdownMenuItem onSelect={editing.onShare}>Share…</DropdownMenuItem>
-            )}
-          </>
-        )}
-        <DropdownMenuItem onSelect={onExport}>Export…</DropdownMenuItem>
-        {editing?.onDelete && (
-          <DropdownMenuItem variant="destructive" onSelect={editing.onDelete}>
-            Delete folder
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -780,46 +777,78 @@ function CreateDialog({
   );
 }
 
-export function DeleteButton({
+/**
+ * Publish to another space, Unpublish or Delete for a page from its row's
+ * menu: the dialogs its own page's menu opens, with the info loaded when
+ * the row's menu opened.
+ */
+function PageRowDialog({
   spaceId,
-  nodeId,
-  onDone,
+  dialog,
+  onClose,
 }: {
   spaceId: SpaceId;
-  nodeId: FolderId | PageId | null;
-  onDone: () => void;
+  dialog: PageDialog;
+  onClose: () => void;
 }) {
-  const ctx = useClient();
-  const queryClient = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function remove() {
-    if (!nodeId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await pageOperations.deleteNode(ctx, { spaceId, nodeId });
-      searchIndexChanged(queryClient);
-      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-      onDone();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
+  const params = useParams({ strict: false });
+  const search = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const { action, pageId, title, info, open } = dialog;
+  const page = { spaceId, pageId };
+  const onOpenChange = (next: boolean) => !next && onClose();
+  // Whether the page is the one open, which then shows what's left, as its own menu does.
+  const here = params.pageId === pageId;
+  const { publishedHead } = info.heads;
+  // The open page publishes the version on screen, as from its own menu.
+  const version = shownVersion(info, here ? search : {});
+  if (action === 'publish') {
+    return (
+      version && (
+        <PublishDialog
+          page={page}
+          title={title}
+          version={version}
+          open={open}
+          onOpenChange={onOpenChange}
+        />
+      )
+    );
+  }
+  if (action === 'unpublish') {
+    return (
+      publishedHead && (
+        <UnpublishDialog
+          page={page}
+          title={title}
+          publishedHead={publishedHead}
+          copy={info.heads.draftHead === null}
+          permissionVersion={info.permissionVersion}
+          open={open}
+          onOpenChange={onOpenChange}
+          onDone={async () => {
+            if (here)
+              await navigate({
+                to: '/s/$spaceId/p/$pageId',
+                params: page,
+                search: { view: 'draft' },
+              });
+          }}
+        />
+      )
+    );
   }
   return (
-    <>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      <DialogFooter>
-        <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
-          Delete for good
-        </Button>
-      </DialogFooter>
-    </>
+    <DeletePageDialog
+      page={page}
+      title={title}
+      publishedCount={info.heads.publishedCount}
+      open={open}
+      onOpenChange={onOpenChange}
+      onDone={() => {
+        onClose();
+        if (here) void navigate({ to: '/s/$spaceId', params: { spaceId } });
+      }}
+    />
   );
 }

@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - **Rename…** in a folder’s menu, for editors, changes only its name through `spaceOperations.updateMetadata`, so its emoji, colour and image stay. (#85)
 - **Name and look…** in the space menu, for owners, changes a space’s name and its emoji or image, kept as `wikistow.icon` as for folders. The rail and the sidebar header show the image, else the emoji, else the initials. (#86)
+- Right-clicking a folder or page in the sidebar, or the menu key or Shift+F10 on a focused row, opens its menu at the pointer: a folder’s ⋯ items, built from the same list, and for a page Open plus what its Page actions menu offers that person, loaded as the menu opens. The desktop app shows it in place of the native menu on these rows only. The delete page dialog moved to `page/delete-dialog.tsx`, and Publish to another space… now says “Copies the draft as it is now” or “Copies this published version”. (#87)
 
 ## 0.9.0 - 2026-10-17
 

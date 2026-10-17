@@ -19,13 +19,6 @@ import { z } from 'zod';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -62,6 +55,7 @@ import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
 import { DetachDialog } from '../../../../../../page/detach-dialog';
 import { Markdown } from '../../../../../../page/markdown';
+import { DeletePageDialog } from '../../../../../../page/delete-dialog';
 import { MoveDialog } from '../../../../../../page/move-dialog';
 import { readWikilinks } from '../../../../../../page/page-reader';
 import { PublishDialog } from '../../../../../../page/publish-dialog';
@@ -76,7 +70,7 @@ import { usePlugins, type ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
-import { DeleteButton, pageTitle } from '../../../../../../shell/sidebar';
+import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
 
 export const Route = createFileRoute('/_app/_vault/s/$spaceId/p/$pageId')({
@@ -816,27 +810,17 @@ function PageBody({
           onDone={() => go('draft')}
         />
       )}
-      <Dialog open={deleting} onOpenChange={setDeleting}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Delete “<Name>{title}</Name>”?
-            </DialogTitle>
-            <DialogDescription>
-              This deletes the page with its draft, all {info.heads.publishedCount} published
-              version(s), and every attachment. It can’t be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DeleteButton
-            spaceId={page.spaceId}
-            nodeId={page.pageId}
-            onDone={() => {
-              setDeleting(false);
-              void navigate({ to: '/s/$spaceId', params: { spaceId: page.spaceId } });
-            }}
-          />
-        </DialogContent>
-      </Dialog>
+      <DeletePageDialog
+        page={page}
+        title={title}
+        publishedCount={info.heads.publishedCount}
+        open={deleting}
+        onOpenChange={setDeleting}
+        onDone={() => {
+          setDeleting(false);
+          void navigate({ to: '/s/$spaceId', params: { spaceId: page.spaceId } });
+        }}
+      />
     </PageCard>
   );
 }

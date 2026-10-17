@@ -35,16 +35,17 @@ import { pageReader } from './page-reader';
 import { publicationMessage } from './messages';
 import { publishPlaces, publishSpaces, type PublishPlace } from './publish-model';
 
-/** The version being published: the one the person is looking at. */
+/** The version being published: the one on screen, or the one opening the page shows. */
 export type Version = { revisionId: RevisionId; audience: 'draft' | 'published' };
 
 type Chosen = { spaceId: SpaceId; spaceName: string; place: PublishPlace<FolderId> };
 
 /**
- * Publish the version of a page the person is looking at into a page in
- * another space (protocol section 13): choose the space and folder, look
- * over who can read it there, which attachments go and which links readers
- * there can't open, then publish. Opened from the page menu.
+ * Publish the version of a page the person is looking at, or from the
+ * sidebar the one opening it shows, into a page in another space (protocol
+ * section 13): choose the space and folder, look over who can read it
+ * there, which attachments go and which links readers there can't open,
+ * then publish. Opened from the page menu and the page's sidebar menu.
  */
 export function PublishDialog({
   page,
@@ -81,8 +82,8 @@ export function PublishDialog({
               </DialogTitle>
               <DialogDescription>
                 {version.audience === 'draft'
-                  ? 'Copies the draft you’re looking at, as a published version there.'
-                  : 'Copies the published version you’re looking at.'}{' '}
+                  ? 'Copies the draft as it is now, as a published version there.'
+                  : 'Copies this published version.'}{' '}
                 Later changes here reach it only when you publish to it again.
               </DialogDescription>
             </DialogHeader>
