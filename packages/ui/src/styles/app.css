@@ -50,6 +50,24 @@
   background-image: linear-gradient(rgb(0 0 0 / 18%), rgb(0 0 0 / 18%));
 }
 
+/* The desktop app's titlebar (shell/titlebar.tsx) sits over the top of every screen, so
+ * the page starts below it; full-height layouts take it off 100svh. None in a browser. */
+:root {
+  --titlebar-height: 0px;
+}
+:root[data-titlebar] {
+  --titlebar-height: 2.25rem;
+  scroll-padding-top: var(--titlebar-height);
+}
+:root[data-titlebar] body {
+  padding-top: var(--titlebar-height);
+}
+/* Its empty part moves the window, even under what opens over it, so dialogs and menus
+ * click instead. */
+:root[data-titlebar] :is(dialog, [data-radix-popper-content-wrapper]) {
+  app-region: no-drag;
+}
+
 @layer base {
   /* Tailwind gives buttons the arrow; show the hand on anything enabled that clicks. */
   :is(button, [role='button'], summary):not(:disabled, [aria-disabled='true']) {

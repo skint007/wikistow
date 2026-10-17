@@ -75,14 +75,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SlotContext value={slot}>
       <div
         data-region="app"
-        className="min-h-svh bg-background min-[900px]:grid min-[900px]:h-svh min-[900px]:grid-cols-[70px_1fr]"
+        className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
       >
         <div className="hidden min-[900px]:block">
           <Rail onSignOut={signOut} onSearch={search} />
         </div>
         <header
           data-region="topbar"
-          className="sticky top-0 z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
+          className="sticky top-(--titlebar-height) z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
         >
           <button
             type="button"

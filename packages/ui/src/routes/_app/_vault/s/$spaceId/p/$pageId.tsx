@@ -709,7 +709,7 @@ function PageBody({
         {asides ? (
           <div
             data-region="page.aside"
-            className="grid w-full content-start gap-4 @min-[960px]:sticky @min-[960px]:top-6 @min-[960px]:max-h-[calc(100svh-5rem)] @min-[960px]:w-52 @min-[960px]:shrink-0 @min-[960px]:self-start @min-[960px]:overflow-y-auto"
+            className="grid w-full content-start gap-4 @min-[960px]:sticky @min-[960px]:top-6 @min-[960px]:max-h-[calc(100svh-5rem-var(--titlebar-height))] @min-[960px]:w-52 @min-[960px]:shrink-0 @min-[960px]:self-start @min-[960px]:overflow-y-auto"
           >
             {contents && (
               <TableOfContents
@@ -725,7 +725,7 @@ function PageBody({
             <TableOfContents
               headings={headings}
               card={card}
-              className="sticky top-6 hidden max-h-[calc(100svh-5rem)] w-52 shrink-0 self-start overflow-y-auto @min-[960px]:grid"
+              className="sticky top-6 hidden max-h-[calc(100svh-5rem-var(--titlebar-height))] w-52 shrink-0 self-start overflow-y-auto @min-[960px]:grid"
             />
           )
         )}

@@ -4,6 +4,7 @@ import {
   DESKTOP_CHANNELS,
   type DesktopBridge,
   type DesktopResult,
+  type WindowState,
 } from '@wikistow/contracts/desktop-bridge';
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -41,6 +42,13 @@ const bridge: DesktopBridge = {
   workshopPreview: (files) => call(DESKTOP_CHANNELS.workshopPreview, files),
   workshopExport: (files, hash) => call(DESKTOP_CHANNELS.workshopExport, files, hash),
   update: () => call(DESKTOP_CHANNELS.update),
+  windowAction: (action) => call(DESKTOP_CHANNELS.windowAction, action),
+  windowState: () => call(DESKTOP_CHANNELS.windowState),
+  onWindowState: (listener) => {
+    const heard = (_event: unknown, state: WindowState) => listener(state);
+    ipcRenderer.on(DESKTOP_CHANNELS.onWindowState, heard);
+    return () => void ipcRenderer.off(DESKTOP_CHANNELS.onWindowState, heard);
+  },
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

@@ -54,6 +54,27 @@ When a newer stable release is out, a blue dot shows on your avatar, at the bott
 
 The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikistow/releases/latest`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. GitHub's latest release is never a prerelease, so the app only offers stable releases; running a prerelease such as `0.4.0-rc.1`, you're offered `0.4.0` once it's out. The app keeps the last answer in `~/.config/WikiStow/update.json`, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
 
+## The window
+
+The window has no system title bar or menu bar. WikiStow draws its own titlebar across the top of every screen, sign-in included. Drag its empty part to move the window, and double-click it to maximize or restore, as your desktop does with a system title bar. The window resizes from its edges as usual, within a few pixels of each one. On the right are buttons plugins add, **Window menu** (⋯), and **Minimize**, **Maximize** (**Restore** while maximized) and **Close**. Close asks first if a page has changes not saved yet, as closing always has. Tab reaches the titlebar's buttons after the page's own.
+
+The window opens at the size and place it was last left, and maximized if it was.
+
+What the old menu bar did is in **Window menu**, and these keys still work:
+
+| Keys | Does |
+| --- | --- |
+| Ctrl+R or F5 | Reload. With changes not saved yet, it asks first. |
+| Ctrl+= and Ctrl+- | Zoom in and out |
+| Ctrl+0 | Actual size |
+| F11 | Full screen, and back |
+| Ctrl+Shift+I or F12 | Developer tools |
+| Ctrl+Q | Quit, which closes the window first |
+
+Cut, copy, paste, undo, redo and select all work in both editors with their usual keys. Ctrl+Shift+Alt+P still restarts the app without plugins.
+
+This is tested on X11. On Wayland, moving, double-clicking and resizing depend on the compositor, as they do for any app that draws its own titlebar.
+
 ## Signing in
 
 The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it; allow it.
