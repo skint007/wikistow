@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- **Rename…** in a folder’s menu, for editors, changes only its name through `spaceOperations.updateMetadata`, so its emoji, colour and image stay. (#85)
+
 ## 0.9.0 - 2026-10-17
 
 ### Highlights

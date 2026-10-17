@@ -51,6 +51,7 @@ import {
   pickedIcon,
   type LookChoice,
 } from './folder-look';
+import { FolderRenameDialog } from './folder-rename';
 import { SpaceHeader } from './space-header';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -217,6 +218,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState<Creating>(null);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
+  const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
@@ -481,6 +483,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                       ? {
                           onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
                           onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
+                          onRename: () => setRenaming(row.id),
                           onRestyle: () => setRestyling(row.id),
                           onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
                           onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
@@ -563,6 +566,11 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           toggle(folderId, true);
         }}
         onCreatedPage={openPage}
+      />
+      <FolderRenameDialog
+        spaceId={spaceId}
+        folderId={renaming}
+        onOpenChange={(open) => !open && setRenaming(null)}
       />
       <FolderLookDialog
         spaceId={spaceId}
@@ -648,6 +656,7 @@ function FolderMenu({
   editing: {
     onNewPage: () => void;
     onNewFolder: () => void;
+    onRename: () => void;
     onRestyle: () => void;
     onMove: () => void;
     onShare: (() => void) | undefined;
@@ -669,6 +678,7 @@ function FolderMenu({
           <>
             <DropdownMenuItem onSelect={editing.onNewPage}>New page here</DropdownMenuItem>
             <DropdownMenuItem onSelect={editing.onNewFolder}>New folder here</DropdownMenuItem>
+            <DropdownMenuItem onSelect={editing.onRename}>Rename…</DropdownMenuItem>
             <DropdownMenuItem onSelect={editing.onRestyle}>Emoji and colour…</DropdownMenuItem>
             <DropdownMenuItem onSelect={editing.onMove}>Move…</DropdownMenuItem>
             {editing.onShare && (
