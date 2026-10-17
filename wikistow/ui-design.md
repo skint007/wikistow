@@ -349,6 +349,10 @@ At `/workshop`, in the browser, on phones and in the desktop app, reached by **B
 - **Versions.** Newest first: **vN**, name and version or **Didn't build**, **In the preview**, the SHA-256, and **Preview** for one that built, and on the desktop **Export…**.
 - **Draft files.** A button per file, showing its text below.
 
+## Email in Settings
+
+A Settings section before Password, saying the account signs in with its email and gets its mail there, and that a new address works once the link sent to it is opened. It shows "Your email is *address*.", a **New email** field and **Change email**, which asks to confirm it's you first. Then it says "We sent a link to *new*. Your email changes when you open it. Until then, keep using *old*." The link opens **Confirm your new email** (`/confirm-email`), a signed-out page, so it works in any browser, the desktop app's users included. Opening it changes nothing until **Confirm email** is pressed, so a mail scanner can't. Then it says "Your account now uses *new*. Sign in with it from now on." with **Go to WikiStow**. A used or old link shows **This link has expired**, and an address another account took meanwhile shows **This address can’t be used**.
+
 ## Lock when idle
 
 A Settings section after Two-factor sign-in, saying the vault locks after the chosen time with nobody using WikiStow, that typing is saved first, and that the choice stays on this browser (or computer, in the desktop app). Its one control is a **Lock after** Picker of Off (the default), 5 minutes, 15 minutes, 30 minutes and 1 hour. An idle lock leaves for the unlock page the way **Lock vault** does; Settings and admin pages stay where they are, locked.
