@@ -181,31 +181,31 @@ export function PersonFinder({
 
   // A plain submit handler, not a form action: React resets a form after
   // its action, which would clear the field after every failed lookup.
-  // The listed person with that email, or the one pickable match, is
-  // picked; any other email is looked up, for someone the list missed.
+  // A whole email picks the listed person with it, or is looked up, for
+  // someone the list missed. Other text picks the one person it matches.
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = query.trim();
     if (!text) return;
-    const email = normalizeEmail(text);
-    const listed = listing.data?.people.find((p) => normalizeEmail(p.email) === email);
-    const pickable = people.filter((person) => !refusal(person));
-    const found = listed ?? (pickable.length === 1 ? pickable[0]?.entry : null);
     void pick(async () => {
-      if (found) return found;
-      if (!text.includes('@')) {
-        setError(
-          people.length > 0
-            ? 'Pick someone from the list.'
-            : 'No one here matches that. Check the name, or type their whole email.',
-        );
-        return null;
+      if (text.includes('@')) {
+        const email = normalizeEmail(text);
+        const listed = listing.data?.people.find((p) => normalizeEmail(p.email) === email);
+        if (listed) return listed;
+        const lookup = await sharingOperations.findPerson(ctx, text);
+        if (!lookup) {
+          setError('No one with a vault uses that email. They need to set up their vault first.');
+        }
+        return lookup;
       }
-      const lookup = await sharingOperations.findPerson(ctx, text);
-      if (!lookup) {
-        setError('No one with a vault uses that email. They need to set up their vault first.');
-      }
-      return lookup;
+      const [only, ...more] = people;
+      if (only?.entry && more.length === 0) return only.entry;
+      setError(
+        only
+          ? 'Pick someone from the list.'
+          : 'No one here matches that. Check the name, or type their whole email.',
+      );
+      return null;
     });
   }
 
