@@ -3,6 +3,7 @@ import { ApiError } from '@wikistow/client/api';
 import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
 import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
 import { useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -138,7 +139,12 @@ function Status({ workshop }: { workshop: Workshop }) {
           role={published.failed ? 'alert' : 'status'}
           className={cn('text-sm', published.failed && 'text-destructive')}
         >
-          {published.text}
+          {published.text}{' '}
+          {!published.failed && (
+            <Link to="/settings/plugins" search={{ tab: 'library' }} className="quiet-link">
+              See it in the library
+            </Link>
+          )}
         </p>
       )}
       {problem && (

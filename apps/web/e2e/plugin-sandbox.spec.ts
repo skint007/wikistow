@@ -89,7 +89,7 @@ test('a library plugin runs in the browser until it leaves the library', async (
   const shownAt = page.url();
 
   // Uploaded from its built folder, which installs it once approved.
-  await page.goto('/settings');
+  await page.goto('/settings/plugins?tab=library');
   await page.getByLabel('Plugin folder').setInputFiles(`${PAGE_TOOLS}/dist`);
   const approval = page.getByRole('dialog');
   await expect(approval).toContainText('App');
@@ -98,6 +98,9 @@ test('a library plugin runs in the browser until it leaves the library', async (
   await expect(page.getByText('Uploaded and installed Page tools 0.1.0.')).toBeVisible({
     timeout: 15_000,
   });
+  const tab = (name: 'Installed' | 'Library') =>
+    page.getByRole('navigation', { name: 'Plugins' }).getByRole('link', { name }).click();
+  await tab('Installed');
   const listed = page
     .getByRole('list', { name: 'Plugin library' })
     .getByRole('listitem', { name: 'Page tools' });
@@ -141,9 +144,11 @@ test('a library plugin runs in the browser until it leaves the library', async (
   await expect(page.locator('link[data-plugin="page-tools"]')).toHaveCount(1);
 
   // Removed from the library: it stops, and Settings says why.
+  await page.goto('/settings/plugins?tab=library');
   await listed.getByRole('button', { name: 'Remove from library' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
   await expect(page.getByRole('list', { name: 'Plugin library' })).toHaveCount(0);
+  await tab('Installed');
   const gone = page
     .getByRole('list', { name: 'Installed plugins' })
     .getByRole('listitem', { name: 'page-tools' });

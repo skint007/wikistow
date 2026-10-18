@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useSyncExternalStore } from 'react';
 import { cn } from '@/lib/utils';
 import { AgentChat, useChatStore } from '../../../ai/chat';
@@ -47,8 +47,11 @@ function WorkshopPage() {
           </div>
           {safeMode && !workshop ? (
             <p className="text-sm text-muted-foreground">
-              Plugins are off in safe mode, so the workshop is too. Turn them back on in Settings →
-              Plugins.
+              Plugins are off in safe mode, so the workshop is too. Turn them back on in{' '}
+              <Link to="/settings/plugins" className="quiet-link">
+                Settings → Plugins
+              </Link>
+              .
             </p>
           ) : error ? (
             <p className="text-sm text-destructive">Couldn’t check whether AI is set up.</p>

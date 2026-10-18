@@ -80,7 +80,7 @@ This is tested on X11. On Wayland, moving, double-clicking and resizing depend o
 
 The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it; allow it.
 
-Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps** in the browser.
+Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps → Review** in the browser.
 
 ## The keyring
 

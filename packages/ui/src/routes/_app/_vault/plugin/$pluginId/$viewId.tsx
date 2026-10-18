@@ -56,7 +56,7 @@ function PluginPage() {
             <p className="text-sm text-muted-foreground">
               This page comes from a plugin that isn’t running now. It may be off, or starting.
             </p>
-            <Link to="/settings" className="text-sm font-bold text-primary">
+            <Link to="/settings/plugins" className="text-sm font-bold text-primary">
               Manage plugins
             </Link>
           </div>

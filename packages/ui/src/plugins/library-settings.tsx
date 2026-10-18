@@ -2,7 +2,7 @@ import { pluginOperations, type ClientContext } from '@wikistow/client';
 import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
 import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
@@ -37,10 +37,14 @@ import {
 import {
   ACCESS,
   Approval,
+  InstalledList,
+  itemText,
   LEVELS,
+  matches,
   PluginRow,
-  SafeModeNotice,
   type ApprovalRequest,
+  type InstalledItem,
+  type PluginsView,
 } from './plugin-settings';
 import { pluginRuntime, usePlugins } from './runtime';
 
@@ -69,15 +73,14 @@ const size = (bytes: number) =>
   bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /**
- * Settings → Plugins in the browser (ADR 0002): the plugins this account
+ * The Plugins page in the browser (ADR 0002): the plugins this account
  * installed from the server's library, each on or off with its page access
  * and any update waiting, then the library itself, to install from, upload
  * to (which installs it) and remove from. What is installed is in the
  * account's encrypted contacts record, so it shows only while the vault is open.
  */
-export function LibrarySettings() {
+export function LibrarySettings({ tab, query }: PluginsView) {
   const vault = useVault();
-  const { safeMode } = usePlugins();
   if (vault.status !== 'unlocked') {
     return (
       <p className="text-sm text-muted-foreground">
@@ -85,29 +88,24 @@ export function LibrarySettings() {
       </p>
     );
   }
-  return (
-    <div className="grid gap-4">
-      <SafeModeNotice />
-      {!safeMode && (
-        <Button variant="outline" asChild className="justify-self-start">
-          <Link to="/workshop">Build one with the assistant</Link>
-        </Button>
-      )}
-      <Library ctx={vault.ctx} />
-    </div>
-  );
+  return <Library ctx={vault.ctx} tab={tab} query={query} />;
 }
 
 /**
- * The library plugins this account installed, then the library. The
- * browser's whole section; in the desktop app, the part below the plugins
- * installed from folders. There a plugin runs from the copy the app keeps,
+ * The library plugins this account installed, in the Installed tab, and
+ * the library, in the Library tab. In the desktop app the installed ones
+ * are listed with its `folder` installs. There a plugin runs from the copy the app keeps,
  * even once the library drops its version, and a folder install of the
  * same ID replaces it on that computer. The desktop shares to the library
  * from an installed plugin, not by choosing a folder.
  * The owner of a plugin chooses whether it is Shared or Only me.
  */
-export function Library({ ctx }: { ctx: ClientContext }) {
+export function Library({
+  ctx,
+  tab,
+  query,
+  folder = [],
+}: PluginsView & { ctx: ClientContext; folder?: InstalledItem[] }) {
   const queryClient = useQueryClient();
   const { data: library, error: listError } = useQuery(libraryQuery(ctx));
   const { data: onlyMe } = useQuery(privatePluginsQuery);
@@ -152,169 +150,181 @@ export function Library({ ctx }: { ctx: ClientContext }) {
     });
 
   const inLibrary = (id: string) => library?.find((plugin) => plugin.id === id);
-  const installedLabel = desktop ? 'Installed from the library' : 'Installed plugins';
+  const installed = approvals.flatMap((approval): InstalledItem[] => {
+    const plugin = inLibrary(approval.id);
+    const version = plugin?.versions.find((each) => each.hash === approval.hash);
+    const newest = plugin?.versions[0];
+    const status = running.find(({ plugin }) => plugin.manifest.id === approval.id);
+    // What runs: in a browser the library's version, in the desktop app its copy,
+    // which stays when the library drops the version.
+    const runs = status?.plugin.library && status.plugin.key === approval.hash ? status : null;
+    // In the desktop app, a folder install of the same ID runs instead.
+    const replaced = status !== undefined && !status.plugin.library;
+    const shown = runs?.plugin ?? (version ? asInstalled(version, true) : null);
+    const key = `library:${approval.id}`;
+    if (!shown) {
+      if (!library) return [];
+      const name = newest?.manifest.name ?? approval.id;
+      return [
+        {
+          key,
+          text: newest ? itemText(newest.manifest) : approval.id,
+          problem: true,
+          row: (
+            <li aria-label={name} className="grid gap-2 rounded-control border border-border p-3">
+              <strong>{name}</strong>
+              <p className="text-sm text-muted-foreground">
+                The version you installed is no longer in the library, so it doesn’t load. Pages
+                keep its blocks.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {plugin && newest && (
+                  <Button size="sm" onClick={() => setRequest(requestFor(plugin.id, newest))}>
+                    Install {newest.manifest.version}…
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+                >
+                  Remove
+                </Button>
+              </div>
+            </li>
+          ),
+        },
+      ];
+    }
+    const plugged = { ...shown, enabled: approval.enabled };
+    const update = newest && newest.hash !== approval.hash ? newest : null;
+    const problem = runs?.problem ?? unavailable[approval.id] ?? null;
+    return [
+      {
+        key,
+        text: itemText(plugged.manifest),
+        problem: problem !== null,
+        row: (
+          <PluginRow
+            status={{ plugin: plugged, problem }}
+            onEnabled={(on) =>
+              void act(() => pluginOperations.setPluginEnabled(ctx, approval.id, on))
+            }
+            onRemove={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+            here={!replaced}
+            note={
+              <>
+                {replaced && (
+                  <p className="text-sm text-muted-foreground">
+                    A plugin installed from a folder on this computer replaces it here, until you
+                    remove that one.
+                  </p>
+                )}
+                {update && (
+                  <p className="text-sm">Version {update.manifest.version} is in the library.</p>
+                )}
+              </>
+            }
+            actions={
+              update && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setRequest({
+                      ...requestFor(approval.id, update),
+                      replaces: {
+                        version: plugged.manifest.version,
+                        level: plugged.level,
+                        access: plugged.manifest.access,
+                      },
+                    })
+                  }
+                >
+                  Update…
+                </Button>
+              )
+            }
+          />
+        ),
+      },
+    ];
+  });
+  const listedHere = library?.filter((plugin) => {
+    const [newest] = plugin.versions;
+    return newest && matches(query, itemText(newest.manifest));
+  });
 
   return (
     <div className="grid gap-4">
-      {desktop && approvals.length > 0 && <h3 className="font-bold">{installedLabel}</h3>}
-      {approvals.length > 0 && (
-        <ul className="grid gap-3" aria-label={installedLabel}>
-          {approvals.map((approval) => {
-            const plugin = inLibrary(approval.id);
-            const version = plugin?.versions.find((each) => each.hash === approval.hash);
-            const newest = plugin?.versions[0];
-            const status = running.find(({ plugin }) => plugin.manifest.id === approval.id);
-            // What runs: in a browser the library's version, in the desktop app its copy,
-            // which stays when the library drops the version.
-            const runs =
-              status?.plugin.library && status.plugin.key === approval.hash ? status : null;
-            // In the desktop app, a folder install of the same ID runs instead.
-            const replaced = status !== undefined && !status.plugin.library;
-            const shown = runs?.plugin ?? (version ? asInstalled(version, true) : null);
-            if (!shown) {
-              if (!library) return null;
-              return (
-                <li
-                  key={approval.id}
-                  aria-label={newest?.manifest.name ?? approval.id}
-                  className="grid gap-2 rounded-control border border-border p-3"
-                >
-                  <strong>{newest?.manifest.name ?? approval.id}</strong>
-                  <p className="text-sm text-muted-foreground">
-                    The version you installed is no longer in the library, so it doesn’t load. Pages
-                    keep its blocks.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {plugin && newest && (
-                      <Button size="sm" onClick={() => setRequest(requestFor(plugin.id, newest))}>
-                        Install {newest.manifest.version}…
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        void act(() => pluginOperations.removePlugin(ctx, approval.id))
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </li>
-              );
-            }
-            const installed = { ...shown, enabled: approval.enabled };
-            const update = newest && newest.hash !== approval.hash ? newest : null;
-            return (
-              <PluginRow
-                key={approval.id}
-                status={{
-                  plugin: installed,
-                  problem: runs?.problem ?? unavailable[approval.id] ?? null,
-                }}
-                onEnabled={(on) =>
-                  void act(() => pluginOperations.setPluginEnabled(ctx, approval.id, on))
-                }
-                onRemove={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
-                pageAccess={!replaced}
-                note={
-                  <>
-                    {replaced && (
-                      <p className="text-sm text-muted-foreground">
-                        A plugin installed from a folder on this computer replaces it here, until
-                        you remove that one.
-                      </p>
-                    )}
-                    {update && (
-                      <p className="text-sm">
-                        Version {update.manifest.version} is in the library.
-                      </p>
-                    )}
-                  </>
-                }
-                actions={
-                  update && (
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        setRequest({
-                          ...requestFor(approval.id, update),
-                          replaces: {
-                            version: installed.manifest.version,
-                            level: installed.level,
-                            access: installed.manifest.access,
-                          },
-                        })
-                      }
-                    >
-                      Update…
-                    </Button>
-                  )
-                }
-              />
-            );
-          })}
-        </ul>
-      )}
       {(error ?? newDraft.error) && <FormMessage>{error ?? newDraft.error}</FormMessage>}
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
-      <div className="grid gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="flex-1 font-bold">Library</h3>
-          {!desktop && (
-            <ChooseFolder
-              label="Upload plugin folder…"
-              name="Plugin folder"
-              phone="Uploading a plugin needs a computer."
-              onFolder={(chosen) =>
-                act(async () => setUpload(await readUpload(await readFolder(chosen))))
-              }
-            />
-          )}
-        </div>
-        {desktop && (
-          <p className="text-sm text-muted-foreground">
-            Share a plugin installed on this computer to add it here.
-          </p>
-        )}
-        {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}
-        {library?.length === 0 && (
-          <p className="text-sm text-muted-foreground">Nobody has uploaded a plugin yet.</p>
-        )}
-        {library && library.length > 0 && (
-          <ul className="grid gap-3" aria-label="Plugin library">
-            {library.map((plugin) => (
-              <LibraryRow
-                key={plugin.id}
-                plugin={plugin}
-                installed={approvals.some((approval) => approval.id === plugin.id)}
-                removable={plugin.mine || admin}
-                visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
-                onInstall={(version) => setRequest(requestFor(plugin.id, version))}
-                onChange={
-                  ai?.enabled && !safeMode && !newDraft.busy
-                    ? async (version) => {
-                        setError(null);
-                        setNotice(null);
-                        const from = { pluginId: plugin.id, hash: version.hash };
-                        if (await newDraft.start({ from })) await navigate({ to: '/workshop' });
-                      }
-                    : null
-                }
-                onRemove={(version) => setRemoval({ plugin, version })}
-                onVisibility={(visibility) =>
-                  act(() =>
-                    api.call(pluginRoutes.setVisibility, {
-                      params: { pluginId: plugin.id },
-                      body: { visibility },
-                    }),
-                  )
+      {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}
+      {tab === 'installed' ? (
+        <InstalledList
+          items={[...folder, ...installed]}
+          query={query}
+          // Rows wait for the library, which says what each approval is.
+          loading={!library && approvals.length > 0}
+        />
+      ) : (
+        <div className="grid gap-2">
+          {desktop ? (
+            <p className="text-sm text-muted-foreground">
+              Share a plugin installed on this computer to add it here.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <ChooseFolder
+                label="Upload plugin folder…"
+                name="Plugin folder"
+                phone="Uploading a plugin needs a computer."
+                onFolder={(chosen) =>
+                  act(async () => setUpload(await readUpload(await readFolder(chosen))))
                 }
               />
-            ))}
-          </ul>
-        )}
-      </div>
+            </div>
+          )}
+          {library?.length === 0 && (
+            <p className="text-sm text-muted-foreground">Nobody has uploaded a plugin yet.</p>
+          )}
+          {library && library.length > 0 && listedHere?.length === 0 && (
+            <p className="text-sm text-muted-foreground">No plugin in the library matches.</p>
+          )}
+          {listedHere && listedHere.length > 0 && (
+            <ul className="grid gap-3" aria-label="Plugin library">
+              {listedHere.map((plugin) => (
+                <LibraryRow
+                  key={plugin.id}
+                  plugin={plugin}
+                  installed={approvals.some((approval) => approval.id === plugin.id)}
+                  removable={plugin.mine || admin}
+                  visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
+                  onInstall={(version) => setRequest(requestFor(plugin.id, version))}
+                  onChange={
+                    ai?.enabled && !safeMode && !newDraft.busy
+                      ? async (version) => {
+                          setError(null);
+                          setNotice(null);
+                          const from = { pluginId: plugin.id, hash: version.hash };
+                          if (await newDraft.start({ from })) await navigate({ to: '/workshop' });
+                        }
+                      : null
+                  }
+                  onRemove={(version) => setRemoval({ plugin, version })}
+                  onVisibility={(visibility) =>
+                    act(() =>
+                      api.call(pluginRoutes.setVisibility, {
+                        params: { pluginId: plugin.id },
+                        body: { visibility },
+                      }),
+                    )
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {newDraft.dialog}
       <Approval candidate={request} onDone={() => setRequest(null)} onApprove={approve} />
       <ConfirmUpload

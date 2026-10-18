@@ -70,7 +70,9 @@ test('keeps nothing between launches without a trusted keyring', async ({
   expect(await profileText(profile)).not.toContain('session_token');
   // Kept nowhere, the session ended on the server as the app quit.
   await page.goto('/settings');
-  await expect(page.getByText('No desktop app is signed in.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Desktop apps' })).toHaveAccessibleDescription(
+    'None',
+  );
   const again = await open(profile, 'basic');
   await expect(again.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });
@@ -108,7 +110,9 @@ test('remembers the session, and the unlock until the vault is locked', async ({
   await expect(third.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   expect(await secretsFile(profile)).toBe(false);
   await page.goto('/settings');
-  await expect(page.getByText('No desktop app is signed in.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Desktop apps' })).toHaveAccessibleDescription(
+    'None',
+  );
   await close(third);
 
   const fourth = await open(profile, 'gnome-libsecret');

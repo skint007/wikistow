@@ -245,6 +245,7 @@ test('seed a fresh installation for the restore drill', ({ page, freshPage }) =>
       await signInAs(page, reader);
       // Settings isn't behind the vault.
       await page.goto('/settings');
+      await page.getByRole('button', { name: 'Manage two-factor sign-in' }).click();
       await page.getByLabel('Password', { exact: true }).fill(reader.password);
       await page.getByRole('button', { name: 'Set up two-factor' }).click();
       const key = await page.getByText('Or enter this key').locator('code').textContent();

@@ -18,7 +18,7 @@ export function SafeModeBanner() {
     >
       <strong>Safe mode:</strong> plugins are off.
       <Button asChild size="sm" variant="outline">
-        <Link to="/settings">Manage plugins</Link>
+        <Link to="/settings/plugins">Manage plugins</Link>
       </Button>
       <Button size="sm" variant="outline" onClick={() => void pluginRuntime.setSafeMode(false)}>
         Turn plugins back on

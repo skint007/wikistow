@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { api, meQuery } from '../api';
 import { errorMessage } from '../errors';
+import { SettingRow } from '../settings/rows';
 import { PLAIN } from '../vault/store';
 
 const ACCEPT = '.jpg,.jpeg,.png,.gif,.svg,image/jpeg,image/png,image/gif,image/svg+xml';
@@ -73,8 +74,8 @@ type Status =
   | { kind: 'failed'; text: string };
 
 /**
- * Choose, preview, upload, replace or remove the account's avatar. A chosen
- * image shows in place until it is saved or dropped.
+ * Choose, preview, upload, replace or remove the account's avatar, as a
+ * Settings row. A chosen image shows in place until it is saved or dropped.
  */
 export function AvatarSettings() {
   const queryClient = useQueryClient();
@@ -178,29 +179,38 @@ export function AvatarSettings() {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-5">
-      <Avatar
-        name={me.account.name}
-        avatar={me.account.avatar}
-        preview={preview}
-        className="size-20 text-2xl"
-      />
-      <div className="grid min-w-0 flex-1 gap-3">
-        <input
-          ref={input}
-          type="file"
-          accept={ACCEPT}
-          className="hidden"
-          aria-label="Avatar image"
-          onChange={(event) => choose(event.target.files?.[0])}
+    <SettingRow
+      icon={
+        <Avatar
+          name={me.account.name}
+          avatar={me.account.avatar}
+          preview={preview}
+          className="size-10 text-sm"
         />
-        <div className="flex flex-wrap gap-2">
+      }
+      name="Avatar"
+      state={
+        chosen
+          ? `Previewing ${chosen.name}. Save it to use it everywhere.`
+          : `JPEG, PNG, GIF or SVG, up to ${LIMIT_MB} MB. Anyone with its link can see it.`
+      }
+      action={
+        <>
+          <input
+            ref={input}
+            type="file"
+            accept={ACCEPT}
+            className="hidden"
+            aria-label="Avatar image"
+            onChange={(event) => choose(event.target.files?.[0])}
+          />
           {chosen ? (
             <>
-              <Button disabled={busy || !drawable} onClick={() => void save()}>
+              <Button size="sm" disabled={busy || !drawable} onClick={() => void save()}>
                 Save avatar
               </Button>
               <Button
+                size="sm"
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
@@ -213,55 +223,53 @@ export function AvatarSettings() {
             </>
           ) : (
             <>
-              <Button variant="outline" disabled={busy} onClick={() => input.current?.click()}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => input.current?.click()}
+              >
                 {me.account.avatar ? 'Replace image…' : 'Choose image…'}
               </Button>
               {me.account.avatar && (
-                <Button variant="outline" disabled={busy} onClick={() => void remove()}>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => void remove()}>
                   Remove
                 </Button>
               )}
             </>
           )}
-        </div>
-        {status.kind === 'uploading' ? (
-          <div className="grid max-w-xs gap-1.5">
-            <p role="status" className="text-sm font-bold">
-              Uploading…
-              {status.fraction !== null && ` ${Math.round(status.fraction * 100)}%`}
-            </p>
-            <div
-              role="progressbar"
-              aria-label="Upload progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={
-                status.fraction === null ? undefined : Math.round(status.fraction * 100)
-              }
-              className="h-2 overflow-hidden rounded-full bg-muted"
-            >
-              {/* Set through the CSSOM, which the style policy allows. */}
-              <div
-                className={cn(
-                  'h-full rounded-full bg-primary transition-[width]',
-                  status.fraction === null && 'animate-pulse',
-                )}
-                style={{ width: `${(status.fraction ?? 1) * 100}%` }}
-              />
-            </div>
-          </div>
-        ) : status.kind === 'done' ? (
-          <FormMessage tone="notice">{status.text}</FormMessage>
-        ) : status.kind === 'failed' ? (
-          <FormMessage>{status.text}</FormMessage>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {chosen
-              ? `Previewing ${chosen.name}. Save it to use it everywhere.`
-              : `JPEG, PNG, GIF or SVG, up to ${LIMIT_MB} MB.`}
+        </>
+      }
+    >
+      {status.kind === 'uploading' ? (
+        <div className="grid max-w-xs gap-1.5">
+          <p role="status" className="text-sm font-bold">
+            Uploading…
+            {status.fraction !== null && ` ${Math.round(status.fraction * 100)}%`}
           </p>
-        )}
-      </div>
-    </div>
+          <div
+            role="progressbar"
+            aria-label="Upload progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={status.fraction === null ? undefined : Math.round(status.fraction * 100)}
+            className="h-2 overflow-hidden rounded-full bg-muted"
+          >
+            {/* Set through the CSSOM, which the style policy allows. */}
+            <div
+              className={cn(
+                'h-full rounded-full bg-primary transition-[width]',
+                status.fraction === null && 'animate-pulse',
+              )}
+              style={{ width: `${(status.fraction ?? 1) * 100}%` }}
+            />
+          </div>
+        </div>
+      ) : status.kind === 'done' ? (
+        <FormMessage tone="notice">{status.text}</FormMessage>
+      ) : status.kind === 'failed' ? (
+        <FormMessage>{status.text}</FormMessage>
+      ) : null}
+    </SettingRow>
   );
 }

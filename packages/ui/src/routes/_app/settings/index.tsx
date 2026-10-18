@@ -2,142 +2,99 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { accountRoutes, desktopRoutes } from '@wikistow/contracts';
 import { createFileRoute } from '@tanstack/react-router';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import QRCode from 'react-qr-code';
 import { z } from 'zod';
 import { Field } from '@/components/form/field';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Picker } from '@/components/ui/picker';
-import { AvatarSettings } from '../../account/avatar-settings';
-import { AiSettings } from '../../ai/ai-settings';
-import { api, meQuery } from '../../api';
-import { authClient } from '../../auth/client';
-import { useReauth } from '../../auth/reauth';
-import { errorMessage, unwrap } from '../../errors';
-import { ThemePicker } from '../../theme/theme-picker';
-import { desktop } from '../../desktop';
-import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../vault/idle-lock';
-import { LibrarySettings } from '../../plugins/library-settings';
-import { PluginSettings } from '../../plugins/plugin-settings';
-import { pluginName } from '../../plugins/regions';
-import { usePlugins } from '../../plugins/runtime';
-import { PluginView } from '../../plugins/views';
-import type { SettingsViewProps } from '@wikistow/plugin-sdk';
+import { AvatarSettings } from '../../../account/avatar-settings';
+import { AiSettings } from '../../../ai/ai-settings';
+import { api, meQuery } from '../../../api';
+import { authClient } from '../../../auth/client';
+import { useReauth } from '../../../auth/reauth';
+import { errorMessage, unwrap } from '../../../errors';
+import { TableOfContents, type Heading } from '../../../page/table-of-contents';
+import { PluginsSummary } from '../../../plugins/plugin-settings';
+import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
+import { ThemePicker } from '../../../theme/theme-picker';
+import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
 
-export const Route = createFileRoute('/_app/settings')({ component: Settings });
+export const Route = createFileRoute('/_app/settings/')({ component: Settings });
 
+/** The groups, in order, for the side nav. Each is linkable as `/settings#<id>`. */
+const GROUPS: Heading[] = [
+  { id: 'account', text: 'Account', level: 2 },
+  { id: 'security', text: 'Security', level: 2 },
+  { id: 'appearance', text: 'Appearance', level: 2 },
+  { id: 'plugins', text: 'Plugins', level: 2 },
+  { id: 'ai', text: 'AI assistant', level: 2 },
+];
+
+/**
+ * One page of grouped rows, each with its state and one action. Forms open
+ * under their row on demand, one at a time. Beside the groups, from 900px,
+ * "On this page" follows the scroll; narrower, it's a row of links above.
+ */
 function Settings() {
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   return (
-    <div
-      data-region="settings"
-      className="mx-auto grid h-full max-w-4xl content-start gap-3.5 overflow-y-auto"
-    >
-      <Section
-        title="Avatar"
-        description="Shown beside your name in the app. Anyone with its link can see it, so it isn’t encrypted like your pages."
-      >
-        <AvatarSettings />
-      </Section>
-      <Section
-        title="Appearance"
-        description={
-          desktop
-            ? 'Palettes are synced to your account on every device. Plugin themes stay on this computer.'
-            : 'Palettes are synced to your account on every device. Plugin themes stay in this browser.'
-        }
-      >
-        <ThemePicker />
-      </Section>
-      <Section
-        title="Email"
-        description="You sign in with it, and mail about your account goes there. A new address works once you open the link we send to it."
-      >
-        <ChangeEmail />
-      </Section>
-      <Section
-        title="Password"
-        description="Changing it signs you out everywhere else. Your vault passphrase stays the same."
-      >
-        <ChangePassword />
-      </Section>
-      <Section
-        title="Two-factor sign-in"
-        description="Ask for a code from an authenticator app at every sign-in."
-      >
-        <TwoFactor />
-      </Section>
-      <Section
-        title="Lock when idle"
-        description={`Lock the vault after this long with nobody using WikiStow. Typing is saved first. Kept on this ${desktop ? 'computer' : 'browser'} only.`}
-      >
-        <IdleLock />
-      </Section>
-      {desktop ? (
-        <Section
-          title="Plugins"
-          description="Installed from a folder on this computer, or from this server’s plugin library, which follows your account. A library plugin runs only once its files match the version you approved. If one breaks the app, Ctrl+Shift+Alt+P restarts it without plugins."
-        >
-          <PluginSettings />
-        </Section>
-      ) : (
-        <Section
-          title="Plugins"
-          description="From this server’s plugin library. What you install follows your account to every browser. If one breaks the app, Ctrl+Shift+Alt+P, or ?safe-mode in the address, opens this tab without plugins."
-        >
-          <LibrarySettings />
-        </Section>
-      )}
-      <PluginSections />
-      <Section
-        title="Desktop apps"
-        description="Computers signed in with the WikiStow desktop app. Signing one out here ends its session there."
-      >
-        <DesktopApps />
-      </Section>
-      <Section title="AI assistant" description="The AI provider this server connects to.">
-        <AiSettings />
-      </Section>
+    <div ref={setScroller} data-region="settings" className="h-full overflow-y-auto">
+      <div className="mx-auto grid max-w-4xl content-start gap-x-6 gap-y-3.5 pb-10 min-[900px]:grid-cols-[minmax(0,1fr)_10rem]">
+        <h1 className="px-1.5 pt-1 text-[32px] leading-tight font-extrabold min-[900px]:col-span-2">
+          Settings
+        </h1>
+        <nav aria-label="On this page" className="flex flex-wrap gap-1 min-[900px]:hidden">
+          {GROUPS.map(({ id, text }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="rounded-row px-3 py-1.5 text-sm font-bold text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong"
+            >
+              {text}
+            </a>
+          ))}
+        </nav>
+        <OneOpen>
+          <div className="grid content-start gap-6">
+            <SettingsGroup id="account" title="Account" note="How people see you, and your email">
+              <AvatarSettings />
+              <ChangeEmail />
+            </SettingsGroup>
+            <SettingsGroup id="security" title="Security" note="How you sign in, and where">
+              <ChangePassword />
+              <TwoFactor />
+              <IdleLock />
+              <DesktopApps />
+            </SettingsGroup>
+            <SettingsGroup id="appearance" title="Appearance" note="Follows your account">
+              <ThemePicker />
+            </SettingsGroup>
+            <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
+              <PluginsSummary />
+            </SettingsGroup>
+            <SettingsGroup id="ai" title="AI assistant" note="Set up by whoever runs the server">
+              <AiSettings />
+            </SettingsGroup>
+          </div>
+        </OneOpen>
+        <TableOfContents
+          headings={GROUPS}
+          card={scroller}
+          className="sticky top-0 hidden self-start min-[900px]:grid"
+        />
+      </div>
     </div>
   );
-}
-
-function Section({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <Card className="rounded-card shadow-card">
-      <CardHeader>
-        <CardTitle className="text-lg font-extrabold">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
-
-const NO_PROPS: SettingsViewProps = {};
-
-/** Plugins' own sections (`settings.section`), each as a card of its own. */
-function PluginSections() {
-  const { regions, plugins } = usePlugins();
-  return regions['settings.section'].map(({ pluginId, id, title, view }) => {
-    const name = pluginName(plugins, pluginId);
-    return (
-      <Section key={`${pluginId}:${id}`} title={title} description={`From ${name}.`}>
-        <PluginView pluginId={pluginId} name={name} view={view} props={NO_PROPS} />
-      </Section>
-    );
-  });
 }
 
 const IDLE_OPTIONS = [
@@ -150,18 +107,21 @@ const IDLE_OPTIONS = [
 
 function IdleLock() {
   const minutes = useIdleLockDelay();
-  const id = useId();
   return (
-    <div className="grid max-w-60 gap-1.5">
-      <Label htmlFor={id}>Lock after</Label>
-      <Picker
-        id={id}
-        label="Lock after"
-        value={minutes === null ? 'off' : String(minutes)}
-        options={IDLE_OPTIONS}
-        onChange={(value) => idleLockDelay.set(value === 'off' ? null : Number(value))}
-      />
-    </div>
+    <SettingRow
+      name="Lock when idle"
+      scope={THIS_DEVICE}
+      state="Locks the vault with nobody using WikiStow. Typing is saved first."
+      action={
+        <Picker
+          label="Lock after"
+          className="w-36"
+          value={minutes === null ? 'off' : String(minutes)}
+          options={IDLE_OPTIONS}
+          onChange={(value) => idleLockDelay.set(value === 'off' ? null : Number(value))}
+        />
+      }
+    />
   );
 }
 
@@ -174,13 +134,20 @@ const NewEmail = z.object({ email: z.string().trim().email('Enter an email addre
  */
 function ChangeEmail() {
   const { data: me } = useQuery(meQuery);
+  return (
+    <FormRow id="email" name="Email" state={me?.account.email}>
+      <EmailForm current={me?.account.email} />
+    </FormRow>
+  );
+}
+
+function EmailForm({ current }: { current: string | undefined }) {
   const withReauth = useReauth();
   const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: ReactNode } | null>(
     null,
   );
   const form = useForm({ resolver: zodResolver(NewEmail), defaultValues: { email: '' } });
   const { errors, isSubmitting } = form.formState;
-  const current = me?.account.email;
 
   const submit = form.handleSubmit(async ({ email }) => {
     setMessage(null);
@@ -207,11 +174,10 @@ function ChangeEmail() {
 
   return (
     <form onSubmit={submit} className="grid max-w-sm gap-4" noValidate>
-      {current && (
-        <p className="text-sm">
-          Your email is <strong>{current}</strong>.
-        </p>
-      )}
+      <p className="text-sm text-muted-foreground">
+        You sign in with it, and mail about your account goes there. A new address works once you
+        open the link we send to it.
+      </p>
       <Field
         id="new-email"
         label="New email"
@@ -240,6 +206,18 @@ const NewPassword = z
   });
 
 function ChangePassword() {
+  return (
+    <FormRow
+      id="password"
+      name="Password"
+      state="Changing it signs you out everywhere else. Your vault passphrase stays the same."
+    >
+      <PasswordForm />
+    </FormRow>
+  );
+}
+
+function PasswordForm() {
   const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: string } | null>(null);
   const form = useForm({
     resolver: zodResolver(NewPassword),
@@ -301,12 +279,47 @@ function ChangePassword() {
 type Setup = { uri: string; backupCodes: string[] };
 
 function TwoFactor() {
-  const { data: session, refetch } = authClient.useSession();
-  const withReauth = useReauth();
+  const { data: session } = authClient.useSession();
+  const enabled = session?.user.twoFactorEnabled === true;
+  // Kept here, so a setup under way and new backup codes show again if the
+  // flow is closed before they're finished or saved.
   const [setup, setSetup] = useState<Setup | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
+  return (
+    <FormRow
+      id="two-factor"
+      name="Two-factor sign-in"
+      state={enabled ? 'On: a code from an authenticator app at every sign-in' : 'Off'}
+      label="Manage"
+      close="Close"
+    >
+      <TwoFactorFlow setup={setup} setSetup={setSetup} codes={codes} setCodes={setCodes} />
+    </FormRow>
+  );
+}
+
+/** Set it up, new backup codes, or turn it off. */
+function TwoFactorFlow({
+  setup,
+  setSetup,
+  codes,
+  setCodes,
+}: {
+  setup: Setup | null;
+  setSetup: (setup: Setup | null) => void;
+  codes: string[] | null;
+  setCodes: (codes: string[] | null) => void;
+}) {
+  const { data: session, refetch } = authClient.useSession();
+  const withReauth = useReauth();
   const [error, setError] = useState<string | null>(null);
   const enabled = session?.user.twoFactorEnabled === true;
+  // Each step replaces the button that led to it: the focus goes to the
+  // step's first field, so it stays in the row and Escape still closes it.
+  const step = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    step.current?.querySelector('input')?.focus();
+  }, [setup, enabled]);
 
   const run = (action: () => Promise<void>) => async () => {
     setError(null);
@@ -343,22 +356,21 @@ function TwoFactor() {
 
   if (setup)
     return (
-      <ConfirmSetup
-        setup={setup}
-        onDone={async () => {
-          setCodes(setup.backupCodes);
-          setSetup(null);
-          password.reset();
-          await refetch();
-        }}
-      />
+      <div ref={step}>
+        <ConfirmSetup
+          setup={setup}
+          onDone={async () => {
+            setCodes(setup.backupCodes);
+            setSetup(null);
+            password.reset();
+            await refetch();
+          }}
+        />
+      </div>
     );
 
   return (
-    <div className="grid max-w-sm gap-4">
-      <p className="text-sm">
-        Two-factor sign-in is <strong>{enabled ? 'on' : 'off'}</strong>.
-      </p>
+    <div ref={step} className="grid max-w-sm gap-4">
       {codes && <BackupCodes codes={codes} />}
       <Field
         id="2fa-password"
@@ -466,24 +478,62 @@ const desktopSessionsQuery = {
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
 
+/** How many desktop apps are signed in, with Review opening the list to sign each out. */
 function DesktopApps() {
-  const queryClient = useQueryClient();
   const { data, error } = useQuery(desktopSessionsQuery);
+  const [reviewing, setReviewing] = useState(false);
+  const sessions = data?.sessions;
+  const count = sessions?.length ?? 0;
+  return (
+    <>
+      <SettingRow
+        name="Desktop apps"
+        state={
+          error ? (
+            <span className="text-destructive">{errorMessage(error)}</span>
+          ) : !sessions ? null : count === 0 ? (
+            'None'
+          ) : (
+            `${count} signed in${sessions.some((session) => session.current) ? ', including this app' : ''}`
+          )
+        }
+        action={
+          count > 0 && (
+            <Button size="sm" variant="outline" onClick={() => setReviewing(true)}>
+              Review
+            </Button>
+          )
+        }
+      />
+      <Dialog open={reviewing} onOpenChange={setReviewing}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Desktop apps</DialogTitle>
+            <DialogDescription>
+              Computers signed in with the WikiStow desktop app. Signing one out here ends its
+              session there.
+            </DialogDescription>
+          </DialogHeader>
+          {sessions && <DesktopSessions sessions={sessions} />}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function DesktopSessions({ sessions }: { sessions: desktopRoutes.DesktopSession[] }) {
+  const queryClient = useQueryClient();
   const signOut = useMutation({
     mutationFn: (sessionId: string) =>
       api.call(desktopRoutes.revokeDesktopSession, { params: { sessionId } }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: desktopSessionsQuery.queryKey }),
   });
-
-  if (error) return <FormMessage>{errorMessage(error)}</FormMessage>;
-  if (!data) return null;
-  if (data.sessions.length === 0) {
+  if (sessions.length === 0)
     return <p className="text-sm text-muted-foreground">No desktop app is signed in.</p>;
-  }
   return (
     <div className="grid gap-3">
       <ul className="grid gap-2" data-testid="desktop-sessions">
-        {data.sessions.map((session) => (
+        {sessions.map((session) => (
           <li key={session.id} className="flex items-center justify-between gap-3 text-sm">
             <span>
               Signed in {day(session.createdAt)}

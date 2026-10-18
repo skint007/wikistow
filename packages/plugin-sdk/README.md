@@ -67,7 +67,7 @@ App plugins put interface in these places with `host.ui.register(region, { id, â
 | `page.footer` | `{ id, view }` | Below the page's text | The same |
 | `page.aside` | `{ id, view }` | Beside the text, under its contents, where the page card is 960px wide or more | Below the page |
 | `page.panel` | `{ id, title, view }` | A sheet opened from the Plugins menu | The same |
-| `settings.section` | `{ id, title, view }` | A card in Settings, after Plugins | The same |
+| `settings.section` | `{ id, title, view }` | Under the plugin's row on the Plugins page (Settings â†’ Plugins), opened by its **Settings** button | The same |
 | `app.titlebar` | `{ id, view }` | The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers | Not in the browser, which has no titlebar of its own |
 
 The page places' views get `{ page }`, the same handle a command gets; settings sections and titlebar buttons get nothing yet. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
