@@ -1,7 +1,28 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+/**
+ * Tells browsers and password managers to leave a field alone. Most managers
+ * ignore `autocomplete="off"`, so each gets its own hint too: 1Password,
+ * LastPass, Bitwarden and Dashlane. Spread it on raw `<input>`s that aren't
+ * credentials; `Input` adds it by itself.
+ */
+export const notCredential = {
+  autoComplete: 'off',
+  'data-1p-ignore': '',
+  'data-lpignore': 'true',
+  'data-bwignore': '',
+  'data-form-type': 'other',
+} as const;
+
+/**
+ * A text field. Password managers stay out unless it is a password or has a
+ * real `autoComplete` (`email`, `current-password`, `one-time-code`…), which is
+ * how credential fields opt in.
+ */
 function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
+  const credential =
+    type === 'password' || (props.autoComplete !== undefined && props.autoComplete !== 'off');
   return (
     <input
       type={type}
@@ -12,6 +33,7 @@ function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
         'aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40',
         className,
       )}
+      {...(credential ? {} : notCredential)}
       {...props}
     />
   );

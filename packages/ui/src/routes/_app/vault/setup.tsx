@@ -196,7 +196,6 @@ function SaveRecoveryKey({ prepared }: { prepared: PreparedVault }) {
               id={`group-${index}`}
               name={`group-${index}`}
               label={`Group ${index + 1}`}
-              autoComplete="off"
               spellCheck={false}
               required
             />

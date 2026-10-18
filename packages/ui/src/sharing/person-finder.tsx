@@ -230,7 +230,6 @@ export function PersonFinder({
           name="query"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          autoComplete="off"
           placeholder="Name or name@example.com"
           className="min-w-48 flex-1"
         />

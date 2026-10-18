@@ -176,7 +176,6 @@ function EnterCode({ onClaim }: { onClaim: (claimed: Claimed) => void }) {
           value={typed}
           onChange={(event) => setTyped(event.target.value)}
           placeholder="XXXX-XXXX"
-          autoComplete="off"
           autoCapitalize="characters"
           spellCheck={false}
           maxLength={32}
@@ -319,7 +318,6 @@ function Compare({
             onChange={(event) => setTypedGroup(event.target.value)}
             maxLength={9}
             disabled={busy}
-            autoComplete="off"
             spellCheck={false}
             className="w-32 font-mono text-lg tracking-wider"
             aria-invalid={group === 'mismatch'}
@@ -509,7 +507,6 @@ function NameAndPicks({
           maxLength={MAX_AGENT_NAME}
           placeholder={placeholder}
           disabled={busy}
-          autoComplete="off"
         />
         {trimmed && check.kind === 'taken' && (
           <p className="text-sm text-destructive">Another of your agents has that name.</p>
