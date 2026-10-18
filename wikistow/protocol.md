@@ -519,13 +519,15 @@ Rules (`payload.ts`, `metadata.ts`):
 { format: 1, emoji?: string,
   banner?: {kind: "theme"} | {kind: "preset", name: "sunrise" | "ocean" | "meadow" | "lavender" | "dusk" | "stone"}
          | {kind: "image", attachmentId, focal: integer 0–100},
-  icon?: {attachmentId} }
+  icon?: {attachmentId},
+  symbol?: {name} }
 ```
 
 - `emoji` is one RGI emoji (Unicode UTS #51): a pictograph, a flag, a keycap, or a modifier, tag or ZWJ sequence, with nothing stacked after it. A reader whose Unicode data predates an emoji leaves it out. `focal` is the image's vertical focal point, 0 at the top. `format` and `banner.focal` are integers (section 3.3, rule 6).
 - An image banner names one of the version's own attachments by ID; its key stays in `attachments[]`, so publishing re-encrypts it with the rest.
 - `icon` is the page's own image, shown in place of its emoji. It names one of the version's attachments the same way: an image the writer resized to fit 144 by 144 pixels and encoded afresh as WebP, JPEG or PNG, as for a folder icon below. The emoji stays beside it: choosing an image keeps the emoji, which older clients and failed loads show; choosing an emoji removes `icon`, and replacing or removing the image drops its attachment from `attachments[]` unless the text links to it.
-- Readers fall back part by part: an emoji they don't accept is left out, a banner of an unknown kind, or an image the version doesn't list, shows the theme gradient, and an icon the version doesn't list, or whose image doesn't load, shows the emoji. A writer changing one part keeps the others, and unknown fields, as they were.
+- `symbol` is an icon from the app's icon set, shown in place of the emoji: `name` is a Lucide icon's name, such as `square-terminal` (lowercase letters and digits in words joined by `-`, at most 64 characters). It needs no attachment. The emoji stays beside it as beside an image. Choosing an icon removes `icon`; choosing an emoji or an image removes `symbol`. Where both are present, as when an older client added an image, the image shows.
+- Readers fall back part by part: an emoji they don't accept is left out, a banner of an unknown kind, or an image the version doesn't list, shows the theme gradient, and an icon the version doesn't list, or whose image doesn't load, shows the emoji, as does a `symbol` that isn't a name or that the reader's icon set doesn't have (Lucide keeps renamed icons' old names, which still show). A writer changing one part keeps the others, and unknown fields, as they were.
 - Publishing into another space (section 13) without the banner's attachment writes `banner: {kind: "theme"}` in the copy, and without the icon's attachment leaves `icon` out.
 
 **Folder and space icon** (`metadata.ts`), the node metadata extension `wikistow.icon`:
@@ -538,6 +540,16 @@ Rules (`payload.ts`, `metadata.ts`):
 - It has no key of its own: it is encrypted with the rest of the metadata, so it reaches exactly the people who can read the folder's or space's name, and moves, shares and rotations need nothing more. The key-material rule above is unchanged.
 - Readers show it only when `format` is 1, `mediaType` is one of the three, and `data` decodes to 1 to 16,384 bytes. Anything else, or an image that fails to decode, counts as no image, and the folder or space shows its emoji (a space without one, the initials of its name); it never makes the metadata `malformed`. Writers refuse what readers would not show.
 - Extensions are merged into the next version, so removing the image writes `wikistow.icon: null`. Choosing an emoji removes the image; choosing an image keeps the emoji, which older clients and failed loads show. A space's emoji can be removed too, which leaves `emoji` out of the next version.
+
+**Folder and space icon from the icon set** (`metadata.ts`), the node metadata extension `wikistow.symbol`:
+
+```
+{ format: 1, name }
+```
+
+- An icon from the app's icon set, Lucide, shown in place of the emoji, named as in a page cover's `symbol`. It is encrypted with the rest of the metadata, like `wikistow.icon`.
+- Readers show it only when `format` is 1 and `name` is a name their icon set has. Anything else counts as none and shows the emoji (a space without one, its initials); it never makes the metadata `malformed`. Where `wikistow.icon` is present too, as when an older client added an image, the image shows.
+- Removing it writes `wikistow.symbol: null`. Choosing an icon removes the image (`wikistow.icon: null`); choosing an emoji or an image removes the icon. The emoji stays beside it, for older clients and the CLI.
 
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
 
