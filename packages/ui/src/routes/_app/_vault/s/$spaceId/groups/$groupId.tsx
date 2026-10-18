@@ -4,11 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { Bot, Pencil, ShieldAlert, Trash2, UserPlus } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { Name, plainText } from '@/components/name';
+import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
-import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { groupsQuery, treeQuery } from '../../../../../../data/queries';
-import { AgentRow, MoreMenu, PersonRow } from '../../../../../../sharing/access-panel';
+import { AgentRow, PersonRow } from '../../../../../../sharing/access-panel';
 import { GiveAccessDialog } from '../../../../../../sharing/give-access-dialog';
 import { agentLabel, GroupDialog, type GroupAction } from '../../../../../../sharing/group-dialogs';
 import { groupName, peopleIn, WaitingMark } from '../../../../../../sharing/groups';
@@ -19,7 +18,6 @@ import { ACCESS_LABELS, accessOf } from '../../../../../../sharing/model';
 import { nameOf, shareNameById } from '../../../../../../sharing/names';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { describePerson, peopleQuery, type Person } from '../../../../../../sharing/people';
-import { canRename, RenameContactDialog } from '../../../../../../sharing/rename-contact';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
 import { useClient } from '../../../../../../vault/store';
 
@@ -60,7 +58,6 @@ function Group() {
   const person = (id: string) => people?.get(id) ?? describePerson(ctx, id, null);
   const [action, setAction] = useState<GroupAction | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
-  const [renaming, setRenaming] = useState<Person | null>(null);
   const [done, setDone] = useState<ReactNode>(null);
   const [giving, setGiving] = useState<Person | null>(null);
   // Once it's deleted, the page says so instead of showing the group gone.
@@ -193,13 +190,6 @@ function Group() {
                     >
                       Remove from group
                     </Button>
-                    {canRename(who) && (
-                      <MoreMenu label={`More for ${plainText(who.name)}`} disabled={false}>
-                        <DropdownMenuItem onSelect={() => setRenaming(who)}>
-                          Rename…
-                        </DropdownMenuItem>
-                      </MoreMenu>
-                    )}
                   </PersonRow>
                 );
               })}
@@ -304,7 +294,6 @@ function Group() {
         open={sharing !== null}
         onOpenChange={(open) => !open && setSharing(null)}
       />
-      <RenameContactDialog person={renaming} onClose={() => setRenaming(null)} />
     </GroupsPage>
   );
 }
