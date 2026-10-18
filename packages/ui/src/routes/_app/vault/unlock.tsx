@@ -1,6 +1,6 @@
 import { CryptoError } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Field } from '@/components/form/field';
@@ -20,6 +20,13 @@ import { forgetInBrowser } from '../../../vault/tab-unlock';
 
 export const Route = createFileRoute('/_app/vault/unlock')({
   validateSearch: z.object({ redirect: z.string().optional().catch(undefined) }),
+  // A browser's kept or remembered unlock may have opened the vault on the
+  // way here (`_app`): go on, rather than ask, and forget it on unlocking.
+  beforeLoad: ({ search }) => {
+    if (!desktop && vaultStore.get().status === 'unlocked') {
+      throw redirect({ href: safeRedirect(search.redirect) });
+    }
+  },
   onLeave: () => vaultStore.dropStaged(),
   component: Unlock,
 });
