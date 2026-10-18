@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - On this page marks the section being read with the tint only, without the bar at its left. (#107)
 
+#### CLI
+
+- `wikistow skill` prints a skill that teaches an agent to use the CLI: it leaves changes as drafts unless its person asks for them published, and puts new pages in the person’s Personal space. (#109)
+
 ## 0.11.0 - 2026-10-18
 
 ### Highlights
