@@ -43,7 +43,6 @@ export function TextField({
   onChange: (value: string) => void;
   error?: string | undefined;
   placeholder?: string;
-  autoComplete?: string;
   inputMode?: 'numeric';
 }) {
   return (
