@@ -11,6 +11,7 @@ import { ChevronRight, FolderPlus, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
 import { IconImage } from '@/components/icon-image';
+import { SymbolIcon } from '@/components/symbol-icon';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -85,6 +86,7 @@ type Row =
       title: string;
       emoji: string | null;
       icon: pageOperations.PageIcon | null;
+      symbol: string | null;
       unpublished: boolean;
     };
 
@@ -145,6 +147,7 @@ function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string):
         title: pageTitle(page.title),
         emoji: page.emoji,
         icon: page.icon,
+        symbol: page.symbol,
         unpublished: page.draftChanges || page.publishedHead === null,
       });
     }
@@ -169,34 +172,35 @@ function contentsOf(tree: Tree, folderId: FolderId) {
 }
 
 /**
- * A page row's image as a 20px rounded square, or its emoji, which also
- * shows while the image loads or if it fails to.
+ * A page row's image as a 20px rounded square, or its icon, or its emoji,
+ * which also shows while either loads or if it fails to.
  */
 function PageRowIcon({
   page,
   emoji,
   icon,
+  symbol,
 }: {
   page: pageOperations.PageRef;
   emoji: string | null;
   icon: pageOperations.PageIcon | null;
+  symbol: string | null;
 }) {
   const ctx = useClient();
   const { data: url } = useQuery(
     decryptedQuery({ ctx, page, audience: icon?.audience ?? 'published' }, icon?.ref),
   );
+  const shown = emoji && (
+    // Clipped to its own line, whatever the emoji draws.
+    <span aria-hidden className="max-w-[1.5em] shrink-0 overflow-hidden leading-none">
+      {emoji}
+    </span>
+  );
   return (
     <IconImage
       src={url ?? null}
       className="size-5 shrink-0 rounded-[6px]"
-      fallback={
-        emoji && (
-          // Clipped to its own line, whatever the emoji draws.
-          <span aria-hidden className="max-w-[1.5em] shrink-0 overflow-hidden leading-none">
-            {emoji}
-          </span>
-        )
-      }
+      fallback={symbol ? <SymbolIcon name={symbol} fallback={shown} /> : shown}
     />
   );
 }
@@ -552,7 +556,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 )}
                 style={indent}
               >
-                <PageRowIcon page={{ spaceId, pageId: row.id }} emoji={row.emoji} icon={row.icon} />
+                <PageRowIcon
+                  page={{ spaceId, pageId: row.id }}
+                  emoji={row.emoji}
+                  icon={row.icon}
+                  symbol={row.symbol}
+                />
                 <span className="min-w-0 flex-1 truncate">
                   <Name>{row.title}</Name>
                 </span>
@@ -727,7 +736,7 @@ function CreateDialog({
           parentId: creating.parentId,
           name: name.trim(),
           look: { emoji: look.emoji, tint: look.tint },
-          icon: pickedIcon(look),
+          picture: { icon: pickedIcon(look), symbol: look.symbol },
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
@@ -754,7 +763,7 @@ function CreateDialog({
             <DialogTitle>{kind === 'folder' ? 'New folder' : 'New page'}</DialogTitle>
             <DialogDescription>
               {kind === 'folder'
-                ? 'Its name, emoji or image, and colour are encrypted.'
+                ? 'Its name, emoji, icon or image, and colour are encrypted.'
                 : 'It starts as a private draft. Publish it when it’s ready.'}
             </DialogDescription>
           </DialogHeader>

@@ -1,9 +1,9 @@
-import { folderIconChange, folderIconOf, spaceOperations, type SpaceId } from '@wikistow/client';
+import { folderIconOf, folderSymbolOf, spaceOperations, type SpaceId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { initials } from '@/components/avatar';
-import { IconImage } from '@/components/icon-image';
+import { Picture } from '@/components/symbol-icon';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,12 +22,12 @@ import { errorMessage } from '../errors';
 import { EmojiPopover } from '../page/cover/emoji-picker';
 import { iconImage } from '../page/cover/icon-image';
 import { useClient, vaultStore } from '../vault/store';
-import { pickedIcon, useFolderIcon, type PickedImage } from './folder-look';
+import { pictureChange, pictureLabel, useFolderIcon, type PickedImage } from './folder-look';
 
 /**
- * What fills a space's tile: its image, else its emoji, else the initials
- * of its name. The tile around it is `overflow-hidden`, so the image takes
- * its corners.
+ * What fills a space's tile: its image, else its icon, else its emoji, else
+ * the initials of its name. The tile around it is `overflow-hidden`, so the
+ * image takes its corners.
  */
 export function SpaceIcon({
   metadata,
@@ -37,8 +37,14 @@ export function SpaceIcon({
   name: string;
 }) {
   const url = useFolderIcon(metadata);
-  const emoji = metadata?.opened.kind === 'current' ? metadata.opened.metadata.emoji : undefined;
-  return <IconImage src={url} fallback={emoji ?? initials(plainText(name))} />;
+  const opened = metadata?.opened.kind === 'current' ? metadata.opened.metadata : null;
+  return (
+    <Picture
+      image={url}
+      symbol={opened && folderSymbolOf(opened)}
+      emoji={opened?.emoji ?? initials(plainText(name))}
+    />
+  );
 }
 
 /** The space menu's Name and look…, for owners: renames a space and changes its emoji or image. */
@@ -60,8 +66,16 @@ export function SpaceLookDialog({
   );
 }
 
-/** A space's name, emoji (null for none) and image, which is its own (`kept`), none, or one picked here. */
-type SpaceChoice = { name: string; emoji: string | null; image: 'kept' | PickedImage | null };
+/**
+ * A space's name, emoji (null for none), icon of the icon set, and image,
+ * which is its own (`kept`), none, or one picked here.
+ */
+type SpaceChoice = {
+  name: string;
+  emoji: string | null;
+  symbol: string | null;
+  image: 'kept' | PickedImage | null;
+};
 
 function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void }) {
   const ctx = useClient();
@@ -93,6 +107,7 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
   const current: SpaceChoice = {
     name: opened.name,
     emoji: opened.emoji ?? null,
+    symbol: folderSymbolOf(opened),
     image: folderIconOf(opened) && 'kept',
   };
   const look = picked ?? current;
@@ -103,10 +118,11 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
     const name = look.name.trim();
     if (!name) return;
     // Only what was changed, so the rest stays as another owner may have left it.
+    const extensions = pictureChange(look, current);
     const changes = {
       ...(name === current.name ? {} : { name }),
       ...(look.emoji === current.emoji ? {} : { emoji: look.emoji }),
-      ...(look.image === current.image ? {} : { extensions: folderIconChange(pickedIcon(look)) }),
+      ...(Object.keys(extensions).length === 0 ? {} : { extensions }),
     };
     if (Object.keys(changes).length === 0) return onDone();
     setBusy(true);
@@ -168,20 +184,25 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
         />
       </div>
       <div className="grid justify-items-start gap-2">
-        <span className="text-sm font-medium">Emoji or image</span>
+        <span className="text-sm font-medium">Emoji, icon or image</span>
         <EmojiPopover
           current={look.emoji}
           open={picking}
           onOpenChange={setPicking}
-          // Choosing an emoji drops the image; choosing an image keeps the emoji to fall back on.
-          onPick={(emoji) => setPicked({ ...look, emoji, image: null })}
+          // Choosing an emoji drops the icon or image; choosing either keeps the emoji to fall back on.
+          onPick={(emoji) => setPicked({ ...look, emoji, symbol: null, image: null })}
           onRemove={() => setPicked({ ...look, emoji: null })}
+          symbol={{
+            current: look.symbol,
+            onPick: (symbol) => setPicked({ ...look, symbol, image: null }),
+            onRemove: () => setPicked({ ...look, symbol: null }),
+          }}
           image={{
             current: image,
             onPick: async (file) => {
               const icon = await iconImage(file);
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
-              setPicked({ ...look, image: { icon, url } });
+              setPicked({ ...look, symbol: null, image: { icon, url } });
             },
             onRemove: () => setPicked({ ...look, image: null }),
           }}
@@ -189,30 +210,28 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
           <button
             ref={tile}
             type="button"
-            aria-label={
-              image
-                ? 'Change image'
-                : look.emoji
-                  ? `Change emoji ${look.emoji}`
-                  : 'Choose an emoji or image'
-            }
+            aria-label={pictureLabel({ image, symbol: look.symbol, emoji: look.emoji })}
             className={cn(
               'grid size-12 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-tile bg-linear-to-br from-primary-2 to-primary text-lg leading-none font-extrabold text-primary-foreground',
               // Opacity, not tint, which would replace the gradient.
               'outline-2 outline-offset-[3px] outline-border outline-dashed hover:opacity-90 focus-visible:outline-ring active:opacity-80',
-              look.emoji && !image && 'text-2xl',
+              (look.emoji || look.symbol) && !image && 'text-2xl',
             )}
           >
-            <IconImage src={image} fallback={look.emoji ?? initials(plainText(look.name))} />
+            <Picture
+              image={image}
+              symbol={look.symbol}
+              emoji={look.emoji ?? initials(plainText(look.name))}
+            />
           </button>
         </EmojiPopover>
-        {(look.emoji !== null || look.image !== null) && (
+        {(look.emoji !== null || look.symbol !== null || look.image !== null) && (
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => {
-              setPicked({ ...look, emoji: null, image: null });
+              setPicked({ ...look, emoji: null, symbol: null, image: null });
               // This button goes once it's done its work; focus stays in the fields.
               tile.current?.focus();
             }}

@@ -39,19 +39,27 @@ describe('cover', () => {
     const cases: [PagePayload['extensions'][string], ShownCover][] = [
       [
         { format: 1, emoji: '🍞', banner: { kind: 'video', src: 'x' } },
-        { emoji: '🍞', banner: theme, icon: null },
+        { emoji: '🍞', banner: theme, icon: null, symbol: null },
       ],
       [
         { format: 2, emoji: '🍞' },
-        { emoji: null, banner: theme, icon: null },
+        { emoji: null, banner: theme, icon: null, symbol: null },
       ],
       [
         { format: 1, emoji: '🍞', icon: { attachmentId: image } },
-        { emoji: '🍞', banner: theme, icon: { attachmentId: image } },
+        { emoji: '🍞', banner: theme, icon: { attachmentId: image }, symbol: null },
       ],
       [
         { format: 1, emoji: '🍞', icon: { attachmentId: newId(AttachmentId) } },
-        { emoji: '🍞', banner: theme, icon: null },
+        { emoji: '🍞', banner: theme, icon: null, symbol: null },
+      ],
+      [
+        { format: 1, emoji: '🍞', symbol: { name: 'square-terminal' } },
+        { emoji: '🍞', banner: theme, icon: null, symbol: { name: 'square-terminal' } },
+      ],
+      [
+        { format: 1, emoji: '🍞', symbol: { name: 'Square Terminal', set: 'other' } },
+        { emoji: '🍞', banner: theme, icon: null, symbol: null },
       ],
     ];
     for (const [cover, shown] of cases)

@@ -468,27 +468,32 @@ export async function shownVersions(
  */
 export type PageIcon = { ref: AttachmentRef; audience: Audience };
 
-/** The image icon a version shows (`coverOf`), if it has one. */
-export function pageIconOf(
+/** The parts of a page's label its cover gives (`PageLabel`), from one version. */
+export function labelCover(
   payload: Pick<PagePayload, 'extensions' | 'attachments'>,
   audience: Audience,
-): PageIcon | null {
-  const id = coverOf(payload).icon?.attachmentId;
-  const ref = payload.attachments.find((attachment) => attachment.id === id);
-  return ref ? { ref, audience } : null;
+): Pick<PageLabel, 'emoji' | 'icon' | 'symbol'> {
+  const cover = coverOf(payload);
+  const ref = payload.attachments.find((attachment) => attachment.id === cover.icon?.attachmentId);
+  return {
+    emoji: cover.emoji,
+    icon: ref ? { ref, audience } : null,
+    symbol: cover.symbol?.name ?? null,
+  };
 }
 
 /**
- * What a page is listed by: its title, and its emoji and image icon if it
- * has them, and the region its version's key material puts it in, which
+ * What a page is listed by: its title, and its emoji, image icon and icon
+ * set name (`ShownCover`) if it has them, and the region its version's key material puts it in, which
  * `writeLinks` goes by rather than the tree. All of them come from the one
  * version opened. One in a format this app doesn't know has a region but
- * no title, emoji or icon.
+ * no title, emoji or icons.
  */
 export type PageLabel = {
   title: string | null;
   emoji: string | null;
   icon: PageIcon | null;
+  symbol: string | null;
   region: Region;
 };
 
@@ -514,11 +519,10 @@ export async function pageLabels(
         opened.kind === 'current'
           ? {
               title: opened.payload.title,
-              emoji: coverOf(opened.payload).emoji,
-              icon: pageIconOf(opened.payload, audience),
+              ...labelCover(opened.payload, audience),
               region,
             }
-          : { title: null, emoji: null, icon: null, region },
+          : { title: null, emoji: null, icon: null, symbol: null, region },
       ];
     }),
   );

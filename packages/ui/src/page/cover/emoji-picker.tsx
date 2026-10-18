@@ -1,6 +1,7 @@
 import { ImageUp, SmilePlus } from 'lucide-react';
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { IconImage } from '@/components/icon-image';
+import { Picture, symbolWords } from '@/components/symbol-icon';
 import { Button, uploadButtonClass } from '@/components/ui/button';
 import {
   Popover,
@@ -10,10 +11,11 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { errorMessage } from '../../errors';
-import { BadgeIcon, badgeClass } from './cover-band';
+import { badgeClass } from './cover-band';
 import { ICON_ACCEPT } from './icon-image';
 
 const EmojiGrid = lazy(() => import('./emoji-grid'));
+const IconGrid = lazy(() => import('./icon-grid'));
 
 /** What the picker's Image tab shows and does. */
 export type ImageChoice = {
@@ -30,10 +32,19 @@ export type ImageChoice = {
   working?: string;
 };
 
+/** What the picker's Icons tab shows and does: an icon of the icon set, by name. */
+export type SymbolChoice = {
+  /** The icon in use, or null for none. */
+  current: string | null;
+  onPick: (name: string) => void;
+  /** Offers Remove icon while there is one. */
+  onRemove: () => void;
+};
+
 /**
- * The emoji picker, which pages and folders share: a popover opened by
- * `children`, its trigger button, holding the emoji grid, and with `image`,
- * an Image tab beside it. Picking closes it.
+ * The emoji picker, which pages, folders and spaces share: a popover opened
+ * by `children`, its trigger button, with tabs for an emoji, an icon of the
+ * icon set and an image. It opens on the one in use. Picking closes it.
  */
 export function EmojiPopover({
   current,
@@ -41,6 +52,7 @@ export function EmojiPopover({
   onOpenChange,
   onPick,
   onRemove,
+  symbol,
   image,
   returnFocus,
   children,
@@ -51,8 +63,8 @@ export function EmojiPopover({
   onPick: (emoji: string) => void;
   /** Offers Remove emoji while there is one. */
   onRemove?: () => void;
-  /** Offers an image instead of an emoji. */
-  image?: ImageChoice;
+  symbol: SymbolChoice;
+  image: ImageChoice;
   /** Where focus goes on closing, when opened from elsewhere; the trigger otherwise. */
   returnFocus?: ReturnType<typeof useReturnFocus>['content'] | undefined;
   children: ReactNode;
@@ -76,11 +88,31 @@ export function EmojiPopover({
       />
     </Suspense>
   );
+  const icons = (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading icons…</p>}>
+      <IconGrid
+        current={symbol.current}
+        onPick={(name) => {
+          symbol.onPick(name);
+          close();
+        }}
+        onRemove={() => {
+          symbol.onRemove();
+          close();
+        }}
+      />
+    </Suspense>
+  );
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent align="start" className="w-[316px]" {...returnFocus}>
-        {image ? <Tabs image={image} emoji={emoji} onDone={close} /> : emoji}
+        <Tabs
+          initial={image.current ? 'image' : symbol.current ? 'icons' : 'emoji'}
+          emoji={emoji}
+          icons={icons}
+          image={<ImageTab image={image} onDone={close} />}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -88,20 +120,14 @@ export function EmojiPopover({
 
 const TABS = [
   { kind: 'emoji', label: 'Emoji' },
+  { kind: 'icons', label: 'Icons' },
   { kind: 'image', label: 'Image' },
 ] as const;
+type Tab = (typeof TABS)[number]['kind'];
 
 // Mounted on each opening, so it opens on the kind in use.
-function Tabs({
-  image,
-  emoji,
-  onDone,
-}: {
-  image: ImageChoice;
-  emoji: ReactNode;
-  onDone: () => void;
-}) {
-  const [tab, setTab] = useState<(typeof TABS)[number]['kind']>(image.current ? 'image' : 'emoji');
+function Tabs({ initial, ...content }: { initial: Tab } & Record<Tab, ReactNode>) {
+  const [tab, setTab] = useState(initial);
   return (
     <div className="grid gap-3">
       <div
@@ -124,7 +150,7 @@ function Tabs({
           </button>
         ))}
       </div>
-      {tab === 'emoji' ? emoji : <ImageTab image={image} onDone={onDone} />}
+      {content[tab]}
     </div>
   );
 }
@@ -196,11 +222,12 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
 
 /**
  * The draft view's badge, which opens the picker, or an Add emoji button in
- * its place when the page has neither an emoji nor an image.
+ * its place when the page has no emoji, icon or image.
  */
 export function EmojiPicker({
   emoji,
   hasImage,
+  symbol,
   image,
   open,
   onOpenChange,
@@ -210,6 +237,7 @@ export function EmojiPicker({
   emoji: string | null;
   /** Whether the page has an image, which `image.current` shows once it's decrypted. */
   hasImage: boolean;
+  symbol: SymbolChoice;
   image: ImageChoice;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -225,19 +253,26 @@ export function EmojiPicker({
       onOpenChange={onOpenChange}
       onPick={onPick}
       onRemove={() => onPick(null)}
+      symbol={symbol}
       image={image}
       returnFocus={returnFocus}
     >
-      {emoji || hasImage ? (
+      {emoji || hasImage || symbol.current ? (
         <button
           type="button"
-          aria-label={hasImage ? 'Change image' : `Change emoji ${emoji}`}
+          aria-label={
+            hasImage
+              ? 'Change image'
+              : symbol.current
+                ? `Change icon ${symbolWords(symbol.current)}`
+                : `Change emoji ${emoji}`
+          }
           className={cn(
             badgeClass,
             'cursor-pointer outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
           )}
         >
-          <BadgeIcon emoji={emoji} image={image.current} />
+          <Picture image={image.current} symbol={symbol.current} emoji={emoji} />
         </button>
       ) : (
         <button
