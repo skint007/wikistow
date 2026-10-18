@@ -334,7 +334,7 @@ At `/settings`, one page: the title, then five groups, each a heading with a sho
 - **Scope pills.** A setting kept on one device has a small "This browser" pill beside its name, or "This computer" in the desktop app: Lock when idle, Plugin themes, and the plugins installed from a folder on the Plugins page. Anything unmarked follows the account.
 - **On this page.** From 900px, a sticky list beside the groups links to each (`#account`, `#security`, `#appearance`, `#plugins`, `#ai`) and marks the one in view, as the page's contents do. Narrower, it's a row of links above the first group. Other places link to a group: **Back to Settings** on the Plugins page goes to `/settings#plugins`.
 - **Desktop apps** says "2 signed in, including this app", or "None", with **Review** opening a dialog of each app's sign-in day and **Sign out**. The server keeps no names for them.
-- **Your plugins** says "12 installed · 9 on" or "No plugins yet", or in the browser while the vault is locked to unlock it, then "1 needs attention" in the destructive colour when any has a problem, and "Safe mode: plugins are off." in safe mode. **Manage plugins** opens the [Plugins page](#plugins-page).
+- **Your plugins** says "12 installed · 9 on" or "No plugins yet", or while the vault is locked to unlock it, then "1 needs attention" in the destructive colour when any has a problem, and "Safe mode: plugins are off." in safe mode. **Manage plugins** opens the [Plugins page](#plugins-page).
 - **AI assistant** names the API style, then the model, host and longest reply, with **Check connection** (and "✓ Connected", or why it failed, below) and **Where it goes**, which shows the disclosure under the row. Without AI it says it isn't set up.
 
 ## Plugins page

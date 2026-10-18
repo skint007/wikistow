@@ -73,6 +73,9 @@ export function SafeModeNotice() {
  */
 export function PluginsSummary() {
   const { listed, safeMode, plugins, unavailable } = usePlugins();
+  const vault = useVault();
+  // Library plugins are known only while the vault is open, in the desktop app too.
+  const known = listed && vault.status === 'unlocked';
   // One that couldn't load is installed too, and needs attention.
   const installed = new Set([
     ...plugins.map(({ plugin }) => plugin.manifest.id),
@@ -88,7 +91,7 @@ export function PluginsSummary() {
       name="Your plugins"
       state={
         <>
-          {!listed
+          {!known
             ? 'Unlock your vault to see your plugins.'
             : installed === 0
               ? 'No plugins yet'
