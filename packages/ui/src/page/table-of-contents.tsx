@@ -152,7 +152,7 @@ export function TableOfContents({
             href={`#${heading.id}`}
             aria-current={heading.id === current ? 'location' : undefined}
             onClick={() => choose(heading.id)}
-            className="block rounded-row px-2 py-1 text-subtle-foreground outline-offset-[-2px] hover:tint hover:text-foreground active:tint-strong aria-[current=location]:bg-primary-soft aria-[current=location]:text-primary-ink aria-[current=location]:shadow-[inset_3px_0_0_var(--primary-ink)]"
+            className="block rounded-row px-2 py-1 text-subtle-foreground outline-offset-[-2px] hover:tint hover:text-foreground active:tint-strong aria-[current=location]:bg-primary-soft aria-[current=location]:text-primary-ink"
           >
             {heading.text}
           </a>
