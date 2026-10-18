@@ -13,7 +13,8 @@ const SHOWN = 100;
  * It is always a plain text field too: any text can be typed, listed or
  * not. Typing filters the list by value and label, ignoring case and
  * matching anywhere, and it draws only the first 100 matches. Up and down
- * move through it, Enter picks, and Escape closes it, keeping the text.
+ * move through it, and Enter picks the option they reach; otherwise Enter
+ * is the form's, with the text as typed. Escape closes it, keeping the text.
  * `status` shows under the field, such as why the list couldn't be had.
  */
 export function Combobox({
@@ -41,7 +42,8 @@ export function Combobox({
   const [open, setOpen] = useState(false);
   // What was typed since the list opened; the field's own value doesn't filter.
   const [filter, setFilter] = useState('');
-  const [active, setActive] = useState(0);
+  // None until an arrow key picks one, so Enter keeps what was typed.
+  const [active, setActive] = useState(-1);
   const matches = useMemo(() => {
     const query = filter.trim().toLowerCase();
     if (!options || !query) return options ?? [];
@@ -52,10 +54,12 @@ export function Combobox({
   }, [options, filter]);
   const shown = matches.slice(0, SHOWN);
   const listed = open && shown.length > 0;
-  useEffect(() => setActive(0), [matches]);
+  useEffect(() => setActive(-1), [matches]);
   const optionId = (i: number) => `${ids}-${i}`;
   useEffect(() => {
-    if (listed) document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
+    if (listed && active >= 0) {
+      document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
+    }
   });
 
   function pick(option: ComboboxOption) {
@@ -70,7 +74,7 @@ export function Combobox({
         role="combobox"
         aria-expanded={listed}
         aria-controls={`${ids}-list`}
-        aria-activedescendant={listed ? optionId(active) : undefined}
+        aria-activedescendant={listed && active >= 0 ? optionId(active) : undefined}
         aria-autocomplete="list"
         autoComplete="off"
         spellCheck={false}

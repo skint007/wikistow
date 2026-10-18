@@ -10,6 +10,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { Label } from '@/components/ui/label';
 import { Picker, type PickerOption } from '@/components/ui/picker';
 import { api } from '../api';
+import { aiStatusQuery } from '../ai/session';
 import { useReauth } from '../auth/reauth';
 import { errorMessage } from '../errors';
 import {
@@ -142,6 +143,8 @@ export function AiSettingsCard({ ai }: { ai: Ai }) {
     onMutate: () => setMessage(null),
     onSuccess: (saved) => {
       queryClient.setQueryData(aiSettingsQuery.queryKey, saved);
+      // What the rest of the app shows: the assistant, Agents, Settings.
+      void queryClient.invalidateQueries({ queryKey: aiStatusQuery.queryKey });
       setApiKey(secretFrom(saved.apiKeySaved));
       setMessage({ tone: 'notice', text: 'Saved.' });
     },
