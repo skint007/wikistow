@@ -258,12 +258,13 @@ export function Library({
     <div className="grid gap-4">
       {(error ?? newDraft.error) && <FormMessage>{error ?? newDraft.error}</FormMessage>}
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
+      {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}
       {tab === 'installed' ? (
         <InstalledList
           items={[...folder, ...installed]}
           query={query}
           // Rows wait for the library, which says what each approval is.
-          loading={!library && !listError && approvals.length > 0}
+          loading={!library && approvals.length > 0}
         />
       ) : (
         <div className="grid gap-2">
@@ -283,7 +284,6 @@ export function Library({
               />
             </div>
           )}
-          {listError && <FormMessage>{errorMessage(listError)}</FormMessage>}
           {library?.length === 0 && (
             <p className="text-sm text-muted-foreground">Nobody has uploaded a plugin yet.</p>
           )}

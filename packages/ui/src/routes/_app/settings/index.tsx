@@ -281,6 +281,8 @@ type Setup = { uri: string; backupCodes: string[] };
 function TwoFactor() {
   const { data: session } = authClient.useSession();
   const enabled = session?.user.twoFactorEnabled === true;
+  // Kept here, so new backup codes show again if the flow is closed before they're saved.
+  const [codes, setCodes] = useState<string[] | null>(null);
   return (
     <FormRow
       id="two-factor"
@@ -289,17 +291,22 @@ function TwoFactor() {
       label="Manage"
       close="Close"
     >
-      <TwoFactorFlow />
+      <TwoFactorFlow codes={codes} setCodes={setCodes} />
     </FormRow>
   );
 }
 
 /** Set it up, new backup codes, or turn it off. */
-function TwoFactorFlow() {
+function TwoFactorFlow({
+  codes,
+  setCodes,
+}: {
+  codes: string[] | null;
+  setCodes: (codes: string[] | null) => void;
+}) {
   const { data: session, refetch } = authClient.useSession();
   const withReauth = useReauth();
   const [setup, setSetup] = useState<Setup | null>(null);
-  const [codes, setCodes] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const enabled = session?.user.twoFactorEnabled === true;
 
@@ -485,7 +492,7 @@ function DesktopApps() {
           )
         }
       />
-      <Dialog open={reviewing && count > 0} onOpenChange={setReviewing}>
+      <Dialog open={reviewing} onOpenChange={setReviewing}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Desktop apps</DialogTitle>
@@ -508,6 +515,8 @@ function DesktopSessions({ sessions }: { sessions: desktopRoutes.DesktopSession[
       api.call(desktopRoutes.revokeDesktopSession, { params: { sessionId } }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: desktopSessionsQuery.queryKey }),
   });
+  if (sessions.length === 0)
+    return <p className="text-sm text-muted-foreground">No desktop app is signed in.</p>;
   return (
     <div className="grid gap-3">
       <ul className="grid gap-2" data-testid="desktop-sessions">
