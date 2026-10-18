@@ -11,7 +11,8 @@ import { Field } from './field';
 
 const Address = z.string().trim().email('Enter your email address');
 
-const Details = z
+/** A new account's name, address and password, as the invite and setup pages ask for them. */
+export const AccountDetails = z
   .object({
     name: accountRoutes.DisplayName,
     email: Address,
@@ -87,7 +88,7 @@ function DetailsForm({ token, email }: { token: string | undefined; email: strin
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const form = useForm({
-    resolver: zodResolver(Details),
+    resolver: zodResolver(AccountDetails),
     defaultValues: { name: '', email, password: '', confirm: '' },
   });
   const { errors, isSubmitting } = form.formState;

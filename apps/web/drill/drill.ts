@@ -1,9 +1,8 @@
 // What the restore drill's seed and check share: settings, the state file,
-// the operator's bootstrap command, the test instance's Mailpit, and keeping
-// secrets out of whatever a failure prints or writes.
+// the test instance's Mailpit, and keeping secrets out of whatever a failure
+// prints or writes.
 import type { Download, Page } from '@playwright/test';
 import { totp } from '@wikistow/server-app/testing/totp';
-import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -20,8 +19,6 @@ export const DRILL_STATE = env(
   'DRILL_STATE',
   join(homedir(), '.config', 'wikistow-drill', 'state.json'),
 );
-/** Run with `--email <address>` appended, through `sh -c`. */
-export const DRILL_BOOTSTRAP = env('DRILL_BOOTSTRAP', '');
 
 export type Person = {
   name: string;
@@ -127,38 +124,6 @@ export async function installationId(): Promise<string> {
   const body: { installationId?: unknown } = await res.json();
   expect(typeof body.installationId, 'the installation has no installationId').toBe('string');
   return String(body.installationId);
-}
-
-/**
- * The operator's `bootstrap-admin` command. Its first run prints a one-time
- * link, which is returned as a path and never printed; once the account's
- * email is verified, the next run promotes it.
- */
-export async function bootstrap(email: string): Promise<{ invitePath?: string; output: string }> {
-  if (!DRILL_BOOTSTRAP)
-    throw new Error('Set DRILL_BOOTSTRAP to the administrator bootstrap command before seeding.');
-  const { stdout, stderr, code } = await new Promise<{
-    stdout: string;
-    stderr: string;
-    code: number;
-  }>((resolve) => {
-    execFile(
-      'sh',
-      ['-c', `${DRILL_BOOTSTRAP} --email "$0"`, email],
-      { timeout: 60_000 },
-      (error, stdout, stderr) =>
-        resolve({ stdout, stderr, code: error ? Number(error.code ?? 1) : 0 }),
-    );
-  });
-  const link = /https?:\/\/\S+\/invite#token=\S+/.exec(stdout)?.[0];
-  if (link) {
-    const url = new URL(link);
-    secret(url.hash.slice('#token='.length));
-    return { invitePath: url.pathname + url.hash, output: 'an invitation link' };
-  }
-  if (code !== 0)
-    throw new Error(`The bootstrap command (${DRILL_BOOTSTRAP}) failed with ${code}: ${stderr}`);
-  return { output: stdout.trim() };
 }
 
 type MailpitSummary = { ID: string; Subject: string; Created: string };

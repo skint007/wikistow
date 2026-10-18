@@ -50,6 +50,19 @@ export const createAccount = {
   status: 201,
 } as const satisfies RouteDef;
 
+/**
+ * Create a new server's first account, its administrator, while it has no
+ * accounts (`installation.setup`). Its address counts as verified, so it
+ * signs in at once. Refused with `admin-exists` once any account exists.
+ */
+export const createFirstAccount = {
+  method: 'POST',
+  path: '/api/setup',
+  body: z.object({ name: DisplayName, email: Email, password: Password }),
+  response: z.object({}),
+  status: 201,
+} as const satisfies RouteDef;
+
 /** Setup link tokens are 32 random bytes, base64url, like invitation tokens. */
 export const SetupToken = InvitationToken;
 

@@ -1,5 +1,5 @@
 // Signed-in people for tests, created the way real ones are.
-import { bootstrapAdmin, createInvitation, schema } from '@wikistow/server';
+import { createInvitation, schema } from '@wikistow/server';
 import { expect } from 'vite-plus/test';
 import { Browser, lastMailTo, linkIn, type TestApp } from './harness.ts';
 
@@ -9,7 +9,7 @@ let counter = 0;
 const issuers = new WeakMap<TestApp, Promise<string>>();
 /**
  * An administrator to issue invitations, as every account invitation needs
- * one. Never verified, so it doesn't count as the installation's admin.
+ * one. Inserted directly, so it also ends the test app's first-run setup.
  */
 export function testIssuer(t: TestApp): Promise<string> {
   let issuer = issuers.get(t);
@@ -27,23 +27,14 @@ export function testIssuer(t: TestApp): Promise<string> {
   return issuer;
 }
 
-async function bootstrapLink(t: TestApp, email: string): Promise<string> {
-  const result = await bootstrapAdmin(t.db, email);
-  if (result.kind !== 'invited') throw new Error(`expected a bootstrap link, got ${result.kind}`);
-  return result.token;
-}
-
-/** A verified, signed-in account. Administrators come from the bootstrap command, run twice. */
+/** A verified, signed-in account, invited by `testIssuer`. */
 export async function signedInPerson(
   t: TestApp,
   role: 'user' | 'admin' = 'user',
   password = PASSWORD,
 ) {
   const email = `${role}${++counter}-${Date.now()}@example.test`;
-  const token =
-    role === 'admin'
-      ? await bootstrapLink(t, email)
-      : (await createInvitation(t.db, { email, role, createdBy: await testIssuer(t) })).token;
+  const { token } = await createInvitation(t.db, { email, role, createdBy: await testIssuer(t) });
   const browser = new Browser(t.app);
   const created = await browser.request('/api/accounts', {
     method: 'POST',
@@ -51,9 +42,6 @@ export async function signedInPerson(
   });
   expect(created.status).toBe(201);
   await new Browser(t.app).request(linkIn(lastMailTo(t.mails, email)));
-  // Promoted before signing in: a role change ends the sessions from before it.
-  if (role === 'admin')
-    expect(await bootstrapAdmin(t.db, email)).toMatchObject({ kind: 'promoted' });
   const signedIn = await browser.request('/api/auth/sign-in/email', {
     method: 'POST',
     json: { email, password },

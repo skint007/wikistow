@@ -1,5 +1,5 @@
 import { and, count, eq, gt, isNotNull, isNull, max, ne, sql } from 'drizzle-orm';
-import { lockAdmins } from '../accounts/bootstrap.ts';
+import { lockAdmins } from '../accounts/first-account.ts';
 import { AccountError } from '../accounts/errors.ts';
 import type { Role } from '../accounts/invitations.ts';
 import type { Database } from '../db/client.ts';

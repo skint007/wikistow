@@ -50,8 +50,7 @@ export const test = base.extend<
   },
   { admin: { email: string } }
 >({
-  // The installation's first administrator, made once per run through the
-  // operator's two-step bootstrap.
+  // The installation's first administrator, made once per run on its setup page.
   admin: [
     async ({ browser }, use) => {
       const existing: { email: string | null } = await (await fetch(`${CONTROL}/owner`)).json();
@@ -176,14 +175,6 @@ export async function linkFor(to: string, subject: RegExp): Promise<string> {
   return url.pathname + url.search + url.hash;
 }
 
-/** The operator's `bootstrap-admin` command. */
-export async function bootstrap(email: string): Promise<{ kind: string; token?: string }> {
-  const res = await fetch(`${CONTROL}/bootstrap?email=${encodeURIComponent(email)}`, {
-    method: 'POST',
-  });
-  return res.json();
-}
-
 /** Give the account's person new keys at the next key version, as a recovery or a hostile server would. */
 export async function swapKey(email: string): Promise<void> {
   const res = await fetch(`${CONTROL}/swap-key?email=${encodeURIComponent(email)}`, {
@@ -234,7 +225,7 @@ export async function joinWith(
 /** Past sign-in: on the vault pages or in the app, wherever the account belongs next. */
 export async function expectSignedIn(page: Page) {
   await page.waitForURL(
-    (url) => !url.pathname.startsWith('/sign-in') && !url.pathname.startsWith('/invite'),
+    (url) => !['/sign-in', '/invite', '/setup'].some((path) => url.pathname.startsWith(path)),
   );
   await expect(page.getByRole('heading').first()).toBeVisible();
 }
@@ -246,12 +237,14 @@ export async function signIn(page: Page, email: string, password = PASSWORD) {
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
-/** A fresh installation's first administrator, signed in. Only works once per server. */
+/** A fresh installation's first administrator, from its setup page, signed in. Only works once per server. */
 export async function firstAdmin(page: Page, email: string) {
-  const invited = await bootstrap(email);
-  if (invited.kind !== 'invited' || !invited.token) throw new Error(`bootstrap: ${invited.kind}`);
-  await joinWith(page, `/invite#token=${invited.token}`, email, 'Owner');
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Set up WikiStow' })).toBeVisible();
+  await page.getByLabel('Your name').fill('Owner');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  await page.getByLabel('Repeat password').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Create administrator' }).click();
   await expectSignedIn(page);
-  expect((await bootstrap(email)).kind).toBe('promoted');
-  await page.reload();
 }

@@ -9,6 +9,7 @@ import {
   createEmailChangeToken,
   currentIdentity,
   createAccount,
+  createFirstAccount,
   findAvatar,
   finishAccountSetup,
   inspectInvitation,
@@ -251,6 +252,15 @@ export function mountAccountRoutes(
         : await accountSetupMail(db, publicOrigin, { id: account.accountId, email: account.email });
       sendInBackground(deliver, log, mail);
       return account.emailBound ? { accountId: account.accountId } : {};
+    },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.public(
+    accountRoutes.createFirstAccount,
+    async ({ body }) => {
+      await createFirstAccount(db, body).catch(toApiError);
+      return {};
     },
     { rateLimit: FORM_LIMIT },
   );

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -24,6 +24,15 @@ const Search = z.object({
 
 export const Route = createFileRoute('/sign-in')({
   validateSearch: Search,
+  // A new server with no accounts asks for its administrator first, and `/`
+  // comes here when signed out. The desktop app's servers are set up in a browser.
+  beforeLoad: async ({ context }) => {
+    if (desktop) return;
+    const installation = await context.queryClient
+      .ensureQueryData(installationQuery)
+      .catch(() => null);
+    if (installation?.setup) throw redirect({ to: '/setup' });
+  },
   component: SignIn,
 });
 

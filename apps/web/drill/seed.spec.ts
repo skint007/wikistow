@@ -15,7 +15,6 @@ import {
   waitForSave,
 } from '../e2e/vault';
 import {
-  bootstrap,
   DRILL_STATE,
   installationId,
   MAILPIT_URL,
@@ -66,7 +65,11 @@ async function join(page: Page, invitePath: string, who: Person, sentSince: Date
     /\/sign-in\?verified=/,
   );
   await signInAs(page, who);
+  await setUpVault(page, who);
+}
 
+/** Create the signed-in person's vault, recording its recovery key. */
+async function setUpVault(page: Page, who: Person) {
   await expect(page.getByRole('heading', { name: 'Set up your vault' })).toBeVisible();
   await page.getByLabel('Vault passphrase').fill(who.passphrase);
   await page.getByLabel('Repeat passphrase').fill(who.passphrase);
@@ -146,22 +149,18 @@ test('seed a fresh installation for the restore drill', ({ page, freshPage }) =>
       return page;
     }
 
-    await once('the operator invites the first administrator, who joins', async () => {
-      const sentSince = fromNow();
-      const { invitePath, output } = await bootstrap(admin.email);
-      if (!invitePath)
-        throw new Error(
-          `bootstrap-admin gave no invitation link (an administrator may exist already): ${output}`,
-        );
-      await join(page, invitePath, admin, sentSince);
-    });
-
-    // Promotion signs the account out everywhere.
-    await once('the operator makes them the administrator', async () => {
-      const { output } = await bootstrap(admin.email);
-      expect(output, 'bootstrap-admin did not promote the account').toContain(
-        `${admin.email} is now the administrator.`,
-      );
+    await once('the first administrator sets up the installation', async () => {
+      await page.goto('/');
+      await expect(
+        page.getByRole('heading', { name: 'Set up WikiStow' }),
+        `${WIKISTOW_URL} has no setup page (it may have an administrator already)`,
+      ).toBeVisible();
+      await page.getByLabel('Your name').fill(admin.name);
+      await page.getByLabel('Email').fill(admin.email);
+      await page.getByLabel('Password', { exact: true }).fill(admin.password);
+      await page.getByLabel('Repeat password').fill(admin.password);
+      await page.getByRole('button', { name: 'Create administrator' }).click();
+      await setUpVault(page, admin);
     });
 
     const reader = (state.reader ??= person('Drill Reader', 'reader@wikistow.test'));

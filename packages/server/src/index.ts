@@ -1,4 +1,4 @@
-export * from './accounts/bootstrap.ts';
+export * from './accounts/first-account.ts';
 export * from './accounts/account-setup.ts';
 export * from './accounts/change-email.ts';
 export * from './accounts/create-account.ts';

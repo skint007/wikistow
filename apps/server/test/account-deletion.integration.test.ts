@@ -1,4 +1,4 @@
-import { bootstrapAdmin, createInvitation, inspectInvitation, schema } from '@wikistow/server';
+import { createInvitation, inspectInvitation, schema } from '@wikistow/server';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
@@ -35,7 +35,7 @@ it('reserves an identity ID after deleting its account and keys', async () => {
   await expect(t.db.delete(schema.identityReservations)).rejects.toThrow();
 });
 
-it("revokes a deleted administrator's links and lets bootstrap run again", async () => {
+it("revokes a deleted administrator's links", async () => {
   const admin = await signedInPerson(t, 'admin');
   const { token, invitation } = await createInvitation(t.db, {
     email: null,
@@ -47,7 +47,6 @@ it("revokes a deleted administrator's links and lets bootstrap run again", async
     .select()
     .from(schema.invitations)
     .where(eq(schema.invitations.id, invitation.id));
-  expect(link).toMatchObject({ kind: 'account', createdBy: null, revokedAt: expect.any(Date) });
+  expect(link).toMatchObject({ createdBy: null, revokedAt: expect.any(Date) });
   expect(await inspectInvitation(t.db, token)).toEqual({ status: 'revoked' });
-  expect(await bootstrapAdmin(t.db, 'next-admin@example.test')).toMatchObject({ kind: 'invited' });
 });
