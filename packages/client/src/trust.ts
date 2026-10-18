@@ -138,12 +138,13 @@ export type DirectoryEntry = { identity: PublicIdentity; name: string; email: st
 
 /**
  * A directory entry as the app is about to use it. `foundBy` is the email the
- * person typed when they found someone by email (section 7.3), never text
- * from the server: the directory's email must be that one, the key-change
- * check by email uses it, and a first-seen label stores it (sections 8.2
- * and 8.4). It is `null` only for a lookup that wasn't by email, say by the
- * identity an envelope names; then the directory's email stands. It is
- * required so that every caller decides which.
+ * person typed when they found someone by email, or the one the list of
+ * people showed for the person they picked (section 7.3): the directory's
+ * email must be that one, the key-change check by email uses it, and a
+ * first-seen label stores it (sections 8.2 and 8.4). It is `null` only for
+ * a lookup that wasn't by email, say by the identity an envelope names;
+ * then the directory's email stands. It is required so that every caller
+ * decides which.
  */
 export type Lookup = DirectoryEntry & { foundBy: string | null };
 

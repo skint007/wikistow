@@ -54,7 +54,7 @@ import { loadTree } from './spaces.ts';
 /** A member's role in a share. */
 export type ShareRole = sharingRoutes.ShareRole;
 
-/** Someone to share with: found by email (`findPerson`), with a role. */
+/** Someone to share with: picked or found by email (`listPeople`, `findPerson`), with a role. */
 export type Invitee = { person: Lookup; role: ShareRole; canPublish?: boolean };
 
 /** One of the space's groups to share with, with its access (section 7.8). */
@@ -99,6 +99,20 @@ async function groupRoles(
 export async function findPerson(ctx: ClientContext, email: string): Promise<Lookup | null> {
   const { person } = await ctx.api.call(peopleRoutes.lookupPerson, { body: { email } });
   return person && { ...person, foundBy: email };
+}
+
+/**
+ * Everyone on the server who could be shared with (section 7.3), each as a
+ * lookup by the email the directory lists them with, as if that email were
+ * typed: picking one checks and labels their key as `findPerson` does. Also
+ * the accounts without a vault yet, by name and email, which can't be picked.
+ */
+export async function listPeople(ctx: ClientContext) {
+  const { people, withoutVault } = await ctx.api.call(peopleRoutes.listPeople);
+  return {
+    people: people.map((person): Lookup => ({ ...person, foundBy: person.email })),
+    withoutVault,
+  };
 }
 
 /**

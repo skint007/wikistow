@@ -501,9 +501,9 @@ export async function planDeleteGroup(
 }
 
 /**
- * Add `person`, found by exact email (`findPerson`), to a group: every
- * version of each of its shares where the keys they hold fall short of
- * their new access, in the same request (section 7.8). Their key must be
+ * Add `person`, picked or found by email (`listPeople`, `findPerson`), to
+ * a group: every version of each of its shares where the keys they hold
+ * fall short of their new access, in the same request (section 7.8). Their key must be
  * one this app may seal to, or `identity-key-changed`.
  */
 export async function planAddMember(

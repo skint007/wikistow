@@ -9,16 +9,19 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - A new server asks for its administrator the first time you open it. That account signs in straight away, before mail is set up. The `bootstrap-admin` command is gone.
+- When you share, add a group member or add an owner, you can pick the person from a list of people on the server, filtered by name or email, instead of typing their whole email.
 
 ### Changes
 
 #### App
 
 - People can reorder their spaces in the rail: drag any tile but the home space, or use Move up and Move down in a tile’s right-click menu. The order is kept with the account (`space_order` on `users`, `GET`/`PUT /api/me/space-order`) and `GET /api/spaces` comes back in it, home space first, in its released shape. Phones show the order in the drawer. (#97)
+- The first share, **Add someone**, **Add member** and adding or handing over an owner list the people on the server to pick from, filtered by name or email. Pinned people show by their label with **Key changed**, others by the server’s name and email marked new. People who can’t be chosen, and accounts without a vault yet, are greyed out with the reason. Picking a row runs the same key checks as typing that email, which still works. (#98)
 
 #### Server
 
 - The first account on a new server becomes its administrator. While the server has no accounts, sign-in and `/` open **Set up WikiStow**, `GET /api/installation` reports `setup: true`, and `POST /api/setup` creates the account under the admin lock, with its address counted as verified. It refuses once any account exists. The `bootstrap-admin` command, `admin.mjs` and the `bootstrap` invitation kind are gone, and open bootstrap links are withdrawn. A server upgraded before its `bootstrap-admin` setup finished has an account but no administrator, so start it again on an empty database. (#96)
+- `GET /api/people` lists everyone the exact-email lookup could find, for people with a vault and rate-limited like it, and by name and email the confirmed accounts without a vault yet. Every person with a vault can now see who else is on the server, a deliberate choice recorded in protocol section 7.3. (#98)
 
 ## 0.10.0 - 2026-10-18
 
