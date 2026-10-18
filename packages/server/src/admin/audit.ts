@@ -24,6 +24,10 @@ const DETAILS = {
   'invitation.resent': z.strictObject({ mailed: z.boolean() }),
   'invitation.revoked': z.strictObject({}),
   'settings.updated': z.strictObject({ publicRegistration: z.boolean() }),
+  // Which fields an administrator changed, never their values.
+  'settings.mail-updated': z.strictObject({
+    changed: z.array(z.enum(['host', 'port', 'security', 'username', 'password', 'from'])),
+  }),
   // Sharing: who was given or lost keys, by identity ID, never by name.
   'share.created': z.strictObject({
     spaceId: z.string(),

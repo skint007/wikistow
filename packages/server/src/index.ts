@@ -16,6 +16,7 @@ export * from './settings.ts';
 export * from './admin/accounts.ts';
 export * from './admin/audit.ts';
 export * from './admin/invitations.ts';
+export * from './admin/settings.ts';
 export * from './content/access.ts';
 export * from './content/errors.ts';
 export * from './content/identities.ts';
