@@ -5,6 +5,8 @@ import type { Root, RootContent } from 'mdast';
 import { Component, use, useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
 import { claimedBlock } from '@wikistow/plugin-sdk';
+import { Check, Copy } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { ReaderBlock, textOf } from '../plugins/blocks';
 import { usePlugins } from '../plugins/runtime';
 import { markdownSyntaxes } from '../registries';
@@ -81,6 +83,7 @@ const Table: NonNullable<Components['table']> = ({ node: _node, ...props }) => (
  * A code block under its language as written, or `text` for none, as the
  * visual editor shows it; or the view of a running plugin that claims it,
  * which keeps what a reader entered in it while the page around it changes.
+ * Only the reader's label has a button that copies the code.
  */
 const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
   const { blocks } = usePlugins();
@@ -102,14 +105,40 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
   const claimed = language ? claimedBlock(language) : null;
   return (
     <div className="code-block">
-      <div className="code-language">
-        {language || 'text'}
-        {claimed && ` · shown as written, without the ${claimed.pluginId} plugin`}
+      {/* The visual editor's label shares the class, without the button. */}
+      <div className="code-language flex items-center gap-2 pt-1 pr-1">
+        <span className="min-w-0 flex-1">
+          {language || 'text'}
+          {claimed && ` · shown as written, without the ${claimed.pluginId} plugin`}
+        </span>
+        <CopyCode text={textOf(code)} />
       </div>
       <pre {...props} />
     </div>
   );
 };
+
+/** Copies a code block's text, as written, showing a check for a moment once it's copied. */
+function CopyCode({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <Button
+      type="button"
+      size="icon-xs"
+      variant="ghost"
+      aria-label={copied ? 'Copied' : 'Copy code'}
+      title="Copy code"
+      onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}
+    >
+      {copied ? <Check strokeWidth={1.75} /> : <Copy strokeWidth={1.75} />}
+    </Button>
+  );
+}
 
 /** A remark plugin: the tree the worker read, in place of the empty one parsed here. */
 const readTree = (tree: Root) => () => tree;
