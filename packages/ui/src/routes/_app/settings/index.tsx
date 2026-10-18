@@ -281,7 +281,9 @@ type Setup = { uri: string; backupCodes: string[] };
 function TwoFactor() {
   const { data: session } = authClient.useSession();
   const enabled = session?.user.twoFactorEnabled === true;
-  // Kept here, so new backup codes show again if the flow is closed before they're saved.
+  // Kept here, so a setup under way and new backup codes show again if the
+  // flow is closed before they're finished or saved.
+  const [setup, setSetup] = useState<Setup | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
   return (
     <FormRow
@@ -291,22 +293,25 @@ function TwoFactor() {
       label="Manage"
       close="Close"
     >
-      <TwoFactorFlow codes={codes} setCodes={setCodes} />
+      <TwoFactorFlow setup={setup} setSetup={setSetup} codes={codes} setCodes={setCodes} />
     </FormRow>
   );
 }
 
 /** Set it up, new backup codes, or turn it off. */
 function TwoFactorFlow({
+  setup,
+  setSetup,
   codes,
   setCodes,
 }: {
+  setup: Setup | null;
+  setSetup: (setup: Setup | null) => void;
   codes: string[] | null;
   setCodes: (codes: string[] | null) => void;
 }) {
   const { data: session, refetch } = authClient.useSession();
   const withReauth = useReauth();
-  const [setup, setSetup] = useState<Setup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const enabled = session?.user.twoFactorEnabled === true;
   // Each step replaces the button that led to it: the focus goes to the
