@@ -1,4 +1,5 @@
 import { createAiSession } from '@wikistow/client';
+import { schema } from '@wikistow/server';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -87,4 +88,32 @@ describe.each(['openai', 'anthropic'] as const)('the %s AI proxy', (style) => {
     }
     expect(logs).not.toContain(PROMPT);
   });
+});
+
+// Set on the admin page instead, the key is write-only, sealed at rest, and
+// used from the next request on.
+it('keeps a key saved on the admin page off the API and the database', async () => {
+  const t = await app();
+  const admin = await signedInPerson(t, 'admin');
+  const saved = await admin.browser.request('/api/admin/settings/ai', {
+    method: 'PUT',
+    json: { style: 'openai', baseUrl: origin, apiKey: KEY, model: 'test-model' },
+  });
+  expect(saved.status).toBe(200);
+  const answers = [
+    await saved.text(),
+    await (await admin.browser.request('/api/admin/settings/ai')).text(),
+    await (await admin.browser.request('/api/ai')).text(),
+    await (
+      await admin.browser.request('/api/admin/ai/models', { method: 'POST', json: {} })
+    ).text(),
+  ];
+  for (const text of answers) expect(text).not.toContain(KEY);
+  expect(JSON.parse(answers[2] ?? '')).toMatchObject({ enabled: true, model: 'test-model' });
+  const [row] = await t.db.select().from(schema.settings);
+  expect(row?.aiApiKey).not.toContain(KEY);
+
+  const session = createAiSession({ fetch: (url, init) => admin.browser.fetch(url, init) });
+  await session.send(PROMPT);
+  expect(seen.at(-1)?.headers['authorization']).toBe(`Bearer ${KEY}`);
 });
