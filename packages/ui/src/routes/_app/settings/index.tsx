@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { accountRoutes, desktopRoutes } from '@wikistow/contracts';
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import QRCode from 'react-qr-code';
 import { z } from 'zod';
@@ -309,6 +309,12 @@ function TwoFactorFlow({
   const [setup, setSetup] = useState<Setup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const enabled = session?.user.twoFactorEnabled === true;
+  // Each step replaces the button that led to it: the focus goes to the
+  // step's first field, so it stays in the row and Escape still closes it.
+  const step = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    step.current?.querySelector('input')?.focus();
+  }, [setup, enabled]);
 
   const run = (action: () => Promise<void>) => async () => {
     setError(null);
@@ -345,19 +351,21 @@ function TwoFactorFlow({
 
   if (setup)
     return (
-      <ConfirmSetup
-        setup={setup}
-        onDone={async () => {
-          setCodes(setup.backupCodes);
-          setSetup(null);
-          password.reset();
-          await refetch();
-        }}
-      />
+      <div ref={step}>
+        <ConfirmSetup
+          setup={setup}
+          onDone={async () => {
+            setCodes(setup.backupCodes);
+            setSetup(null);
+            password.reset();
+            await refetch();
+          }}
+        />
+      </div>
     );
 
   return (
-    <div className="grid max-w-sm gap-4">
+    <div ref={step} className="grid max-w-sm gap-4">
       {codes && <BackupCodes codes={codes} />}
       <Field
         id="2fa-password"
