@@ -146,7 +146,14 @@ export const librarySource: Omit<RuntimeSource, 'pages' | 'handle'> = {
       // what runs keeps running. Before any listing, nothing is known.
       if (lastListed?.ctx !== vault.ctx) return { safeMode, plugins: null };
     }
-    return { safeMode, plugins: approvedPlugins(lastListed.library, approvals) };
+    const plugins = approvedPlugins(lastListed.library, approvals);
+    // Approved, but its version left the library: it can't load.
+    const unavailable = Object.fromEntries(
+      approvals
+        .filter(({ id }) => !plugins.some((plugin) => plugin.manifest.id === id))
+        .map(({ id }) => [id, 'The version you installed is no longer in the library.']),
+    );
+    return { safeMode, plugins, unavailable };
   },
   async access() {
     const vault = vaultStore.get();
