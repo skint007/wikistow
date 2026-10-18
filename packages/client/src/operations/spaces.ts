@@ -71,7 +71,11 @@ async function unlessUnreadable<T>(read: () => Promise<T>): Promise<T | null> {
   }
 }
 
-/** The spaces this person can open, with their names decrypted (null if unreadable). */
+/**
+ * The spaces this person can open, with their names decrypted (null if
+ * unreadable), in their order: home space first (`home`), then as they
+ * arranged them (`saveSpaceOrder`), then the rest.
+ */
 export async function loadSpaces(ctx: ClientContext) {
   const { spaces } = await ctx.api.call(structureRoutes.listSpaces);
   return Promise.all(
@@ -81,12 +85,21 @@ export async function loadSpaces(ctx: ClientContext) {
       role: space.role,
       canPublish: space.canPublish,
       permissionVersion: space.permissionVersion,
+      home: space.home,
       // One space that fails its checks mustn't hide the others.
       metadata: await unlessUnreadable(() =>
         openName(ctx, { spaceId: space.id, subjectKind: 'space', subjectId: space.id }, space),
       ),
     })),
   );
+}
+
+/**
+ * Save the order of this person's spaces, the whole list. The server drops
+ * spaces they can't open and keeps the home space first whatever its place.
+ */
+export async function saveSpaceOrder(ctx: ClientContext, spaceIds: SpaceId[]) {
+  await ctx.api.call(structureRoutes.setSpaceOrder, { body: { spaceIds } });
 }
 
 /** What the tree shows for a page whose version can't be opened: every part of its label missing. */

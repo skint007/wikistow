@@ -78,11 +78,32 @@ export const ShareSummary = z.strictObject({
 
 const SpaceParams = z.object({ spaceId: SpaceId });
 
-/** Spaces the caller owns, or holds as a member of the space's own share. */
+/**
+ * A space in the caller's list. `home` marks a person's home space, the
+ * oldest personal space they own, which the list always puts first.
+ */
+export const ListedSpace = SpaceSummary.extend({ home: z.boolean() });
+
+/**
+ * Spaces the caller owns, or holds as a member of the space's own share. A
+ * person's come home space first, then in their saved order (`setSpaceOrder`),
+ * then the rest oldest first.
+ */
 export const listSpaces = {
   method: 'GET',
   path: '/api/spaces',
-  response: z.strictObject({ spaces: z.array(SpaceSummary) }),
+  response: z.strictObject({ spaces: z.array(ListedSpace) }),
+} as const satisfies RouteDef;
+
+/**
+ * Save the order of the caller's spaces, the whole list. IDs of spaces the
+ * caller can't open are dropped; the answer is what was saved. People only.
+ */
+export const setSpaceOrder = {
+  method: 'PUT',
+  path: '/api/me/space-order',
+  body: z.object({ spaceIds: z.array(SpaceId).max(1000) }),
+  response: z.strictObject({ spaceIds: z.array(SpaceId) }),
 } as const satisfies RouteDef;
 
 /** A new space owned by the caller; its name is the first metadata version, sealed to them. */
