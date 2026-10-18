@@ -4,16 +4,31 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.11.0 - 2026-10-18
+
 ### Highlights
+
+#### Upgrade notes
+
+- No two people on a server can share a name now. The upgrade renames later accounts that share one to “Name (2)”, “Name (3)”, oldest first.
+- The `bootstrap-admin` command is gone. A new server asks for its administrator the first time you open it. A server upgraded partway through the old setup, with an account but no administrator, needs to start again on an empty database.
+- Everyone with a vault can now see the name and email of everyone else on the server, to pick them when sharing. This is a deliberate choice for servers where people know each other.
+- Administration → Registration is now Administration → Settings. Plugins moved from Settings to Settings → Plugins.
 
 #### Features
 
-- A new server asks for its administrator the first time you open it. That account signs in straight away, before mail is set up. The `bootstrap-admin` command is gone.
+- A new server asks for its administrator the first time you open it. That account signs in straight away, before mail is set up.
 - When you share, add a group member or add an owner, you can pick the person from a list of people on the server, filtered by name or email, instead of typing their whole email.
+- Drag your spaces into the order you want in the rail, or use Move up and Move down in a space’s right-click menu. Your home space stays first, and the order follows you to every device.
 - Administrators can set up mail in Administration → Settings, and send a test email before saving. The server now starts without mail, and `SMTP_URL` and `SMTP_FROM` are optional; when set, they still win.
 - Administrators can connect an AI provider in Administration → Settings and pick the model from the provider’s own list, searchable even when it has hundreds. Each `AI_*` variable is now optional and still wins when set.
 - You can change your name in Settings → Account. No two people on a server can have the same name, ignoring case and spacing.
 - Owners can rename a contact with Rename… in the person’s menu in the Share dialog, Members and owners, and a group’s members. When that person changed their name on the server, the new one shows beside the field.
+
+#### UI polish
+
+- Settings is grouped into Account, Security, Appearance, Plugins and AI assistant, with a list to jump between them. Forms such as Email, Password and Two-factor sign-in open when you choose Change or Manage, and Desktop apps opens with Review.
+- Settings → Plugins has Installed and Library tabs and a search. A plugin’s own settings open from its row there.
 
 ### Changes
 
