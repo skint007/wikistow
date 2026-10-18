@@ -44,7 +44,7 @@ import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
 import { desktop, desktopUpdateQuery } from '../desktop';
-import { spacesQuery } from '../data/queries';
+import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
 import { isApple } from './search-model';
@@ -207,6 +207,7 @@ function SpaceTiles({
   const queryClient = useQueryClient();
   const query = spacesQuery(vault.ctx);
   const { data: spaces = [] } = useQuery(query);
+  const { data: order } = useQuery(spaceOrderQuery(vault.ctx));
   const params = useParams({ strict: false });
   const [creating, setCreating] = useState(false);
   // The tile being dragged, and the place it would land: before the tile at that index.
@@ -218,7 +219,7 @@ function SpaceTiles({
     return () => clearTimeout(timer);
   }, [failed]);
   // Nothing goes above the home space.
-  const first = spaces[0]?.home ? 1 : 0;
+  const first = order && spaces[0]?.id === order.homeId ? 1 : 0;
 
   async function move(from: number, to: number) {
     const before = queryClient.getQueryData(query.queryKey);

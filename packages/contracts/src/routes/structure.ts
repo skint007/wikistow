@@ -79,20 +79,26 @@ export const ShareSummary = z.strictObject({
 const SpaceParams = z.object({ spaceId: SpaceId });
 
 /**
- * A space in the caller's list. `home` marks a person's home space, the
- * personal space they have owned longest, which the list always puts first.
- */
-export const ListedSpace = SpaceSummary.extend({ home: z.boolean() });
-
-/**
  * Spaces the caller owns, or holds as a member of the space's own share. A
  * person's come home space first, then in their saved order (`setSpaceOrder`),
- * then the rest in the order they got them.
+ * then the rest in the order they got them. Its shape stays as released apps
+ * read it; the home space is named by `spaceOrder`.
  */
 export const listSpaces = {
   method: 'GET',
   path: '/api/spaces',
-  response: z.strictObject({ spaces: z.array(ListedSpace) }),
+  response: z.strictObject({ spaces: z.array(SpaceSummary) }),
+} as const satisfies RouteDef;
+
+/**
+ * The caller's home space, the personal space they have owned longest, which
+ * the space list always puts first (null if they own none), and their saved
+ * order. People only.
+ */
+export const spaceOrder = {
+  method: 'GET',
+  path: '/api/me/space-order',
+  response: z.strictObject({ homeId: SpaceId.nullable(), spaceIds: z.array(SpaceId) }),
 } as const satisfies RouteDef;
 
 /**

@@ -418,6 +418,28 @@ async function humanSpaces(db: Database, identityId: string) {
 }
 
 /**
+ * A person's spaces, home space and saved order. Spaces they left drop out
+ * of the saved order here, so one they get back comes last; unless it was
+ * saved again meanwhile.
+ */
+async function personSpaces(db: Database, accountId: string, identityId: string) {
+  const { bySpace, homeId } = await humanSpaces(db, identityId);
+  const [account] = await db
+    .select({ spaceOrder: users.spaceOrder })
+    .from(users)
+    .where(eq(users.id, accountId));
+  const stored = account?.spaceOrder ?? [];
+  const saved = stored.filter((id) => bySpace.has(id));
+  if (saved.length < stored.length) {
+    await db
+      .update(users)
+      .set({ spaceOrder: saved })
+      .where(and(eq(users.id, accountId), eq(users.spaceOrder, stored)));
+  }
+  return { bySpace, homeId, saved };
+}
+
+/**
  * Spaces in the person's order: the home space, then the saved order, then
  * the rest (new, or newly shared) in the order they got them.
  */
@@ -472,21 +494,7 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
       }
     }
   } else {
-    ({ bySpace, homeId } = await humanSpaces(db, identity.id));
-    const [account] = await db
-      .select({ spaceOrder: users.spaceOrder })
-      .from(users)
-      .where(eq(users.id, caller.accountId));
-    saved = account?.spaceOrder ?? [];
-    // Spaces they left drop out of the saved order, so one they get back
-    // comes last. Unless it was saved again meanwhile.
-    const kept = saved.filter((id) => bySpace.has(id));
-    if (kept.length < saved.length) {
-      await db
-        .update(users)
-        .set({ spaceOrder: kept })
-        .where(and(eq(users.id, caller.accountId), eq(users.spaceOrder, saved)));
-    }
+    ({ bySpace, homeId, saved } = await personSpaces(db, caller.accountId, identity.id));
   }
   const listed = inOrder([...bySpace.values()], homeId, saved);
   const heads = await servedMetadata(
@@ -500,14 +508,13 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
     if (!head) return [];
     // Its ID too may be one Milestone 1 allowed and today's rules refuse.
     const summary = readStored(
-      structureRoutes.ListedSpace,
+      structureRoutes.SpaceSummary,
       {
         id: space.id,
         kind: space.kind,
         role: access.role,
         canPublish: access.canPublish,
         permissionVersion: space.permissionVersion,
-        home: space.id === homeId,
         ...head,
       },
       { table: 'spaces', id: space.id },
@@ -515,6 +522,13 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
     );
     return summary ? [summary] : [];
   });
+}
+
+/** A person's home space and saved order, as `listSpaces` sorts by them. */
+export async function readSpaceOrder(db: Database, accountId: string) {
+  const { identity } = await requireCaller(db, { accountId, agentId: null });
+  const { homeId, saved } = await personSpaces(db, accountId, identity.id);
+  return { homeId, spaceIds: saved };
 }
 
 /**

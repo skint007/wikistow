@@ -73,8 +73,8 @@ async function unlessUnreadable<T>(read: () => Promise<T>): Promise<T | null> {
 
 /**
  * The spaces this person can open, with their names decrypted (null if
- * unreadable), in their order: home space first (`home`), then as they
- * arranged them (`saveSpaceOrder`), then the rest.
+ * unreadable), in their order: home space first (`loadSpaceOrder`), then as
+ * they arranged them (`saveSpaceOrder`), then the rest.
  */
 export async function loadSpaces(ctx: ClientContext) {
   const { spaces } = await ctx.api.call(structureRoutes.listSpaces);
@@ -85,13 +85,17 @@ export async function loadSpaces(ctx: ClientContext) {
       role: space.role,
       canPublish: space.canPublish,
       permissionVersion: space.permissionVersion,
-      home: space.home,
       // One space that fails its checks mustn't hide the others.
       metadata: await unlessUnreadable(() =>
         openName(ctx, { spaceId: space.id, subjectKind: 'space', subjectId: space.id }, space),
       ),
     })),
   );
+}
+
+/** This person's home space, which the space list always puts first, and their saved order. */
+export async function loadSpaceOrder(ctx: ClientContext) {
+  return ctx.api.call(structureRoutes.spaceOrder);
 }
 
 /**
