@@ -49,8 +49,8 @@ export type GroupAction =
 
 /**
  * The dialog for a change to one group (protocol sections 7.8 and 7.9):
- * add a member, found by exact email, sealing them every folder the group
- * has; add an agent for its person; remove one, or delete the group,
+ * add a member, picked or found by email, sealing them every folder the
+ * group has; add an agent for its person; remove one, or delete the group,
  * showing for each folder who keeps access and what each person keeps
  * before any keys change; rename it; or review a member's changed key.
  * `onDone` hears what was done, or that the group is gone.
@@ -315,7 +315,7 @@ const Keeps = ({ children }: { children: ReactNode }) => (
 );
 
 /**
- * Add someone to a group: find them by exact email, then look over the
+ * Add someone to a group: pick or find them by email, then look over the
  * folders the group has, with the access they will get and the history
  * notice, before every version is sealed to them with the membership.
  */

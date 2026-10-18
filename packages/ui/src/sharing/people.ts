@@ -64,8 +64,8 @@ const byFingerprint = (identity: PublicIdentity) =>
  * How `entry` compares with this app's pins. A pinned person is named only
  * by their label, never by the directory; someone new by the directory's
  * name, if it could be their label. `foundBy` is the email the person
- * typed, when they found someone by email: a label for that email naming
- * another key is a key change too.
+ * typed, or the one the list of people showed, when they found someone by
+ * email: a label for that email naming another key is a key change too.
  */
 export function describePerson(
   ctx: Viewer,

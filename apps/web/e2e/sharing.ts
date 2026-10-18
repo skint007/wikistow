@@ -64,8 +64,8 @@ export const shareDialog = (page: Page, name: string) =>
   page.getByRole('dialog', { name: `Share “${name}”` });
 
 /**
- * Share `folder` the first time, from its menu, with the person at `email`;
- * `check` looks at the preview before it is confirmed. Ends on the access list.
+ * Share `folder` the first time, from its menu, with the person at `email`,
+ * picked from the list; `check` looks at the preview before it is confirmed. Ends on the access list.
  */
 export async function shareFolder(
   page: Page,
@@ -78,7 +78,7 @@ export async function shareFolder(
   const dialog = shareDialog(page, folder);
   await dialog.getByLabel('Email').fill(email);
   await pick(dialog.getByLabel('Access'), ACCESS[access]);
-  await dialog.getByRole('button', { name: 'Next' }).click();
+  await dialog.getByRole('list', { name: 'People' }).getByRole('button', { name: email }).click();
   await expect(dialog.getByRole('region', { name: 'What will be shared' })).toContainText(folder);
   await check?.(dialog);
   await dialog.getByRole('button', { name: 'Share', exact: true }).click();
@@ -88,7 +88,7 @@ export async function shareFolder(
   return dialog;
 }
 
-/** Add someone from an open Share dialog's access list. */
+/** Add someone from an open Share dialog's access list, by typing their email. */
 export async function addPerson(
   dialog: ReturnType<typeof shareDialog>,
   email: string,
@@ -98,7 +98,7 @@ export async function addPerson(
   const adding = dialog.getByRole('region', { name: 'Add someone' });
   await adding.getByLabel('Email').fill(email);
   await pick(adding.getByLabel('Access'), ACCESS[access]);
-  await adding.getByRole('button', { name: 'Add' }).click();
+  await adding.getByRole('button', { name: 'Add', exact: true }).click();
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(dialog.getByRole('status')).toHaveText(`${name} has access now.`);
 }
