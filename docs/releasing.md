@@ -62,7 +62,7 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, that Electron is its major's newest patch, and that every release in the commit's history, this one too, has a changelog entry dated the day of its tag.
    2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
-   3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI download](#the-cli-download) and their `SHA256SUMS`.
+   3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
    4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)).
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
@@ -133,7 +133,7 @@ Each release has the desktop app, for x86_64, from the tested build:
 | `wikistow-desktop-<version>.tar.gz` | The AUR package, which runs it on Arch's `electron44` |
 | `wikistow-desktop-<version>-amd64.deb` | Debian 13, Ubuntu 24.04 and Ubuntu 26.04 |
 | `wikistow-desktop-<version>-x86_64.rpm` | Fedora 43 and 44 |
-| `SHA256SUMS` | The checksums of the three, and of the [CLI's archive](#the-cli-download) |
+| `SHA256SUMS` | The checksums of the three, and of the [CLI downloads](#the-cli-downloads) |
 
 Check a download before you use it:
 
@@ -153,17 +153,35 @@ sha256sum -c --ignore-missing SHA256SUMS
 
 The archive is built the same way every time, from the commit's files and time.
 
-## The CLI download
+## The CLI downloads
 
-Each release also has the `wikistow` command-line client as `wikistow-cli-<version>.tar.gz`. It is the one-file bundle CI built and ran in its `smoke` job, and needs nothing but Node.js 26 or newer, on any system. It holds what the Arch package installs:
+Each release has the `wikistow` command-line client as one binary per system, which runs with nothing else installed:
 
-| File | Installed as |
+| File | System |
 | --- | --- |
-| `wikistow.mjs` | `/usr/lib/wikistow-cli/wikistow.mjs` |
-| `wikistow` | `/usr/bin/wikistow`, which runs it on the system Node |
-| `LICENSE` | `/usr/share/licenses/wikistow-cli-bin/LICENSE` |
+| `wikistow-linux-x64`, `wikistow-linux-arm64` | Linux with glibc |
+| `wikistow-darwin-arm64`, `wikistow-darwin-x64` | macOS |
+| `wikistow-windows-x64.exe` | Windows |
 
-Without the package, run it as `node wikistow.mjs`. Before publishing, the release unpacks the archive outside the workspace and checks that `node wikistow.mjs --version` prints the release's version. Like the desktop archive, it comes out the same every time from the same commit.
+`apps/cli/scripts/binaries.sh` builds them with `bun build --compile` from `wikistow.mjs`, the one-file bundle CI built and tested. Bun cross-builds every system from the Linux runner, putting the bundle into the Bun runtime for that system. `release.yml` pins Bun's version; raise it on purpose, and check the binaries on each system when you do. The script then copies the Linux x64 binary outside the workspace and checks that it prints the release's version and, unenrolled, exits with status 5. A `.env` or `bunfig.toml` in the folder a binary runs in changes nothing: the build turns off Bun's loading of both.
+
+Bun signs the macOS binaries ad hoc, which Apple Silicon requires before it runs anything. They aren't notarized, so macOS refuses one downloaded in a browser until its quarantine flag is removed. `curl` sets no such flag, so the install script needs nothing more.
+
+Beside the binaries are their install scripts, from `apps/cli/install/`:
+
+- `install.sh`, for Linux and macOS: `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`. It picks the binary for the system, checks it against `SHA256SUMS`, puts it in `~/.local/bin`, and adds that to `PATH` in the shell's startup file (`.zshrc`, `.bashrc`, `.bash_profile` on macOS, fish's `config.fish`, or `.profile`) if it's missing. Musl systems such as Alpine get a plain refusal.
+- `install.ps1`, for Windows: `irm https://github.com/skint007/wikistow/releases/latest/download/install.ps1 | iex`. The same checks, into `%LOCALAPPDATA%\Programs\wikistow`, added to the user's `PATH` as stored, so its other entries keep their `%VARIABLES%`.
+
+Running either again updates the CLI. Both install the latest release; `WIKISTOW_RELEASE_URL` points them at another release's downloads, such as `https://github.com/skint007/wikistow/releases/download/v0.13.0`, or a local copy for testing.
+
+The release also has `wikistow-cli-<version>.tar.gz`, with `wikistow.mjs` and the licence, for systems without a binary: run it as `node wikistow.mjs` on Node.js 26 or newer. Before publishing, the release unpacks it outside the workspace and checks that it prints the release's version. Like the desktop archive, it comes out the same every time from the same commit. `LICENSE` is a download of its own too, for the Arch package.
+
+To build the binaries yourself, after the build in the README, put Oven's own Bun at the pinned version on your `PATH`, from [its releases](https://github.com/oven-sh/bun/releases). A distribution's package, such as Arch's `bun`, builds the binary for its own system with the libraries it links to, so that one won't run elsewhere:
+
+```sh
+cd apps/cli
+scripts/binaries.sh "$(node ../../scripts/version.ts)" dist/binaries
+```
 
 ## The .deb and .rpm
 
@@ -189,9 +207,9 @@ CI pins nfpm's version and checksum in `linux-packages`.
 
 ## The AUR packages
 
-Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
+Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's Linux binary for its architecture, x86_64 or aarch64, with `LICENSE`. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
 
-`.github/workflows/aur.yml` publishes both, once the release's archives are downloadable, in a job for each. Each job sets its PKGBUILD's version, `pkgrel` and checksum from the release, builds the package as a user who isn't root, checking the downloaded archive against the release's `SHA256SUMS`, and generates `.SRCINFO`. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/<package>.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped. The AUR creates a package on its first push. One package failing doesn't stop the other.
+`.github/workflows/aur.yml` publishes both, once the release's files are up, in a job for each. Each job sets its PKGBUILD's version, `pkgrel` and checksums from the release's `SHA256SUMS`, builds the package as a user who isn't root, checking what it downloads against them, and generates `.SRCINFO`. The runner is x86_64, so the build downloads only the x86_64 binary; the aarch64 checksum comes from `SHA256SUMS` alone. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/<package>.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped. The AUR creates a package on its first push. One package failing doesn't stop the other.
 
 To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version, the package (or both) and the next `pkgrel`, such as `2`. Each package counts its own `pkgrel`, and the next release starts both again at 1.
 
