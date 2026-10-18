@@ -1,4 +1,5 @@
 import { fromBase64, toBase64 } from '@wikistow/client';
+import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
 
 /**
@@ -10,13 +11,23 @@ import { z } from 'zod';
  * one starts with a copy of it). Forgetting deletes the wrapping key too,
  * which makes every tab's copy useless: a lock or sign-out in one tab means
  * the next load anywhere asks again.
+ *
+ * Asked to, the browser also remembers the unlock for later visits: one more
+ * copy, sealed the same way, in localStorage, with the vault version it was
+ * remembered at, so a passphrase change made anywhere stops it opening.
  */
 const ITEM = 'wikistow.vault';
 const DATABASE = 'wikistow-vault';
 const STORE = 'keys';
 const WRAPPING_KEY = 'tab-unlock';
 
-const Stored = z.object({ accountId: z.string(), iv: z.string(), sealed: z.string() });
+// `version` only on the remembered copy.
+const Stored = z.object({
+  accountId: z.string(),
+  iv: z.string(),
+  sealed: z.string(),
+  version: z.number().int().optional(),
+});
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -70,8 +81,12 @@ function inTurn<T>(work: () => Promise<T>): Promise<T> {
   return turn;
 }
 
-/** Keep `vaultKey` for this tab's next load. It is copied now, so zeroing it after is fine. */
-export function rememberInTab(accountId: string, vaultKey: Uint8Array): Promise<void> {
+/** Copy `vaultKey` now and seal the copy in turn, under the shared wrapping key. */
+function sealInTurn(
+  accountId: string,
+  vaultKey: Uint8Array,
+  keep: (stored: z.input<typeof Stored>) => void,
+): Promise<void> {
   const copy = new Uint8Array(vaultKey);
   return inTurn(async () => {
     try {
@@ -82,24 +97,50 @@ export function rememberInTab(accountId: string, vaultKey: Uint8Array): Promise<
         key,
         copy,
       );
-      const stored = { accountId, iv: toBase64(iv), sealed: toBase64(new Uint8Array(sealed)) };
-      sessionStorage.setItem(ITEM, JSON.stringify(stored satisfies z.input<typeof Stored>));
+      keep({ accountId, iv: toBase64(iv), sealed: toBase64(new Uint8Array(sealed)) });
     } finally {
       copy.fill(0);
     }
   });
 }
 
-/**
- * The vault key this tab kept for `accountId`, or null. A copy kept for
- * someone else, or one that no longer opens, is dropped.
- */
-export function rememberedInTab(accountId: string): Promise<Uint8Array | null> {
-  return inTurn(() => openKept(accountId));
+/** Keep `vaultKey` for this tab's next load. It is copied now, so zeroing it after is fine. */
+export function rememberInTab(accountId: string, vaultKey: Uint8Array): Promise<void> {
+  return sealInTurn(accountId, vaultKey, (stored) =>
+    sessionStorage.setItem(ITEM, JSON.stringify(stored)),
+  );
 }
 
-async function openKept(accountId: string): Promise<Uint8Array | null> {
-  const item = sessionStorage.getItem(ITEM);
+/**
+ * Remember `vaultKey` for later visits, while this browser stays signed in
+ * and the vault stays at `version`. It is copied now, so zeroing it after is
+ * fine.
+ */
+export function rememberInBrowser(
+  accountId: string,
+  vaultKey: Uint8Array,
+  version: number,
+): Promise<void> {
+  return sealInTurn(accountId, vaultKey, (stored) => {
+    localStorage.setItem(ITEM, JSON.stringify({ ...stored, version }));
+    changed();
+  });
+}
+
+/**
+ * The vault key this tab kept for `accountId`, or else the one this browser
+ * remembers with the version it was remembered at, or null. A copy kept for
+ * someone else, or one that no longer opens, is dropped.
+ */
+export function rememberedInTab(accountId: string) {
+  return inTurn(
+    async () =>
+      (await openKept(sessionStorage, accountId)) ?? (await openKept(localStorage, accountId)),
+  );
+}
+
+async function openKept(storage: Storage, accountId: string) {
+  const item = storage.getItem(ITEM);
   if (!item) return null;
   try {
     const stored = Stored.parse(JSON.parse(item));
@@ -111,17 +152,53 @@ async function openKept(accountId: string): Promise<Uint8Array | null> {
       key,
       bytes(stored.sealed),
     );
-    return new Uint8Array(opened);
+    return { vaultKey: new Uint8Array(opened), version: stored.version };
   } catch {
-    sessionStorage.removeItem(ITEM);
+    storage.removeItem(ITEM);
+    changed();
     return null;
   }
 }
 
-/** Forget this tab's copy, and the wrapping key that would open any tab's. */
+/** Stop remembering the unlock for later visits. Tabs keep theirs for a refresh. */
+export function forgetInBrowser(): Promise<void> {
+  return inTurn(async () => {
+    localStorage.removeItem(ITEM);
+    changed();
+  });
+}
+
+/** Forget this tab's copy, the remembered one, and the wrapping key that would open any tab's. */
 export function forgetInTab(): Promise<void> {
   return inTurn(async () => {
     sessionStorage.removeItem(ITEM);
+    localStorage.removeItem(ITEM);
+    changed();
     await request(indexedDB.deleteDatabase(DATABASE));
   });
+}
+
+const listeners = new Set<() => void>();
+function changed() {
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+  // Remembering or forgetting in another tab shows here too.
+  const elsewhere = (event: StorageEvent) => {
+    if (event.key === ITEM || event.key === null) listener();
+  };
+  listeners.add(listener);
+  window.addEventListener('storage', elsewhere);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener('storage', elsewhere);
+  };
+}
+
+const remembered = () => localStorage.getItem(ITEM) !== null;
+
+/** Whether this browser remembers the unlock for later visits. */
+export function useRememberedInBrowser(): boolean {
+  return useSyncExternalStore(subscribe, remembered);
 }

@@ -17,17 +17,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Picker } from '@/components/ui/picker';
+import { Switch } from '@/components/ui/switch';
 import { AvatarSettings } from '../../../account/avatar-settings';
 import { AiSettings } from '../../../ai/ai-settings';
 import { api, meQuery } from '../../../api';
 import { authClient } from '../../../auth/client';
 import { useReauth } from '../../../auth/reauth';
+import { desktop } from '../../../desktop';
 import { errorMessage, unwrap } from '../../../errors';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
+import { rememberOpenVault } from '../../../vault/open';
+import { useVault } from '../../../vault/store';
+import { forgetInBrowser, useRememberedInBrowser } from '../../../vault/tab-unlock';
 
 export const Route = createFileRoute('/_app/settings/')({ component: Settings });
 
@@ -75,6 +80,7 @@ function Settings() {
               <ChangePassword />
               <TwoFactor />
               <IdleLock />
+              {!desktop && <RememberUnlock />}
               <DesktopApps />
             </SettingsGroup>
             <SettingsGroup id="appearance" title="Appearance" note="Follows your account">
@@ -123,6 +129,50 @@ function IdleLock() {
         />
       }
     />
+  );
+}
+
+/**
+ * Whether this browser opens the vault on later visits without the
+ * passphrase. Turning it on takes the open vault's key, so it needs the vault
+ * open; a lock, sign-out or passphrase change turns it off.
+ */
+function RememberUnlock() {
+  const vault = useVault();
+  const remembered = useRememberedInBrowser();
+  const [error, setError] = useState<string | null>(null);
+  async function change(on: boolean) {
+    setError(null);
+    try {
+      if (!on) await forgetInBrowser();
+      else if (vault.status === 'unlocked') await rememberOpenVault(vault.vault);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+  const locked = vault.status !== 'unlocked';
+  return (
+    <SettingRow
+      name="Remember unlock"
+      scope={THIS_DEVICE}
+      state={
+        <>
+          Opens your vault on later visits without the passphrase, until you lock it or sign out.
+          Anyone who can use this browser profile can read it.
+          {locked && !remembered && ' Unlock your vault to turn it on.'}
+        </>
+      }
+      action={
+        <Switch
+          aria-label="Remember unlock"
+          checked={remembered}
+          disabled={locked && !remembered}
+          onCheckedChange={(on) => void change(on)}
+        />
+      }
+    >
+      {error && <FormMessage>{error}</FormMessage>}
+    </SettingRow>
   );
 }
 

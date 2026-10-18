@@ -1,6 +1,6 @@
 import { CryptoError } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, redirect, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Field } from '@/components/form/field';
@@ -14,11 +14,19 @@ import { meQuery } from '../../../api';
 import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
 import { vaultMessage } from '../../../vault/messages';
-import { unlockWith } from '../../../vault/open';
+import { rememberOpenVault, unlockWith } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
+import { forgetInBrowser } from '../../../vault/tab-unlock';
 
 export const Route = createFileRoute('/_app/vault/unlock')({
   validateSearch: z.object({ redirect: z.string().optional().catch(undefined) }),
+  // A browser's kept or remembered unlock may have opened the vault on the
+  // way here (`_app`): go on, rather than ask, and forget it on unlocking.
+  beforeLoad: ({ search }) => {
+    if (!desktop && vaultStore.get().status === 'unlocked') {
+      throw redirect({ href: safeRedirect(search.redirect) });
+    }
+  },
   onLeave: () => vaultStore.dropStaged(),
   component: Unlock,
 });
@@ -31,9 +39,10 @@ function Unlock() {
   const [busy, setBusy] = useState(false);
   const [remember, setRemember] = useState(false);
   // The desktop app can keep the unlock only in a secret store it trusts.
+  // A browser always can.
   const { data: canRemember } = useQuery({
     queryKey: ['desktop-secure-storage'],
-    queryFn: () => desktop?.secureStorage() ?? false,
+    queryFn: () => desktop?.secureStorage() ?? true,
   });
   const accountId = me?.account.id;
   const [checkedRemembered, setCheckedRemembered] = useState(!desktop);
@@ -77,9 +86,14 @@ function Unlock() {
     setError(null);
     try {
       const vault = await unlockWith({ kind: 'passphrase', passphrase }, started);
-      // The switch says what happens at the next launch, whatever was kept before.
-      if (remember) await desktop?.rememberVault(vault.accountId, vault.vaultKey);
-      else await desktop?.forgetVault();
+      // The switch says what happens at the next launch or visit, whatever was kept before.
+      if (desktop) {
+        if (remember) await desktop.rememberVault(vault.accountId, vault.vaultKey);
+        else await desktop.forgetVault();
+      } else {
+        // The vault is open by now: failing to remember it isn't failing to unlock.
+        await (remember ? rememberOpenVault(vault) : forgetInBrowser()).catch(() => {});
+      }
       await navigate({ to: safeRedirect(redirect) });
     } catch (caught) {
       if (safe) tabSafeMode.set(false);
@@ -109,11 +123,14 @@ function Unlock() {
           <div className="grid gap-1.5">
             <div className="flex items-center gap-3">
               <Switch id="remember" checked={remember} onCheckedChange={setRemember} />
-              <Label htmlFor="remember">Remember on this computer</Label>
+              <Label htmlFor="remember">
+                {desktop ? 'Remember on this computer' : 'Remember on this browser'}
+              </Label>
             </div>
             <p className="text-sm text-muted-foreground">
-              Unlocks when WikiStow starts, until you lock it or sign out. Your keyring keeps the
-              key.
+              {desktop
+                ? 'Unlocks when WikiStow starts, until you lock it or sign out. Your keyring keeps the key.'
+                : 'Unlocks on later visits, until you lock it or sign out. Anyone who can use this browser profile can read your vault.'}
             </p>
           </div>
         )}

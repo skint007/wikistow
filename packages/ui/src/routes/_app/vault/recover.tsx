@@ -7,9 +7,11 @@ import { AuthCard, FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { api } from '../../../api';
 import { useReauth } from '../../../auth/reauth';
+import { desktop } from '../../../desktop';
 import { vaultMessage } from '../../../vault/messages';
 import { startSession } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
+import { forgetInBrowser } from '../../../vault/tab-unlock';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
 import { PassphraseFields, readPassphrase } from './setup';
 
@@ -92,6 +94,8 @@ function NewPassphrase({ vault }: { vault: UnlockedVault }) {
           passphrase: passphrase.value,
         }),
       );
+      // A browser remembering the unlock asks for the new passphrase next visit.
+      if (!desktop) await forgetInBrowser();
       vaultStore.unlock(await startSession(vault), vault);
       await navigate({ to: '/' });
     } catch (caught) {

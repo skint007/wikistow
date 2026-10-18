@@ -7,10 +7,11 @@ import {
   type UnlockedVault,
   type VaultSecret,
 } from '@wikistow/client';
+import { vaultRoutes } from '@wikistow/contracts';
 import { api } from '../api';
 import { desktop } from '../desktop';
 import { forgetKeptUnlock, vaultStore } from './store';
-import { rememberedInTab } from './tab-unlock';
+import { forgetInBrowser, rememberedInTab, rememberInBrowser } from './tab-unlock';
 import { workerVaultCrypto } from './worker-crypto';
 
 /**
@@ -54,8 +55,21 @@ export async function unlockWith(secret: VaultSecret, started: number) {
 let restoring: Promise<void> | null = null;
 
 /**
- * Open the vault this browser tab kept through a refresh, if it kept one for
- * `accountId`. Otherwise the vault stays locked, and opening a page asks.
+ * Remember the open vault's key in this browser for later visits, until a
+ * lock, sign-out or passphrase change. Nothing if the vault locked meanwhile.
+ */
+export async function rememberOpenVault(vault: UnlockedVault) {
+  const started = vaultStore.epoch();
+  const { version } = await api.call(vaultRoutes.getVault);
+  if (vaultStore.epoch() === started) {
+    await rememberInBrowser(vault.accountId, vault.vaultKey, version);
+  }
+}
+
+/**
+ * Open the vault this browser tab kept through a refresh, or the one this
+ * browser remembers, if there is one for `accountId`. Otherwise the vault
+ * stays locked, and opening a page asks.
  * Navigations while one runs share it: a second would stage over its keys.
  */
 export function restoreInTab(accountId: string): Promise<void> {
@@ -67,9 +81,15 @@ export function restoreInTab(accountId: string): Promise<void> {
 
 async function restore(accountId: string) {
   const started = vaultStore.epoch();
-  const vaultKey = await rememberedInTab(accountId).catch(() => null);
-  if (!vaultKey) return;
+  const kept = await rememberedInTab(accountId).catch(() => null);
+  if (!kept) return;
+  const { vaultKey, version } = kept;
   try {
+    // The passphrase changed since it was remembered: ask for the new one.
+    if (version !== undefined && (await api.call(vaultRoutes.getVault)).version !== version) {
+      await forgetInBrowser();
+      return;
+    }
     await unlockWith({ kind: 'vault-key', vaultKey }, started);
   } catch (caught) {
     // A key that no longer opens this vault is no use to keep. Anything
