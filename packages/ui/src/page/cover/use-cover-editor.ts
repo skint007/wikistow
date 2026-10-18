@@ -108,8 +108,8 @@ export function useCoverEditor({
 
   /**
    * Resize, encrypt and upload an icon image, then show it in place of the
-   * emoji, unless another icon or emoji was chosen meanwhile. Saves wait for
-   * it. Rejects with a message to show.
+   * emoji or icon, unless another image, icon or emoji was chosen meanwhile.
+   * Saves wait for it. Rejects with a message to show.
    */
   function uploadIcon(file: File): Promise<void> {
     const handle = editor.current;
@@ -121,7 +121,7 @@ export function useCoverEditor({
         handle.checkSize();
         const ref = await pageOperations.uploadAttachment(ctx, page, await iconImage(file));
         if (vaultStore.epoch() !== epoch || iconChoices.current !== choices) return;
-        apply({ icon: { attachmentId: ref.id } }, ref);
+        apply({ icon: { attachmentId: ref.id }, symbol: null }, ref);
       } catch (caught) {
         throw new Error(uploadMessage(caught));
       }
@@ -138,11 +138,16 @@ export function useCoverEditor({
       bannerChoices.current += 1;
       apply({ banner });
     },
-    /** Choosing an emoji removes the image; removing the emoji keeps it. */
+    /** Choosing an emoji removes the image or icon; removing the emoji keeps them. */
     setEmoji: (emoji: string | null) => {
       if (emoji === null) return apply({ emoji });
       iconChoices.current += 1;
-      apply({ emoji, icon: null });
+      apply({ emoji, icon: null, symbol: null });
+    },
+    /** Choosing an icon of the icon set removes the image; null removes the icon. */
+    setSymbol: (name: string | null) => {
+      iconChoices.current += 1;
+      apply(name === null ? { symbol: null } : { symbol: { name }, icon: null });
     },
     uploadIcon,
     /** Remove the image, so the emoji shows again. */

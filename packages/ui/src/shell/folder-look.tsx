@@ -3,6 +3,8 @@ import {
   FOLDER_TINTS,
   folderIconChange,
   folderIconOf,
+  folderSymbolChange,
+  folderSymbolOf,
   ICON_NAMESPACE,
   spaceOperations,
   type FolderIcon,
@@ -14,7 +16,7 @@ import {
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { IconImage } from '@/components/icon-image';
+import { Picture, SymbolIcon, symbolWords } from '@/components/symbol-icon';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -51,22 +53,36 @@ export const folderLook = ({ emoji, tint }: NodeMetadata): FolderLook => ({
 export type PickedImage = { icon: FolderIcon; url: string };
 
 /**
- * What the folder fields show and change: a look, and an image, which is
- * the folder's own (`kept`), none, or one picked here.
+ * What the folder fields show and change: a look, an icon of the icon set
+ * by name, or none, and an image, which is the folder's own (`kept`), none,
+ * or one picked here. Picking an icon drops the image and the other way
+ * round.
  */
-export type LookChoice = FolderLook & { image: 'kept' | PickedImage | null };
+export type LookChoice = FolderLook & {
+  symbol: string | null;
+  image: 'kept' | PickedImage | null;
+};
 
-/** How a new folder starts: ⭐ on blue, no image. */
-export const DEFAULT_CHOICE: LookChoice = { ...DEFAULT_FOLDER_LOOK, image: null };
+/** How a new folder starts: ⭐ on blue, no icon or image. */
+export const DEFAULT_CHOICE: LookChoice = { ...DEFAULT_FOLDER_LOOK, symbol: null, image: null };
 
 const sameLook = (a: LookChoice, b: LookChoice) =>
-  a.emoji === b.emoji && a.tint === b.tint && a.image === b.image;
+  a.emoji === b.emoji && a.tint === b.tint && a.symbol === b.symbol && a.image === b.image;
 
 /** The image picked in the fields to save, if any. */
 export const pickedIcon = ({ image }: Pick<LookChoice, 'image'>) =>
   image === 'kept' || image === null ? null : image.icon;
 
-/** A folder's tile: its emoji, or image, on its tint. A tint this app doesn't know shows blue. */
+/** The `extensions` change for the icon and image picked, from what was `current`. */
+export const pictureChange = (
+  look: Pick<LookChoice, 'symbol' | 'image'>,
+  current: Pick<LookChoice, 'symbol' | 'image'>,
+): NodeMetadata['extensions'] => ({
+  ...(look.symbol === current.symbol ? {} : folderSymbolChange(look.symbol)),
+  ...(look.image === current.image ? {} : folderIconChange(pickedIcon(look))),
+});
+
+/** A folder's tile: its emoji, icon or image, on its tint. A tint this app doesn't know shows blue. */
 export const tileClass = (tint: string) =>
   cn(
     'grid shrink-0 place-items-center overflow-hidden rounded-folder leading-none',
@@ -98,7 +114,7 @@ export function useFolderIcon(
   return data ?? null;
 }
 
-/** A folder's tile in the tree: its image, or its emoji when it has none, on its tint. */
+/** A folder's tile in the tree: its image, else its icon, else its emoji, on its tint. */
 export function FolderTile({
   metadata,
   emoji,
@@ -111,17 +127,37 @@ export function FolderTile({
   className?: string;
 }) {
   const url = useFolderIcon(metadata);
+  const symbol =
+    metadata?.opened.kind === 'current' ? folderSymbolOf(metadata.opened.metadata) : null;
   return (
     <span aria-hidden className={cn(tileClass(tint), className)}>
-      <IconImage src={url} fallback={emoji} />
+      <Picture image={url} symbol={symbol} emoji={emoji} />
     </span>
   );
 }
 
+/** The label of a tile that opens the picker, for what it shows. */
+export const pictureLabel = ({
+  image,
+  symbol,
+  emoji,
+}: {
+  image: string | null;
+  symbol: string | null;
+  emoji: string | null;
+}) =>
+  image
+    ? 'Change image'
+    : symbol
+      ? `Change icon ${symbolWords(symbol)}`
+      : emoji
+        ? `Change emoji ${emoji}`
+        : 'Choose an emoji, icon or image';
+
 /**
- * A folder's emoji or image, from the page emoji picker, and its colour,
- * one of the design's tints, with a way back to ⭐ on blue. For a new
- * folder and for changing one. `kept` is the folder's own image, if any.
+ * A folder's emoji, icon or image, from the page emoji picker, and its
+ * colour, one of the design's tints, with a way back to ⭐ on blue. For a
+ * new folder and for changing one. `kept` is the folder's own image, if any.
  */
 export function FolderLookFields({
   look,
@@ -138,19 +174,24 @@ export function FolderLookFields({
   return (
     <div className="grid gap-4">
       <div className="grid justify-items-start gap-2">
-        <span className="text-sm font-medium">Emoji or image</span>
+        <span className="text-sm font-medium">Emoji, icon or image</span>
         <EmojiPopover
           current={look.emoji}
           open={picking}
           onOpenChange={setPicking}
-          // Choosing an emoji drops the image; choosing an image keeps the emoji to fall back on.
-          onPick={(emoji) => onChange({ ...look, emoji, image: null })}
+          // Choosing an emoji drops the icon or image; choosing either keeps the emoji to fall back on.
+          onPick={(emoji) => onChange({ ...look, emoji, symbol: null, image: null })}
+          symbol={{
+            current: look.symbol,
+            onPick: (symbol) => onChange({ ...look, symbol, image: null }),
+            onRemove: () => onChange({ ...look, symbol: null }),
+          }}
           image={{
             current: image,
             onPick: async (file) => {
               const icon = await iconImage(file);
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
-              onChange({ ...look, image: { icon, url } });
+              onChange({ ...look, symbol: null, image: { icon, url } });
             },
             onRemove: () => onChange({ ...look, image: null }),
           }}
@@ -158,13 +199,13 @@ export function FolderLookFields({
           <button
             ref={tile}
             type="button"
-            aria-label={image ? 'Change image' : `Change emoji ${look.emoji}`}
+            aria-label={pictureLabel({ image, symbol: look.symbol, emoji: look.emoji })}
             className={cn(
               tileClass(look.tint),
               'size-12 cursor-pointer text-2xl outline-2 outline-offset-[3px] outline-border outline-dashed hover:tint focus-visible:outline-ring active:tint-strong',
             )}
           >
-            <IconImage src={image} fallback={look.emoji} />
+            <Picture image={image} symbol={look.symbol} emoji={look.emoji} />
           </button>
         </EmojiPopover>
       </div>
@@ -191,7 +232,11 @@ export function FolderLookFields({
                       : 'group-hover:ring-2 group-hover:ring-foreground/25',
                   )}
                 >
-                  {look.emoji}
+                  {look.symbol ? (
+                    <SymbolIcon name={look.symbol} fallback={look.emoji} />
+                  ) : (
+                    look.emoji
+                  )}
                 </span>
                 {tint[0]?.toUpperCase() + tint.slice(1)}
               </button>
@@ -278,7 +323,11 @@ function LookForm({
       </DialogHeader>
     );
   }
-  const current: LookChoice = { ...folderLook(opened), image: folderIconOf(opened) && 'kept' };
+  const current: LookChoice = {
+    ...folderLook(opened),
+    symbol: folderSymbolOf(opened),
+    image: folderIconOf(opened) && 'kept',
+  };
   const look = picked ?? current;
 
   async function save() {
@@ -286,16 +335,12 @@ function LookForm({
     setBusy(true);
     setError(null);
     try {
-      const { emoji, tint, image } = look;
+      const { emoji, tint } = look;
       await spaceOperations.updateMetadata(ctx, {
         spaceId,
         subject: { kind: 'folder', folderId },
         current: loaded,
-        changes: {
-          emoji,
-          tint,
-          ...(image === current.image ? {} : { extensions: folderIconChange(pickedIcon(look)) }),
-        },
+        changes: { emoji, tint, extensions: pictureChange(look, current) },
       });
       await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
       onDone();

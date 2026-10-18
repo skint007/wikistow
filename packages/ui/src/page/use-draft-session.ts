@@ -1,5 +1,4 @@
 import {
-  coverOf,
   draftLinkTargets,
   pageOperations,
   type ClientContext,
@@ -157,8 +156,7 @@ function appPorts(
             return {
               ...entry,
               title: payload.title,
-              emoji: coverOf(payload).emoji,
-              icon: pageOperations.pageIconOf(payload, 'draft'),
+              ...pageOperations.labelCover(payload, 'draft'),
               region,
               draftHead: revisionId,
               draftChanges: true,

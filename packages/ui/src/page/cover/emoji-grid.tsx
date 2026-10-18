@@ -1,8 +1,9 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EMOJI_GROUPS } from './emoji-data';
 import { parseGroups, searchEmoji } from './emoji-model';
+import { firstInGrid, moveInGrid } from './grid-keys';
 
 const GROUPS = parseGroups(EMOJI_GROUPS);
 const COLUMNS = 8;
@@ -29,24 +30,6 @@ export default function EmojiGrid({
   const grid = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
 
-  const buttons = () => [...(grid.current?.querySelectorAll<HTMLElement>('[data-emoji]') ?? [])];
-  function move(event: KeyboardEvent) {
-    const steps: Record<string, number> = {
-      ArrowRight: 1,
-      ArrowLeft: -1,
-      ArrowDown: COLUMNS,
-      ArrowUp: -COLUMNS,
-    };
-    const step = steps[event.key];
-    if (step === undefined) return;
-    event.preventDefault();
-    const all = buttons();
-    const at = all.findIndex((button) => button === document.activeElement);
-    const next = at + step;
-    if (next < 0) search.current?.focus();
-    else all[Math.min(next, all.length - 1)]?.focus();
-  }
-
   return (
     <div className="grid gap-2">
       <Input
@@ -60,13 +43,17 @@ export default function EmojiGrid({
             onPick(first.emoji);
           } else if (event.key === 'ArrowDown') {
             event.preventDefault();
-            buttons()[0]?.focus();
+            firstInGrid(grid)?.focus();
           }
         }}
         placeholder="Search emoji"
         aria-label="Search emoji"
       />
-      <div ref={grid} onKeyDown={move} className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+      <div
+        ref={grid}
+        onKeyDown={(event) => moveInGrid(event, { grid, search, columns: COLUMNS })}
+        className="grid max-h-72 gap-2 overflow-y-auto pr-1"
+      >
         {groups.map((group) => (
           <section key={group.title} aria-label={group.title} className="grid gap-1">
             <h3 className="text-xs font-bold text-muted-foreground">{group.title}</h3>
@@ -75,7 +62,7 @@ export default function EmojiGrid({
                 <button
                   key={entry.emoji}
                   type="button"
-                  data-emoji
+                  data-pick
                   title={entry.words}
                   aria-label={entry.words}
                   aria-pressed={entry.emoji === current}

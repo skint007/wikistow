@@ -281,6 +281,7 @@ function PageBody({
       : payload && { cover: coverOf(payload), attachments: payload.attachments };
   const emoji = shown?.cover.emoji ?? null;
   const icon = shown?.cover.icon ?? null;
+  const symbol = shown?.cover.symbol?.name ?? null;
   const { data: iconUrl } = useQuery(
     decryptedQuery(
       { ctx, page, audience: model.view },
@@ -471,7 +472,7 @@ function PageBody({
                           className="min-[900px]:hidden"
                           onSelect={() => openFromMenu(changeEmoji)}
                         >
-                          {icon ? 'Change image' : 'Change emoji'}
+                          {icon ? 'Change image' : symbol ? 'Change icon' : 'Change emoji'}
                         </DropdownMenuItem>
                       </>
                     )}
@@ -525,6 +526,11 @@ function PageBody({
           <EmojiPicker
             emoji={emoji}
             hasImage={icon !== null}
+            symbol={{
+              current: symbol,
+              onPick: coverEditor.setSymbol,
+              onRemove: () => coverEditor.setSymbol(null),
+            }}
             image={{
               current: iconUrl ?? null,
               onPick: coverEditor.uploadIcon,
@@ -538,7 +544,9 @@ function PageBody({
           />
         ) : (
           // An image with no emoji shows once it's decrypted, not as an empty badge.
-          (emoji || iconUrl) && <PageBadge emoji={emoji} image={iconUrl ?? null} />
+          (emoji || symbol || iconUrl) && (
+            <PageBadge emoji={emoji} symbol={symbol} image={iconUrl ?? null} />
+          )
         )}
       </CoverBand>
       {/* The page's column, as wide as the card, and beside it, where the card is wide enough,
@@ -547,7 +555,7 @@ function PageBody({
         data-region="page.body"
         className={cn(
           'flex w-full flex-1 flex-wrap gap-10 px-11 pb-10 @min-[960px]:flex-nowrap max-[899px]:px-[18px] max-[899px]:pb-8',
-          bodyTop(emoji !== null || icon !== null),
+          bodyTop(emoji !== null || icon !== null || symbol !== null),
         )}
       >
         <div data-region="page.content" className="flex min-w-0 flex-1 flex-col gap-4">
