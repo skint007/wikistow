@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Code blocks in the reader have a copy button at the end of their language line. It copies the code as written, without the label, and shows a check for a moment. Blocks a plugin draws and the visual editor’s code blocks have none. (#123)
+
 ## 0.12.0 - 2026-10-18
 
 ### Highlights
