@@ -140,16 +140,51 @@ export function folderIconChange(icon: FolderIcon | null): NodeMetadata['extensi
   };
 }
 
+/**
+ * The extension holding a folder's or space's icon from the app's icon set,
+ * Lucide, by name, inside its encrypted metadata (section 5.5).
+ */
+export const SYMBOL_NAMESPACE = 'wikistow.symbol';
+
+/** An icon's name in the icon set, as Lucide writes it: `square-terminal`. */
+export const SymbolName = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+
+const StoredSymbol = z.looseObject({ format: z.literal(1), name: SymbolName });
+
+/**
+ * A folder's or space's icon from the icon set, by name, or null for none:
+ * anything else counts as none, so it shows its emoji. Whether this app's
+ * icon set has the name is for the app to check.
+ */
+export function folderSymbolOf({ extensions }: NodeMetadata): string | null {
+  const stored = StoredSymbol.safeParse(extensions[SYMBOL_NAMESPACE]);
+  return stored.success ? stored.data.name : null;
+}
+
+/** The `extensions` change that sets a folder's or space's icon, or removes it with null. */
+export function folderSymbolChange(name: string | null): NodeMetadata['extensions'] {
+  return { [SYMBOL_NAMESPACE]: name && { format: 1, name: SymbolName.parse(name) } };
+}
+
+/** A new folder's image or icon from the icon set, if it starts with one. */
+export type FolderPicture = { icon?: FolderIcon | null; symbol?: string | null };
+
 export const newFolderMetadata = (
   name: string,
   { emoji, tint }: FolderLook = DEFAULT_FOLDER_LOOK,
-  icon: FolderIcon | null = null,
+  { icon, symbol }: FolderPicture = {},
 ): NodeMetadata => ({
   format: { ...METADATA_FORMAT },
   name,
   emoji,
   tint,
-  extensions: icon ? folderIconChange(icon) : {},
+  extensions: {
+    ...(icon && folderIconChange(icon)),
+    ...(symbol && folderSymbolChange(symbol)),
+  },
 });
 
 export const newSpaceMetadata = (name: string, emoji?: string): NodeMetadata => ({
