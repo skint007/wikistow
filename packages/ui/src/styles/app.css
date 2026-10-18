@@ -105,7 +105,7 @@
     place-content: center;
     width: 1rem;
     height: 1rem;
-    border: 1.5px solid color-mix(in srgb, var(--muted-foreground) 60%, transparent);
+    border: 1.5px solid var(--muted-foreground);
     border-radius: 4px;
     background: var(--background);
     vertical-align: -0.125em;
@@ -147,10 +147,14 @@
   }
   /* The ring goes round the thumb, not the whole track. */
   input[type='range']:focus-visible::-webkit-slider-thumb {
-    box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
   }
   input[type='range']:focus-visible::-moz-range-thumb {
-    box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
   }
   input[type='range']::-webkit-slider-runnable-track {
     height: 0.375rem;
