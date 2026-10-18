@@ -86,7 +86,7 @@ export type PluginsSnapshot = {
   listed: boolean;
   safeMode: boolean;
   plugins: PluginStatus[];
-  /** Plugins the source knows of but couldn't load, by ID, with why: a desktop's library plugin it couldn't install. */
+  /** Plugins the source knows of but couldn't load, by ID, with why: a desktop's library plugin it couldn't install, or one whose version left the library. */
   unavailable: Readonly<Record<string, string>>;
   commands: PluginCommand[];
   /** What running plugins put in each region, in plugin order, then registration order. */
