@@ -1,6 +1,6 @@
+import { flip, offset, shift, useFloating } from '@floating-ui/react-dom';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Tooltip as TooltipPrimitive } from 'radix-ui';
 
 /** How long the pointer rests on an element before its hint shows. */
 const DELAY = 500;
@@ -10,13 +10,12 @@ const SKIP_DELAY = 300;
 const SIDES = ['top', 'right', 'bottom', 'left'] as const;
 
 type Shown = {
-  /** Each hint its own tooltip, so one never shows in the last one's place. */
+  /** Each hint its own box, last in its container, so it shows over popovers opened since. */
   id: number;
+  element: HTMLElement;
   hint: string;
   keys: string | undefined;
   side: (typeof SIDES)[number];
-  /** Where the element is, in the viewport; hints close on scroll, so it stays true. */
-  rect: DOMRect;
   /** A modal <dialog> makes the rest of the page inert, so a hint in one renders in it. */
   container: HTMLElement;
 };
@@ -44,7 +43,6 @@ const hinted = (event: Event) => origin(event)?.closest<HTMLElement>('[data-hint
  */
 export function HintLayer() {
   const [shown, setShown] = useState<Shown | null>(null);
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let target: HTMLElement | null = null;
@@ -59,22 +57,21 @@ export function HintLayer() {
       showing = true;
       setShown({
         id: ++shows,
+        element,
         hint,
         keys: element.dataset['hintKeys'],
         side: SIDES.find((side) => side === element.dataset['hintSide']) ?? 'bottom',
-        rect: element.getBoundingClientRect(),
         container: element.closest('dialog') ?? document.body,
       });
-      setOpen(true);
     };
     // Hides the hint. The element's hint shows again only once the pointer has been elsewhere,
-    // as with Radix's own tooltips after a press, a key or a scroll.
+    // as with Radix's tooltips after a press, a key or a scroll.
     const hide = () => {
       clearTimeout(timer);
       if (!showing) return;
       showing = false;
       closedAt = performance.now();
-      setOpen(false);
+      setShown(null);
     };
     const close = () => {
       hide();
@@ -127,34 +124,33 @@ export function HintLayer() {
     };
   }, []);
 
-  if (!shown) return null;
-  const { rect } = shown;
-  // The pointer goes through the hint, and its Radix wrapper, to what's under it.
+  return shown && <Hint key={shown.id} shown={shown} />;
+}
+
+/**
+ * One hint, placed against its element by floating-ui, as Radix places its
+ * own popups. Not a Radix tooltip, which would take the first Escape from
+ * the popover or menu the element is in. The pointer goes through it.
+ */
+function Hint({ shown }: { shown: Shown }) {
+  const { refs, floatingStyles, placement } = useFloating({
+    elements: { reference: shown.element },
+    placement: shown.side,
+    strategy: 'fixed',
+    // Placed by left and top, so the opening animation's transform doesn't move it.
+    transform: false,
+    middleware: [offset(4), flip(), shift({ padding: 8 })],
+  });
   return createPortal(
-    <div className="pointer-events-none contents">
-      <TooltipPrimitive.Provider>
-        {/* Opened and closed only by the listeners above, which cover what Radix would close it for. */}
-        <TooltipPrimitive.Root key={shown.id} open={open}>
-          {/* Radix places the hint against its trigger: a stand-in over the element. */}
-          <TooltipPrimitive.Trigger asChild>
-            <span
-              aria-hidden
-              className="pointer-events-none fixed"
-              style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
-            />
-          </TooltipPrimitive.Trigger>
-          <TooltipPrimitive.Content
-            data-slot="tooltip-content"
-            side={shown.side}
-            sideOffset={4}
-            collisionPadding={8}
-            className="z-50 max-w-80 origin-(--radix-tooltip-content-transform-origin) animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance text-popover-foreground shadow-md fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-          >
-            {shown.hint}
-            {shown.keys && <span className="ml-2 text-muted-foreground">{shown.keys}</span>}
-          </TooltipPrimitive.Content>
-        </TooltipPrimitive.Root>
-      </TooltipPrimitive.Provider>
+    <div
+      ref={refs.setFloating}
+      data-slot="tooltip-content"
+      data-side={placement}
+      style={floatingStyles}
+      className="pointer-events-none z-50 w-max max-w-80 animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance text-popover-foreground shadow-md fade-in-0 zoom-in-95"
+    >
+      {shown.hint}
+      {shown.keys && <span className="ml-2 text-muted-foreground">{shown.keys}</span>}
     </div>,
     shown.container,
   );
