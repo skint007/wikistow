@@ -28,6 +28,11 @@ const DETAILS = {
   'settings.mail-updated': z.strictObject({
     changed: z.array(z.enum(['host', 'port', 'security', 'username', 'password', 'from'])),
   }),
+  'settings.ai-updated': z.strictObject({
+    changed: z.array(
+      z.enum(['style', 'baseUrl', 'apiKey', 'model', 'maxOutputTokens', 'requestsPerMinute']),
+    ),
+  }),
   // Sharing: who was given or lost keys, by identity ID, never by name.
   'share.created': z.strictObject({
     spaceId: z.string(),

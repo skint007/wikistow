@@ -6,12 +6,20 @@ import type { z } from 'zod';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Picker, type PickerOption } from '@/components/ui/picker';
 import { Switch } from '@/components/ui/switch';
 import { api } from '../../../api';
+import { AiSettingsCard, aiSettingsQuery } from '../../../admin/ai-settings-card';
 import { useReauth } from '../../../auth/reauth';
+import {
+  FromEnvironment,
+  SecretField,
+  secretFrom,
+  secretValue,
+  TextField,
+  type Secret,
+} from '../../../admin/fields';
 import { errorMessage } from '../../../errors';
 
 export const Route = createFileRoute('/_app/admin/settings')({ component: AdminSettings });
@@ -29,9 +37,11 @@ const mailQuery = queryOptions({
 function AdminSettings() {
   const { data } = useQuery(settingsQuery);
   const { data: mail } = useQuery(mailQuery);
+  const { data: ai } = useQuery(aiSettingsQuery);
   return (
     <div className="grid gap-3.5">
       <Registration open={data?.publicRegistration} />
+      {ai && <AiSettingsCard ai={ai} />}
       {mail && <MailSettings mail={mail} />}
     </div>
   );
@@ -87,21 +97,6 @@ const SECURITY: readonly PickerOption<Security>[] = [
 
 const MAIL_FIELDS = adminRoutes.MailField.options.length;
 
-/** A setting the server's environment makes, which this page can't change. */
-function FromEnvironment({ label, variable }: { label: string; variable: string }) {
-  return (
-    <div className="grid gap-2">
-      <span className="text-sm leading-none font-medium">{label}</span>
-      <p className="text-sm text-muted-foreground">
-        Set in the server’s environment (<code>{variable}</code>)
-      </p>
-    </div>
-  );
-}
-
-/** A saved password stays unless it's replaced or removed. */
-type Password = { kind: 'keep' } | { kind: 'remove' } | { kind: 'enter'; value: string };
-
 /**
  * Outgoing mail. Fields the server's environment sets are read-only. The
  * password is write-only: a saved one shows as Saved. Save and Send test
@@ -116,9 +111,7 @@ function MailSettings({ mail }: { mail: Mail }) {
   const [port, setPort] = useState(String(mail.port ?? 587));
   const [security, setSecurity] = useState<Security>(mail.security ?? 'starttls');
   const [username, setUsername] = useState(mail.username ?? '');
-  const [password, setPassword] = useState<Password>(
-    mail.passwordSaved ? { kind: 'keep' } : { kind: 'enter', value: '' },
-  );
+  const [password, setPassword] = useState<Secret>(secretFrom(mail.passwordSaved));
   const [from, setFrom] = useState(mail.from ?? '');
   const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: ReactNode } | null>(
     null,
@@ -136,8 +129,7 @@ function MailSettings({ mail }: { mail: Mail }) {
     security,
     username: username.trim() || null,
     from: from.trim() || null,
-    ...(password.kind === 'remove' && { password: null }),
-    ...(password.kind === 'enter' && password.value !== '' && { password: password.value }),
+    password: secretValue(password),
   });
 
   const save = useMutation({
@@ -145,7 +137,7 @@ function MailSettings({ mail }: { mail: Mail }) {
     onMutate: () => setMessage(null),
     onSuccess: (saved) => {
       queryClient.setQueryData(mailQuery.queryKey, saved);
-      setPassword(saved.passwordSaved ? { kind: 'keep' } : { kind: 'enter', value: '' });
+      setPassword(secretFrom(saved.passwordSaved));
       setMessage({ tone: 'notice', text: 'Saved.' });
     },
     onError: (caught) => setMessage({ tone: 'error', text: errorMessage(caught) }),
@@ -228,8 +220,9 @@ function MailSettings({ mail }: { mail: Mail }) {
                 onChange={setUsername}
                 autoComplete="off"
               />
-              <PasswordField
+              <SecretField
                 id={`${id}-password`}
+                label="Password"
                 saved={mail.passwordSaved}
                 value={password}
                 onChange={setPassword}
@@ -265,114 +258,5 @@ function MailSettings({ mail }: { mail: Mail }) {
         </form>
       </CardContent>
     </Card>
-  );
-}
-
-function TextField({
-  id,
-  label,
-  value,
-  onChange,
-  error,
-  ...input
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  error?: string | undefined;
-  placeholder?: string;
-  autoComplete?: string;
-  inputMode?: 'numeric';
-}) {
-  return (
-    <div className="grid content-start gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
-        {...input}
-      />
-      {error && (
-        <p id={`${id}-error`} className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** Write-only: a saved password shows as Saved, with Replace and Remove. */
-function PasswordField({
-  id,
-  saved,
-  value,
-  onChange,
-}: {
-  id: string;
-  saved: boolean;
-  value: Password;
-  onChange: (value: Password) => void;
-}) {
-  if (value.kind === 'enter') {
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor={id}>Password</Label>
-        <div className="flex gap-2">
-          <Input
-            id={id}
-            type="password"
-            autoComplete="new-password"
-            value={value.value}
-            onChange={(event) => onChange({ kind: 'enter', value: event.target.value })}
-          />
-          {saved && (
-            <Button type="button" variant="ghost" onClick={() => onChange({ kind: 'keep' })}>
-              Cancel
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="grid gap-2">
-      <span className="text-sm leading-none font-medium">Password</span>
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">
-          {value.kind === 'keep' ? 'Saved' : 'Removed when you save'}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onChange({ kind: 'enter', value: '' })}
-        >
-          Replace
-        </Button>
-        {value.kind === 'keep' ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onChange({ kind: 'remove' })}
-          >
-            Remove
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onChange({ kind: 'keep' })}
-          >
-            Keep
-          </Button>
-        )}
-      </div>
-    </div>
   );
 }

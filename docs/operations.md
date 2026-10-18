@@ -35,7 +35,11 @@ The server starts without mail, and the first administrator can be created witho
 
 ## Connect an AI provider
 
-The AI assistant is off until you configure one provider in the server's environment. People's apps send their conversations to your server, which adds the key and forwards them to the provider. The key never leaves the server. Turning AI on means the content people choose to send passes through your server to that provider, and the app tells them so.
+The AI assistant is off until you connect one provider. People's apps send their conversations to your server, which adds the key and forwards them to the provider. The key never leaves the server. Turning AI on means the content people choose to send passes through your server to that provider, and the app tells them so.
+
+Connect it in **Administration → Settings → AI assistant**: the API style, the base URL, the key, the model, the longest reply and how many requests a minute each person may make. Once the style and base URL are filled in, the model field lists the provider's models when you click into it, fetched by your server with the key, so it never reaches the browser. Type to search the list, or type any model's name, listed or not. **Refresh** fetches the list again. **Check connection** sends the provider a request of a few tokens with what the form holds, saved or not, and says whether the key and model work. A save applies at once, without a restart. The key is write-only and stored encrypted ([What to back up](#what-to-back-up)).
+
+You can set any of it in the server's environment instead. A variable set there wins over its field on the admin page, which then shows that field as set in the environment:
 
 | Variable | Meaning |
 | --- | --- |
@@ -46,18 +50,19 @@ The AI assistant is off until you configure one provider in the server's environ
 | `AI_MAX_OUTPUT_TOKENS` | The longest reply, in tokens. Default 4096. Clients can't ask for more. |
 | `AI_REQUESTS_PER_MINUTE` | AI requests a minute for one account. Each tool step is a request. Default 30. |
 
-AI is on once `AI_API_STYLE`, `AI_BASE_URL` and `AI_MODEL` are set. Setting only some of them stops the server at start with a message naming the rest. Some examples:
+AI is on once the style, base URL and model are set, each in the environment or on the admin page. Some examples:
 
 | Provider | `AI_API_STYLE` | `AI_BASE_URL` |
 | --- | --- | --- |
 | OpenAI | `openai` | `https://api.openai.com/v1` |
 | Anthropic | `anthropic` | `https://api.anthropic.com` |
+| OpenRouter | `openai` | `https://openrouter.ai/api/v1` |
 | Ollama | `openai` | `http://127.0.0.1:11434/v1` |
 | LM Studio | `openai` | `http://127.0.0.1:1234/v1` |
 
 The model must support tool calls. For the OpenAI style the server limits replies with `max_completion_tokens`, which some local servers ignore.
 
-Check the connection under **Settings → AI assistant → Check connection**. It sends the provider a request of a few tokens and says whether the key and model work.
+Anyone can also check the connection under **Settings → AI assistant → Check connection**, with the settings the server uses.
 
 The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. While the provider is quiet, as a reasoning model can be for minutes before it answers, the server sends a blank line every 15 seconds to keep the reply open. When a person stops a reply, the server cancels the provider's request too.
 
@@ -69,7 +74,7 @@ Three things, taken together by `scripts/backup.sh`:
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 - The plugin library's files in `BLOB_DIR/plugins`, one folder per uploaded version, named by its hash. These are plain text, as the server serves them to members.
 
-Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. The secrets saved on the admin page, such as the SMTP password, are encrypted with a key derived from it too. A server with another `BETTER_AUTH_SECRET` treats them as unset, and the admin page asks for them again. Keep it with your other secrets.
+Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. The secrets saved on the admin page, the SMTP password and the AI key, are encrypted with a key derived from it too. A server with another `BETTER_AUTH_SECRET` treats them as unset, and the admin page asks for them again. Keep it with your other secrets.
 
 Treat every backup as private. Page content is encrypted, but the dump also holds email addresses, password hashes and sessions. The scripts write backups readable only by the user who ran them. Encrypt any copy you send off the machine.
 

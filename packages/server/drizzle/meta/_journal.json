@@ -218,6 +218,13 @@
       "when": 1792297687909,
       "tag": "0030_mail_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792300682596,
+      "tag": "0031_ai_settings",
+      "breakpoints": true
     }
   ]
 }

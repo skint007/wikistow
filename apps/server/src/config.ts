@@ -71,21 +71,21 @@ const Env = z.object({
    */
   PASSWORD_GUESS_FAILURES: z.coerce.number().int().min(1).default(20),
   /**
-   * The AI provider (wikistow.md, AI assistant). AI is on once the style,
-   * base URL and model are set; the key is optional, for local servers.
+   * The AI provider (wikistow.md, AI assistant), optional: an administrator
+   * can set it on the admin page instead, and each variable wins over its
+   * field there. AI is on once the style, base URL and model are set, here
+   * or there; the key is optional, for local servers.
    */
   AI_API_STYLE: unsetIfEmpty(z.enum(['openai', 'anthropic'])),
   /** As each SDK takes it: `https://api.openai.com/v1`, or `https://api.anthropic.com`. */
   AI_BASE_URL: unsetIfEmpty(z.url({ protocol: /^https?$/ })),
   AI_API_KEY: unsetIfEmpty(z.string()),
   AI_MODEL: unsetIfEmpty(z.string().max(200)),
-  /** The most a reply may write, in tokens. Clients can't ask for more. */
-  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).max(1_000_000).default(4096),
-  /** AI requests a minute for one account. A tool step is one request. */
-  AI_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).default(30),
+  /** The most a reply may write, in tokens. Clients can't ask for more. Default 4096. */
+  AI_MAX_OUTPUT_TOKENS: unsetIfEmpty(z.coerce.number().int().min(1).max(1_000_000)),
+  /** AI requests a minute for one account. A tool step is one request. Default 30. */
+  AI_REQUESTS_PER_MINUTE: unsetIfEmpty(z.coerce.number().int().min(1).max(1_000_000)),
 });
-
-const AI_PARTS = ['AI_API_STYLE', 'AI_BASE_URL', 'AI_MODEL'] as const;
 
 const MIB = 1024 * 1024;
 
@@ -98,6 +98,9 @@ export type AiConfig = {
   maxOutputTokens: number;
   requestsPerMinute: number;
 };
+
+/** The parts of `AiConfig` the environment sets; settings.ts fills in the rest. */
+export type AiEnv = { [K in keyof AiConfig]?: AiConfig[K] | undefined };
 
 export type Config = {
   databaseUrl: string;
@@ -121,8 +124,8 @@ export type Config = {
   limits: { uploadBytes: number; storageBytes: number };
   /** How long a large owner body may take to arrive. */
   bodyDeadlineMs: number;
-  /** The AI provider; omitted or null when AI is off. */
-  ai?: AiConfig | null;
+  /** The AI provider's settings from the environment, which win over the admin page's. */
+  ai?: AiEnv;
 };
 
 const LARGE_BODY_DEADLINE_MS = 60_000;
@@ -138,10 +141,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     throw new Error(`Invalid or missing environment variables: ${names}`);
   }
   const e = parsed.data;
-  const missing = AI_PARTS.filter((name) => e[name] === undefined);
-  if (missing.length > 0 && missing.length < AI_PARTS.length) {
-    throw new Error(`AI is partly configured; also set ${missing.join(', ')}`);
-  }
   return {
     databaseUrl: e.DATABASE_URL,
     publicOrigin: new URL(e.PUBLIC_ORIGIN).origin,
@@ -163,16 +162,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       pages: e.MAX_PAGES_PER_ACCOUNT,
     },
     bodyDeadlineMs: LARGE_BODY_DEADLINE_MS,
-    ai:
-      e.AI_API_STYLE && e.AI_BASE_URL && e.AI_MODEL
-        ? {
-            style: e.AI_API_STYLE,
-            baseUrl: e.AI_BASE_URL.replace(/\/+$/, ''),
-            apiKey: e.AI_API_KEY,
-            model: e.AI_MODEL,
-            maxOutputTokens: e.AI_MAX_OUTPUT_TOKENS,
-            requestsPerMinute: e.AI_REQUESTS_PER_MINUTE,
-          }
-        : null,
+    ai: {
+      style: e.AI_API_STYLE,
+      baseUrl: e.AI_BASE_URL,
+      apiKey: e.AI_API_KEY,
+      model: e.AI_MODEL,
+      maxOutputTokens: e.AI_MAX_OUTPUT_TOKENS,
+      requestsPerMinute: e.AI_REQUESTS_PER_MINUTE,
+    },
   } satisfies Config;
 }
