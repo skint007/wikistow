@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - On this page marks the section being read with the tint only, without the bar at its left. (#107)
+- Avatars can be up to 2.5 MiB, up from 2 MiB. Migration 0033 re-adds the `avatars_size` check at the new size. (#108)
 
 ## 0.11.0 - 2026-10-18
 
