@@ -182,11 +182,17 @@ export function PersonFinder({
   // A plain submit handler, not a form action: React resets a form after
   // its action, which would clear the field after every failed lookup.
   // A whole email picks the listed person with it, or is looked up, for
-  // someone the list missed. Other text picks the one person it matches.
+  // someone the list missed. Other text picks the one person or group it
+  // matches.
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = query.trim();
     if (!text) return;
+    const [group] = offered;
+    if (!text.includes('@') && group && offered.length === 1 && people.length === 0) {
+      onGroup?.(group.groupId, access);
+      return;
+    }
     void pick(async () => {
       if (text.includes('@')) {
         const email = normalizeEmail(text);
@@ -199,10 +205,10 @@ export function PersonFinder({
         return lookup;
       }
       const [only, ...more] = people;
-      if (only?.entry && more.length === 0) return only.entry;
+      if (only?.entry && more.length === 0 && offered.length === 0) return only.entry;
       setError(
-        only
-          ? 'Pick someone from the list.'
+        only || group
+          ? 'Pick one from the list.'
           : withoutVault.length > 0
             ? 'They haven’t set up their vault yet, so they can’t be chosen.'
             : listing.data
