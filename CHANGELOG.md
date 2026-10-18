@@ -4,6 +4,21 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.12.0 - 2026-10-18
+
+### Highlights
+
+#### Features
+
+- Folders, spaces and pages can show an icon. The picker’s new Icons tab searches every Lucide icon by name, drawn in the text colour.
+- Avatars can be up to 2.5 MB, up from 2 MB.
+- `wikistow skill` prints a skill you can save for an agent, so it knows how to use the CLI: it leaves changes as drafts unless you ask, and puts new pages in your Personal space.
+
+#### UI polish
+
+- On this page marks the section you’re reading with a tint only, without the bar at its left.
+- Rename… is gone from the person menus in the Share dialog, Members and owners and a group’s members. A contact keeps the name they had when you first shared with them.
+
 ### Changes
 
 #### App
