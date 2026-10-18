@@ -132,7 +132,7 @@ function CopyCode({ text }: { text: string }) {
       size="icon-xs"
       variant="ghost"
       aria-label={copied ? 'Copied' : 'Copy code'}
-      title="Copy code"
+      data-hint="Copy code"
       onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}
     >
       {copied ? <Check strokeWidth={1.75} /> : <Copy strokeWidth={1.75} />}
