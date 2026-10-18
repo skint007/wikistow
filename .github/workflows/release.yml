@@ -75,8 +75,8 @@ jobs:
 
   # The desktop app as CI built, tested and packaged it: the .deb, the .rpm,
   # and an archive of what its AUR package installs. Beside them, the CLI as
-  # a binary for each system, its install scripts, its bundle for Node, and
-  # checksums for every file.
+  # a binary for each system, its install scripts, its bundle for Node, the
+  # licence, and checksums for every file.
   github-release:
     needs: [verify, ci]
     runs-on: ubuntu-24.04
@@ -125,7 +125,8 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           name="wikistow-cli-$version"
           mkdir -p "release/$name"
-          cp apps/cli/dist/wikistow.mjs apps/cli/packaging/wikistow LICENSE "release/$name/"
+          cp apps/cli/dist/wikistow.mjs LICENSE "release/$name/"
+          cp LICENSE release/
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
@@ -137,7 +138,7 @@ jobs:
         run: |
           sha256sum wikistow-desktop-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm \
             wikistow-linux-* wikistow-darwin-* wikistow-windows-* install.sh install.ps1 \
-            wikistow-cli-*.tar.gz > SHA256SUMS
+            wikistow-cli-*.tar.gz LICENSE > SHA256SUMS
           cat SHA256SUMS
       # The notes are the release's entry in CHANGELOG.md, reviewed in its
       # version change. Without one, nothing is published.
@@ -154,9 +155,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" \
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
             release/*.tar.gz release/*.deb release/*.rpm release/wikistow-linux-* release/wikistow-darwin-* \
-            release/wikistow-windows-* release/install.sh release/install.ps1 release/SHA256SUMS
+            release/wikistow-windows-* release/install.sh release/install.ps1 release/LICENSE release/SHA256SUMS
 
-  # The AUR packages follow the newest stable release, once their archives
+  # The AUR packages follow the newest stable release, once their downloads
   # are downloadable. A prerelease or a fix to an older line leaves them alone.
   aur:
     needs: [verify, github-release]

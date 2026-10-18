@@ -1,5 +1,5 @@
 # Publishes wikistow-desktop-bin and wikistow-cli-bin to the AUR for a GitHub
-# Release that already has their archives. The release workflow runs it for
+# Release that already has their downloads. The release workflow runs it for
 # both after each stable release from main. Run it by hand to publish either
 # again, such as with a packaging fix and a higher pkgrel (docs/releasing.md).
 name: AUR
@@ -56,9 +56,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The package as a user builds it: the release's archive, checked
-      # against the checksum the release published, packaged by a user who
-      # isn't root, as makepkg requires.
+      # The package as a user builds it: the release's files, checked against
+      # the checksums the release published, packaged by a user who isn't
+      # root, as makepkg requires. The CLI has a binary for each architecture;
+      # makepkg downloads only this runner's.
       - name: Build
         env:
           PACKAGE: ${{ matrix.package }}
@@ -68,19 +69,34 @@ jobs:
           AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && "$PKGREL" =~ ^[1-9][0-9]*$ ]]
-          # wikistow-desktop-bin installs wikistow-desktop-<version>.tar.gz.
-          archive="${PACKAGE%-bin}-$VERSION.tar.gz"
-          sha=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS" \
-            | awk -v f="$archive" '$2 == f { print $1 }')
-          [ -n "$sha" ]
+          sums=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS")
+          sum() {
+            local sha
+            sha=$(awk -v f="$1" '$2 == f { print $1 }' <<< "$sums")
+            [ -n "$sha" ] || { echo "::error::SHA256SUMS has no line for $1" >&2; return 1; }
+            echo "$sha"
+          }
+          case "$PACKAGE" in
+            wikistow-desktop-bin)
+              sha=$(sum "wikistow-desktop-$VERSION.tar.gz")
+              checksums=(-e "s/^sha256sums=.*/sha256sums=('$sha')/")
+              ;;
+            wikistow-cli-bin)
+              license=$(sum LICENSE)
+              x86_64=$(sum wikistow-linux-x64)
+              aarch64=$(sum wikistow-linux-arm64)
+              checksums=(-e "s/^sha256sums=.*/sha256sums=('$license')/"
+                -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$x86_64')/"
+                -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$aarch64')/")
+              ;;
+          esac
           useradd -m builder
           cp -r "aur/$PACKAGE" /home/builder/pkg
           cd /home/builder/pkg
-          sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" \
-            -e "s/^sha256sums=.*/sha256sums=('$sha')/" \
+          sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" "${checksums[@]}" \
             -e "s|^# Maintainer:.*|# Maintainer: $AUR_USERNAME <$AUR_EMAIL>|" PKGBUILD
           chown -R builder: .
-          # Electron and Node aren't needed to package the apps, only to run them.
+          # Electron isn't needed to package the desktop app, only to run it.
           runuser -u builder -- makepkg --nodeps --noconfirm
           runuser -u builder -- makepkg --printsrcinfo > .SRCINFO
           cat PKGBUILD .SRCINFO
