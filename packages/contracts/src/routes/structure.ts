@@ -80,14 +80,14 @@ const SpaceParams = z.object({ spaceId: SpaceId });
 
 /**
  * A space in the caller's list. `home` marks a person's home space, the
- * oldest personal space they own, which the list always puts first.
+ * personal space they have owned longest, which the list always puts first.
  */
 export const ListedSpace = SpaceSummary.extend({ home: z.boolean() });
 
 /**
  * Spaces the caller owns, or holds as a member of the space's own share. A
  * person's come home space first, then in their saved order (`setSpaceOrder`),
- * then the rest oldest first.
+ * then the rest in the order they got them.
  */
 export const listSpaces = {
   method: 'GET',

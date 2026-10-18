@@ -373,7 +373,8 @@ export const shareOf = (row: ShareRow) => ({
   currentKeyVersion: row.currentKeyVersion,
 });
 
-type Listed = { space: typeof spaces.$inferSelect; access: Access };
+/** A space in the caller's list, and since when they have it. */
+type Listed = { space: typeof spaces.$inferSelect; access: Access; since: Date };
 
 /**
  * The spaces a person can open: those they own, with every right, and those
@@ -382,46 +383,50 @@ type Listed = { space: typeof spaces.$inferSelect; access: Access };
 async function humanSpaces(db: Database, identityId: string) {
   const bySpace = new Map<string, Listed>();
   const owned = await db
-    .select({ space: spaces })
+    .select({ space: spaces, since: spaceOwners.createdAt })
     .from(spaceOwners)
     .innerJoin(spaces, eq(spaces.id, spaceOwners.spaceId))
     .where(and(eq(spaceOwners.identityId, identityId), isNull(spaceOwners.removedAt)));
   const held = await db
-    .select({ space: spaces, role: shareMembers.role, canPublish: shareMembers.canPublish })
+    .select({
+      space: spaces,
+      role: shareMembers.role,
+      canPublish: shareMembers.canPublish,
+      since: shareMembers.createdAt,
+    })
     .from(shareMembers)
     .innerJoin(shares, and(eq(shares.id, shareMembers.shareId), isNull(shares.rootId)))
     .innerJoin(spaces, eq(spaces.id, shares.spaceId))
     .where(eq(shareMembers.identityId, identityId));
-  for (const { space, role, canPublish } of held) {
-    bySpace.set(space.id, { space, access: { role, canPublish } });
+  for (const { space, role, canPublish, since } of held) {
+    bySpace.set(space.id, { space, access: { role, canPublish }, since });
   }
   // An owner's own rights win over any share they also hold.
-  for (const { space } of owned) {
-    bySpace.set(space.id, { space, access: { role: 'owner', canPublish: true } });
+  for (const { space, since } of owned) {
+    bySpace.set(space.id, { space, access: { role: 'owner', canPublish: true }, since });
   }
-  // The home space is the oldest personal space they own: the one the app
-  // makes when the vault is set up. New space makes personal spaces too.
+  // The home space is the personal space they have owned longest: the one
+  // the app makes when the vault is set up, before anyone can add them as an
+  // owner elsewhere. New space makes personal spaces too.
   const home = owned
-    .map(({ space }) => space)
-    .filter((space) => space.kind === 'personal')
-    .reduce<typeof spaces.$inferSelect | null>(
-      (oldest, space) => (oldest && oldest.createdAt <= space.createdAt ? oldest : space),
+    .filter(({ space }) => space.kind === 'personal')
+    .reduce<(typeof owned)[number] | null>(
+      (oldest, row) => (oldest && oldest.since <= row.since ? oldest : row),
       null,
     );
-  return { bySpace, homeId: home?.id ?? null };
+  return { bySpace, homeId: home?.space.id ?? null };
 }
 
 /**
  * Spaces in the person's order: the home space, then the saved order, then
- * the rest (new, or newly shared) oldest first.
+ * the rest (new, or newly shared) in the order they got them.
  */
 function inOrder(listed: Listed[], homeId: string | null, saved: string[]) {
   const rank = new Map(saved.map((id, index) => [id, index]));
   const at = (id: string) => (id === homeId ? -1 : (rank.get(id) ?? Infinity));
-  // Two unsaved spaces give NaN, which falls through to their age.
+  // Two unsaved spaces give NaN, which falls through to when they came.
   return listed.toSorted(
-    (a, b) =>
-      at(a.space.id) - at(b.space.id) || a.space.createdAt.getTime() - b.space.createdAt.getTime(),
+    (a, b) => at(a.space.id) - at(b.space.id) || a.since.getTime() - b.since.getTime(),
   );
 }
 
@@ -462,7 +467,9 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
     for (const { space, share } of granted) {
       const person = await personAccess(db, caller.personId, share);
       const grant = highest(whole.filter((g) => g.shareId === share.id));
-      if (person && grant) bySpace.set(space.id, { space, access: capAgent(grant, person) });
+      if (person && grant) {
+        bySpace.set(space.id, { space, access: capAgent(grant, person), since: space.createdAt });
+      }
     }
   } else {
     ({ bySpace, homeId } = await humanSpaces(db, identity.id));
@@ -471,6 +478,15 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
       .from(users)
       .where(eq(users.id, caller.accountId));
     saved = account?.spaceOrder ?? [];
+    // Spaces they left drop out of the saved order, so one they get back
+    // comes last. Unless it was saved again meanwhile.
+    const kept = saved.filter((id) => bySpace.has(id));
+    if (kept.length < saved.length) {
+      await db
+        .update(users)
+        .set({ spaceOrder: kept })
+        .where(and(eq(users.id, caller.accountId), eq(users.spaceOrder, saved)));
+    }
   }
   const listed = inOrder([...bySpace.values()], homeId, saved);
   const heads = await servedMetadata(
