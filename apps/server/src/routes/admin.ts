@@ -6,24 +6,38 @@ import {
   listPendingInvitations,
   newInvitationLink,
   reactivateAccount,
+  readMailSettings,
   readSettings,
   recordVerificationResend,
   resendInvitation,
   revokeAccountSessions,
   revokeInvitation,
+  saveMailSettings,
   setPublicRegistration,
   suspendAccount,
+  withChanges,
   type Database,
+  type MailSettings,
 } from '@wikistow/server';
+import type { z } from 'zod';
 import type { Auth } from '../auth/auth.ts';
 import type { Config } from '../config.ts';
 import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
-import { sendInBackground, type Deliver } from '../mail/mailer.ts';
-import { invitationMail } from '../mail/templates.ts';
+import { ApiError } from '../http/errors.ts';
+import { sendInBackground, type Mailer, type Transport } from '../mail/mailer.ts';
+import { invitationMail, testMail } from '../mail/templates.ts';
+import { mailFromEnvironment, mailSetup } from '../settings.ts';
 import { toApiError } from './accounts.ts';
 
-type Deps = { db: Database; auth: Auth; config: Config; deliver: Deliver; log: Log };
+type Deps = {
+  db: Database;
+  auth: Auth;
+  config: Config;
+  mailer: Mailer;
+  transport: Transport;
+  log: Log;
+};
 
 const iso = (date: Date | null) => (date === null ? null : date.toISOString());
 
@@ -42,13 +56,68 @@ const done = { ok: true as const };
 // Each of these sends mail; an administrator has no reason to send more than this.
 const MAIL_LIMIT = { windowSeconds: 60, max: 10 };
 
-export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, log }: Deps): void {
+/** Why a test message didn't go, from nodemailer's error codes, never the server's own words. */
+function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSetup>>) {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined;
+  const where =
+    'url' in setup.connection
+      ? 'the mail server'
+      : `${setup.connection.host}:${setup.connection.port}`;
+  switch (code) {
+    case 'EAUTH':
+      return 'The mail server refused the username or password.';
+    case 'ENOAUTH':
+      return 'The mail server needs a username and password.';
+    case 'ETLS':
+      return `Couldn’t start a secure connection with ${where}. Check the security setting.`;
+    case 'ETIMEDOUT':
+      return `${where} didn’t answer in time.`;
+    case 'EDNS':
+    case 'ECONNECTION':
+    case 'ESOCKET':
+      return `Couldn’t reach ${where}.`;
+    case 'EENVELOPE':
+      return 'The mail server refused the From address or your address.';
+    default:
+      return 'The mail server didn’t accept the message.';
+  }
+}
+
+export function mountAdminRoutes(
+  routes: Routes,
+  { db, auth, config, mailer, transport, log }: Deps,
+): void {
+  const environment = mailFromEnvironment(config.smtp);
+  const mailView = (saved: MailSettings) => {
+    const shown = (field: (typeof environment)[number]) => !environment.includes(field);
+    return {
+      host: shown('host') ? saved.host : null,
+      port: shown('port') ? saved.port : null,
+      security: shown('security') ? saved.security : null,
+      username: shown('username') ? saved.username : null,
+      passwordSaved: shown('password') && saved.password !== null,
+      from: shown('from') ? saved.from : null,
+      environment,
+      ready: mailSetup(config.smtp, saved) !== null,
+    };
+  };
+  /** The form's values, less the fields the environment sets. */
+  const editable = (form: z.output<typeof adminRoutes.MailForm>) => {
+    const changes = { ...form };
+    for (const field of environment) delete changes[field];
+    return changes;
+  };
+
   const inviteLink = (token: string) => `${config.publicOrigin}/invite#token=${token}`;
 
   /** Email-bound invitations are mailed; generic ones return the link once. */
   const deliverInvitation = (invitation: InvitationRow, token: string, inviter: string) => {
     if (invitation.email === null) return inviteLink(token);
-    sendInBackground(deliver, log, invitationMail(invitation.email, inviteLink(token), inviter));
+    sendInBackground(
+      mailer.deliver,
+      log,
+      invitationMail(invitation.email, inviteLink(token), inviter),
+    );
     return null;
   };
 
@@ -96,6 +165,7 @@ export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, lo
   routes.admin(
     adminRoutes.resendVerification,
     async ({ params }, { principal }) => {
+      await mailer.require();
       const email = await recordVerificationResend(db, {
         actor: principal.accountId,
         target: params.id,
@@ -117,6 +187,8 @@ export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, lo
   routes.admin(
     adminRoutes.createInvitation,
     async ({ body }, { principal }) => {
+      // A link for anyone needs no mail; one for an address is mailed to it.
+      if (body.email !== null) await mailer.require();
       const { invitation, token } = await inviteAccount(db, {
         actor: principal.accountId,
         email: body.email,
@@ -133,6 +205,7 @@ export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, lo
   routes.admin(
     adminRoutes.resendInvitation,
     async ({ params }, { principal }) => {
+      await mailer.require();
       const { invitation, token } = await resendInvitation(db, {
         actor: principal.accountId,
         id: params.id,
@@ -171,4 +244,33 @@ export function mountAdminRoutes(routes: Routes, { db, auth, config, deliver, lo
     }).catch(toApiError);
     return { publicRegistration: body.publicRegistration };
   });
+
+  routes.admin(adminRoutes.getMailSettings, async () =>
+    mailView(await readMailSettings(db, config.authSecret)),
+  );
+
+  routes.admin(adminRoutes.updateMailSettings, async ({ body }, { principal }) => {
+    const saved = await saveMailSettings(db, config.authSecret, {
+      actor: principal.accountId,
+      changes: editable(body),
+    }).catch(toApiError);
+    mailer.reload();
+    return mailView(saved);
+  });
+
+  routes.admin(
+    adminRoutes.sendTestMail,
+    async ({ body }, { principal }) => {
+      const saved = await readMailSettings(db, config.authSecret);
+      const setup = mailSetup(config.smtp, withChanges(saved, editable(body)));
+      if (!setup) throw new ApiError('mail-failed', 'Fill in the server, port and From first.');
+      try {
+        await transport(setup)(testMail(principal.email, config.publicOrigin));
+      } catch (error) {
+        throw new ApiError('mail-failed', mailFailure(error, setup));
+      }
+      return { sentTo: principal.email };
+    },
+    { rateLimit: MAIL_LIMIT },
+  );
 }

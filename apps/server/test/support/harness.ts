@@ -60,7 +60,7 @@ export function testAppOn(testDb: TestDatabase, blobDir: string, overrides: Part
     db: testDb.db,
     config,
     log: (entry) => logs.push(entry),
-    deliver: async (mail) => {
+    transport: () => async (mail) => {
       mails.push(mail);
     },
     blobs: fileBlobStore(blobDir),

@@ -22,9 +22,13 @@ const Env = z.object({
   MIGRATIONS_DIR: z.string().min(1).optional(),
   /** Signs session cookies and encrypts Better Auth's secrets at rest. */
   BETTER_AUTH_SECRET: z.string().min(32),
-  /** For example smtp://user:pass@relay:587, or smtp://127.0.0.1:1025 for Mailpit. */
-  SMTP_URL: z.url(),
-  SMTP_FROM: z.string().min(3),
+  /**
+   * Outgoing mail, optional: an administrator can set it on the admin page
+   * instead. For example smtp://user:pass@relay:587, or
+   * smtp://127.0.0.1:1025 for Mailpit. Each wins over the admin page.
+   */
+  SMTP_URL: unsetIfEmpty(z.url()),
+  SMTP_FROM: unsetIfEmpty(z.string().min(3)),
   /** Set when a reverse proxy (Traefik) supplies X-Real-IP. Never trust it otherwise. */
   TRUST_PROXY: z.enum(['true', 'false']).default('false'),
   /** Where encrypted attachment files are stored. Back it up with the database. */
@@ -102,7 +106,8 @@ export type Config = {
   webDist: string | undefined;
   migrationsDir: string | undefined;
   authSecret: string;
-  smtp: { url: string; from: string };
+  /** Mail settings from the environment, which win over the admin page's. */
+  smtp: { url: string | undefined; from: string | undefined };
   trustProxy: boolean;
   rateLimit: boolean;
   /** Optional for embedded callers, which use the environment default. */

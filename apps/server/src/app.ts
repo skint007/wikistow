@@ -1,4 +1,4 @@
-import { filePluginStore, type BlobStore, type Database } from '@wikistow/server';
+import { filePluginStore, readMailSettings, type BlobStore, type Database } from '@wikistow/server';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { isIP } from 'node:net';
@@ -21,7 +21,7 @@ import { isRecentlyAuthenticated } from './http/principal.ts';
 import { createRoutes } from './http/mount.ts';
 import { securityHeaders } from './http/security-headers.ts';
 import { serveWebApp } from './http/static.ts';
-import type { Deliver } from './mail/mailer.ts';
+import { createMailer, smtpDeliver, type Transport } from './mail/mailer.ts';
 import { mountAccountRoutes } from './routes/accounts.ts';
 import { mountAdminRoutes } from './routes/admin.ts';
 import { mountAiRoutes } from './routes/ai.ts';
@@ -31,6 +31,7 @@ import { mountDesktopRoutes } from './routes/desktop.ts';
 import { mountPluginDraftRoutes } from './routes/plugin-drafts.ts';
 import { mountPluginRoutes } from './routes/plugins.ts';
 import { mountSystemRoutes } from './routes/system.ts';
+import { mailSetup } from './settings.ts';
 
 /**
  * Run `task` after any earlier task with the same key has finished. In
@@ -52,8 +53,9 @@ export type AppDeps = {
   db: Database;
   config: Config;
   log: Log;
-  deliver: Deliver;
   blobs: BlobStore;
+  /** How mail is sent; tests record it instead. */
+  transport?: Transport;
 };
 
 const BLOB_UPLOAD = /^\/api\/pages\/[^/]+\/blobs$/;
@@ -61,10 +63,14 @@ const BLOB_UPLOAD = /^\/api\/pages\/[^/]+\/blobs$/;
 const JSON_BODY_LIMIT = 1024 * 1024;
 
 /** Build the whole HTTP app. Tests call this with their own database, log sink, and mailbox. */
-export function createApp({ db, config, log, deliver, blobs }: AppDeps) {
+export function createApp({ db, config, log, blobs, transport = smtpDeliver }: AppDeps) {
   const app = new Hono<AppEnv>();
   const guesses = createPasswordGuesses({ db, config });
-  const auth = createAuth({ db, config, deliver, log, guesses });
+  const mailer = createMailer({
+    setup: async () => mailSetup(config.smtp, await readMailSettings(db, config.authSecret)),
+    transport,
+  });
+  const auth = createAuth({ db, config, mailer, log, guesses });
 
   app.use(
     securityHeaders({
@@ -152,11 +158,11 @@ export function createApp({ db, config, log, deliver, blobs }: AppDeps) {
     db,
     auth,
     guesses,
-    deliver,
+    mailer,
     log,
     publicOrigin: config.publicOrigin,
   });
-  mountAdminRoutes(routes, { db, auth, config, deliver, log });
+  mountAdminRoutes(routes, { db, auth, config, mailer, transport, log });
   mountContentRoutes(routes, {
     db,
     blobs,

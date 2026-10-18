@@ -15,7 +15,7 @@ import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { twoFactor } from 'better-auth/plugins';
 import type { Config } from '../config.ts';
 import type { Log } from '../http/logger.ts';
-import { sendInBackground, type Deliver, type Mail } from '../mail/mailer.ts';
+import { sendInBackground, type Mail, type Mailer } from '../mail/mailer.ts';
 import { resetPasswordMail, verifyEmailMail } from '../mail/templates.ts';
 import { accountSetupMail } from './account-setup.ts';
 import type { PasswordGuesses } from './password-guesses.ts';
@@ -165,13 +165,13 @@ type AuthHookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0]
 export function createAuth({
   db,
   config,
-  deliver,
+  mailer,
   log,
   guesses,
 }: {
   db: Database;
   config: Config;
-  deliver: Deliver;
+  mailer: Mailer;
   log: Log;
   guesses: PasswordGuesses;
 }) {
@@ -199,6 +199,10 @@ export function createAuth({
       // `auth.api` calls, so sign-up stays closed even for server code.
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/sign-up/email') throw new APIError('NOT_FOUND');
+        // A reset link can only arrive by mail, so say when there is none.
+        if (ctx.path === '/request-password-reset' && !(await mailer.ready())) {
+          throw new APIError('CONFLICT', { message: 'Mail isn’t set up', code: 'mail-off' });
+        }
         // Matched here, as Better Auth routes it, rather than by URL.
         if (ctx.path === '/sign-in/email' && config.rateLimit) {
           const email: unknown = ctx.body?.email;
@@ -273,7 +277,7 @@ export function createAuth({
       resetPasswordTokenExpiresIn: 30 * 60,
       sendResetPassword: async ({ user, url }) => {
         sendInBackground(
-          deliver,
+          mailer.deliver,
           log,
           await mailFor(user, () => resetPasswordMail(user.email, url)),
         );
@@ -284,7 +288,11 @@ export function createAuth({
       expiresIn: 24 * 60 * 60,
       // Also behind the administrator's "Resend verification".
       sendVerificationEmail: async ({ user, url }) => {
-        sendInBackground(deliver, log, await mailFor(user, () => verifyEmailMail(user.email, url)));
+        sendInBackground(
+          mailer.deliver,
+          log,
+          await mailFor(user, () => verifyEmailMail(user.email, url)),
+        );
       },
     },
     databaseHooks: {

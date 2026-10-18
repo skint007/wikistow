@@ -15,7 +15,6 @@ import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { stdoutLog } from './http/logger.ts';
 import { scheduleSweep } from './sweep.ts';
-import { smtpDeliver } from './mail/mailer.ts';
 
 /** How long a connection may go without sending or taking a byte. */
 const IDLE_TIMEOUT_MS = 60_000;
@@ -41,7 +40,7 @@ await lock.migrate(config.migrationsDir ?? MIGRATIONS_DIR);
 stdoutLog({ level: 'info', event: 'migrated' });
 const { db, close } = connect(config.databaseUrl);
 const blobs = fileBlobStore(config.blobDir);
-const { app } = createApp({ db, config, log: stdoutLog, deliver: smtpDeliver(config.smtp), blobs });
+const { app } = createApp({ db, config, log: stdoutLog, blobs });
 
 // Each sweep on its own, so one failing doesn't stop the others: attachment
 // data nothing uses, and publications into another space nobody finished

@@ -18,7 +18,7 @@ const newApp = (overrides: Partial<Config> = {}) =>
     db: testDb.db,
     config: testConfig(testDb.url, { webDist, ...overrides }),
     log: () => {},
-    deliver: async () => {},
+    transport: () => async () => {},
     blobs: fileBlobStore(root),
   }).app;
 
