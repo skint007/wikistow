@@ -232,6 +232,13 @@
       "when": 1792304521768,
       "tag": "0032_unique_names",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792320853717,
+      "tag": "0033_avatar_size",
+      "breakpoints": true
     }
   ]
 }
