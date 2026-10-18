@@ -11,6 +11,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A new server asks for its administrator the first time you open it. That account signs in straight away, before mail is set up. The `bootstrap-admin` command is gone.
 - When you share, add a group member or add an owner, you can pick the person from a list of people on the server, filtered by name or email, instead of typing their whole email.
 - Administrators can set up mail in Administration → Settings, and send a test email before saving. The server now starts without mail, and `SMTP_URL` and `SMTP_FROM` are optional; when set, they still win.
+- Administrators can connect an AI provider in Administration → Settings and pick the model from the provider’s own list, searchable even when it has hundreds. Each `AI_*` variable is now optional and still wins when set.
 
 ### Changes
 
@@ -18,6 +19,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - People can reorder their spaces in the rail: drag any tile but the home space, or use Move up and Move down in a tile’s right-click menu. The order is kept with the account (`space_order` on `users`, `GET`/`PUT /api/me/space-order`) and `GET /api/spaces` comes back in it, home space first, in its released shape. Phones show the order in the drawer. (#97)
 - Administration’s Registration tab is now **Settings**, with a **Mail** card: server, port, security, username, a write-only password, From, **Save** and **Send test email**, which says why a test failed. (#99)
+- Administration → Settings has an **AI assistant** card: API style, base URL, a write-only key, the model, the longest reply and requests a minute per person, with **Save** and **Check connection**. The model field lists the provider’s models when clicked into, searchable by ID and name with a count, drawing the first 100 matches, with arrow keys, Enter and Escape and **Refresh**; any name can still be typed (`components/ui/combobox.tsx`). People’s AI failure messages no longer name environment variables. (#100)
 - The first share, **Add someone**, **Add member** and adding or handing over an owner list the people on the server to pick from, filtered by name or email. Pinned people show by their label with **Key changed**, others by the server’s name and email marked new. People who can’t be chosen, and accounts without a vault yet, are greyed out with the reason. Picking a row runs the same key checks as typing that email, which still works. (#98)
 
 #### Server
@@ -25,6 +27,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The first account on a new server becomes its administrator. While the server has no accounts, sign-in and `/` open **Set up WikiStow**, `GET /api/installation` reports `setup: true`, and `POST /api/setup` creates the account under the admin lock, with its address counted as verified. It refuses once any account exists. The `bootstrap-admin` command, `admin.mjs` and the `bootstrap` invitation kind are gone, and open bootstrap links are withdrawn. A server upgraded before its `bootstrap-admin` setup finished has an account but no administrator, so start it again on an empty database. (#96)
 - `GET /api/people` lists everyone the exact-email lookup could find, for people with a vault and rate-limited like it, and by name and email the confirmed accounts without a vault yet. Every person with a vault can now see who else is on the server, a deliberate choice recorded in protocol section 7.3. (#98)
 - Mail can be set on the admin page as well as by `SMTP_URL` and `SMTP_FROM`, which are now optional and win over it. The settings live on the `settings` row, with the password sealed under a key derived from `BETTER_AUTH_SECRET`, so it reads as unset under another secret. `GET`/`PUT /api/admin/settings/mail` and `POST /api/admin/settings/mail/test` are new, and saves apply without a restart. With no mail set up, everything that would send mail answers `mail-off`. (#99)
+- The AI provider can be set on the admin page as well as by the `AI_*` variables, each now optional and winning over its field; a partial environment no longer stops the server. The AI routes read the provider and its rate limit on each request, so a save applies without a restart, and `GET /api/ai` keeps its shape. The key is sealed like the SMTP password. `GET`/`PUT /api/admin/settings/ai`, `POST /api/admin/ai/models` (OpenAI and Anthropic lists, paged, up to 2,000 in 10 seconds, with the saved key when none is typed) and `POST /api/admin/ai/check` are new. (#100)
 
 ## 0.10.0 - 2026-10-18
 

@@ -15,14 +15,24 @@ const CHECK_DEADLINE_MS = 30_000;
  * The AI proxy (`aiRoutes`). The server adds the key and forwards; it never
  * runs a tool, keeps a prompt or answer, or logs either. Only failure codes
  * are logged. Each request, a tool step included, counts toward the
- * account's AI rate limit.
+ * account's AI rate limit. `current` gives the provider settings that apply
+ * now, read for each request, so a change on the admin page applies at once.
  */
-export function mountAiRoutes(routes: Routes, { ai, log }: { ai: AiConfig | null; log: Log }) {
+export function mountAiRoutes(
+  routes: Routes,
+  { current, log }: { current: () => Promise<AiConfig | null>; log: Log },
+) {
   const off = () => new ApiError('ai-off', 'AI is not set up on this server');
-  const limits = ai ? { rateLimit: { windowSeconds: 60, max: ai.requestsPerMinute } } : {};
+  const limits = {
+    rateLimit: async () => {
+      const ai = await current();
+      return ai && { windowSeconds: 60, max: ai.requestsPerMinute };
+    },
+  };
 
-  routes.account(aiRoutes.status, () =>
-    ai
+  routes.account(aiRoutes.status, async () => {
+    const ai = await current();
+    return ai
       ? {
           enabled: true as const,
           style: ai.style,
@@ -30,28 +40,23 @@ export function mountAiRoutes(routes: Routes, { ai, log }: { ai: AiConfig | null
           model: ai.model,
           maxOutputTokens: ai.maxOutputTokens,
         }
-      : { enabled: false as const },
-  );
+      : { enabled: false as const };
+  });
 
   routes.account(
     aiRoutes.check,
     async (_input, { c }) => {
+      const ai = await current();
       if (!ai) throw off();
-      const request = { messages: [{ role: 'user' as const, text: 'Reply with OK.' }], tools: [] };
-      const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(CHECK_DEADLINE_MS)]);
-      for await (const event of forward(ai, request, { signal, log, maxTokens: CHECK_TOKENS })) {
-        if (event.type === 'error')
-          return { ok: false as const, code: event.code, detail: event.detail };
-        if (event.type === 'finish') break;
-      }
-      return { ok: true as const };
+      return checkAi(ai, c.req.raw.signal, log);
     },
     limits,
   );
 
   routes.stream(
     aiRoutes.stream,
-    (body, { signal }) => {
+    async (body, { signal }) => {
+      const ai = await current();
       if (!ai) throw off();
       return forward(ai, body, {
         signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_DEADLINE_MS)]),
@@ -60,6 +65,22 @@ export function mountAiRoutes(routes: Routes, { ai, log }: { ai: AiConfig | null
     },
     limits,
   );
+}
+
+/** Send the provider a request of a few tokens, to show whether the key and model work. */
+export async function checkAi(ai: AiConfig, signal: AbortSignal, log: Log) {
+  const request = { messages: [{ role: 'user' as const, text: 'Reply with OK.' }], tools: [] };
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(CHECK_DEADLINE_MS)]);
+  for await (const event of forward(ai, request, {
+    signal: deadline,
+    log,
+    maxTokens: CHECK_TOKENS,
+  })) {
+    if (event.type === 'error')
+      return { ok: false as const, code: event.code, detail: event.detail };
+    if (event.type === 'finish') break;
+  }
+  return { ok: true as const };
 }
 
 /**

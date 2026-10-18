@@ -3,6 +3,7 @@ import { boolean, check, integer, pgTable, smallint, text } from 'drizzle-orm/pg
 import { timestamptz } from './helpers.ts';
 
 export const SMTP_SECURITY = ['none', 'starttls', 'tls'] as const;
+export const AI_STYLES = ['openai', 'anthropic'] as const;
 
 /**
  * Installation-wide settings, kept in a single row (`id = 1`) that the first
@@ -34,9 +35,21 @@ export const settings = pgTable(
     smtpUsername: text(),
     smtpPassword: text(),
     smtpFrom: text(),
+    /**
+     * The AI provider, as an administrator set it, null until set. Each
+     * `AI_*` variable wins over its column. The key is sealed like the SMTP
+     * password and never sent back.
+     */
+    aiStyle: text({ enum: AI_STYLES }),
+    aiBaseUrl: text(),
+    aiApiKey: text(),
+    aiModel: text(),
+    aiMaxOutputTokens: integer(),
+    aiRequestsPerMinute: integer(),
   },
   (table) => [
     check('settings_single_row', sql`${table.id} = 1`),
     check('settings_smtp_security', sql`${table.smtpSecurity} in ('none', 'starttls', 'tls')`),
+    check('settings_ai_style', sql`${table.aiStyle} in ('openai', 'anthropic')`),
   ],
 );

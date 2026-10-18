@@ -12,7 +12,7 @@ export async function readSettings(db: Database) {
 type Row = typeof settings.$inferSelect;
 
 /** Columns holding a secret an administrator saved, sealed by `settingsSecrets`. */
-export type SecretColumn = 'smtpPassword';
+export type SecretColumn = 'smtpPassword' | 'aiApiKey';
 
 const SEALED = 'v1.';
 const IV_BYTES = 12;
@@ -69,6 +69,24 @@ export type MailSettings = ReturnType<typeof mailSettingsOf>;
 
 export async function readMailSettings(db: Database, authSecret: string): Promise<MailSettings> {
   return mailSettingsOf(await readSettings(db), authSecret);
+}
+
+/** The AI provider as an administrator saved it, key opened. Null fields are unset. */
+export function aiSettingsOf(row: Row, authSecret: string) {
+  return {
+    style: row.aiStyle,
+    baseUrl: row.aiBaseUrl,
+    apiKey: settingsSecrets(authSecret, row).open('aiApiKey', row.aiApiKey),
+    model: row.aiModel,
+    maxOutputTokens: row.aiMaxOutputTokens,
+    requestsPerMinute: row.aiRequestsPerMinute,
+  };
+}
+
+export type AiSettings = ReturnType<typeof aiSettingsOf>;
+
+export async function readAiSettings(db: Database, authSecret: string): Promise<AiSettings> {
+  return aiSettingsOf(await readSettings(db), authSecret);
 }
 
 /** Changes to settings: a field left out (or undefined) keeps its value. */

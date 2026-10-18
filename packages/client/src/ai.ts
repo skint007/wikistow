@@ -112,13 +112,13 @@ export function aiFailureMessage(code: AiFailureCode, detail?: string): string {
   const said = detail ? ` The provider said: “${detail}”` : '';
   switch (code) {
     case 'key-rejected':
-      return `The AI provider turned down this server’s API key. ${ASK} AI_API_KEY.`;
+      return `The AI provider turned down this server’s API key. ${ASK} the key.`;
     case 'model-unknown':
-      return `The AI provider doesn’t offer the model this server asks for. ${ASK} AI_MODEL.${said}`;
+      return `The AI provider doesn’t offer the model this server asks for. ${ASK} the model.${said}`;
     case 'rate-limited':
       return `The AI provider is busy or limiting requests. Wait a minute and try again.${said}`;
     case 'unavailable':
-      return `Your WikiStow server couldn’t get an answer from the AI provider. Try again in a moment. If it keeps happening, ${ASK.charAt(0).toLowerCase()}${ASK.slice(1)} AI_BASE_URL.${said}`;
+      return `Your WikiStow server couldn’t get an answer from the AI provider. Try again in a moment. If it keeps happening, ${ASK.charAt(0).toLowerCase()}${ASK.slice(1)} the base URL.${said}`;
     case 'too-long':
       return 'This conversation is too long for the model. Start a new one, or include less.';
     case 'failed':
