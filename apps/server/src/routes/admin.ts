@@ -59,11 +59,13 @@ const MAIL_LIMIT = { windowSeconds: 60, max: 10 };
 /** Why a test message didn't go, from nodemailer's error codes, never the server's own words. */
 function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSetup>>) {
   const code = error instanceof Error && 'code' in error ? error.code : undefined;
+  // OpenSSL's, as when TLS meets a server that starts in plain text.
+  const tls = error instanceof Error && 'library' in error && error.library === 'SSL routines';
   const where =
     'url' in setup.connection
       ? 'the mail server'
       : `${setup.connection.host}:${setup.connection.port}`;
-  switch (code) {
+  switch (tls ? 'ETLS' : code) {
     case 'EAUTH':
       return 'The mail server refused the username or password.';
     case 'ENOAUTH':

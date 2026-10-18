@@ -104,6 +104,10 @@ export const SESSION_CODE_PATHS = new Set([
 // Paths where a client could ask to skip TOTP on future sign-ins.
 const TRUST_DEVICE_PATHS = new Set(['/two-factor/verify-totp', '/two-factor/verify-backup-code']);
 
+/** Better Auth paths that only mail something, refused while mail isn't set up. */
+const MAILING_AUTH_PATHS = new Set(['/request-password-reset', '/send-verification-email']);
+const mailOff = () => new APIError('CONFLICT', { message: 'Mail isn’t set up', code: 'mail-off' });
+
 export type Auth = ReturnType<typeof createAuth>;
 
 /**
@@ -199,10 +203,8 @@ export function createAuth({
       // `auth.api` calls, so sign-up stays closed even for server code.
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/sign-up/email') throw new APIError('NOT_FOUND');
-        // A reset link can only arrive by mail, so say when there is none.
-        if (ctx.path === '/request-password-reset' && !(await mailer.ready())) {
-          throw new APIError('CONFLICT', { message: 'Mail isn’t set up', code: 'mail-off' });
-        }
+        // These links can only arrive by mail, so say when there is none.
+        if (MAILING_AUTH_PATHS.has(ctx.path) && !(await mailer.ready())) throw mailOff();
         // Matched here, as Better Auth routes it, rather than by URL.
         if (ctx.path === '/sign-in/email' && config.rateLimit) {
           const email: unknown = ctx.body?.email;
@@ -214,6 +216,19 @@ export function createAuth({
           throw new APIError('BAD_REQUEST', { message: 'Trusted devices are not supported' });
         }
         if (ctx.path === '/two-factor/verify-totp') await refuseReplayedCode(db, ctx);
+      }),
+      // An unconfirmed address is told a new link went out at sign-in (after
+      // its password matched); with no mail, none did.
+      after: createAuthMiddleware(async (ctx) => {
+        const returned = ctx.context.returned;
+        if (
+          ctx.path === '/sign-in/email' &&
+          returned instanceof APIError &&
+          returned.body?.code === 'EMAIL_NOT_VERIFIED' &&
+          !(await mailer.ready())
+        ) {
+          throw mailOff();
+        }
       }),
     },
     advanced: {
