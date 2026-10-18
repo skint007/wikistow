@@ -10,6 +10,8 @@ const SKIP_DELAY = 300;
 const SIDES = ['top', 'right', 'bottom', 'left'] as const;
 
 type Shown = {
+  /** Each hint its own tooltip, so one never shows in the last one's place. */
+  id: number;
   hint: string;
   keys: string | undefined;
   side: (typeof SIDES)[number];
@@ -19,8 +21,16 @@ type Shown = {
   container: HTMLElement;
 };
 
-const hinted = (target: EventTarget | null) =>
-  target instanceof Element ? target.closest<HTMLElement>('[data-hint]') : null;
+/**
+ * Where the event happened. Its path, not its target, which for an element
+ * in a shadow root, as CodeMirror's are, is the root's host.
+ */
+const origin = (event: Event) => {
+  const [first] = event.composedPath();
+  return first instanceof Element ? first : null;
+};
+
+const hinted = (event: Event) => origin(event)?.closest<HTMLElement>('[data-hint]') ?? null;
 
 /**
  * Hover and keyboard-focus hints, in the theme's popover colours, for every
@@ -41,12 +51,14 @@ export function HintLayer() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let closedAt = -Infinity;
     let showing = false;
+    let shows = 0;
 
     const show = (element: HTMLElement) => {
       const hint = element.dataset['hint'];
       if (!hint || !element.isConnected) return;
       showing = true;
       setShown({
+        id: ++shows,
         hint,
         keys: element.dataset['hintKeys'],
         side: SIDES.find((side) => side === element.dataset['hintSide']) ?? 'bottom',
@@ -56,7 +68,7 @@ export function HintLayer() {
       setOpen(true);
     };
     // Hides the hint. The element's hint shows again only once the pointer has been elsewhere,
-    // as with Radix's own tooltips after a press, Escape or a scroll.
+    // as with Radix's own tooltips after a press, a key or a scroll.
     const hide = () => {
       clearTimeout(timer);
       if (!showing) return;
@@ -72,7 +84,7 @@ export function HintLayer() {
     const over = (event: PointerEvent) => {
       // Touch has no hover; a tap would show a hint over what it opens.
       if (event.pointerType === 'touch') return;
-      const element = hinted(event.target);
+      const element = hinted(event);
       if (element === target) return;
       hide();
       target = element;
@@ -84,22 +96,18 @@ export function HintLayer() {
       if (event.relatedTarget === null) close();
     };
     const focusIn = (event: FocusEvent) => {
-      const element = hinted(event.target);
-      if (!element || !(event.target instanceof Element) || !event.target.matches(':focus-visible'))
-        return;
+      const element = hinted(event);
+      if (!element || !origin(event)?.matches(':focus-visible')) return;
       hide();
       target = element;
       show(element);
     };
     const focusOut = (event: FocusEvent) => {
-      if (target && hinted(event.target) === target) close();
+      if (target && hinted(event) === target) close();
     };
     const press = (event: PointerEvent) => {
       hide();
-      target = hinted(event.target);
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') hide();
+      target = hinted(event);
     };
 
     const stop = new AbortController();
@@ -109,7 +117,7 @@ export function HintLayer() {
     document.addEventListener('pointerdown', press, options);
     document.addEventListener('focusin', focusIn, options);
     document.addEventListener('focusout', focusOut, options);
-    document.addEventListener('keydown', key, options);
+    document.addEventListener('keydown', hide, options);
     document.addEventListener('scroll', hide, options);
     // Not in capture, which would catch every element's blur too.
     window.addEventListener('blur', close, { signal: stop.signal });
@@ -121,30 +129,33 @@ export function HintLayer() {
 
   if (!shown) return null;
   const { rect } = shown;
+  // The pointer goes through the hint, and its Radix wrapper, to what's under it.
   return createPortal(
-    <TooltipPrimitive.Provider>
-      {/* Opened and closed only by the listeners above, which cover what Radix would close it for. */}
-      <TooltipPrimitive.Root open={open}>
-        {/* Radix places the hint against its trigger: a stand-in over the element. */}
-        <TooltipPrimitive.Trigger asChild>
-          <span
-            aria-hidden
-            className="pointer-events-none fixed"
-            style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
-          />
-        </TooltipPrimitive.Trigger>
-        <TooltipPrimitive.Content
-          data-slot="tooltip-content"
-          side={shown.side}
-          sideOffset={4}
-          collisionPadding={8}
-          className="pointer-events-none z-50 max-w-80 origin-(--radix-tooltip-content-transform-origin) animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance text-popover-foreground shadow-md fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-        >
-          {shown.hint}
-          {shown.keys && <span className="ml-2 text-muted-foreground">{shown.keys}</span>}
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Root>
-    </TooltipPrimitive.Provider>,
+    <div className="pointer-events-none contents">
+      <TooltipPrimitive.Provider>
+        {/* Opened and closed only by the listeners above, which cover what Radix would close it for. */}
+        <TooltipPrimitive.Root key={shown.id} open={open}>
+          {/* Radix places the hint against its trigger: a stand-in over the element. */}
+          <TooltipPrimitive.Trigger asChild>
+            <span
+              aria-hidden
+              className="pointer-events-none fixed"
+              style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+            />
+          </TooltipPrimitive.Trigger>
+          <TooltipPrimitive.Content
+            data-slot="tooltip-content"
+            side={shown.side}
+            sideOffset={4}
+            collisionPadding={8}
+            className="z-50 max-w-80 origin-(--radix-tooltip-content-transform-origin) animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance text-popover-foreground shadow-md fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+          >
+            {shown.hint}
+            {shown.keys && <span className="ml-2 text-muted-foreground">{shown.keys}</span>}
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Root>
+      </TooltipPrimitive.Provider>
+    </div>,
     shown.container,
   );
 }
