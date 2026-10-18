@@ -188,7 +188,7 @@ function ResultRow({
         </span>
         {(hit.doc.draft || hit.doc.unpublished) && (
           <span
-            title={hit.doc.unpublished ? 'Readers can’t see this copy.' : undefined}
+            data-hint={hit.doc.unpublished ? 'Readers can’t see this copy.' : undefined}
             className="shrink-0 rounded-full bg-status-draft px-2 text-xs font-bold text-status-draft-foreground"
           >
             {hit.doc.draft ? 'Draft' : 'Unpublished'}

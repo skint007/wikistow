@@ -26,7 +26,6 @@ import {
   useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
-  type ReactNode,
 } from 'react';
 import {
   DropdownMenu,
@@ -45,7 +44,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { isApple } from '../../../shell/search-model';
 import { ALERT_ICONS, QUOTE_KINDS } from '../../alert-title';
@@ -291,26 +289,6 @@ const BUTTONS: { name: FormatName; label: string; icon: LucideIcon }[][] = [
 const CONTROL =
   'inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-row text-muted-foreground outline-none hover:tint active:tint-strong hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-none aria-disabled:hover:text-muted-foreground aria-disabled:active:bg-none aria-pressed:bg-primary-soft aria-pressed:text-primary-ink';
 
-function Tip({
-  label,
-  shortcut,
-  children,
-}: {
-  label: string;
-  shortcut?: string;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={4}>
-        {label}
-        {shortcut && <span className="ml-2 opacity-70">{shortcut}</span>}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 // Each control is its own memoized component: the status changes with
 // most edits, and only the controls it changes for draw again.
 type Roving = { tabbable: boolean; onFocus: (key: string) => void };
@@ -355,16 +333,15 @@ const TextStyle = memo(
     const backToText = useBackToText(watch);
     return (
       <DropdownMenu>
-        <Tip label="Text style">
-          <DropdownMenuTrigger
-            {...roving('heading', focus)}
-            aria-label={`Text style: ${style}`}
-            className={cn(CONTROL, 'w-28 justify-between px-2 text-sm')}
-          >
-            <span className="truncate">{style}</span>
-            <ChevronDown className="size-3.5" strokeWidth={1.75} />
-          </DropdownMenuTrigger>
-        </Tip>
+        <DropdownMenuTrigger
+          {...roving('heading', focus)}
+          aria-label={`Text style: ${style}`}
+          data-hint="Text style"
+          className={cn(CONTROL, 'w-28 justify-between px-2 text-sm')}
+        >
+          <span className="truncate">{style}</span>
+          <ChevronDown className="size-3.5" strokeWidth={1.75} />
+        </DropdownMenuTrigger>
         <DropdownMenuContent align="start" {...backToText}>
           <DropdownMenuRadioGroup value={level === null ? '' : String(level)}>
             {LEVELS.map(({ level: option, format }, i) => (
@@ -411,22 +388,22 @@ const FormatButton = memo(function FormatButton({
   className?: string | undefined;
 }) {
   return (
-    <Tip label={label} shortcut={shortcutLabel(SHORTCUTS[name])}>
-      <button
-        type="button"
-        {...roving(name, focus)}
-        aria-label={label}
-        aria-pressed={active}
-        // Not `disabled`, which would drop the focus as the selection moves.
-        aria-disabled={!applies}
-        // The editor keeps the focus and its selection.
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => applies && watch.run(FORMATS[name].run)}
-        className={cn(CONTROL, 'w-8', className)}
-      >
-        <Icon className="size-4" strokeWidth={1.75} />
-      </button>
-    </Tip>
+    <button
+      type="button"
+      {...roving(name, focus)}
+      aria-label={label}
+      data-hint={label}
+      data-hint-keys={shortcutLabel(SHORTCUTS[name])}
+      aria-pressed={active}
+      // Not `disabled`, which would drop the focus as the selection moves.
+      aria-disabled={!applies}
+      // The editor keeps the focus and its selection.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => applies && watch.run(FORMATS[name].run)}
+      className={cn(CONTROL, 'w-8', className)}
+    >
+      <Icon className="size-4" strokeWidth={1.75} />
+    </button>
   );
 });
 
@@ -470,22 +447,21 @@ const LinkControl = memo(function LinkControl({
 
   return (
     <Popover open={target !== null} onOpenChange={onOpenChange}>
-      <Tip label="Link">
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            {...roving('link', focus)}
-            aria-label="Link"
-            aria-pressed={active}
-            aria-disabled={!applies}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={(event) => !applies && event.preventDefault()}
-            className={cn(CONTROL, 'w-8')}
-          >
-            <Link className="size-4" strokeWidth={1.75} />
-          </button>
-        </PopoverTrigger>
-      </Tip>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          {...roving('link', focus)}
+          aria-label="Link"
+          data-hint="Link"
+          aria-pressed={active}
+          aria-disabled={!applies}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => !applies && event.preventDefault()}
+          className={cn(CONTROL, 'w-8')}
+        >
+          <Link className="size-4" strokeWidth={1.75} />
+        </button>
+      </PopoverTrigger>
       <PopoverContent
         align="start"
         className="w-80"
@@ -552,15 +528,14 @@ const QuoteKindMenu = memo(function QuoteKindMenu({
   const backToText = useBackToText(watch);
   return (
     <DropdownMenu>
-      <Tip label="Quote type">
-        <DropdownMenuTrigger
-          {...roving('quoteKind', focus)}
-          aria-label={current ? `Quote type: ${current.label}` : 'Quote type'}
-          className={cn(CONTROL, 'w-4 rounded-l-none')}
-        >
-          <ChevronDown className="size-3.5" strokeWidth={1.75} />
-        </DropdownMenuTrigger>
-      </Tip>
+      <DropdownMenuTrigger
+        {...roving('quoteKind', focus)}
+        aria-label={current ? `Quote type: ${current.label}` : 'Quote type'}
+        data-hint="Quote type"
+        className={cn(CONTROL, 'w-4 rounded-l-none')}
+      >
+        <ChevronDown className="size-3.5" strokeWidth={1.75} />
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="start" {...backToText}>
         <DropdownMenuRadioGroup value={current?.label ?? ''}>
           {QUOTE_KINDS.map(({ kind: option, label, icon: Icon }) => (
@@ -612,16 +587,15 @@ const AttachmentControl = memo(function AttachmentControl({
   return (
     <>
       <DropdownMenu open={open} onOpenChange={onOpenChange}>
-        <Tip label="Insert attachment">
-          <DropdownMenuTrigger
-            {...roving('attachment', focus)}
-            aria-label="Insert attachment"
-            aria-disabled={!applies}
-            className={cn(CONTROL, 'w-8')}
-          >
-            <Paperclip className="size-4" strokeWidth={1.75} />
-          </DropdownMenuTrigger>
-        </Tip>
+        <DropdownMenuTrigger
+          {...roving('attachment', focus)}
+          aria-label="Insert attachment"
+          data-hint="Insert attachment"
+          aria-disabled={!applies}
+          className={cn(CONTROL, 'w-8')}
+        >
+          <Paperclip className="size-4" strokeWidth={1.75} />
+        </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72" {...backToText}>
           <DropdownMenuLabel>This page's attachments</DropdownMenuLabel>
           {attachments.length === 0 && (
@@ -705,76 +679,74 @@ export function FormatToolbar({
   };
 
   return (
-    <TooltipProvider delayDuration={500}>
-      <div
-        ref={bar}
-        id={watch.id}
-        role="toolbar"
-        aria-label="Formatting"
-        aria-controls="page-visual"
-        onKeyDown={onKeyDown}
-        className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-input px-1.5 py-1"
-      >
-        <TextStyle
-          watch={watch}
-          style={status?.style ?? headingLabel(0)}
-          level={status?.level ?? null}
-          headings={status?.headings ?? []}
-          tabbable={current === 'heading'}
-          onFocus={setCurrent}
-        />
-        {BUTTONS.map((group, i) => (
-          <Fragment key={i}>
-            <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-5" />
-            {group.map((button) => {
-              const kind = button.name === 'quote' ? status?.quote.kind : undefined;
-              const control = (
-                <FormatButton
-                  key={button.name}
+    <div
+      ref={bar}
+      id={watch.id}
+      role="toolbar"
+      aria-label="Formatting"
+      aria-controls="page-visual"
+      onKeyDown={onKeyDown}
+      className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-input px-1.5 py-1"
+    >
+      <TextStyle
+        watch={watch}
+        style={status?.style ?? headingLabel(0)}
+        level={status?.level ?? null}
+        headings={status?.headings ?? []}
+        tabbable={current === 'heading'}
+        onFocus={setCurrent}
+      />
+      {BUTTONS.map((group, i) => (
+        <Fragment key={i}>
+          <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-5" />
+          {group.map((button) => {
+            const kind = button.name === 'quote' ? status?.quote.kind : undefined;
+            const control = (
+              <FormatButton
+                key={button.name}
+                watch={watch}
+                {...button}
+                // In a quote, its kind's icon.
+                icon={kind ? ALERT_ICONS[kind] : button.icon}
+                active={status?.formats[button.name].active ?? false}
+                applies={status?.formats[button.name].applies ?? false}
+                tabbable={current === button.name}
+                onFocus={setCurrent}
+                className={button.name === 'quote' ? 'rounded-r-none' : undefined}
+              />
+            );
+            if (button.name !== 'quote') return control;
+            // A split button: the quote's toggle, then its kinds.
+            return (
+              <span key={button.name} className="flex">
+                {control}
+                <QuoteKindMenu
                   watch={watch}
-                  {...button}
-                  // In a quote, its kind's icon.
-                  icon={kind ? ALERT_ICONS[kind] : button.icon}
-                  active={status?.formats[button.name].active ?? false}
-                  applies={status?.formats[button.name].applies ?? false}
-                  tabbable={current === button.name}
+                  kind={kind}
+                  applies={status?.quote.applies ?? false}
+                  tabbable={current === 'quoteKind'}
                   onFocus={setCurrent}
-                  className={button.name === 'quote' ? 'rounded-r-none' : undefined}
                 />
-              );
-              if (button.name !== 'quote') return control;
-              // A split button: the quote's toggle, then its kinds.
-              return (
-                <span key={button.name} className="flex">
-                  {control}
-                  <QuoteKindMenu
-                    watch={watch}
-                    kind={kind}
-                    applies={status?.quote.applies ?? false}
-                    tabbable={current === 'quoteKind'}
-                    onFocus={setCurrent}
-                  />
-                </span>
-              );
-            })}
-          </Fragment>
-        ))}
-        <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-5" />
-        <LinkControl
-          watch={watch}
-          active={status?.link.active ?? false}
-          applies={status?.link.applies ?? false}
-          tabbable={current === 'link'}
-          onFocus={setCurrent}
-        />
-        <AttachmentControl
-          watch={watch}
-          attachments={attachments}
-          applies={status?.attachment ?? false}
-          tabbable={current === 'attachment'}
-          onFocus={setCurrent}
-        />
-      </div>
-    </TooltipProvider>
+              </span>
+            );
+          })}
+        </Fragment>
+      ))}
+      <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-5" />
+      <LinkControl
+        watch={watch}
+        active={status?.link.active ?? false}
+        applies={status?.link.applies ?? false}
+        tabbable={current === 'link'}
+        onFocus={setCurrent}
+      />
+      <AttachmentControl
+        watch={watch}
+        attachments={attachments}
+        applies={status?.attachment ?? false}
+        tabbable={current === 'attachment'}
+        onFocus={setCurrent}
+      />
+    </div>
   );
 }

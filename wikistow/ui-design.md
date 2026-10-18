@@ -243,7 +243,8 @@ Proposed shadcn/Radix building blocks. Check each against the interaction it nee
 
 | Part | Building block |
 | --- | --- |
-| Space tiles | Button with Tooltip (space name) and an accessible name. Selected state via `aria-current`. |
+| Space tiles | Link with a hint (space name, to its right) and an accessible name. Selected state via `aria-current`. |
+| Hints | A `data-hint` attribute on any element, never a `title`, whose tooltip each browser draws its own way. One layer at the app root (`HintLayer` in `components/ui/tooltip.tsx`) shows it in a Radix Tooltip: `popover` colours, a border, `rounded-row`, `text-xs`, below the element unless `data-hint-side` says otherwise, with `data-hint-keys` for a shortcut in `muted-foreground`. It shows after the pointer rests 500 ms, at once when moving on from another hint within 300 ms, and at once on keyboard focus; a press, Escape or a scroll hides it until the pointer moves on. Not on touch. It works on editor DOM too, and on each of a grid's thousand buttons for the cost of an attribute. A hint isn't a name: an icon-only control has an `aria-label` as well. |
 | Space menu, avatar menu | DropdownMenu |
 | Choices (Space, Folder, Move to, Access, code language) | Picker (`components/ui/picker.tsx`), not a native select, whose option list the browser draws in its own colours: a button named "Label: choice", 36px, `rounded-control`, `input` border on `background`, with a `ring` outline while focused, as a native select has, so clicking its label shows it focused, then a DropdownMenu of radio items at least as wide, the choice checked and focused as it opens. Not Radix Select, whose scroll lock injects a `<style>` the CSP refuses. Menus in a dialog render inside it, and a dialog's body scrolls rather than its box, so they aren't cut off at its edge. |
 | Rail navigation | Buttons or links with visible labels. |

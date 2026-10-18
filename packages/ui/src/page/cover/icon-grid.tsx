@@ -64,7 +64,7 @@ export default function IconGrid({
               key={icon.name}
               type="button"
               data-pick
-              title={label}
+              data-hint={label}
               aria-label={label}
               aria-pressed={icon.data === shown}
               onClick={() => onPick(icon.name)}

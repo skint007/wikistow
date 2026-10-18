@@ -130,7 +130,8 @@ function PluginItems({ onNavigate }: { onNavigate: (() => void) | undefined }) {
       to="/plugin/$pluginId/$viewId"
       params={{ pluginId, viewId: opens }}
       onClick={onNavigate}
-      title={title}
+      data-hint={title}
+      data-hint-side="right"
       data-plugin={pluginId}
       className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
       activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
@@ -298,7 +299,8 @@ function SpaceTiles({
               onClick={onNavigate}
               aria-label={plainText(name)}
               aria-current={active ? 'page' : undefined}
-              title={plainText(name)}
+              data-hint={plainText(name)}
+              data-hint-side="right"
               draggable={movable}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';

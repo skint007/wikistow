@@ -54,7 +54,7 @@ export function AgentName({
       ) : person === null ? (
         'someone'
       ) : person.served ? (
-        <span title="Their name as the server has it">
+        <span data-hint="Their name as the server has it">
           “<Name>{person.name}</Name>”
         </span>
       ) : (
@@ -80,7 +80,7 @@ export function AgentName({
     );
   }
   return (
-    <span title="The name its person gave it, as the server has it">
+    <span data-hint="The name its person gave it, as the server has it">
       “<Name>{serverName}</Name>”{forWhom}
     </span>
   );

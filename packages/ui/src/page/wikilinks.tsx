@@ -52,7 +52,7 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
       // The chooser comes with the source editor; until then, just a hint.
       return (
         <span
-          title="More than one page has this title"
+          data-hint="More than one page has this title"
           className="underline decoration-dotted underline-offset-2"
         >
           {view.text}
@@ -130,7 +130,7 @@ function CreateLink({
     <>
       <button
         type="button"
-        title="Create this page"
+        data-hint="Create this page"
         onClick={() => void create()}
         className="text-muted-foreground underline decoration-dashed underline-offset-2 hover:text-foreground"
       >
