@@ -269,6 +269,14 @@ export function shortcutLabel(key: string): string {
   return APPLE ? [...mods, last].join('') : [...mods, last].join('+');
 }
 
+/** A ProseMirror key name as `aria-keyshortcuts` writes it: `Control+Alt+7`, `Meta+Alt+7` on Apple systems. */
+function ariaShortcut(key: string): string {
+  const parts = key.split('-');
+  const last = parts.pop()?.toUpperCase() ?? '';
+  const mods = parts.map((part) => (part === 'Mod' ? (APPLE ? 'Meta' : 'Control') : part));
+  return [...mods, last].join('+');
+}
+
 const BUTTONS: { name: FormatName; label: string; icon: LucideIcon }[][] = [
   [
     { name: 'bold', label: 'Bold', icon: Bold },
@@ -394,6 +402,7 @@ const FormatButton = memo(function FormatButton({
       aria-label={label}
       data-hint={label}
       data-hint-keys={shortcutLabel(SHORTCUTS[name])}
+      aria-keyshortcuts={ariaShortcut(SHORTCUTS[name])}
       aria-pressed={active}
       // Not `disabled`, which would drop the focus as the selection moves.
       aria-disabled={!applies}
