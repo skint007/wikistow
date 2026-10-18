@@ -61,7 +61,8 @@ test('a plugin draft is built, previewed, opened again and published', async ({
   await expect(status).toContainText(
     'Published Calculator 0.1.0 and installed it on all your devices.',
   );
-  await page.goto('/settings');
+  await page.getByRole('link', { name: 'See it in the library' }).click();
+  await page.getByRole('link', { name: 'Installed' }).click();
   await expect(
     page
       .getByRole('list', { name: 'Installed plugins' })

@@ -7,17 +7,18 @@ import {
   setPluginTheme,
   setTheme as setThemeCommand,
 } from '../commands/ui-commands';
-import { desktop } from '../desktop';
 import { usePlugins, type PluginThemeOption } from '../plugins/runtime';
+import { SettingRow, THIS_DEVICE } from '../settings/rows';
 import { pluginTheme, usePluginTheme } from './plugin-theme';
-import { THEME_LABELS, useTheme } from './theme';
+import { THEME_LABELS, useTheme, type Theme } from './theme';
 
 const env = { satisfies: requirementsHere() };
 
 /**
- * The built-in palettes, synced to the account, and the themes enabled
- * plugins add, kept on this computer or in this browser. A plugin theme can be
- * previewed first; a built-in choice, or "Use … here", leaves it.
+ * Settings' Appearance rows: the built-in palettes, synced to the account,
+ * and the themes enabled plugins add, kept on this computer or in this
+ * browser. A plugin theme can be previewed first; a built-in choice, or
+ * "Use … here", leaves it.
  */
 export function ThemePicker() {
   const { theme, setTheme } = useTheme();
@@ -51,30 +52,63 @@ export function ThemePicker() {
   );
 
   return (
-    <div className="grid gap-4">
-      <div role="group" aria-label="Theme" className="flex flex-wrap gap-2">
-        {accountRoutes.THEMES.map((choice) => {
-          const on = !using && choice === theme;
-          return (
-            <Button
-              key={choice}
-              variant={on ? 'default' : 'outline'}
-              aria-pressed={on}
-              onClick={() =>
-                void runCommand(setThemeCommand, { theme: choice }, { ...env, setTheme })
-              }
-            >
-              {THEME_LABELS[choice]}
+    <>
+      <SettingRow
+        name="Palette"
+        action={
+          <div role="group" aria-label="Theme" className="flex flex-wrap gap-2">
+            {accountRoutes.THEMES.map((choice) => {
+              const on = !using && choice === theme;
+              return (
+                <Button
+                  key={choice}
+                  size="sm"
+                  variant={on ? 'default' : 'outline'}
+                  aria-pressed={on}
+                  onClick={() =>
+                    void runCommand(setThemeCommand, { theme: choice }, { ...env, setTheme })
+                  }
+                >
+                  <Swatch theme={choice} />
+                  {THEME_LABELS[choice]}
+                </Button>
+              );
+            })}
+          </div>
+        }
+      >
+        {preview ? (
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-2 rounded-control bg-muted p-3 text-sm"
+          >
+            <span className="flex-1">
+              Previewing {previewing?.name ?? 'a theme'}. Nothing changes until you use it.
+            </span>
+            {previewing && (
+              <Button size="sm" onClick={() => choose(previewing)}>
+                Use {previewing.name}
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => pluginTheme.preview(null)}>
+              Stop preview
             </Button>
-          );
-        })}
-      </div>
+          </div>
+        ) : (
+          using && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="flex-1 text-muted-foreground">
+                {using.name} is on here. Your account’s theme is {THEME_LABELS[theme]}.
+              </span>
+              <Button size="sm" variant="outline" onClick={() => choose(null)}>
+                Use {THEME_LABELS[theme]} here
+              </Button>
+            </div>
+          )
+        )}
+      </SettingRow>
       {themes.length > 0 && (
-        <div className="grid gap-2">
-          <p className="text-sm text-muted-foreground">
-            From plugins, {desktop ? 'on this computer' : 'in this browser'} only. Your account
-            keeps its theme everywhere else.
-          </p>
+        <SettingRow name="Plugin themes" scope={THIS_DEVICE}>
           <ul aria-label="Plugin themes" className="grid gap-2">
             {themes.map((option) => {
               const on = using === option;
@@ -84,6 +118,7 @@ export function ThemePicker() {
                   className="flex flex-wrap items-center gap-2"
                 >
                   <Button
+                    size="sm"
                     variant={on ? 'default' : 'outline'}
                     aria-pressed={on}
                     onClick={() => choose(option)}
@@ -107,36 +142,24 @@ export function ThemePicker() {
               );
             })}
           </ul>
-        </div>
+        </SettingRow>
       )}
-      {preview && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center gap-2 rounded-control bg-muted p-3 text-sm"
-        >
-          <span className="flex-1">
-            Previewing {previewing?.name ?? 'a theme'}. Nothing changes until you use it.
-          </span>
-          {previewing && (
-            <Button size="sm" onClick={() => choose(previewing)}>
-              Use {previewing.name}
-            </Button>
-          )}
-          <Button size="sm" variant="outline" onClick={() => pluginTheme.preview(null)}>
-            Stop preview
-          </Button>
-        </div>
+    </>
+  );
+}
+
+/** A dot of the palette's background, drawn by its own tokens; System is half Light, half Midnight slate. */
+function Swatch({ theme }: { theme: Theme }) {
+  return (
+    <span className="flex size-3.5 overflow-hidden rounded-full border border-foreground/25">
+      {theme === 'system' ? (
+        <>
+          <span data-theme="light" className="flex-1 bg-background" />
+          <span data-theme="slate" className="flex-1 bg-background" />
+        </>
+      ) : (
+        <span data-theme={theme} className="flex-1 bg-background" />
       )}
-      {using && !preview && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="flex-1 text-muted-foreground">
-            {using.name} is on here. Your account’s theme is {THEME_LABELS[theme]}.
-          </span>
-          <Button size="sm" variant="outline" onClick={() => choose(null)}>
-            Use {THEME_LABELS[theme]} here
-          </Button>
-        </div>
-      )}
-    </div>
+    </span>
   );
 }

@@ -66,6 +66,7 @@ test('a forgotten password is reset by email', async ({ freshPage, admin }) => {
 test('a sign-in with two-factor turned on asks for a code', async ({ freshPage, admin }) => {
   const { email, page } = await invited(freshPage, admin.email);
   await page.goto('/settings');
+  await page.getByRole('button', { name: 'Manage two-factor sign-in' }).click();
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'Set up two-factor' }).click();
   const key = await page.locator('code').first().textContent();

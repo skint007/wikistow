@@ -40,7 +40,9 @@ test('signs in through the browser and opens the vault in the app', async ({
   });
   await expect(window.getByRole('heading', { name: 'Desktop apps' })).toBeVisible();
   await window.reload();
-  await expect(window.getByText('(this app)')).toBeVisible();
+  await expect(window.getByRole('heading', { name: 'Desktop apps' })).toHaveAccessibleDescription(
+    '1 signed in, including this app',
+  );
 });
 
 test('opens with a damaged settings file', async () => {

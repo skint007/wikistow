@@ -49,9 +49,17 @@ async function runCommand(window: Page, title: string) {
 }
 
 // In the app, never by loading an address: that would lock the vault.
-const toSettings = (window: Page) => window.getByRole('link', { name: 'Settings' }).first().click();
-const backToPage = async (window: Page) => {
+const toPlugins = async (window: Page) => {
+  await window.getByRole('link', { name: 'Settings' }).first().click();
+  await window.getByRole('link', { name: 'Manage plugins' }).click();
+};
+/** Back from the Plugins page, past Settings. */
+const leavePlugins = async (window: Page) => {
   await window.goBack();
+  await window.goBack();
+};
+const backToPage = async (window: Page) => {
+  await leavePlugins(window);
   await expect(window.locator('#page-title')).toHaveValue('Probed');
 };
 
@@ -101,7 +109,7 @@ test('a script plugin gets only the page access it is given', async ({
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, `${PROBE}/dist`);
-  await toSettings(window);
+  await toPlugins(window);
   await window.getByRole('button', { name: 'Install plugin…' }).click();
   const approval = window.getByRole('dialog');
   await expect(approval).toContainText('Script');
@@ -123,20 +131,20 @@ test('a script plugin gets only the page access it is given', async ({
   // No page access: not even reading.
   expect(await runCommand(window, 'Save a draft here')).toContain('may not read there');
 
-  await toSettings(window);
+  await toPlugins(window);
   await setAccess(window, 'Read');
   await backToPage(window);
   // Read access reads, but can't save.
   expect(await runCommand(window, 'Save a draft here')).toContain('may not change pages there');
 
-  await toSettings(window);
+  await toPlugins(window);
   await setAccess(window, 'Read and write');
   await backToPage(window);
   expect(await runCommand(window, 'Save a draft here')).toContain('write saved');
 
   // Disabled, it registers nothing: no menu, no commands. The page opened
   // again shows the draft the probe saved.
-  await toSettings(window);
+  await toPlugins(window);
   await window.getByRole('switch', { name: 'Probe enabled' }).click();
   await expect(window.getByRole('switch', { name: 'Probe enabled' })).not.toBeChecked();
   await backToPage(window);
@@ -234,12 +242,15 @@ test('a library plugin installs at unlock, checked against its hash', async ({
   await first.app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, `${PROBE}/dist`);
-  await toSettings(first.window);
+  await toPlugins(first.window);
   await first.window.getByRole('button', { name: 'Install plugin…' }).click();
   await first.window.getByRole('dialog').getByRole('button', { name: 'Install' }).click();
-  const folderInstall = first.window
-    .getByRole('list', { name: 'Installed plugins' })
-    .getByRole('listitem', { name: 'Probe' });
+  const installed = (from: 'Folder' | 'Library') =>
+    first.window
+      .getByRole('list', { name: 'Installed plugins' })
+      .getByRole('listitem', { name: 'Probe' })
+      .filter({ has: first.window.getByText(from, { exact: true }) });
+  const folderInstall = installed('Folder');
   await folderInstall.getByRole('button', { name: 'Share to library…' }).click();
   await first.window.getByRole('dialog').getByRole('button', { name: 'Upload' }).click();
   await expect(
@@ -249,11 +260,7 @@ test('a library plugin installs at unlock, checked against its hash', async ({
   ).toBeVisible();
   await folderInstall.getByRole('button', { name: 'Remove Probe' }).click();
   await expect(folderInstall).toHaveCount(0);
-  await expect(
-    first.window
-      .getByRole('list', { name: 'Installed from the library' })
-      .getByRole('listitem', { name: 'Probe' }),
-  ).toBeVisible();
+  await expect(installed('Library')).toBeVisible();
   await backToPage(first.window);
   expect(await runCommand(first.window, 'Try the network')).toContain('probe: network blocked');
   // Copied by now: it ran from the copy.
@@ -270,10 +277,10 @@ test('a library plugin installs at unlock, checked against its hash', async ({
   await signInThroughBrowser(second, page, baseURL ?? '');
   await unlock(second.window);
   await newPage(second.window, 'Second computer');
-  await toSettings(second.window);
+  await toPlugins(second.window);
   await expect(
     second.window
-      .getByRole('list', { name: 'Installed from the library' })
+      .getByRole('list', { name: 'Installed plugins' })
       .getByRole('listitem', { name: 'Probe' })
       .getByRole('alert'),
   ).toContainText('don’t match the version you approved');
@@ -281,7 +288,7 @@ test('a library plugin installs at unlock, checked against its hash', async ({
 
   // Put back, it installs at the next unlock, with nothing to approve, and runs.
   await writeFile(script, original);
-  await second.window.goBack();
+  await leavePlugins(second.window);
   await expect(second.window.locator('#page-title')).toHaveValue('Second computer');
   await accountMenu(second.window, 'Lock vault');
   await unlock(second.window);
@@ -311,20 +318,19 @@ test('a plugin block keeps its page text whole', async ({ page, freshPage, admin
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, `${CALCULATOR}/dist`);
-  const settings = () => window.getByRole('link', { name: 'Settings' }).first().click();
   const toggle = async (checked: boolean) => {
-    await settings();
+    await toPlugins(window);
     await window.getByRole('switch', { name: 'Calculator enabled' }).click();
     await expect(window.getByRole('switch', { name: 'Calculator enabled' })).toBeChecked({
       checked,
     });
-    await window.goBack();
+    await leavePlugins(window);
   };
-  await settings();
+  await toPlugins(window);
   await window.getByRole('button', { name: 'Install plugin…' }).click();
   await window.getByRole('dialog').getByRole('button', { name: 'Install' }).click();
   await expect(window.getByRole('listitem', { name: 'Calculator' })).toBeVisible();
-  await window.goBack();
+  await leavePlugins(window);
 
   await showIn(window, 'Visual');
   const total = visual(window).locator('output[data-output="total"]');

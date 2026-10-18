@@ -1,10 +1,12 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { aiFailureMessage } from '@wikistow/client';
 import { aiRoutes } from '@wikistow/contracts';
+import { useId, useState } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { api } from '../api';
 import { errorMessage } from '../errors';
+import { SettingRow } from '../settings/rows';
 import { aiStatusQuery } from './session';
 
 const STYLE_LABELS: Record<aiRoutes.AiStyle, string> = {
@@ -33,57 +35,78 @@ export function AiDisclosure({ host }: { host: string }) {
   );
 }
 
-/** The server's AI provider and model, the disclosure, and a connection check. */
+/**
+ * Settings' AI assistant row: the server's AI provider, model and host, a
+ * connection check, and Where it goes, which shows the disclosure in place.
+ */
 export function AiSettings() {
   const { data, error } = useQuery(aiStatusQuery);
   const check = useMutation({ mutationFn: () => api.call(aiRoutes.check) });
+  const [disclosed, setDisclosed] = useState(false);
+  const disclosure = useId();
 
-  if (error) return <FormMessage>{errorMessage(error)}</FormMessage>;
+  if (error)
+    return (
+      <SettingRow name="AI assistant" state={<FormMessage>{errorMessage(error)}</FormMessage>} />
+    );
   if (!data) return null;
   if (!data.enabled) {
     return (
-      <p className="text-sm text-muted-foreground">
-        AI isn’t set up on this server, so there’s no assistant. The person who runs the server can
-        connect an AI provider.
-      </p>
+      <SettingRow
+        name="Not set up"
+        state="AI isn’t set up on this server, so there’s no assistant. The person who runs the server can connect an AI provider."
+      />
     );
   }
   return (
-    <div className="grid gap-4">
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">
-        <dt className="text-muted-foreground">Provider</dt>
-        <dd>
-          {STYLE_LABELS[data.style]} at {data.host}
-        </dd>
-        <dt className="text-muted-foreground">Model</dt>
-        <dd className="font-mono">{data.model}</dd>
-        <dt className="text-muted-foreground">Longest reply</dt>
-        <dd>{data.maxOutputTokens.toLocaleString()} tokens</dd>
-      </dl>
-      <AiDisclosure host={data.host} />
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={check.isPending}
-          onClick={() => check.mutate()}
-        >
-          Check connection
-        </Button>
-        {check.isPending && <span className="text-sm text-muted-foreground">Checking…</span>}
-        {check.data?.ok && !check.isPending && (
-          <span
-            role="status"
-            className="rounded-full bg-status-published px-2.5 py-[3px] text-[12.5px] font-bold text-status-published-foreground"
+    <SettingRow
+      name={STYLE_LABELS[data.style]}
+      state={
+        <>
+          <span className="font-mono">{data.model}</span> at {data.host}, replies up to{' '}
+          {data.maxOutputTokens.toLocaleString()} tokens
+        </>
+      }
+      action={
+        <>
+          {check.isPending && <span className="text-sm text-muted-foreground">Checking…</span>}
+          {check.data?.ok && !check.isPending && (
+            <span
+              role="status"
+              className="rounded-full bg-status-published px-2.5 py-[3px] text-[12.5px] font-bold text-status-published-foreground"
+            >
+              ✓ Connected
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={check.isPending}
+            onClick={() => check.mutate()}
           >
-            ✓ Connected
-          </span>
-        )}
-      </div>
+            Check connection
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={disclosed}
+            aria-controls={disclosed ? disclosure : undefined}
+            onClick={() => setDisclosed(!disclosed)}
+          >
+            Where it goes
+          </Button>
+        </>
+      }
+    >
       {check.data && !check.data.ok && !check.isPending && (
         <FormMessage>{aiFailureMessage(check.data.code, check.data.detail)}</FormMessage>
       )}
       {check.error && <FormMessage>{errorMessage(check.error)}</FormMessage>}
-    </div>
+      {disclosed && (
+        <div id={disclosure}>
+          <AiDisclosure host={data.host} />
+        </div>
+      )}
+    </SettingRow>
   );
 }
