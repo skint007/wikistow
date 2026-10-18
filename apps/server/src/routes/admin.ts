@@ -65,6 +65,10 @@ function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSe
     'url' in setup.connection
       ? 'the mail server'
       : `${setup.connection.host}:${setup.connection.port}`;
+  // Node's own words are the only sign of a refused certificate.
+  if (error instanceof Error && /certificate/i.test(error.message)) {
+    return `The certificate from ${where} wasn’t accepted. It may be self-signed, expired or for another name.`;
+  }
   switch (tls ? 'ETLS' : code) {
     case 'EAUTH':
       return 'The mail server refused the username or password.';
