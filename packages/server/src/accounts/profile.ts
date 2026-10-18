@@ -27,3 +27,14 @@ export const withUniqueName = <T>(write: Promise<T>): Promise<T> =>
     if (isUniqueViolation(error, USERS_NAME_UNIQUE)) throw new AccountError('name-taken');
     throw error;
   });
+
+/**
+ * Change an account's own name. It isn't a credential, so no recent sign-in
+ * is needed. People who already have the account as a contact keep the name
+ * they know it by (protocol section 8.2).
+ */
+export async function setName(db: Database, accountId: string, name: string): Promise<string> {
+  const stored = normalizeName(name);
+  await withUniqueName(db.update(users).set({ name: stored }).where(eq(users.id, accountId)));
+  return stored;
+}

@@ -17,6 +17,7 @@ import {
   removeAvatar,
   schema,
   setAvatar,
+  setName,
   setTheme,
   type AccountFailure,
   type Database,
@@ -365,6 +366,14 @@ export function mountAccountRoutes(
       sendInBackground(mailer.deliver, log, emailChangedMail(change.from, change.to));
       return { email: change.to };
     },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.account(
+    accountRoutes.setName,
+    async ({ body }, { principal }) => ({
+      name: await setName(db, principal.accountId, body.name).catch(toApiError),
+    }),
     { rateLimit: FORM_LIMIT },
   );
 

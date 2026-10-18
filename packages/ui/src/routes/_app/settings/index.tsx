@@ -67,6 +67,7 @@ function Settings() {
         <OneOpen>
           <div className="grid content-start gap-6">
             <SettingsGroup id="account" title="Account" note="How people see you, and your email">
+              <ChangeName />
               <AvatarSettings />
               <ChangeEmail />
             </SettingsGroup>
@@ -122,6 +123,65 @@ function IdleLock() {
         />
       }
     />
+  );
+}
+
+const NewName = z.object({ name: accountRoutes.DisplayName });
+
+/**
+ * The account's name, as the server shows it to people meeting this account,
+ * and changing it. Nobody else on the server may use the same name.
+ */
+function ChangeName() {
+  const { data: me } = useQuery(meQuery);
+  return (
+    <FormRow id="name" name="Name" state={me?.account.name}>
+      <NameForm current={me?.account.name ?? ''} />
+    </FormRow>
+  );
+}
+
+function NameForm({ current }: { current: string }) {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState<{ tone: 'error' | 'notice'; text: string } | null>(null);
+  const form = useForm({ resolver: zodResolver(NewName), defaultValues: { name: current } });
+  const { errors, isSubmitting } = form.formState;
+
+  const submit = form.handleSubmit(async ({ name }) => {
+    setMessage(null);
+    try {
+      const saved = await api.call(accountRoutes.setName, { body: { name } });
+      form.reset(saved);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: meQuery.queryKey }),
+        queryClient.invalidateQueries({ queryKey: ['admin', 'accounts'] }),
+      ]);
+      setMessage({
+        tone: 'notice',
+        text: 'Name changed. People who already have you as a contact keep the name they saved for you, until they rename you.',
+      });
+    } catch (caught) {
+      setMessage({ tone: 'error', text: errorMessage(caught) });
+    }
+  });
+
+  return (
+    <form onSubmit={submit} className="grid max-w-sm gap-4" noValidate>
+      <p className="text-sm text-muted-foreground">
+        People see it when they share with you. Nobody else on this server can use the same name.
+      </p>
+      <Field
+        id="new-name"
+        label="New name"
+        autoComplete="name"
+        error={errors.name?.message}
+        {...form.register('name')}
+      />
+      {message && <FormMessage tone={message.tone}>{message.text}</FormMessage>}
+      <Button type="submit" disabled={isSubmitting} className="justify-self-start">
+        Change name
+      </Button>
+    </form>
   );
 }
 

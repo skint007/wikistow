@@ -187,6 +187,18 @@ export const confirmEmailChange = {
   response: z.object({ email: Email }),
 } as const satisfies RouteDef;
 
+/**
+ * Change the signed-in account's name. People who already have the account
+ * as a contact keep their own name for it (protocol section 8.2). Answers
+ * `name-taken` when another account uses the name.
+ */
+export const setName = {
+  method: 'PUT',
+  path: '/api/me/name',
+  body: z.object({ name: DisplayName }),
+  response: z.object({ name: z.string() }),
+} as const satisfies RouteDef;
+
 export const setTheme = {
   method: 'PUT',
   path: '/api/me/theme',
