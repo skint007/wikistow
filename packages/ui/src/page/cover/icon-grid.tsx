@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { symbolWords } from '@/components/symbol-icon';
-import { SYMBOL_LIST } from '@/components/symbol-set';
+import { SYMBOL_LIST, symbolData } from '@/components/symbol-set';
 import { firstInGrid, moveInGrid } from './grid-keys';
 
 const COLUMNS = 8;
@@ -28,6 +28,8 @@ export default function IconGrid({
   const words = query.toLowerCase().replaceAll('-', ' ').split(/\s+/).filter(Boolean);
   const found = SYMBOL_LIST.filter((icon) => words.every((word) => icon.words.includes(word)));
   const first = found[0];
+  // Stored under an older name, it's still the current one.
+  const shown = current === null ? undefined : symbolData(current);
   const grid = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
 
@@ -64,7 +66,7 @@ export default function IconGrid({
               data-pick
               title={label}
               aria-label={label}
-              aria-pressed={icon.name === current}
+              aria-pressed={icon.data === shown}
               onClick={() => onPick(icon.name)}
               className="grid size-8 place-items-center rounded-row outline-offset-[-2px] hover:tint active:tint-strong aria-pressed:bg-primary-soft"
             >

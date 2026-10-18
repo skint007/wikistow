@@ -36,6 +36,9 @@ const BY_NAME = new Map(
   ),
 );
 
+/** The drawing of the icon `name`, by its name or an older one, if the set has it. */
+export const symbolData = (name: string) => BY_NAME.get(name);
+
 /** An icon of the set in the text colour (`SymbolIcon`), or `fallback` for a name the set doesn't have. */
 export default function DrawnSymbol({
   name,
@@ -48,7 +51,7 @@ export default function DrawnSymbol({
   label?: string | undefined;
   className?: string | undefined;
 }) {
-  const data = BY_NAME.get(name);
+  const data = symbolData(name);
   if (!data) return fallback;
   return (
     <Icon
