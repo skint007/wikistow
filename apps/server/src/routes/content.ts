@@ -66,6 +66,8 @@ import {
   sharedWithMe,
   versionEnvelopes,
   listSpaces,
+  readSpaceOrder,
+  saveSpaceOrder,
   listStatements,
   myEnvelopes,
   readContacts,
@@ -227,6 +229,14 @@ export function mountContentRoutes(
 
   routes.content(structureRoutes.listSpaces, async (_input, { actor }) => ({
     spaces: await listSpaces(db, actor, report).catch(toApiError),
+  }));
+
+  routes.account(structureRoutes.spaceOrder, async (_input, { principal }) =>
+    readSpaceOrder(db, principal.accountId).catch(toApiError),
+  );
+
+  routes.account(structureRoutes.setSpaceOrder, async ({ body }, { principal }) => ({
+    spaceIds: await saveSpaceOrder(db, principal.accountId, body.spaceIds).catch(toApiError),
   }));
 
   routes.account(

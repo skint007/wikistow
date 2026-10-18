@@ -25,6 +25,14 @@ export const users = pgTable(
     suspendedAt: timestamptz(),
     theme: text({ enum: THEMES }).notNull().default('system'),
     /**
+     * Space IDs in the order the person put their spaces, home space aside.
+     * Listing spaces sorts by it (`listSpaces`); IDs aren't secret.
+     */
+    spaceOrder: text()
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /**
      * Agent credentials made before this are dead (protocol section 9.7):
      * set by a password reset, an administrator revoking sessions and
      * agents, a suspension or a role change. Never cleared.

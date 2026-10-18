@@ -24,6 +24,7 @@ import {
   shares,
   spaceOwners,
   spaces,
+  users,
 } from '../db/schema/index.ts';
 import { readSettings } from '../settings.ts';
 import {
@@ -372,17 +373,99 @@ export const shareOf = (row: ShareRow) => ({
   currentKeyVersion: row.currentKeyVersion,
 });
 
+/** A space in the caller's list, and since when they have it. */
+type Listed = { space: typeof spaces.$inferSelect; access: Access; since: Date };
+
+/**
+ * The spaces a person can open: those they own, with every right, and those
+ * whose own share they are a member of, with their role there.
+ */
+async function humanSpaces(db: Database, identityId: string) {
+  const bySpace = new Map<string, Listed>();
+  const owned = await db
+    .select({ space: spaces, since: spaceOwners.createdAt })
+    .from(spaceOwners)
+    .innerJoin(spaces, eq(spaces.id, spaceOwners.spaceId))
+    .where(and(eq(spaceOwners.identityId, identityId), isNull(spaceOwners.removedAt)));
+  const held = await db
+    .select({
+      space: spaces,
+      role: shareMembers.role,
+      canPublish: shareMembers.canPublish,
+      since: shareMembers.createdAt,
+    })
+    .from(shareMembers)
+    .innerJoin(shares, and(eq(shares.id, shareMembers.shareId), isNull(shares.rootId)))
+    .innerJoin(spaces, eq(spaces.id, shares.spaceId))
+    .where(eq(shareMembers.identityId, identityId));
+  for (const { space, role, canPublish, since } of held) {
+    bySpace.set(space.id, { space, access: { role, canPublish }, since });
+  }
+  // An owner's own rights win over any share they also hold.
+  for (const { space, since } of owned) {
+    bySpace.set(space.id, { space, access: { role: 'owner', canPublish: true }, since });
+  }
+  // The home space is the personal space they have owned longest: the one
+  // the app makes when the vault is set up, before anyone can add them as an
+  // owner elsewhere. New space makes personal spaces too.
+  const home = owned
+    .filter(({ space }) => space.kind === 'personal')
+    .reduce<(typeof owned)[number] | null>(
+      (oldest, row) => (oldest && oldest.since <= row.since ? oldest : row),
+      null,
+    );
+  return { bySpace, homeId: home?.space.id ?? null };
+}
+
+/**
+ * A person's spaces, home space and saved order. Spaces they left drop out
+ * of the saved order here, so one they get back comes last; unless it was
+ * saved again meanwhile.
+ */
+async function personSpaces(db: Database, accountId: string, identityId: string) {
+  const { bySpace, homeId } = await humanSpaces(db, identityId);
+  const [account] = await db
+    .select({ spaceOrder: users.spaceOrder })
+    .from(users)
+    .where(eq(users.id, accountId));
+  const stored = account?.spaceOrder ?? [];
+  const saved = stored.filter((id) => bySpace.has(id));
+  if (saved.length < stored.length) {
+    await db
+      .update(users)
+      .set({ spaceOrder: saved })
+      .where(and(eq(users.id, accountId), eq(users.spaceOrder, stored)));
+  }
+  return { bySpace, homeId, saved };
+}
+
+/**
+ * Spaces in the person's order: the home space, then the saved order, then
+ * the rest (new, or newly shared) in the order they got them.
+ */
+function inOrder(listed: Listed[], homeId: string | null, saved: string[]) {
+  const rank = new Map(saved.map((id, index) => [id, index]));
+  const at = (id: string) => (id === homeId ? -1 : (rank.get(id) ?? Infinity));
+  // Two unsaved spaces give NaN, which falls through to when they came.
+  return listed.toSorted(
+    (a, b) => at(a.space.id) - at(b.space.id) || a.since.getTime() - b.since.getTime(),
+  );
+}
+
 /**
  * The spaces the caller can open, each with its current encrypted name:
  * spaces they own, with every right, and spaces whose own share they are a
  * member of, with their role there. Folder shares are listed under Shared
  * with me instead (section 7.7). An agent's are the spaces whose own share
- * it was granted whole, within its person's current access.
+ * it was granted whole, within its person's current access. A person's
+ * spaces come in their order, home space first; an agent's oldest first.
  */
 export async function listSpaces(db: Database, actor: Actor, report: ReportUnreadable) {
   const caller = await requireCaller(db, actor);
   const { identity } = caller;
-  const bySpace = new Map<string, { space: typeof spaces.$inferSelect; access: Access }>();
+  let bySpace = new Map<string, Listed>();
+  let homeId: string | null = null;
+  let saved: string[] = [];
   if (caller.personId !== null) {
     const whole = (await agentGrantsOf(db, { agentIds: [identity.id] })).filter(
       (grant) => grant.folderId === null,
@@ -406,35 +489,21 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
     for (const { space, share } of granted) {
       const person = await personAccess(db, caller.personId, share);
       const grant = highest(whole.filter((g) => g.shareId === share.id));
-      if (person && grant) bySpace.set(space.id, { space, access: capAgent(grant, person) });
+      if (person && grant) {
+        bySpace.set(space.id, { space, access: capAgent(grant, person), since: space.createdAt });
+      }
     }
   } else {
-    const owned = await db
-      .select({ space: spaces })
-      .from(spaceOwners)
-      .innerJoin(spaces, eq(spaces.id, spaceOwners.spaceId))
-      .where(and(eq(spaceOwners.identityId, identity.id), isNull(spaceOwners.removedAt)));
-    const held = await db
-      .select({ space: spaces, role: shareMembers.role, canPublish: shareMembers.canPublish })
-      .from(shareMembers)
-      .innerJoin(shares, and(eq(shares.id, shareMembers.shareId), isNull(shares.rootId)))
-      .innerJoin(spaces, eq(spaces.id, shares.spaceId))
-      .where(eq(shareMembers.identityId, identity.id));
-    for (const { space, role, canPublish } of held) {
-      bySpace.set(space.id, { space, access: { role, canPublish } });
-    }
-    // An owner's own rights win over any share they also hold.
-    for (const { space } of owned) {
-      bySpace.set(space.id, { space, access: { role: 'owner', canPublish: true } });
-    }
+    ({ bySpace, homeId, saved } = await personSpaces(db, caller.accountId, identity.id));
   }
+  const listed = inOrder([...bySpace.values()], homeId, saved);
   const heads = await servedMetadata(
     db,
     identity,
-    [...bySpace.values()].flatMap(({ space }) => (space.metadataHead ? [space.metadataHead] : [])),
+    listed.flatMap(({ space }) => (space.metadataHead ? [space.metadataHead] : [])),
     report,
   );
-  return [...bySpace.values()].flatMap(({ space, access }) => {
+  return listed.flatMap(({ space, access }) => {
     const head = space.metadataHead ? heads.get(space.metadataHead) : undefined;
     if (!head) return [];
     // Its ID too may be one Milestone 1 allowed and today's rules refuse.
@@ -453,6 +522,25 @@ export async function listSpaces(db: Database, actor: Actor, report: ReportUnrea
     );
     return summary ? [summary] : [];
   });
+}
+
+/** A person's home space and saved order, as `listSpaces` sorts by them. */
+export async function readSpaceOrder(db: Database, accountId: string) {
+  const { identity } = await requireCaller(db, { accountId, agentId: null });
+  const { homeId, saved } = await personSpaces(db, accountId, identity.id);
+  return { homeId, spaceIds: saved };
+}
+
+/**
+ * Save the order a person put their spaces in, dropping IDs of spaces they
+ * can't open and repeats. Returns what was saved.
+ */
+export async function saveSpaceOrder(db: Database, accountId: string, spaceIds: string[]) {
+  const { identity } = await requireCaller(db, { accountId, agentId: null });
+  const { bySpace } = await humanSpaces(db, identity.id);
+  const kept = [...new Set(spaceIds)].filter((id) => bySpace.has(id));
+  await db.update(users).set({ spaceOrder: kept }).where(eq(users.id, accountId));
+  return kept;
 }
 
 /**

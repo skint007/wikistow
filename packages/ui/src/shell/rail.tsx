@@ -14,11 +14,12 @@ import {
   Shield,
   Users,
 } from 'lucide-react';
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState, type DragEvent } from 'react';
 import { Avatar } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
+import { ContextMenuItem } from '@/components/ui/context-menu';
 import {
   Dialog,
   DialogContent,
@@ -43,11 +44,12 @@ import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
 import { desktop, desktopUpdateQuery } from '../desktop';
-import { spacesQuery } from '../data/queries';
+import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
 import { isApple } from './search-model';
 import { SpaceIcon } from './space-look';
+import { RowMenu } from './tree-menus';
 import { useVault, vaultStore, type VaultState } from '../vault/store';
 
 // The running build's version, set by the web app's Vite config.
@@ -179,6 +181,22 @@ function SharedLinkHere({
   return <SharedLink here={here} onNavigate={onNavigate} />;
 }
 
+// What a space tile carries while dragged, so other drags aren't taken for one.
+const SPACE_DRAG_TYPE = 'application/x-wikistow-space';
+
+/** `ids` with the one at `from` moved to sit before what was at `to` (or last, at its length). */
+function moved<T>(ids: T[], from: number, to: number) {
+  const next = [...ids];
+  next.splice(to > from ? to - 1 : to, 0, ...next.splice(from, 1));
+  return next;
+}
+
+/**
+ * The person's spaces in their order, home space first. A mouse drags any
+ * other tile to a new place; the tile menu's Move up and Move down do the
+ * same from the keyboard. The rail shows the new order at once, and puts the
+ * old one back if saving it fails.
+ */
 function SpaceTiles({
   vault,
   onNavigate,
@@ -186,35 +204,133 @@ function SpaceTiles({
   vault: Extract<VaultState, { status: 'unlocked' }>;
   onNavigate: (() => void) | undefined;
 }) {
-  const { data: spaces = [] } = useQuery(spacesQuery(vault.ctx));
+  const queryClient = useQueryClient();
+  const query = spacesQuery(vault.ctx);
+  const { data: spaces = [] } = useQuery(query);
+  const { data: order } = useQuery(spaceOrderQuery(vault.ctx));
   const params = useParams({ strict: false });
   const [creating, setCreating] = useState(false);
+  // The tile being dragged, and the place it would land: before the tile at that index.
+  const [dragging, setDragging] = useState<{ from: number; to: number | null } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!failed) return;
+    const timer = setTimeout(() => setFailed(false), 6000);
+    return () => clearTimeout(timer);
+  }, [failed]);
+  // Nothing goes above the home space.
+  const first = order && spaces[0]?.id === order.homeId ? 1 : 0;
+
+  async function move(from: number, to: number) {
+    const before = queryClient.getQueryData(query.queryKey);
+    if (!before) return;
+    const after = moved(before, from, to);
+    setFailed(false);
+    queryClient.setQueryData(query.queryKey, after);
+    try {
+      await spaceOperations.saveSpaceOrder(
+        vault.ctx,
+        after.map((space) => space.id),
+      );
+    } catch {
+      queryClient.setQueryData(query.queryKey, before);
+      setFailed(true);
+      void queryClient.invalidateQueries({ queryKey: query.queryKey });
+    }
+  }
+
+  // Only a drag from these tiles, and only to a place that changes something.
+  const dropAt = (event: DragEvent, to: number) => {
+    if (!dragging || !event.dataTransfer.types.includes(SPACE_DRAG_TYPE)) return;
+    const place = to === dragging.from || to === dragging.from + 1 ? null : to;
+    if (place !== dragging.to) setDragging({ ...dragging, to: place });
+    if (place === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+  // Over a tile, the place is above it or below it, whichever half the pointer is in.
+  const placeOver = (event: DragEvent<HTMLElement>, index: number) => {
+    const { top, height } = event.currentTarget.getBoundingClientRect();
+    return Math.max(first, event.clientY < top + height / 2 ? index : index + 1);
+  };
+  const drop = (event: DragEvent) => {
+    event.preventDefault();
+    if (dragging?.to != null) void move(dragging.from, dragging.to);
+    setDragging(null);
+  };
+
   return (
     <>
-      <ul className="flex flex-col items-center gap-2">
-        {spaces.map((space) => {
+      <ul
+        className="flex flex-col items-center gap-2"
+        // Between tiles, the place last pointed at holds.
+        onDragOver={(event) => dragging?.to != null && dropAt(event, dragging.to)}
+        onDrop={drop}
+        onDragLeave={(event) => {
+          const to = event.relatedTarget;
+          if (dragging && (!(to instanceof Node) || !event.currentTarget.contains(to))) {
+            setDragging({ ...dragging, to: null });
+          }
+        }}
+        onDragEnd={() => setDragging(null)}
+      >
+        {spaces.map((space, index) => {
           const name =
             space.metadata?.opened.kind === 'current' ? space.metadata.opened.metadata.name : '?';
           const active = params.spaceId === space.id;
+          const movable = index >= first;
+          const items = [
+            movable && index > first && (
+              <ContextMenuItem key="up" onSelect={() => void move(index, index - 1)}>
+                Move up
+              </ContextMenuItem>
+            ),
+            movable && index < spaces.length - 1 && (
+              <ContextMenuItem key="down" onSelect={() => void move(index, index + 2)}>
+                Move down
+              </ContextMenuItem>
+            ),
+          ].filter(Boolean);
+          const tile = (
+            <Link
+              to="/s/$spaceId"
+              params={{ spaceId: space.id }}
+              onClick={onNavigate}
+              aria-label={plainText(name)}
+              aria-current={active ? 'page' : undefined}
+              title={plainText(name)}
+              draggable={movable}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData(SPACE_DRAG_TYPE, '');
+                setDragging({ from: index, to: null });
+              }}
+              className={cn(
+                'grid size-11 place-items-center overflow-hidden rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
+                active && 'bg-primary-soft ring-2 ring-primary',
+                dragging?.from === index && 'opacity-50',
+              )}
+            >
+              <SpaceIcon metadata={space.metadata} name={name} />
+            </Link>
+          );
           return (
-            <li key={space.id} className="relative">
+            <li
+              key={space.id}
+              className="relative"
+              onDragOver={(event) => {
+                event.stopPropagation();
+                dropAt(event, placeOver(event, index));
+              }}
+            >
               {active && (
                 <span aria-hidden className="absolute top-2 -left-3 h-7 w-1 rounded-r bg-primary" />
               )}
-              <Link
-                to="/s/$spaceId"
-                params={{ spaceId: space.id }}
-                onClick={onNavigate}
-                aria-label={plainText(name)}
-                aria-current={active ? 'page' : undefined}
-                title={plainText(name)}
-                className={cn(
-                  'grid size-11 place-items-center overflow-hidden rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
-                  active && 'bg-primary-soft ring-2 ring-primary',
-                )}
-              >
-                <SpaceIcon metadata={space.metadata} name={name} />
-              </Link>
+              {dragging?.to === index && <DropLine className="-top-[5px]" />}
+              {dragging?.to === spaces.length && index === spaces.length - 1 && (
+                <DropLine className="-bottom-[5px]" />
+              )}
+              {items.length > 0 ? <RowMenu items={items}>{tile}</RowMenu> : tile}
             </li>
           );
         })}
@@ -229,7 +345,25 @@ function SpaceTiles({
       </button>
       <span aria-hidden className="my-1 h-px w-7 bg-border" />
       <NewSpaceDialog open={creating} onOpenChange={setCreating} vault={vault} />
+      {failed && (
+        <p
+          role="alert"
+          className="fixed bottom-4 left-4 z-50 rounded-card bg-card px-4 py-2 text-sm text-destructive shadow-card min-[900px]:left-20"
+        >
+          Couldn’t save the order of your spaces. Try again.
+        </p>
+      )}
     </>
+  );
+}
+
+/** Where a dragged space tile would land, in the gap above or below a tile. */
+function DropLine({ className }: { className: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn('absolute right-0 left-0 h-0.5 rounded-full bg-primary', className)}
+    />
   );
 }
 

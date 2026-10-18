@@ -27,6 +27,13 @@ export const spacesQuery = (ctx: ClientContext) =>
     queryFn: () => spaceOperations.loadSpaces(ctx),
   });
 
+/** The home space and saved order, under the spaces' key so refreshing those refreshes it. */
+export const spaceOrderQuery = (ctx: ClientContext) =>
+  queryOptions({
+    queryKey: [PLAIN, 'spaces', 'order'],
+    queryFn: () => spaceOperations.loadSpaceOrder(ctx),
+  });
+
 export const treeQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({
     queryKey: [PLAIN, 'tree', spaceId],
