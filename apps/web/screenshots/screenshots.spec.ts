@@ -305,7 +305,7 @@ test('capture the editors, [[ completion, search, the cover pickers and publicat
   test.setTimeout(240_000);
   const shoot = bothPalettes(page, 'm3-');
   await page.clock.setFixedTime(new Date('2026-10-01T09:30:00Z'));
-  await memberWithVault(page, await adminTab(freshPage, admin.email), 'Olive Owner');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
   await newSpace(page, 'Club');
   await newSpace(page, 'Garden');
   await newPage(page, 'Watering');

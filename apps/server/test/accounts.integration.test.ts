@@ -26,10 +26,12 @@ const uniqueEmail = () => `person${++counter}@example.test`;
 const invite = async (email: string | null, role: 'user' | 'admin' = 'user') =>
   (await createInvitation(t.db, { email, role, createdBy: await testIssuer(t) })).token;
 
+// Names are unique on a server, so each account gets its own unless the test names it.
+let named = 0;
 const createAccount = (body: Record<string, unknown>, browser = new Browser(t.app)) =>
   browser.request('/api/accounts', {
     method: 'POST',
-    json: { name: 'Jo', password: PASSWORD, ...body },
+    json: { name: `Jo ${++named}`, password: PASSWORD, ...body },
   });
 
 const errorCode = async (res: Response) =>

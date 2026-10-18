@@ -8,6 +8,7 @@ export type AccountFailure =
   | 'invitation-email-mismatch'
   | 'invitation-exists'
   | 'email-taken'
+  | 'name-taken'
   | 'admin-exists'
   | 'account-not-found'
   | 'not-admin'

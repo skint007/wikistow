@@ -1,0 +1,3 @@
+-- Hand-added before the generated index: accounts that already share a name, case ignored, keep the oldest's; each later one gets " (2)", " (3)" and so on, so the index can be made.
+UPDATE "users" SET "name" = "users"."name" || ' (' || "same"."n" || ')' FROM (SELECT "id", row_number() OVER (PARTITION BY lower("name") ORDER BY "created_at", "id") AS "n" FROM "users" WHERE "name" <> '') AS "same" WHERE "users"."id" = "same"."id" AND "same"."n" > 1;--> statement-breakpoint
+CREATE UNIQUE INDEX "users_name_unique" ON "users" USING btree (lower("name")) WHERE "users"."name" <> '';

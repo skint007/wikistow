@@ -19,6 +19,7 @@ export const ERROR_STATUS = {
   'invitation-used': 409,
   'invitation-revoked': 409,
   'email-taken': 409,
+  'name-taken': 409,
   'invitation-exists': 409,
   'admin-exists': 409,
   'last-admin': 409,

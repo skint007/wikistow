@@ -192,12 +192,15 @@ export async function serverBlobDir(): Promise<string> {
 let counter = 0;
 export const uniqueEmail = (label: string) => `${label}${Date.now()}${++counter}@example.test`;
 
+// No two accounts share a name, so an account gets its email's own part unless named.
+const nameFor = (email: string) => email.split('@')[0] ?? email;
+
 /** Accept an invitation link in the browser, leaving the email unconfirmed. */
 export async function acceptInvitation(
   page: Page,
   invitePath: string,
   email: string,
-  name = 'Test Person',
+  name = nameFor(email),
 ) {
   await page.goto(invitePath);
   await page.getByLabel('Your name').fill(name);
@@ -214,7 +217,7 @@ export async function joinWith(
   page: Page,
   invitePath: string,
   email: string,
-  name = 'Test Person',
+  name = nameFor(email),
 ) {
   await acceptInvitation(page, invitePath, email, name);
   await page.goto(await linkFor(email, /confirm|verify/i));

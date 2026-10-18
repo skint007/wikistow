@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { Database } from '../db/client.ts';
 import { accounts, users, verifications } from '../db/schema/index.ts';
 import { AccountError } from './errors.ts';
+import { normalizeName, withUniqueName } from './profile.ts';
 
 /** As long as a confirmation link lasts. */
 export const SETUP_LINK_TTL_HOURS = 24;
@@ -46,7 +47,8 @@ export async function createSetupToken(db: Database, accountId: string): Promise
 /**
  * Finish an account from its emailed link: the owner's name and first
  * password, and the address confirmed, all at once. The link works once,
- * and not at all once the account has a password some other way.
+ * and not at all once the account has a password some other way. A name
+ * another account uses is refused with `name-taken`, and the link still works.
  */
 export async function finishAccountSetup(
   db: Database,
@@ -54,7 +56,7 @@ export async function finishAccountSetup(
 ): Promise<{ accountId: string }> {
   // Hashed before the transaction so no lock is held during scrypt.
   const passwordHash = await hashPassword(input.password);
-  return db.transaction(async (tx) => {
+  const transaction = db.transaction(async (tx) => {
     const [link] = await tx
       .delete(verifications)
       .where(
@@ -89,8 +91,9 @@ export async function finishAccountSetup(
     }
     await tx
       .update(users)
-      .set({ name: input.name.trim(), emailVerified: true })
+      .set({ name: normalizeName(input.name), emailVerified: true })
       .where(eq(users.id, user.id));
     return { accountId: user.id };
   });
+  return withUniqueName(transaction);
 }

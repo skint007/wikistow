@@ -9,13 +9,14 @@ export const Password = z.string().min(12).max(256);
 /**
  * The name other people see when they look someone up. It refuses the
  * controls that could reorder or hide the text around it in their dialogs
- * (protocol section 3.3).
+ * (protocol section 3.3). No two accounts on a server share one, with case
+ * and spacing ignored (`name-taken`).
  */
 export const DisplayName = z
   .string()
   .trim()
-  .min(1)
-  .max(100)
+  .min(1, 'Enter your name')
+  .max(100, 'Use at most 100 characters')
   .refine(isPlainText, 'A name can’t hold control or text-direction characters');
 /** Invitation tokens are 32 random bytes, base64url. */
 export const InvitationToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/);

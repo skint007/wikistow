@@ -57,7 +57,7 @@ export async function adminTab(freshPage: () => Promise<Page>, email: string) {
 }
 
 /** An invited member, signed in and on the vault setup page. */
-export async function invitedMember(page: Page, adminPage: Page, name = 'Test Person') {
+export async function invitedMember(page: Page, adminPage: Page, name?: string) {
   const email = uniqueEmail('writer');
   await adminPage.goto('/admin/invitations');
   await adminPage.getByLabel('Email (optional)').fill(email);

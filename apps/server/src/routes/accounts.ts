@@ -47,6 +47,7 @@ const ACCOUNT_ERRORS = {
   'invitation-email-mismatch': 'invitation-email-mismatch',
   'invitation-exists': 'invitation-exists',
   'email-taken': 'email-taken',
+  'name-taken': 'name-taken',
   'admin-exists': 'admin-exists',
   'account-not-found': 'not-found',
   'not-admin': 'forbidden',
