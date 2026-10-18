@@ -47,12 +47,13 @@ async function browserStorage(page: Page) {
  * (their IDs), scroll positions and session cookie, and
  * none of `secrets`. While the vault is open, the tab
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
- * wrapping key in IndexedDB that no script can read out. Locking forgets both.
+ * wrapping key in IndexedDB that no script can read out, and, when it is
+ * `remembered`, another sealed copy in localStorage. Locking forgets them all.
  */
 async function expectNothingStored(
   page: Page,
   secrets: readonly string[],
-  { open, editor }: { open: boolean; editor?: 'visual' },
+  { open, editor, remembered }: { open: boolean; editor?: 'visual'; remembered?: boolean },
 ) {
   const stored = await browserStorage(page);
   const { installationId } = await (await page.request.get('/api/installation')).json();
@@ -62,6 +63,7 @@ async function expectNothingStored(
   expect(stored.local).toEqual({
     'wikistow.theme': expect.any(String),
     ...(editor ? { 'wikistow.editor': editor } : {}),
+    ...(remembered ? { 'wikistow.vault': expect.stringMatching(/"version":\d+}$/) } : {}),
     [`wikistow.restore.${installationId}`]: '',
     // Folder IDs only.
     ...Object.fromEntries(
@@ -88,11 +90,11 @@ async function expectNothingStored(
 /**
  * Decrypted pages, the keys that open them, the search index built from
  * them and a Markdown export live only in memory, apart from the vault key
- * the tab keeps sealed for a refresh. After a whole page flow, a search and
- * an export, the browser's storage holds the theme choice, the editor
- * picked, the last restore seen, the open folders' IDs, the router's
- * scroll positions, the session cookie and that sealed copy, and nothing
- * typed.
+ * the tab keeps sealed for a refresh, and the browser for later visits when
+ * asked to. After a whole page flow, a search and an export, the browser's
+ * storage holds the theme choice, the editor picked, the last restore seen,
+ * the open folders' IDs, the router's scroll positions, the session cookie
+ * and those sealed copies, and nothing typed.
  */
 test('the browser stores no page content or key material', async ({ page, freshPage, admin }) => {
   const { recoveryKey } = await memberWithVault(page, await adminTab(freshPage, admin.email));
@@ -128,7 +130,8 @@ test('the browser stores no page content or key material', async ({ page, freshP
     recoveryKey,
     recoveryKey.replaceAll('-', ''),
   ];
-  const check = (open = true) => expectNothingStored(page, secrets, { open, editor: 'visual' });
+  const check = (open = true, remembered = false) =>
+    expectNothingStored(page, secrets, { open, editor: 'visual', remembered });
   // While the vault is open, once search has indexed it, and after it locks.
   await check();
   await page.keyboard.press('Escape');
@@ -155,9 +158,16 @@ test('the browser stores no page content or key material', async ({ page, freshP
   expect(await saved.failure()).toBeNull();
   await expect(exporting).toBeHidden();
   await check();
+  // Remembered for later visits, and forgotten by the lock with the rest.
+  await page.goto('/settings');
+  const remember = page.getByRole('switch', { name: 'Remember unlock' });
+  await remember.click();
+  await expect(remember).toBeChecked();
+  await check(true, true);
   await page.getByRole('button', { name: 'Account' }).click();
   await page.getByRole('menuitem', { name: 'Lock vault' }).click();
-  await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+  await expect(remember).not.toBeChecked();
+  await expect(remember).toBeDisabled();
   // Forgetting the kept unlock finishes a moment after the page locks.
   await expect(() => check(false)).toPass();
 });

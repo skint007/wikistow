@@ -46,7 +46,7 @@ const emit = () => {
 
 /**
  * Forget the unlock kept between loads: the desktop app's remembered one, or
- * the browser tabs' copies (`tab-unlock.ts`).
+ * the browser's copies, its tabs' and any it remembers (`tab-unlock.ts`).
  */
 export function forgetKeptUnlock(): Promise<void> {
   return (desktop ? desktop.forgetVault() : forgetInTab()).catch(() => {});
@@ -55,8 +55,8 @@ export function forgetKeptUnlock(): Promise<void> {
 /**
  * The unlocked vault lives in this module's memory, never in cookies or the
  * URL. Storage gets only a sealed copy of the vault key: a browser tab's,
- * for its next load (`tab-unlock.ts`), or the desktop app's, when asked to
- * remember. Locking zeroes the keys, wipes the folder keys the
+ * for its next load, the browser's, when asked to remember (`tab-unlock.ts`),
+ * or the desktop app's, when asked to remember. Locking zeroes the keys, wipes the folder keys the
  * session opened (`closeSession`), drops decrypted queries, and
  * revokes the object URLs of decrypted attachments. Keys that stop being
  * used any other way (replaced, or made on a page that was left) are zeroed
@@ -74,8 +74,9 @@ export const vaultStore = {
     if (staged === vault) staged = null;
     vaultStore.dropStaged();
     state = { status: 'unlocked', ctx, vault };
-    // A browser tab keeps it through a refresh. The desktop app keeps it only
-    // when asked to (the unlock page).
+    // A browser tab keeps it through a refresh. Keeping it for later visits,
+    // and the desktop app keeping it at all, is only when asked to (the
+    // unlock page, or Settings in the browser).
     if (!desktop) void rememberInTab(vault.accountId, vault.vaultKey).catch(() => {});
     emit();
   },
