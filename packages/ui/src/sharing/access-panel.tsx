@@ -53,7 +53,6 @@ import { shareName, shareNameById } from './names';
 import { describePerson, peopleQuery, type Person } from './people';
 import { AccessSelect, PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
-import { canRename, RenameContact } from './rename-contact';
 import { NotInAnyShare, RotationConfirm } from './rotation-confirm';
 import { ErrorLine, useAction } from './use-action';
 
@@ -66,8 +65,6 @@ type PersonAccess = groupOperations.PersonAccess;
 type Pending =
   | { kind: 'add'; found: Found }
   | { kind: 'promote'; identityId: IdentityId; person: Person; access: Access }
-  /** Not a change to access: a new name for a contact, on this person's own record. */
-  | { kind: 'rename'; person: Person }
   | {
       kind: 'rotation';
       title: ReactNode;
@@ -454,38 +451,6 @@ export function AccessPanel({
     return outcome;
   };
 
-  if (pending?.kind === 'rename') {
-    const who = pending.person;
-    return (
-      <div className="grid gap-4">
-        <h3 className="font-extrabold">
-          Rename <Name>{who.name}</Name>
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          {who.email && (
-            <>
-              <Name>{who.email}</Name>.{' '}
-            </>
-          )}
-          The name your apps show for them. Only you see it.
-        </p>
-        <RenameContact
-          person={who}
-          onCancel={() => setPending(null)}
-          // Only names changed, which the form refreshed, so not `finish`.
-          onDone={(name) => {
-            setPending(null);
-            setDone(
-              <>
-                Renamed to <Name>{name}</Name>.
-              </>,
-            );
-          }}
-        />
-      </div>
-    );
-  }
-
   if (pending?.kind === 'rotation') {
     return (
       <RotationConfirm
@@ -621,21 +586,11 @@ export function AccessPanel({
       <section aria-label="People with access" className="grid gap-1">
         <h3 className="text-sm font-bold text-subtle-foreground">People with access</h3>
         <ul className="grid gap-1">
-          {owners.map((id) => {
-            const who = person(id);
-            return (
-              <PersonRow key={id} person={who}>
-                <span className="text-sm text-muted-foreground">Owner</span>
-                {canRename(who) && (
-                  <MoreMenu label={`More for ${plainText(who.name)}`} disabled={busy}>
-                    <DropdownMenuItem onSelect={() => ask({ kind: 'rename', person: who })}>
-                      Rename…
-                    </DropdownMenuItem>
-                  </MoreMenu>
-                )}
-              </PersonRow>
-            );
-          })}
+          {owners.map((id) => (
+            <PersonRow key={id} person={person(id)}>
+              <span className="text-sm text-muted-foreground">Owner</span>
+            </PersonRow>
+          ))}
           {state &&
             access?.groups.map(({ group, access: held }) => (
               <GroupRow
@@ -716,11 +671,6 @@ export function AccessPanel({
                     </span>
                   )}
                   <MoreMenu label={`More for ${plainText(who.name)}`} disabled={busy}>
-                    {canRename(who) && (
-                      <DropdownMenuItem onSelect={() => ask({ kind: 'rename', person: who })}>
-                        Rename…
-                      </DropdownMenuItem>
-                    )}
                     {direct && (
                       <DropdownMenuItem variant="destructive" onSelect={() => removeHere(p)}>
                         {p.sources.length > 1 ? 'Remove direct access' : 'Remove from this folder'}
@@ -824,7 +774,7 @@ export function AccessPanel({
 }
 
 /** The "More" menu at the end of a row in an access list. */
-export function MoreMenu({
+function MoreMenu({
   label,
   disabled,
   children,

@@ -158,7 +158,7 @@ function NameForm({ current }: { current: string }) {
       ]);
       setMessage({
         tone: 'notice',
-        text: 'Name changed. People who already have you as a contact keep the name they saved for you, until they rename you.',
+        text: 'Name changed. People who already have you as a contact keep the name they saved for you.',
       });
     } catch (caught) {
       setMessage({ tone: 'error', text: errorMessage(caught) });

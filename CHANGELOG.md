@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - On this page marks the section being read with the tint only, without the bar at its left. (#107)
 - Avatars can be up to 2.5 MiB, up from 2 MiB. Migration 0033 re-adds the `avatars_size` check at the new size. (#108)
+- **Rename…** for contacts is gone from the person menus in the Share dialog, Members and owners and a group's members, with `RenameContact` and `sharingOperations.renameContact`. A contact keeps the name saved when they were pinned. The `relabel` contacts change stays last-write-wins. (#110)
 
 #### CLI
 
