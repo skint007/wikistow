@@ -4,12 +4,23 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`. On Windows it only shows its help so far.
+
 ### Changes
 
 #### App
 
 - Code blocks in the reader have a copy button at the end of their language line. It copies the code as written, without the label, and shows a check for a moment. Blocks a plugin draws and the visual editor’s code blocks have none. (#123)
 - The browser can remember the vault unlock, off by default: **Remember on this browser** on the unlock page, or **Remember unlock** in Settings → Security. Later visits and new tabs then open the vault without the passphrase, from a copy of the vault key sealed in `localStorage` (`wikistow.vault`) under the tab unlock's wrapping key. Locking, signing out or a passphrase change made anywhere forgets it. (#124)
+
+#### Releases and packaging
+
+- Each release has the CLI as one binary per system, built by Bun 1.4.3 from the tested bundle: `wikistow-linux-x64`, `wikistow-linux-arm64`, `wikistow-darwin-arm64`, `wikistow-darwin-x64` and `wikistow-windows-x64.exe`, beside `install.sh`, `install.ps1` and `LICENSE`, all in `SHA256SUMS`. The release checks the Linux x64 binary. `wikistow-cli-<version>.tar.gz` stays, for Node.js, without its `wikistow` launcher. (#126)
+- `wikistow-cli-bin` on the AUR installs the binary, for x86_64 and aarch64, and no longer needs `nodejs`. (#126)
 
 ## 0.12.0 - 2026-10-18
 
