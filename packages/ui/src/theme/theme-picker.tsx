@@ -148,18 +148,22 @@ export function ThemePicker() {
   );
 }
 
-/** A dot of the palette's background, drawn by its own tokens; System is half Light, half Midnight slate. */
+// Each palette's background, as styles/theme.css sets it: fixed here, so a
+// plugin theme, which restyles every [data-theme], can't recolour the dots.
+const DOTS = {
+  light: 'bg-[#f4f1ec]',
+  slate: 'bg-[#0a0f1c]',
+  warm: 'bg-[#131110]',
+  oled: 'bg-[#000000]',
+} as const;
+
+/** A dot of the palette's background; System is half Light, half Midnight slate. */
 function Swatch({ theme }: { theme: Theme }) {
   return (
     <span className="flex size-3.5 overflow-hidden rounded-full border border-foreground/25">
-      {theme === 'system' ? (
-        <>
-          <span data-theme="light" className="flex-1 bg-background" />
-          <span data-theme="slate" className="flex-1 bg-background" />
-        </>
-      ) : (
-        <span data-theme={theme} className="flex-1 bg-background" />
-      )}
+      {(theme === 'system' ? (['light', 'slate'] as const) : [theme]).map((each) => (
+        <span key={each} className={`flex-1 ${DOTS[each]}`} />
+      ))}
     </span>
   );
 }
