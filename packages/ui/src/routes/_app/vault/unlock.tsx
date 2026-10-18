@@ -83,8 +83,10 @@ function Unlock() {
       if (desktop) {
         if (remember) await desktop.rememberVault(vault.accountId, vault.vaultKey);
         else await desktop.forgetVault();
-      } else if (remember) await rememberOpenVault(vault);
-      else await forgetInBrowser();
+      } else {
+        // The vault is open by now: failing to remember it isn't failing to unlock.
+        await (remember ? rememberOpenVault(vault) : forgetInBrowser()).catch(() => {});
+      }
       await navigate({ to: safeRedirect(redirect) });
     } catch (caught) {
       if (safe) tabSafeMode.set(false);
