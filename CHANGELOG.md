@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Code blocks in the reader have a copy button at the end of their language line. It copies the code as written, without the label, and shows a check for a moment. Blocks a plugin draws and the visual editor’s code blocks have none. (#123)
 - The browser can remember the vault unlock, off by default: **Remember on this browser** on the unlock page, or **Remember unlock** in Settings → Security. Later visits and new tabs then open the vault without the passphrase, from a copy of the vault key sealed in `localStorage` (`wikistow.vault`) under the tab unlock's wrapping key. Locking, signing out or a passphrase change made anywhere forgets it. (#124)
+- Fields that aren’t credentials, such as folder and space names, renames, search, page titles and the people picker, tell browsers and password managers to leave them alone: `autocomplete="off"` plus the 1Password, LastPass, Bitwarden and Dashlane ignore hints. `Input` adds them unless the field is a password or has a real `autocomplete`, so sign-in, account, passphrase and two-factor fields are unchanged. The admin SMTP password and AI API key get the hints too. Bitwarden reads its hint only when its user turns on “Allow websites to exclude fields to autofill”. (#125)
 
 ## 0.12.0 - 2026-10-18
 
