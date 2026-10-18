@@ -3,7 +3,7 @@ import type { Database } from '../db/client.ts';
 import { and, eq } from 'drizzle-orm';
 import { accounts, settings, users } from '../db/schema/index.ts';
 import { usablePassword } from './account-setup.ts';
-import { lockAdmins } from './bootstrap.ts';
+import { lockAdmins } from './first-account.ts';
 import { AccountError } from './errors.ts';
 import {
   claimInvitation,
@@ -37,27 +37,17 @@ export async function createAccount(
   const passwordHash = input.password === undefined ? null : await hashPassword(input.password);
 
   return db.transaction(async (tx) => {
-    // Taken first, before any row lock, so lock order matches bootstrap and
-    // admin changes. Account creation is rare enough to serialize.
+    // Taken first, before any row lock, so lock order matches the first
+    // account and admin changes. Account creation is rare enough to serialize.
     await lockAdmins(tx);
     let role: Role = 'user';
     let invitationId: string | undefined;
     let emailBound = false;
     if (input.token !== undefined) {
       const invitation = await claimInvitation(tx, input.token, email);
-      if (invitation.bootstrap) {
-        const [admin] = await tx
-          .select({ id: users.id })
-          .from(users)
-          .where(and(eq(users.role, 'admin'), eq(users.emailVerified, true)))
-          .limit(1);
-        if (admin) throw new AccountError('admin-exists');
-      }
       invitationId = invitation.id;
       emailBound = invitation.email !== null;
-      // A bootstrap link makes an ordinary account; the operator's second run
-      // of bootstrap-admin, after verification, grants the role.
-      role = invitation.bootstrap ? 'user' : invitation.role;
+      role = invitation.role;
     } else {
       const [row] = await tx
         .select({ open: settings.publicRegistration })

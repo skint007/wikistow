@@ -14,11 +14,8 @@ export const invitations = pgTable(
     id: primaryId(),
     tokenHash: text().notNull().unique(),
     email: text(),
-    kind: text({ enum: ['account', 'bootstrap'] })
-      .notNull()
-      .default('account'),
     role: text({ enum: ROLES }).notNull().default('user'),
-    /** Null for operator invitations, or once the issuer is deleted. */
+    /** Null once the issuer is deleted. */
     createdBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamptz().notNull().defaultNow(),
     expiresAt: timestamptz().notNull(),
@@ -28,7 +25,6 @@ export const invitations = pgTable(
     revokedAt: timestamptz(),
   },
   (table) => [
-    check('invitations_kind', sql`${table.kind} in ('account', 'bootstrap')`),
     check('invitations_role', sql`${table.role} in ('user', 'admin')`),
     check('invitations_email_lowercase', sql`${table.email} = lower(${table.email})`),
     // At most one open invitation per address.

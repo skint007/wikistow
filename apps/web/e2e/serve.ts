@@ -1,10 +1,10 @@
 // The server the browser tests run against: the real app on a fresh,
 // migrated database, serving the built web app. Mail arrives over loopback SMTP,
-// and a separate control port stands in for the operator's command line.
+// and a separate control port lets tests look behind the server.
 import { serve } from '@hono/node-server';
 import { createApp } from '@wikistow/server-app/app';
 import { smtpDeliver, type Mail } from '@wikistow/server-app/mail';
-import { bootstrapAdmin, connect, fileBlobStore, MIN_VAULT_KDF } from '@wikistow/server';
+import { connect, fileBlobStore, MIN_VAULT_KDF } from '@wikistow/server';
 import { sql } from 'drizzle-orm';
 import { createMigratedDatabase } from '@wikistow/server/testing/postgres';
 import { simpleParser } from 'mailparser';
@@ -67,7 +67,6 @@ smtp.on('error', (error) => logs.push({ smtp: error.message }));
 const database = await createMigratedDatabase('wikistow_e2e');
 const blobDir = await mkdtemp(join(tmpdir(), 'wikistow-e2e-blobs-'));
 const { db, close } = connect(database.url);
-let owner: string | null = null;
 
 const { app } = createApp({
   db,
@@ -96,27 +95,24 @@ const { app } = createApp({
 // Loopback only: the control port can reset accounts and dump the database.
 const server = serve({ fetch: app.fetch, port: APP_PORT, hostname: '127.0.0.1' });
 
-// Test-only: read decoded SMTP mail, and run the first-administrator command.
+// Test-only: read decoded SMTP mail, the database and the blob folder, and change keys.
 const control = createServer((req, res) => {
   void (async () => {
     const url = new URL(req.url ?? '/', `http://localhost:${CONTROL_PORT}`);
     if (req.method === 'GET' && url.pathname === '/mails') {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify(mails));
-    } else if (req.method === 'POST' && url.pathname === '/bootstrap') {
-      const email = url.searchParams.get('email') ?? '';
-      const result = await bootstrapAdmin(db, email);
-      if (result.kind === 'promoted') owner = email;
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify(result));
     } else if (req.method === 'GET' && url.pathname === '/blob-dir') {
       // Where blobs and library plugins' files are, for tests that change one behind the server.
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ blobDir }));
     } else if (req.method === 'GET' && url.pathname === '/owner') {
       // The first administrator, so a restarted test worker can reuse it.
+      const [first] = await db.execute<{ email: string }>(
+        sql`select email from users order by created_at limit 1`,
+      );
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ email: owner }));
+      res.end(JSON.stringify({ email: first?.email ?? null }));
     } else if (req.method === 'GET' && url.pathname === '/snapshot') {
       // Everything the server holds: every table, every blob file, its log, and its mail.
       const tables = await db.execute<{ name: string }>(

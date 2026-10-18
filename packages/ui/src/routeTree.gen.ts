@@ -15,6 +15,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppVaultRouteImport } from './routes/_app/_vault'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
@@ -66,6 +67,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInRoute = SignInRouteImport.update({
@@ -193,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRouteWithChildren
   '/desktop-sign-in': typeof AppDesktopSignInRoute
@@ -222,6 +229,7 @@ export interface FileRoutesByTo {
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/settings': typeof AppSettingsRoute
@@ -250,6 +258,7 @@ export interface FileRoutesById {
   '/invite': typeof InviteRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/_app/_vault': typeof AppVaultRouteWithChildren
   '/_app/admin': typeof AppAdminRouteWithChildren
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
     | '/invite'
     | '/register'
     | '/reset-password'
+    | '/setup'
     | '/sign-in'
     | '/admin'
     | '/desktop-sign-in'
@@ -312,6 +322,7 @@ export interface FileRouteTypes {
     | '/invite'
     | '/register'
     | '/reset-password'
+    | '/setup'
     | '/sign-in'
     | '/desktop-sign-in'
     | '/settings'
@@ -339,6 +350,7 @@ export interface FileRouteTypes {
     | '/invite'
     | '/register'
     | '/reset-password'
+    | '/setup'
     | '/sign-in'
     | '/_app/_vault'
     | '/_app/admin'
@@ -371,6 +383,7 @@ export interface RootRouteChildren {
   InviteRoute: typeof InviteRoute
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
 }
 
@@ -416,6 +429,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in': {
@@ -670,6 +690,7 @@ const rootRouteChildren: RootRouteChildren = {
   InviteRoute: InviteRoute,
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
 }
 export const routeTree = rootRouteImport

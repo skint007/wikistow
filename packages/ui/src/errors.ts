@@ -11,6 +11,7 @@ const MESSAGES: Partial<Record<string, string>> = {
   'invitation-expired': 'This invitation has expired. Ask for a new one.',
   'invitation-email-mismatch': 'This invitation is for a different email address.',
   'email-taken': 'An account with that email already exists.',
+  'admin-exists': 'This server is already set up. Sign in instead.',
   'invitation-exists': 'That address already has a pending invitation.',
   'last-admin': 'There must always be at least one administrator.',
   'space-limit': 'Your account has made as many spaces as this server allows.',

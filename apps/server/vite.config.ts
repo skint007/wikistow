@@ -4,7 +4,7 @@ import { defineConfig } from 'vite-plus';
 // dependencies included, so the image needs no node_modules.
 export default defineConfig({
   pack: {
-    entry: { server: 'src/main.ts', migrate: 'src/migrate.ts', admin: 'src/admin-cli.ts' },
+    entry: { server: 'src/main.ts', migrate: 'src/migrate.ts' },
     platform: 'node',
     format: 'esm',
     target: 'node26',

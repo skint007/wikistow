@@ -17,6 +17,8 @@ const DETAILS = {
   'account.reactivated': z.strictObject({}),
   'account.sessions-revoked': z.strictObject({ sessionsRevoked: z.number().int() }),
   'account.verification-resent': z.strictObject({}),
+  // A new installation's first account, made on its setup page.
+  'account.first-admin': z.strictObject({}),
   'invitation.created': z.strictObject({ role: z.enum(ROLES), emailBound: z.boolean() }),
   // A new link replaced the old one; `mailed` if it went to the invited address.
   'invitation.resent': z.strictObject({ mailed: z.boolean() }),

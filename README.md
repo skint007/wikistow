@@ -36,13 +36,7 @@ pnpm --filter @wikistow/web dev
 
 Open `http://localhost:5173`. The server applies database migrations when it starts. Mailpit shows verification emails at `http://127.0.0.1:8025`.
 
-Create the first administrator's invitation from the repository root:
-
-```sh
-node --env-file=.env apps/server/src/admin-cli.ts bootstrap-admin --email you@example.com
-```
-
-Open the printed invitation, create the account, and verify its email through Mailpit. Run the same command again to promote the verified account to administrator. Invite other people from the admin page.
+On a fresh database the app opens **Set up WikiStow**. The account you create there is the administrator. It signs in at once, without a verification email. Invite other people from the admin page.
 
 ## Check and build
 
@@ -82,8 +76,10 @@ docker build -f docker/Dockerfile -t wikistow:local .
 
 The root Compose file runs development services only. For a server, configure the environment described in [.env.example](.env.example), provide Postgres and persistent attachment storage, and follow [docs/operations.md](docs/operations.md). Keep real environment files and deployment configuration outside this repository.
 
+To set up the first administrator, start the server, open its address, and create the account on the **Set up WikiStow** page. Until then anyone who can reach the server can claim it, so do this before you share the address ([details](docs/operations.md#first-administrator)).
+
 - [Linux desktop app and its packages](docs/desktop.md)
-- [Images, backup, restore, and AI configuration](docs/operations.md)
+- [Images, first administrator, backup, restore, and AI configuration](docs/operations.md)
 - [Versions and releases](docs/releasing.md)
 - [Restore verification against a test instance](deploy/test-instance/README.md)
 - [Desktop plugin SDK](packages/plugin-sdk/README.md)

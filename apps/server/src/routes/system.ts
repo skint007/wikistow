@@ -1,5 +1,5 @@
 import { systemRoutes } from '@wikistow/contracts';
-import { readSettings, type Database } from '@wikistow/server';
+import { readSettings, setupOpen, type Database } from '@wikistow/server';
 import type { Routes } from '../http/mount.ts';
 
 export function mountSystemRoutes(
@@ -15,6 +15,12 @@ export function mountSystemRoutes(
       restoredAt: restoredAt.toISOString(),
       backupTakenAt: backupTakenAt?.toISOString() ?? null,
     };
-    return { installationId, publicRegistration, origin: publicOrigin, restore };
+    return {
+      installationId,
+      publicRegistration,
+      setup: await setupOpen(db),
+      origin: publicOrigin,
+      restore,
+    };
   });
 }

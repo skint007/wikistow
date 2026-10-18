@@ -16,6 +16,12 @@ export const installation = {
     installationId: InstallationId,
     publicRegistration: z.boolean(),
     /**
+     * True while the server has no accounts. The app then offers to create
+     * the first one, its administrator (`createFirstAccount`). Missing from
+     * servers older than it.
+     */
+    setup: z.boolean().optional(),
+    /**
      * Where the server is reached, as clients outside the browser should
      * name it. Missing from servers older than the desktop app.
      */

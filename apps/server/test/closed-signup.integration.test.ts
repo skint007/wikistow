@@ -1,15 +1,8 @@
-import { AccountError, bootstrapAdmin, schema } from '@wikistow/server';
-import { count, eq } from 'drizzle-orm';
+import { schema } from '@wikistow/server';
+import { count } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { DISABLED_AUTH_PATHS } from '../src/auth/auth.ts';
-import {
-  Browser,
-  createTestApp,
-  lastMailTo,
-  linkIn,
-  scratchApps,
-  type TestApp,
-} from './support/harness.ts';
+import { Browser, createTestApp, scratchApps, type TestApp } from './support/harness.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -90,96 +83,47 @@ describe('closed sign-up', () => {
   });
 });
 
-describe('bootstrapping the first administrator', () => {
+describe('setting up the first administrator', () => {
   const scratchApp = scratchApps();
-  const OWNER_PASSWORD = 'a long admin passphrase';
+  const PASSWORD = 'a long admin passphrase';
 
-  /** A fresh installation, so each case starts with no administrator. */
-  async function fresh() {
+  it('makes exactly one administrator, who signs in without mail, then closes', async () => {
     const app = await scratchApp();
-    const accept = (token: string, email: string) =>
-      new Browser(app.app).request('/api/accounts', {
+    const installation = async () =>
+      (await (await new Browser(app.app).request('/api/installation')).json()) as {
+        setup: boolean;
+      };
+    const setUp = (email: string) =>
+      new Browser(app.app).request('/api/setup', {
         method: 'POST',
-        json: { token, email, name: 'Owner', password: OWNER_PASSWORD },
+        json: { name: 'Owner', email, password: PASSWORD },
       });
-    const verify = (email: string) =>
-      new Browser(app.app).request(linkIn(lastMailTo(app.mails, email)));
-    const invited = async (email: string) => {
-      const result = await bootstrapAdmin(app.db, email);
-      if (result.kind !== 'invited') throw new Error(`expected a link, got ${result.kind}`);
-      return result.token;
-    };
-    const roleOf = async (email: string) =>
-      (await app.db.select().from(schema.users).where(eq(schema.users.email, email)))[0]?.role;
-    return { app, accept, verify, invited, roleOf };
-  }
+    expect((await installation()).setup).toBe(true);
 
-  it('invites, then promotes only after the account verifies, then refuses', async () => {
-    const f = await fresh();
-    expect(
-      (await f.accept(await f.invited('Owner@Example.test'), 'owner@example.test')).status,
-    ).toBe(201);
-    expect(await f.roleOf('owner@example.test')).toBe('user');
-    // Running again before verifying leaves the account alone.
-    expect(await bootstrapAdmin(f.app.db, 'owner@example.test')).toEqual({
-      kind: 'awaiting-verification',
+    // Two people racing for a fresh server: one wins, the other is refused.
+    const answers = await Promise.all([setUp('Owner@Example.test'), setUp('other@example.test')]);
+    expect(answers.map((res) => res.status).toSorted((a, b) => a - b)).toEqual([201, 409]);
+    const accounts = await app.db.select().from(schema.users);
+    expect(accounts).toEqual([expect.objectContaining({ role: 'admin', emailVerified: true })]);
+    const [owner] = accounts;
+    if (!owner) throw new Error('no first account');
+    const [event] = await app.db.select().from(schema.auditEvents);
+    expect(event).toMatchObject({
+      actorKind: 'operator',
+      action: 'account.first-admin',
+      targetId: owner.id,
     });
-    await f.verify('owner@example.test');
-    // Untouched by that run: the account signs in normally once verified.
-    const signIn = await new Browser(f.app.app).request('/api/auth/sign-in/email', {
+
+    const signIn = await new Browser(app.app).request('/api/auth/sign-in/email', {
       method: 'POST',
-      json: { email: 'owner@example.test', password: OWNER_PASSWORD },
+      json: { email: owner.email, password: PASSWORD },
     });
     expect(signIn.status).toBe(200);
-    expect(await bootstrapAdmin(f.app.db, 'owner@example.test')).toMatchObject({
-      kind: 'promoted',
-    });
-    expect(await f.roleOf('owner@example.test')).toBe('admin');
-    await expect(bootstrapAdmin(f.app.db, 'someone@example.test')).rejects.toThrow(
-      expect.objectContaining({ code: 'admin-exists' }) as AccountError,
-    );
-  });
+    expect(app.mails).toEqual([]);
 
-  it('never leaves the owner of a mistyped address with an account', async () => {
-    const f = await fresh();
-    const typo = await f.invited('owner@exmaple.test');
-    expect((await f.accept(typo, 'owner@exmaple.test')).status).toBe(201);
-    // Whoever owns the mistyped domain verifies and signs in before the operator notices.
-    await f.verify('owner@exmaple.test');
-    const stranger = new Browser(f.app.app);
-    const signIn = () =>
-      stranger.request('/api/auth/sign-in/email', {
-        method: 'POST',
-        json: { email: 'owner@exmaple.test', password: OWNER_PASSWORD },
-      });
-    expect((await signIn()).status).toBe(200);
-
-    const fixed = await f.invited('owner@example.test');
-    expect((await f.accept(fixed, 'owner@example.test')).status).toBe(201);
-    await f.verify('owner@example.test');
-    // Another slip leaves a link open just before promotion.
-    const stray = await f.invited('owner@exampel.test');
-    expect(await bootstrapAdmin(f.app.db, 'owner@example.test')).toMatchObject({
-      kind: 'promoted',
-      suspended: 1,
-    });
-    const late = await f.accept(stray, 'owner@exampel.test');
-    expect((await late.json()).error.code).toBe('invitation-revoked');
-    expect(await f.roleOf('owner@exmaple.test')).toBe('user');
-    expect((await stranger.request('/api/me')).status).toBe(401);
-    expect((await signIn()).status).not.toBe(200);
-  });
-
-  it('stops a bootstrap link working once a verified administrator exists', async () => {
-    const f = await fresh();
-    const token = await f.invited('late@example.test');
-    await f.app.db.insert(schema.users).values({
-      name: 'A',
-      email: 'other-admin@example.test',
-      role: 'admin',
-      emailVerified: true,
-    });
-    const res = await f.accept(token, 'late@example.test');
-    expect((await res.json()).error.code).toBe('admin-exists');
+    expect((await installation()).setup).toBe(false);
+    const late = await setUp('late@example.test');
+    expect((await late.json()).error.code).toBe('admin-exists');
+    expect(await app.db.select().from(schema.users)).toHaveLength(1);
   });
 });

@@ -29,12 +29,10 @@ export async function createInvitation(
     email,
     role,
     createdBy,
-    kind = 'account',
   }: {
     email: string | null;
     role: Role;
     createdBy: string | null;
-    kind?: 'account' | 'bootstrap';
   },
 ) {
   const { token, tokenHash } = newToken();
@@ -42,7 +40,6 @@ export async function createInvitation(
     .insert(invitations)
     .values({
       tokenHash,
-      kind,
       email: email === null ? null : normalizeEmail(email),
       role,
       createdBy,
@@ -58,14 +55,12 @@ export async function createInvitation(
 /**
  * Authorization is re-checked whenever a link is shown or redeemed: an account
  * invitation stops working once whoever issued it is no longer an active
- * administrator, including once they are deleted. Only the operator's
- * bootstrap link has no issuer.
+ * administrator, including once they are deleted.
  */
 async function issuerGone(
   db: Database,
-  { kind, createdBy }: { kind: 'account' | 'bootstrap'; createdBy: string | null },
+  { createdBy }: { createdBy: string | null },
 ): Promise<boolean> {
-  if (kind === 'bootstrap') return false;
   if (!createdBy) return true;
   const [issuer] = await db
     .select({ id: users.id })
@@ -83,7 +78,6 @@ export async function inspectInvitation(db: Database, token: string): Promise<In
   const [row] = await db
     .select({
       email: invitations.email,
-      kind: invitations.kind,
       createdBy: invitations.createdBy,
       expiresAt: invitations.expiresAt,
       acceptedAt: invitations.acceptedAt,
@@ -107,7 +101,6 @@ export async function claimInvitation(tx: Database, token: string, email: string
       id: invitations.id,
       email: invitations.email,
       role: invitations.role,
-      kind: invitations.kind,
       createdBy: invitations.createdBy,
       acceptedAt: invitations.acceptedAt,
       revokedAt: invitations.revokedAt,
@@ -123,7 +116,7 @@ export async function claimInvitation(tx: Database, token: string, email: string
   if (row.email !== null && row.email !== email)
     throw new AccountError('invitation-email-mismatch');
   if (await issuerGone(tx, row)) throw new AccountError('invitation-revoked');
-  return { id: row.id, email: row.email, role: row.role, bootstrap: row.kind === 'bootstrap' };
+  return { id: row.id, email: row.email, role: row.role };
 }
 
 /** `userId` is null when a generic link was spent on an address that already had an account. */

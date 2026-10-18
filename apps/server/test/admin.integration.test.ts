@@ -1,4 +1,4 @@
-import { bootstrapAdmin, createInvitation, inviteAccount, schema } from '@wikistow/server';
+import { createInvitation, inviteAccount, schema } from '@wikistow/server';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { asAgent, enrolledAgent } from './support/agents.ts';
@@ -45,15 +45,18 @@ let admin: Awaited<ReturnType<typeof join>>;
 
 beforeAll(async () => {
   t = await createTestApp();
+  // The installation's first account, from its setup page.
   const email = 'owner@example.test';
-  const invited = await bootstrapAdmin(t.db, email);
-  if (invited.kind !== 'invited') throw new Error('expected a bootstrap link');
-  admin = await join(invited.token, email);
-  // The operator's second run, after verification, grants the role and ends
-  // the sessions from before it, so the administrator signs in again.
-  expect(await bootstrapAdmin(t.db, email)).toMatchObject({ kind: 'promoted' });
-  expect((await admin.browser.request('/api/me')).status).toBe(401);
-  expect((await signIn(admin.browser, email)).ok).toBe(true);
+  const browser = new Browser(t.app);
+  const created = await browser.request('/api/setup', {
+    method: 'POST',
+    json: { name: 'Owner', email, password: PASSWORD },
+  });
+  expect(created.status).toBe(201);
+  expect((await signIn(browser, email)).ok).toBe(true);
+  const [owner] = await t.db.select().from(schema.users).where(eq(schema.users.email, email));
+  if (!owner) throw new Error('no first account');
+  admin = { browser, email, id: owner.id };
 });
 afterAll(() => t.drop());
 

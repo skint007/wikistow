@@ -6,18 +6,17 @@ Actual hostnames, proxy routes, deployment files, and secret files belong in you
 
 ## Seed a fresh installation
 
-Point `WIKISTOW_URL` at an empty test installation and `MAILPIT_URL` at its Mailpit inbox. Set `DRILL_BOOTSTRAP` to the command that runs the server's administrator CLI, without the `--email` argument. For a server container named `wikistow`:
+Point `WIKISTOW_URL` at an empty test installation and `MAILPIT_URL` at its Mailpit inbox:
 
 ```sh
 export WIKISTOW_URL=https://wiki-test.example.com
 export MAILPIT_URL=https://mail-test.example.com
-export DRILL_BOOTSTRAP='docker exec wikistow node admin.mjs bootstrap-admin'
 pnpm -C apps/web drill:seed
 ```
 
-If Mailpit requires a login, set `MAILPIT_AUTH` to `user:password` through your credential tooling, or save it in `~/.config/wikistow-drill/mailpit-auth`, mode 600. Keep its directory mode 700. The seed requires an explicit bootstrap command so it cannot accidentally run a command for someone else's server.
+If Mailpit requires a login, set `MAILPIT_AUTH` to `user:password` through your credential tooling, or save it in `~/.config/wikistow-drill/mailpit-auth`, mode 600. Keep its directory mode 700.
 
-The seed creates two test accounts with random passwords, passphrases and recovery keys. It creates shared and private published pages with an attachment, and enables two-factor on the second account. Its private state file records everything needed to verify the restore, including account secrets. An existing state file prevents a new seed from running.
+The seed creates the administrator on the installation's **Set up WikiStow** page, so it stops on a server that already has accounts. It creates two test accounts with random passwords, passphrases and recovery keys. It creates shared and private published pages with an attachment, and enables two-factor on the second account. Its private state file records everything needed to verify the restore, including account secrets. An existing state file prevents a new seed from running.
 
 ## Check a restore
 
@@ -35,7 +34,6 @@ The check compares the installation ID, signs in and unlocks with the recorded c
 | --- | --- |
 | `WIKISTOW_URL` | `http://localhost:3000`, the server being seeded or checked |
 | `MAILPIT_URL` | `http://127.0.0.1:8025`, used only by the seed |
-| `DRILL_BOOTSTRAP` | No default. Required by the seed; runs with `--email <address>` appended |
 | `MAILPIT_AUTH` | Mailpit login, otherwise read from `~/.config/wikistow-drill/mailpit-auth` |
 | `DRILL_STATE` | `~/.config/wikistow-drill/state.json`, written mode 600 |
 | `DRILL_FORCE` | `1` permits overwriting the existing state file |
