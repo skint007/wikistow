@@ -76,9 +76,7 @@ docker build -f docker/Dockerfile -t wikistow:local .
 
 The root Compose file runs development services only. For a server, configure the environment described in [.env.example](.env.example), provide Postgres and persistent attachment storage, and follow [docs/operations.md](docs/operations.md). Keep real environment files and deployment configuration outside this repository.
 
-### First administrator
-
-Start the server, open its address, and create the administrator on the **Set up WikiStow** page. Until then anyone who can reach the server can claim it, so do this before you share the address. [Operations](docs/operations.md#first-administrator) has the details.
+To set up the first administrator, start the server, open its address, and create the account on the **Set up WikiStow** page. Until then anyone who can reach the server can claim it, so do this before you share the address ([details](docs/operations.md#first-administrator)).
 
 - [Linux desktop app and its packages](docs/desktop.md)
 - [Images, first administrator, backup, restore, and AI configuration](docs/operations.md)
