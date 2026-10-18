@@ -74,8 +74,9 @@ jobs:
       packages: write
 
   # The desktop app as CI built, tested and packaged it: the .deb, the .rpm,
-  # and an archive of what its AUR package installs. Beside them, an archive
-  # of what the CLI's AUR package installs, and checksums for every file.
+  # and an archive of what its AUR package installs. Beside them, the CLI as
+  # a binary for each system, its install scripts, its bundle for Node, and
+  # checksums for every file.
   github-release:
     needs: [verify, ci]
     runs-on: ubuntu-24.04
@@ -109,8 +110,17 @@ jobs:
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
-      # The CLI the same way. Unpacked away from the workspace, it runs with
-      # nothing but Node and says it is this release.
+      # The CLI as one binary per system, built by the Bun pinned here from
+      # the bundle CI tested, beside its install scripts. The Linux x64 one
+      # must run outside the workspace and say it is this release.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - working-directory: apps/cli
+        run: scripts/binaries.sh "${GITHUB_REF_NAME#v}" ../../release
+      # The bundle too, for Node.js on systems without a binary, packed the
+      # same way. Unpacked away from the workspace, it runs with nothing but
+      # Node and says it is this release.
       - run: |
           version="${GITHUB_REF_NAME#v}"
           name="wikistow-cli-$version"
@@ -125,7 +135,9 @@ jobs:
           node wikistow.mjs --help >/dev/null
       - working-directory: release
         run: |
-          sha256sum wikistow-desktop-*.tar.gz wikistow-cli-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm > SHA256SUMS
+          sha256sum wikistow-desktop-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm \
+            wikistow-linux-* wikistow-darwin-* wikistow-windows-* install.sh install.ps1 \
+            wikistow-cli-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
       # The notes are the release's entry in CHANGELOG.md, reviewed in its
       # version change. Without one, nothing is published.
@@ -141,7 +153,8 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" \
             --title "WikiStow ${GITHUB_REF_NAME#v}" "${prerelease[@]}" --latest="$LATEST" \
-            release/*.tar.gz release/*.deb release/*.rpm release/SHA256SUMS
+            release/*.tar.gz release/*.deb release/*.rpm release/wikistow-linux-* release/wikistow-darwin-* \
+            release/wikistow-windows-* release/install.sh release/install.ps1 release/SHA256SUMS
 
   # The AUR packages follow the newest stable release, once their archives
   # are downloadable. A prerelease or a fix to an older line leaves them alone.
