@@ -258,3 +258,28 @@ export async function lookupPerson(db: Database, accountId: string, email: strin
   const [person] = [...rows].map(toPerson);
   return person ?? null;
 }
+
+/**
+ * Everyone `lookupPerson` could find, by name, for a person to pick from
+ * (section 7.3), and the set-up accounts that could be found once they
+ * make a vault, by name and email only. Accounts still being set up from an
+ * invitation or a sign-up are left out: nobody can sign in to them yet. Listing them is a deliberate trade-off for
+ * servers where people know each other: everyone with a vault sees who else
+ * is on the server.
+ */
+export async function listPeople(db: Database, accountId: string) {
+  const me = await requireIdentity(db, accountId);
+  const rows = await db.execute<PersonRow>(sql`
+    select i.id, i.kind, i.key_version, i.box_public_key, i.sign_public_key, u.name, u.email
+    from users u join identities i on i.account_id = u.id
+    where u.suspended_at is null
+      and i.kind = 'human' and i.revoked_at is null and i.id <> ${me.id}
+    order by u.name, u.email`);
+  const without = await db.execute<{ name: string; email: string }>(sql`
+    select u.name, u.email from users u
+    where u.suspended_at is null and u.email_verified
+      and not exists (select 1 from identities i
+                      where i.account_id = u.id and i.kind = 'human' and i.revoked_at is null)
+    order by u.name, u.email`);
+  return { people: [...rows].map(toPerson), withoutVault: [...without] };
+}

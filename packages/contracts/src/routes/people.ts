@@ -77,3 +77,18 @@ export const lookupPerson = {
   body: z.object({ email: z.string().max(320) }),
   response: z.strictObject({ person: DirectoryPerson.nullable() }),
 } as const satisfies RouteDef;
+
+/**
+ * Everyone `lookupPerson` could find, for a person to pick from when they
+ * share (protocol section 7.3): the accounts with a vault, but not the
+ * caller. `withoutVault` names the accounts that have none yet, which can't
+ * be picked. Humans with a vault only. Rate-limited.
+ */
+export const listPeople = {
+  method: 'GET',
+  path: '/api/people',
+  response: z.strictObject({
+    people: z.array(DirectoryPerson),
+    withoutVault: z.array(z.strictObject({ name: z.string(), email: z.string() })),
+  }),
+} as const satisfies RouteDef;

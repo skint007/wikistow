@@ -42,6 +42,7 @@ import {
   directoryAvatars,
   listOwners,
   listShares,
+  listPeople,
   lookupPerson,
   makeShare,
   checkMover,
@@ -143,8 +144,8 @@ const DOWNLOAD_LIMIT = { windowSeconds: 60, max: 600 };
 // Opening pages and loading the tree. Each answer carries at most a couple of
 // megabytes, so this also bounds how much one account can pull a minute.
 const FETCH_LIMIT = { windowSeconds: 60, max: 120 };
-// Finding people by exact email: enough to share with a household in a
-// sitting, too few to walk the directory by guessing.
+// Finding people by exact email, or listing them for a sharing dialog:
+// enough to share with a household in a sitting.
 const LOOKUP_LIMIT = { windowSeconds: 600, max: 30 };
 // Making a share carries a key wrap for every record in it, and adding a
 // co-owner an envelope for every owner-region record: a space share of a
@@ -599,6 +600,12 @@ export function mountContentRoutes(
     async ({ body }, { principal }) => ({
       person: await lookupPerson(db, principal.accountId, body.email).catch(toApiError),
     }),
+    { rateLimit: LOOKUP_LIMIT },
+  );
+
+  routes.account(
+    peopleRoutes.listPeople,
+    async (_input, { principal }) => listPeople(db, principal.accountId).catch(toApiError),
     { rateLimit: LOOKUP_LIMIT },
   );
 
