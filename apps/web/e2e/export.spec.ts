@@ -20,7 +20,7 @@ const FRONTMATTER = '---\ntags: [network]\nlink: "[[Plan]]"\n---\n';
  */
 test('exporting a space as Markdown', async ({ page, freshPage, admin }) => {
   test.setTimeout(180_000);
-  await memberWithVault(page, await adminTab(freshPage, admin.email), 'Olive Owner');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
 
   let uploaded = '';
   await test.step('the owner writes a page with links, frontmatter and an attachment', async () => {

@@ -17,7 +17,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
-import { pinLabel } from '../contacts.ts';
+import { isUsableLabel, pinLabel } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
 import {
   folderKeyOf,
@@ -113,6 +113,32 @@ export async function listPeople(ctx: ClientContext) {
     people: people.map((person): Lookup => ({ ...person, foundBy: person.email })),
     withoutVault,
   };
+}
+
+/**
+ * Rename a contact: the name in their label, which is how this person's apps
+ * name them from then on (section 8.2). Their ID, key hash and email stay.
+ * The server's name for them is never copied in; the person types the new
+ * one. Only a pinned person with a usable label can be renamed, to a name a
+ * label may hold, or it throws `malformed`.
+ */
+export async function renameContact(
+  ctx: ClientContext,
+  identityId: string,
+  name: string,
+): Promise<void> {
+  const { shared, private: own } = ctx.contacts.book.payloads;
+  const pin = shared.contacts.find((c) => c.identity.id === identityId);
+  const label = pin && pinLabel(pin, own.labels);
+  if (!label) throw new CryptoError('malformed', `${identityId} has no label to rename`);
+  if (label.name === name) return;
+  const renamed = { name, email: label.email };
+  if (!isUsableLabel(renamed)) throw new CryptoError('malformed', 'A label can’t hold that name');
+  const { id, keyHash: hashed } = label;
+  await saveContacts(ctx, [{ kind: 'relabel', id, keyHash: hashed, label: renamed }], {
+    holds: (payloads) =>
+      payloads.private.labels.some((l) => l.id === id && l.keyHash === hashed && l.name === name),
+  });
 }
 
 /**

@@ -9,8 +9,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { Crown, Share, UserPlus, UsersRound } from 'lucide-react';
 import { useState } from 'react';
-import { Name } from '@/components/name';
+import { Name, plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -28,14 +29,15 @@ import {
   treeQuery,
 } from '../../../../../data/queries';
 import { groupName, peopleIn } from '../../../../../sharing/groups';
-import { PersonRow } from '../../../../../sharing/access-panel';
+import { MoreMenu, PersonRow } from '../../../../../sharing/access-panel';
 import { useKeyReview } from '../../../../../sharing/key-change';
 import { sharingMessage } from '../../../../../sharing/messages';
 import { ACCESS_LABELS, accessOf } from '../../../../../sharing/model';
 import { nameOf, shareName, shareNameById } from '../../../../../sharing/names';
 import { OwnerDialog, type OwnerAction } from '../../../../../sharing/owner-dialog';
 import { OwnerTasks } from '../../../../../sharing/owner-tasks';
-import { describePerson, peopleQuery } from '../../../../../sharing/people';
+import { describePerson, peopleQuery, type Person } from '../../../../../sharing/people';
+import { canRename, RenameContactDialog } from '../../../../../sharing/rename-contact';
 import { NotInAnyShare, RotationConfirm } from '../../../../../sharing/rotation-confirm';
 import { RotateKeysDialog } from '../../../../../sharing/rotate-keys-dialog';
 import { ShareDialog } from '../../../../../sharing/share-dialog';
@@ -98,6 +100,14 @@ function Members() {
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [removing, setRemoving] = useState<IdentityId | null>(null);
   const [rotating, setRotating] = useState<ShareId | null>(null);
+  const [renaming, setRenaming] = useState<Person | null>(null);
+  // Rename… for someone this app names by their label.
+  const renameMenu = (who: Person) =>
+    canRename(who) && (
+      <MoreMenu label={`More for ${plainText(who.name)}`} disabled={false}>
+        <DropdownMenuItem onSelect={() => setRenaming(who)}>Rename…</DropdownMenuItem>
+      </MoreMenu>
+    );
   const self = ctx.identity.public.id;
   const failed = keys.error ?? shares.error;
 
@@ -178,6 +188,7 @@ function Members() {
                       {id === self ? 'Leave' : 'Remove'}
                     </Button>
                   )}
+                  {renameMenu(person(id))}
                 </PersonRow>
               ))}
             </ul>
@@ -312,6 +323,7 @@ function Members() {
                   <Button size="sm" variant="outline" onClick={() => setRemoving(id)}>
                     Remove from every folder
                   </Button>
+                  {renameMenu(person(id))}
                 </PersonRow>
               ))}
             </ul>
@@ -319,6 +331,7 @@ function Members() {
         )}
       </div>
       <OwnerDialog spaceId={spaceId} action={action} onClose={() => setAction(null)} />
+      <RenameContactDialog person={renaming} onClose={() => setRenaming(null)} />
       <ShareDialog
         spaceId={spaceId}
         rootId={sharing?.rootId ?? null}

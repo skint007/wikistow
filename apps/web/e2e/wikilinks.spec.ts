@@ -32,8 +32,8 @@ test('a reader follows a wikilink to its heading, and sees an embed', async ({
   test.setTimeout(300_000);
   const adminPage = await adminTab(freshPage, admin.email);
   const rita = await freshPage();
-  await memberWithVault(owner, adminPage, 'Olive Owner');
-  const { email: ritaEmail } = await memberWithVault(rita, adminPage, 'Rita Reader');
+  await memberWithVault(owner, adminPage);
+  const { email: ritaEmail } = await memberWithVault(rita, adminPage);
 
   await test.step('the owner writes pages in a shared folder', async () => {
     await newSpace(owner, 'Garden');

@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { accounts, settings, users } from '../db/schema/index.ts';
 import { usablePassword } from './account-setup.ts';
 import { lockAdmins } from './first-account.ts';
+import { normalizeName, withUniqueName } from './profile.ts';
 import { AccountError } from './errors.ts';
 import {
   claimInvitation,
@@ -21,7 +22,8 @@ import {
  * invitation accepted. Two concurrent attempts with one invitation produce
  * exactly one account. Only an email-bound link went to the address's owner,
  * so only it chooses a name and password here. Otherwise the account gets
- * neither until the mailbox owner finishes it from an emailed link.
+ * neither until the mailbox owner finishes it from an emailed link. A name
+ * another account uses is refused with `name-taken`.
  */
 export async function createAccount(
   db: Database,
@@ -36,7 +38,7 @@ export async function createAccount(
   // Hash before opening the transaction so no lock is held during scrypt.
   const passwordHash = input.password === undefined ? null : await hashPassword(input.password);
 
-  return db.transaction(async (tx) => {
+  const transaction = db.transaction(async (tx) => {
     // Taken first, before any row lock, so lock order matches the first
     // account and admin changes. Account creation is rare enough to serialize.
     await lockAdmins(tx);
@@ -55,7 +57,7 @@ export async function createAccount(
         .for('share');
       if (!row?.open) throw new AccountError('registration-closed');
     }
-    const name = input.name?.trim();
+    const name = input.name === undefined ? undefined : normalizeName(input.name);
     if (emailBound && (!name || passwordHash === null)) {
       throw new AccountError('details-required');
     }
@@ -98,6 +100,7 @@ export async function createAccount(
     if (invitationId) await markInvitationAccepted(tx, invitationId, user.id);
     return { kind: 'created' as const, accountId: user.id, email, role, emailBound };
   });
+  return withUniqueName(transaction);
 }
 
 /** Better Auth's credential account, which uses the user ID as its account ID. */

@@ -5,6 +5,7 @@ import { audit } from '../admin/audit.ts';
 import { accounts, users } from '../db/schema/index.ts';
 import { AccountError } from './errors.ts';
 import { normalizeEmail } from './invitations.ts';
+import { normalizeName, withUniqueName } from './profile.ts';
 
 /**
  * Serializes every change to who is an administrator. Taken as a
@@ -31,14 +32,14 @@ export async function createFirstAccount(
 ) {
   // Hash before opening the transaction so no lock is held during scrypt.
   const password = await hashPassword(input.password);
-  return db.transaction(async (tx) => {
+  const transaction = db.transaction(async (tx) => {
     // Account creation takes the same lock, so two requests make one account.
     await lockAdmins(tx);
     if (!(await setupOpen(tx))) throw new AccountError('admin-exists');
     const [user] = await tx
       .insert(users)
       .values({
-        name: input.name.trim(),
+        name: normalizeName(input.name),
         email: normalizeEmail(input.email),
         role: 'admin',
         emailVerified: true,
@@ -58,4 +59,5 @@ export async function createFirstAccount(
     });
     return { accountId: user.id };
   });
+  return withUniqueName(transaction);
 }

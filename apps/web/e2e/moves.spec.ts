@@ -36,9 +36,9 @@ test('moving a folder between shares changes who can read it', async ({
   const adminPage = await adminTab(freshPage, admin.email);
   const rita = await freshPage();
   const kim = await freshPage();
-  await memberWithVault(owner, adminPage, 'Olive Owner');
-  const { email: ritaEmail } = await memberWithVault(rita, adminPage, 'Rita Reader');
-  const { email: kimEmail } = await memberWithVault(kim, adminPage, 'Kim Cook');
+  await memberWithVault(owner, adminPage);
+  const { email: ritaEmail } = await memberWithVault(rita, adminPage);
+  const { email: kimEmail } = await memberWithVault(kim, adminPage);
 
   await test.step('the owner shares Garden with Rita and Kitchen with Kim', async () => {
     await newSpace(owner, 'Family');

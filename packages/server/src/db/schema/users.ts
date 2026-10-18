@@ -1,9 +1,16 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, pgTable, text } from 'drizzle-orm/pg-core';
+import { boolean, check, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { primaryId, timestamps, timestamptz } from './helpers.ts';
 
 export const ROLES = ['user', 'admin'] as const;
 export const THEMES = ['system', 'light', 'slate', 'warm', 'oled'] as const;
+
+/**
+ * No two accounts share a name, ignoring case. Names are stored trimmed with
+ * inner whitespace collapsed (`normalizeName`). An account waiting for its
+ * owner to finish it has the empty name, which any number may have.
+ */
+export const USERS_NAME_UNIQUE = 'users_name_unique';
 
 /**
  * Accounts. Better Auth reads and writes the core columns; `role`,
@@ -50,5 +57,8 @@ export const users = pgTable(
     check('users_role', sql`${table.role} in ('user', 'admin')`),
     check('users_theme', sql`${table.theme} in ('system', 'light', 'slate', 'warm', 'oled')`),
     check('users_email_lowercase', sql`${table.email} = lower(${table.email})`),
+    uniqueIndex(USERS_NAME_UNIQUE)
+      .on(sql`lower(${table.name})`)
+      .where(sql`${table.name} <> ''`),
   ],
 );

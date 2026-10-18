@@ -17,6 +17,7 @@ import {
   removeAvatar,
   schema,
   setAvatar,
+  setName,
   setTheme,
   type AccountFailure,
   type Database,
@@ -47,6 +48,7 @@ const ACCOUNT_ERRORS = {
   'invitation-email-mismatch': 'invitation-email-mismatch',
   'invitation-exists': 'invitation-exists',
   'email-taken': 'email-taken',
+  'name-taken': 'name-taken',
   'admin-exists': 'admin-exists',
   'account-not-found': 'not-found',
   'not-admin': 'forbidden',
@@ -364,6 +366,14 @@ export function mountAccountRoutes(
       sendInBackground(mailer.deliver, log, emailChangedMail(change.from, change.to));
       return { email: change.to };
     },
+    { rateLimit: FORM_LIMIT },
+  );
+
+  routes.account(
+    accountRoutes.setName,
+    async ({ body }, { principal }) => ({
+      name: await setName(db, principal.accountId, body.name).catch(toApiError),
+    }),
     { rateLimit: FORM_LIMIT },
   );
 

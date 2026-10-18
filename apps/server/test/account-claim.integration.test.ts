@@ -65,8 +65,8 @@ it.each(['open', 'generic'] as const)(
     expect((await signIn(email, PASSWORD)).status).toBe(401);
 
     const ownerPassword = 'a password only the owner chose';
-    expect((await finish(link, '  Owner Name ', ownerPassword)).status).toBe(200);
-    expect(await userAt(email)).toMatchObject({ name: 'Owner Name', emailVerified: true });
+    expect((await finish(link, `  Owner  ${kind} `, ownerPassword)).status).toBe(200);
+    expect(await userAt(email)).toMatchObject({ name: `Owner ${kind}`, emailVerified: true });
     expect((await signIn(email, PASSWORD)).status).toBe(401);
     expect((await signIn(email, ownerPassword)).status).toBe(200);
     // The link works once.

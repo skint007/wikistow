@@ -31,7 +31,7 @@ async function accountWithTotp() {
   const browser = new Browser(t.app);
   await browser.request('/api/accounts', {
     method: 'POST',
-    json: { token, email, name: 'T', password: PASSWORD },
+    json: { token, email, name: `T ${counter}`, password: PASSWORD },
   });
   await new Browser(t.app).request(linkIn(lastMailTo(t.mails, email)));
   await signIn(browser, email);
