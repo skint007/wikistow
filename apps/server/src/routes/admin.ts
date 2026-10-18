@@ -71,7 +71,7 @@ function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSe
     case 'ETLS':
       return `Couldn’t start a secure connection with ${where}. Check the security setting.`;
     case 'ETIMEDOUT':
-      return `${where} didn’t answer in time.`;
+      return `No answer from ${where} in time.`;
     case 'EDNS':
     case 'ECONNECTION':
     case 'ESOCKET':

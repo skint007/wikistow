@@ -26,7 +26,7 @@ export const settings = pgTable(
      * Outgoing mail, as an administrator set it on the admin page. Null
      * until set. The server's environment wins over each (`SMTP_URL` over
      * the connection, `SMTP_FROM` over `smtpFrom`). The password is sealed
-     * (settings.ts, `sealSecret`) and never sent back.
+     * (`settingsSecrets` in settings.ts) and never sent back.
      */
     smtpHost: text(),
     smtpPort: integer(),
