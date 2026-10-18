@@ -584,13 +584,8 @@ export type ContactsChange =
   | { kind: 'confirm-key'; pin: Pin; replaced: string }
   /** A changed key the person declined: it goes into `removed`, and the pin stays. */
   | { kind: 'decline-key'; id: string; keyHash: string; removedAt: string }
-  | {
-      kind: 'relabel';
-      id: string;
-      keyHash: string;
-      label: Pick<Label, 'name' | 'email'>;
-      replaced: Pick<Label, 'name' | 'email'>;
-    }
+  /** A label renamed: the last write stands, and a label gone meanwhile stays gone. */
+  | { kind: 'relabel'; id: string; keyHash: string; label: Pick<Label, 'name' | 'email'> }
   | { kind: 'unpin'; id: string; keyHash: string; removedAt: string }
   | { kind: 'enroll'; agent: OwnAgent }
   | { kind: 'rename-agent'; agentId: string; name: string; replaced: string }
@@ -706,9 +701,7 @@ export function applyContactsChange(
     case 'relabel': {
       const index = own.labels.findIndex((l) => l.id === change.id && l.keyHash === change.keyHash);
       const current = own.labels[index];
-      if (!current || !sameLabel(current, change.replaced)) {
-        throw conflict('This contact was relabelled or removed on another device');
-      }
+      if (!current || sameLabel(current, change.label)) return base;
       const others = own.labels.filter((_, i) => i !== index);
       if (others.some((label) => label.email === change.label.email)) {
         throw conflict('Another contact has this email');
