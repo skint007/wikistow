@@ -131,6 +131,7 @@ function CreateLink({
       <button
         type="button"
         data-hint="Create this page"
+        aria-description="Create this page"
         onClick={() => void create()}
         className="text-muted-foreground underline decoration-dashed underline-offset-2 hover:text-foreground"
       >
