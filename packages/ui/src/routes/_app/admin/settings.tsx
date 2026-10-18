@@ -189,7 +189,6 @@ function MailSettings({ mail }: { mail: Mail }) {
                   value={host}
                   onChange={setHost}
                   placeholder="smtp.example.com"
-                  autoComplete="off"
                 />
                 <TextField
                   id={`${id}-port`}
@@ -218,7 +217,6 @@ function MailSettings({ mail }: { mail: Mail }) {
                 label="Username"
                 value={username}
                 onChange={setUsername}
-                autoComplete="off"
               />
               <SecretField
                 id={`${id}-password`}
@@ -238,7 +236,6 @@ function MailSettings({ mail }: { mail: Mail }) {
               value={from}
               onChange={setFrom}
               placeholder="WikiStow <wiki@example.com>"
-              autoComplete="off"
             />
           )}
           {message && <FormMessage tone={message.tone}>{message.text}</FormMessage>}

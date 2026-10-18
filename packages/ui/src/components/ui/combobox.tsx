@@ -76,7 +76,6 @@ export function Combobox({
         aria-controls={`${ids}-list`}
         aria-activedescendant={listed && active >= 0 ? optionId(active) : undefined}
         aria-autocomplete="list"
-        autoComplete="off"
         spellCheck={false}
         placeholder={placeholder}
         value={value}
