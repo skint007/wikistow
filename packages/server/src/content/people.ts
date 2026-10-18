@@ -244,8 +244,7 @@ export async function peopleById(db: Database, ids: readonly string[]) {
 /**
  * The person whose account has exactly this email, once normalized
  * (section 3.2), if they have a vault (section 7.3): nothing for any other
- * match, a suspended or deleted account, or the caller themself. The route
- * is rate-limited, so the directory can't be walked by guessing.
+ * match, a suspended or deleted account, or the caller themself.
  */
 export async function lookupPerson(db: Database, accountId: string, email: string) {
   const me = await requireIdentity(db, accountId);
@@ -262,10 +261,10 @@ export async function lookupPerson(db: Database, accountId: string, email: strin
 /**
  * Everyone `lookupPerson` could find, by name, for a person to pick from
  * (section 7.3), and the set-up accounts that could be found once they
- * make a vault, by name and email only. Accounts still being set up from an
- * invitation or a sign-up are left out: nobody can sign in to them yet. Listing them is a deliberate trade-off for
- * servers where people know each other: everyone with a vault sees who else
- * is on the server.
+ * make a vault, by name and email only. Accounts still being set up from
+ * an invitation or a sign-up are left out: nobody can sign in to them yet.
+ * Listing them is a deliberate trade-off for servers where people know
+ * each other: everyone with a vault sees who else is on the server.
  */
 export async function listPeople(db: Database, accountId: string) {
   const me = await requireIdentity(db, accountId);
