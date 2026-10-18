@@ -60,7 +60,10 @@ const MAIL_LIMIT = { windowSeconds: 60, max: 10 };
 function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSetup>>) {
   const code = error instanceof Error && 'code' in error ? error.code : undefined;
   // OpenSSL's, as when TLS meets a server that starts in plain text.
-  const tls = error instanceof Error && 'library' in error && error.library === 'SSL routines';
+  // Also a server that wants STARTTLS before the sender (Security set to None).
+  const tls =
+    error instanceof Error &&
+    (('library' in error && error.library === 'SSL routines') || /STARTTLS/.test(error.message));
   const where =
     'url' in setup.connection
       ? 'the mail server'
@@ -77,7 +80,7 @@ function mailFailure(error: unknown, setup: NonNullable<ReturnType<typeof mailSe
     case 'ETLS':
       return `Couldn’t start a secure connection with ${where}. Check the security setting.`;
     case 'ETIMEDOUT':
-      return `No answer from ${where} in time.`;
+      return `No answer from ${where} in time. Check the port and security setting.`;
     case 'EDNS':
     case 'ECONNECTION':
     case 'ESOCKET':

@@ -173,7 +173,7 @@ function MailSettings({ mail }: { mail: Mail }) {
         <CardDescription>
           {mail.ready
             ? 'WikiStow sends invitations, email confirmations and password resets with these settings.'
-            : 'Mail isn’t set up, so WikiStow can’t send invitations, email confirmations or password resets. You can still share invitations with Copy link.'}
+            : 'Mail isn’t set up, so WikiStow can’t send invitations, email confirmations or password resets. You can still copy invitation links, but nobody can create an account with one until mail is set up.'}
         </CardDescription>
       </CardHeader>
       <CardContent>
