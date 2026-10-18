@@ -31,6 +31,13 @@ const origin = (event: Event) => {
 
 const hinted = (event: Event) => origin(event)?.closest<HTMLElement>('[data-hint]') ?? null;
 
+/** Whether scrolling `scrolled` moves `element`, which may be in a shadow root. */
+const moves = (scrolled: EventTarget | null, element: HTMLElement) => {
+  const root = element.getRootNode();
+  const outer = root instanceof ShadowRoot ? root.host : element;
+  return scrolled instanceof Node && scrolled.contains(outer);
+};
+
 /**
  * Hover and keyboard-focus hints, in the theme's popover colours, for every
  * element with a `data-hint` attribute: `<button data-hint="Bold">` in React,
@@ -102,6 +109,10 @@ export function HintLayer() {
     const focusOut = (event: FocusEvent) => {
       if (target && hinted(event) === target) close();
     };
+    // Only a scroll that moves the element hides its hint, not a chat streaming in beside it.
+    const scroll = (event: Event) => {
+      if (target && moves(event.target, target)) hide();
+    };
     const press = (event: PointerEvent) => {
       hide();
       target = hinted(event);
@@ -115,7 +126,7 @@ export function HintLayer() {
     document.addEventListener('focusin', focusIn, options);
     document.addEventListener('focusout', focusOut, options);
     document.addEventListener('keydown', hide, options);
-    document.addEventListener('scroll', hide, options);
+    document.addEventListener('scroll', scroll, options);
     // Not in capture, which would catch every element's blur too.
     window.addEventListener('blur', close, { signal: stop.signal });
     return () => {
