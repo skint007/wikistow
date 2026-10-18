@@ -10,18 +10,21 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A new server asks for its administrator the first time you open it. That account signs in straight away, before mail is set up. The `bootstrap-admin` command is gone.
 - When you share, add a group member or add an owner, you can pick the person from a list of people on the server, filtered by name or email, instead of typing their whole email.
+- Administrators can set up mail in Administration → Settings, and send a test email before saving. The server now starts without mail, and `SMTP_URL` and `SMTP_FROM` are optional; when set, they still win.
 
 ### Changes
 
 #### App
 
 - People can reorder their spaces in the rail: drag any tile but the home space, or use Move up and Move down in a tile’s right-click menu. The order is kept with the account (`space_order` on `users`, `GET`/`PUT /api/me/space-order`) and `GET /api/spaces` comes back in it, home space first, in its released shape. Phones show the order in the drawer. (#97)
+- Administration’s Registration tab is now **Settings**, with a **Mail** card: server, port, security, username, a write-only password, From, **Save** and **Send test email**, which says why a test failed. (#99)
 - The first share, **Add someone**, **Add member** and adding or handing over an owner list the people on the server to pick from, filtered by name or email. Pinned people show by their label with **Key changed**, others by the server’s name and email marked new. People who can’t be chosen, and accounts without a vault yet, are greyed out with the reason. Picking a row runs the same key checks as typing that email, which still works. (#98)
 
 #### Server
 
 - The first account on a new server becomes its administrator. While the server has no accounts, sign-in and `/` open **Set up WikiStow**, `GET /api/installation` reports `setup: true`, and `POST /api/setup` creates the account under the admin lock, with its address counted as verified. It refuses once any account exists. The `bootstrap-admin` command, `admin.mjs` and the `bootstrap` invitation kind are gone, and open bootstrap links are withdrawn. A server upgraded before its `bootstrap-admin` setup finished has an account but no administrator, so start it again on an empty database. (#96)
 - `GET /api/people` lists everyone the exact-email lookup could find, for people with a vault and rate-limited like it, and by name and email the confirmed accounts without a vault yet. Every person with a vault can now see who else is on the server, a deliberate choice recorded in protocol section 7.3. (#98)
+- Mail can be set on the admin page as well as by `SMTP_URL` and `SMTP_FROM`, which are now optional and win over it. The settings live on the `settings` row, with the password sealed under a key derived from `BETTER_AUTH_SECRET`, so it reads as unset under another secret. `GET`/`PUT /api/admin/settings/mail` and `POST /api/admin/settings/mail/test` are new, and saves apply without a restart. With no mail set up, everything that would send mail answers `mail-off`. (#99)
 
 ## 0.10.0 - 2026-10-18
 

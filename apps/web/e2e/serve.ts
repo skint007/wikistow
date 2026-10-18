@@ -3,7 +3,7 @@
 // and a separate control port lets tests look behind the server.
 import { serve } from '@hono/node-server';
 import { createApp } from '@wikistow/server-app/app';
-import { smtpDeliver, type Mail } from '@wikistow/server-app/mail';
+import type { Mail } from '@wikistow/server-app/mail';
 import { connect, fileBlobStore, MIN_VAULT_KDF } from '@wikistow/server';
 import { sql } from 'drizzle-orm';
 import { createMigratedDatabase } from '@wikistow/server/testing/postgres';
@@ -89,7 +89,6 @@ const { app } = createApp({
   log: (entry) => {
     logs.push(entry);
   },
-  deliver: smtpDeliver(smtpConfig),
   blobs: fileBlobStore(blobDir),
 });
 // Loopback only: the control port can reset accounts and dump the database.

@@ -20,7 +20,7 @@ The seed creates the administrator on the installation's **Set up WikiStow** pag
 
 ## Check a restore
 
-Use your deployment tooling to restore the backup into a separate database and attachment directory. Start that restored server with the original `BETTER_AUTH_SECRET`, an SMTP endpoint that sends nothing, and a private test URL. Then run:
+Use your deployment tooling to restore the backup into a separate database and attachment directory. Start that restored server with the original `BETTER_AUTH_SECRET`, an `SMTP_URL` that sends nothing (it wins over the mail settings the backup brings back), and a private test URL. Then run:
 
 ```sh
 WIKISTOW_URL=https://wiki-restored.example.com pnpm -C apps/web drill:check

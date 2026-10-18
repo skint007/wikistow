@@ -29,7 +29,7 @@ import { GuessesRefused, type PasswordGuesses } from '../auth/password-guesses.t
 import { ApiError } from '../http/errors.ts';
 import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
-import { sendInBackground, type Deliver } from '../mail/mailer.ts';
+import { sendInBackground, type Mailer } from '../mail/mailer.ts';
 import {
   accountExistsMail,
   confirmNewEmailMail,
@@ -210,14 +210,14 @@ export function mountAccountRoutes(
     db,
     auth,
     guesses,
-    deliver,
+    mailer,
     log,
     publicOrigin,
   }: {
     db: Database;
     auth: Auth;
     guesses: PasswordGuesses;
-    deliver: Deliver;
+    mailer: Mailer;
     log: Log;
     publicOrigin: string;
   },
@@ -225,6 +225,8 @@ export function mountAccountRoutes(
   routes.public(
     accountRoutes.createAccount,
     async ({ body }) => {
+      // Every new account is confirmed by mail, so none starts without it.
+      await mailer.require();
       const account = await createAccount(db, body).catch(toApiError);
       if (account.kind === 'existing') {
         // Open registration and generic links give the same answer for a taken
@@ -241,7 +243,7 @@ export function mountAccountRoutes(
                 id: account.accountId,
                 email: account.email,
               });
-          sendInBackground(deliver, log, mail);
+          sendInBackground(mailer.deliver, log, mail);
         }
         return {};
       }
@@ -250,7 +252,7 @@ export function mountAccountRoutes(
       const mail = account.emailBound
         ? await verificationMail(auth, account.email)
         : await accountSetupMail(db, publicOrigin, { id: account.accountId, email: account.email });
-      sendInBackground(deliver, log, mail);
+      sendInBackground(mailer.deliver, log, mail);
       return account.emailBound ? { accountId: account.accountId } : {};
     },
     { rateLimit: FORM_LIMIT },
@@ -346,9 +348,10 @@ export function mountAccountRoutes(
       if (email === principal.email) {
         throw new ApiError('invalid-request', 'That is already the account’s address');
       }
+      await mailer.require();
       const token = await createEmailChangeToken(db, principal.accountId, email);
       const url = `${publicOrigin}/confirm-email?token=${token}`;
-      sendInBackground(deliver, log, confirmNewEmailMail(email, url));
+      sendInBackground(mailer.deliver, log, confirmNewEmailMail(email, url));
       return {};
     },
     { recentAuth: true, rateLimit: EMAIL_CHANGE_LIMIT },
@@ -358,7 +361,7 @@ export function mountAccountRoutes(
     accountRoutes.confirmEmailChange,
     async ({ body }) => {
       const change = await confirmEmailChange(db, body.token).catch(toApiError);
-      sendInBackground(deliver, log, emailChangedMail(change.from, change.to));
+      sendInBackground(mailer.deliver, log, emailChangedMail(change.from, change.to));
       return { email: change.to };
     },
     { rateLimit: FORM_LIMIT },

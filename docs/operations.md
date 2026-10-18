@@ -1,6 +1,6 @@
 # Operations
 
-How to run a WikiStow server so it stays up, set up its first administrator, connect an AI provider, back up the installation, restore it, and prove the restore works.
+How to run a WikiStow server so it stays up, set up its first administrator and mail, connect an AI provider, back up the installation, restore it, and prove the restore works.
 
 ## Choose an image
 
@@ -19,6 +19,19 @@ Until that account exists, anyone who can reach the server can claim it. Create 
 ## Idle connections
 
 The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout well over 15 seconds, about the longest an AI reply goes without sending anything. Proxy defaults, such as nginx's 60 seconds, are.
+
+## Set up mail
+
+WikiStow sends mail for invitations, email confirmations, password resets and email changes. Set it up in **Administration → Settings → Mail**: the SMTP server and port, the security (STARTTLS, TLS or none), a username and password if the server wants them, and the From address, such as `WikiStow <wiki@example.com>`. **Send test email** sends a message to your own address with what the form holds, saved or not, and says why if it fails. A save applies at once, without a restart. The password is write-only and stored encrypted ([What to back up](#what-to-back-up)).
+
+You can set it in the server's environment instead. A variable set there wins over the admin page, which then shows that part as set in the environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `SMTP_URL` | The whole connection, such as `smtp://user:pass@relay.example:587` (STARTTLS when the server offers it) or `smtps://user:pass@relay.example:465` (TLS). |
+| `SMTP_FROM` | The From address. |
+
+The server starts without mail, and the first administrator can be created without it. Until it's set up, whatever would send mail says so instead: creating an account, which confirms its address by mail, a password reset, an email change, and an invitation to an address. You can still share invitations with **Copy link**, though the person can only create their account once mail works.
 
 ## Connect an AI provider
 
@@ -56,7 +69,7 @@ Three things, taken together by `scripts/backup.sh`:
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 - The plugin library's files in `BLOB_DIR/plugins`, one folder per uploaded version, named by its hash. These are plain text, as the server serves them to members.
 
-Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. Keep it with your other secrets.
+Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. The secrets saved on the admin page, such as the SMTP password, are encrypted with a key derived from it too. A server with another `BETTER_AUTH_SECRET` treats them as unset, and the admin page asks for them again. Keep it with your other secrets.
 
 Treat every backup as private. Page content is encrypted, but the dump also holds email addresses, password hashes and sessions. The scripts write backups readable only by the user who ran them. Encrypt any copy you send off the machine.
 
@@ -156,6 +169,6 @@ The backup's time comes from its directory's name, `wikistow-<UTC time>`, as `ba
 
 ## The restore drill
 
-Run it every few months, and after any change to how you deploy. Restore the latest backup into a scratch database and an empty blob directory on a test instance, never the live one. Start a server on them with the same `BETTER_AUTH_SECRET`, and do the checks above. The test instance holds real accounts and sessions, so keep it off the internet, point its `SMTP_URL` somewhere that sends nothing, and delete it when you're done.
+Run it every few months, and after any change to how you deploy. Restore the latest backup into a scratch database and an empty blob directory on a test instance, never the live one. Start a server on them with the same `BETTER_AUTH_SECRET`, and do the checks above. The test instance holds real accounts and sessions, so keep it off the internet, point its `SMTP_URL` somewhere that sends nothing (it wins over the mail settings the backup brings back), and delete it when you're done.
 
 CI runs an automated drill on every change, in `apps/server/test/m4-restore.integration.test.ts`. It backs up a running installation and writes more. Then it restores onto another installation and starts the server on it. It checks that the installation ID is unchanged, that the restore and the backup's time are reported, that people sign in and decrypt their pages and attachments with their own keys, and that the plugin library's files are served again. Last, it restores over the original installation and checks that nothing written after the backup came back. Beside it, `apps/server/test/restore-lock.integration.test.ts` starts the real server to check the lock: the script refuses while an idle server holds it, a server or migrations started mid-restore refuse to start, a restore stopped mid-restore cleans up and lets go, and one whose `pg_restore` fails leaves the database as it was. Locally both need `pg_dump`, `pg_restore` and `psql` 17 on your `PATH`, from `postgresql-client-17` on Debian and Ubuntu.

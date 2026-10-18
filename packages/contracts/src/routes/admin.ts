@@ -118,6 +118,41 @@ export const revokeInvitation = {
   response: Done,
 } as const satisfies RouteDef;
 
+export const SmtpSecurity = z.enum(['none', 'starttls', 'tls']);
+export const MailField = z.enum(['host', 'port', 'security', 'username', 'password', 'from']);
+
+/**
+ * Outgoing mail as the admin page shows it. The password never comes back,
+ * only whether one is saved. A field the server's environment sets is
+ * listed in `environment`: the page shows it read-only and its value here
+ * is null. `ready` says whether the server can send mail now.
+ */
+export const AdminMailSettings = z.strictObject({
+  host: z.string().nullable(),
+  port: z.number().int().nullable(),
+  security: SmtpSecurity.nullable(),
+  username: z.string().nullable(),
+  passwordSaved: z.boolean(),
+  from: z.string().nullable(),
+  environment: z.array(MailField),
+  ready: z.boolean(),
+});
+
+/**
+ * The mail form's values. A field left out keeps what is saved, and a null
+ * clears it; so a left-out password keeps the saved one.
+ */
+export const MailForm = z.object({
+  host: z.string().trim().min(1).max(253).nullable().optional(),
+  port: z.number().int().min(1).max(65535).nullable().optional(),
+  security: SmtpSecurity.nullable().optional(),
+  username: z.string().trim().min(1).max(256).nullable().optional(),
+  password: z.string().min(1).max(256).nullable().optional(),
+  from: z.string().trim().min(3).max(320).nullable().optional(),
+});
+
+// Each settings group has its own route: released apps parse these
+// responses strictly, so a group added to one would break them.
 export const getSettings = {
   method: 'GET',
   path: '/api/admin/settings',
@@ -129,4 +164,29 @@ export const updateSettings = {
   path: '/api/admin/settings',
   body: z.object({ publicRegistration: z.boolean() }),
   response: z.strictObject({ publicRegistration: z.boolean() }),
+} as const satisfies RouteDef;
+
+export const getMailSettings = {
+  method: 'GET',
+  path: '/api/admin/settings/mail',
+  response: AdminMailSettings,
+} as const satisfies RouteDef;
+
+export const updateMailSettings = {
+  method: 'PUT',
+  path: '/api/admin/settings/mail',
+  body: MailForm,
+  response: AdminMailSettings,
+} as const satisfies RouteDef;
+
+/**
+ * Send a test message to the administrator's own address with the form's
+ * values, saved or not, and wait for the mail server's answer. A failure is
+ * `mail-failed`, with a message saying why.
+ */
+export const sendTestMail = {
+  method: 'POST',
+  path: '/api/admin/settings/mail/test',
+  body: MailForm,
+  response: z.strictObject({ sentTo: Email }),
 } as const satisfies RouteDef;

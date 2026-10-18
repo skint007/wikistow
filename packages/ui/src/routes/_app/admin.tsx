@@ -23,7 +23,7 @@ function Admin() {
           Invitations
         </Link>
         <Link to="/admin/settings" className={tab} activeProps={active}>
-          Registration
+          Settings
         </Link>
       </nav>
       <Outlet />

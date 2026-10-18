@@ -29,6 +29,8 @@ const MESSAGES: Partial<Record<string, string>> = {
   'setup-link-invalid': 'This link has expired or was already used. Ask for a new one.',
   'email-link-invalid': 'This link has expired or was already used. Ask for a new one in Settings.',
   'handoff-invalid': 'This sign-in has expired. Start it again from the desktop app.',
+  'mail-off':
+    'This server can’t send email yet, so nothing was sent. Its administrator can set up mail in Administration → Settings.',
   network: 'This app couldn’t reach the server. Check your connection and try again.',
   // Both locks last 15 minutes (TWO_FACTOR_LOCKOUT on the server).
   'two-factor-locked': 'Too many wrong codes. Wait 15 minutes and try again.',

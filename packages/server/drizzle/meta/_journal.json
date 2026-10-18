@@ -211,6 +211,13 @@
       "when": 1792296827572,
       "tag": "0029_space_order",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792297687909,
+      "tag": "0030_mail_settings",
+      "breakpoints": true
     }
   ]
 }

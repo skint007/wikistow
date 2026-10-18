@@ -65,3 +65,9 @@ export const emailChangedMail = (to: string, newEmail: string): Mail => ({
     `and account mail goes there.\n\n` +
     `If you didn't make this change, ask your WikiStow administrator for help.\n`,
 });
+
+export const testMail = (to: string, origin: string): Mail => ({
+  to,
+  subject: 'WikiStow test email',
+  text: `This is a test from the WikiStow at ${origin}. Mail from it reaches you.\n`,
+});
