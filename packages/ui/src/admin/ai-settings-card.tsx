@@ -205,7 +205,6 @@ export function AiSettingsCard({ ai }: { ai: Ai }) {
               value={baseUrl}
               onChange={setBaseUrl}
               placeholder={BASE_URLS[style ?? 'openai']}
-              autoComplete="off"
               error={urlInvalid ? 'Use an address starting with http:// or https://' : undefined}
             />
           )}

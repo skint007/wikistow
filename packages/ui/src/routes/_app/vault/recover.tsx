@@ -61,7 +61,6 @@ function RecoveryKey({ onOpened }: { onOpened: (vault: UnlockedVault) => void })
           id="recovery-key"
           name="recovery-key"
           label="Recovery key"
-          autoComplete="off"
           spellCheck={false}
           required
           autoFocus

@@ -15,6 +15,7 @@ import { Paperclip, Trash2 } from 'lucide-react';
 import { useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Name, plainText } from '@/components/name';
 import { Button, uploadButtonClass } from '@/components/ui/button';
+import { notCredential } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
@@ -200,6 +201,7 @@ export function DraftEditor({
         value={snapshot.title}
         onChange={(event) => session.setTitle(event.target.value)}
         placeholder="Untitled"
+        {...notCredential}
         className="w-full bg-transparent text-[32px] leading-tight font-extrabold outline-none placeholder:text-muted-foreground"
       />
       <PageEditor

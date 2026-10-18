@@ -6,6 +6,7 @@ import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { notCredential } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { searchIndexQuery, searchProgressKey } from '../data/queries';
 import { errorMessage } from '../errors';
@@ -92,7 +93,7 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
           aria-activedescendant={results.length > 0 ? optionId(active) : undefined}
           aria-autocomplete="list"
           autoFocus
-          autoComplete="off"
+          {...notCredential}
           spellCheck={false}
           placeholder="Search pages"
           value={query}

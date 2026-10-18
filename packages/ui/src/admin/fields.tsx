@@ -1,7 +1,7 @@
 // Fields of the admin settings cards, where a setting may come from the
 // server's environment and a secret is write-only.
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Input, notCredential } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 /** A saved secret stays unless it's replaced or removed. */
@@ -88,7 +88,8 @@ export function SecretField({
           <Input
             id={id}
             type="password"
-            autoComplete="new-password"
+            // The server's secret, not the person's: no manager should save it.
+            {...notCredential}
             value={value.value}
             onChange={(event) => onChange({ kind: 'enter', value: event.target.value })}
           />

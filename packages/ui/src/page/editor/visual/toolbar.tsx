@@ -512,7 +512,6 @@ const LinkControl = memo(function LinkControl({
               value={href}
               onChange={(event) => setHref(event.target.value)}
               placeholder="https://example.com"
-              autoComplete="off"
               spellCheck={false}
             />
           </div>
