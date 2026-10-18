@@ -203,7 +203,11 @@ export function PersonFinder({
       setError(
         only
           ? 'Pick someone from the list.'
-          : 'No one here matches that. Check the name, or type their whole email.',
+          : withoutVault.length > 0
+            ? 'They haven’t set up their vault yet, so they can’t be chosen.'
+            : listing.data
+              ? 'No one here matches that. Check the name, or type their whole email.'
+              : 'Type their whole email.',
       );
       return null;
     });
