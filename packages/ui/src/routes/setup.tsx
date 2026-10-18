@@ -4,24 +4,29 @@ import { accountRoutes } from '@wikistow/contracts';
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { z } from 'zod';
 import { AccountDetails } from '@/components/form/account-form';
 import { Field } from '@/components/form/field';
 import { AuthCard, FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
+import { safeRedirect } from '@/lib/redirect';
 import { api, installationQuery, meQuery } from '../api';
 import { authClient } from '../auth/client';
 import { errorMessage, unwrap } from '../errors';
 
 /** A new server's first account, its administrator. Gone once any account exists. */
 export const Route = createFileRoute('/setup')({
-  beforeLoad: async ({ context }) => {
+  // Where sign-in was headed, such as a desktop app's sign-in waiting in this browser.
+  validateSearch: z.object({ redirect: z.string().optional().catch(undefined) }),
+  beforeLoad: async ({ context, search }) => {
     const { setup } = await context.queryClient.ensureQueryData(installationQuery);
-    if (!setup) throw redirect({ to: '/sign-in' });
+    if (!setup) throw redirect({ to: '/sign-in', search: { redirect: search.redirect } });
   },
   component: Setup,
 });
 
 function Setup() {
+  const { redirect: next } = Route.useSearch();
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -39,7 +44,7 @@ function Setup() {
       unwrap(await authClient.signIn.email({ email, password }));
       await queryClient.invalidateQueries({ queryKey: installationQuery.queryKey });
       await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
-      await navigate({ to: '/' });
+      await navigate({ to: safeRedirect(next) });
     } catch (caught) {
       setError(errorMessage(caught));
     }

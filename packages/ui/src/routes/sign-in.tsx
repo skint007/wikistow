@@ -26,12 +26,13 @@ export const Route = createFileRoute('/sign-in')({
   validateSearch: Search,
   // A new server with no accounts asks for its administrator first, and `/`
   // comes here when signed out. The desktop app's servers are set up in a browser.
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, search }) => {
     if (desktop) return;
     const installation = await context.queryClient
       .ensureQueryData(installationQuery)
       .catch(() => null);
-    if (installation?.setup) throw redirect({ to: '/setup' });
+    if (installation?.setup)
+      throw redirect({ to: '/setup', search: { redirect: search.redirect } });
   },
   component: SignIn,
 });
