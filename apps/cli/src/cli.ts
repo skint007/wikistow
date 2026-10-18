@@ -25,6 +25,7 @@ import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { COMMAND_HELP, USAGE, VERSION } from './help.ts';
 import { Printer, type Io } from './io.ts';
 import { DEFAULT_SECRET_TOOL } from './secret-store.ts';
+import { SKILL } from './skill.ts';
 
 type Options = NonNullable<ParseArgsConfig['options']>;
 
@@ -50,6 +51,7 @@ const COMMANDS = {
   'agent status': { options: {}, positionals: 0 },
   whoami: { options: {}, positionals: 0 },
   'agent secret-store': { options: { 'secret-tool': { type: 'string' } }, positionals: 1 },
+  skill: { options: {}, positionals: 0 },
   'spaces list': { options: {}, positionals: 0 },
   tree: { options: { space: { type: 'string' } }, positionals: 0 },
   search: { options: { space: { type: 'string' } }, positionals: 1 },
@@ -350,6 +352,8 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
         deps,
       );
     }
+    case 'skill':
+      return out.result({ skill: SKILL }, () => io.stdout.write(SKILL));
     case 'spaces list':
       return listSpaces(io, out, content, deps);
     case 'tree':

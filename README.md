@@ -10,7 +10,7 @@ The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-deskto
 
 ## Install the command-line client
 
-The `wikistow` command is how an agent reads and writes the pages shared with it, once enrolled with `wikistow agent enroll`. Run `wikistow --help` for the rest. On Arch Linux, install `wikistow-cli-bin` from the AUR, which runs it on the system `nodejs`. Elsewhere, install Node.js 26 or newer, download `wikistow-cli-<version>.tar.gz` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.6.0 on, and run `node wikistow.mjs` from the folder it unpacks to. It installs beside the desktop app, whose command is `wikistow-desktop`.
+The `wikistow` command is how an agent reads and writes the pages shared with it, once enrolled with `wikistow agent enroll`. Run `wikistow --help` for the rest. `wikistow skill` prints a skill that teaches an agent to use it, to save wherever its harness reads skills. On Arch Linux, install `wikistow-cli-bin` from the AUR, which runs it on the system `nodejs`. Elsewhere, install Node.js 26 or newer, download `wikistow-cli-<version>.tar.gz` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.6.0 on, and run `node wikistow.mjs` from the folder it unpacks to. It installs beside the desktop app, whose command is `wikistow-desktop`.
 
 ## Run locally
 

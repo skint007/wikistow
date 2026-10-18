@@ -39,6 +39,7 @@ Commands:
   agent enroll --server URL [--secret-store [--secret-tool PATH]]
   agent status                    (also: whoami)
   agent secret-store enable|disable [--secret-tool PATH]
+  skill                           a skill that teaches an agent this CLI
   spaces list
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
@@ -160,6 +161,18 @@ The same as agent status.
 enable keeps an unlock secret in the Secret Service (asking for the
 passphrase first); disable removes it, so only the passphrase unlocks the
 agent. See agent enroll --help.
+`,
+  skill: `Usage: wikistow skill
+
+Print a skill for this agent's harness: a SKILL.md in the Agent Skills
+format. It tells the agent to leave changes as drafts unless its person
+asks for them to be published, to put new pages in the person's Personal
+space, and to read this help for the rest. Write it to a folder named
+wikistow where the harness looks for skills, for example:
+  mkdir -p ~/.claude/skills/wikistow
+  wikistow skill > ~/.claude/skills/wikistow/SKILL.md
+Edit that copy to change what it says. It names the version that printed
+it: print it again after an update. With --json: {"skill":"..."}
 `,
   'spaces list': `Usage: wikistow spaces list
 
