@@ -1,5 +1,5 @@
-import type { MailSettings } from '@wikistow/server';
-import type { Config } from './config.ts';
+import type { AiSettings, MailSettings } from '@wikistow/server';
+import type { AiConfig, AiEnv, Config } from './config.ts';
 import type { MailSetup } from './mail/mailer.ts';
 
 // Settings an administrator can change on the admin page. A variable in the
@@ -23,4 +23,40 @@ export function mailSetup(env: Config['smtp'], saved: MailSettings): MailSetup |
       ? { host, port, security, username, password }
       : null;
   return from && connection ? { from, connection } : null;
+}
+
+const AI_DEFAULTS = { maxOutputTokens: 4096, requestsPerMinute: 30 };
+
+const AI_FIELDS = [
+  'style',
+  'baseUrl',
+  'apiKey',
+  'model',
+  'maxOutputTokens',
+  'requestsPerMinute',
+] as const satisfies readonly (keyof AiConfig)[];
+
+/** AI fields the environment sets, one `AI_*` variable each. */
+export function aiFromEnvironment(env: AiEnv = {}) {
+  return AI_FIELDS.filter((field) => env[field] !== undefined);
+}
+
+/**
+ * The AI provider requests go to, each field from the environment if set
+ * there, else as saved; null (AI off) without a style, base URL and model.
+ */
+export function aiSetup(env: AiEnv = {}, saved: AiSettings): AiConfig | null {
+  const style = env.style ?? saved.style;
+  const baseUrl = env.baseUrl ?? saved.baseUrl;
+  const model = env.model ?? saved.model;
+  if (!style || !baseUrl || !model) return null;
+  return {
+    style,
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    apiKey: env.apiKey ?? saved.apiKey ?? undefined,
+    model,
+    maxOutputTokens: env.maxOutputTokens ?? saved.maxOutputTokens ?? AI_DEFAULTS.maxOutputTokens,
+    requestsPerMinute:
+      env.requestsPerMinute ?? saved.requestsPerMinute ?? AI_DEFAULTS.requestsPerMinute,
+  };
 }

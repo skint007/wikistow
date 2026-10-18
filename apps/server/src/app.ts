@@ -1,4 +1,10 @@
-import { filePluginStore, readMailSettings, type BlobStore, type Database } from '@wikistow/server';
+import {
+  filePluginStore,
+  readAiSettings,
+  readMailSettings,
+  type BlobStore,
+  type Database,
+} from '@wikistow/server';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { isIP } from 'node:net';
@@ -24,6 +30,7 @@ import { serveWebApp } from './http/static.ts';
 import { createMailer, smtpDeliver, type Transport } from './mail/mailer.ts';
 import { mountAccountRoutes } from './routes/accounts.ts';
 import { mountAdminRoutes } from './routes/admin.ts';
+import { mountAdminAiRoutes } from './routes/admin-ai.ts';
 import { mountAiRoutes } from './routes/ai.ts';
 import { mountAgentRoutes } from './routes/agents.ts';
 import { mountContentRoutes } from './routes/content.ts';
@@ -31,7 +38,7 @@ import { mountDesktopRoutes } from './routes/desktop.ts';
 import { mountPluginDraftRoutes } from './routes/plugin-drafts.ts';
 import { mountPluginRoutes } from './routes/plugins.ts';
 import { mountSystemRoutes } from './routes/system.ts';
-import { mailSetup } from './settings.ts';
+import { aiSetup, mailSetup } from './settings.ts';
 
 /**
  * Run `task` after any earlier task with the same key has finished. In
@@ -173,7 +180,12 @@ export function createApp({ db, config, log, blobs, transport = smtpDeliver }: A
   });
   mountAgentRoutes(routes, { db });
   mountDesktopRoutes(routes, { db, auth });
-  mountAiRoutes(routes, { ai: config.ai ?? null, log });
+  mountAdminAiRoutes(routes, { db, config, log });
+  // Read for each request, so a change on the admin page applies at once.
+  mountAiRoutes(routes, {
+    current: async () => aiSetup(config.ai, await readAiSettings(db, config.authSecret)),
+    log,
+  });
   // Library plugins' files live beside the attachment blobs, so backups take both.
   const pluginStore = filePluginStore(config.blobDir);
   mountPluginRoutes(routes, { db, plugins: pluginStore });

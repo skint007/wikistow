@@ -33,8 +33,11 @@ type AccountCtx = {
 type ContentCtx = { c: Context<AppEnv>; actor: Actor; once?: Once };
 /** Who an early check (`beforeBody`) is for: a person, or on a content route, their agent. */
 export type EarlyCaller = { accountId: string; agentId?: string | null };
+type RateLimit = { windowSeconds: number; max: number };
+
 type Options = {
-  rateLimit?: { windowSeconds: number; max: number };
+  /** A fixed limit, or one read for each request (the AI routes', from settings). */
+  rateLimit?: RateLimit | (() => Promise<RateLimit | null>);
   /** Require a full sign-in within the last few minutes (account routes). */
   recentAuth?: boolean;
   /**
@@ -211,8 +214,10 @@ export function createRoutes({
   async function enforceRateLimit(
     c: Context<AppEnv>,
     key: string,
-    limit: { windowSeconds: number; max: number },
+    given: NonNullable<Options['rateLimit']>,
   ) {
+    const limit = typeof given === 'function' ? await given() : given;
+    if (!limit) return;
     const result = await consumeRateLimit(db, key, {
       windowMs: limit.windowSeconds * 1000,
       max: limit.max,

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { RouteDef } from '../route.ts';
 import { Email, Role } from './accounts.ts';
+import { AiProviderFailure, AiStyle } from './ai.ts';
 
 // Every admin route requires an administrator. Every one that changes
 // something also requires a recent sign-in (`reauth-required` otherwise).
@@ -189,4 +190,90 @@ export const sendTestMail = {
   path: '/api/admin/settings/mail/test',
   body: MailForm,
   response: z.strictObject({ sentTo: Email }),
+} as const satisfies RouteDef;
+
+export const AiField = z.enum([
+  'style',
+  'baseUrl',
+  'apiKey',
+  'model',
+  'maxOutputTokens',
+  'requestsPerMinute',
+]);
+
+/**
+ * The AI provider as the admin page shows it, like `AdminMailSettings`: the
+ * key never comes back, only whether one is saved, and fields an `AI_*`
+ * variable sets are listed in `environment` with a null value. `enabled`
+ * says whether AI is on now.
+ */
+export const AdminAiSettings = z.strictObject({
+  style: AiStyle.nullable(),
+  baseUrl: z.string().nullable(),
+  apiKeySaved: z.boolean(),
+  model: z.string().nullable(),
+  maxOutputTokens: z.number().int().nullable(),
+  requestsPerMinute: z.number().int().nullable(),
+  environment: z.array(AiField),
+  enabled: z.boolean(),
+});
+
+/** The AI form's values, as `MailForm`: left out keeps, null clears. */
+export const AiForm = z.object({
+  style: AiStyle.nullable().optional(),
+  baseUrl: z
+    .url({ protocol: /^https?$/ })
+    .max(2000)
+    .nullable()
+    .optional(),
+  apiKey: z.string().min(1).max(2000).nullable().optional(),
+  model: z.string().trim().min(1).max(200).nullable().optional(),
+  maxOutputTokens: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  requestsPerMinute: z.number().int().min(1).max(1_000_000).nullable().optional(),
+});
+
+export const getAiSettings = {
+  method: 'GET',
+  path: '/api/admin/settings/ai',
+  response: AdminAiSettings,
+} as const satisfies RouteDef;
+
+export const updateAiSettings = {
+  method: 'PUT',
+  path: '/api/admin/settings/ai',
+  body: AiForm,
+  response: AdminAiSettings,
+} as const satisfies RouteDef;
+
+export const AiModel = z.strictObject({ id: z.string(), name: z.string().nullable() });
+
+/**
+ * The provider's models for the form's style, base URL and key (the saved
+ * key when none is given), sorted by ID, at most 2,000. The server asks the
+ * provider, so the key never reaches the browser. `reason` says why the list
+ * couldn't be had.
+ */
+export const listAiModels = {
+  method: 'POST',
+  path: '/api/admin/ai/models',
+  body: AiForm.pick({ style: true, baseUrl: true, apiKey: true }),
+  response: z.discriminatedUnion('ok', [
+    z.strictObject({ ok: z.literal(true), models: z.array(AiModel) }),
+    z.strictObject({ ok: z.literal(false), reason: z.string() }),
+  ]),
+} as const satisfies RouteDef;
+
+/** `aiRoutes.check` with the form's values, saved or not. */
+export const checkAi = {
+  method: 'POST',
+  path: '/api/admin/ai/check',
+  body: AiForm,
+  response: z.discriminatedUnion('ok', [
+    z.strictObject({ ok: z.literal(true) }),
+    z.strictObject({
+      ok: z.literal(false),
+      code: AiProviderFailure,
+      detail: z.string().optional(),
+    }),
+  ]),
 } as const satisfies RouteDef;
