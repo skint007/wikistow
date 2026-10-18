@@ -97,8 +97,8 @@ export const inspectInvitation = {
 export const AvatarId = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
 export type AvatarId = z.infer<typeof AvatarId>;
 
-/** The largest avatar the server takes: 2 MiB. */
-export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+/** The largest avatar the server takes: 2.5 MiB. */
+export const MAX_AVATAR_BYTES = 2.5 * 1024 * 1024;
 
 /**
  * Avatar bytes aren't JSON, so these two are registered as binary routes:

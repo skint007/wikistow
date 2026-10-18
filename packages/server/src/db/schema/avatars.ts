@@ -7,7 +7,7 @@ export const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/svg+
 
 /**
  * One avatar per account, kept in the database in the clear like the
- * account's name, at most 2 MiB. `id` is random and new with every upload,
+ * account's name, at most 2.5 MiB. `id` is random and new with every upload,
  * so a replaced image's address stops working and the new one can be cached
  * for good.
  */
@@ -27,6 +27,6 @@ export const avatars = pgTable(
       'avatars_content_type',
       sql`${table.contentType} in ('image/jpeg', 'image/png', 'image/gif', 'image/svg+xml')`,
     ),
-    check('avatars_size', sql`octet_length(${table.bytes}) <= 2097152`),
+    check('avatars_size', sql`octet_length(${table.bytes}) <= 2621440`),
   ],
 );
