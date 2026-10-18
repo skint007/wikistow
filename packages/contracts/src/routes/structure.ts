@@ -80,9 +80,9 @@ const SpaceParams = z.object({ spaceId: SpaceId });
 
 /**
  * Spaces the caller owns, or holds as a member of the space's own share. A
- * person's come home space first, then in their saved order (`setSpaceOrder`),
- * then the rest in the order they got them. Its shape stays as released apps
- * read it; the home space is named by `spaceOrder`.
+ * person's spaces come home space first, then in their saved order
+ * (`setSpaceOrder`), then the rest in the order they got them. Its shape
+ * stays as released apps read it; `spaceOrder` names the home space.
  */
 export const listSpaces = {
   method: 'GET',

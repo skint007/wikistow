@@ -457,8 +457,8 @@ function inOrder(listed: Listed[], homeId: string | null, saved: string[]) {
  * spaces they own, with every right, and spaces whose own share they are a
  * member of, with their role there. Folder shares are listed under Shared
  * with me instead (section 7.7). An agent's are the spaces whose own share
- * it was granted whole, within its person's current access. A person's come
- * in their order, home space first; an agent's oldest first.
+ * it was granted whole, within its person's current access. A person's
+ * spaces come in their order, home space first; an agent's oldest first.
  */
 export async function listSpaces(db: Database, actor: Actor, report: ReportUnreadable) {
   const caller = await requireCaller(db, actor);
