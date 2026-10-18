@@ -1,3 +1,4 @@
+import { accountRoutes } from '@wikistow/contracts';
 import { createInvitation, schema } from '@wikistow/server';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -319,8 +320,13 @@ describe('avatars', () => {
     );
     expect(res.headers.get('content-disposition')).toBe('inline; filename="avatar.svg"');
 
+    // The largest avatar fits the database too.
+    const largest = new Uint8Array(accountRoutes.MAX_AVATAR_BYTES);
+    largest.set(PNG);
+    expect((await upload(browser, largest)).status).toBe(200);
+
     // Too big whether the length is stated or only found while streaming.
-    const big = new Uint8Array(2 * 1024 * 1024 + 1);
+    const big = new Uint8Array(accountRoutes.MAX_AVATAR_BYTES + 1);
     big.set(PNG);
     expect((await upload(browser, big)).status).toBe(413);
     const streamed = new ReadableStream<Uint8Array>({
