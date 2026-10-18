@@ -1,4 +1,5 @@
 import {
+  Children,
   createContext,
   use,
   useEffect,
@@ -88,7 +89,10 @@ export function SettingRow({ name, scope, state, icon, action, children }: RowPr
         </div>
         {action && <div className="flex flex-wrap items-center gap-2">{action}</div>}
       </div>
-      {children && <div className="grid gap-3 px-4 pb-4">{children}</div>}
+      {/* Not for children that are all false, as a row's conditional notes can be. */}
+      {Children.toArray(children).length > 0 && (
+        <div className="grid gap-3 px-4 pb-4">{children}</div>
+      )}
     </div>
   );
 }
