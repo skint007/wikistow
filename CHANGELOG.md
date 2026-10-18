@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- On this page marks the section being read with the tint only, without the bar at its left. (#107)
+
 ## 0.11.0 - 2026-10-18
 
 ### Highlights
