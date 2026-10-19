@@ -22,7 +22,6 @@ import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppDesktopSignInRouteImport } from './routes/_app/desktop-sign-in'
 import { Route as AppWhatsNewRouteImport } from './routes/_app/whats-new'
 import { Route as AppVaultIndexRouteImport } from './routes/_app/_vault/index'
-import { Route as AppVaultAgentsRouteImport } from './routes/_app/_vault/agents'
 import { Route as AppVaultSharedRouteImport } from './routes/_app/_vault/shared'
 import { Route as AppVaultWorkshopRouteImport } from './routes/_app/_vault/workshop'
 import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
@@ -33,6 +32,8 @@ import { Route as AppSettingsPluginsRouteImport } from './routes/_app/settings/p
 import { Route as AppVaultRecoverRouteImport } from './routes/_app/vault/recover'
 import { Route as AppVaultSetupRouteImport } from './routes/_app/vault/setup'
 import { Route as AppVaultUnlockRouteImport } from './routes/_app/vault/unlock'
+import { Route as AppVaultAgentsIndexRouteImport } from './routes/_app/_vault/agents/index'
+import { Route as AppVaultAgentsGuideRouteImport } from './routes/_app/_vault/agents/guide'
 import { Route as AppVaultSSpaceIdRouteImport } from './routes/_app/_vault/s/$spaceId'
 import { Route as AppVaultPluginPluginIdViewIdRouteImport } from './routes/_app/_vault/plugin/$pluginId/$viewId'
 import { Route as AppVaultSSpaceIdIndexRouteImport } from './routes/_app/_vault/s/$spaceId/index'
@@ -104,11 +105,6 @@ const AppVaultIndexRoute = AppVaultIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppVaultRoute,
 } as any)
-const AppVaultAgentsRoute = AppVaultAgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => AppVaultRoute,
-} as any)
 const AppVaultSharedRoute = AppVaultSharedRouteImport.update({
   id: '/shared',
   path: '/shared',
@@ -158,6 +154,16 @@ const AppVaultUnlockRoute = AppVaultUnlockRouteImport.update({
   id: '/vault/unlock',
   path: '/vault/unlock',
   getParentRoute: () => AppRoute,
+} as any)
+const AppVaultAgentsIndexRoute = AppVaultAgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => AppVaultRoute,
+} as any)
+const AppVaultAgentsGuideRoute = AppVaultAgentsGuideRouteImport.update({
+  id: '/agents/guide',
+  path: '/agents/guide',
+  getParentRoute: () => AppVaultRoute,
 } as any)
 const AppVaultSSpaceIdRoute = AppVaultSSpaceIdRouteImport.update({
   id: '/s/$spaceId',
@@ -210,7 +216,6 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRouteWithChildren
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
-  '/agents': typeof AppVaultAgentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/workshop': typeof AppVaultWorkshopRoute
   '/admin/invitations': typeof AppAdminInvitationsRoute
@@ -221,7 +226,9 @@ export interface FileRoutesByFullPath {
   '/vault/unlock': typeof AppVaultUnlockRoute
   '/admin/': typeof AppAdminIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
+  '/agents/guide': typeof AppVaultAgentsGuideRoute
   '/s/$spaceId': typeof AppVaultSSpaceIdRouteWithChildren
+  '/agents/': typeof AppVaultAgentsIndexRoute
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
@@ -240,7 +247,6 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
-  '/agents': typeof AppVaultAgentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/workshop': typeof AppVaultWorkshopRoute
   '/admin/invitations': typeof AppAdminInvitationsRoute
@@ -251,6 +257,8 @@ export interface FileRoutesByTo {
   '/vault/unlock': typeof AppVaultUnlockRoute
   '/admin': typeof AppAdminIndexRoute
   '/settings': typeof AppSettingsIndexRoute
+  '/agents/guide': typeof AppVaultAgentsGuideRoute
+  '/agents': typeof AppVaultAgentsIndexRoute
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId': typeof AppVaultSSpaceIdIndexRoute
@@ -272,7 +280,6 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/desktop-sign-in': typeof AppDesktopSignInRoute
   '/_app/whats-new': typeof AppWhatsNewRoute
-  '/_app/_vault/agents': typeof AppVaultAgentsRoute
   '/_app/_vault/shared': typeof AppVaultSharedRoute
   '/_app/_vault/workshop': typeof AppVaultWorkshopRoute
   '/_app/admin/invitations': typeof AppAdminInvitationsRoute
@@ -284,7 +291,9 @@ export interface FileRoutesById {
   '/_app/_vault/': typeof AppVaultIndexRoute
   '/_app/admin/': typeof AppAdminIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
+  '/_app/_vault/agents/guide': typeof AppVaultAgentsGuideRoute
   '/_app/_vault/s/$spaceId': typeof AppVaultSSpaceIdRouteWithChildren
+  '/_app/_vault/agents/': typeof AppVaultAgentsIndexRoute
   '/_app/_vault/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/_app/_vault/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/_app/_vault/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
@@ -306,7 +315,6 @@ export interface FileRouteTypes {
     | '/admin'
     | '/desktop-sign-in'
     | '/whats-new'
-    | '/agents'
     | '/shared'
     | '/workshop'
     | '/admin/invitations'
@@ -317,7 +325,9 @@ export interface FileRouteTypes {
     | '/vault/unlock'
     | '/admin/'
     | '/settings/'
+    | '/agents/guide'
     | '/s/$spaceId'
+    | '/agents/'
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId/'
@@ -336,7 +346,6 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/desktop-sign-in'
     | '/whats-new'
-    | '/agents'
     | '/shared'
     | '/workshop'
     | '/admin/invitations'
@@ -347,6 +356,8 @@ export interface FileRouteTypes {
     | '/vault/unlock'
     | '/admin'
     | '/settings'
+    | '/agents/guide'
+    | '/agents'
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId'
@@ -367,7 +378,6 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/desktop-sign-in'
     | '/_app/whats-new'
-    | '/_app/_vault/agents'
     | '/_app/_vault/shared'
     | '/_app/_vault/workshop'
     | '/_app/admin/invitations'
@@ -379,7 +389,9 @@ export interface FileRouteTypes {
     | '/_app/_vault/'
     | '/_app/admin/'
     | '/_app/settings/'
+    | '/_app/_vault/agents/guide'
     | '/_app/_vault/s/$spaceId'
+    | '/_app/_vault/agents/'
     | '/_app/_vault/plugin/$pluginId/$viewId'
     | '/_app/_vault/s/$spaceId/members'
     | '/_app/_vault/s/$spaceId/'
@@ -492,13 +504,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultIndexRouteImport
       parentRoute: typeof AppVaultRoute
     }
-    '/_app/_vault/agents': {
-      id: '/_app/_vault/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AppVaultAgentsRouteImport
-      parentRoute: typeof AppVaultRoute
-    }
     '/_app/_vault/shared': {
       id: '/_app/_vault/shared'
       path: '/shared'
@@ -568,6 +573,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/vault/unlock'
       preLoaderRoute: typeof AppVaultUnlockRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_app/_vault/agents/': {
+      id: '/_app/_vault/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AppVaultAgentsIndexRouteImport
+      parentRoute: typeof AppVaultRoute
+    }
+    '/_app/_vault/agents/guide': {
+      id: '/_app/_vault/agents/guide'
+      path: '/agents/guide'
+      fullPath: '/agents/guide'
+      preLoaderRoute: typeof AppVaultAgentsGuideRouteImport
+      parentRoute: typeof AppVaultRoute
     }
     '/_app/_vault/s/$spaceId': {
       id: '/_app/_vault/s/$spaceId'
@@ -641,20 +660,22 @@ const AppVaultSSpaceIdRouteWithChildren =
   AppVaultSSpaceIdRoute._addFileChildren(AppVaultSSpaceIdRouteChildren)
 
 interface AppVaultRouteChildren {
-  AppVaultAgentsRoute: typeof AppVaultAgentsRoute
   AppVaultSharedRoute: typeof AppVaultSharedRoute
   AppVaultWorkshopRoute: typeof AppVaultWorkshopRoute
   AppVaultIndexRoute: typeof AppVaultIndexRoute
+  AppVaultAgentsGuideRoute: typeof AppVaultAgentsGuideRoute
   AppVaultSSpaceIdRoute: typeof AppVaultSSpaceIdRouteWithChildren
+  AppVaultAgentsIndexRoute: typeof AppVaultAgentsIndexRoute
   AppVaultPluginPluginIdViewIdRoute: typeof AppVaultPluginPluginIdViewIdRoute
 }
 
 const AppVaultRouteChildren: AppVaultRouteChildren = {
-  AppVaultAgentsRoute: AppVaultAgentsRoute,
   AppVaultSharedRoute: AppVaultSharedRoute,
   AppVaultWorkshopRoute: AppVaultWorkshopRoute,
   AppVaultIndexRoute: AppVaultIndexRoute,
+  AppVaultAgentsGuideRoute: AppVaultAgentsGuideRoute,
   AppVaultSSpaceIdRoute: AppVaultSSpaceIdRouteWithChildren,
+  AppVaultAgentsIndexRoute: AppVaultAgentsIndexRoute,
   AppVaultPluginPluginIdViewIdRoute: AppVaultPluginPluginIdViewIdRoute,
 }
 

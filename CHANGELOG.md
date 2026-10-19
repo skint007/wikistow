@@ -11,6 +11,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`.
 - In the desktop app, hovering a link shows where it goes: its address, or the page's name for a link to another page.
 - On a Mac or Windows PC, an AI tool can run the command-line client without a passphrase: `wikistow agent enroll --secret-store` keeps its unlock in the Keychain or in Credential Manager, as it does in the desktop keyring on Linux.
+- The Agents page has a setup guide for command-line agents: install the CLI, enroll it and hand it to your AI tool, in three steps for Linux, macOS and Windows, with this server’s address in the enroll command.
 
 ### Changes
 
@@ -21,6 +22,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Fields that aren’t credentials, such as folder and space names, renames, search, page titles and the people picker, tell browsers and password managers to leave them alone: `autocomplete="off"` plus the 1Password, LastPass, Bitwarden and Dashlane ignore hints. `Input` adds them unless the field is a password or has a real `autocomplete`, so sign-in, account, passphrase and two-factor fields are unchanged. The admin SMTP password and AI API key get the hints too. Bitwarden reads its hint only when its user turns on “Allow websites to exclude fields to autofill”. (#125)
 - Hover hints are themed tooltips in the popover colours, in place of the browser's own `title` tooltips. Any element gets one with a `data-hint` attribute, shown by one `HintLayer` at the app root; the visual editor toolbar's dark tooltips use it too. Checkboxes, radio buttons and sliders (the publish dialog's attachments, the invitation role, the banner's focal point, task lists) are drawn in the theme's colours. (#131)
 - In the desktop app, which has no status bar, a link's hint says where it goes: the address of a link in the reader or the visual editor, or of What’s new's release link and the update link, cut short past 200 characters and wrapping after a slash; a wikilink in the reader gives the page's name (and heading). Footnotes and other `#` links in the page, and attachments, get none. A browser shows its own status bar, so it gets no hint. (#133)
+- The Agents page links to the new setup guide (`/agents/guide`) from its header, its empty state, which no longer shows the enroll command, and the Add an agent dialog. The guide opens on the browser’s own system. Its steps are Markdown shipped with the app, shown through the page reader. (#128)
 
 #### CLI
 
