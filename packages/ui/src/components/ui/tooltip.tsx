@@ -157,7 +157,8 @@ export function HintLayer() {
 /**
  * One hint, placed against its element by floating-ui, as Radix places its
  * own popups. Not a Radix tooltip, which would take the first Escape from
- * the popover or menu the element is in. The pointer goes through it.
+ * the popover or menu the element is in. The pointer goes through it. A
+ * long word, as a link's address, breaks where it must.
  */
 function Hint({ shown }: { shown: Shown }) {
   const { refs, floatingStyles, placement } = useFloating({
@@ -174,7 +175,7 @@ function Hint({ shown }: { shown: Shown }) {
       data-slot="tooltip-content"
       data-side={placement}
       style={floatingStyles}
-      className="pointer-events-none z-50 w-max max-w-80 animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance text-popover-foreground shadow-md fade-in-0 zoom-in-95"
+      className="pointer-events-none z-50 w-max max-w-80 animate-in rounded-row border bg-popover px-2.5 py-1.5 text-xs text-balance wrap-anywhere text-popover-foreground shadow-md fade-in-0 zoom-in-95"
     >
       {shown.hint}
       {shown.keys && <span className="ml-2 text-muted-foreground">{shown.keys}</span>}
