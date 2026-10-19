@@ -18,7 +18,7 @@ import { configDir, readPrivateFile, WINDOWS } from './files.ts';
 import type { Io } from './io.ts';
 import { Journal } from './journal.ts';
 import { openKeyFile, parseKeyFile, type KeyFile, type Secrets, type Unlock } from './keyfile.ts';
-import { REMEDIES, SecretToolStore, type SecretStore } from './secret-store.ts';
+import { REMEDIES, systemStore, type SecretStore } from './secret-store.ts';
 import { LocalState } from './state.ts';
 
 export const KEY_FILE = 'agent.key';
@@ -34,7 +34,7 @@ export type UnlockOptions = {
 
 /** Makes the secret store a key file names. Tests pass their own. */
 export type StoreFactory = (tool: string, io: Io) => SecretStore;
-export const secretToolStore: StoreFactory = (tool, io) => new SecretToolStore(tool, io.env);
+export const systemSecretStore: StoreFactory = (tool, io) => systemStore(tool, io.env);
 
 /**
  * The `fetch` the CLI sends with: no cookie, no Origin (a bearer request
@@ -106,9 +106,8 @@ export async function unlockSecret(
   if (passphrase === null) {
     throw new CliError(
       'locked',
-      WINDOWS
-        ? 'No terminal to ask for the passphrase; pass --passphrase-fd 0'
-        : 'No terminal to ask for the passphrase; pass --passphrase-fd or configure a secret store',
+      `No terminal to ask for the passphrase; pass --passphrase-fd${WINDOWS ? ' 0' : ''} ` +
+        'or configure a secret store',
     );
   }
   return { kind: 'passphrase', passphrase };
@@ -141,7 +140,7 @@ export async function openAgent(
     unlock,
     idempotencyKey = null,
     input,
-    makeStore = secretToolStore,
+    makeStore = systemSecretStore,
     send = cliFetch,
   }: {
     unlock: UnlockOptions;

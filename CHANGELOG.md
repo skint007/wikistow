@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`.
 - In the desktop app, hovering a link shows where it goes: its address, or the page's name for a link to another page.
+- On a Mac or Windows PC, an AI tool can run the command-line client without a passphrase: `wikistow agent enroll --secret-store` keeps its unlock in the Keychain or in Credential Manager, as it does in the desktop keyring on Linux.
 
 ### Changes
 
@@ -23,7 +24,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
-- The CLI runs natively on Windows. It keeps its files in `%APPDATA%\wikistow`, where the user profile's permissions keep other users out, so it checks no Unix owners or modes there. On Windows, `--passphrase-fd` takes only `0` (standard input), `--secret-store` isn't supported yet, and messages print as UTF-8. (#130)
+- The CLI runs natively on Windows. It keeps its files in `%APPDATA%\wikistow`, where the user profile's permissions keep other users out, so it checks no Unix owners or modes there. On Windows, `--passphrase-fd` takes only `0` (standard input), and messages print as UTF-8. (#130)
+- `--secret-store` and `wikistow agent secret-store enable` work on macOS and Windows too, so an AI tool can run the CLI there without a passphrase. macOS keeps the unlock secret in the login Keychain through `/usr/bin/security`; Windows keeps it in Credential Manager, under Web Credentials (`wikistow`), through Windows PowerShell. Over SSH a Mac's login keychain is locked, so the CLI says to run it from the desktop or unlock it with `security unlock-keychain`. `agent status` names the store, in `secretStore.store` with `--json`. `--secret-tool` is only for Linux. (#134)
 - `wikistow agent enroll` exits once it's done. On every system, it used to keep running after a successful enroll until Ctrl+C. `--passphrase-fd 0` is refused with `--file -` or `agent enroll`, which read standard input too. (#130)
 
 #### Releases and packaging

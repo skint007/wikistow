@@ -6,12 +6,43 @@ import { pageRoutes } from '@wikistow/contracts';
 import packageJson from '../package.json' with { type: 'json' };
 import type { CommandName } from './cli.ts';
 import { WINDOWS } from './files.ts';
+import { SYSTEM_STORE } from './secret-store.ts';
 
 export const VERSION = packageJson.version;
 
 /** The CLI's directory (`configDir`), as a person would type it. */
 const DIR = WINDOWS ? '%APPDATA%\\wikistow' : '~/.config/wikistow';
 const SEP = WINDOWS ? '\\' : '/';
+
+/** `--secret-tool` names another secret-tool, so it is only for the Secret Service. */
+const SECRET_TOOL = SYSTEM_STORE === 'secret-service' ? ' [--secret-tool PATH]' : '';
+const SECRET_STORE = SECRET_TOOL ? `[--secret-store [--secret-tool PATH]]` : '[--secret-store]';
+
+/** What --secret-store does, in agent enroll --help. */
+const STORE_OPTION = {
+  'secret-service': `--secret-store     also keep an unlock secret in the desktop's Secret Service
+                   (libsecret's secret-tool), so later runs need no
+                   passphrase. It needs a session bus and an unlocked keyring:
+                   not cron or systemd on a machine nobody is logged in to.
+--secret-tool PATH secret-tool somewhere other than /usr/bin/secret-tool. It,
+                   and every directory above it, must be root's and writable
+                   by nobody else: the CLI runs it before it can check anything`,
+  keychain: `--secret-store     also keep an unlock secret in the login Keychain, through
+                   /usr/bin/security, so later runs need no passphrase. The
+                   keychain must be unlocked, as it is for a program run from
+                   the Mac's desktop, such as Terminal. Over SSH it stays
+                   locked until security unlock-keychain unlocks it`,
+  'credential-manager': `--secret-store     also keep an unlock secret in Credential Manager, under Web
+                   Credentials (wikistow), so later runs as this Windows user
+                   need no passphrase`,
+}[SYSTEM_STORE];
+
+/** Where agent secret-store enable keeps the secret. */
+const STORE_PLACE = {
+  'secret-service': 'the Secret Service',
+  keychain: 'the login Keychain',
+  'credential-manager': 'Credential Manager',
+}[SYSTEM_STORE];
 
 // PowerShell passes text, not bytes, between it and a native program.
 const PIPES = WINDOWS
@@ -50,9 +81,9 @@ export const USAGE = `Usage: wikistow <command> [options]
        wikistow --version
 
 Commands:
-  agent enroll --server URL [--secret-store [--secret-tool PATH]]
+  agent enroll --server URL ${SECRET_STORE}
   agent status                    (also: whoami)
-  agent secret-store enable|disable [--secret-tool PATH]
+  agent secret-store enable|disable${SECRET_TOOL}
   skill                           a skill that teaches an agent this CLI
   spaces list
   tree --space SPACE_ID
@@ -143,7 +174,7 @@ at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} of it: more exits 2 (too-lar
 
 /** Each command's own help. */
 export const COMMAND_HELP = {
-  'agent enroll': `Usage: wikistow agent enroll --server URL [--secret-store [--secret-tool PATH]]
+  'agent enroll': `Usage: wikistow agent enroll --server URL ${SECRET_STORE}
                            [--fingerprint-answer-from-stdin]
 
 Enroll this CLI as an agent of a WikiStow person. It prints a lookup code;
@@ -153,17 +184,7 @@ agent's keys and token are kept in ${DIR}${SEP}agent.key, under a
 new passphrase of at least 12 characters (asked twice${WINDOWS ? '' : ', or --passphrase-fd'}).
 
 --server URL       https, or plain http only to this machine
-${
-  WINDOWS
-    ? `--secret-store     not on Windows yet: there, the passphrase unlocks the agent`
-    : `--secret-store     also keep an unlock secret in the desktop's Secret Service
-                   (libsecret's secret-tool), so later runs need no
-                   passphrase. It needs a session bus and an unlocked keyring:
-                   not cron or systemd on a machine nobody is logged in to.
---secret-tool PATH secret-tool somewhere other than /usr/bin/secret-tool. It,
-                   and every directory above it, must be root's and writable
-                   by nobody else: the CLI runs it before it can check anything`
-}
+${STORE_OPTION}
 ${
   WINDOWS
     ? `--fingerprint-answer-from-stdin
@@ -194,15 +215,11 @@ shares and how it unlocks.
 
 The same as agent status.
 `,
-  'agent secret-store': `Usage: wikistow agent secret-store enable|disable [--secret-tool PATH]
+  'agent secret-store': `Usage: wikistow agent secret-store enable|disable${SECRET_TOOL}
 
-${
-  WINDOWS
-    ? `Not on Windows yet: there, the passphrase unlocks the agent.`
-    : `enable keeps an unlock secret in the Secret Service (asking for the
+enable keeps an unlock secret in ${STORE_PLACE} (asking for the
 passphrase first); disable removes it, so only the passphrase unlocks the
-agent. See agent enroll --help.`
-}
+agent. See agent enroll --help.
 `,
   skill: `Usage: wikistow skill
 

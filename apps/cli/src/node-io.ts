@@ -15,6 +15,7 @@ const ENV_NAMES = [
   'LANG',
   'DBUS_SESSION_BUS_ADDRESS',
   'XDG_RUNTIME_DIR',
+  'SystemRoot',
 ] as const;
 
 export function nodeIo(): Io {

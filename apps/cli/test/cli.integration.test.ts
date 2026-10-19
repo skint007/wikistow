@@ -589,6 +589,6 @@ describe('unlocking without a passphrase prompt (gate L359)', () => {
     // Unattended: no passphrase, no terminal.
     const status = await cli(home, ['agent', 'status', '--json']);
     expect(status.code, status.stderr).toBe(0);
-    expect(status.json().secretStore).toEqual({ tool: store.tool });
+    expect(status.json().secretStore).toEqual({ tool: store.tool, store: 'secret-service' });
   });
 });
