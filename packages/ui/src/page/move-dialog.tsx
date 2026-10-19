@@ -48,10 +48,12 @@ export type Moving = {
   name: string;
   to?: Destination<FolderId>;
   /**
-   * Why a move made without asking stopped, for the dialog it opens on:
+   * Why a drop moving without asking stopped, for the dialog it opens on:
    * something changed meanwhile, or what went wrong.
    */
   stopped?: 'stale' | { error: string };
+  /** What a drop moving without asking worked out, for the dialog showing its progress. */
+  preview?: moveOperations.MovePreview;
 };
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -134,7 +136,7 @@ export function useStartMove(spaceId: SpaceId, open: (moving: Moving) => void) {
         parentId: moving.to.parentId,
       });
       // Rewrapping can take a while: the dialog shows how far it has got.
-      if (preview.crossing) return open(moving);
+      if (preview.crossing) return open({ ...moving, preview });
       await runCommand(moveNode, { preview }, { satisfies: requirementsHere(), ctx });
       await refreshMoved(queryClient, ctx);
     } catch (caught) {
@@ -167,6 +169,8 @@ function MoveSteps({
 }) {
   const [chosen, setChosen] = useState(moving.to ?? null);
   const [confirming, setConfirming] = useState(moving.to !== undefined);
+  // What a drop moving without asking left, for the place dropped on only.
+  const [dropped, setDropped] = useState<Pick<Moving, 'stopped' | 'preview'>>(moving);
   return (
     <div className="grid gap-4">
       <DialogHeader>
@@ -184,7 +188,11 @@ function MoveSteps({
           spaceId={spaceId}
           moving={moving}
           destination={chosen}
-          onBack={() => setConfirming(false)}
+          dropped={dropped}
+          onBack={() => {
+            setDropped({});
+            setConfirming(false);
+          }}
           onDone={onDone}
         />
       ) : (
@@ -303,12 +311,14 @@ function ConfirmMove({
   spaceId,
   moving,
   destination,
+  dropped,
   onBack,
   onDone,
 }: {
   spaceId: SpaceId;
   moving: Moving;
   destination: Destination<FolderId>;
+  dropped: Pick<Moving, 'stopped' | 'preview'>;
   onBack: () => void;
   onDone: () => void;
 }) {
@@ -317,14 +327,14 @@ function ConfirmMove({
   const { busy, error, run } = useAction((caught) => moveMessage(caught, moving.kind));
   // How far the rewrapping has got, once the server has counted what moves.
   const [progress, setProgress] = useState<{ records: number; total: number | null } | null>(null);
-  const [notice, setNotice] = useState(moving.stopped === 'stale' ? CHANGED : null);
+  const [notice, setNotice] = useState(dropped.stopped === 'stale' ? CHANGED : null);
   const [earlier, setEarlier] = useState(
-    typeof moving.stopped === 'object' ? moving.stopped.error : null,
+    typeof dropped.stopped === 'object' ? dropped.stopped.error : null,
   );
   const asking = useAskBeforeMoves();
   const [dontAsk, setDontAsk] = useState(false);
   // As it was when this step opened, so Don't ask again doesn't move it too.
-  const [auto] = useState(() => !askBeforeMoves.get() && moving.stopped === undefined);
+  const [auto] = useState(() => !askBeforeMoves.get() && dropped.stopped === undefined);
   const tried = useRef(false);
   const preview = useQuery({
     queryKey: [PLAIN, 'move-preview', spaceId, moving.id, destination.parentId],
@@ -334,7 +344,9 @@ function ConfirmMove({
         nodeId: moving.id,
         parentId: destination.parentId,
       }),
-    staleTime: 0,
+    // A drop's, worked out a moment ago, isn't worked out again.
+    initialData: dropped.preview,
+    staleTime: dropped.preview ? Infinity : 0,
     gcTime: 0,
     retry: false,
   });
@@ -348,7 +360,8 @@ function ConfirmMove({
   const { data: people } = useQuery(peopleQuery(ctx, ids));
   const name = (identityId: string) =>
     (people?.get(identityId) ?? describePerson(ctx, identityId, null)).name;
-  const unreadable = shown
+  // Only a move across matters: it gives access to what moves.
+  const unreadable = shown?.crossing
     ? shown.folders.filter((f) => nameOf(f.metadata) === null).length +
       shown.pages.filter((p) => p.title === null).length
     : 0;
@@ -539,7 +552,7 @@ function ConfirmMove({
           Keep this open until it’s done.
         </p>
       )}
-      <ErrorLine error={error ?? earlier} />
+      <ErrorLine error={error ?? (preview.isError ? null : earlier)} />
       {asking && (
         <label className="flex items-center gap-2 text-sm">
           <input

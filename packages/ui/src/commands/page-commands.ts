@@ -24,7 +24,8 @@ const Preview = z.custom<moveOperations.MovePreview>(
 );
 
 /**
- * Move a page or folder the person confirmed. Who may is the server's to
+ * Move a page or folder as previewed, once the person confirms it, or at
+ * once if they turned asking before moves off. Who may is the server's to
  * enforce: an editor within their share, an owner anywhere in the space.
  */
 export const moveNode: Command<z.ZodObject<{ preview: typeof Preview }>, PageEnv> = {
