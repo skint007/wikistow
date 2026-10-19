@@ -4,14 +4,27 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-19
+
 ### Highlights
 
 #### Features
 
+- The browser can remember your vault unlock, so new tabs and later visits open without the passphrase. It’s off until you turn on **Remember on this browser** on the unlock page or **Remember unlock** in Settings → Security; locking, signing out or changing your passphrase forgets it.
+- Code blocks have a copy button that copies the code as written, without its language label.
 - The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`.
-- In the desktop app, hovering a link shows where it goes: its address, or the page's name for a link to another page.
+- In the desktop app, hovering a link shows where it goes: its address, or the page’s name for a link to another page.
 - On a Mac or Windows PC, an AI tool can run the command-line client without a passphrase: `wikistow agent enroll --secret-store` keeps its unlock in the Keychain or in Credential Manager, as it does in the desktop keyring on Linux.
 - The Agents page has a setup guide for command-line agents: install the CLI, enroll it and hand it to your AI tool, in three steps for Linux, macOS and Windows, with this server’s address in the enroll command.
+
+#### UI polish
+
+- Hover hints match your theme in light, dark and plugin themes, and so do checkboxes, radio buttons and sliders.
+- Password managers are asked to leave fields that aren’t sign-in details alone, such as folder and space names, search and page titles. Bitwarden only does so once you turn on its “Allow websites to exclude fields to autofill” setting.
+
+#### Upgrade notes
+
+- If you run the CLI from the release’s `wikistow-cli` archive, it no longer has the `wikistow` launcher: install the binary with the install script, or run `node wikistow.mjs`. `wikistow-cli-bin` on the AUR updates by itself and no longer needs `nodejs`.
 
 ### Changes
 
