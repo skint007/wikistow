@@ -42,6 +42,7 @@ describe('a wikilink in the reader', () => {
       pageId: 'p-plan',
       hash: headingId('Dates'),
       text: 'Release Plan › Dates',
+      name: 'Release Plan › Dates',
     });
     expect(view('[[Old plan|the plan]]', renamed)).toMatchObject({
       pageId: 'p-plan',

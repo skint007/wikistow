@@ -3,6 +3,7 @@ import { ChevronRight, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import changelog from '../../../../../CHANGELOG.md?raw';
+import { linkHint } from '../../desktop';
 import { parseChangelog, REPOSITORY, type Release } from '../../whats-new/changelog';
 
 export const Route = createFileRoute('/_app/whats-new')({ component: WhatsNew });
@@ -102,6 +103,7 @@ function ReleaseNotes({
   open: boolean;
   onToggle: (open: boolean) => void;
 }) {
+  const changes = `${REPOSITORY}/releases/tag/v${version}`;
   return (
     <details
       id={`v${version}`}
@@ -146,7 +148,8 @@ function ReleaseNotes({
           </section>
         ))}
         <a
-          href={`${REPOSITORY}/releases/tag/v${version}`}
+          href={changes}
+          data-hint={linkHint(changes)}
           target="_blank"
           rel="noreferrer"
           className="flex w-fit items-center gap-1.5 text-sm font-bold text-primary-ink underline-offset-4 hover:underline"

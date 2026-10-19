@@ -6,6 +6,7 @@ import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { searchIndexChanged, treeQuery } from '../data/queries';
+import { linkHint } from '../desktop';
 import { errorMessage } from '../errors';
 import { AttachmentImage, AttachmentLink, ATTACHMENT_SCHEME } from './attachments';
 import { InLink, PageBody, type PageBodyContext } from './body-context';
@@ -67,7 +68,7 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
 /** A wikilink to a page of this wiki. */
 function PageLink({
   spaceId,
-  view: { pageId, hash, text },
+  view: { pageId, hash, text, name },
 }: {
   spaceId: SpaceId;
   view: Extract<WikilinkView, { kind: 'page' }>;
@@ -78,7 +79,7 @@ function PageLink({
     ...(hash ? { hash } : {}),
   } as const;
   return (
-    <Link {...to} className="text-primary underline">
+    <Link {...to} data-hint={linkHint(name)} className="text-primary underline">
       {text}
     </Link>
   );

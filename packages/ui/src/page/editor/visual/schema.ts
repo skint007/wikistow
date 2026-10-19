@@ -12,6 +12,8 @@ import {
   tableHeaderSchema,
 } from '@milkdown/kit/preset/gfm';
 import type { $NodeSchema } from '@milkdown/kit/utils';
+import { linkHint } from '../../../desktop';
+import { ATTACHMENT_SCHEME } from '../../attachments';
 import { TAB } from './copy-marks';
 import { isLiteral } from './literals';
 
@@ -230,7 +232,10 @@ export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
       const dom = schema.toDOM?.(mark, inline);
       const [tag, attrs] = Array.isArray(dom) ? dom : ['a', {}];
       const { auto: _a, bare: _b, read: _r, id: _i, ...rest } = attrs as Record<string, unknown>;
-      return [String(tag), rest];
+      // Where it goes, in the desktop app; an attachment's address says nothing.
+      const href = String(mark.attrs.href);
+      const hint = href.startsWith(ATTACHMENT_SCHEME) ? undefined : linkHint(href);
+      return [String(tag), { ...rest, 'data-hint': hint }];
     },
   };
 });

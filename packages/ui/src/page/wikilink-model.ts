@@ -14,7 +14,14 @@ import { headingId } from './heading-ids';
  * page see `missing` and `ambiguous`, judged by their own tree.
  */
 export type WikilinkView =
-  | { kind: 'page'; pageId: string; hash: string | undefined; text: string }
+  | {
+      kind: 'page';
+      pageId: string;
+      hash: string | undefined;
+      text: string;
+      /** The page's title, and heading, it goes to; its hint in the desktop app. */
+      name: string;
+    }
   | { kind: 'image' | 'file'; attachmentId: string; text: string }
   | { kind: 'missing'; title: string; text: string }
   | { kind: 'ambiguous'; text: string }
@@ -68,13 +75,14 @@ export function wikilinkView(link: WikilinkNode, scope: WikilinkScope): Wikilink
   });
   const pageId = found?.status === 'resolved' ? found.targets[0] : undefined;
   if (pageId) {
-    const title =
-      link.target && (scope.pages.find((page) => page.id === pageId)?.title ?? link.target);
+    const title = scope.pages.find((page) => page.id === pageId)?.title ?? link.target;
     return {
       kind: 'page',
       pageId,
       hash: link.heading ? headingId(link.heading) : undefined,
-      text: link.shown ?? withHeading(title, link.heading),
+      // A link to a heading of this page (`[[#Dates]]`) shows just the heading.
+      text: link.shown ?? withHeading(link.target && title, link.heading),
+      name: withHeading(title, link.heading),
     };
   }
   if (!scope.editor) return written;
