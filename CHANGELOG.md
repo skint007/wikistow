@@ -9,6 +9,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - The web app has a favicon, the desktop app's icon as an SVG, and a 180 px `apple-touch-icon.png` for iPhone and iPad home screens. (#137)
+- Chrome, Edge and other Chromium browsers on a Mac use Cmd+K for search, and the visual editor's toolbar names Cmd shortcuts there, as Safari and Firefox already did. (#140)
+- The Agents page's description takes the page's width, with its buttons in a row below. (#140)
 
 #### CLI
 

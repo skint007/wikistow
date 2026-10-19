@@ -44,9 +44,12 @@ export function searchStatus({
   return `${results} page${results === 1 ? '' : 's'}`;
 }
 
-/** Apple systems, where shortcuts take Cmd (and Ctrl+K deletes to the line's end in text). */
+/**
+ * Apple systems, where shortcuts take Cmd (and Ctrl+K deletes to the line's end in text).
+ * Chromium says `macOS`, other browsers' `navigator.platform` `MacIntel` or `iPhone`.
+ */
 export const isApple = () =>
-  /Mac|iPhone|iPad|iPod/.test(
+  /mac|iphone|ipad|ipod/i.test(
     (navigator as Navigator & { userAgentData?: { platform: string } }).userAgentData?.platform ??
       navigator.platform,
   );
