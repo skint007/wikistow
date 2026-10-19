@@ -22,6 +22,7 @@ import {
 import { exportMarkdown } from './commands/export.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
+import { WINDOWS } from './files.ts';
 import { COMMAND_HELP, USAGE, VERSION } from './help.ts';
 import { Printer, type Io } from './io.ts';
 import { DEFAULT_SECRET_TOOL } from './secret-store.ts';
@@ -178,10 +179,27 @@ function unlockOf(values: Values): UnlockOptions {
   if (fd !== null && !/^[0-9]{1,4}$/.test(fd)) {
     throw new CliError('usage', '--passphrase-fd takes a file descriptor number');
   }
+  // A Windows program inherits no descriptors past the standard three.
+  if (WINDOWS && fd !== null && Number(fd) !== 0) {
+    throw new CliError(
+      'usage',
+      'On Windows, --passphrase-fd takes only 0, standard input: --passphrase-fd 0 < FILE',
+    );
+  }
   return {
     passphraseFd: fd === null ? undefined : Number(fd),
     usePassphrase: values['use-passphrase'] === true,
   };
+}
+
+/** The Secret Service is Linux's; Windows has none for the CLI yet. */
+function noSecretStoreOnWindows(): void {
+  if (WINDOWS) {
+    throw new CliError(
+      'usage',
+      'The secret store isn’t supported on Windows yet: the passphrase unlocks the agent',
+    );
+  }
 }
 
 /** The shape of the IDs WikiStow makes: 16 random bytes, base64url. */
@@ -322,6 +340,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
       const tool = optional(values, 'secret-tool');
       if (tool !== null && !store)
         throw new CliError('usage', '--secret-tool goes with --secret-store');
+      if (store) noSecretStoreOnWindows();
       return enroll(
         io,
         out,
@@ -341,6 +360,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
       if (first !== 'enable' && first !== 'disable') {
         throw new CliError('usage', 'agent secret-store takes enable or disable');
       }
+      if (first === 'enable') noSecretStoreOnWindows();
       return secretStore(
         io,
         out,
