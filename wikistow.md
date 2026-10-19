@@ -27,7 +27,7 @@ Offline editing, Windows and macOS packaging, comments, simultaneous live editin
 
 ## Architecture
 
-Use a TypeScript pnpm workspace with four applications: a Vite-built React web app, a Linux Electron client, a Hono API server on Node, and a Node CLI. A shared client library owns encrypted document operations. One shared React interface, built by Vite, runs in both the browser and the desktop renderer. The server owns identity, authorization, opaque structure, and encrypted storage, and also serves the built web app.
+Use a TypeScript pnpm workspace with four applications: a Vite-built React web app, a Linux Electron client, a Hono API server on Node, and a CLI released as one binary per system. A shared client library owns encrypted document operations. One shared React interface, built by Vite, runs in both the browser and the desktop renderer. The server owns identity, authorization, opaque structure, and encrypted storage, and also serves the built web app.
 
 This departs from the preferred stack's Next.js on purpose (decided 2026-10-02). The server never reads stored content, so every real page is decrypted and rendered in the client. Next.js's server rendering, server components, and caching would go unused. Electron cannot run Next.js, so the web and desktop builds would also diverge. A static single-page app gives both clients one build. A plain JSON API keeps the server small and easy to audit. A static app can also enforce a strict Content Security Policy without per-request nonces. The cost: no server-rendered login or settings pages, and the API server, static serving, and development proxy are assembled by hand. Revisit if anonymous, search-indexed publishing is ever added.
 
@@ -510,7 +510,7 @@ The following are engineering gates, not settled product facts:
 
 - The exact encryption envelope and key-pinning protocol. No production rollout until the browser, desktop, and CLI implement one reviewed format.
 - Milkdown's preservation of the chosen Markdown subset, wikilinks, and pasted Obsidian notes. Wikilinks and the frontmatter block need custom nodes that round-trip the exact source text. Keep the source editor usable if the visual editor fails a fidelity case.
-- Linux key-storage integration for both Electron and the independent Node CLI. A secure fallback must work on systems without Secret Service.
+- Linux key-storage integration for both Electron and the independent CLI. A secure fallback must work on systems without Secret Service.
 - Sharing and search cost for a representative family library. Folder keys keep adding a member cheap, but a first share wraps every retained revision once; both must be measured.
 - Transactional integration between Better Auth signup and one-time application invitations. Framework hooks alone are not proof of atomic redemption.
 - Better Auth's Hono integration with sessions, TOTP, and the desktop login handoff, on the pinned versions of both.

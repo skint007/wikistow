@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite-plus';
 
 // `vp pack` bundles the CLI into one file, dependencies included, so it runs
-// with nothing but Node: `node dist/wikistow.mjs`.
+// with nothing but Node: `node dist/wikistow.mjs`. The release builds its
+// binaries from that file (`scripts/binaries.sh`).
 export default defineConfig({
   pack: {
     entry: { wikistow: 'src/main.ts' },

@@ -10,7 +10,25 @@ The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-deskto
 
 ## Install the command-line client
 
-The `wikistow` command is how an agent reads and writes the pages shared with it, once enrolled with `wikistow agent enroll`. Run `wikistow --help` for the rest. `wikistow skill` prints a skill that teaches an agent to use it, to save wherever its harness reads skills. On Arch Linux, install `wikistow-cli-bin` from the AUR, which runs it on the system `nodejs`. Elsewhere, install Node.js 26 or newer, download `wikistow-cli-<version>.tar.gz` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.6.0 on, and run `node wikistow.mjs` from the folder it unpacks to. It installs beside the desktop app, whose command is `wikistow-desktop`.
+The `wikistow` command is how an agent reads and writes the pages shared with it, once enrolled with `wikistow agent enroll`. Run `wikistow --help` for the rest. `wikistow skill` prints a skill that teaches an agent to use it, to save wherever its harness reads skills.
+
+It's one file, with nothing else to install. On Linux (x86_64 or arm64, with glibc) and macOS:
+
+```sh
+curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh
+```
+
+That puts `wikistow` in `~/.local/bin`, and adds that folder to `PATH` in your shell's startup file if it isn't there. Run it again to update. On Arch Linux, you can install `wikistow-cli-bin` from the AUR instead. Either installs beside the desktop app, whose command is `wikistow-desktop`.
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://github.com/skint007/wikistow/releases/latest/download/install.ps1 | iex
+```
+
+That installs it in `%LOCALAPPDATA%\Programs\wikistow` and adds that folder to your `PATH`. On Windows the CLI only runs `--help` and `--version` so far.
+
+You can also download your system's binary from the [latest release](https://github.com/skint007/wikistow/releases/latest) and check it against `SHA256SUMS`. On a Mac, a binary downloaded in a browser won't run until you run `xattr -d com.apple.quarantine` on it; the install script doesn't need that. Systems without glibc, such as Alpine, can run `node wikistow.mjs` from the release's `wikistow-cli-<version>.tar.gz` on Node.js 26 or newer.
 
 ## Run locally
 
