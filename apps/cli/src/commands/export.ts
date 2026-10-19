@@ -108,7 +108,9 @@ export class OutDir {
         name === '.' || name === '..'
           ? real(written)
           : join(real(written.slice(0, written.length - name.length) || '.'), name);
-      if (found !== path) {
+      // Windows names are case-blind, and PowerShell keeps a folder's case as typed.
+      const same = WINDOWS ? found.toLowerCase() === path.toLowerCase() : found === path;
+      if (!same) {
         throw new CliError(
           'usage',
           `${given} goes through a link to ${found}: give --out the directory's own path`,
