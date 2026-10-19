@@ -18,6 +18,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The browser can remember the vault unlock, off by default: **Remember on this browser** on the unlock page, or **Remember unlock** in Settings → Security. Later visits and new tabs then open the vault without the passphrase, from a copy of the vault key sealed in `localStorage` (`wikistow.vault`) under the tab unlock's wrapping key. Locking, signing out or a passphrase change made anywhere forgets it. (#124)
 - Fields that aren’t credentials, such as folder and space names, renames, search, page titles and the people picker, tell browsers and password managers to leave them alone: `autocomplete="off"` plus the 1Password, LastPass, Bitwarden and Dashlane ignore hints. `Input` adds them unless the field is a password or has a real `autocomplete`, so sign-in, account, passphrase and two-factor fields are unchanged. The admin SMTP password and AI API key get the hints too. Bitwarden reads its hint only when its user turns on “Allow websites to exclude fields to autofill”. (#125)
 
+#### CLI
+
+- The CLI runs natively on Windows. It keeps its files in `%APPDATA%\wikistow`, where the user profile's permissions keep other users out, so it checks no Unix owners or modes there. On Windows, `--passphrase-fd` takes only `0` (standard input), `--secret-store` isn't supported yet, and messages print as UTF-8. (#130)
+- `wikistow agent enroll` exits once it's done. On every system, it used to keep running after a successful enroll until Ctrl+C. `--passphrase-fd 0` is refused with `--file -` or `agent enroll`, which read standard input too. (#130)
+
 #### Releases and packaging
 
 - Each release has the CLI as one binary per system, built by Bun 1.4.3 from the tested bundle: `wikistow-linux-x64`, `wikistow-linux-arm64`, `wikistow-darwin-arm64`, `wikistow-darwin-x64` and `wikistow-windows-x64.exe`, beside `install.sh`, `install.ps1` and `LICENSE`, all in `SHA256SUMS`. The release checks the Linux x64 binary. `wikistow-cli-<version>.tar.gz` stays, for Node.js, without its `wikistow` launcher. (#126)
