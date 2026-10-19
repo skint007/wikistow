@@ -232,9 +232,10 @@ export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
       const dom = schema.toDOM?.(mark, inline);
       const [tag, attrs] = Array.isArray(dom) ? dom : ['a', {}];
       const { auto: _a, bare: _b, read: _r, id: _i, ...rest } = attrs as Record<string, unknown>;
-      // Where it goes, in the desktop app; an attachment's address says nothing.
+      // Where it goes, in the desktop app; an attachment's address or a `#` place says nothing.
       const href = String(mark.attrs.href);
-      const hint = href.startsWith(ATTACHMENT_SCHEME) ? undefined : linkHint(href);
+      const hint =
+        href.startsWith(ATTACHMENT_SCHEME) || href.startsWith('#') ? undefined : linkHint(href);
       return [String(tag), { ...rest, 'data-hint': hint }];
     },
   };
