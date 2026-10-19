@@ -89,8 +89,9 @@ function copied(spec: DOMOutputSpec): DOMOutputSpec {
     : spec;
 }
 
-// HTML copied, each node marked as this tab's (`copied`), and each link
-// with its `id` (`data-link`), not shown otherwise: ProseMirror writes a
+// HTML copied, each node marked as this tab's (`copied`), each link's
+// title as `title` for other apps, and each link with its `id`
+// (`data-link`), not shown otherwise: ProseMirror writes a
 // link that a mark starts or ends inside as an `<a>` each side of the
 // mark's edge, which are then pasted as one (`pastedLinks`). The id carries
 // this tab's own token, so HTML from anywhere else, or another tab, can't
@@ -106,8 +107,9 @@ function copying(schema: Schema): DOMSerializer {
     ...marks,
     link: (mark, inline) => {
       const [tag, attrs] = link(mark, inline) as [string, Record<string, unknown>];
-      const { id } = mark.attrs;
-      return [tag, id === null ? attrs : { ...attrs, 'data-link': copiedLinkId(id) }];
+      const { id, title } = mark.attrs;
+      const titled = { ...attrs, 'data-title': undefined, title };
+      return [tag, id === null ? titled : { ...titled, 'data-link': copiedLinkId(id) }];
     },
   });
 }
