@@ -5,8 +5,13 @@ import { kilobytes } from '@wikistow/client';
 import { pageRoutes } from '@wikistow/contracts';
 import packageJson from '../package.json' with { type: 'json' };
 import type { CommandName } from './cli.ts';
+import { WINDOWS } from './files.ts';
 
 export const VERSION = packageJson.version;
+
+/** The CLI's directory (`configDir`), as a person would type it. */
+const DIR = WINDOWS ? '%APPDATA%\\wikistow' : '~/.config/wikistow';
+const SEP = WINDOWS ? '\\' : '/';
 
 const RETRYING = `Retrying a change:
   Give create, draft, attach and publish --idempotency-key KEY, a new KEY for
@@ -27,7 +32,7 @@ const RETRYING = `Retrying a change:
   Without a KEY, check (tree, page read) before running a change again.
   page unpublish and page publish-to take no KEY: each names what it
   changes, so run it again as it was (see their --help).
-  The CLI keeps each keyed change, encrypted, in ~/.config/wikistow/journal/,
+  The CLI keeps each keyed change, encrypted, in ${DIR}${SEP}journal${SEP},
   until a day after its answer came back, as long as the server keeps KEY.
 `;
 
@@ -75,10 +80,18 @@ Options for every command:
   --json                    machine-readable output, ASCII only. A failure is
                             printed to standard output too, as
                             {"error":{"exit":N,"code":"...","message":"...",...}}
-  --passphrase-fd N         read the key file's passphrase from file descriptor N:
+${
+  WINDOWS
+    ? `  --passphrase-fd 0         read the key file's passphrase from standard input:
+                            a file (< file) or a pipe from a secret manager, never
+                            a terminal. Windows passes no other file descriptor, so
+                            it can't go with --file -. Don't write the passphrase
+                            itself in the command (echo ... |): history keeps it`
+    : `  --passphrase-fd N         read the key file's passphrase from file descriptor N:
                             a file (3<file) or a pipe from a secret manager, never
                             a terminal. Don't write the passphrase itself in the
-                            command (3<<<..., echo ... |): shell history keeps it
+                            command (3<<<..., echo ... |): shell history keeps it`
+}
   --use-passphrase          ask for the passphrase even if a secret store is configured
   --idempotency-key KEY     for create, draft, attach and publish (see below)
   --help                    more about the command
@@ -125,27 +138,35 @@ export const COMMAND_HELP = {
 Enroll this CLI as an agent of a WikiStow person. It prints a lookup code;
 the person enters it under Agents in WikiStow. Both then show the same
 fingerprint: type yes only if they match. Once the person approves, the
-agent's keys and token are kept in ~/.config/wikistow/agent.key, under a
+agent's keys and token are kept in ${DIR}${SEP}agent.key, under a
 new passphrase of at least 12 characters (asked twice, or --passphrase-fd).
 
 --server URL       https, or plain http only to this machine
---secret-store     also keep an unlock secret in the desktop's Secret Service
+${
+  WINDOWS
+    ? `--secret-store     not on Windows yet: there, the passphrase unlocks the agent`
+    : `--secret-store     also keep an unlock secret in the desktop's Secret Service
                    (libsecret's secret-tool), so later runs need no
                    passphrase. It needs a session bus and an unlocked keyring:
                    not cron or systemd on a machine nobody is logged in to.
 --secret-tool PATH secret-tool somewhere other than /usr/bin/secret-tool. It,
                    and every directory above it, must be root's and writable
-                   by nobody else: the CLI runs it before it can check anything
+                   by nobody else: the CLI runs it before it can check anything`
+}
 --fingerprint-answer-from-stdin
                    take the yes from standard input when it isn't a terminal.
                    Only for a person who compares the fingerprint and types
                    the answer through a pipe: a program must never answer it
 
-While it runs, the CLI holds the agent's keys in memory, and a crash could
+${
+  WINDOWS
+    ? ''
+    : `While it runs, the CLI holds the agent's keys in memory, and a crash could
 write them to a core dump. Where others could read one, turn them off for
 the CLI: ulimit -c 0 in its shell, or LimitCORE=0 in its systemd unit.
 
-To enroll again, move the whole ~/.config/wikistow directory away first.
+`
+}To enroll again, move the whole ${DIR} directory away first.
 `,
   'agent status': `Usage: wikistow agent status
 
@@ -168,9 +189,16 @@ Print a skill for this agent's harness: a SKILL.md in the Agent Skills
 format. It tells the agent to leave changes as drafts unless its person
 asks for them to be published, to put new pages in the person's Personal
 space, and to read this help for the rest. Write it to a folder named
-wikistow where the harness looks for skills, for example:
+wikistow where the harness looks for skills, for example${
+    WINDOWS
+      ? ` in PowerShell
+(Windows PowerShell's > writes UTF-16):
+  mkdir -Force ~\\.claude\\skills\\wikistow
+  wikistow skill | Out-File -Encoding ascii ~\\.claude\\skills\\wikistow\\SKILL.md`
+      : `:
   mkdir -p ~/.claude/skills/wikistow
-  wikistow skill > ~/.claude/skills/wikistow/SKILL.md
+  wikistow skill > ~/.claude/skills/wikistow/SKILL.md`
+  }
 Edit that copy to change what it says. It names the version that printed
 it: print it again after an update. With --json: {"skill":"..."}
 `,
@@ -204,7 +232,7 @@ Quote a QUERY of several words; put one that starts with -- after a lone --.
   export: `Usage: wikistow export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
 
 Write every page this agent can read as Markdown files in DIR, which must
-be empty or not exist yet, and open to you alone (mode 700). Each page is
+be empty or not exist yet, and open to you alone${WINDOWS ? '' : ' (mode 700)'}. Each page is
 written as page read would show it: the draft if this agent edits the
 page, the published version otherwise. --space exports one space,
 --folder one folder and what is in it (--space saves looking up which
@@ -221,8 +249,14 @@ exported stays as written. A name no file system takes (a / or :, a
 reserved name like CON, one too long) is changed, a name used twice in a
 folder gets (2), and a link to a renamed file keeps the title as its text.
 
-Folders are made mode 700 and files 600, and nothing already there is
-written over or followed. If the export fails, what it wrote is removed.
+${
+  WINDOWS
+    ? `Keep DIR in your user profile, which other users can't open. Nothing
+already there is written over or followed. If the export fails, what it
+wrote is removed.`
+    : `Folders are made mode 700 and files 600, and nothing already there is
+written over or followed. If the export fails, what it wrote is removed.`
+}
 With --json:
   {"out":"DIR","pages":[{"spaceId":"...","pageId":"...","path":"..."}],
    "attachments":[{"spaceId":"...","pageId":"...","attachmentId":"...","path":"..."}],
