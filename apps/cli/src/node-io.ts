@@ -17,9 +17,6 @@ const ENV_NAMES = [
   'XDG_RUNTIME_DIR',
 ] as const;
 
-// Lines of standard input, read one at a time as asked for.
-let lines: AsyncIterator<string> | null = null;
-
 export function nodeIo(): Io {
   return {
     stdout: {
@@ -37,17 +34,28 @@ export function nodeIo(): Io {
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
       return new Uint8Array(Buffer.concat(chunks));
     },
-    async readLine() {
-      lines ??= createInterface({ input: process.stdin, terminal: false })[Symbol.asyncIterator]();
-      const next = await lines.next();
-      return next.done ? null : next.value;
-    },
+    readLine,
     readFd,
     isTerminal: (fd) => isatty(fd),
     askSecret: (prompt) => askSecret(prompt),
     sleep: (ms) => delay(ms),
     now: () => new Date(),
   };
+}
+
+/**
+ * One line of standard input. The reader closes after it, as an open one
+ * would keep a terminal's input, and so the CLI, running once it is done.
+ */
+function readLine(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = createInterface({ input: process.stdin, terminal: false });
+    reader.once('line', (line) => {
+      resolve(line);
+      reader.close();
+    });
+    reader.once('close', () => resolve(null));
+  });
 }
 
 /**
