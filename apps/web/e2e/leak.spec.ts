@@ -45,7 +45,8 @@ async function browserStorage(page: Page) {
  * The browser keeps the theme, the editor last picked, the server's last
  * restore it has seen (none here), the folders open in each space's tree
  * (their IDs), scroll positions and session cookie, and
- * none of `secrets`. While the vault is open, the tab
+ * none of `secrets`. Settings kept on the device once changed, such as
+ * `wikistow.idleLock` and `wikistow.askBeforeMoves` (`false`), aren't set here. While the vault is open, the tab
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
  * wrapping key in IndexedDB that no script can read out, and, when it is
  * `remembered`, another sealed copy in localStorage. Locking forgets them all.

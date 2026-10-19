@@ -29,7 +29,7 @@ import { AgentActivityCard } from '../agents/activity-card';
 import { searchIndexChanged, treeQuery } from '../data/queries';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
-import { destinationsIn, MoveDialog, type Moving } from '../page/move-dialog';
+import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
@@ -245,6 +245,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
+  const startMove = useStartMove(spaceId, setMoving);
   const [exporting, setExporting] = useState<Exporting | null>(null);
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
@@ -351,7 +352,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   }
 
   // Drag and drop moves, for a mouse: a drop opens the move preview on the
-  // place dropped on, as Move… does once that place is chosen. Keyboard
+  // place dropped on, as Move… does once that place is chosen, or moves at
+  // once if the person turned asking before moves off. Keyboard
   // users have Move… in the menus. A drop on a page is a drop beside it,
   // and one below the rows is at the top of the space.
   // A drag whose row went away meanwhile, moved or deleted elsewhere, is
@@ -383,7 +385,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     event.preventDefault();
     event.stopPropagation();
     const destination = placeAt(event, parentId);
-    if (dragging && destination) setMoving({ ...dragging.moving, to: destination });
+    if (dragging && destination) void startMove({ ...dragging.moving, to: destination });
     setDragging(null);
   };
   const dropTarget = (row: Row) => (row.kind === 'folder' ? row.id : row.parentId);
