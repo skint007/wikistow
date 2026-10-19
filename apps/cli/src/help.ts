@@ -128,9 +128,16 @@ still saved, with exit status 0: the output says so, and links is null in
 --json. YAML frontmatter is kept byte for byte and ignored; --title sets the
 title.`;
 
+// PowerShell pipes a native program text, not bytes, re-encoded on the way.
+const PIPES = WINDOWS
+  ? `
+In PowerShell, give --file PATH: its pipes re-encode what they carry (as
+ASCII in Windows PowerShell 5.1, so accents become ?). cmd's < FILE is fine.`
+  : '';
+
 const FILE = `--file PATH reads the Markdown from PATH, or from standard input for -.
 It must be UTF-8, and is kept byte for byte, line ends included. A page holds
-at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} of it: more exits 2 (too-large), and nothing changes.`;
+at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} of it: more exits 2 (too-large), and nothing changes.${PIPES}`;
 
 /** Each command's own help. */
 export const COMMAND_HELP = {
@@ -326,7 +333,7 @@ Encrypt and upload a file, and list it on a new draft on top of the draft
 head (or --base, which must be the draft head). Prints the attachment and
 the new draft head, which the next draft or publish must use. To embed the
 file, then draft the page with ![[NAME]]. --name is needed with --file -.
-The media type is guessed from the name's extension otherwise.
+The media type is guessed from the name's extension otherwise.${PIPES}
 
 Like page draft, the new draft may write a page's new title into a link
 and report it in "renamed". If the space's tree can't be loaded to check
