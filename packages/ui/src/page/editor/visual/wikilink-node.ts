@@ -113,6 +113,7 @@ class WikilinkView implements NodeView {
       case 'missing':
         text.className = MISSING;
         text.dataset.hint = 'No page has this title yet';
+        text.setAttribute('aria-description', text.dataset.hint);
         break;
       case 'image': {
         const ref = this.#host.attachments().list.find((a) => a.id === view.attachmentId);
@@ -133,6 +134,7 @@ class WikilinkView implements NodeView {
     // A button can't sit inside a link's `<a>`; there Alt+Enter alone opens the chooser.
     if (this.#inLink) {
       text.dataset.hint = hint;
+      text.setAttribute('aria-description', hint);
       return;
     }
     const button = document.createElement('button');

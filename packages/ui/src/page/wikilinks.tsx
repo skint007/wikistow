@@ -53,6 +53,7 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
       return (
         <span
           data-hint="More than one page has this title"
+          aria-description="More than one page has this title"
           className="underline decoration-dotted underline-offset-2"
         >
           {view.text}

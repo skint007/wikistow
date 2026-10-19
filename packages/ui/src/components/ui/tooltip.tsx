@@ -45,8 +45,9 @@ const moves = (scrolled: EventTarget | null, element: HTMLElement) => {
  * beside it, and `data-hint-side` moves it from below the element (as along
  * the rail, where below would cover the next tile). One layer for the app,
  * so a hint costs an attribute, even on each of a grid's thousand buttons.
- * The hint isn't the element's name to screen readers: an icon-only control
- * needs an `aria-label` too.
+ * Screen readers don't get the hint: an icon-only control needs an
+ * `aria-label` too, and a hint that says more than the element's name its
+ * own `aria-description`.
  */
 export function HintLayer() {
   const [shown, setShown] = useState<Shown | null>(null);
