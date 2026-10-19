@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - The web app has a favicon, the desktop app's icon as an SVG, and a 180 px `apple-touch-icon.png` for iPhone and iPad home screens. (#137)
 
+#### CLI
+
+- Messages print paths as they are, so on Windows they show `C:\Users\me\AppData\Roaming\wikistow`, not every backslash doubled. Paths and other text the user gave the CLI are no longer escaped; server text, decrypted content and system errors still are, and `--json` is unchanged. (#129)
+
 ## 0.13.0 - 2026-10-19
 
 ### Highlights
