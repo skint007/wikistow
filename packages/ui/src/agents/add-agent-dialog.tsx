@@ -5,6 +5,7 @@ import {
   type IdentityId,
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { Bot, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Name, plainText } from '@/components/name';
@@ -164,7 +165,13 @@ function EnterCode({ onClaim }: { onClaim: (claimed: Claimed) => void }) {
         <DialogTitle>Add an agent</DialogTitle>
         <DialogDescription>
           In a terminal on the computer the agent runs on, run this command. Then enter the lookup
-          code it shows.
+          code it shows.{' '}
+          <Link
+            to="/agents/guide"
+            className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-current"
+          >
+            First time? Follow the setup guide.
+          </Link>
         </DialogDescription>
       </DialogHeader>
       <EnrollCommand />

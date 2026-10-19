@@ -1,13 +1,12 @@
 import type { ShareId, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { Plus } from 'lucide-react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { BookOpen, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AddAgentDialog } from '../../../../agents/add-agent-dialog';
 import { AgentCard, type ListedAgent } from '../../../../agents/agent-card';
 import { ownAgentName } from '../../../../agents/agent-name';
-import { EnrollCommand } from '../../../../agents/enroll-command';
 import { agentMessage } from '../../../../agents/messages';
 import { sharesItHeld } from '../../../../agents/model';
 import { RevokeDialog } from '../../../../agents/revoke-dialog';
@@ -59,6 +58,11 @@ function Agents() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" asChild>
+              <Link to="/agents/guide">
+                <BookOpen strokeWidth={1.75} /> Setup guide
+              </Link>
+            </Button>
             {/* A chat assistant needs the server's AI, so it's offered only then. */}
             {ai?.enabled && (
               <Button variant="secondary" onClick={() => setAdding('app')}>
@@ -81,13 +85,17 @@ function Agents() {
           </p>
         )}
         {sorted?.length === 0 && (
-          <div className="grid gap-2 text-sm text-muted-foreground">
-            <p>
-              You haven’t added an agent yet. In a terminal on the computer it runs on, run this
-              command, then choose Add an agent:
-            </p>
-            <EnrollCommand />
-          </div>
+          <p className="text-sm text-muted-foreground">
+            No agents yet. An agent is a program, like an AI assistant, that reads and writes the
+            pages you share with it.{' '}
+            <Link
+              to="/agents/guide"
+              className="text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-current"
+            >
+              Read the setup guide
+            </Link>{' '}
+            to add your first one.
+          </p>
         )}
         <ul aria-label="Your agents" className="grid gap-3">
           {sorted?.map((agent) => (
