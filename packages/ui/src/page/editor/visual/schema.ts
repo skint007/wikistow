@@ -174,7 +174,8 @@ export const copiedHere = (element: Element) => element.getAttribute('data-copie
  * of text has an `id` of its own. One that's `bare` is written as its literal
  * (`https://…`) where that reads as it: one made of text, and one the page
  * wrote so, not as `<…>` or `[…](…)`. None of these is shown, and only the
- * `id` is copied (`copying`).
+ * `id` is copied (`copying`). Its title isn't shown either: the editor
+ * writes it as `data-title`, and copies as `title`.
  */
 export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
   const schema = prev(ctx);
@@ -196,7 +197,8 @@ export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
         getAttrs: (dom) =>
           dom instanceof HTMLElement && {
             href: dom.getAttribute('href'),
-            title: dom.getAttribute('title'),
+            // The editor's own `<a>` keeps it as `data-title` (`toDOM`).
+            title: dom.getAttribute('title') ?? dom.dataset['title'] ?? null,
             id: pastedLinkId(dom.dataset['link']),
           },
       },
@@ -236,7 +238,11 @@ export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
       const href = String(mark.attrs.href);
       const hint =
         href.startsWith(ATTACHMENT_SCHEME) || href.startsWith('#') ? undefined : linkHint(href);
-      return [String(tag), { ...rest, 'data-hint': hint }];
+      // Its title as data, not `title`, which would show the browser's own tooltip.
+      return [
+        String(tag),
+        { ...rest, title: undefined, 'data-title': mark.attrs.title, 'data-hint': hint },
+      ];
     },
   };
 });
