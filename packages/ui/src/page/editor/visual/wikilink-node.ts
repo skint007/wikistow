@@ -88,7 +88,7 @@ class WikilinkView implements NodeView {
   redraw() {
     const shown = ++this.#shown;
     const link = parseWikilink(this.#source);
-    this.dom.title = this.#source;
+    this.dom.dataset.hint = this.#source;
     this.dom.className = '';
     if (!link) {
       this.dom.replaceChildren(this.#source);
@@ -112,7 +112,8 @@ class WikilinkView implements NodeView {
         break;
       case 'missing':
         text.className = MISSING;
-        text.title = 'No page has this title yet';
+        text.dataset.hint = 'No page has this title yet';
+        text.setAttribute('aria-description', text.dataset.hint);
         break;
       case 'image': {
         const ref = this.#host.attachments().list.find((a) => a.id === view.attachmentId);
@@ -132,7 +133,8 @@ class WikilinkView implements NodeView {
     const hint = `More than one page has this title. ${label} (Alt+Enter).`;
     // A button can't sit inside a link's `<a>`; there Alt+Enter alone opens the chooser.
     if (this.#inLink) {
-      text.title = hint;
+      text.dataset.hint = hint;
+      text.setAttribute('aria-description', hint);
       return;
     }
     const button = document.createElement('button');
@@ -140,7 +142,8 @@ class WikilinkView implements NodeView {
     button.className = ambiguous.chosen ? CHOSEN : CHOOSE;
     button.textContent = ambiguous.chosen ? '✓' : '?';
     button.setAttribute('aria-label', label);
-    button.title = hint;
+    button.setAttribute('aria-keyshortcuts', 'Alt+Enter');
+    button.dataset.hint = hint;
     // Keep the cursor where it is; the click opens the chooser.
     button.addEventListener('mousedown', (event) => event.preventDefault());
     button.addEventListener('click', () => this.#host.links().choose({ key, target }));

@@ -63,7 +63,7 @@ export default function EmojiGrid({
                   key={entry.emoji}
                   type="button"
                   data-pick
-                  title={entry.words}
+                  data-hint={entry.words}
                   aria-label={entry.words}
                   aria-pressed={entry.emoji === current}
                   onClick={() => onPick(entry.emoji)}

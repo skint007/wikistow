@@ -121,7 +121,7 @@ export function BannerPicker({
                 focal: Number(event.target.value),
               })
             }
-            className="w-full accent-primary"
+            className="w-full"
           />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Top</span>

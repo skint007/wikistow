@@ -857,7 +857,8 @@ function Pills({
           return (
             <span
               key={pill.kind}
-              title={pill.kind === 'not-published' ? pill.hint : undefined}
+              data-hint={pill.kind === 'not-published' ? pill.hint : undefined}
+              aria-description={pill.kind === 'not-published' ? pill.hint : undefined}
               className={cn(
                 'rounded-full px-2.5 py-[3px]',
                 style(pill),

@@ -78,6 +78,117 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
+
+  /* Checkboxes, radios and sliders in the theme's colours, not each browser's own. The marks
+   * are shapes, not images: the CSP allows no data: images. */
+  input:is([type='checkbox'], [type='radio'], [type='range']) {
+    appearance: none;
+    margin: 0;
+    cursor: pointer;
+  }
+  input:is([type='checkbox'], [type='radio'], [type='range']):disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  input:is([type='checkbox'], [type='radio']):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* A page's task boxes are disabled because the reader only shows them. */
+  .page-body input[type='checkbox']:disabled {
+    cursor: default;
+    opacity: 1;
+  }
+  input:is([type='checkbox'], [type='radio']) {
+    display: inline-grid;
+    flex-shrink: 0;
+    place-content: center;
+    width: 1rem;
+    height: 1rem;
+    border: 1.5px solid var(--muted-foreground);
+    border-radius: 4px;
+    background: var(--background);
+    vertical-align: -0.125em;
+  }
+  input[type='radio'] {
+    border-radius: 9999px;
+  }
+  input:is([type='checkbox'], [type='radio'])::before {
+    content: '';
+    transform: scale(0);
+    transition: transform 0.1s;
+  }
+  input:is([type='checkbox'], [type='radio']):checked::before {
+    transform: scale(1);
+  }
+  input[type='checkbox']:checked {
+    border-color: var(--primary);
+    background: var(--primary);
+  }
+  input[type='checkbox']::before {
+    width: 0.625rem;
+    height: 0.625rem;
+    background: var(--primary-foreground);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+  }
+  input[type='radio']:checked {
+    border-color: var(--primary);
+  }
+  input[type='radio']::before {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--primary);
+  }
+  input[type='range'] {
+    height: 1rem;
+    background: transparent;
+    outline: none;
+  }
+  /* The ring goes round the thumb, not the whole track. */
+  input[type='range']:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
+  }
+  input[type='range']:focus-visible::-moz-range-thumb {
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px var(--ring);
+  }
+  input[type='range']::-webkit-slider-runnable-track {
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--muted-foreground) 25%, transparent);
+  }
+  input[type='range']::-moz-range-track {
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--muted-foreground) 25%, transparent);
+  }
+  input[type='range']::-moz-range-progress {
+    height: 0.375rem;
+    border-radius: 9999px;
+    background: var(--primary);
+  }
+  input[type='range']::-webkit-slider-thumb {
+    appearance: none;
+    width: 1rem;
+    height: 1rem;
+    margin-top: -0.3125rem;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--primary);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  }
+  input[type='range']::-moz-range-thumb {
+    width: 1rem;
+    height: 1rem;
+    border: 0;
+    border-radius: 9999px;
+    background: var(--primary);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  }
 }
 
 /* Page bodies rendered from Markdown (see page/markdown.tsx). */
