@@ -26,7 +26,7 @@ On Windows, in PowerShell:
 irm https://github.com/skint007/wikistow/releases/latest/download/install.ps1 | iex
 ```
 
-That installs it in `%LOCALAPPDATA%\Programs\wikistow` and adds that folder to your `PATH`. On Windows the CLI only runs `--help` and `--version` so far.
+That installs it in `%LOCALAPPDATA%\Programs\wikistow` and adds that folder to your `PATH`. On Windows the CLI keeps its files in `%APPDATA%\wikistow`, and the passphrase unlocks it: it can't use a secret store there yet.
 
 You can also download your system's binary from the [latest release](https://github.com/skint007/wikistow/releases/latest) and check it against `SHA256SUMS`. On a Mac, a binary downloaded in a browser won't run until you run `xattr -d com.apple.quarantine` on it; the install script doesn't need that. Systems without glibc, such as Alpine, can run `node wikistow.mjs` from the release's `wikistow-cli-<version>.tar.gz` on Node.js 26 or newer.
 

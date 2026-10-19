@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Features
 
-- The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`. On Windows it only shows its help so far.
+- The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`.
 
 ### Changes
 
@@ -18,6 +18,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The browser can remember the vault unlock, off by default: **Remember on this browser** on the unlock page, or **Remember unlock** in Settings → Security. Later visits and new tabs then open the vault without the passphrase, from a copy of the vault key sealed in `localStorage` (`wikistow.vault`) under the tab unlock's wrapping key. Locking, signing out or a passphrase change made anywhere forgets it. (#124)
 - Fields that aren’t credentials, such as folder and space names, renames, search, page titles and the people picker, tell browsers and password managers to leave them alone: `autocomplete="off"` plus the 1Password, LastPass, Bitwarden and Dashlane ignore hints. `Input` adds them unless the field is a password or has a real `autocomplete`, so sign-in, account, passphrase and two-factor fields are unchanged. The admin SMTP password and AI API key get the hints too. Bitwarden reads its hint only when its user turns on “Allow websites to exclude fields to autofill”. (#125)
 - Hover hints are themed tooltips in the popover colours, in place of the browser's own `title` tooltips. Any element gets one with a `data-hint` attribute, shown by one `HintLayer` at the app root; the visual editor toolbar's dark tooltips use it too. Checkboxes, radio buttons and sliders (the publish dialog's attachments, the invitation role, the banner's focal point, task lists) are drawn in the theme's colours. (#131)
+
+#### CLI
+
+- The CLI runs natively on Windows. It keeps its files in `%APPDATA%\wikistow`, where the user profile's permissions keep other users out, so it checks no Unix owners or modes there. On Windows, `--passphrase-fd` takes only `0` (standard input), `--secret-store` isn't supported yet, and messages print as UTF-8. (#130)
+- `wikistow agent enroll` exits once it's done. On every system, it used to keep running after a successful enroll until Ctrl+C. `--passphrase-fd 0` is refused with `--file -` or `agent enroll`, which read standard input too. (#130)
 
 #### Releases and packaging
 

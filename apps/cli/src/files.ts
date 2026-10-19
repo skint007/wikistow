@@ -18,15 +18,30 @@ import {
   type Stats,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 import { CliError } from './exit.ts';
+
+/**
+ * Windows has no Unix owners or modes to check. There the CLI's files sit
+ * in the user's profile, which only that user (with SYSTEM and the
+ * administrators) can open by default.
+ */
+export const WINDOWS = process.platform === 'win32';
 
 /**
  * Where the CLI keeps its files: `$XDG_CONFIG_HOME/wikistow`, or
  * `~/.config/wikistow` when that is unset or not an absolute path, as the
- * XDG spec says. Neither variable holds a secret: only where to look.
+ * XDG spec says. On Windows, `%APPDATA%\wikistow`. None of these variables
+ * holds a secret: only where to look.
  */
 export function configDir(env: Readonly<Record<string, string | undefined>>): string {
+  if (WINDOWS) {
+    const appData = env.APPDATA;
+    if (!appData || !win32.isAbsolute(appData)) {
+      throw new CliError('usage', 'Set APPDATA to an absolute path');
+    }
+    return win32.join(appData, 'wikistow');
+  }
   const xdg = env.XDG_CONFIG_HOME;
   if (xdg?.startsWith('/')) return join(xdg, 'wikistow');
   const home = env.HOME;
@@ -40,12 +55,13 @@ const uid = () => process.getuid?.() ?? -1;
 
 // Refuse anything a symlink, another user, or a group or world bit could
 // let someone else read or swap: the key file's protection is only as good
-// as the directory it sits in.
+// as the directory it sits in. On Windows, only the link and kind.
 function requirePrivate(path: string, stats: Stats, kind: 'directory' | 'file'): void {
   const isKind = kind === 'directory' ? stats.isDirectory() : stats.isFile();
   if (stats.isSymbolicLink() || !isKind) {
     throw new CliError('locked', `${path} is not a plain ${kind}; refusing to use it`);
   }
+  if (WINDOWS) return;
   if (stats.uid !== uid()) {
     throw new CliError('locked', `${path} belongs to another user; refusing to use it`);
   }
@@ -118,7 +134,7 @@ export function checkPrivateDir(dir: string): void {
     );
   }
   requirePrivate(dir, stats, 'directory');
-  checkAncestors(dir);
+  if (!WINDOWS) checkAncestors(dir);
 }
 
 /**
@@ -178,6 +194,8 @@ export function writePrivateFile(path: string, bytes: Uint8Array): void {
     rmSync(temporary, { force: true });
     throw error;
   }
+  // Windows refuses to flush a directory (EPERM); NTFS journals the rename itself.
+  if (WINDOWS) return;
   const dirFd = openSync(dir, 'r');
   try {
     fsyncSync(dirFd);

@@ -1,6 +1,7 @@
 // What `wikistow skill` prints: a SKILL.md, in the Agent Skills format, for
 // an agent's harness. It holds how this agent should behave, and leaves the
-// commands themselves to --help, so the two can't drift apart.
+// commands themselves to --help, so the two can't drift apart. It stays
+// ASCII: Windows' help saves it with PowerShell's Out-File -Encoding ascii.
 import { VERSION } from './help.ts';
 
 export const SKILL = `---

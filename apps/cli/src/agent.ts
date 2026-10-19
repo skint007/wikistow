@@ -14,7 +14,7 @@ import {
 import { systemRoutes } from '@wikistow/contracts';
 import { join } from 'node:path';
 import { CliError } from './exit.ts';
-import { configDir, readPrivateFile } from './files.ts';
+import { configDir, readPrivateFile, WINDOWS } from './files.ts';
 import type { Io } from './io.ts';
 import { Journal } from './journal.ts';
 import { openKeyFile, parseKeyFile, type KeyFile, type Secrets, type Unlock } from './keyfile.ts';
@@ -106,7 +106,9 @@ export async function unlockSecret(
   if (passphrase === null) {
     throw new CliError(
       'locked',
-      'No terminal to ask for the passphrase; pass --passphrase-fd or configure a secret store',
+      WINDOWS
+        ? 'No terminal to ask for the passphrase; pass --passphrase-fd 0'
+        : 'No terminal to ask for the passphrase; pass --passphrase-fd or configure a secret store',
     );
   }
   return { kind: 'passphrase', passphrase };

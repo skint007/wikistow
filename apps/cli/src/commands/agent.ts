@@ -25,7 +25,7 @@ import {
   type UnlockOptions,
 } from '../agent.ts';
 import { classify, CliError, EXIT } from '../exit.ts';
-import { configDir, ensurePrivateDir, writePrivateFile } from '../files.ts';
+import { configDir, ensurePrivateDir, WINDOWS, writePrivateFile } from '../files.ts';
 import type { Io, Printer } from '../io.ts';
 import { JOURNAL_DIR } from '../journal.ts';
 import {
@@ -71,7 +71,13 @@ async function newPassphrase(io: Io, unlock: UnlockOptions): Promise<string> {
   }
   const first = await io.askSecret('New passphrase for the agent key file: ');
   if (first === null) {
-    throw new CliError('locked', 'No terminal to ask for a passphrase; pass --passphrase-fd');
+    // On Windows the passphrase can't come from a descriptor here (`unlockOf`).
+    throw new CliError(
+      'locked',
+      WINDOWS
+        ? 'No terminal to ask for a passphrase; run agent enroll in a terminal'
+        : 'No terminal to ask for a passphrase; pass --passphrase-fd',
+    );
   }
   checkNewPassphrase(first);
   const again = await io.askSecret('The same passphrase again: ');
@@ -171,7 +177,7 @@ export async function enroll(
     throw new CliError(
       'usage',
       `This CLI is already enrolled (${dir} holds ${left.join(', ')}); ` +
-        `to enroll again, move the whole directory away, for example mv ${dir} ${dir}.old`,
+        `to enroll again, move the whole directory away, for example mv "${dir}" "${dir}.old"`,
     );
   }
   const passphrase = await newPassphrase(io, unlock);

@@ -2,6 +2,7 @@
 // standard streams and a few environment values. Tests pass their own.
 import { forTerminal, isUtf8Locale, toAsciiJson } from '@wikistow/client';
 import type { Failure } from './exit.ts';
+import { WINDOWS } from './files.ts';
 
 export interface Io {
   readonly stdout: { write(text: string): void; readonly isTTY: boolean };
@@ -9,8 +10,8 @@ export interface Io {
   writeStdout(bytes: Uint8Array): Promise<void>;
   readonly stderr: { write(text: string): void };
   /**
-   * Only where to look and how to print: `XDG_CONFIG_HOME`, `HOME` and the
-   * locale. The CLI never takes a secret from the environment.
+   * Only where to look and how to print: `XDG_CONFIG_HOME`, `HOME`,
+   * `APPDATA` and the locale. The CLI never takes a secret from the environment.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** All of standard input, for `--file -`. */
@@ -43,7 +44,8 @@ export class Printer {
   constructor(io: Io, { json }: { json: boolean }) {
     this.#io = io;
     this.json = json;
-    this.#utf8 = isUtf8Locale(io.env);
+    // Windows has no locale variables, and its consoles show Unicode.
+    this.#utf8 = WINDOWS || isUtf8Locale(io.env);
   }
 
   /** A foreign string, escaped for this terminal's encoding. */
