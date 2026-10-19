@@ -171,7 +171,7 @@ export async function enroll(
     throw new CliError(
       'usage',
       `This CLI is already enrolled (${dir} holds ${left.join(', ')}); ` +
-        `to enroll again, move the whole directory away, for example mv ${dir} ${dir}.old`,
+        `to enroll again, move the whole directory away, for example mv "${dir}" "${dir}.old"`,
     );
   }
   const passphrase = await newPassphrase(io, unlock);
