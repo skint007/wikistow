@@ -155,10 +155,16 @@ ${
                    and every directory above it, must be root's and writable
                    by nobody else: the CLI runs it before it can check anything`
 }
---fingerprint-answer-from-stdin
+${
+  WINDOWS
+    ? `--fingerprint-answer-from-stdin
+                   not on Windows, where enroll asks for the passphrase on
+                   the terminal, so standard input is one`
+    : `--fingerprint-answer-from-stdin
                    take the yes from standard input when it isn't a terminal.
                    Only for a person who compares the fingerprint and types
-                   the answer through a pipe: a program must never answer it
+                   the answer through a pipe: a program must never answer it`
+}
 
 ${
   WINDOWS
@@ -181,9 +187,13 @@ The same as agent status.
 `,
   'agent secret-store': `Usage: wikistow agent secret-store enable|disable [--secret-tool PATH]
 
-enable keeps an unlock secret in the Secret Service (asking for the
+${
+  WINDOWS
+    ? `Not on Windows yet: there, the passphrase unlocks the agent.`
+    : `enable keeps an unlock secret in the Secret Service (asking for the
 passphrase first); disable removes it, so only the passphrase unlocks the
-agent. See agent enroll --help.
+agent. See agent enroll --help.`
+}
 `,
   skill: `Usage: wikistow skill
 
