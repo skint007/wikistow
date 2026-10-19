@@ -12,6 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Chrome, Edge and other Chromium browsers on a Mac use Cmd+K for search, and the visual editor's toolbar names Cmd shortcuts there, as Safari and Firefox already did. (#140)
 - The Agents page's description takes the page's width, with its buttons in a row below. (#140)
 - A link with a title no longer shows the browser’s own tooltip in the visual editor, beside the desktop app’s hint. The title stays in the page and in what you copy. (#142)
+- Moving a page or folder can skip its confirmation: **Don’t ask again** on that step turns it off on this browser or computer, and Settings → Pages → Ask before moving turns it back on. A drop in the sidebar then moves at once, and Move… moves once a place is picked. (#143)
 
 #### CLI
 
