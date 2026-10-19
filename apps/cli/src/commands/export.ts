@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { CliError } from '../exit.ts';
+import { WINDOWS } from '../files.ts';
 import type { Io, Printer } from '../io.ts';
 import type { Deps } from './agent.ts';
 import { spaceOfFolder, withAgent, type ContentArgs } from './content.ts';
@@ -92,9 +93,11 @@ export class OutDir {
 
   constructor(given: string) {
     const full = resolve(given);
-    // `link/` would have the system follow the link.
-    const written = given.replace(/(?<=.)\/+$/, '');
-    const name = written.slice(written.lastIndexOf('/') + 1);
+    // `link/` would have the system follow the link. Windows takes `\` as a separator too.
+    const written = given.replace(WINDOWS ? /(?<=.)[\\/]+$/ : /(?<=.)\/+$/, '');
+    const name = written.slice(
+      Math.max(written.lastIndexOf('/'), WINDOWS ? written.lastIndexOf('\\') : -1) + 1,
+    );
     // The system's own reading: Node's `realpathSync` takes `..` as written first.
     const real = realpathSync.native;
     let path: string;
@@ -128,16 +131,19 @@ export class OutDir {
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
       throw new CliError('usage', `${path} is not a directory`);
     }
-    // Whose it is first: another user's may not even be readable.
-    if (stats.uid !== (process.getuid?.() ?? -1)) {
-      throw new CliError('usage', `${path} belongs to another user: give --out one of your own`);
-    }
-    if ((stats.mode & 0o077) !== 0) {
-      const mode = (stats.mode & 0o777).toString(8);
-      throw new CliError(
-        'usage',
-        `${path} has mode ${mode}, which lets others in; run chmod 700 on it`,
-      );
+    // Windows has no owners or modes to check (`files.ts`).
+    if (!WINDOWS) {
+      // Whose it is first: another user's may not even be readable.
+      if (stats.uid !== (process.getuid?.() ?? -1)) {
+        throw new CliError('usage', `${path} belongs to another user: give --out one of your own`);
+      }
+      if ((stats.mode & 0o077) !== 0) {
+        const mode = (stats.mode & 0o777).toString(8);
+        throw new CliError(
+          'usage',
+          `${path} has mode ${mode}, which lets others in; run chmod 700 on it`,
+        );
+      }
     }
     let entries: string[];
     try {

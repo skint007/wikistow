@@ -9,8 +9,8 @@ export interface Io {
   writeStdout(bytes: Uint8Array): Promise<void>;
   readonly stderr: { write(text: string): void };
   /**
-   * Only where to look and how to print: `XDG_CONFIG_HOME`, `HOME` and the
-   * locale. The CLI never takes a secret from the environment.
+   * Only where to look and how to print: `XDG_CONFIG_HOME`, `HOME`,
+   * `APPDATA` and the locale. The CLI never takes a secret from the environment.
    */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** All of standard input, for `--file -`. */

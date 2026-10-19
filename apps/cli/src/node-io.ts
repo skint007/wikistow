@@ -9,6 +9,7 @@ import type { Io } from './io.ts';
 const ENV_NAMES = [
   'XDG_CONFIG_HOME',
   'HOME',
+  'APPDATA',
   'LC_ALL',
   'LC_CTYPE',
   'LANG',
