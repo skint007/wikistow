@@ -43,7 +43,7 @@ import { meQuery } from '../api';
 import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
-import { desktop, desktopUpdateQuery } from '../desktop';
+import { desktop, desktopUpdateQuery, linkHint } from '../desktop';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
@@ -552,7 +552,13 @@ function UpdateEntry({ update }: { update: DesktopUpdate }) {
         <span className="block">{route.how}</span>
       </DropdownMenuLabel>
       <DropdownMenuItem asChild>
-        <a href={update.url} target="_blank" rel="noreferrer" aria-describedby={about}>
+        <a
+          href={update.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-describedby={about}
+          data-hint={linkHint(update.url)}
+        >
           <ExternalLink strokeWidth={1.75} /> {route.link}
         </a>
       </DropdownMenuItem>
