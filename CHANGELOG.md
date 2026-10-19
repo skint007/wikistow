@@ -12,6 +12,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Chrome, Edge and other Chromium browsers on a Mac use Cmd+K for search, and the visual editor's toolbar names Cmd shortcuts there, as Safari and Firefox already did. (#140)
 - The Agents page's description takes the page's width, with its buttons in a row below. (#140)
 
+#### CLI
+
+- Messages print paths as they are, so on Windows they show `C:\Users\me\AppData\Roaming\wikistow`, not every backslash doubled. Paths and other text the user gave the CLI are no longer escaped; server text, decrypted content and system errors still are, and `--json` is unchanged. (#129)
+
 ## 0.13.0 - 2026-10-19
 
 ### Highlights

@@ -31,9 +31,10 @@ export interface Io {
 
 /**
  * Everything the CLI prints. Text it didn't write (server text, decrypted
- * content, typed input) goes through `foreign`, and `--json` goes through
- * `toAsciiJson`, so nothing it prints can carry a terminal escape (protocol
- * section 9.3).
+ * content) goes through `foreign`, and `--json` goes through `toAsciiJson`,
+ * so nothing it prints can carry a terminal escape (protocol section 9.3).
+ * What the user gave it, such as a path, prints as it is: escaped, every
+ * backslash in a Windows path would show doubled.
  */
 export class Printer {
   readonly json: boolean;
@@ -117,11 +118,9 @@ export class Printer {
       );
       return;
     }
-    // A message may hold a path, which came from the environment.
+    // The message is the CLI's own, with any path in it as given; the reason is foreign.
     const reason = failure.reason ? ` (${this.foreign(failure.reason)})` : '';
-    this.note(
-      `wikistow: ${this.foreign(failure.message)}${reason} [${this.foreign(failure.code)}]`,
-    );
+    this.note(`wikistow: ${failure.message}${reason} [${this.foreign(failure.code)}]`);
     if (failure.detail) {
       for (const [name, value] of Object.entries(failure.detail)) {
         this.note(`  ${name}: ${this.foreign(String(value))}`);

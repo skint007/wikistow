@@ -59,7 +59,7 @@ export async function exportMarkdown(
   const { pages, attachments, skipped, unread } = summary;
   out.result({ out: args.out, pages, attachments, skipped, unread }, () => {
     const files = `${pages.length} page${pages.length === 1 ? '' : 's'} and ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`;
-    out.line(`Exported ${files} to ${out.foreign(args.out)}`);
+    out.line(`Exported ${files} to ${args.out}`);
     for (const item of skipped) {
       if (!('attachmentId' in item)) {
         out.note(`Left out page ${item.pageId}: it couldn't be opened`);

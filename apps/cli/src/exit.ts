@@ -30,7 +30,8 @@ export type ExitStatus = (typeof EXIT)[keyof typeof EXIT];
 
 /**
  * The CLI's own failures, each with a code for `--json`. Their messages
- * are the CLI's own text, except where noted at the throw.
+ * are the CLI's own text, printed as they are: literals, checked IDs, and
+ * what the user gave it, such as paths. Never server or library text.
  */
 export type CliErrorCode =
   | 'usage'
@@ -118,7 +119,7 @@ export class ChangeMayHaveHappened extends Error {
 export type Failure = {
   exit: ExitStatus;
   code: string;
-  /** The CLI's own words. */
+  /** The CLI's own words, printed as they are (`CliError`). */
   message: string;
   /** The change may have been made: see `ChangeMayHaveHappened`. */
   outcomeUnknown?: true;
