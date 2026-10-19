@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - The command-line client is one file for Linux, macOS and Windows, with nothing else to install. Install or update it with `curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh`, or on Windows with `install.ps1`.
+- In the desktop app, hovering a link shows where it goes: its address, or the page's name for a link to another page.
 
 ### Changes
 
@@ -18,6 +19,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The browser can remember the vault unlock, off by default: **Remember on this browser** on the unlock page, or **Remember unlock** in Settings → Security. Later visits and new tabs then open the vault without the passphrase, from a copy of the vault key sealed in `localStorage` (`wikistow.vault`) under the tab unlock's wrapping key. Locking, signing out or a passphrase change made anywhere forgets it. (#124)
 - Fields that aren’t credentials, such as folder and space names, renames, search, page titles and the people picker, tell browsers and password managers to leave them alone: `autocomplete="off"` plus the 1Password, LastPass, Bitwarden and Dashlane ignore hints. `Input` adds them unless the field is a password or has a real `autocomplete`, so sign-in, account, passphrase and two-factor fields are unchanged. The admin SMTP password and AI API key get the hints too. Bitwarden reads its hint only when its user turns on “Allow websites to exclude fields to autofill”. (#125)
 - Hover hints are themed tooltips in the popover colours, in place of the browser's own `title` tooltips. Any element gets one with a `data-hint` attribute, shown by one `HintLayer` at the app root; the visual editor toolbar's dark tooltips use it too. Checkboxes, radio buttons and sliders (the publish dialog's attachments, the invitation role, the banner's focal point, task lists) are drawn in the theme's colours. (#131)
+- In the desktop app, which has no status bar, a link's hint says where it goes: the address of a link in the reader or the visual editor, or of What’s new's release link and the update link, cut short past 200 characters and wrapping after a slash; a wikilink in the reader gives the page's name (and heading). Footnotes and other `#` links in the page, and attachments, get none. A browser shows its own status bar, so it gets no hint. (#133)
 
 #### CLI
 
