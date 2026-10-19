@@ -34,11 +34,8 @@ export const WINDOWS = process.platform === 'win32';
  * XDG spec says. On Windows, `%APPDATA%\wikistow`. None of these variables
  * holds a secret: only where to look.
  */
-export function configDir(
-  env: Readonly<Record<string, string | undefined>>,
-  windows = WINDOWS,
-): string {
-  if (windows) {
+export function configDir(env: Readonly<Record<string, string | undefined>>): string {
+  if (WINDOWS) {
     const appData = env.APPDATA;
     if (!appData || !win32.isAbsolute(appData)) {
       throw new CliError('usage', 'Set APPDATA to an absolute path');
