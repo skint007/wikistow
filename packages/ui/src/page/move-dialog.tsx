@@ -1,11 +1,12 @@
 import {
   moveOperations,
+  type ClientContext,
   type FolderId,
   type PageId,
   type SpaceId,
   type spaceOperations,
 } from '@wikistow/client';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { failedToLoad, LoadFailed } from '@/components/load-failed';
 import { Name, plainText } from '@/components/name';
@@ -24,6 +25,7 @@ import { runCommand } from '../commands/command';
 import { moveNode } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { refreshAccess, spacesQuery, treeQuery } from '../data/queries';
+import { THIS_DEVICE } from '../settings/rows';
 import { PreviewTree } from '../sharing/first-share';
 import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
@@ -31,6 +33,7 @@ import { useOwnerStanding } from '../sharing/owner-standing';
 import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
+import { askBeforeMoves, useAskBeforeMoves } from './ask-before-moves';
 import { moveMessage } from './messages';
 import { moveDestinations, type Destination } from './move-model';
 
@@ -44,6 +47,11 @@ export type Moving = {
   kind: 'folder' | 'page';
   name: string;
   to?: Destination<FolderId>;
+  /**
+   * Why a move made without asking stopped, for the dialog it opens on:
+   * something changed meanwhile, or what went wrong.
+   */
+  stopped?: 'stale' | { error: string };
 };
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -107,6 +115,45 @@ export function MoveDialog({
     </Dialog>
   );
 }
+
+/**
+ * Start a move whose place is already chosen, as a drop's is. With asking
+ * before moves turned off it goes ahead at once, and `open`s the dialog only
+ * when there is something to see there: the progress of a move that changes
+ * keys, or why one stopped. Otherwise it opens the dialog to confirm.
+ */
+export function useStartMove(spaceId: SpaceId, open: (moving: Moving) => void) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  return async (moving: Moving & { to: Destination<FolderId> }) => {
+    if (askBeforeMoves.get()) return open(moving);
+    try {
+      const preview = await moveOperations.previewMove(ctx, {
+        spaceId,
+        nodeId: moving.id,
+        parentId: moving.to.parentId,
+      });
+      // Rewrapping can take a while: the dialog shows how far it has got.
+      if (preview.crossing) return open(moving);
+      await runCommand(moveNode, { preview }, { satisfies: requirementsHere(), ctx });
+      await refreshMoved(queryClient, ctx);
+    } catch (caught) {
+      if (!isStale(caught))
+        return open({ ...moving, stopped: { error: moveMessage(caught, moving.kind) } });
+      // The dialog works it out again, never sent unseen.
+      void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      open({ ...moving, stopped: 'stale' });
+    }
+  };
+}
+
+// What a move changes: who has access to what, and where pages are.
+const refreshMoved = (queryClient: QueryClient, ctx: ClientContext) =>
+  Promise.all([
+    refreshAccess(queryClient, ctx),
+    queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] }),
+    queryClient.invalidateQueries({ queryKey: [PLAIN, 'history'] }),
+  ]);
 
 // Choosing where it goes, then confirming; Back keeps the choice.
 function MoveSteps({
@@ -245,7 +292,13 @@ const REACH: Record<moveOperations.Reach, string> = {
   published: 'published versions',
 };
 
-// Who gains and who loses, worked out afresh: it is what the person confirms.
+const CHANGED = 'Something changed meanwhile. Check the move again, then confirm.';
+
+/**
+ * Who gains and who loses, worked out afresh: it is what the person
+ * confirms. With asking before moves turned off, it moves as soon as it's
+ * worked out, unless a move made without asking stopped already.
+ */
 function ConfirmMove({
   spaceId,
   moving,
@@ -264,7 +317,15 @@ function ConfirmMove({
   const { busy, error, run } = useAction((caught) => moveMessage(caught, moving.kind));
   // How far the rewrapping has got, once the server has counted what moves.
   const [progress, setProgress] = useState<{ records: number; total: number | null } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState(moving.stopped === 'stale' ? CHANGED : null);
+  const [earlier, setEarlier] = useState(
+    typeof moving.stopped === 'object' ? moving.stopped.error : null,
+  );
+  const asking = useAskBeforeMoves();
+  const [dontAsk, setDontAsk] = useState(false);
+  // As it was when this step opened, so Don't ask again doesn't move it too.
+  const [auto] = useState(() => !askBeforeMoves.get() && moving.stopped === undefined);
+  const tried = useRef(false);
   const preview = useQuery({
     queryKey: [PLAIN, 'move-preview', spaceId, moving.id, destination.parentId],
     queryFn: () =>
@@ -297,10 +358,12 @@ function ConfirmMove({
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const spaceName = nameOf(tree?.space?.metadata) ?? 'this space';
 
-  const move = (confirmed: moveOperations.MovePreview) =>
-    run(async () => {
+  const move = (confirmed: moveOperations.MovePreview) => {
+    tried.current = true;
+    return run(async () => {
       setProgress(confirmed.crossing ? { records: 0, total: null } : null);
       setNotice(null);
+      setEarlier(null);
       try {
         await runCommand(
           moveNode,
@@ -318,18 +381,19 @@ function ConfirmMove({
           preview.refetch(),
           queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
         ]);
-        setNotice('Something changed meanwhile. Check the move again, then confirm.');
+        setNotice(CHANGED);
         return;
       } finally {
         setProgress(null);
       }
-      await Promise.all([
-        refreshAccess(queryClient, ctx),
-        queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] }),
-        queryClient.invalidateQueries({ queryKey: [PLAIN, 'history'] }),
-      ]);
+      await refreshMoved(queryClient, ctx);
       onDone();
     });
+  };
+  const movable = shown !== undefined && !preview.isError && unreadable === 0;
+  useEffect(() => {
+    if (auto && movable && !tried.current) void move(shown);
+  });
 
   return (
     <div className="grid gap-4">
@@ -475,7 +539,18 @@ function ConfirmMove({
           Keep this open until it’s done.
         </p>
       )}
-      <ErrorLine error={error} />
+      <ErrorLine error={error ?? earlier} />
+      {asking && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={dontAsk}
+            disabled={busy}
+            onChange={(event) => setDontAsk(event.target.checked)}
+          />
+          Don’t ask again on {THIS_DEVICE.toLowerCase()}
+        </label>
+      )}
       <DialogFooter>
         <Button
           variant="ghost"
@@ -489,8 +564,12 @@ function ConfirmMove({
           Back
         </Button>
         <Button
-          disabled={busy || !shown || preview.isError || unreadable > 0}
-          onClick={() => shown && void move(shown)}
+          disabled={busy || !movable}
+          onClick={() => {
+            if (!movable) return;
+            if (dontAsk) askBeforeMoves.set(false);
+            void move(shown);
+          }}
         >
           Move
         </Button>

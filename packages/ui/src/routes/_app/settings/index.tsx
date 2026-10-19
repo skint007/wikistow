@@ -25,6 +25,7 @@ import { authClient } from '../../../auth/client';
 import { useReauth } from '../../../auth/reauth';
 import { desktop } from '../../../desktop';
 import { errorMessage, unwrap } from '../../../errors';
+import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-moves';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
@@ -41,6 +42,7 @@ const GROUPS: Heading[] = [
   { id: 'account', text: 'Account', level: 2 },
   { id: 'security', text: 'Security', level: 2 },
   { id: 'appearance', text: 'Appearance', level: 2 },
+  { id: 'pages', text: 'Pages', level: 2 },
   { id: 'plugins', text: 'Plugins', level: 2 },
   { id: 'ai', text: 'AI assistant', level: 2 },
 ];
@@ -85,6 +87,9 @@ function Settings() {
             </SettingsGroup>
             <SettingsGroup id="appearance" title="Appearance" note="Follows your account">
               <ThemePicker />
+            </SettingsGroup>
+            <SettingsGroup id="pages" title="Pages" note="Working with pages and folders">
+              <AskBeforeMoves />
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />
@@ -173,6 +178,25 @@ function RememberUnlock() {
     >
       {error && <FormMessage>{error}</FormMessage>}
     </SettingRow>
+  );
+}
+
+/** Whether a move waits on its confirmation step; Don’t ask again there turns it off. */
+function AskBeforeMoves() {
+  const asking = useAskBeforeMoves();
+  return (
+    <SettingRow
+      name="Ask before moving"
+      scope={THIS_DEVICE}
+      state="Before a page or folder moves, shows who gains and loses access, for you to confirm."
+      action={
+        <Switch
+          aria-label="Ask before moving"
+          checked={asking}
+          onCheckedChange={(on) => askBeforeMoves.set(on)}
+        />
+      }
+    />
   );
 }
 
