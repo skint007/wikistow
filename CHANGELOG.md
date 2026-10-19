@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- The web app has a favicon, the desktop app's icon as an SVG. (#137)
+- The web app has a favicon, the desktop app's icon as an SVG, and a 180 px `apple-touch-icon.png` for iPhone and iPad home screens. (#137)
 
 ## 0.13.0 - 2026-10-19
 
