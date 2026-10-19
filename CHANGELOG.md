@@ -4,6 +4,25 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.14.0 - 2026-10-19
+
+### Highlights
+
+#### Features
+
+- Moving a page or folder can skip its confirmation step. Tick **Don’t ask again** on it, and from then on a drop in the sidebar moves at once and Move… moves as soon as you pick a place. The choice is kept per browser or computer; **Ask before moving** in Settings → Pages turns the step back on.
+
+#### Fixes
+
+- Chrome, Edge and other Chromium browsers on a Mac use Cmd+K for search, as Safari and Firefox already did.
+- A link with a title no longer shows the browser’s own tooltip in the visual editor. The title stays in the page and in what you copy.
+- On Windows, the command-line client’s messages show paths with single backslashes, not doubled ones.
+
+#### UI polish
+
+- The web app has its own icon in browser tabs and on iPhone and iPad home screens.
+- The Agents page’s description takes the page’s width, with its buttons in a row below.
+
 ### Changes
 
 #### App
@@ -16,7 +35,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
-- Messages print paths as they are, so on Windows they show `C:\Users\me\AppData\Roaming\wikistow`, not every backslash doubled. Paths and other text the user gave the CLI are no longer escaped; server text, decrypted content and system errors still are, and `--json` is unchanged. (#129)
+- Messages print paths as they are, so on Windows they show `C:\Users\me\AppData\Roaming\wikistow`, not every backslash doubled. Paths and other text the user gave the CLI are no longer escaped; server text, decrypted content and system errors still are, and `--json` is unchanged. (#141)
 
 ## 0.13.0 - 2026-10-19
 
