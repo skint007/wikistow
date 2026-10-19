@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- The web app has a favicon, the desktop app's icon as an SVG. (#137)
+
 ## 0.13.0 - 2026-10-19
 
 ### Highlights
