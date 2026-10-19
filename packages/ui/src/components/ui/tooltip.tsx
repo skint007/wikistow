@@ -35,7 +35,7 @@ const hinted = (event: Event) => origin(event)?.closest<HTMLElement>('[data-hint
 const moves = (scrolled: EventTarget | null, element: HTMLElement) => {
   const root = element.getRootNode();
   const outer = root instanceof ShadowRoot ? root.host : element;
-  return scrolled instanceof Node && scrolled.contains(outer);
+  return scrolled instanceof Node && (scrolled.contains(element) || scrolled.contains(outer));
 };
 
 /**
@@ -52,6 +52,8 @@ export function HintLayer() {
   const [shown, setShown] = useState<Shown | null>(null);
 
   useEffect(() => {
+    const stop = new AbortController();
+    const options = { capture: true, passive: true, signal: stop.signal };
     let target: HTMLElement | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let closedAt = -Infinity;
@@ -85,9 +87,23 @@ export function HintLayer() {
       target = null;
     };
 
-    const over = (event: PointerEvent) => {
+    // Moves and scrolls that stay inside a shadow root, as in CodeMirror, never reach the
+    // document, so a root gets the same listeners once the pointer or focus first gets there.
+    const roots = new WeakSet<ShadowRoot>();
+    const watch = (event: Event) => {
+      const root = origin(event)?.getRootNode();
+      if (!(root instanceof ShadowRoot) || roots.has(root)) return;
+      roots.add(root);
+      root.addEventListener('pointerover', over, options);
+      root.addEventListener('pointerout', out, options);
+      root.addEventListener('scroll', scroll, options);
+    };
+
+    // Events, not pointer events, as a shadow root's listeners are typed.
+    const over = (event: Event) => {
+      watch(event);
       // Touch has no hover; a tap would show a hint over what it opens.
-      if (event.pointerType === 'touch') return;
+      if (!(event instanceof PointerEvent) || event.pointerType === 'touch') return;
       const element = hinted(event);
       if (element === target) return;
       hide();
@@ -96,10 +112,11 @@ export function HintLayer() {
       const warm = performance.now() - closedAt < SKIP_DELAY;
       timer = setTimeout(() => show(element), warm ? 0 : DELAY);
     };
-    const out = (event: PointerEvent) => {
-      if (event.relatedTarget === null) close();
+    const out = (event: Event) => {
+      if (event instanceof PointerEvent && event.relatedTarget === null) close();
     };
     const focusIn = (event: FocusEvent) => {
+      watch(event);
       const element = hinted(event);
       if (!element || !origin(event)?.matches(':focus-visible')) return;
       hide();
@@ -118,8 +135,6 @@ export function HintLayer() {
       target = hinted(event);
     };
 
-    const stop = new AbortController();
-    const options = { capture: true, passive: true, signal: stop.signal };
     document.addEventListener('pointerover', over, options);
     document.addEventListener('pointerout', out, options);
     document.addEventListener('pointerdown', press, options);
