@@ -37,6 +37,7 @@ import {
   withSecretStore,
   type KeyFile,
 } from '../keyfile.ts';
+import { clearByHand, STORE_NAMES, SYSTEM_STORE } from '../secret-store.ts';
 import { LocalState } from '../state.ts';
 
 export type Deps = { makeStore: StoreFactory; send: Fetch; pollMs: number };
@@ -99,7 +100,8 @@ function whoami(ctx: ClientContext, file: KeyFile) {
       shareId,
       drafts,
     })),
-    secretStore: file.secretStore === null ? null : { tool: file.secretStore.tool },
+    secretStore:
+      file.secretStore === null ? null : { tool: file.secretStore.tool, store: SYSTEM_STORE },
   };
 }
 
@@ -110,7 +112,9 @@ function printWhoami(out: Printer, who: ReturnType<typeof whoami>) {
     out.line(`  enrolled: ${out.foreign(who.enrolledAt ?? '(unknown)')}`);
     out.line(`  for person: ${who.person ?? '(unknown)'}`);
     out.line(`  server: ${out.foreign(who.server)}`);
-    out.line(`  unlocks with: ${who.secretStore ? 'secret store' : 'passphrase'}`);
+    out.line(
+      `  unlocks with: ${who.secretStore ? `secret store (${STORE_NAMES[who.secretStore.store]})` : 'passphrase'}`,
+    );
     for (const share of who.shares) {
       out.line(
         `  share ${share.shareId} in space ${share.spaceId}${share.drafts ? ' (drafts)' : ''}`,
@@ -334,8 +338,7 @@ export async function secretStore(
         code: 'secret-not-cleared',
         message:
           'The key file no longer uses the secret store, but its unlock secret is still ' +
-          'there, and opens any older copy of the key file. Remove it with: secret-tool ' +
-          `clear service wikistow account ${file.agentId}`,
+          `there, and opens any older copy of the key file. Remove it ${clearByHand(file.agentId)}`,
         reason: classify(error).message,
       });
     }

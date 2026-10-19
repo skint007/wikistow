@@ -2,7 +2,7 @@
 // into an exit status (`exit.ts`).
 import { AttachmentId, FolderId, PageId, RevisionId, SpaceId } from '@wikistow/contracts';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
-import { cliFetch, secretToolStore, type UnlockOptions } from './agent.ts';
+import { cliFetch, systemSecretStore, type UnlockOptions } from './agent.ts';
 import { enroll, secretStore, status, type Deps } from './commands/agent.ts';
 import {
   attachFile,
@@ -25,7 +25,7 @@ import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { WINDOWS } from './files.ts';
 import { COMMAND_HELP, USAGE, VERSION } from './help.ts';
 import { Printer, type Io } from './io.ts';
-import { DEFAULT_SECRET_TOOL } from './secret-store.ts';
+import { SYSTEM_STORE, systemTool } from './secret-store.ts';
 import { SKILL } from './skill.ts';
 
 type Options = NonNullable<ParseArgsConfig['options']>;
@@ -192,14 +192,13 @@ function unlockOf(values: Values): UnlockOptions {
   };
 }
 
-/** The Secret Service is Linux's; Windows has none for the CLI yet. */
-function noSecretStoreOnWindows(): void {
-  if (WINDOWS) {
-    throw new CliError(
-      'usage',
-      'The secret store isn’t supported on Windows yet: the passphrase unlocks the agent',
-    );
+/** `--secret-tool`: another secret-tool, so only where the store is the Secret Service. */
+function secretToolOf(values: Values): string | null {
+  const tool = optional(values, 'secret-tool');
+  if (tool !== null && SYSTEM_STORE !== 'secret-service') {
+    throw new CliError('usage', '--secret-tool is only for secret-tool on Linux');
   }
+  return tool;
 }
 
 /** The shape of the IDs WikiStow makes: 16 random bytes, base64url. */
@@ -318,7 +317,7 @@ export async function run(
     return EXIT.ok;
   }
   const all: Deps = {
-    makeStore: secretToolStore,
+    makeStore: systemSecretStore,
     send: cliFetch,
     pollMs: 1000,
     ...deps,
@@ -353,17 +352,16 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
   switch (name) {
     case 'agent enroll': {
       const store = values['secret-store'] === true;
-      const tool = optional(values, 'secret-tool');
+      const tool = secretToolOf(values);
       if (tool !== null && !store)
         throw new CliError('usage', '--secret-tool goes with --secret-store');
-      if (store) noSecretStoreOnWindows();
       return enroll(
         io,
         out,
         {
           server: required(values, 'server'),
           unlock: content.unlock,
-          secretTool: store ? (tool ?? DEFAULT_SECRET_TOOL) : null,
+          secretTool: store ? (tool ?? systemTool(io.env)) : null,
           answerFromStdin: values['fingerprint-answer-from-stdin'] === true,
         },
         deps,
@@ -376,14 +374,13 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
       if (first !== 'enable' && first !== 'disable') {
         throw new CliError('usage', 'agent secret-store takes enable or disable');
       }
-      if (first === 'enable') noSecretStoreOnWindows();
       return secretStore(
         io,
         out,
         {
           action: first,
           unlock: content.unlock,
-          secretTool: optional(values, 'secret-tool') ?? DEFAULT_SECRET_TOOL,
+          secretTool: secretToolOf(values) ?? systemTool(io.env),
         },
         deps,
       );

@@ -25,6 +25,7 @@ import {
 } from '@wikistow/client';
 import { AgentId, HumanId, InstallationId } from '@wikistow/contracts';
 import { randomBytes } from 'node:crypto';
+import { win32 } from 'node:path';
 import { z } from 'zod';
 import { CliError } from './exit.ts';
 
@@ -32,8 +33,8 @@ export const KEY_FILE_FORMAT = 1;
 
 /** Where an OS secret store keeps this key file's unlock secret. */
 const StoreWrap = Sealed.extend({
-  /** The `secret-tool` program that reads it, as configured. */
-  tool: z.string().startsWith('/'),
+  /** The program that reads it, as configured: secret-tool, macOS's security or Windows PowerShell. */
+  tool: z.string().refine((tool) => win32.isAbsolute(tool)),
   service: z.literal('wikistow'),
   account: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
 });
