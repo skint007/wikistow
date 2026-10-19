@@ -13,6 +13,15 @@ export const VERSION = packageJson.version;
 const DIR = WINDOWS ? '%APPDATA%\\wikistow' : '~/.config/wikistow';
 const SEP = WINDOWS ? '\\' : '/';
 
+// PowerShell passes text, not bytes, between it and a native program.
+const PIPES = WINDOWS
+  ? `
+In PowerShell, give files by path (--file PATH, --out PATH) and read pages
+with --json: its pipes and > re-encode what they carry (ASCII in Windows
+PowerShell 5.1, so accents become ?, and its > writes UTF-16). cmd's < and
+> are fine.`
+  : '';
+
 const RETRYING = `Retrying a change:
   Give create, draft, attach and publish --idempotency-key KEY, a new KEY for
   each new change. Running the same command again with the same KEY and the
@@ -103,7 +112,7 @@ IDs may start with - or --: one that is no option is taken as an ID where
 one is wanted, and every word after a lone -- is an ID, as in
   wikistow page read --json -- --AbCdEfGhIjKlMnOpQrSt
 
-Secrets are never read from arguments or the environment.
+Secrets are never read from arguments or the environment.${PIPES}
 
 Exit status: 0 done, 1 failed, 2 usage, 3 conflict, 4 not found, 5 locked,
 6 credential revoked, 7 missing keys, 8 trust failure (possibly an attack:
@@ -127,13 +136,6 @@ it. If the links can't be read (Markdown nested thousands deep), the page is
 still saved, with exit status 0: the output says so, and links is null in
 --json. YAML frontmatter is kept byte for byte and ignored; --title sets the
 title.`;
-
-// PowerShell pipes a native program text, not bytes, re-encoded on the way.
-const PIPES = WINDOWS
-  ? `
-In PowerShell, give --file PATH: its pipes re-encode what they carry (as
-ASCII in Windows PowerShell 5.1, so accents become ?). cmd's < FILE is fine.`
-  : '';
 
 const FILE = `--file PATH reads the Markdown from PATH, or from standard input for -.
 It must be UTF-8, and is kept byte for byte, line ends included. A page holds
@@ -445,7 +447,7 @@ Decrypt one attachment of a version and write it to PATH, which must not
 exist yet, or to standard output for - (not a terminal, and not with
 --json). The version is chosen as page read chooses it: the published one,
 the draft with --draft, or --revision. Attachment IDs are listed under
-attachments by page read --json.
+attachments by page read --json.${PIPES}
 `,
   'page history': `Usage: wikistow page history PAGE_ID
 
