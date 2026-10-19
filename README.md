@@ -30,6 +30,8 @@ That installs it in `%LOCALAPPDATA%\Programs\wikistow` and adds that folder to y
 
 You can also download your system's binary from the [latest release](https://github.com/skint007/wikistow/releases/latest) and check it against `SHA256SUMS`. On a Mac, a binary downloaded in a browser won't run until you run `xattr -d com.apple.quarantine` on it; the install script doesn't need that. Systems without glibc, such as Alpine, can run `node wikistow.mjs` from the release's `wikistow-cli-<version>.tar.gz` on Node.js 26 or newer.
 
+The setup guide in WikiStow (**Setup guide** on the Agents page) walks through installing the CLI with these scripts, enrolling it, and handing it to an AI tool, on Linux, macOS and Windows, with your server's address in the enroll command.
+
 ## Run locally
 
 Install Node.js 26 or newer, pnpm 10.34.5, and Docker Compose.
