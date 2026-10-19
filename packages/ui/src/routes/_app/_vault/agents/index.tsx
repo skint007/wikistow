@@ -48,8 +48,8 @@ function Agents() {
   return (
     <section className="h-full min-h-0 overflow-y-auto rounded-card bg-card shadow-card">
       <div className="mx-auto grid w-full max-w-[720px] gap-6 px-11 py-10 max-[899px]:px-[18px] max-[899px]:py-8">
-        <header className="flex flex-wrap items-end gap-3">
-          <div className="grid flex-1 gap-1">
+        <header className="grid gap-3">
+          <div className="grid gap-1">
             <h1 className="text-[32px] leading-tight font-extrabold">Agents</h1>
             <p className="text-sm text-muted-foreground">
               Command-line tools, and assistants in the page chat, that read and write here for you,
