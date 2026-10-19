@@ -1181,7 +1181,7 @@ export async function downloadAttachment(
   writeNewFile(args.out, bytes);
   const attachment = { id: ref.id, name: ref.name, mediaType: ref.mediaType, size: ref.size };
   out.result({ pageId: args.pageId, revisionId: got.revisionId, attachment, out: args.out }, () =>
-    out.line(`Saved ${out.foreign(ref.name)} (${bytes.length} bytes) to ${out.foreign(args.out)}`),
+    out.line(`Saved ${out.foreign(ref.name)} (${bytes.length} bytes) to ${args.out}`),
   );
 }
 
