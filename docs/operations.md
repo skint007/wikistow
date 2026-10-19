@@ -158,7 +158,7 @@ A restore puts everything back as it was at the backup, including changes made o
 
 The apps and the CLI remember the newest records they have seen, so they can catch a server that serves older ones. A restore of an older backup looks the same, so `restore.sh` records the restore, and when the backup was taken, and the server reports it in `/api/installation` as `restore`. A client that sees a restore it hasn't seen before takes what the server serves now as its new starting point instead of refusing, and says so:
 
-- The CLI prints "This server was restored from a backup taken on 2026-10-15 09:30 UTC. Changes made after that are gone." on standard error, once, and carries on. Agents enrolled before the backup was taken don't need to enroll again. One enrolled since is gone from the restored server: move its configuration directory (`~/.config/wikistow`) aside and enroll it again.
+- The CLI prints "This server was restored from a backup taken on 2026-10-15 09:30 UTC. Changes made after that are gone." on standard error, once, and carries on. Agents enrolled before the backup was taken don't need to enroll again. One enrolled since is gone from the restored server: move its configuration directory (`~/.config/wikistow`, or `%APPDATA%\wikistow` on Windows) aside and enroll it again.
 - The browser and the desktop app show the same notice, in local time, to each device that used the server before the restore, until it's dismissed. A device meeting the server for the first time says nothing.
 - A browser tab left open through the restore may report a rollback error. Reloading it fixes that.
 
