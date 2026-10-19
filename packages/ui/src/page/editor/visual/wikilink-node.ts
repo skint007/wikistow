@@ -140,6 +140,7 @@ class WikilinkView implements NodeView {
     button.className = ambiguous.chosen ? CHOSEN : CHOOSE;
     button.textContent = ambiguous.chosen ? '✓' : '?';
     button.setAttribute('aria-label', label);
+    button.setAttribute('aria-keyshortcuts', 'Alt+Enter');
     button.dataset.hint = hint;
     // Keep the cursor where it is; the click opens the chooser.
     button.addEventListener('mousedown', (event) => event.preventDefault());

@@ -71,6 +71,7 @@ class ChooseWidget extends WidgetType {
     button.className = chosen ? 'cm-link-choose cm-link-chosen' : 'cm-link-choose';
     const label = `${chosen ? 'Change' : 'Choose'} which page “${plainText(target)}” means`;
     button.setAttribute('aria-label', label);
+    button.setAttribute('aria-keyshortcuts', 'Alt+Enter');
     button.dataset.hint = `More than one page has this title. ${label} (Alt+Enter).`;
     // Keep the cursor where it is; the click opens the chooser.
     button.addEventListener('mousedown', (event) => event.preventDefault());
