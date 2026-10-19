@@ -4,19 +4,19 @@ import { createFileRoute } from '@tanstack/react-router';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { AddAgentDialog } from '../../../agents/add-agent-dialog';
-import { AgentCard, type ListedAgent } from '../../../agents/agent-card';
-import { ownAgentName } from '../../../agents/agent-name';
-import { EnrollCommand } from '../../../agents/enroll-command';
-import { agentMessage } from '../../../agents/messages';
-import { sharesItHeld } from '../../../agents/model';
-import { RevokeDialog } from '../../../agents/revoke-dialog';
-import { aiStatusQuery } from '../../../ai/session';
-import { agentGroupsQuery, agentsQuery } from '../../../data/queries';
-import { RotateKeysDialog } from '../../../sharing/rotate-keys-dialog';
-import { useClient } from '../../../vault/store';
+import { AddAgentDialog } from '../../../../agents/add-agent-dialog';
+import { AgentCard, type ListedAgent } from '../../../../agents/agent-card';
+import { ownAgentName } from '../../../../agents/agent-name';
+import { EnrollCommand } from '../../../../agents/enroll-command';
+import { agentMessage } from '../../../../agents/messages';
+import { sharesItHeld } from '../../../../agents/model';
+import { RevokeDialog } from '../../../../agents/revoke-dialog';
+import { aiStatusQuery } from '../../../../ai/session';
+import { agentGroupsQuery, agentsQuery } from '../../../../data/queries';
+import { RotateKeysDialog } from '../../../../sharing/rotate-keys-dialog';
+import { useClient } from '../../../../vault/store';
 
-export const Route = createFileRoute('/_app/_vault/agents')({ component: Agents });
+export const Route = createFileRoute('/_app/_vault/agents/')({ component: Agents });
 
 type ShareRef = { spaceId: SpaceId; shareId: ShareId };
 
