@@ -183,7 +183,7 @@ function unlockOf(values: Values): UnlockOptions {
   if (WINDOWS && fd !== null && Number(fd) !== 0) {
     throw new CliError(
       'usage',
-      'On Windows, --passphrase-fd takes only 0, standard input: --passphrase-fd 0 < FILE',
+      'On Windows, --passphrase-fd takes only 0, standard input; see wikistow --help',
     );
   }
   return {
@@ -280,7 +280,23 @@ function parse(argv: readonly string[]) {
   if (key !== null && !changes.includes(name)) {
     throw new CliError('usage', '--idempotency-key is only for create, draft, publish and attach');
   }
-  const content: ContentArgs = { unlock: unlockOf(values), idempotencyKey: key };
+  const unlock = unlockOf(values);
+  if (unlock.passphraseFd === 0) {
+    // Read to its end for the passphrase, standard input has nothing left.
+    if (name === 'agent enroll') {
+      throw new CliError(
+        'usage',
+        'agent enroll reads the fingerprint’s yes from standard input, so not the passphrase',
+      );
+    }
+    if (values.file === '-') {
+      throw new CliError(
+        'usage',
+        '--file - and --passphrase-fd 0 both read standard input; give one of them a file',
+      );
+    }
+  }
+  const content: ContentArgs = { unlock, idempotencyKey: key };
   return { name, help: false, values, positionals, content } as const;
 }
 

@@ -82,11 +82,13 @@ Options for every command:
                             {"error":{"exit":N,"code":"...","message":"...",...}}
 ${
   WINDOWS
-    ? `  --passphrase-fd 0         read the key file's passphrase from standard input:
-                            a file (< file) or a pipe from a secret manager, never
-                            a terminal. Windows passes no other file descriptor, so
-                            it can't go with --file -. Don't write the passphrase
-                            itself in the command (echo ... |): history keeps it`
+    ? `  --passphrase-fd 0         read the key file's passphrase from standard input,
+                            from a file or a secret manager, never a terminal:
+                            Get-Content FILE | wikistow ... in PowerShell (ASCII
+                            only in Windows PowerShell 5.1), wikistow ... < FILE
+                            in cmd. Windows passes no other file descriptor, so
+                            not with --file - or agent enroll. Don't write the
+                            passphrase itself in the command: history keeps it`
     : `  --passphrase-fd N         read the key file's passphrase from file descriptor N:
                             a file (3<file) or a pipe from a secret manager, never
                             a terminal. Don't write the passphrase itself in the
@@ -139,7 +141,7 @@ Enroll this CLI as an agent of a WikiStow person. It prints a lookup code;
 the person enters it under Agents in WikiStow. Both then show the same
 fingerprint: type yes only if they match. Once the person approves, the
 agent's keys and token are kept in ${DIR}${SEP}agent.key, under a
-new passphrase of at least 12 characters (asked twice, or --passphrase-fd).
+new passphrase of at least 12 characters (asked twice${WINDOWS ? '' : ', or --passphrase-fd'}).
 
 --server URL       https, or plain http only to this machine
 ${
