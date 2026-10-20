@@ -142,17 +142,18 @@ export function formatDate(date: Date, format: string, locale?: string): string 
   const pad = (n: number, width = 2) => String(n).padStart(width, '0');
   const name = (options: Intl.DateTimeFormatOptions) => date.toLocaleString(locale, options);
   const hour12 = date.getHours() % 12 || 12;
-  // The ISO week: the one holding this week's Thursday, counted in that Thursday's year.
-  const thursday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  thursday.setDate(thursday.getDate() + 3 - ((date.getDay() + 6) % 7));
+  // The ISO week: the one holding this week's Thursday, counted in that
+  // Thursday's year. In UTC, so a change to summer time can't shift it.
+  const thursday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  thursday.setUTCDate(thursday.getUTCDate() + 3 - ((date.getDay() + 6) % 7));
   const week = Math.ceil(
-    ((thursday.getTime() - new Date(thursday.getFullYear(), 0, 1).getTime()) / 86_400_000 + 1) / 7,
+    ((thursday.getTime() - Date.UTC(thursday.getUTCFullYear(), 0, 1)) / 86_400_000 + 1) / 7,
   );
   return format.replace(DATE_TOKENS, (token, kept?: string) => {
     if (kept !== undefined) return kept;
     switch (token) {
       case 'GGGG':
-        return pad(thursday.getFullYear(), 4);
+        return pad(thursday.getUTCFullYear(), 4);
       case 'YYYY':
         return pad(date.getFullYear(), 4);
       case 'YY':
