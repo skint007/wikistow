@@ -259,6 +259,15 @@ There is no importer. Notes from Obsidian or elsewhere arrive as ordinary Markdo
 
 Use stable IDs for links inside the application. For wikilinks, the encrypted link table holds these IDs. Export writes wikilinks with current titles, so the files open in Obsidian, and copies attachments into a readable directory (see **Export**). *Proposed, not built:* an export option converts wikilinks to relative Markdown paths instead. Preserve plugin syntax as source text rather than claiming it works in the visual editor. The supported subset is validated against representative documents, including pasted Obsidian notes, during the editor milestone.
 
+### Templates
+
+A template is any page in a folder named Templates, in any case, at any depth, so a shared folder can keep its own. Folders inside it sort them. Templates are ordinary pages, written and shared like any other.
+
+- **Making a page.** **New page** has a menu beside it with **New page from template…**, and a folder's menu has **New page from template here**. The dialog lists the space's templates by their folders, and only those of the space it's in. Picking one shows a Title field and a field for each variable.
+- **Variables.** `{{Client name}}` in the template's title, body or properties asks for a value, one field per name whatever its case or spacing, in the order they first appear. `{{Client name|Acme}}` starts the field with Acme. `{{title}}` is the new page's title, `{{me}}` the person's account name, and `{{date}}` and `{{time}}` the day and time, as `2026-10-20` and `14:05`, or in a format: `{{date:dddd D MMMM YYYY}}`, with Moment's tokens and text in square brackets kept. A name holds only letters, digits, spaces, `_` and `-`; anything else in braces, such as `{{#each}}`, stays as written, as does a format on another variable or a default on a built-in one.
+- **The title.** A template title with variables, such as `Meeting {{date}}`, is the suggested title, filled in as the fields are. One without is left empty, since two pages of one title make their wikilinks ambiguous.
+- **What it copies.** The template's draft, or the published version for someone who can only read it: its Markdown with the properties, its cover, and its attachments, encrypted again for the new page's draft. Its other extensions, such as where a published copy came from, stay behind. The app does it all, so the server sees only a new page and its uploads. A page with attachments is made first without them, then saved again with them, since uploads need the page.
+
 ### Export
 
 Status: built (2026-10-08). Export writes what a person or agent can read as Markdown files that open as an Obsidian vault. In the web app, the space menu and each folder's menu have **Export…**, which downloads a zip, for everyone who can read there. The CLI has `wikistow export --out DIR [--space ID] [--folder ID]`.
