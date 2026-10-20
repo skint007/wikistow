@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useTreeChanges } from '../data/tree-changes';
 import { desktopUpdateQuery } from '../desktop';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
@@ -31,7 +32,8 @@ const SlotContext = createContext<Slot | null>(null);
  * move into a drawer behind a top bar. Space pages tell the shell which
  * space is open with `useShellSpace`. A refused sign-out is reported here,
  * not in the rail, so it still shows after the drawer closed. Search opens
- * from the rail, the top bar or `isSearchKey` while the vault is open.
+ * from the rail, the top bar or `isSearchKey` while the vault is open, and
+ * meanwhile trees others change load again (`useTreeChanges`).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [spaceId, setSpace] = useState<SpaceId | null>(null);
@@ -39,6 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const slot = useMemo(() => ({ setSpace, closeDrawer: () => setDrawer(false) }), []);
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
+  useTreeChanges(vault.status === 'unlocked' ? vault.ctx : null);
   const { signOut, failed: signOutFailed } = useSignOut();
   // The avatar's update mark is in the drawer, so the button opening it carries it too.
   const { data: update } = useQuery(desktopUpdateQuery);

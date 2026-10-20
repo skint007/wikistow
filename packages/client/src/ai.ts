@@ -1,6 +1,7 @@
 import { aiRoutes, ApiErrorBody } from '@wikistow/contracts';
 import { z } from 'zod';
 import type { Fetch } from './api/client.ts';
+import { jsonLines } from './json-lines.ts';
 
 /**
  * The AI assistant's client side (wikistow.md, AI assistant). A session
@@ -233,7 +234,7 @@ export function createAiSession({
     };
     update({ messages: [...state.messages, reply] });
     try {
-      for await (const event of events(response, signal)) {
+      for await (const event of jsonLines(response, aiRoutes.AiEvent, signal)) {
         if (signal.aborted) return null;
         switch (event.type) {
           case 'text':
@@ -363,40 +364,4 @@ export function createAiSession({
       });
     },
   };
-}
-
-// The stream's lines as events. A line that isn't one ends it.
-async function* events(response: Response, signal: AbortSignal) {
-  if (!response.body) return;
-  // A reader rather than `for await`, which Safari only has from version 27.
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || signal.aborted) return;
-      buffer += decoder.decode(value, { stream: true });
-      let end: number;
-      while ((end = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, end);
-        buffer = buffer.slice(end + 1);
-        if (line.trim() === '') continue;
-        const event = aiRoutes.AiEvent.safeParse(parseLine(line));
-        if (!event.success) throw new Error('Unreadable AI event');
-        yield event.data;
-      }
-    }
-  } finally {
-    // Leaving early (at `finish`) lets the rest of the stream go.
-    reader.cancel().catch(() => {});
-  }
-}
-
-function parseLine(line: string): unknown {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return undefined;
-  }
 }
