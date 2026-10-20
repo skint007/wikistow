@@ -4,10 +4,11 @@ import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
 
 /**
- * How long changes gather before anyone hears of them: a second after a
- * quiet spell, and longer while they keep coming. An agent making fifty
- * pages then costs an app a tree load every few seconds, not fifty, and
- * a person's other devices stay well inside their fetch limit.
+ * How long changes to a space gather before anyone hears of them: a second
+ * after a quiet spell, and longer while they keep coming. An agent making
+ * fifty pages then costs an app a tree load every few seconds, not fifty,
+ * and a person's other devices stay well inside their fetch limit. Other
+ * spaces keep the quick pace meanwhile.
  */
 const GATHER_MS = 1000;
 const BUSY_GATHER_MS = 3000;
@@ -34,16 +35,40 @@ type Listener = {
 export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Database; log: Log }) {
   const listeners = new Set<Listener>();
   const closing = new AbortController();
-  let gathered = new Set<string>();
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let lastTold = 0;
+  // When each space was last told of, while that is recent.
+  const lastTold = new Map<string, number>();
+  const quick = gathering(GATHER_MS);
+  const busy = gathering(BUSY_GATHER_MS);
 
-  // Each person's streams hear of the gathered spaces they see, or saw.
-  async function tell() {
-    const spaceIds = [...gathered];
-    gathered = new Set();
-    timer = null;
-    lastTold = Date.now();
+  // Spaces gathered for `ms`, then told of together.
+  function gathering(ms: number) {
+    let gathered = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    return {
+      add(spaceId: string) {
+        gathered.add(spaceId);
+        timer ??= setTimeout(() => {
+          const spaceIds = [...gathered];
+          gathered = new Set();
+          timer = null;
+          tell(spaceIds).catch((error: unknown) =>
+            log({
+              level: 'error',
+              event: 'tree-changes-failed',
+              name: error instanceof Error ? error.name : 'unknown',
+            }),
+          );
+        }, ms);
+      },
+      stop: () => timer && clearTimeout(timer),
+    };
+  }
+
+  // Each person's streams hear of the spaces they see, or saw.
+  async function tell(spaceIds: string[]) {
+    const now = Date.now();
+    for (const [id, at] of lastTold) if (now - at >= BUSY_GATHER_MS) lastTold.delete(id);
+    for (const id of spaceIds) lastTold.set(id, now);
     const accounts = new Set([...listeners].map((listener) => listener.accountId));
     await Promise.all(
       [...accounts].map(async (accountId) => {
@@ -103,22 +128,12 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
   return {
     changed: (spaceId: string) => {
       if (listeners.size === 0) return;
-      gathered.add(spaceId);
-      timer ??= setTimeout(
-        () => {
-          tell().catch((error: unknown) =>
-            log({
-              level: 'error',
-              event: 'tree-changes-failed',
-              name: error instanceof Error ? error.name : 'unknown',
-            }),
-          );
-        },
-        Date.now() - lastTold < BUSY_GATHER_MS ? BUSY_GATHER_MS : GATHER_MS,
-      );
+      const told = lastTold.get(spaceId);
+      (told !== undefined && Date.now() - told < BUSY_GATHER_MS ? busy : quick).add(spaceId);
     },
     close: () => {
-      if (timer) clearTimeout(timer);
+      quick.stop();
+      busy.stop();
       closing.abort();
     },
   };

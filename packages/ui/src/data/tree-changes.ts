@@ -2,13 +2,14 @@ import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/cl
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
-import { treeQuery } from './queries';
+import { sharedWithMeQuery, spacesQuery, treeQuery } from './queries';
 
 /**
  * While the vault is open (`ctx`), load a space's tree again when the
  * server says it changed: pages an agent adds, edits from another device
- * or from someone the space is shared with. Only the tree loads again; the
- * page that is open stays as it is. A tab out of view stops listening, so
+ * or from someone the space is shared with. The spaces and shares listed
+ * load again too, for a space renamed, deleted or newly shared. The page
+ * that is open stays as it is. A tab out of view stops listening, so
  * a dozen tabs don't hold a dozen connections, and its trees load again
  * when it is back in view, as every query does (`refetchOnWindowFocus`).
  */
@@ -22,6 +23,8 @@ export function useTreeChanges(ctx: ClientContext | null) {
       signal: stop.signal,
       onChange: (spaceIds) => {
         for (const spaceId of spaceIds) void reloadTree(queryClient, ctx, spaceId);
+        void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
+        void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
       },
       onMissed: () => void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] }),
     });
