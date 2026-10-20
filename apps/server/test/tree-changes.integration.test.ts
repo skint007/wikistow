@@ -79,6 +79,12 @@ it('tells everyone who sees some of a space that its tree changed, and nobody el
     await expect.poll(() => byOutsider.length, SOON).toBeGreaterThan(before);
     expect(new Set(byOutsider)).toEqual(new Set([elsewhere]));
     expect([...byOwner, ...byMember]).not.toContain(elsewhere);
+
+    // Deleting the shared folder shuts the member out, and they still hear
+    // of it, so their sidebar drops it.
+    const memberHeard = byMember.length;
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.shared });
+    await expect.poll(() => byMember.slice(memberHeard), SOON).toContain(lib.spaceId);
   } finally {
     stop.abort();
   }

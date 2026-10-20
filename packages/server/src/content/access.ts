@@ -360,15 +360,16 @@ export type TreeView = {
 };
 
 /**
- * Which of `spaceIds` a person sees some of the tree of, as `treeView`
- * decides for them: they own the space, or are a member of a share in it.
+ * Which spaces, of `spaceIds` or all, a person sees some of the tree of,
+ * as `treeView` decides for them: they own the space, or are a member of
+ * a share in it.
  */
 export async function treesSeenBy(
   db: Database,
   accountId: string,
-  spaceIds: string[],
+  spaceIds?: string[],
 ): Promise<Set<string>> {
-  const identity = spaceIds.length === 0 ? null : await currentIdentity(db, accountId);
+  const identity = spaceIds?.length === 0 ? null : await currentIdentity(db, accountId);
   if (!identity) return new Set();
   const rows = await db
     .select({ spaceId: spaceOwners.spaceId })
@@ -377,7 +378,7 @@ export async function treesSeenBy(
       and(
         eq(spaceOwners.identityId, identity.id),
         isNull(spaceOwners.removedAt),
-        inArray(spaceOwners.spaceId, spaceIds),
+        spaceIds && inArray(spaceOwners.spaceId, spaceIds),
       ),
     )
     .union(
@@ -385,7 +386,12 @@ export async function treesSeenBy(
         .select({ spaceId: shares.spaceId })
         .from(shareMembers)
         .innerJoin(shares, eq(shares.id, shareMembers.shareId))
-        .where(and(eq(shareMembers.identityId, identity.id), inArray(shares.spaceId, spaceIds))),
+        .where(
+          and(
+            eq(shareMembers.identityId, identity.id),
+            spaceIds && inArray(shares.spaceId, spaceIds),
+          ),
+        ),
     );
   return new Set(rows.map((row) => row.spaceId));
 }

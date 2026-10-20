@@ -31,7 +31,8 @@ CREATE TRIGGER "nodes_tree_changed" AFTER INSERT OR UPDATE OR DELETE ON "nodes"
   FOR EACH ROW EXECUTE FUNCTION "wikistow_tree_changed"();
 --> statement-breakpoint
 -- A page's title and status come from its latest draft and published version.
-CREATE TRIGGER "page_heads_tree_changed" AFTER UPDATE OF "draft_head", "published_head" ON "page_heads"
+-- A publication into another space adds its row only with its first version.
+CREATE TRIGGER "page_heads_tree_changed" AFTER INSERT OR UPDATE OF "draft_head", "published_head" ON "page_heads"
   FOR EACH ROW EXECUTE FUNCTION "wikistow_tree_changed"();
 --> statement-breakpoint
 -- Shares the tree marks.

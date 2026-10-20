@@ -4,47 +4,70 @@ import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
 
 /**
- * How long changes gather before anyone hears of them. An agent making
- * fifty pages then costs an app one tree load a second, not fifty.
+ * How long changes gather before anyone hears of them: a second after a
+ * quiet spell, and longer while they keep coming. An agent making fifty
+ * pages then costs an app a tree load every few seconds, not fifty, and
+ * a person's other devices stay well inside their fetch limit.
  */
 const GATHER_MS = 1000;
+const BUSY_GATHER_MS = 3000;
 
-type Listener = { accountId: string; hear: (spaceIds: readonly string[]) => void };
+/**
+ * One open stream. `seen` holds the spaces its person sees some of, as of
+ * the last change to each, so someone a change shuts out still hears of
+ * it, and their sidebar drops what they lost.
+ */
+type Listener = {
+  accountId: string;
+  seen: Set<string>;
+  hear: (spaceIds: readonly string[]) => void;
+};
 
 /**
  * The tree changes stream (`structureRoutes.treeChanges`). `changed` takes
  * a space whose tree changed, as the database names it
- * (`listenForTreeChanges`). A second later, every open stream whose person
- * sees some of that space hears of it, with the others that changed
- * meanwhile. `close` ends every stream, so the server can stop.
+ * (`listenForTreeChanges`). Soon after, every open stream whose person
+ * sees some of that space, or did until this change, hears of it, with the
+ * others that changed meanwhile. `close` ends every stream, so the server
+ * can stop.
  */
 export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Database; log: Log }) {
   const listeners = new Set<Listener>();
   const closing = new AbortController();
   let gathered = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastTold = 0;
 
-  // Each person's streams hear of the gathered spaces they see.
+  // Each person's streams hear of the gathered spaces they see, or saw.
   async function tell() {
     const spaceIds = [...gathered];
     gathered = new Set();
     timer = null;
+    lastTold = Date.now();
     const accounts = new Set([...listeners].map((listener) => listener.accountId));
     await Promise.all(
       [...accounts].map(async (accountId) => {
-        const seen = [...(await treesSeenBy(db, accountId, spaceIds))];
-        if (seen.length === 0) return;
-        for (const listener of listeners) if (listener.accountId === accountId) listener.hear(seen);
+        const seen = await treesSeenBy(db, accountId, spaceIds);
+        for (const listener of listeners) {
+          if (listener.accountId !== accountId) continue;
+          const told = spaceIds.filter((id) => seen.has(id) || listener.seen.has(id));
+          for (const id of spaceIds) {
+            if (seen.has(id)) listener.seen.add(id);
+            else listener.seen.delete(id);
+          }
+          if (told.length > 0) listener.hear(told);
+        }
       }),
     );
   }
 
-  routes.stream(structureRoutes.treeChanges, (_body, { principal, signal }) => {
+  routes.stream(structureRoutes.treeChanges, async (_body, { principal, signal }) => {
     const ended = AbortSignal.any([signal, closing.signal]);
     let heard = new Set<string>();
     let wake: (() => void) | null = null;
     const listener: Listener = {
       accountId: principal.accountId,
+      seen: await treesSeenBy(db, principal.accountId),
       hear(spaceIds) {
         for (const spaceId of spaceIds) heard.add(spaceId);
         wake?.();
@@ -81,15 +104,18 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
     changed: (spaceId: string) => {
       if (listeners.size === 0) return;
       gathered.add(spaceId);
-      timer ??= setTimeout(() => {
-        tell().catch((error: unknown) =>
-          log({
-            level: 'error',
-            event: 'tree-changes-failed',
-            name: error instanceof Error ? error.name : 'unknown',
-          }),
-        );
-      }, GATHER_MS);
+      timer ??= setTimeout(
+        () => {
+          tell().catch((error: unknown) =>
+            log({
+              level: 'error',
+              event: 'tree-changes-failed',
+              name: error instanceof Error ? error.name : 'unknown',
+            }),
+          );
+        },
+        Date.now() - lastTold < BUSY_GATHER_MS ? BUSY_GATHER_MS : GATHER_MS,
+      );
     },
     close: () => {
       if (timer) clearTimeout(timer);
