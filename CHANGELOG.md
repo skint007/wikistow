@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - Pages can start from templates: any page in a folder named Templates. **New page from template…** (beside New page, and in a folder's menu) asks for each `{{variable}}` in it, fills in `{{title}}`, `{{me}}`, `{{date}}` and `{{time}}`, and copies its properties, cover, attachments and links. (#147)
+- The sidebar shows pages and folders as they change elsewhere, within a second or two and with no refresh: what an agent makes, moves, renames or deletes, edits from your other devices, and changes by people you share a space with. The page you’re on stays put. (#150)
 
 ## 0.14.0 - 2026-10-19
 
