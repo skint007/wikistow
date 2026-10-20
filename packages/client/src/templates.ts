@@ -128,21 +128,31 @@ export function fillTemplate(text: string, values: TemplateValues): string {
   });
 }
 
-const DATE_TOKENS = /\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|dddd|ddd|DD|D|HH|H|hh|h|mm|ss|A|a/g;
+const DATE_TOKENS =
+  /\[([^\]]*)\]|GGGG|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|WW|W|HH|H|hh|h|mm|m|ss|s|A|a/g;
 
 /**
- * `date` in local time by `format`, as Moment and Obsidian write them:
- * YYYY YY, MMMM MMM MM M, DD D, dddd ddd, HH H hh h, mm ss, A a. Text in
- * square brackets is kept as written. Month and day names are in `locale`,
- * by default the app's.
+ * `date` in local time by `format`, in these of Moment's tokens, as
+ * Obsidian writes them: YYYY YY, MMMM MMM MM M, Do DD D, dddd ddd dd,
+ * HH H hh h, mm m, ss s, A a, and ISO weeks WW W with their year GGGG.
+ * Text in square brackets is kept as written. Month and day names are in
+ * `locale`, by default the app's; `Do` is English (1st, 2nd).
  */
 export function formatDate(date: Date, format: string, locale?: string): string {
   const pad = (n: number, width = 2) => String(n).padStart(width, '0');
   const name = (options: Intl.DateTimeFormatOptions) => date.toLocaleString(locale, options);
   const hour12 = date.getHours() % 12 || 12;
+  // The ISO week: the one holding this week's Thursday, counted in that Thursday's year.
+  const thursday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  thursday.setDate(thursday.getDate() + 3 - ((date.getDay() + 6) % 7));
+  const week = Math.ceil(
+    ((thursday.getTime() - new Date(thursday.getFullYear(), 0, 1).getTime()) / 86_400_000 + 1) / 7,
+  );
   return format.replace(DATE_TOKENS, (token, kept?: string) => {
     if (kept !== undefined) return kept;
     switch (token) {
+      case 'GGGG':
+        return pad(thursday.getFullYear(), 4);
       case 'YYYY':
         return pad(date.getFullYear(), 4);
       case 'YY':
@@ -159,6 +169,17 @@ export function formatDate(date: Date, format: string, locale?: string): string 
         return name({ weekday: 'long' });
       case 'ddd':
         return name({ weekday: 'short' });
+      case 'dd':
+        return name({ weekday: 'short' }).slice(0, 2);
+      case 'WW':
+        return pad(week);
+      case 'W':
+        return String(week);
+      case 'Do': {
+        const day = date.getDate();
+        const teen = day % 100 >= 11 && day % 100 <= 13;
+        return `${day}${teen ? 'th' : (['th', 'st', 'nd', 'rd'][day % 10] ?? 'th')}`;
+      }
       case 'DD':
         return pad(date.getDate());
       case 'D':
@@ -173,8 +194,12 @@ export function formatDate(date: Date, format: string, locale?: string): string 
         return String(hour12);
       case 'mm':
         return pad(date.getMinutes());
+      case 'm':
+        return String(date.getMinutes());
       case 'ss':
         return pad(date.getSeconds());
+      case 's':
+        return String(date.getSeconds());
       case 'A':
         return date.getHours() < 12 ? 'AM' : 'PM';
       default:

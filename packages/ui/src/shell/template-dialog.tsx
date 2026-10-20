@@ -114,9 +114,10 @@ function ChooseTemplate({
   const id = useId();
   const [pickedId, setPickedId] = useState(templates[0]?.page.id);
   const [filter, setFilter] = useState('');
-  const picked = templates.find((t) => t.page.id === pickedId);
   const needle = filter.trim().toLowerCase();
   const shown = templates.filter((t) => label(t).toLowerCase().includes(needle));
+  // The one picked while the filter shows it, else the first it shows.
+  const picked = shown.find((t) => t.page.id === pickedId) ?? shown[0];
   return (
     <div className="grid gap-4">
       <div className="grid gap-1.5">
@@ -124,6 +125,7 @@ function ChooseTemplate({
         <Input
           id={`${id}-find`}
           placeholder="Find a template"
+          autoFocus
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
         />
@@ -251,7 +253,6 @@ function FillTemplate({
         <Input
           id={`${id}-title`}
           required
-          autoFocus
           maxLength={200}
           value={shownTitle}
           placeholder={plainText(payload.title)}
