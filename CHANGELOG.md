@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Pages can start from templates: any page in a folder named Templates. **New page from template…** (beside New page, and in a folder's menu) asks for each `{{variable}}` in it, fills in `{{title}}`, `{{me}}`, `{{date}}` and `{{time}}`, and copies its properties, cover, attachments and links. (#147)
+
 ## 0.14.0 - 2026-10-19
 
 ### Highlights
