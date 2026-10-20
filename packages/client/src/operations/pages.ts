@@ -15,6 +15,7 @@ import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '.
 import { agentIdentityId } from '../identity.ts';
 import { repairText } from '../json.ts';
 import {
+  LINKS_NAMESPACE,
   linkTableOf,
   withoutLinkTable,
   writeLinks,
@@ -252,8 +253,11 @@ export async function createPage(
  * filled in (`fillTemplate`). It takes the template's cover and its
  * attachments, encrypted again for the new page's draft. Uploading needs
  * the page, so one with attachments is made first without them, and with
- * no image banner or icon, then saved again with them. The template's
- * other extensions, such as where a published copy came from, stay behind.
+ * no image banner or icon, then saved again with them. Its link table
+ * comes too, so a link to a page renamed since the template was saved
+ * still names it: `writeLinks` keeps an entry only for a page this person
+ * sees and everyone who opens the new page can open. The template's other
+ * extensions, such as where a published copy came from, stay behind.
  */
 export async function createFromTemplate(
   ctx: ClientContext,
@@ -272,10 +276,17 @@ export async function createFromTemplate(
   },
 ): Promise<PageId> {
   const source = current(template);
-  const cover = source.extensions[COVER_NAMESPACE];
+  const { [COVER_NAMESPACE]: cover, [LINKS_NAMESPACE]: links } = source.extensions;
   const covered = cover === undefined ? {} : { [COVER_NAMESPACE]: cover };
+  const linked = links === undefined ? {} : { [LINKS_NAMESPACE]: links };
   const made = (extensions: PagePayload['extensions']) =>
-    createPage(ctx, { spaceId, parentId, title, markdown, extensions });
+    createPage(ctx, {
+      spaceId,
+      parentId,
+      title,
+      markdown,
+      extensions: { ...linked, ...extensions },
+    });
   if (source.attachments.length === 0) return made(covered);
   const pageId = await made(
     cover === undefined ? {} : reviseCover(covered, coverLeftBehind(covered, new Set())),
