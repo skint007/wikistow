@@ -10,9 +10,10 @@ type Node = { id: string; parentId: string | null };
 
 /**
  * Every page in a folder named Templates, at any depth, with the names of
- * the folders between it and the outermost such folder, outermost first:
- * `[]` for a page right in it. Sorted by those names, a folder's own pages
- * first, then by title.
+ * the folders it's in, outermost first, but for the outermost Templates
+ * folder: `[]` for a page right in one at the top, `['Family']` for one in
+ * Family/Templates. Sorted by those names, a folder's own pages first,
+ * then by title.
  */
 export function templatesIn<P extends Node & { title: string | null }>(
   folders: readonly (Node & { name: string | null })[],
@@ -20,18 +21,19 @@ export function templatesIn<P extends Node & { title: string | null }>(
 ): { page: P; path: string[] }[] {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
   const pathOf = (parentId: string | null) => {
-    let path: string[] | null = null;
-    const above: string[] = [];
+    // The folders from the page's up, and where the outermost Templates folder is among them.
+    const names: string[] = [];
+    let templates = -1;
     const seen = new Set<string>();
     for (let folder = parentId === null ? undefined : byId.get(parentId); folder;) {
       // A lying tree could loop; a folder seen twice ends the walk.
       if (seen.has(folder.id)) break;
       seen.add(folder.id);
-      if (isTemplatesFolder(folder.name)) path = above.toReversed();
-      above.push(folder.name ?? '');
+      if (isTemplatesFolder(folder.name)) templates = names.length;
+      names.push(folder.name ?? '');
       folder = folder.parentId === null ? undefined : byId.get(folder.parentId);
     }
-    return path;
+    return templates < 0 ? null : names.filter((_, i) => i !== templates).toReversed();
   };
   return pages
     .flatMap((page) => {

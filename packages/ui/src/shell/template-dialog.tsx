@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Picker } from '@/components/ui/picker';
+import { cn } from '@/lib/utils';
 import { meQuery } from '../api';
 import { revisionQuery, searchIndexChanged, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
@@ -96,6 +96,10 @@ export function TemplateDialog({
   );
 }
 
+// A template as listed: the folders it's in, then its title.
+const label = ({ page, path }: Template) =>
+  [...path, page.title?.trim() || 'Untitled'].map(plainText).join(' › ');
+
 function ChooseTemplate({
   spaceId,
   parentId,
@@ -109,21 +113,48 @@ function ChooseTemplate({
 }) {
   const id = useId();
   const [pickedId, setPickedId] = useState(templates[0]?.page.id);
+  const [filter, setFilter] = useState('');
   const picked = templates.find((t) => t.page.id === pickedId);
-  const label = ({ page, path }: Template) =>
-    [...path, page.title?.trim() || 'Untitled'].map(plainText).join(' › ');
+  const needle = filter.trim().toLowerCase();
+  const shown = templates.filter((t) => label(t).toLowerCase().includes(needle));
   return (
     <div className="grid gap-4">
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-template`}>Template</Label>
-        <Picker
-          id={`${id}-template`}
-          label="Template"
-          placeholder="Choose a template"
-          value={picked?.page.id ?? null}
-          options={templates.map((t) => ({ value: t.page.id, label: label(t) }))}
-          onChange={setPickedId}
+        <Label htmlFor={`${id}-find`}>Template</Label>
+        <Input
+          id={`${id}-find`}
+          placeholder="Find a template"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
         />
+        {/* In the dialog's flow, not floating over it, so its scrolling can't cut it off. */}
+        <div
+          role="radiogroup"
+          aria-label="Templates"
+          className="grid max-h-48 gap-0.5 overflow-y-auto rounded-control border border-input p-1"
+        >
+          {shown.length === 0 && (
+            <p className="px-2 py-1.5 text-sm text-muted-foreground">No template matches.</p>
+          )}
+          {shown.map((t) => (
+            <label
+              key={t.page.id}
+              className={cn(
+                'flex cursor-pointer items-center rounded-row px-2 py-1.5 text-sm hover:tint has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ring',
+                t === picked && 'bg-primary-soft text-primary-ink',
+              )}
+            >
+              <input
+                type="radio"
+                name={`${id}-template`}
+                className="sr-only"
+                checked={t === picked}
+                onChange={() => setPickedId(t.page.id)}
+              />
+              <span className="min-w-0 truncate">{label(t)}</span>
+            </label>
+          ))}
+        </div>
       </div>
       {picked && (
         <FillTemplate
@@ -160,6 +191,7 @@ function FillTemplate({
   const [typed, setTyped] = useState<Record<string, string>>({});
   // Until the person types a title, it follows the template's, filled in.
   const [title, setTitle] = useState<string | null>(null);
+  // One time for the title and the page, when the template was picked.
   const [now] = useState(() => new Date());
   const opened = version.data?.opened;
   const payload = opened?.kind === 'current' ? opened.payload : null;
@@ -192,17 +224,22 @@ function FillTemplate({
   async function submit() {
     const name = shownTitle.trim();
     if (!name || !payload) return;
-    const filled = { ...values, title: name, now: new Date() };
+    const filled = { ...values, title: name, now };
     await run(async () => {
-      const pageId = await pageOperations.createFromTemplate(ctx, {
-        spaceId,
-        parentId,
-        template,
-        title: name,
-        markdown: fillTemplate(payload.markdown, filled),
-      });
-      searchIndexChanged(queryClient);
-      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      let pageId: PageId;
+      try {
+        pageId = await pageOperations.createFromTemplate(ctx, {
+          spaceId,
+          parentId,
+          template,
+          title: name,
+          markdown: fillTemplate(payload.markdown, filled),
+        });
+      } finally {
+        // A page whose attachments failed is made all the same, and listed.
+        searchIndexChanged(queryClient);
+        await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      }
       onCreated(pageId);
     });
   }
