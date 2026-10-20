@@ -115,6 +115,8 @@ function ChooseTemplate({
   onCreated: (pageId: PageId) => void;
 }) {
   const id = useId();
+  // Here, so the list stays put while a page is made, and its error stays in view.
+  const action = useAction(errorMessage);
   const [pickedId, setPickedId] = useState(templates[0]?.page.id);
   const [filter, setFilter] = useState('');
   const matching = (text: string) =>
@@ -127,6 +129,7 @@ function ChooseTemplate({
       <div className="grid gap-1.5">
         <Label htmlFor={`${id}-find`}>Template</Label>
         <Input
+          disabled={action.busy}
           id={`${id}-find`}
           placeholder="Find a template"
           autoFocus
@@ -158,11 +161,15 @@ function ChooseTemplate({
               )}
             >
               <input
+                disabled={action.busy}
                 type="radio"
                 name={`${id}-template`}
                 className="sr-only"
                 checked={t === picked}
-                onChange={() => setPickedId(t.page.id)}
+                onChange={() => {
+                  setPickedId(t.page.id);
+                  action.setError(null);
+                }}
               />
               <span className="min-w-0 truncate">{label(t)}</span>
             </label>
@@ -175,6 +182,7 @@ function ChooseTemplate({
           spaceId={spaceId}
           parentId={parentId}
           template={picked}
+          action={action}
           onCreated={onCreated}
         />
       )}
@@ -187,11 +195,13 @@ function FillTemplate({
   spaceId,
   parentId,
   template: { page, head },
+  action: { busy, error, run },
   onCreated,
 }: {
   spaceId: SpaceId;
   parentId: FolderId | null;
   template: Template;
+  action: ReturnType<typeof useAction>;
   onCreated: (pageId: PageId) => void;
 }) {
   const ctx = useClient();
@@ -207,7 +217,6 @@ function FillTemplate({
     ...revisionQuery(ctx, { spaceId, pageId: page.id }, audience, latest ?? head),
     enabled: Boolean(latest),
   });
-  const { busy, error, run } = useAction(errorMessage);
   const [typed, setTyped] = useState<Record<string, string>>({});
   // Until the person types a title, it follows the template's, filled in.
   const [title, setTitle] = useState<string | null>(null);
