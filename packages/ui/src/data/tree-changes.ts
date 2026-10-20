@@ -19,14 +19,20 @@ export function useTreeChanges(ctx: ClientContext | null) {
   useEffect(() => {
     if (!ctx || !visible) return;
     const stop = new AbortController();
+    const reloadLists = () => {
+      void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
+      void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
+    };
     void watchTreeChanges({
       signal: stop.signal,
       onChange: (spaceIds) => {
         for (const spaceId of spaceIds) void reloadTree(queryClient, ctx, spaceId);
-        void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
-        void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
+        reloadLists();
       },
-      onMissed: () => void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] }),
+      onMissed: () => {
+        void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
+        reloadLists();
+      },
     });
     return () => stop.abort();
   }, [ctx, visible, queryClient]);

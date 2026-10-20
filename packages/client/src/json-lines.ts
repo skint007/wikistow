@@ -3,12 +3,15 @@ import type { z } from 'zod';
 /**
  * A stream route's events (`StreamRouteDef`), each line parsed with `event`
  * as it arrives, until the stream ends or `signal` aborts. Blank lines, which
- * keep a quiet stream open, are skipped. A line that isn't an event throws.
+ * keep a quiet stream open, are skipped. A line that isn't an event throws,
+ * as does nothing at all arriving for `quietMs`, if given: a connection
+ * that died unseen, as across a laptop's sleep.
  */
 export async function* jsonLines<S extends z.ZodType>(
   response: Response,
   event: S,
   signal: AbortSignal,
+  quietMs?: number,
 ): AsyncGenerator<z.output<S>> {
   if (!response.body) return;
   // A reader rather than `for await`, which Safari only has from version 27.
@@ -17,7 +20,9 @@ export async function* jsonLines<S extends z.ZodType>(
   let buffer = '';
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await (quietMs === undefined
+        ? reader.read()
+        : withDeadline(reader.read(), quietMs));
       if (done || signal.aborted) return;
       buffer += decoder.decode(value, { stream: true });
       let end: number;
@@ -34,6 +39,14 @@ export async function* jsonLines<S extends z.ZodType>(
     // Leaving early lets the rest of the stream go.
     reader.cancel().catch(() => {});
   }
+}
+
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The stream went quiet')), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 function parseLine(line: string): unknown {

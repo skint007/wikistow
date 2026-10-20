@@ -6,12 +6,15 @@ import { jsonLines } from './json-lines.ts';
 // row that fails, up to the longest.
 const FIRST_PAUSE_MS = 1000;
 const LONGEST_PAUSE_MS = 30_000;
+// The server sends a blank line every 15 seconds; three missed means the
+// connection is gone.
+const QUIET_MS = 45_000;
 
 /**
  * Hear which spaces' trees change (`structureRoutes.treeChanges`) until
  * `signal` aborts: `onChange` gets the spaces each event names. A stream
- * that ends or fails opens again after a pause, and `onMissed` runs once it
- * has: whatever changed meanwhile went unheard.
+ * that ends, fails or goes quiet opens again after a pause, and `onMissed`
+ * runs once it has: whatever changed meanwhile went unheard.
  *
  *   const stop = new AbortController();
  *   void watchTreeChanges({
@@ -46,7 +49,9 @@ export async function watchTreeChanges({
       if (response.ok) {
         pause = FIRST_PAUSE_MS;
         if (dropped) onMissed();
-        for await (const { spaceIds } of jsonLines(response, event, signal)) onChange(spaceIds);
+        for await (const { spaceIds } of jsonLines(response, event, signal, QUIET_MS)) {
+          onChange(spaceIds);
+        }
       } else {
         await response.body?.cancel();
       }

@@ -45,6 +45,7 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
     let gathered = new Set<string>();
     let timer: ReturnType<typeof setTimeout> | null = null;
     return {
+      has: (spaceId: string) => gathered.has(spaceId),
       add(spaceId: string) {
         gathered.add(spaceId);
         timer ??= setTimeout(() => {
@@ -128,8 +129,11 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
   return {
     changed: (spaceId: string) => {
       if (listeners.size === 0) return;
+      // Busy while waiting in the slow batch too, which ends a little after
+      // its first change, not three seconds after the last notice.
       const told = lastTold.get(spaceId);
-      (told !== undefined && Date.now() - told < BUSY_GATHER_MS ? busy : quick).add(spaceId);
+      const recent = told !== undefined && Date.now() - told < BUSY_GATHER_MS;
+      (recent || busy.has(spaceId) ? busy : quick).add(spaceId);
     },
     close: () => {
       quick.stop();
