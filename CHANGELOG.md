@@ -4,12 +4,29 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.15.0 - 2026-10-20
+
+### Highlights
+
+#### Features
+
+- Pages can start from a template. Put a page in a folder named Templates, then pick **New page from template…** beside New page. It asks for each `{{variable}}` in it and fills in the title, your name, the date and the time.
+- The sidebar keeps up on its own. Pages and folders an agent makes, moves, renames or deletes show up within a second or two with no refresh, as do changes from your other devices and from people you share a space with.
+
 ### Changes
 
 #### App
 
 - Pages can start from templates: any page in a folder named Templates. **New page from template…** (beside New page, and in a folder's menu) asks for each `{{variable}}` in it, fills in `{{title}}`, `{{me}}`, `{{date}}` and `{{time}}`, and copies its properties, cover, attachments and links. (#147)
 - The sidebar shows pages and folders as they change elsewhere, within a second or two and with no refresh: what an agent makes, moves, renames or deletes, edits from your other devices, and changes by people you share a space with. The page you’re on stays put. (#150)
+
+#### Server
+
+- `GET /api/me/tree-changes` streams to a signed-in person, as JSON lines, the spaces they see whose tree changed, never what changed. A database trigger names each space, and the server keeps one more database connection open to hear it, named `wikistow-tree-changes`. (#150)
+
+#### Releases and packaging
+
+- Electron 44.9.2, from 44.9.0. (#151)
 
 ## 0.14.0 - 2026-10-19
 
