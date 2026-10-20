@@ -56,7 +56,7 @@ export function testAppOn(testDb: TestDatabase, blobDir: string, overrides: Part
   const mails: Mail[] = [];
   const logs: LogEntry[] = [];
   const config = testConfig(testDb.url, { blobDir, ...overrides });
-  const { app, auth } = createApp({
+  const { app, auth, treeChanges } = createApp({
     db: testDb.db,
     config,
     log: (entry) => logs.push(entry),
@@ -68,6 +68,7 @@ export function testAppOn(testDb: TestDatabase, blobDir: string, overrides: Part
   return {
     app,
     auth,
+    treeChanges,
     db: testDb.db,
     config,
     mails,

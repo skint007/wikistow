@@ -9,6 +9,7 @@ import {
   DATABASE_LOCK_KEY,
   DatabaseLockedError,
   migrateDatabase,
+  TREE_LISTENER_APPLICATION,
 } from '@wikistow/server';
 import { createTestDatabase } from '@wikistow/server/testing';
 import { withAdmin } from '@wikistow/server/testing/postgres';
@@ -136,19 +137,21 @@ afterAll(async () => {
 });
 
 describe('the restore lock', () => {
-  it('a restore refuses while a server runs, though the server has no other connection open', async () => {
+  it('a restore refuses while a server runs, though the server has no pooled connection open', async () => {
     const server = await startServer(testDb.url, t.blobDir);
     await server.waitFor('listening', 'blob-sweep', 'draft-sweep', 'password-budget-sweep');
     // As postgres.js leaves an idle server once its pooled connections reach
-    // their max_lifetime: only the lock's session is open. Nothing reconnects,
-    // as the sweeps run again only in an hour. Without a timeout,
-    // pg_terminate_backend only signals each backend, and on a busy runner one
-    // can still be listed after, so wait up to 15 seconds for each to exit.
+    // their max_lifetime: only the lock's session and the tree listener's,
+    // which never close, are open. Nothing reconnects, as the sweeps run
+    // again only in an hour. Without a timeout, pg_terminate_backend only
+    // signals each backend, and on a busy runner one can still be listed
+    // after, so wait up to 15 seconds for each to exit.
+    const kept = [DATABASE_LOCK_APPLICATION, TREE_LISTENER_APPLICATION];
     await withAdmin(
       (sql) => sql`select pg_terminate_backend(pid, 15000) from pg_stat_activity
-        where datname = ${database()} and application_name <> ${DATABASE_LOCK_APPLICATION}`,
+        where datname = ${database()} and application_name <> all(${kept})`,
     );
-    expect(await sessions()).toEqual([{ name: DATABASE_LOCK_APPLICATION }]);
+    expect((await sessions()).map(({ name }) => name).toSorted()).toEqual(kept.toSorted());
 
     await expect(script('restore.sh', t, ['--server-stopped', backup])).rejects.toThrow(
       /The WikiStow server, its migrations or another restore is using the database/,

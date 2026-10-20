@@ -44,12 +44,13 @@ export type RouteOutput<R extends RouteDef> = z.input<R['response']>;
 
 /**
  * A route that answers with a stream of JSON lines (`application/x-ndjson`),
- * each one an `event`, instead of one response value. Used by the AI proxy.
- * Blank lines, sent while the stream is quiet to keep it open, carry nothing.
+ * each one an `event`, instead of one response value: the AI proxy, and
+ * the tree changes. Blank lines, sent while the stream is quiet to keep it
+ * open, carry nothing. A POST takes a JSON `body`; a GET takes none.
  */
-export type StreamRouteDef = {
-  method: 'POST';
-  path: string;
-  body: z.ZodType;
-  event: z.ZodType;
-};
+export type StreamRouteDef =
+  | { method: 'POST'; path: string; body: z.ZodType; event: z.ZodType }
+  | { method: 'GET'; path: string; body?: never; event: z.ZodType };
+
+/** The parsed body a stream route's handler receives: none for a GET. */
+export type StreamBody<R extends StreamRouteDef> = Infer<R['body']>;

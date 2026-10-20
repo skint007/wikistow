@@ -38,6 +38,7 @@ import { mountDesktopRoutes } from './routes/desktop.ts';
 import { mountPluginDraftRoutes } from './routes/plugin-drafts.ts';
 import { mountPluginRoutes } from './routes/plugins.ts';
 import { mountSystemRoutes } from './routes/system.ts';
+import { mountTreeChangeRoutes } from './routes/tree-changes.ts';
 import { aiSetup, mailSetup } from './settings.ts';
 
 /**
@@ -178,6 +179,8 @@ export function createApp({ db, config, log, blobs, transport = smtpDeliver }: A
     minKdf: config.minKdf,
     log,
   });
+  // The database names each space whose tree changes (`listenForTreeChanges`).
+  const treeChanges = mountTreeChangeRoutes(routes, { db, log });
   mountAgentRoutes(routes, { db });
   mountDesktopRoutes(routes, { db, auth });
   mountAdminAiRoutes(routes, { db, config, log });
@@ -194,5 +197,5 @@ export function createApp({ db, config, log, blobs, transport = smtpDeliver }: A
 
   app.notFound((c) => errorResponse(c, new ApiError('not-found', 'Not found')));
   app.onError(onError(log));
-  return { app, auth };
+  return { app, auth, treeChanges };
 }

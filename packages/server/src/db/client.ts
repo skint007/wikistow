@@ -21,6 +21,26 @@ export function connect(url: string, { max = 10 }: { max?: number } = {}) {
   return { db, close: () => sql.end({ timeout: 5 }) };
 }
 
+/** The tree listener's session, as `pg_stat_activity` names it. */
+export const TREE_LISTENER_APPLICATION = 'wikistow-tree-changes';
+
+/**
+ * Call `onChange` with a space's ID after each committed change to its tree,
+ * once per space and transaction, until `close`. The `wikistow_tree_changed`
+ * trigger names it (migration 0034); nothing says what changed. postgres.js
+ * listens on a connection of its own, which stays open, and listens again if
+ * that one drops. Changes made while it is down are missed.
+ */
+export async function listenForTreeChanges(url: string, onChange: (spaceId: string) => void) {
+  const sql = postgres(url, {
+    max: 1,
+    connection: { application_name: TREE_LISTENER_APPLICATION },
+    onnotice: () => {},
+  });
+  await sql.listen('wikistow_tree', onChange);
+  return { close: () => sql.end({ timeout: 5 }) };
+}
+
 /**
  * The advisory lock that marks the database as in use by WikiStow: "wikistow"
  * in ASCII, read as a 64-bit integer. The server, migrations and the admin
