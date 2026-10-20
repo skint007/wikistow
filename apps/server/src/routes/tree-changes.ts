@@ -75,8 +75,10 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
     for (const id of spaceIds) lastTold.set(id, now);
     // A stream lasts only as long as its session: one signed out, revoked
     // or suspended since it opened ends here, before it hears anything.
-    const live = await liveSessions([...listeners].map((listener) => listener.sessionId));
-    for (const listener of listeners) if (!live.has(listener.sessionId)) listener.end();
+    // Only those asked about: one opening meanwhile was checked as it opened.
+    const open = [...listeners];
+    const live = await liveSessions(open.map((listener) => listener.sessionId));
+    for (const listener of open) if (!live.has(listener.sessionId)) listener.end();
     const accounts = new Set([...listeners].map((listener) => listener.accountId));
     await Promise.all(
       [...accounts].map(async (accountId) => {
