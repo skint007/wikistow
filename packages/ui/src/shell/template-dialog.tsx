@@ -27,7 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { meQuery } from '../api';
-import { revisionQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { pageQuery, revisionQuery, searchIndexChanged, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { ErrorLine, useAction } from '../sharing/use-action';
 import { useClient } from '../vault/store';
@@ -35,7 +35,10 @@ import { useClient } from '../vault/store';
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 type TreePage = Tree['pages'][number];
 
-/** A template with a version to copy: its draft, or for a reader its publication. */
+/**
+ * A template with a version to copy, its draft or for a reader its
+ * publication, as the tree last listed it.
+ */
 type Template = { page: TreePage; path: string[]; head: RevisionId };
 
 /**
@@ -114,10 +117,11 @@ function ChooseTemplate({
   const id = useId();
   const [pickedId, setPickedId] = useState(templates[0]?.page.id);
   const [filter, setFilter] = useState('');
-  const needle = filter.trim().toLowerCase();
-  const shown = templates.filter((t) => label(t).toLowerCase().includes(needle));
-  // The one picked while the filter shows it, else the first it shows.
-  const picked = shown.find((t) => t.page.id === pickedId) ?? shown[0];
+  const matching = (text: string) =>
+    templates.filter((t) => label(t).toLowerCase().includes(text.trim().toLowerCase()));
+  const shown = matching(filter);
+  // None while the filter shows nothing; the pick comes back as it shows it again.
+  const picked = shown.find((t) => t.page.id === pickedId);
   return (
     <div className="grid gap-4">
       <div className="grid gap-1.5">
@@ -127,7 +131,14 @@ function ChooseTemplate({
           placeholder="Find a template"
           autoFocus
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
+          onChange={(event) => {
+            const text = event.target.value;
+            setFilter(text);
+            // Filtering out the one picked picks the first shown, which then stays picked.
+            const found = matching(text);
+            const first = found[0];
+            if (first && !found.some((t) => t.page.id === pickedId)) setPickedId(first.page.id);
+          }}
         />
         {/* In the dialog's flow, not floating over it, so its scrolling can't cut it off. */}
         <div
@@ -187,8 +198,15 @@ function FillTemplate({
   const queryClient = useQueryClient();
   const id = useId();
   const { data: me } = useQuery(meQuery);
-  const audience = page.draftHead === null ? 'published' : 'draft';
-  const version = useQuery(revisionQuery(ctx, { spaceId, pageId: page.id }, audience, head));
+  // The tree's heads can be from before the template's last save: ask for them now.
+  const info = useQuery(pageQuery(ctx, page.id));
+  const heads = info.isFetchedAfterMount ? info.data?.heads : undefined;
+  const latest = heads ? (heads.draftHead ?? heads.publishedHead) : undefined;
+  const audience = heads?.draftHead ? 'draft' : 'published';
+  const version = useQuery({
+    ...revisionQuery(ctx, { spaceId, pageId: page.id }, audience, latest ?? head),
+    enabled: Boolean(latest),
+  });
   const { busy, error, run } = useAction(errorMessage);
   const [typed, setTyped] = useState<Record<string, string>>({});
   // Until the person types a title, it follows the template's, filled in.
@@ -202,9 +220,12 @@ function FillTemplate({
     [payload],
   );
 
+  if (heads && !latest) {
+    return <p className="text-sm text-muted-foreground">This template has nothing to copy yet.</p>;
+  }
   if (!version.data) {
-    return failedToLoad(version) ? (
-      <LoadFailed what="the template" queries={[version]} />
+    return failedToLoad(info) || failedToLoad(version) ? (
+      <LoadFailed what="the template" queries={[info, version]} />
     ) : (
       <p className="text-sm text-muted-foreground">Loading…</p>
     );
