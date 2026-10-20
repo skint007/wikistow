@@ -110,6 +110,10 @@ The page and version a publication was copied from. It is recorded only inside t
 **Attachment**
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 
+**Template**
+A page in a folder named Templates that new pages can start from. Its `{{variables}}` are filled in by the person making the page; the copy is an ordinary page with no tie to its template.
+_Avoid_: Blueprint, page type.
+
 **Wikilink**
 A link written as `[[Page title]]` that resolves to a page in the same space by title. It follows the page when the page is renamed.
 

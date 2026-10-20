@@ -7,7 +7,7 @@ import {
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { ChevronRight, FolderPlus, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderPlus, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
 import { IconImage } from '@/components/icon-image';
@@ -21,6 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Name, plainText } from '@/components/name';
@@ -51,6 +57,7 @@ import {
 } from './folder-look';
 import { FolderRenameDialog } from './folder-rename';
 import { SpaceHeader } from './space-header';
+import { TemplateDialog } from './template-dialog';
 import {
   FolderMenu,
   folderActions,
@@ -240,6 +247,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [expanded, setExpanded] = useExpandedFolders(spaceId);
   const [filter, setFilter] = useState('');
   const [creating, setCreating] = useState<Creating>(null);
+  // Where a page from a template goes, while that dialog is open.
+  const [fromTemplate, setFromTemplate] = useState<FolderId | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
   const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
@@ -404,12 +413,30 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       />
       {canEdit && (
         <div className="flex gap-2">
-          <Button
-            className="flex-1 rounded-control"
-            onClick={() => setCreating({ kind: 'page', parentId: null })}
-          >
-            <Plus strokeWidth={1.75} /> New page
-          </Button>
+          <div className="flex flex-1">
+            <Button
+              className="flex-1 rounded-l-control rounded-r-none"
+              onClick={() => setCreating({ kind: 'page', parentId: null })}
+            >
+              <Plus strokeWidth={1.75} /> New page
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon"
+                  aria-label="More ways to make a page"
+                  className="w-8 rounded-l-none rounded-r-control border-l border-primary-foreground/25"
+                >
+                  <ChevronDown strokeWidth={1.75} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setFromTemplate(null)}>
+                  New page from template…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           <Button
             variant="secondary"
             size="icon"
@@ -469,6 +496,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               editing: canEditAt(row.id)
                 ? {
                     onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
+                    onNewFromTemplate: () => setFromTemplate(row.id),
                     onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
                     onRename: () => setRenaming(row.id),
                     onRestyle: () => setRestyling(row.id),
@@ -617,6 +645,16 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           toggle(folderId, true);
         }}
         onCreatedPage={openPage}
+      />
+      <TemplateDialog
+        spaceId={spaceId}
+        tree={tree}
+        parentId={fromTemplate}
+        onClose={() => setFromTemplate(undefined)}
+        onCreated={(pageId) => {
+          setFromTemplate(undefined);
+          openPage(pageId);
+        }}
       />
       <FolderRenameDialog
         spaceId={spaceId}

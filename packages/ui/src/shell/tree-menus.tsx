@@ -37,6 +37,7 @@ export function folderActions({
 }: {
   editing: {
     onNewPage: () => void;
+    onNewFromTemplate: () => void;
     onNewFolder: () => void;
     onRename: () => void;
     onRestyle: () => void;
@@ -48,6 +49,7 @@ export function folderActions({
 }): MenuAction[] {
   return [
     action('New page here', editing?.onNewPage),
+    action('New page from template here', editing?.onNewFromTemplate),
     action('New folder here', editing?.onNewFolder),
     action('Rename…', editing?.onRename),
     action('Emoji and colour…', editing?.onRestyle),

@@ -31,6 +31,7 @@ export * from './revision-cache.ts';
 export * from './rotation.ts';
 export * from './search.ts';
 export * from './trust.ts';
+export * from './templates.ts';
 export * from './tree.ts';
 export * from './vault.ts';
 export * as pageOperations from './operations/pages.ts';
