@@ -9,7 +9,7 @@ import {
 } from '@wikistow/contracts';
 import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
-import { coverOf } from '../cover.ts';
+import { COVER_NAMESPACE, coverLeftBehind, coverOf, reviseCover } from '../cover.ts';
 import { CryptoError } from '../errors.ts';
 import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '../ids.ts';
 import { agentIdentityId } from '../identity.ts';
@@ -201,19 +201,21 @@ export async function createPage(
     parentId,
     title,
     markdown = '',
+    extensions = {},
     tree,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     title: string;
     markdown?: string;
+    extensions?: PagePayload['extensions'];
     tree?: LinkTree;
   },
 ): Promise<PageId> {
   const pageId = newId(PageIdSchema);
   const linkTree = linkTreeFor(ctx, spaceId, tree);
   // Before reading its links, which takes longest on a page too large to save.
-  const content = newPayload({ title, markdown });
+  const content = newPayload({ title, markdown, extensions });
   checkPayloadSize(content);
   await withFreshKeys(ctx, spaceId, async (keys) => {
     const target = await newNodeTarget(ctx, spaceId, parentId);
@@ -241,6 +243,58 @@ export async function createPage(
       body: { pageId, parentId, ...commit },
     });
   });
+  return pageId;
+}
+
+/**
+ * A new page made from `template`, the version of a template page this
+ * person sees (`shownVersions`), with its `title` and `markdown` already
+ * filled in (`fillTemplate`). It takes the template's cover and its
+ * attachments, encrypted again for the new page's draft. Uploading needs
+ * the page, so one with attachments is made first without them, and with
+ * no image banner or icon, then saved again with them. The template's
+ * other extensions, such as where a published copy came from, stay behind.
+ */
+export async function createFromTemplate(
+  ctx: ClientContext,
+  {
+    spaceId,
+    parentId,
+    template,
+    title,
+    markdown,
+  }: {
+    spaceId: SpaceId;
+    parentId: FolderId | null;
+    template: OpenedRevision;
+    title: string;
+    markdown: string;
+  },
+): Promise<PageId> {
+  const source = current(template);
+  const cover = source.extensions[COVER_NAMESPACE];
+  const covered = cover === undefined ? {} : { [COVER_NAMESPACE]: cover };
+  const made = (extensions: PagePayload['extensions']) =>
+    createPage(ctx, { spaceId, parentId, title, markdown, extensions });
+  if (source.attachments.length === 0) return made(covered);
+  const pageId = await made(
+    cover === undefined ? {} : reviseCover(covered, coverLeftBehind(covered, new Set())),
+  );
+  const page = { spaceId, pageId };
+  const { record } = template;
+  const from = attachmentTarget(ctx, record, record.audience);
+  const attachments = [];
+  for (const ref of source.attachments) {
+    const resealed = resealAttachment({
+      from,
+      to: attachmentTarget(ctx, page, 'draft'),
+      ref,
+      blob: await downloadBlob(ctx, ref.blobHash),
+    });
+    await uploadBlob(ctx, page, 'draft', resealed.blob);
+    attachments.push(resealed.ref);
+  }
+  await editDraft(ctx, page, { attachments, extensions: covered });
   return pageId;
 }
 
