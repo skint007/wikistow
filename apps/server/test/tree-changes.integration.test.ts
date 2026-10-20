@@ -6,8 +6,9 @@ import {
 } from '@wikistow/client';
 import { listenForTreeChanges } from '@wikistow/server';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
+import { PASSWORD } from './support/accounts.ts';
 import { personWithVault } from './support/content.ts';
-import { createTestApp, type TestApp } from './support/harness.ts';
+import { Browser, createTestApp, type TestApp } from './support/harness.ts';
 import { invite, library, shareFolder, type Person } from './support/sharing.ts';
 
 let t: TestApp;
@@ -79,6 +80,25 @@ it('tells everyone who sees some of a space that its tree changed, and nobody el
     await expect.poll(() => byOutsider.length, SOON).toBeGreaterThan(before);
     expect(new Set(byOutsider)).toEqual(new Set([elsewhere]));
     expect([...byOwner, ...byMember]).not.toContain(elsewhere);
+
+    // A stream lasts only as long as its session.
+    const other = new Browser(t.app);
+    const signIn = { email: owner.email, password: PASSWORD };
+    expect(
+      (await other.request('/api/auth/sign-in/email', { method: 'POST', json: signIn })).status,
+    ).toBe(200);
+    const bySignedOut = await hearing({ ...owner, browser: other }, stop.signal);
+    expect((await other.request('/api/auth/sign-out', { method: 'POST', json: {} })).status).toBe(
+      200,
+    );
+    const ownerHeard = byOwner.length;
+    await pages.createPage(owner.ctx, {
+      spaceId: lib.spaceId,
+      parentId: lib.shared,
+      title: 'Later',
+    });
+    await expect.poll(() => byOwner.length, SOON).toBeGreaterThan(ownerHeard);
+    expect(bySignedOut).toEqual([]);
 
     // Deleting the shared folder shuts the member out, and they still hear
     // of it, so their sidebar drops it.

@@ -1,5 +1,6 @@
 import { structureRoutes } from '@wikistow/contracts';
-import { treesSeenBy, type Database } from '@wikistow/server';
+import { schema, treesSeenBy, type Database } from '@wikistow/server';
+import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { Log } from '../http/logger.ts';
 import type { Routes } from '../http/mount.ts';
 
@@ -20,8 +21,10 @@ const BUSY_GATHER_MS = 3000;
  */
 type Listener = {
   accountId: string;
+  sessionId: string;
   seen: Set<string>;
   hear: (spaceIds: readonly string[]) => void;
+  end: () => void;
 };
 
 /**
@@ -70,6 +73,10 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
     const now = Date.now();
     for (const [id, at] of lastTold) if (now - at >= BUSY_GATHER_MS) lastTold.delete(id);
     for (const id of spaceIds) lastTold.set(id, now);
+    // A stream lasts only as long as its session: one signed out, revoked
+    // or suspended since it opened ends here, before it hears anything.
+    const live = await liveSessions([...listeners].map((listener) => listener.sessionId));
+    for (const listener of listeners) if (!live.has(listener.sessionId)) listener.end();
     const accounts = new Set([...listeners].map((listener) => listener.accountId));
     await Promise.all(
       [...accounts].map(async (accountId) => {
@@ -87,17 +94,38 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
     );
   }
 
+  // Which of `sessionIds` are current, for an account that isn't suspended.
+  async function liveSessions(sessionIds: string[]) {
+    if (sessionIds.length === 0) return new Set<string>();
+    const { sessions, users } = schema;
+    const rows = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .innerJoin(users, eq(users.id, sessions.userId))
+      .where(
+        and(
+          inArray(sessions.id, sessionIds),
+          gt(sessions.expiresAt, new Date()),
+          isNull(users.suspendedAt),
+        ),
+      );
+    return new Set(rows.map((row) => row.id));
+  }
+
   routes.stream(structureRoutes.treeChanges, async (_body, { principal, signal }) => {
-    const ended = AbortSignal.any([signal, closing.signal]);
+    const left = new AbortController();
+    const ended = AbortSignal.any([signal, closing.signal, left.signal]);
     let heard = new Set<string>();
     let wake: (() => void) | null = null;
     const listener: Listener = {
       accountId: principal.accountId,
+      sessionId: principal.sessionId,
       seen: await treesSeenBy(db, principal.accountId),
       hear(spaceIds) {
         for (const spaceId of spaceIds) heard.add(spaceId);
         wake?.();
       },
+      end: () => left.abort(),
     };
     // Listening already as the answer starts, until the person leaves or
     // the server stops.
