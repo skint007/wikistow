@@ -15,7 +15,7 @@ import {
 } from '../db/schema/index.ts';
 import { highest } from './effective.ts';
 import { ContentError } from './errors.ts';
-import { lookupIdentities } from './identities.ts';
+import { currentIdentity, lookupIdentities } from './identities.ts';
 
 export type AccessRole = 'reader' | 'editor' | 'owner';
 export type Access = { role: AccessRole; canPublish: boolean };
@@ -358,6 +358,37 @@ export type TreeView = {
   starts: ReadonlySet<string>;
   held: (share: ShareRow) => { access: Access; rootId: string | null } | null;
 };
+
+/**
+ * Which of `spaceIds` a person sees some of the tree of, as `treeView`
+ * decides for them: they own the space, or are a member of a share in it.
+ */
+export async function treesSeenBy(
+  db: Database,
+  accountId: string,
+  spaceIds: string[],
+): Promise<Set<string>> {
+  const identity = spaceIds.length === 0 ? null : await currentIdentity(db, accountId);
+  if (!identity) return new Set();
+  const rows = await db
+    .select({ spaceId: spaceOwners.spaceId })
+    .from(spaceOwners)
+    .where(
+      and(
+        eq(spaceOwners.identityId, identity.id),
+        isNull(spaceOwners.removedAt),
+        inArray(spaceOwners.spaceId, spaceIds),
+      ),
+    )
+    .union(
+      db
+        .select({ spaceId: shares.spaceId })
+        .from(shareMembers)
+        .innerJoin(shares, eq(shares.id, shareMembers.shareId))
+        .where(and(eq(shareMembers.identityId, identity.id), inArray(shares.spaceId, spaceIds))),
+    );
+  return new Set(rows.map((row) => row.spaceId));
+}
 
 /** The caller's view of a space, or null when they have no place in it. */
 export async function treeView(

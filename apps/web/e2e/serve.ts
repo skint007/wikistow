@@ -4,7 +4,7 @@
 import { serve } from '@hono/node-server';
 import { createApp } from '@wikistow/server-app/app';
 import type { Mail } from '@wikistow/server-app/mail';
-import { connect, fileBlobStore, MIN_VAULT_KDF } from '@wikistow/server';
+import { connect, fileBlobStore, listenForTreeChanges, MIN_VAULT_KDF } from '@wikistow/server';
 import { sql } from 'drizzle-orm';
 import { createMigratedDatabase } from '@wikistow/server/testing/postgres';
 import { simpleParser } from 'mailparser';
@@ -68,7 +68,7 @@ const database = await createMigratedDatabase('wikistow_e2e');
 const blobDir = await mkdtemp(join(tmpdir(), 'wikistow-e2e-blobs-'));
 const { db, close } = connect(database.url);
 
-const { app } = createApp({
+const { app, treeChanges } = createApp({
   db,
   config: {
     databaseUrl: database.url,
@@ -91,6 +91,8 @@ const { app } = createApp({
   },
   blobs: fileBlobStore(blobDir),
 });
+// Sidebars load again as trees change, as with the real server.
+const treeListener = await listenForTreeChanges(database.url, treeChanges.changed);
 // Loopback only: the control port can reset accounts and dump the database.
 const server = serve({ fetch: app.fetch, port: APP_PORT, hostname: '127.0.0.1' });
 
@@ -168,11 +170,12 @@ const shutdown = () => {
   smtp.close();
   control.close();
   server.close(() => {
-    void close()
+    void Promise.all([close(), treeListener.close()])
       .then(() => database.drop())
       .then(() => rm(blobDir, { recursive: true, force: true }))
       .then(() => process.exit(0));
   });
+  treeChanges.close();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);

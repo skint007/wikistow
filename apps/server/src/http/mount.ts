@@ -1,4 +1,10 @@
-import type { RouteDef, RouteInput, RouteOutput, StreamRouteDef } from '@wikistow/contracts';
+import type {
+  RouteDef,
+  RouteInput,
+  RouteOutput,
+  StreamBody,
+  StreamRouteDef,
+} from '@wikistow/contracts';
 import { hash, utf8 } from '@wikistow/client';
 import { consumeRateLimit, type Actor, type Database, type Once } from '@wikistow/server';
 import type { Context, Hono } from 'hono';
@@ -412,13 +418,14 @@ export function createRoutes({
     },
     /**
      * A signed-in route that answers with a stream of JSON lines, one
-     * `route.event` each (the AI proxy). The same origin, session, rate
-     * limit and body checks as `account`; the handler writes the stream.
+     * `route.event` each (the AI proxy, the tree changes). The same origin,
+     * session, rate limit and body checks as `account`; the handler writes
+     * the stream, and it ends when the handler's events do.
      */
     stream<R extends StreamRouteDef>(
       route: R,
       handler: (
-        body: z.output<R['body']>,
+        body: StreamBody<R>,
         ctx: AccountCtx & { signal: AbortSignal },
       ) => AsyncIterable<z.input<R['event']>> | Promise<AsyncIterable<z.input<R['event']>>>,
       options: Pick<Options, 'rateLimit'> = {},
@@ -428,7 +435,11 @@ export function createRoutes({
         const principal = await requirePrincipal(auth, c);
         if (c.req.header('idempotency-key') !== undefined) refuseKey();
         await limitAccount(c, route, principal, options);
-        const body = parsed<R['body']>(route.body, await readJson(c), 'body');
+        // Validated by the route's own schema; the compiler can't follow the
+        // GET or POST route's body schema through `parsed`.
+        const body = (
+          route.body ? parsed(route.body, await readJson(c), 'body') : undefined
+        ) as StreamBody<R>;
         // Ends when the client leaves or cancels the stream, so the
         // handler can stop its own work (the provider's request) at once.
         const left = new AbortController();

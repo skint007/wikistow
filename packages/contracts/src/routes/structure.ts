@@ -7,7 +7,7 @@ import {
   SealedMetadataV2,
 } from '../records/metadata.ts';
 import { KeyWrap, Share } from '../records/share.ts';
-import type { RouteDef } from '../route.ts';
+import type { RouteDef, StreamRouteDef } from '../route.ts';
 
 export const AccessRole = z.enum(['reader', 'editor', 'owner']);
 
@@ -149,6 +149,21 @@ export const tree = {
     agentActivity: AgentEdit.extend({ pageId: PageId, draftOnly: z.boolean() }).nullable(),
   }),
 } as const satisfies RouteDef;
+
+/**
+ * Which spaces' trees changed, for the signed-in person's app to load them
+ * again: a stream of JSON lines that stays open. Each line names spaces
+ * they see some of, where anyone made, moved, renamed or deleted a folder
+ * or page, saved or published a page, or changed a share, about once a
+ * second at most. It never says what changed. Blank lines every 15 seconds
+ * keep it open. The server ends it when it stops, and changes made while
+ * nobody listened are not sent later.
+ */
+export const treeChanges = {
+  method: 'GET',
+  path: '/api/me/tree-changes',
+  event: z.strictObject({ spaceIds: z.array(SpaceId).min(1) }),
+} as const satisfies StreamRouteDef;
 
 /**
  * Where a node is, for a write there (section 6.8): the share whose region

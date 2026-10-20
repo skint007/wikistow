@@ -4,6 +4,7 @@ import {
   DatabaseLockedError,
   fileBlobStore,
   filePluginStore,
+  listenForTreeChanges,
   lockDatabase,
   MIGRATIONS_DIR,
   sweepBlobs,
@@ -40,7 +41,9 @@ await lock.migrate(config.migrationsDir ?? MIGRATIONS_DIR);
 stdoutLog({ level: 'info', event: 'migrated' });
 const { db, close } = connect(config.databaseUrl);
 const blobs = fileBlobStore(config.blobDir);
-const { app } = createApp({ db, config, log: stdoutLog, blobs });
+const { app, treeChanges } = createApp({ db, config, log: stdoutLog, blobs });
+// Should the database go away, losing the lock above stops the server too.
+const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.changed);
 
 // Each sweep on its own, so one failing doesn't stop the others: attachment
 // data nothing uses, and publications into another space nobody finished
@@ -69,14 +72,16 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
 // `routes.stream`).
 server.setTimeout(IDLE_TIMEOUT_MS);
 
-// Stop taking connections, let in-flight requests finish, then close the pool.
+// Stop taking connections, end the tree change streams, let in-flight
+// requests finish, then close the pool.
 const shutdown = () => {
   for (const sweep of sweeps) clearInterval(sweep);
   server.close(() => {
-    void close()
+    void Promise.all([close(), treeListener.close()])
       .then(() => lock.release())
       .then(() => process.exit(0));
   });
+  treeChanges.close();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
