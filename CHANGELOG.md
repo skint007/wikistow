@@ -21,6 +21,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Streams (`POST /api/ai/stream` and `GET /api/me/tree-changes`) send the renewed session cookie when they're the request that renews a session. (#155)
 - `POST /api/spaces/:spaceId/delete {permissionVersion}` deletes a space and everything in it, for its owners. It refuses a space that is any owner's home space (`home-space`), and a delete sent before access last changed (`permission-version`), so the owner was shown everyone who loses access. It ends the space's publications into other spaces as deleting a page does, removes its attachment files, and drops it from everyone's saved space order. The audit log records `space.deleted` with counts only. (#158)
 
+#### Development
+
+- ADR 0005 (`docs/adr/0005-public-links.md`) records how public links for pages work, and the spec's plaintext rule now allows their one exception: the published version of a page with a public link, stored readable only while the link is on. The protocol gains accepted risk A12. (#159)
+
 ## 0.15.0 - 2026-10-20
 
 ### Highlights
