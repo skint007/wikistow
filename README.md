@@ -2,7 +2,7 @@
 
 WikiStow is a self-hosted encrypted wiki for people and their agents. It has a browser app, a Linux desktop app, and a command-line client. Pages support Markdown, attachments, sharing, drafts, and published versions.
 
-The clients encrypt page content before sending it to the server. Accounts, permissions, and some operational metadata remain on the server. The optional AI assistant sends the content a person chooses to their configured provider through the server. See the [protocol](wikistow/protocol.md) and [operations guide](docs/operations.md) for the details and limits.
+The clients encrypt page content before sending it to the server. Accounts, permissions, and some operational metadata remain on the server. The optional AI assistant sends the content a person chooses to their configured provider through the server. A page someone gives a public link is stored readable on the server while the link is on, so anyone with the link can read it. See the [protocol](wikistow/protocol.md) and [operations guide](docs/operations.md) for the details and limits.
 
 ## Install the desktop app
 

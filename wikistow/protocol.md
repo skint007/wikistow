@@ -111,7 +111,7 @@ the project owner accepted these on 2026-10-05, for a design that is "secure, bu
 - **A2. Hide or roll back changes undetected.** It can serve an old draft or published head, hide versions, reorder history, and hide a member, a removal, a key rotation or an unpublish from anyone. In particular, a writer whom the server keeps from seeing a new key version keeps saving under the old one, and a removed person who colludes with the server can read those saves. The same goes for a write the server refuses as `key-version`: the client retries with the same content key (section 6.8), so a server that hands the refused wrap to a removed person leaks what the retry then saves, which it could have done by accepting the write. A server that rolls back a move can likewise make new content in the moved folder land in its old region. And it can hide one owner's rotation from another owner in a later browser session, which keeps no **No going back** mark (section 6.8), so that owner's next rotation reaches the person the hidden rotation removed.
 - **A3. Keep serving a removed person data they could already decrypt.** Nothing can be recalled: not keys, not plaintext, not downloads.
 
-It **cannot** read content, add a reader by itself, or decrypt anything saved after a removal.
+It **cannot** read content, add a reader by itself, or decrypt anything saved after a removal. The one exception is a page someone gives a public link: its published version is stored readable while the link is on (A12).
 
 These further risks are accepted too:
 
@@ -123,12 +123,13 @@ These further risks are accepted too:
 - **A9. Served JavaScript.** In the browser, the server delivers the client code. A malicious operator can ship code that steals keys at the next unlock (`wikistow.md` L135). The desktop app and the CLI bundle their code, which narrows this risk without removing it.
 - **A10. Confirmed move previews.** Once an owner confirms a move (or at once, on a device where they turned confirming moves off), the client uploads wraps under the destination's keys (section 10). A gainer colluding with the server can open them even if the move then fails.
 - **A11. Milestone 1 records aren't key-committing.** Clients accept a v1 record only from an accepted owner (section 5.7), who could have sealed one ciphertext that opens differently for different keys.
+- **A12. Public links.** A page someone gives a public link has its published version stored readable on the server while the link is on ([ADR 0005](../docs/adr/0005-public-links.md)). The server can read that copy, keep it after the link is turned off, and keep serving it. Nothing in this protocol protects it; only the person's choice to share it limits what it holds.
 
 ### 2.5 What the server can and cannot do
 
 | Action | Server alone | Section |
 |---|---|---|
-| Read titles, Markdown, attachments, folder or space names | **No** | 2.3 |
+| Read titles, Markdown, attachments, folder or space names | **No**, except a page with a public link | 2.3, A12 |
 | See IDs, the tree, sizes, times, emails, public keys, shares, members and roles | Yes | A7 |
 | Refuse any request, or serve stale or partial data | Yes | A2 |
 | Let someone do what their role forbids, with keys they already hold | Yes | A1 |
