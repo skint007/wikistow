@@ -23,6 +23,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
+- ADR 0005 (`docs/adr/0005-public-links.md`) records how public links for pages work, and the spec's plaintext rule now allows their one exception: the published version of a page with a public link, stored readable only while the link is on. The protocol gains accepted risk A12. (#159)
 - The reader's Markdown rules (alerts, heading ids, highlighting, wikilinks and `pageHtml`'s sanitizing) move from `packages/ui` to `@wikistow/client/reader`, so the server can use them too. The app reads pages as before. (#160)
 
 ## 0.15.0 - 2026-10-20
