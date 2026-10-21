@@ -29,9 +29,9 @@ The server stores no plaintext page content except the published version of a pa
 - the attachments the body shows or links to, by `attachment:<id>` or `![[file]]`, and no others;
 - the server's own rendering of that body.
 
-It is always the page's current published version. A copy is made only of the published head, and any change to the published head deletes the copies of the page in the same transaction (decision 5). So the server never holds an older published version. The server can't check that the Markdown it is sent matches the sealed revision; the app sends the published version it has just opened, never a draft, and a person with publish rights could publish any text anyway. A copy exists only for a page with a link, or for the moments while the app uploads one (decision 5).
+It is always the page's current published version. A copy is made only of the published head, and any change to the published head deletes the copies of the page in the same transaction (decision 5). So the server never holds an older published version. The server can't check that the Markdown it is sent matches the sealed revision; the app sends the published version it has just opened, never a draft, and a person with publish rights could publish any text anyway. A copy exists only for a page with a link, or while the app uploads one. An upload the app never finishes is deleted within 20 minutes (decision 5).
 
-Copies are deleted in the same transaction as the change that ends them, not by a sweep, so once the request returns the database has no row of the copy. The files are rows too (decision 4). `backup.sh` leaves the rows of the three tables out of its dump, so backups don't hold copies, and a restore comes back with every link off.
+Copies are deleted in the same transaction as the change that ends them, so once the request returns the database has no row of the copy. The files are rows too (decision 4). `backup.sh` leaves the rows of the three tables out of its dump, so backups don't hold copies, and a restore comes back with every link off.
 
 Turning a link off can't take back what someone already saved, or copies in other backups of the server's disk or database made while it was on. Deleted rows also stay on the database's disk, in its write-ahead log and in any replica until Postgres reuses the space. This is the same limit the spec already states for revoking access and for unpublishing.
 
@@ -53,7 +53,7 @@ Three tables, with no files on disk:
 
 - `public_links`: one row per page with a link: the page (foreign key to `nodes`, cascading), its id, its live copy if any, who turned it on, and when.
 - `public_copies`: a copy, staged or live: the page (cascading), the published revision it was made from, its title, Markdown and rendering, its wikilink targets, who uploaded it, and when.
-- `public_files`: a copy's attachments (cascading from the copy): attachment ID, name, media type, size, the `plainHash` the client gave, and the bytes.
+- `public_files`: a copy's attachments (cascading from the copy): attachment ID, name, media type, size and the bytes.
 
 Keeping the files in Postgres, as avatars are, lets every ending be one transaction with no file to unlink after it and no orphan for a sweep to find. Deleting a node, a space's nodes included, deletes the link, its copies and their files by cascade. A file is at most 25 MiB, or the upload limit if that is lower, and a copy's files at most 100 MiB together; an attachment past that is left out of the copy, and the page shows it as not available. Files count toward the uploader's storage quota.
 
@@ -61,17 +61,17 @@ Keeping the files in Postgres, as avatars are, lets every ending be one transact
 
 The app makes a copy in three steps, so the link never shows a copy that is missing files:
 
-1. `POST /api/pages/:pageId/public-copies` with the published revision's ID, title, Markdown, attachment list and resolved wikilinks. The server checks publish rights and that the revision is the page's published head, renders the body (decision 6), stores the copy as staged and answers which files it needs: the attachments the body shows or links to.
+1. `POST /api/pages/:pageId/public-copies` with the published revision's ID, title, Markdown, attachment list, resolved wikilinks, and whether it is for a new link. The server renders the body first, with no transaction open and no lock held (decision 6). Then it takes the locks, checks publish rights, that the revision is the page's published head, and for a replacement that the link is on, stores the copy as staged and answers which files it needs: the attachments the body shows or links to.
 2. `PUT /api/public-copies/:copyId/files/:attachmentId` for each file it needs, at most the size declared. Only the person who staged the copy can add to it, and only while it is staged.
-3. `POST /api/pages/:pageId/public-link` with the copy and whether to make a new link. A new link is turning it on. Otherwise the copy replaces the live one, if the link is still on. Every check of step 1 runs again: publish rights, and that the copy's revision is still the published head. Then the copy goes live and the page's other copies are deleted.
+3. `POST /api/pages/:pageId/public-link` with the copy. A copy for a new link turns the link on, with a new id, replacing any link the page had. Otherwise the copy replaces the live one, if the link is still on. Every check of step 1 runs again, and every file it named must have arrived, apart from those left out for size. Then the copy goes live and the page's other copies are deleted.
 
 `DELETE /api/pages/:pageId/public-link` turns it off, deleting the link and every copy of the page, staged ones too.
 
-Staging, committing and turning off take the same locks as publishing, in the same order: the space, then the page's heads row. So a staged copy can't slip past a publish, an unpublish, a move or a turn-off running at the same time, and every change that deletes a page's copies sees all of them.
+Staging, committing and turning off take the same locks as publishing, in the same order: the space, the share, the page, then its heads row. So a staged copy can't slip past a publish, an unpublish, a move, a change of rights in the share or a turn-off running at the same time, and every change that deletes a page's copies sees all of them.
 
 **A new published version.** Any change to the page's published head deletes every copy of the page, live and staged, in the same transaction: publishing, by a person or an agent, publishing into the page from another space, and unpublishing. The link itself stays on, except on unpublish (decision 8). After the app publishes a page with a link, it makes the new copy at once. Until it arrives, the public page says the page is being updated. If the app can't make it, because the publish came from an agent, from another space or from an app that closed, the share dialog says the public page is out of date and offers to update it.
 
-Staged copies that are never committed are deleted by the hourly sweep after an hour. They are of the current published version, never served, and any change that ends copies deletes them too. Staging is rate limited per person, 20 a minute.
+A sweep every 10 minutes deletes staged copies more than 10 minutes old, so one the app never commits, because it closed or lost its connection, is gone within 20 minutes. Until then it is of the current published version and never served, and any change that ends copies deletes it too. Staging is rate limited per person, 20 a minute.
 
 The page updates with each publish from the app, so every publish sends all the attachments again. That keeps the rule simple: one copy, one version.
 
@@ -83,14 +83,14 @@ The server renders the body with the reader's own rules, which move from `packag
 - The server always sanitizes, pages without raw HTML too, so every link and image address goes through the sanitizer's list of protocols, as react-markdown's `urlTransform` does in the app. Links that leave the page get `rel="noopener noreferrer"`. Images load only from the copy's own files, and an image elsewhere shows "Image not loaded", as in the app. Only raster images (decision 7) show inline; an SVG or other image becomes a download link. `attachment:` links become download links to the copy's files.
 - Code blocks show their language label. There is no copy button, as the page has no script. Alerts get their label as text.
 
-Wikilinks link only to another page whose link is on. The client resolves each wikilink of the published version as a reader would and sends the targets with the copy (`linkKey` → page ID). The server keeps only targets the uploader can publish, who could share those pages' links anyway. The stored rendering is a list of HTML segments with a gap between each, never a marker inside the HTML, so nothing in the page can make a gap. When the page is served, a gap becomes a link to the target's `/p/<id>` if the target's link is on and the uploader can still publish the target, and otherwise the link's text. So a link to a page made public later works without a new copy, and one whose target's link was turned off goes back to text. An embedded attachment (`![[file.png]]`) shows from the copy's files.
+Wikilinks link only to another page whose link is on. The client resolves each wikilink of the published version as a reader would and sends the targets with the copy (`linkKey` → page ID). The server keeps only targets the uploader can publish, who could share those pages' links anyway. The stored rendering is a list of HTML segments with a gap between each. To find the gaps, the renderer marks each wikilink with a random value chosen for that render, after reading the page, and splits the sanitized HTML at those marks. The page can't know the value, so nothing written in it can make a gap. When the page is served, a gap becomes a link to the target's `/p/<id>` if the target's link is on and the uploader can still publish the target, and otherwise the link's text. So a link to a page made public later works without a new copy, and one whose target's link was turned off goes back to text. An embedded attachment (`![[file.png]]`) shows from the copy's files.
 
 ### 7. Serving
 
 - `GET /p/:id` answers a full HTML page: the title, the body and a short footer. It needs no session and has a rate limit per client, as `publicFile` does. It is registered before the SPA's fallback. Before answering, it checks that the person who turned the link on can still publish the page (decision 8).
 - The policy is `default-src 'none'; img-src 'self'; style-src 'sha256-…'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. The one inline stylesheet is named by its hash. The page has no script at all, so nothing in it can run even if the sanitizing missed something.
 - `X-Robots-Tag: noindex, nofollow` and the same `<meta name="robots">`, so search engines leave it out. The app's `Referrer-Policy: no-referrer` stays, so the id doesn't leak to the sites the page links to.
-- `GET /p/:id/files/:attachmentId` serves a file of the link's live copy. Raster images (PNG, JPEG, GIF, WebP, AVIF) are served inline with their type. Everything else, SVG and HTML included, is `application/octet-stream` with `Content-Disposition: attachment`, so a file can't run as a page on the app's origin. Files have `default-src 'none'; sandbox` and `nosniff`.
+- `GET /p/:id/files/:attachmentId` serves a file of the link's live copy, with the same check of the sharer. Raster images (PNG, JPEG, GIF, WebP, AVIF) are served inline with their type. Everything else, SVG and HTML included, is `application/octet-stream` with `Content-Disposition: attachment`, so a file can't run as a page on the app's origin. Files have `default-src 'none'; sandbox` and `nosniff`.
 - Pages and files are sent with `Cache-Control: no-store`, so a link turned off isn't served from a cache or proxy.
 - An unknown id, a link turned off and a missing file all get the same plain 404 page.
 
@@ -98,7 +98,7 @@ Wikilinks link only to another page whose link is on. The client resolves each w
 
 - **Unpublishing** turns the link off, in the unpublish transaction.
 - **Deleting** the page, or a folder or space holding it, deletes the link by cascade.
-- **Losing publish rights.** A link stays on only while the person who turned it on can publish the page. A suspended account can't. A change that takes that away turns the link off in its own transaction: moving the page, or a folder above it, where they can't publish; removing them from the share, directly or through a group; taking away their publish rights; or removing them as an owner. Serving checks it too, and turns off a link it finds lapsed, and so does the hourly sweep for every link, so a path this list misses can't leave a copy behind. Without this, someone removed from a share could keep reading new versions through a link they made.
+- **Losing publish rights.** A link stays on only while the person who turned it on can publish the page. A suspended account can't. A change that takes that away turns the link off in its own transaction: moving the page, or a folder above it, where they can't publish; removing them from the share, directly or through a group; taking away their publish rights; or removing them as an owner. Serving checks it too, and turns off a link it finds lapsed, and so does the 10-minute sweep for every link, so a path this list misses can't leave a copy behind. Without this, someone removed from a share could keep reading new versions through a link they made.
 
 ### 9. The app
 
@@ -106,7 +106,7 @@ Wikilinks link only to another page whose link is on. The client resolves each w
 
 ### 10. Proof
 
-`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and shown attachments are readable, never its draft, an older version, an attachment the body doesn't show, or another page. Then turning the link off, unpublishing, deleting, moving the page where its sharer can't publish, and publishing a new version each leave nothing readable of the old copy at once, and a link turned off answers 404.
+`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and shown attachments are readable, never its draft, an older version, an attachment the body doesn't show, or another page. Then turning the link off, unpublishing, deleting, moving the page where its sharer can't publish, removing the sharer from the share, and publishing a new version each leave nothing readable of the old copy at once, and a link turned off answers 404.
 
 ## Considered options
 
@@ -123,7 +123,7 @@ Wikilinks link only to another page whose link is on. The client resolves each w
 ## Consequences
 
 - The spec's plaintext rule, "what the service can see", the static SPA note, the CSP section, the record table, the storage paragraph and the release evidence change with this ADR, and so do the protocol's guarantees and accepted risks.
-- The server gains three tables and a migration, five routes and the `/p/` pages, and the reader's Markdown dependencies (remark, rehype, lowlight) through `@wikistow/client/reader`.
+- The server gains three tables and a migration, four routes, the two `/p/` routes, and the reader's Markdown dependencies (remark, rehype, lowlight) through `@wikistow/client/reader`.
 - The tree response gains `publicLink` on each page. `PageInfo` gains the link for publishers.
 - A server restored from a backup has every public link off.
 
