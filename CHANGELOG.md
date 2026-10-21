@@ -21,6 +21,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Streams (`POST /api/ai/stream` and `GET /api/me/tree-changes`) send the renewed session cookie when they're the request that renews a session. (#155)
 - `POST /api/spaces/:spaceId/delete {permissionVersion}` deletes a space and everything in it, for its owners. It refuses a space that is any owner's home space (`home-space`), and a delete sent before access last changed (`permission-version`), so the owner was shown everyone who loses access. It ends the space's publications into other spaces as deleting a page does, removes its attachment files, and drops it from everyone's saved space order. The audit log records `space.deleted` with counts only. (#158)
 
+#### Development
+
+- The reader's Markdown rules (alerts, heading ids, highlighting, wikilinks and `pageHtml`'s sanitizing) move from `packages/ui` to `@wikistow/client/reader`, so the server can use them too. The app reads pages as before. (#160)
+
 ## 0.15.0 - 2026-10-20
 
 ### Highlights
