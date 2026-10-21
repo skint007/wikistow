@@ -59,7 +59,10 @@ export function SpaceHeader({
   const standing = useOwnerStanding(spaceId);
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
-  const [action, setAction] = useState<OwnerAction | null>(null);
+  // Kept with the space it's for, so it closes when another space opens.
+  const [opened, setOpened] = useState<{ spaceId: SpaceId; action: OwnerAction } | null>(null);
+  const action = opened?.spaceId === spaceId ? opened.action : null;
+  const setAction = (next: OwnerAction) => setOpened({ spaceId, action: next });
   const { data: order } = useQuery(spaceOrderQuery(ctx));
   const deletable = owner && order !== undefined && order.homeId !== spaceId;
   return (
@@ -139,7 +142,7 @@ export function SpaceHeader({
         spaceId={spaceId}
         action={action}
         onAction={setAction}
-        onClose={() => setAction(null)}
+        onClose={() => setOpened(null)}
       />
     </div>
   );
