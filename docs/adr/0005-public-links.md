@@ -11,7 +11,7 @@ In short: **Share public link…** uploads a readable copy of the page's publish
 ## What the code supports today
 
 - **The server never holds a page in the clear.** Revisions are client-sealed JSON (`revisions.sealed`), and publishing decrypts the draft and re-encrypts it in the client (`publishPage` in `packages/client/src/operations/pages.ts`). The plaintext the server stores is account data, avatars (`schema/avatars.ts`), library plugins and plugin drafts, never page content.
-- **The reader lives in the app.** A page body is read in a web worker (`markdown.worker.ts`: `readBody`, then `highlightCode`) and turned into HTML on the page's thread by react-markdown. Its `urlTransform` drops unsafe link and image addresses, and `pageHtml` (rehype-raw, then rehype-sanitize with GitHub's list) runs when the page has raw HTML. The server has no Markdown pipeline. `@wikistow/client/markdown` has the parser and the wikilink syntax, not the reader's plugins.
+- **The reader lives in the app.** A page body is read in a web worker (`markdown-jobs.ts`: `readBody`, then `highlightCode`) and turned into HTML on the page's thread by react-markdown. Its `urlTransform` drops unsafe link and image addresses, and `pageHtml` (rehype-raw, then rehype-sanitize with GitHub's list) runs when the page has raw HTML. The server has no Markdown pipeline. `@wikistow/client/markdown` has the parser and the wikilink syntax, not the reader's plugins.
 - **Wikilinks resolve in the client.** Titles are encrypted, so each version carries an encrypted link table (`wikistow.links`, `linkKey` → page ID), and readers resolve the rest by title against their own tree.
 - **Attachments keep their ID across publishes.** `attachment:<id>` names an `AttachmentRef` inside the payload. Publishing re-encrypts each one for the published audience, unless the previous publication's copy can be reused (`resealAll`). Either way the server sees only blob hashes and can't map one to an attachment.
 - **Paths with no extension, outside `/api` and `/assets`, return `index.html`.** `/p/<id>` reaches the SPA today. Every response gets the app's security headers; a route can send its own CSP, as avatars do.
@@ -29,17 +29,19 @@ The server stores no plaintext page content except the published version of a pa
 - the attachments the body shows or links to, by `attachment:<id>` or `![[file]]`, and no others;
 - the server's own rendering of that body.
 
-It is always the page's current published version. A copy is made only of the published head, and any change to the published head deletes the copies of the page in the same transaction (decision 5). So the server never holds a draft or an older published version. A copy exists only for a page with a link, or for the moments while the app uploads one (decision 5).
+It is always the page's current published version. A copy is made only of the published head, and any change to the published head deletes the copies of the page in the same transaction (decision 5). So the server never holds an older published version. The server can't check that the Markdown it is sent matches the sealed revision; the app sends the published version it has just opened, never a draft, and a person with publish rights could publish any text anyway. A copy exists only for a page with a link, or for the moments while the app uploads one (decision 5).
 
 Copies are deleted in the same transaction as the change that ends them, not by a sweep, so once the request returns the database has no row of the copy. The files are rows too (decision 4). `backup.sh` leaves the rows of the three tables out of its dump, so backups don't hold copies, and a restore comes back with every link off.
 
-Turning a link off can't take back what someone already saved, or copies in other backups of the server's disk or database made while it was on. This is the same limit the spec already states for revoking access and for unpublishing.
+Turning a link off can't take back what someone already saved, or copies in other backups of the server's disk or database made while it was on. Deleted rows also stay on the database's disk, in its write-ahead log and in any replica until Postgres reuses the space. This is the same limit the spec already states for revoking access and for unpublishing.
 
 ### 2. Who can share
 
 A person who can publish the page: the space's owners, and editors with publish rights in its share. The routes are for people only, with a session. An agent can't turn a link on, replace its copy or turn it off. A link is a public disclosure, and the person should make it themselves. An agent can still publish and unpublish the page; what that does to the copy is in decision 5.
 
 A link stays on only while the person who turned it on can publish the page (decision 8). Readers see the marker (decision 9), but only people who can publish the page get the link itself.
+
+The app never uploads a copy without saying so on screen. The server tells the app which pages have links, and a dishonest server could claim a private page has one. So a copy goes up only from the share dialog, after its warning, or from the publish dialog, which says the page has a public link and that publishing updates it. Nothing uploads a copy in the background.
 
 ### 3. The link
 
@@ -59,22 +61,26 @@ Keeping the files in Postgres, as avatars are, lets every ending be one transact
 
 The app makes a copy in three steps, so the link never shows a copy that is missing files:
 
-1. `POST /api/pages/:pageId/public-copies` with the published revision's ID, title, Markdown, attachment list and resolved wikilinks. The server checks publish rights and that the revision is the page's published head, renders the body (decision 6), stores the copy as staged and answers which files it needs. A file the live copy already has, by attachment ID and the same `plainHash`, is reused rather than sent again.
+1. `POST /api/pages/:pageId/public-copies` with the published revision's ID, title, Markdown, attachment list and resolved wikilinks. The server checks publish rights and that the revision is the page's published head, renders the body (decision 6), stores the copy as staged and answers which files it needs: the attachments the body shows or links to.
 2. `PUT /api/public-copies/:copyId/files/:attachmentId` for each file it needs, at most the size declared. Only the person who staged the copy can add to it, and only while it is staged.
 3. `POST /api/pages/:pageId/public-link` with the copy and whether to make a new link. A new link is turning it on. Otherwise the copy replaces the live one, if the link is still on. Every check of step 1 runs again: publish rights, and that the copy's revision is still the published head. Then the copy goes live and the page's other copies are deleted.
 
 `DELETE /api/pages/:pageId/public-link` turns it off, deleting the link and every copy of the page, staged ones too.
 
+Staging, committing and turning off take the same locks as publishing, in the same order: the space, then the page's heads row. So a staged copy can't slip past a publish, an unpublish, a move or a turn-off running at the same time, and every change that deletes a page's copies sees all of them.
+
 **A new published version.** Any change to the page's published head deletes every copy of the page, live and staged, in the same transaction: publishing, by a person or an agent, publishing into the page from another space, and unpublishing. The link itself stays on, except on unpublish (decision 8). After the app publishes a page with a link, it makes the new copy at once. Until it arrives, the public page says the page is being updated. If the app can't make it, because the publish came from an agent, from another space or from an app that closed, the share dialog says the public page is out of date and offers to update it.
 
 Staged copies that are never committed are deleted by the hourly sweep after an hour. They are of the current published version, never served, and any change that ends copies deletes them too. Staging is rate limited per person, 20 a minute.
+
+The page updates with each publish from the app, so every publish sends all the attachments again. That keeps the rule simple: one copy, one version.
 
 ### 6. Rendering
 
 The server renders the body with the reader's own rules, which move from `packages/ui` to `@wikistow/client/reader` so the app and the server share them: GitHub-flavoured Markdown, alerts, wikilinks, heading ids, highlighted code and `pageHtml`'s sanitizing. The client sends Markdown, never HTML.
 
-- It renders once, when the copy is staged, in one worker thread for the whole server, one page at a time, so a slow page can't stall the server. As in the app, a body that takes over 10 seconds, or that's nested past the parser's stack, is shown as written, in a `<pre>` with a note.
-- The server always sanitizes, pages without raw HTML too, so every link and image address goes through the sanitizer's list of protocols, as react-markdown's `urlTransform` does in the app. Links that leave the page get `rel="noopener noreferrer"`. Images load only from the copy's own files, and an image elsewhere shows "Image not loaded", as in the app. `attachment:` links become download links to the copy's files.
+- It renders once, when the copy is staged, in one worker thread for the whole server, one page at a time, so a slow page can't stall the server. Each person has one render at a time, and at most 8 wait in all; past that, staging is refused as rate limited. As in the app, a body that takes over 10 seconds, or that's nested past the parser's stack, is shown as written, in a `<pre>` with a note.
+- The server always sanitizes, pages without raw HTML too, so every link and image address goes through the sanitizer's list of protocols, as react-markdown's `urlTransform` does in the app. Links that leave the page get `rel="noopener noreferrer"`. Images load only from the copy's own files, and an image elsewhere shows "Image not loaded", as in the app. Only raster images (decision 7) show inline; an SVG or other image becomes a download link. `attachment:` links become download links to the copy's files.
 - Code blocks show their language label. There is no copy button, as the page has no script. Alerts get their label as text.
 
 Wikilinks link only to another page whose link is on. The client resolves each wikilink of the published version as a reader would and sends the targets with the copy (`linkKey` → page ID). The server keeps only targets the uploader can publish, who could share those pages' links anyway. The stored rendering is a list of HTML segments with a gap between each, never a marker inside the HTML, so nothing in the page can make a gap. When the page is served, a gap becomes a link to the target's `/p/<id>` if the target's link is on and the uploader can still publish the target, and otherwise the link's text. So a link to a page made public later works without a new copy, and one whose target's link was turned off goes back to text. An embedded attachment (`![[file.png]]`) shows from the copy's files.
@@ -92,7 +98,7 @@ Wikilinks link only to another page whose link is on. The client resolves each w
 
 - **Unpublishing** turns the link off, in the unpublish transaction.
 - **Deleting** the page, or a folder or space holding it, deletes the link by cascade.
-- **Losing publish rights.** A link stays on only while the person who turned it on can publish the page. A change that takes that away turns the link off in its own transaction: moving the page, or a folder above it, where they can't publish; removing them from the share, directly or through a group; taking away their publish rights; or removing them as an owner. Serving checks it too, so a page is never shown through a link whose sharer can't publish it. Without this, someone removed from a share could keep reading new versions through a link they made.
+- **Losing publish rights.** A link stays on only while the person who turned it on can publish the page. A suspended account can't. A change that takes that away turns the link off in its own transaction: moving the page, or a folder above it, where they can't publish; removing them from the share, directly or through a group; taking away their publish rights; or removing them as an owner. Serving checks it too, and turns off a link it finds lapsed, and so does the hourly sweep for every link, so a path this list misses can't leave a copy behind. Without this, someone removed from a share could keep reading new versions through a link they made.
 
 ### 9. The app
 
@@ -106,11 +112,12 @@ Wikilinks link only to another page whose link is on. The client resolves each w
 
 - **A key in the link's fragment** (`/p/<id>#<key>`), with the app decrypting in the visitor's browser. The server would keep only ciphertext. But the public page would have to run the app's script, the key would live in browser history and anywhere the link is pasted, and the server could serve changed script to steal it. The issue asks for a page with no app script, rendered by the server.
 - **The client uploading HTML.** It would put the sanitizing in the hands of whoever uploads. The server renders instead, with the same rules.
+- **Uploading every publish of a page with a link, without asking.** It needs nothing on screen, but the server alone would decide which pages the app sends in plaintext.
 - **Rendering on each visit.** No rendering stored, but every anonymous visit would parse Markdown, the step that can take seconds (#47). Rendering once at upload costs a person with publish rights, and a visit only fills the wikilink gaps.
 - **Files beside the blobs on disk.** Every ending would need to delete files after its transaction, in many places and in #153's space deletion, with a sweep for what a crash leaves. Rows cascade.
 - **Keeping the older copy until the new one arrives.** No gap after a publish, but an agent's publish would leave the older version public with no end, against decision 1.
 - **One request for the copy and its files.** No staged copies, but files can be large, and a JSON body or a multipart parser for this alone is more than three small routes.
-- **Server-side copies made from the encrypted blobs.** The server can't decrypt them.
+- **Giving the server the version's keys,** so it decrypts the copy itself. Those keys also open the stored ciphertext, in the database and in every old backup, for good.
 - **Agents managing links.** Left out on purpose (decision 2).
 
 ## Consequences
@@ -128,5 +135,5 @@ Scott decided on 2026-10-21 to change the spec rather than drop the feature: the
 
 1. **This ADR and the spec.**
 2. **The shared reader.** The reader's plugins and `pageHtml` move to `@wikistow/client/reader`, unchanged, and the app imports them from there. The app reads pages exactly as before.
-3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, the cascade on delete, `backup.sh`, and the new leak test. Space deletion (#153) deletes nodes, so it needs no hook of its own; the test covers it once #153 has merged.
-4. **The app.** The menu item, the dialog, replacing the copy after each publish, the markers, and `ui-design.md`. Closes #154.
+3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, the cascade on delete, `backup.sh` and `docs/operations.md`, and the new leak test. Space deletion (#153) deletes nodes, so it needs no hook of its own; the test covers it once #153 has merged.
+4. **The app.** The menu item, the dialog, the publish dialog's line and its upload, the markers, and `ui-design.md`. Closes #154.
