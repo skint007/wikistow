@@ -398,7 +398,9 @@ function DeleteSpace({
   const { keys, shares, groups } = access.data ?? {};
   const self = ctx.identity.public.id;
   const coOwners = keys?.listed.map((o) => o.identity.id).filter((id) => id !== self) ?? [];
-  const sharedGroups = groups?.groups.filter((g) => g.shares.length > 0) ?? [];
+  // Groups with folders and people; their agents are an owner's or their people's.
+  const sharedGroups =
+    groups?.groups.filter((g) => g.shares.length > 0 && peopleIn(g).length > 0) ?? [];
   const members = [
     ...new Set([
       ...(shares?.flatMap((s) => s.members.map((m) => m.identityId)) ?? []),
