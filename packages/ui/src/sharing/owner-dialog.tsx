@@ -482,6 +482,7 @@ function DeleteSpace({
                   type="button"
                   size="sm"
                   variant="outline"
+                  disabled={busy}
                   onClick={() => onAction({ kind: 'remove', ownerId: self, retry: false })}
                 >
                   Leave instead
@@ -491,6 +492,7 @@ function DeleteSpace({
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={busy}
                 onClick={() => onAction({ kind: 'transfer' })}
               >
                 Transfer instead
