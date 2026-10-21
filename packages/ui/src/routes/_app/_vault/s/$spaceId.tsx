@@ -54,8 +54,9 @@ function SpaceLayout() {
 function useLeaveWhenGone(spaceId: SpaceId) {
   const ctx = useClient();
   const navigate = useNavigate();
-  const { error } = useQuery(treeQuery(ctx, spaceId));
-  const gone = error instanceof ApiError && error.code === 'not-found';
+  // A cached error stays while the tree loads again, so only a settled one counts.
+  const { error, isFetching } = useQuery(treeQuery(ctx, spaceId));
+  const gone = !isFetching && error instanceof ApiError && error.code === 'not-found';
   useEffect(() => {
     if (gone) void navigate({ to: '/' });
   }, [gone, navigate]);
