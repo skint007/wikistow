@@ -61,7 +61,7 @@ _Avoid_: Trusting an owner because the server lists them.
 
 **Share**
 A space or folder that has its own folder keys and members. Shares don't nest: no share sits inside another. Content outside every share is readable by the space's owners only.
-_Avoid_: Sharing a page; pages are shared only through their folder.
+_Avoid_: Sharing a page; pages are shared with people only through their folder. A public link is the one way to show a single page, to anyone.
 
 **Folder key**
 A key that opens the content of one share. Each key version of a share has a **draft key** and a **published key**. Editors and owners hold both; readers hold only the published key, so they can never read drafts. Folder and space names use the published key.
@@ -102,7 +102,7 @@ An immutable version made available to a page's readers by a publisher. Later ed
 Withdrawing a page's published versions from its readers. The server hides them; no keys change. Readers who already read a version keep it.
 
 **Public link**
-A long random web address that shows one page's published version to anyone who has it, with no account. While it's on, the server keeps a readable copy of that version; turning it off deletes the copy, and turning it on again makes a new address. Not the same as publishing, which shows a page to its readers.
+A long random web address that shows one page's published version to anyone who has it, with no account. While it's on, the server keeps a readable copy of that version; turning it off deletes the copy, and turning it on again makes a new address. The person who turned it on is its sharer, and it stays on only while they can publish the page. Not the same as publishing, which shows a page to its readers.
 _Avoid_: Publish to web.
 
 **Publication**
