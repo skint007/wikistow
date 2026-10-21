@@ -798,10 +798,24 @@ describe('deleting', () => {
       (await t.db.select().from(schema.keyEnvelopes)).filter((e) => subjects.includes(e.subjectId));
     expect((await envelopes()).length).toBeGreaterThan(0);
 
-    const remove = (person: Person, id: SpaceId) =>
-      rejection(spaceOperations.deleteSpace(person.ctx, id));
+    const version = async (id: SpaceId) => {
+      const [space] = await t.db
+        .select({ permissionVersion: schema.spaces.permissionVersion })
+        .from(schema.spaces)
+        .where(eq(schema.spaces.id, id));
+      return space?.permissionVersion ?? 1;
+    };
+    const remove = async (person: Person, id: SpaceId, seen?: number) =>
+      rejection(
+        spaceOperations.deleteSpace(person.ctx, {
+          spaceId: id,
+          permissionVersion: seen ?? (await version(id)),
+        }),
+      );
     expect(await remove(bob, spaceId)).toBe('forbidden');
     expect(await remove(alice, home)).toBe('home-space');
+    // Shown who had access before Bob was given the folder.
+    expect(await remove(alice, spaceId, (await version(spaceId)) - 1)).toBe('permission-version');
     expect(await remove(alice, spaceId)).toBe('no error');
     expect(await remove(alice, spaceId)).toBe('not-found');
 

@@ -208,9 +208,9 @@ export const removeOwner = command(
 /** Delete the space for everyone, once the owner has typed its name. */
 export const deleteSpace = command(
   'space.delete',
-  z.object({ spaceId: SpaceId }),
+  z.object({ spaceId: SpaceId, permissionVersion: z.number().int() }),
   owner,
-  async ({ spaceId }, { ctx }) => spaceOperations.deleteSpace(ctx, spaceId),
+  async (input, { ctx }) => spaceOperations.deleteSpace(ctx, input),
 );
 
 /**

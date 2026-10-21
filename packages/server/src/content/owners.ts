@@ -635,13 +635,17 @@ export async function removeOwner(
 export async function deleteSpace(
   db: Database,
   store: BlobStore,
-  input: { accountId: string; spaceId: string },
+  input: { accountId: string; spaceId: string; permissionVersion: number },
 ): Promise<void> {
   const { spaceId } = input;
   const hashes = await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
     const space = await lockSpaceForUpdate(tx, spaceId);
     await requireOwner(tx, identity, spaceId);
+    // Who loses access is what the owner was shown.
+    if (space.permissionVersion !== input.permissionVersion) {
+      throw new ContentError('permission-version', 'Access changed; reload and try again');
+    }
     if (space.kind === 'personal' && (await isHomeSpace(tx, spaceId))) {
       throw new ContentError('home-space', 'A home space can’t be deleted');
     }

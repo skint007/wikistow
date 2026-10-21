@@ -813,8 +813,12 @@ export function mountContentRoutes(
 
   routes.account(
     ownerRoutes.deleteSpace,
-    async ({ params }, { principal }) => {
-      await deleteSpace(db, blobs, { accountId: principal.accountId, ...params }).catch(toApiError);
+    async ({ params, body }, { principal }) => {
+      await deleteSpace(db, blobs, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
       return { ok: true as const };
     },
     { rateLimit: WRITE_LIMIT },

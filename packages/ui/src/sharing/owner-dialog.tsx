@@ -399,9 +399,12 @@ function DeleteSpace({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
-  const keys = useQuery(spaceKeysQuery(ctx, spaceId));
-  const shares = useQuery(sharesQuery(ctx, spaceId));
-  const groups = useQuery(groupsQuery(ctx, spaceId));
+  // Loaded afresh, so who loses access is current; the server refuses the
+  // delete if access changes after (`permission-version`).
+  const fresh = { refetchOnMount: 'always' } as const;
+  const keys = useQuery({ ...spaceKeysQuery(ctx, spaceId), ...fresh });
+  const shares = useQuery({ ...sharesQuery(ctx, spaceId), ...fresh });
+  const groups = useQuery({ ...groupsQuery(ctx, spaceId), ...fresh });
   const self = ctx.identity.public.id;
   const coOwners = keys.data?.listed.map((o) => o.identity.id).filter((id) => id !== self) ?? [];
   const sharedGroups = groups.data?.groups.filter((g) => g.shares.length > 0) ?? [];
@@ -422,12 +425,17 @@ function DeleteSpace({
   const [typed, setTyped] = useState('');
   const { busy, error, run } = useAction();
   const failed = keys.error ?? shares.error ?? groups.error;
-  const loaded = keys.data && shares.data && groups.data;
+  const loading = [keys, shares, groups].some((query) => query.isFetching);
   const shared = coOwners.length + members.length + sharedGroups.length > 0;
 
   const go = () =>
     run(async () => {
-      await runCommand(deleteSpace, { spaceId }, { satisfies, ctx });
+      if (!keys.data) return;
+      await runCommand(
+        deleteSpace,
+        { spaceId, permissionVersion: keys.data.permissionVersion },
+        { satisfies, ctx },
+      );
       onClose();
       await navigate({ to: '/' });
       await refreshAccess(queryClient, ctx);
@@ -525,7 +533,14 @@ function DeleteSpace({
         <Button
           type="submit"
           variant="destructive"
-          disabled={busy || !loaded || typed.trim() !== (name ?? 'delete').trim()}
+          disabled={
+            busy ||
+            loading ||
+            !keys.data ||
+            !shares.data ||
+            !groups.data ||
+            typed.trim() !== (name ?? 'delete').trim()
+          }
         >
           Delete for good
         </Button>

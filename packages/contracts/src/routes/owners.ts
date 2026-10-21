@@ -96,11 +96,13 @@ export const removeOwner = {
 /**
  * Delete the space for everyone, with everything in it: every page and
  * folder, their history and attachments, its shares and groups. Any owner
- * can, except of a space that is an owner's home space (`home-space`).
+ * can, except of a space that is an owner's home space (`home-space`). It
+ * carries the permission version the owner was shown who has access at.
  */
 export const deleteSpace = {
-  method: 'DELETE',
-  path: '/api/spaces/:spaceId',
+  method: 'POST',
+  path: '/api/spaces/:spaceId/delete',
   params: SpaceParams,
+  body: z.object({ permissionVersion: z.number().int() }),
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
