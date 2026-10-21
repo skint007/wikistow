@@ -482,8 +482,10 @@ export function createRoutes({
             await iterator.return?.();
           },
         });
-        return new Response(lines, {
-          headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' },
+        // Through Hono, so the session cookie `requirePrincipal` renewed goes too.
+        return c.body(lines, 200, {
+          'content-type': 'application/x-ndjson',
+          'cache-control': 'no-store',
         });
       });
     },

@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Server
+
+- Streams (`POST /api/ai/stream` and `GET /api/me/tree-changes`) send the renewed session cookie when they're the request that renews a session. (#155)
+
 ## 0.15.0 - 2026-10-20
 
 ### Highlights
