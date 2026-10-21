@@ -94,7 +94,7 @@ Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
 ### 2.3 What the protocol guarantees
 
-- **Confidentiality of content at rest.** Without a folder key or a recipient's secret key, stored ciphertext, wraps and envelopes reveal no plaintext.
+- **Confidentiality of content at rest.** Without a folder key or a recipient's secret key, stored ciphertext, wraps and envelopes reveal no plaintext. A page someone gives a public link is outside this: its published version is stored readable on purpose while the link is on ([ADR 0005](../docs/adr/0005-public-links.md)), and nothing in this protocol protects it.
 - **The server can't add a reader by itself.** Folder keys are sealed only by an owner's app, during an owner action, to the people shown in its dialog, or by a person's app to that person's own agents (section 7.2). Keys come from the directory and are checked against the app's pins (section 8). A save never chooses recipients: inside a share it wraps the content key under the share's current key version (section 6.8), and outside shares it seals only to the space's accepted owners, never to a list the server gives (section 6.6).
 - **Members take keys only from owners they accept.** A key version opens only through a folder key envelope signed by an accepted owner of the space, or for an agent by its own person (section 6.4). A server-invented owner has no statement from an accepted owner, so it can't hand a member a key the server knows (section 6.5).
 - **Readers never get draft keys.** An owner's app seals draft keys only to editors and owners, and the server checks each envelope's class against the recipient's role (section 6.4). A reader can't read a draft unless an editor or owner hands it over.

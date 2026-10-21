@@ -4,7 +4,7 @@ This project gives family and friends one place for personal knowledge and share
 
 Status: implementation proposal based on the completed product interview. The product requirements below are agreed. Technical choices and explicitly marked defaults are proposed decisions to validate during implementation. This document does not claim that the encryption protocol or application has been built or audited.
 
-Project name: WikiStow. CLI command: `wikistow`. Updated: 2026-10-15.
+Project name: WikiStow. CLI command: `wikistow`. Updated: 2026-10-21.
 
 Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wikistow/ui-design.md), and [implementation research](../Research/wikistow-implementation.md).
 
@@ -14,7 +14,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Accounts support verified email, password login, password reset, and optional authenticator-app two-factor authentication.
 - Administrators invite people by email or single-use link, manage accounts, suspend access, and revoke sessions and agent credentials. Invitations expire after seven days.
 - Spaces contain folders and pages. People can receive access to an entire space or a folder, never a single page. A grant covers the folder's existing and future descendants. Groups, named sets of people a space or folder is shared with as one, come in Milestone 5: built for people, with agents in groups not built yet.
-- Personal and shared spaces use the same content model. Shared content requires authentication and authorization; anonymous web publishing is outside this version.
+- Personal and shared spaces use the same content model. Shared content requires authentication and authorization. The one exception is a page someone gives a public link: anyone with the link can read its published version, with no account ([ADR 0005](docs/adr/0005-public-links.md)). Search-indexed publishing is outside this version.
 - Markdown is the canonical page source. People can switch between visual editing and source editing. The application supplies the theme.
 - Drafts autosave. Readers see published versions; editors see drafts. Publishing is a separate permission. Published history records the person or agent responsible and supports restoration.
 - A page can publish selected versions into another space without exposing its private working draft.
@@ -29,7 +29,7 @@ Offline editing, Windows and macOS packaging, comments, simultaneous live editin
 
 Use a TypeScript pnpm workspace with four applications: a Vite-built React web app, a Linux Electron client, a Hono API server on Node, and a CLI released as one binary per system. A shared client library owns encrypted document operations. One shared React interface, built by Vite, runs in both the browser and the desktop renderer. The server owns identity, authorization, opaque structure, and encrypted storage, and also serves the built web app.
 
-This departs from the preferred stack's Next.js on purpose (decided 2026-10-02). The server never reads stored content, so every real page is decrypted and rendered in the client. Next.js's server rendering, server components, and caching would go unused. Electron cannot run Next.js, so the web and desktop builds would also diverge. A static single-page app gives both clients one build. A plain JSON API keeps the server small and easy to audit. A static app can also enforce a strict Content Security Policy without per-request nonces. The cost: no server-rendered login or settings pages, and the API server, static serving, and development proxy are assembled by hand. Revisit if anonymous, search-indexed publishing is ever added.
+This departs from the preferred stack's Next.js on purpose (decided 2026-10-02). The server never reads stored content, so every real page is decrypted and rendered in the client. Next.js's server rendering, server components, and caching would go unused. Electron cannot run Next.js, so the web and desktop builds would also diverge. A static single-page app gives both clients one build. A plain JSON API keeps the server small and easy to audit. A static app can also enforce a strict Content Security Policy without per-request nonces. The cost: no server-rendered login or settings pages, and the API server, static serving, and development proxy are assembled by hand. Revisit if search-indexed publishing is ever added. Public links ([ADR 0005](docs/adr/0005-public-links.md)) don't change this: the server renders a public page itself, outside the app, as plain HTML with no app script, a strict policy of its own and `noindex`, so the app stays a static single-page app.
 
 ```mermaid
 flowchart LR
@@ -95,6 +95,7 @@ Proposed default: the common library is an ordinary shared space with owner-mana
 | Create pages within an authorized container | No | Yes | Yes | Yes |
 | Publish or unpublish | No | No | Yes | Yes |
 | Manage sharing and ownership | No | No | No | Yes |
+| Give a page a public link, or turn it off | No | No | Yes | Yes |
 | Move or delete content across permission boundaries | No | No | No | Yes |
 
 Groups come in [Milestone 5](#milestone-5-groups): built for people, with agents in groups not built yet. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
@@ -135,9 +136,11 @@ Proposed deletion policy: account deletion removes the account's credentials, pe
 
 Encrypt page titles, Markdown, attachment names and contents, and human-readable folder and space names. The server retains account emails, opaque resource IDs, parent relationships, memberships, permissions, revision identifiers, sizes, timestamps, and activity attribution. This version protects content, not all metadata or traffic patterns.
 
-The server stores ciphertext and wrapped keys, not content keys, vault passphrases, recovery secrets, plaintext search indexes, or decrypted page previews. Keep plaintext out of request logs, error reporting, analytics, server caches, and background jobs. Source-to-publication relationships are additional visible metadata; human-readable source names remain encrypted.
+The server stores ciphertext and wrapped keys, not content keys, vault passphrases, recovery secrets, plaintext search indexes, or decrypted page previews. Keep plaintext out of request logs, error reporting, analytics, server caches, and background jobs. The one stored exception is a public link, below. Source-to-publication relationships are additional visible metadata; human-readable source names remain encrypted.
 
-The [AI assistant](#ai-assistant) is the one exception, by the person's choice: what they send to it passes through the server, decrypted, on its way to the configured provider. The server forwards it without storing or logging it.
+The [AI assistant](#ai-assistant) is an exception, by the person's choice: what they send to it passes through the server, decrypted, on its way to the configured provider. The server forwards it without storing or logging it.
+
+A public link is the other exception, and the only page content the server stores readable ([ADR 0005](docs/adr/0005-public-links.md)). Someone who can publish a page can give it a link that anyone can open with no account. The app then uploads a readable copy of the page's published version: its title, its Markdown without the frontmatter, and the attachments the body shows or links to. The server keeps that copy, and its own rendering of it, only while the link is on. Turning the link off deletes it at once, and so do unpublishing the page, deleting it or its space, and moving it where the person who shared it can't publish it. Drafts, older published versions and pages without a link are never stored readable. The share dialog says before the first link that anyone with the link can read the page and that the server keeps a readable copy. Turning a link off can't take back copies someone already saved, or copies in server backups made while it was on.
 
 E2EE here protects against disclosure of stored server data. A malicious operator serving changed browser JavaScript could steal keys when someone unlocks the web app. The bundled desktop and CLI reduce dependence on live web code, but their updates also require trust. Do not promise protection against a compromised client or a model provider receiving content that a user deliberately sends to an agent.
 
@@ -195,7 +198,7 @@ For publication into another space, maintain one destination page per source-and
 
 Proposed default: the destination is maintained from its source. Editing it independently requires an explicit detached copy. Source readers do not automatically gain destination access, and destination readers do not gain source access. Publishing requires publishing rights at the source page and at the destination, so a page's readers cannot copy it elsewhere. Keep source provenance encrypted and do not display inaccessible source paths.
 
-Before publishing across spaces, show the destination audience, attachments, and links that recipients cannot open. Do not automatically publish linked private pages. Unpublishing removes the current reader-visible publication but cannot recall downloaded copies. The owner retains its history for restoration; do not leave an alternate history route exposing an unpublished page to readers.
+Before publishing across spaces, show the destination audience, attachments, and links that recipients cannot open. Do not automatically publish linked private pages. Unpublishing removes the current reader-visible publication but cannot recall downloaded copies. It also turns off the page's public link, if it has one. The owner retains its history for restoration; do not leave an alternate history route exposing an unpublished page to readers.
 
 ## Editor and file portability
 
@@ -409,7 +412,7 @@ The internal extension points stay internal and may change freely; plugins see o
    - `connect-src` is limited to the application's API.
    - Images come only from the application and `blob:` URLs, which carry decrypted attachments and banners.
 
-   The Hono server sends the policy with every app response, alongside the other security headers. The policy is static, so the built files stay cacheable. The Electron renderer applies the same policy. The policy has one entry for plugins, `frame-src 'self'`, for the hidden sandboxed frame that holds scripts' workers (ADR 0002). That frame, `/plugin-host.html`, is served with a stricter policy of its own: `default-src 'none'`, its one host script `/plugin-host.js` named in `script-src` with the app's origin (the public origin, or `app://wikistow` in the desktop app), `worker-src data:`, `frame-ancestors 'self'` and `sandbox allow-scripts`, and without `X-Frame-Options`. Its script is served with `Cross-Origin-Resource-Policy: cross-origin`, since the frame's origin is opaque. Scripts' workers inherit the frame's policy, so they can make no requests. The desktop app serves the frame and runs scripts in it the same way. If the editor needs inline styles, record that exception and the reason for it. Keys stay inside the encryption module, as required above.
+   The Hono server sends the policy with every app response, alongside the other security headers. The policy is static, so the built files stay cacheable. The Electron renderer applies the same policy. The policy has one entry for plugins, `frame-src 'self'`, for the hidden sandboxed frame that holds scripts' workers (ADR 0002). That frame, `/plugin-host.html`, is served with a stricter policy of its own: `default-src 'none'`, its one host script `/plugin-host.js` named in `script-src` with the app's origin (the public origin, or `app://wikistow` in the desktop app), `worker-src data:`, `frame-ancestors 'self'` and `sandbox allow-scripts`, and without `X-Frame-Options`. Its script is served with `Cross-Origin-Resource-Policy: cross-origin`, since the frame's origin is opaque. Scripts' workers inherit the frame's policy, so they can make no requests. The desktop app serves the frame and runs scripts in it the same way. If the editor needs inline styles, record that exception and the reason for it. Keys stay inside the encryption module, as required above. A public page (`/p/<id>`, [ADR 0005](docs/adr/0005-public-links.md)) is not the app and has a policy of its own: `default-src 'none'`, its one inline stylesheet named by hash, images only from the server, no script at all, `frame-ancestors 'none'`, and `noindex`. Its files are sent with `default-src 'none'; sandbox`, and anything but a raster image as a download.
 
 ## Server records and operations
 
@@ -428,6 +431,7 @@ The internal extension points stay internal and may change freely; plugins see o
 | Blobs | Opaque ID, encrypted bytes, size, version references, upload completion state |
 | Plugin library | Plugin ID, owner and whether it is Shared or Only me; the hashes of approved versions a client names when it lists the library, not kept; each version's hash, manifest, file paths, size, uploader and time; its files in plain text, stored beside the blobs and backed up with them |
 | Plugin drafts | Owner, name, the library version it started from, its source files in plain text, the build its owner last previewed, and when its files last changed; in the database, so backed up with it |
+| Public links | A page's link id, its live copy and who turned it on; each copy's published revision, title, Markdown body, rendering, wikilink targets and the attachments it shows, in plain text, in the database, deleted with the link ([ADR 0005](docs/adr/0005-public-links.md)) |
 | Audit events | Actor, resource IDs, administrative and publication actions, timestamps; no plaintext names or bodies |
 
 Store attachment payloads outside PostgreSQL while retaining authorization and revision references in the database. Authorize every download, upload completion, and envelope fetch. Opaque URLs alone do not grant access. Back up the database and encrypted blob store consistently and test restoration.
@@ -452,7 +456,7 @@ Required evidence:
 - A write prepared before revocation fails the permission-version check; a later write excludes the removed recipient.
 - Password reset does not unlock the vault. The vault passphrase and recovery key each recover the same intended keyring independently.
 - A substituted recipient key is detected by the chosen enrollment or verification procedure.
-- A database and blob snapshot plus captured application logs contains none of the test document's plaintext markers or private key material.
+- A database and blob snapshot plus captured application logs contains none of the test document's plaintext markers or private key material. The one exception is a page given a public link: the snapshot holds its published version and the attachments that version shows, and nothing else of it, no draft and no older version. Once the link is off, or the page is unpublished, deleted or moved where its sharer can't publish it, the snapshot holds none of it.
 - A client built without knowledge of an `extensions` namespace saves a new revision that carries that namespace unchanged, and refuses to save a payload with a newer major format version.
 
 Finalize the protocol format and key-verification procedure only after this evidence and a focused security review. This is a release dependency arising from the E2EE requirement, not evidence that the proposed protocol is already secure.

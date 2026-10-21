@@ -101,6 +101,10 @@ An immutable version made available to a page's readers by a publisher. Later ed
 **Unpublish**
 Withdrawing a page's published versions from its readers. The server hides them; no keys change. Readers who already read a version keep it.
 
+**Public link**
+A long random web address that shows one page's published version to anyone who has it, with no account. While it's on, the server keeps a readable copy of that version; turning it off deletes the copy, and turning it on again makes a new address. Not the same as publishing, which shows a page to its readers.
+_Avoid_: Publish to web.
+
 **Publication**
 A page in another space that receives explicitly published versions from a source page. It has its own audience and does not expose the source's drafts or history.
 
