@@ -2,7 +2,7 @@ import type { Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
-import { alertMarker, type AlertType } from '../../alerts';
+import { alertMarker, type AlertType } from '@wikistow/client/reader';
 
 /**
  * The alert `quote`, a block quote, is (`alertMarker`), by the plain text

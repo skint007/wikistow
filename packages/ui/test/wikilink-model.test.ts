@@ -4,9 +4,8 @@ import {
   type LinkablePage,
   type WikilinkNode,
 } from '@wikistow/client';
+import { headingId, readBody } from '@wikistow/client/reader';
 import { describe, expect, it } from 'vite-plus/test';
-import { headingId } from '../src/page/heading-ids.ts';
-import { readBody } from '../src/page/reading.ts';
 import { wikilinkView, type WikilinkScope } from '../src/page/wikilink-model.ts';
 
 const link = (source: string): WikilinkNode => {

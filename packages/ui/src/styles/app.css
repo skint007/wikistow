@@ -225,7 +225,7 @@
   .page-body :is(blockquote, .markdown-alert) {
     @apply rounded-control border-l-4 border-border bg-muted px-4 py-2 text-subtle-foreground;
   }
-  /* GitHub's alerts (see page/alerts.ts): a quote in its type's colour, under its label. */
+  /* GitHub's alerts (see packages/client/src/reader/alerts.ts): a quote in its type's colour, under its label. */
   .page-body .markdown-alert {
     @apply border-(--alert) text-foreground;
   }
@@ -266,7 +266,7 @@
   .page-body .code-language {
     @apply px-4 pt-2 font-mono text-xs text-subtle-foreground select-none;
   }
-  /* Highlighted code's tokens (see page/highlight.ts), in the palette's own colours. */
+  /* Highlighted code's tokens (see packages/client/src/reader/highlight.ts), in the palette's own colours. */
   .page-body :is(.hljs-comment, .hljs-quote, .hljs-meta) {
     @apply text-subtle-foreground;
   }
@@ -302,7 +302,7 @@
   .page-body td {
     @apply border-t border-border px-3 py-2;
   }
-  /* Raw HTML a page may hold (see page/page-html.ts). */
+  /* Raw HTML a page may hold (see packages/client/src/reader/page-html.ts). */
   .page-body kbd {
     @apply rounded-[6px] border border-b-2 border-border bg-card px-1.5 py-0.5 font-mono text-[0.85em];
   }

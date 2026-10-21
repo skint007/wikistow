@@ -1,9 +1,9 @@
 // GitHub's alerts: a block quote whose first line is `[!NOTE]`, `[!TIP]`,
 // `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` alone, in any case. The
 // reader shows it as an alert (`remarkAlerts`), the visual editor too, its
-// marker kept as text (`visual/alerts.ts`). No React here: the reader's
-// worker loads this.
-import { markdownNodes } from '@wikistow/client/markdown';
+// marker kept as text (`packages/ui/src/page/editor/visual/alerts.ts`). No
+// React here: the reader's worker loads this.
+import { markdownNodes } from '../markdown/index.ts';
 import type { Blockquote, Root, Text } from 'mdast';
 
 /** Each alert's type, as its class names it (`markdown-alert-note`), and the label it shows. */
@@ -57,7 +57,7 @@ export function alertOf(quote: Blockquote): { type: AlertType; length: number; t
 /**
  * A remark plugin: each alert as a `div` of classes `markdown-alert` and
  * `markdown-alert-<type>`, its marker left out, which the reader gives a
- * label (`markdown.tsx`).
+ * label (`packages/ui/src/page/markdown.tsx`).
  */
 export function remarkAlerts() {
   return (tree: Root) => {

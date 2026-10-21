@@ -5,7 +5,7 @@ import {
   type LinkablePage,
   type WikilinkNode,
 } from '@wikistow/client';
-import { headingId } from './heading-ids';
+import { headingId } from '@wikistow/client/reader';
 
 /**
  * How the reader shows one wikilink. Whatever the viewer can't open is

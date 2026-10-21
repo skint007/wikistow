@@ -3,9 +3,8 @@
 // copies: strings and plain objects.
 import { findLinks, placedWikilinks } from '@wikistow/client/links';
 import { linkSpans } from '@wikistow/client/markdown';
+import { headingTexts, highlightCode, readBody } from '@wikistow/client/reader';
 import { meaningOf, readerFidelity } from './editor/visual/reader-fidelity';
-import { highlightCode } from './highlight';
-import { headingTexts, readBody } from './reading';
 
 export const markdownJobs = {
   /**
