@@ -31,6 +31,7 @@ export type ContentFailure =
   | 'page-limit'
   | 'draft-limit'
   | 'last-owner'
+  | 'home-space'
   | 'invalid-plugin';
 
 export class ContentError extends Error {

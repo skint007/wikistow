@@ -1132,7 +1132,7 @@ const lockBlob = (tx: Database, hash: string) =>
  * a transaction, so this takes it again in one of its own and checks for a
  * row once more, since an upload of the same bytes may have stored one since.
  */
-async function deleteUnlistedFile(db: Database, store: BlobStore, hash: string) {
+export async function deleteUnlistedFile(db: Database, store: BlobStore, hash: string) {
   await db.transaction(async (tx) => {
     await lockBlob(tx, hash);
     const [row] = await tx.select({ hash: blobs.hash }).from(blobs).where(eq(blobs.hash, hash));

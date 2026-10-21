@@ -12,10 +12,13 @@ import {
   sealedBytes,
   verifySignature,
 } from '@wikistow/client';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { audit } from '../admin/audit.ts';
+import type { BlobStore } from '../blobs/store.ts';
 import type { Database } from '../db/client.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import {
+  blobs,
   keyEnvelopes,
   metadataRevisions,
   metadataWraps,
@@ -23,6 +26,7 @@ import {
   shareMembers,
   shares,
   spaceOwners,
+  revisions,
   spaces,
   users,
 } from '../db/schema/index.ts';
@@ -31,6 +35,7 @@ import {
   accessTo,
   canEdit,
   agentGrantsOf,
+  isOwner,
   capAgent,
   lockShare,
   lockSpace,
@@ -39,6 +44,7 @@ import {
   readSnapshot,
   requireRoom,
   sharesByNode,
+  treesSeenBy,
   treeView,
   type Access,
   type Holder,
@@ -49,7 +55,8 @@ import { ContentError } from './errors.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
-import { latestAgentEdit, listPages, requirePublished } from './pages.ts';
+import { deleteUnlistedFile, latestAgentEdit, listPages, requirePublished } from './pages.ts';
+import { endPublicationsFrom } from './publications.ts';
 import { charge } from './quota.ts';
 import { servedMetadata } from './serving.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
@@ -223,6 +230,95 @@ export async function createSpace(
       .set({ metadataHead: input.metadata.record.metadataRevisionId })
       .where(eq(spaces.id, input.spaceId));
   });
+}
+
+/**
+ * Delete a space for everyone, for any of its owners (`forbidden` for its
+ * members, `not-found` for anyone else). A space that is an owner's home
+ * space stays (`home-space`). Everything in it goes in one transaction:
+ * its folders and pages with every version, key and attachment, its names,
+ * shares, groups and owners, and copies published into it. Its pages'
+ * publications into other spaces end as a deleted page's do
+ * (`endPublicationsFrom`), and it drops out of everyone's saved order.
+ * Once the space's row is gone, the tree trigger tells everyone who saw
+ * it. As in `deleteNode`, the space is locked first, then its shares, then
+ * its nodes, and blob files are removed after the commit.
+ */
+export async function deleteSpace(
+  db: Database,
+  store: BlobStore,
+  input: { accountId: string; spaceId: string },
+): Promise<void> {
+  const { spaceId } = input;
+  const hashes = await db.transaction(async (tx) => {
+    const identity = await requireIdentity(tx, input.accountId);
+    const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for('update');
+    if (!space) throw new ContentError('not-found');
+    if (!(await isOwner(tx, identity.id, spaceId))) {
+      const seen = await treesSeenBy(tx, input.accountId, [spaceId]);
+      throw new ContentError(seen.has(spaceId) ? 'forbidden' : 'not-found');
+    }
+    if (space.kind === 'personal' && (await isHomeSpace(tx, spaceId))) {
+      throw new ContentError('home-space', 'A home space can’t be deleted');
+    }
+    const spaceShares = await tx
+      .select({ id: shares.id })
+      .from(shares)
+      .where(eq(shares.spaceId, spaceId))
+      .orderBy(shares.id)
+      .for('update');
+    const ids = (
+      await tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.spaceId, spaceId)).for('update')
+    ).map((node) => node.id);
+    // In parts, since a space can hold more pages than one query takes IDs.
+    const openingFiles: string[] = [];
+    for (let i = 0; i < ids.length; i += 5000) {
+      openingFiles.push(...(await endPublicationsFrom(tx, ids.slice(i, i + 5000))));
+    }
+    const doomed = await tx
+      .select({ hash: blobs.hash })
+      .from(blobs)
+      .innerJoin(nodes, eq(nodes.id, blobs.pageId))
+      .where(eq(nodes.spaceId, spaceId));
+    // Envelopes point at their subject by ID, not by foreign key, so they
+    // are removed explicitly. Everything else goes with the space's row.
+    await tx
+      .delete(keyEnvelopes)
+      .where(
+        or(
+          and(
+            eq(keyEnvelopes.subjectKind, 'revision'),
+            inArray(
+              keyEnvelopes.subjectId,
+              tx.select({ id: revisions.id }).from(revisions).where(eq(revisions.spaceId, spaceId)),
+            ),
+          ),
+          and(
+            eq(keyEnvelopes.subjectKind, 'metadata'),
+            inArray(
+              keyEnvelopes.subjectId,
+              tx
+                .select({ id: metadataRevisions.id })
+                .from(metadataRevisions)
+                .where(eq(metadataRevisions.spaceId, spaceId)),
+            ),
+          ),
+        ),
+      );
+    await tx.delete(spaces).where(eq(spaces.id, spaceId));
+    await tx
+      .update(users)
+      .set({ spaceOrder: sql`array_remove(${users.spaceOrder}, ${spaceId})` })
+      .where(sql`${spaceId} = any(${users.spaceOrder})`);
+    await audit(tx, {
+      actor: input.accountId,
+      action: 'space.deleted',
+      target: { kind: 'space', id: spaceId },
+      details: { nodes: ids.length, shares: spaceShares.length },
+    });
+    return [...doomed.map((blob) => blob.hash), ...openingFiles];
+  });
+  for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
 }
 
 /**
@@ -415,6 +511,18 @@ async function humanSpaces(db: Database, identityId: string) {
       null,
     );
   return { bySpace, homeId: home?.space.id ?? null };
+}
+
+/** Whether the space is the home space of any of its current owners, which nobody can delete. */
+async function isHomeSpace(db: Database, spaceId: string) {
+  const owners = await db
+    .select({ id: spaceOwners.identityId })
+    .from(spaceOwners)
+    .where(and(eq(spaceOwners.spaceId, spaceId), isNull(spaceOwners.removedAt)));
+  for (const { id } of owners) {
+    if ((await humanSpaces(db, id)).homeId === spaceId) return true;
+  }
+  return false;
 }
 
 /**

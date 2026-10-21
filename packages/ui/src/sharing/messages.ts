@@ -15,6 +15,7 @@ const REFUSED: Partial<Record<ApiError['code'], string>> = {
   'share-nesting':
     'Shares don’t nest: this folder is inside a shared folder, or a folder inside it is shared.',
   'last-owner': 'A space always keeps one owner. Add another owner first.',
+  'home-space': 'This is an owner’s home space, so it can’t be deleted.',
   duplicate: 'That was already done. Close this and look again.',
   'not-found': 'That person or folder isn’t there any more.',
   'payload-too-large': 'This folder is too big to share in one go.',

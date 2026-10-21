@@ -92,3 +92,15 @@ export const removeOwner = {
   }),
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
+
+/**
+ * Delete the space for everyone, with everything in it: every page and
+ * folder, their history and attachments, its shares and groups. Any owner
+ * can, except of a space that is an owner's home space (`home-space`).
+ */
+export const deleteSpace = {
+  method: 'DELETE',
+  path: '/api/spaces/:spaceId',
+  params: SpaceParams,
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;

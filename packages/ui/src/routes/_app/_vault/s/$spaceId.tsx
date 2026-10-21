@@ -1,10 +1,15 @@
 import { SpaceId } from '@wikistow/client';
-import { createFileRoute, Outlet } from '@tanstack/react-router';
+import { ApiError } from '@wikistow/client/api';
+import { useQuery } from '@tanstack/react-query';
+import { createFileRoute, Outlet, useNavigate } from '@tanstack/react-router';
+import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { ChatColumn, useChatColumn } from '../../../../ai/chat-column';
+import { treeQuery } from '../../../../data/queries';
 import { OwnerConfirm } from '../../../../sharing/owner-confirm';
 import { useShellSpace } from '../../../../shell/app-shell';
 import { Sidebar } from '../../../../shell/sidebar';
+import { useClient } from '../../../../vault/store';
 
 export const Route = createFileRoute('/_app/_vault/s/$spaceId')({
   params: {
@@ -22,6 +27,7 @@ export const Route = createFileRoute('/_app/_vault/s/$spaceId')({
 function SpaceLayout() {
   const { spaceId } = Route.useParams();
   useShellSpace(spaceId);
+  useLeaveWhenGone(spaceId);
   const chat = useChatColumn();
   return (
     <div
@@ -38,4 +44,19 @@ function SpaceLayout() {
       <OwnerConfirm key={spaceId} spaceId={spaceId} />
     </div>
   );
+}
+
+/**
+ * Send someone viewing a space home once the server no longer shows it to
+ * them: deleted, or no longer shared with them. The home route opens their
+ * first space, which is their home space.
+ */
+function useLeaveWhenGone(spaceId: SpaceId) {
+  const ctx = useClient();
+  const navigate = useNavigate();
+  const { error } = useQuery(treeQuery(ctx, spaceId));
+  const gone = error instanceof ApiError && error.code === 'not-found';
+  useEffect(() => {
+    if (gone) void navigate({ to: '/' });
+  }, [gone, navigate]);
 }

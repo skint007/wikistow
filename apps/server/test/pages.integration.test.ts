@@ -31,7 +31,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, scratchApps, type TestApp } from './support/harness.ts';
-import { shareFolder } from './support/sharing.ts';
+import { invite, shareFolder } from './support/sharing.ts';
 
 let t: TestApp;
 const scratchApp = scratchApps();
@@ -751,5 +751,78 @@ describe('deleting', () => {
     ).toEqual([]);
     const files = await readdir(`${t.blobDir}/objects`, { recursive: true, withFileTypes: true });
     expect(files.filter((f) => f.isFile() && f.name === ref.blobHash)).toEqual([]);
+  });
+
+  it('removes a whole space for its owners, but never a home space', async () => {
+    const alice = await personWithVault(t);
+    const bob = await personWithVault(t);
+    const home = await spaceOperations.createSpace(alice.ctx, { name: 'Home' });
+    const spaceId = await spaceOperations.createSpace(alice.ctx, { name: 'Space' });
+    // The page stays sealed to the owners, the folder is shared with Bob.
+    const page = {
+      spaceId,
+      pageId: await pages.createPage(alice.ctx, { spaceId, parentId: null, title: 'P' }),
+    };
+    const ref = await pages.uploadAttachment(alice.ctx, page, {
+      name: 'f',
+      mediaType: 'text/plain',
+      bytes: bytes('whole space'),
+    });
+    await pages.editDraft(alice.ctx, page, { attachments: [ref] });
+    await pages.publishPage(alice.ctx, page);
+    const folderId = await spaceOperations.createFolder(alice.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Shared',
+    });
+    await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: folderId,
+      people: [await invite(alice, bob, 'editor')],
+    });
+    await t.db
+      .update(schema.users)
+      .set({ spaceOrder: [spaceId] })
+      .where(eq(schema.users.id, bob.id));
+    const subjects = [
+      ...(await t.db
+        .select({ id: schema.revisions.id })
+        .from(schema.revisions)
+        .where(eq(schema.revisions.spaceId, spaceId))),
+      ...(await t.db
+        .select({ id: schema.metadataRevisions.id })
+        .from(schema.metadataRevisions)
+        .where(eq(schema.metadataRevisions.spaceId, spaceId))),
+    ].map((row) => row.id);
+    const envelopes = async () =>
+      (await t.db.select().from(schema.keyEnvelopes)).filter((e) => subjects.includes(e.subjectId));
+    expect((await envelopes()).length).toBeGreaterThan(0);
+
+    const remove = (person: Person, id: SpaceId) =>
+      rejection(spaceOperations.deleteSpace(person.ctx, id));
+    expect(await remove(bob, spaceId)).toBe('forbidden');
+    expect(await remove(alice, home)).toBe('home-space');
+    expect(await remove(alice, spaceId)).toBe('no error');
+    expect(await remove(alice, spaceId)).toBe('not-found');
+
+    const rows = async (query: ReturnType<typeof sql>) => [...(await t.db.execute(query))].length;
+    for (const table of ['spaces', 'nodes', 'revisions', 'blobs', 'metadata_revisions', 'shares']) {
+      const column = table === 'spaces' ? 'id' : 'space_id';
+      expect(
+        await rows(
+          sql`select 1 from ${sql.identifier(table)} where ${sql.identifier(column)} = ${spaceId}`,
+        ),
+        table,
+      ).toBe(0);
+    }
+    expect(await envelopes()).toEqual([]);
+    const files = await readdir(`${t.blobDir}/objects`, { recursive: true, withFileTypes: true });
+    expect(files.filter((f) => f.isFile() && f.name === ref.blobHash)).toEqual([]);
+    const [order] = await t.db
+      .select({ spaceOrder: schema.users.spaceOrder })
+      .from(schema.users)
+      .where(eq(schema.users.id, bob.id));
+    expect(order?.spaceOrder).toEqual([]);
+    expect((await spaceOperations.loadSpaces(alice.ctx)).map((s) => s.id)).toEqual([home]);
   });
 });

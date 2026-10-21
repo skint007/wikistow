@@ -38,6 +38,7 @@ export const ERROR_STATUS = {
   'page-limit': 409,
   'draft-limit': 409,
   'last-owner': 409,
+  'home-space': 409,
   'mail-off': 409,
   duplicate: 409,
   'request-timeout': 408,

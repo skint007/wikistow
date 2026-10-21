@@ -5,6 +5,7 @@ import {
   saveContacts,
   ShareId,
   sharingOperations,
+  spaceOperations,
   SpaceId,
   type ClientContext,
   type Lookup,
@@ -202,6 +203,14 @@ export const removeOwner = command(
   z.object({ removal: made<ownerOperations.PlannedOwnerRemoval>() }),
   owner,
   async ({ removal }, { ctx }) => ownerOperations.applyOwnerRemoval(ctx, removal),
+);
+
+/** Delete the space for everyone, once the owner has typed its name. */
+export const deleteSpace = command(
+  'space.delete',
+  z.object({ spaceId: SpaceId }),
+  owner,
+  async ({ spaceId }, { ctx }) => spaceOperations.deleteSpace(ctx, spaceId),
 );
 
 /**

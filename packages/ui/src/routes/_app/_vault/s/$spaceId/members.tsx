@@ -318,7 +318,12 @@ function Members() {
           </section>
         )}
       </div>
-      <OwnerDialog spaceId={spaceId} action={action} onClose={() => setAction(null)} />
+      <OwnerDialog
+        spaceId={spaceId}
+        action={action}
+        onAction={setAction}
+        onClose={() => setAction(null)}
+      />
       <ShareDialog
         spaceId={spaceId}
         rootId={sharing?.rootId ?? null}
