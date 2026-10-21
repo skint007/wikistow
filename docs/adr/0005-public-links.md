@@ -55,7 +55,7 @@ The audit log records each link turned on and each way one ends (turned off, unp
 Four tables, with no files on disk:
 
 - `public_links`: one row per page with a link: the page (foreign key to `nodes`, cascading), its id, who turned it on, and when. Replacing a link deletes its row and adds a new one.
-- `public_copies`: a copy, staged or live, which the copy's own row says, so ending a copy never writes to a link's row: the page (cascading), the published revision it was made from, its title, Markdown and rendering, who uploaded it, and when.
+- `public_copies`: a copy, staged or live: the page (cascading), the published revision it was made from, its title, Markdown and rendering, who uploaded it, and when. Whether it is live is on its own row, so ending a copy never writes to a link's row.
 - `public_files`: a copy's attachments (cascading from the copy): attachment ID, name, media type, size and the bytes.
 - `public_targets`: a copy's links to other public pages (decision 6): the copy (cascading), the link, and the target page's link (cascading from `public_links`).
 
