@@ -1,4 +1,5 @@
 import { splitFrontmatter } from '@wikistow/client';
+import { pageHtml, SYNTAX } from '@wikistow/client/reader';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
 import type { Root, RootContent } from 'mdast';
@@ -22,7 +23,6 @@ import {
 import { PageBody, type PageBodyContext } from './body-context';
 import { BodyLink } from './body-link';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
-import { pageHtml, SYNTAX } from './page-html';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
 

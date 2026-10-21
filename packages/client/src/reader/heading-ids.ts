@@ -1,5 +1,6 @@
-import { markdownNodes, markdownText } from '@wikistow/client/markdown';
+import { markdownNodes, markdownText } from '../markdown/index.ts';
 import type { Root } from 'mdast';
+import type {} from 'mdast-util-to-hast';
 
 /**
  * The id a heading with this text gets, which `[[Page#Heading]]` links to:

@@ -19,12 +19,12 @@ import {
 } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { $remark } from '@milkdown/kit/utils';
+import { alertOf } from '@wikistow/client/reader';
 import type { Link, Root, Text } from 'mdast';
 import { defaultHandlers, type State } from 'mdast-util-to-markdown';
 import type { Options } from 'remark-stringify';
 import type { Pluggable } from 'unified';
 import { markdownSyntaxes } from '../../../registries';
-import { alertOf } from '../../alerts';
 import { inertHost, type VisualHost } from './host';
 import { isLiteral } from './literals';
 import { leaveLastBlock } from './plugins';

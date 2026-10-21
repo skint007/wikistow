@@ -3,9 +3,8 @@
 // for. No Milkdown or React here: the Markdown worker loads this
 // (`markdown-jobs.ts`), so the check's reads run off the page's thread.
 import { markdownNodes, parseMarkdown } from '@wikistow/client/markdown';
+import { ALERTS, alertOf, syntaxReadings } from '@wikistow/client/reader';
 import type { Nodes, Root } from 'mdast';
-import { ALERTS, alertOf } from '../../alerts';
-import { syntaxReadings } from '../../reading';
 
 /** Whether a page body can be edited visually, and if not, why it stays in source mode. */
 export type Fidelity = { visual: true } | { visual: false; reason: string };

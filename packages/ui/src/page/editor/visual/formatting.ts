@@ -10,7 +10,7 @@ import {
 } from '@milkdown/kit/prose/state';
 import { liftTarget } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
-import type { AlertType } from '../../alerts';
+import type { AlertType } from '@wikistow/client/reader';
 import { alertIn } from './alerts';
 import { inlineHtml } from './read-alone';
 

@@ -1,4 +1,5 @@
 import type { AttachmentRef } from '@wikistow/client';
+import { CODE_LANGUAGES, type AlertType } from '@wikistow/client/reader';
 import { Fragment, type Node } from '@milkdown/kit/prose/model';
 import { NodeSelection, Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
@@ -14,9 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { Picker, type PickerOption } from '@/components/ui/picker';
 import { cn } from '@/lib/utils';
 import { QUOTE_KINDS } from '../../alert-title';
-import type { AlertType } from '../../alerts';
 import { attachmentId } from '../../attachments';
-import { CODE_LANGUAGES } from '../../highlight';
 import { alertIn } from './alerts';
 import { setKind, type QuoteKind } from './formatting';
 import { claimedBlock } from '@wikistow/plugin-sdk';

@@ -1,8 +1,9 @@
 // Syntax highlighting for fenced code, by its language label, in the
 // reader (in its worker, `markdownJobs.body`) and the visual editor
-// (`visual/highlight.ts`). Each token is a span with highlight.js's `hljs-`
-// classes, coloured by the page's palette (styles/app.css).
-import { markdownNodes } from '@wikistow/client/markdown';
+// (`packages/ui/src/page/editor/visual/highlight.ts`). Each token is a span
+// with highlight.js's `hljs-` classes, coloured by the page's palette
+// (`packages/ui/src/styles/app.css`).
+import { markdownNodes } from '../markdown/index.ts';
 import type { ElementContent } from 'hast';
 import { common, createLowlight } from 'lowlight';
 import type { Root } from 'mdast';

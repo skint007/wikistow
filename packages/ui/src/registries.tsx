@@ -1,11 +1,11 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
 import type { ClientContext, pageOperations, RevisionId } from '@wikistow/client';
+import { wikilinkReading, type SyntaxReading } from '@wikistow/client/reader';
 import { History, type LucideIcon } from 'lucide-react';
 import type { RootContent } from 'mdast';
 import type { ComponentType, ReactElement } from 'react';
 import type { VisualHost } from './page/editor/visual/host';
 import { HistorySheet } from './page/history-sheet';
-import { wikilinkReading, type SyntaxReading } from './page/reading';
 import { WikilinkReader } from './page/wikilinks';
 
 /*
@@ -48,8 +48,9 @@ function markdownSyntax<Type extends RootContent['type']>({
  * Syntax every page body is read with. Wikilinks and attachment embeds
  * come first; frontmatter is split off before any of it runs (see
  * `splitFrontmatter`), and shown by the reader's Properties box. Each
- * one's reading is listed in `syntaxReadings` too (page/reading.ts), which
- * the reader's worker reads with, without React.
+ * one's reading is listed in `syntaxReadings` too
+ * (packages/client/src/reader/reading.ts), which the reader's worker reads
+ * with, without React.
  */
 export const markdownSyntaxes: readonly MarkdownSyntax[] = [
   markdownSyntax({

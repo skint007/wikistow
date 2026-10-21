@@ -2,8 +2,8 @@ import type { Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
+import { highlighted } from '@wikistow/client/reader';
 import type { ElementContent } from 'hast';
-import { highlighted } from '../../highlight';
 
 /** A run of a code block's text, by offset in it, and the classes highlight.js gives it. */
 type Token = { from: number; to: number; className: string };

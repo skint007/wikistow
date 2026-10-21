@@ -1,4 +1,5 @@
 import type { Nodes, Root } from 'hast';
+import type {} from 'mdast-util-to-hast';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize';
 

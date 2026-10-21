@@ -1,9 +1,9 @@
+import { pageHtml } from '@wikistow/client/reader';
 import { toHtml } from 'hast-util-to-html';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
 import { describe, expect, it } from 'vite-plus/test';
 import { markdownJobs } from '../src/page/markdown-jobs.ts';
-import { pageHtml } from '../src/page/page-html.ts';
 
 /** A body as the reader renders it, before React: read as the worker does, then `pageHtml`. */
 function render(body: string): string {

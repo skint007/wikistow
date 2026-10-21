@@ -1,3 +1,4 @@
+import { ALERTS, type AlertType } from '@wikistow/client/reader';
 import {
   Info,
   Lightbulb,
@@ -7,7 +8,6 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react';
-import { ALERTS, type AlertType } from './alerts';
 
 /** GitHub's icons for its alerts, as lucide draws them. */
 export const ALERT_ICONS = {

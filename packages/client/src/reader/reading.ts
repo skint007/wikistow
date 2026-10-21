@@ -1,5 +1,6 @@
 // How the reader reads a page body, up to the tree it turns into HTML. No
-// React here: the reader's worker (`markdown.worker.ts`) loads this.
+// React here: the reader's worker (`packages/ui/src/page/markdown.worker.ts`)
+// loads this.
 import {
   markdownNodes,
   markdownText,
@@ -8,14 +9,14 @@ import {
   wikilinkFromMarkdown,
   wikilinkSyntax,
   wikilinkToMarkdown,
-} from '@wikistow/client/markdown';
+} from '../markdown/index.ts';
 import type { Root, RootContent } from 'mdast';
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import type {} from 'remark-stringify';
 import { unified, type PluggableList, type Processor } from 'unified';
-import { remarkAlerts } from './alerts';
-import { headingIds } from './heading-ids';
+import { remarkAlerts } from './alerts.ts';
+import { headingIds } from './heading-ids.ts';
 
 /** A remark plugin: reads `[[…]]` and `![[…]]` as wikilink nodes, and writes them back verbatim. */
 export function remarkWikilinks(this: Processor) {
@@ -27,7 +28,8 @@ export function remarkWikilinks(this: Processor) {
 
 /**
  * How a syntax beyond GitHub's is read: the remark plugins that read it
- * into `type` nodes. Its entry in `markdownSyntaxes` (registries.tsx) adds
+ * into `type` nodes. Its entry in `markdownSyntaxes`
+ * (`packages/ui/src/registries.tsx`) adds
  * how each view shows them.
  */
 export type SyntaxReading = { type: RootContent['type']; remarkPlugins: PluggableList };
