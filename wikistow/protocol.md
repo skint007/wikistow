@@ -111,7 +111,7 @@ the project owner accepted these on 2026-10-05, for a design that is "secure, bu
 - **A2. Hide or roll back changes undetected.** It can serve an old draft or published head, hide versions, reorder history, and hide a member, a removal, a key rotation or an unpublish from anyone. In particular, a writer whom the server keeps from seeing a new key version keeps saving under the old one, and a removed person who colludes with the server can read those saves. The same goes for a write the server refuses as `key-version`: the client retries with the same content key (section 6.8), so a server that hands the refused wrap to a removed person leaks what the retry then saves, which it could have done by accepting the write. A server that rolls back a move can likewise make new content in the moved folder land in its old region. And it can hide one owner's rotation from another owner in a later browser session, which keeps no **No going back** mark (section 6.8), so that owner's next rotation reaches the person the hidden rotation removed.
 - **A3. Keep serving a removed person data they could already decrypt.** Nothing can be recalled: not keys, not plaintext, not downloads.
 
-It **cannot** read content, add a reader by itself, or decrypt anything saved after a removal. The one exception is a page someone gives a public link: its published version is stored readable while the link is on (A12).
+It **cannot** read content, add a reader by itself, or decrypt anything saved after a removal. One exception is a page someone gives a public link: its published version is stored readable while the link is on (A12).
 
 These further risks are accepted too:
 
