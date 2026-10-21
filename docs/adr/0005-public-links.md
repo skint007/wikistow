@@ -27,7 +27,7 @@ The server stores no plaintext page content except the published version of a pa
 
 - the published version's title and Markdown body. Its frontmatter is left out, so properties stay encrypted;
 - the attachments the body shows or links to, by `attachment:<id>` or `![[file]]`, and no others;
-- the targets of its wikilinks that name, by its published title alone, a page that already has a public copy, kept only while that copy is (decision 6);
+- its own link table's entries for the wikilinks that name, by its published title alone, a page whose link is on, kept only while that page's link is (decision 6);
 - the server's own rendering of that body.
 
 It is always the page's current published version. A copy is made only of the published head, and any change to the published head deletes the copies of the page in the same transaction (decision 5). So the server never holds an older published version. The server can't check that the Markdown it is sent matches the sealed revision; the app sends the published version it has just opened, never a draft, and a person with publish rights could publish any text anyway. The app opens the version the server names as published, so a dishonest server could name an older one and get it uploaded (protocol A12). After a publish, the app uploads the version it just published, which the server didn't choose. A copy exists only for a page with a link, or while the app uploads one. An upload the app never finishes is deleted within 20 minutes of the app's last request for it (decision 5).
@@ -57,7 +57,7 @@ Four tables, with no files on disk:
 - `public_links`: one row per page with a link: the page (foreign key to `nodes`, cascading), its id, its live copy if any, who turned it on, and when.
 - `public_copies`: a copy, staged or live: the page (cascading), the published revision it was made from, its title, Markdown and rendering, who uploaded it, and when.
 - `public_files`: a copy's attachments (cascading from the copy): attachment ID, name, media type, size and the bytes.
-- `public_targets`: a copy's links to other public pages (decision 6): the copy (cascading), the link, and the target page's live copy (cascading).
+- `public_targets`: a copy's links to other public pages (decision 6): the copy (cascading), the link, and the target page (cascading).
 
 Keeping the files in Postgres, as avatars are, lets every ending be one transaction with no file to unlink after it and no orphan for a sweep to find. Deleting a node, a space's nodes included, deletes the link, its copies and their files by cascade. A file is at most 25 MiB, or the upload limit if that is lower, and a copy's files at most 100 MiB together; an attachment past that is left out of the copy, and the page shows it as not available. Files count toward the uploader's storage quota.
 
@@ -71,7 +71,9 @@ The app makes a copy in three steps, so the link never shows a copy that is miss
 
 `DELETE /api/pages/:pageId/public-link` turns it off, deleting the link and every copy of the page, staged ones too.
 
-Staging, committing and turning off take the same locks as publishing, in the same order: the space, the share, the page, then its heads row. Staging also locks the uploader's account row, and committing locks the account rows of the link's sharer and the copy's uploader, in order of ID. Suspension locks the same rows, and staging and committing check that neither account is suspended. Account rows come after the heads row and before any link or copy row, the order suspension takes them in, so the two can't deadlock. So a staged copy can't slip past a publish, an unpublish, a move, a change of rights in the share or a turn-off running at the same time, and every change that deletes a page's copies sees all of them.
+Staging, committing and turning off take the same locks as publishing, in the same order: the space, the share, the page, then its heads row. Staging also locks the uploader's account row, and committing locks the account rows of the link's sharer and the copy's uploader, in order of ID. Suspension locks the same rows, and staging and committing check that neither account is suspended. Account rows come after the heads row and before any link, copy or target row, the order suspension takes them in. So a staged copy can't slip past a publish, an unpublish, a move, a change of rights in the share or a turn-off running at the same time, and every change that deletes a page's copies sees all of them.
+
+Every change that ends links or copies, decision 8's included, locks the rows it deletes before deleting them: the links, then the copies, then the target rows, each in order of ID. Deleting a page or a space deletes its links, copies and the target rows naming its pages that way before it deletes the nodes, rather than leaving them to the cascade. So two endings that meet, say a suspension and a space deletion that both reach one person's copies, wait for each other instead of deadlocking. Postgres would abort one of them, and nothing retries it.
 
 **A new published version.** Any change to the page's published head deletes every copy of the page, live and staged, in the same transaction: publishing, by a person or an agent, publishing into the page from another space, and unpublishing. The link itself stays on, except on unpublish (decision 8). After the app publishes a page with a link, through the Publish confirmation (decision 2), it makes the new copy at once from the version it just published, without opening the page again. Until it arrives, the public page says the page is being updated. If the app can't make it, because the publish came from an agent, from another space or from an app that closed, the public link dialog says the public page is out of date and offers to update it.
 
@@ -92,7 +94,7 @@ A wikilink to a heading of the page itself (`[[#Dates]]`) links to that heading.
 
 The client resolves each wikilink of the published version as a reader would. It sends the targets with the copy (`linkKey` → page ID) only for links to pages its tree shows with a link on, and only where the link names the page by its current published title, with no folder. A link to a private page, or by a draft or older title, would tell the server which page that text names, and one with a folder (`[[Folder/Title]]`) would tell it that folder's name. Those targets stay with the app, and the links stay text. A page-address link names its page in the Markdown already, so the server finds that target itself.
 
-When the copy is staged, each target the uploader can publish becomes a row of `public_targets` (decision 4) that points at the target page's live copy, if it has one. Any other link stays text. The row goes with that copy, by cascade: when the target's link is turned off or replaced, or the target is published again, unpublished or deleted. So a target only ever ties a page to the published title its own public copy shows, and only while that copy exists. A link whose target's copy has gone goes back to text, and stays text until the linking page's copy is updated, even once the target has a new link.
+When the copy is staged, each target the uploader can publish, of a page whose link is on, becomes a row of `public_targets` (decision 4). Any other link stays text. A target is the public page's own published link table, as its readers have it, cut down to pages anyone can already read. The rows that name a page are deleted whenever that page's link ends, in the same transaction: turned off or replaced, by unpublishing, by its sharer losing publish rights, or by deleting the page. So the server keeps no row naming a page whose link is off. A link whose target's link has ended goes back to text, and stays text until the linking page's copy is updated, even once the target has a new link.
 
 The stored rendering is a list of HTML segments with a gap between each. To find the gaps, the renderer marks each link to another page with a random value chosen for that render, after reading the page, and splits the sanitized HTML at those marks. The page can't know the value, so nothing written in it can make a gap. When the page is served, a gap becomes a link to the target's `/p/<id>` if its row is still there and the uploader can still publish the target, and otherwise the link's text.
 
@@ -122,7 +124,7 @@ An embedded attachment (`![[file.png]]`) shows from the copy's files.
 
 ### 10. Proof
 
-`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and the attachments the body shows or links to are readable, never its draft, an older version, another attachment, or another page. Then turning the link off, unpublishing, deleting the page or its space, moving the page where its sharer can't publish, removing the sharer from the share, suspending them, removing a different person who uploaded the live copy, and publishing a new version each leave nothing readable of the old copy at once, including what other public pages' links knew of it, and a link turned off answers 404.
+`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and the attachments the body shows or links to are readable, never its draft, an older version, another attachment, or another page. Then turning the link off, unpublishing, deleting the page or its space, moving the page where its sharer can't publish, removing the sharer from the share, suspending them, removing a different person who uploaded the live copy, and publishing a new version each leave nothing readable of the old copy at once, and every ending of the link leaves no other public page's row naming it, and a link turned off answers 404.
 
 ## Considered options
 
@@ -140,7 +142,7 @@ An embedded attachment (`![[file.png]]`) shows from the copy's files.
 
 - The spec's plaintext rule, "what the service can see", the static SPA note, the CSP section, the record table, the storage paragraph and the release evidence change with this ADR, and so do the protocol's guarantees and accepted risks.
 - The server gains four tables and a migration, five routes, the two `/p/` routes, and the reader's Markdown dependencies (remark, rehype, lowlight) through `@wikistow/client/reader`.
-- Links to another public page go back to text whenever that page's copy changes, until the linking page is updated. That keeps the server from holding any page's title longer than its own copy.
+- Links to another public page go back to text when that page's link ends, until the linking page is updated. That keeps the server from holding a link to any page whose link is off.
 - A server restored from a backup has every public link off.
 
 ## Decided (2026-10-21)
@@ -151,5 +153,5 @@ Scott decided on 2026-10-21 to change the spec rather than drop the feature: the
 
 1. **This ADR and the spec.**
 2. **The shared reader.** The reader's plugins and `pageHtml` move to `@wikistow/client/reader`, unchanged, and the app imports them from there. The app reads pages exactly as before.
-3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, the cascade on delete, `backup.sh` and `docs/operations.md`, and the new leak test. Space deletion (#158) deletes nodes by cascade, so its links and copies go with them; the new test covers it. Its update of people's space order moves ahead of the delete, so it locks account rows before link and copy rows, as suspension does, and the two can't deadlock.
+3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, the cascade on delete, `backup.sh` and `docs/operations.md`, and the new leak test. Space deletion (#158) deletes nodes by cascade, so its links and copies go with them; the new test covers it. Its update of people's space order moves ahead of the delete, so it locks account rows before link and copy rows, as suspension does.
 4. **The app.** The menu item, the public link dialog, the Publish confirmation and its upload, the markers, and `ui-design.md`. Closes #154.
