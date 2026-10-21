@@ -111,6 +111,26 @@ export const groupsQuery = (ctx: ClientContext, spaceId: SpaceId) =>
     queryFn: () => groupOperations.loadGroups(ctx, spaceId),
   });
 
+/**
+ * Who has access to a space, for deleting it: its owners and permission
+ * version first, then its shares and groups, so any change after the
+ * version was read is one the server refuses (`permission-version`). Not
+ * kept once the dialog closes, so each opening loads it afresh.
+ */
+export const spaceAccessQuery = (ctx: ClientContext, spaceId: SpaceId) =>
+  queryOptions({
+    queryKey: [PLAIN, 'space-access', spaceId],
+    queryFn: async () => {
+      const keys = await spaceKeys(ctx, spaceId, { refresh: true });
+      const [shares, groups] = await Promise.all([
+        sharingOperations.listShares(ctx, spaceId),
+        groupOperations.loadGroups(ctx, spaceId),
+      ]);
+      return { keys, shares, groups };
+    },
+    gcTime: 0,
+  });
+
 /** The space as this app sees it: the owners it accepts, and what the server lists. */
 export const spaceKeysQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({

@@ -417,6 +417,18 @@ async function humanSpaces(db: Database, identityId: string) {
   return { bySpace, homeId: home?.space.id ?? null };
 }
 
+/** Whether the space is the home space of any of its current owners, which nobody can delete. */
+export async function isHomeSpace(db: Database, spaceId: string) {
+  const owners = await db
+    .select({ id: spaceOwners.identityId })
+    .from(spaceOwners)
+    .where(and(eq(spaceOwners.spaceId, spaceId), isNull(spaceOwners.removedAt)));
+  for (const { id } of owners) {
+    if ((await humanSpaces(db, id)).homeId === spaceId) return true;
+  }
+  return false;
+}
+
 /**
  * A person's spaces, home space and saved order. Spaces they left drop out
  * of the saved order here, so one they get back comes last; unless it was

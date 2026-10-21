@@ -1,4 +1,10 @@
-import { structureRoutes, type FolderId, type ShareId, type SpaceId } from '@wikistow/contracts';
+import {
+  ownerRoutes,
+  structureRoutes,
+  type FolderId,
+  type ShareId,
+  type SpaceId,
+} from '@wikistow/contracts';
 import {
   FolderId as FolderIdSchema,
   MetadataRevisionId,
@@ -91,6 +97,22 @@ export async function loadSpaces(ctx: ClientContext) {
       ),
     })),
   );
+}
+
+/**
+ * Delete a space for everyone, with everything in it. Only an owner can,
+ * and not of a space that is an owner's home space (`home-space`).
+ * `permissionVersion` is the one the owner saw who has access at; if
+ * access changed since, it is refused (`permission-version`).
+ */
+export async function deleteSpace(
+  ctx: ClientContext,
+  { spaceId, permissionVersion }: { spaceId: SpaceId; permissionVersion: number },
+): Promise<void> {
+  await ctx.api.call(ownerRoutes.deleteSpace, {
+    params: { spaceId },
+    body: { permissionVersion },
+  });
 }
 
 /** This person's home space, which the space list always puts first, and their saved order. */

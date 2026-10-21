@@ -10,6 +10,7 @@ import {
   Palette,
   Share,
   ShieldAlert,
+  Trash2,
   Users,
   UsersRound,
 } from 'lucide-react';
@@ -20,7 +21,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { sharesQuery, spaceKeysQuery } from '../data/queries';
+import { sharesQuery, spaceKeysQuery, spaceOrderQuery } from '../data/queries';
+import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
 import { useClient } from '../vault/store';
@@ -29,9 +31,11 @@ import { SpaceIcon, SpaceLookDialog } from './space-look';
 /**
  * The sidebar's head: the space tile and name, and for owners, how many
  * people have access. Its menu exports the space, and for owners changes its
- * name and look, shares it, shows its members, or its groups.
+ * name and look, shares it, shows its members or its groups, or deletes it,
+ * unless it is their home space.
  * A new owner who hasn't confirmed who added them gets a way back to that
- * question instead (section 6.5). Someone who holds only folders of a
+ * question instead (section 6.5). Keyed by space, so a dialog open in one
+ * space doesn't follow to the next. Someone who holds only folders of a
  * space sees no space name (section 7.7), just that the folders were
  * shared with them.
  */
@@ -56,6 +60,9 @@ export function SpaceHeader({
   const standing = useOwnerStanding(spaceId);
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
+  const [action, setAction] = useState<OwnerAction | null>(null);
+  const { data: order } = useQuery(spaceOrderQuery(ctx));
+  const deletable = owner && order !== undefined && order.homeId !== spaceId;
   return (
     <div className="flex items-center gap-3 px-1">
       <span className="grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-tile bg-linear-to-br from-primary-2 to-primary text-sm font-extrabold text-primary-foreground">
@@ -115,9 +122,26 @@ export function SpaceHeader({
           <DropdownMenuItem onSelect={onExport}>
             <Download strokeWidth={1.75} /> Export…
           </DropdownMenuItem>
+          {deletable && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setAction({ kind: 'delete' })}
+              >
+                <Trash2 strokeWidth={1.75} /> Delete space…
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       <SpaceLookDialog spaceId={spaceId} open={restyling} onOpenChange={setRestyling} />
+      <OwnerDialog
+        spaceId={spaceId}
+        action={action}
+        onAction={setAction}
+        onClose={() => setAction(null)}
+      />
     </div>
   );
 }

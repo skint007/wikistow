@@ -261,6 +261,41 @@ test('capture sharing: the Share dialog, removal, a key change, Shared with me, 
   }
 });
 
+test('capture deleting a shared space, and someone viewing it sent to their home space', async ({
+  page: owner,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const adminPage = await adminTab(freshPage, admin.email);
+  const member = await freshPage();
+  await member.setViewportSize({ width: 1280, height: 800 });
+  await memberWithVault(owner, adminPage, 'Dana Deleter');
+  const { email } = await memberWithVault(member, adminPage, 'Milo Member');
+  await newSpace(owner, 'Book club');
+  await newFolder(owner, 'Reading list');
+  await publishedPageIn(owner, 'Reading list', 'October', 'Two novels and a short story.');
+  await shareFolder(owner, 'Reading list', email, 'editor');
+  await owner.keyboard.press('Escape');
+  await openShared(member, 'Reading list', 'October');
+  // Changes to a busy space gather for a few seconds before anyone hears of
+  // them. Let the member's app hear of the share before the space goes.
+  await member.waitForTimeout(4_000);
+
+  await owner.getByRole('button', { name: 'Space menu' }).click();
+  await owner.getByRole('menuitem', { name: 'Delete space…' }).click();
+  const deleting = owner.getByRole('dialog', { name: 'Delete this space' });
+  await expect(deleting.getByText('Milo Member')).toBeVisible();
+  await deleting.getByLabel(/Type the space’s name/).fill('Book club');
+  await shooter(owner)('delete-space');
+  await deleting.getByRole('button', { name: 'Delete for good' }).click();
+  await expect(owner.getByRole('heading', { name: 'Personal', level: 2 })).toBeVisible();
+  // The member's app hears the space is gone and goes home.
+  await expect(member.getByRole('heading', { name: 'Personal', level: 2 })).toBeVisible({
+    timeout: 30_000,
+  });
+});
+
 test('capture the message for an account that has made as many spaces as the server allows', async ({
   page,
   freshPage,

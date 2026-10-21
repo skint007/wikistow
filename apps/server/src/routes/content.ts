@@ -17,6 +17,7 @@ import {
   createFolder,
   createPage,
   deleteNode,
+  deleteSpace,
   downloadBlob,
   fetchRevisions,
   pageHistory,
@@ -120,6 +121,7 @@ const CONTENT_ERRORS = {
   'page-limit': 'page-limit',
   'draft-limit': 'draft-limit',
   'last-owner': 'last-owner',
+  'home-space': 'home-space',
   'invalid-plugin': 'invalid-request',
 } as const satisfies Record<ContentFailure, ErrorCode>;
 
@@ -807,6 +809,19 @@ export function mountContentRoutes(
       };
     },
     { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.account(
+    ownerRoutes.deleteSpace,
+    async ({ params, body }, { principal }) => {
+      await deleteSpace(db, blobs, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
   );
 
   routes.account(

@@ -79,6 +79,8 @@ const DETAILS = {
   }),
   'space.owner-added': z.strictObject({ identityId: z.string(), keyVersion: z.number().int() }),
   'space.owner-removed': z.strictObject({ identityId: z.string(), shares: z.number().int() }),
+  // How much went with it, never what.
+  'space.deleted': z.strictObject({ nodes: z.number().int(), shares: z.number().int() }),
   // Agents: which shares a person granted their agent, by ID.
   'agent.enrolled': z.strictObject({ shares: z.array(z.string()) }),
   'agent.granted': z.strictObject({

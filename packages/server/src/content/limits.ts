@@ -10,9 +10,9 @@ export type ContentLimits = typeof DEFAULT_CONTENT_LIMITS;
  * Count live items created for an account, including its agents' work.
  * Call after existing space/share/node locks and before inserting the item.
  * The account lock makes concurrent creates in different spaces count once.
- * Deleting an item frees capacity; sharing or moving it does not transfer it.
- * Nothing deletes spaces yet, so the space limit counts every space made. An
- * item counts against its creator even after they lose access, as storage does.
+ * Deleting an item, a space included, frees capacity; sharing or moving it
+ * does not transfer it. An item counts against its creator even after they
+ * lose access, as storage does.
  */
 export async function requireCapacity(
   tx: Database,
