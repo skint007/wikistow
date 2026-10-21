@@ -1,4 +1,5 @@
 import { ownerOperations, type IdentityId, type SpaceId } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
@@ -16,13 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { runCommand } from '../commands/command';
 import { addCoOwner, deleteSpace, finishTransfer, removeOwner } from '../commands/sharing-commands';
-import {
-  groupsQuery,
-  refreshAccess,
-  sharesQuery,
-  spaceKeysQuery,
-  treeQuery,
-} from '../data/queries';
+import { refreshAccess, spaceAccessQuery, spaceKeysQuery, treeQuery } from '../data/queries';
 import { groupName, peopleIn } from './groups';
 import { sharingMessage } from './messages';
 import { useOwnerRequirements } from './owner-standing';
@@ -399,23 +394,19 @@ function DeleteSpace({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
-  // Loaded afresh, so who loses access is current; the server refuses the
-  // delete if access changes after (`permission-version`).
-  const fresh = { refetchOnMount: 'always' } as const;
-  const keys = useQuery({ ...spaceKeysQuery(ctx, spaceId), ...fresh });
-  const shares = useQuery({ ...sharesQuery(ctx, spaceId), ...fresh });
-  const groups = useQuery({ ...groupsQuery(ctx, spaceId), ...fresh });
+  const access = useQuery(spaceAccessQuery(ctx, spaceId));
+  const { keys, shares, groups } = access.data ?? {};
   const self = ctx.identity.public.id;
-  const coOwners = keys.data?.listed.map((o) => o.identity.id).filter((id) => id !== self) ?? [];
-  const sharedGroups = groups.data?.groups.filter((g) => g.shares.length > 0) ?? [];
+  const coOwners = keys?.listed.map((o) => o.identity.id).filter((id) => id !== self) ?? [];
+  const sharedGroups = groups?.groups.filter((g) => g.shares.length > 0) ?? [];
   const members = [
     ...new Set([
-      ...(shares.data?.flatMap((s) => s.members.map((m) => m.identityId)) ?? []),
+      ...(shares?.flatMap((s) => s.members.map((m) => m.identityId)) ?? []),
       ...sharedGroups.flatMap((g) => peopleIn(g).map((m) => m.identity.id)),
     ]),
   ].filter((id) => id !== self && !coOwners.includes(id));
   // Other people's agents; those people are listed already.
-  const agents = shares.data?.some((s) => s.agents.some((a) => a.personId !== self)) ?? false;
+  const agents = shares?.some((s) => s.agents.some((a) => a.personId !== self)) ?? false;
   const { data: people } = useQuery({
     ...peopleQuery(ctx, [...coOwners, ...members]),
     enabled: coOwners.length + members.length > 0,
@@ -424,18 +415,24 @@ function DeleteSpace({
   const name = nameOf(tree?.space?.metadata);
   const [typed, setTyped] = useState('');
   const { busy, error, run } = useAction();
-  const failed = keys.error ?? shares.error ?? groups.error;
-  const loading = [keys, shares, groups].some((query) => query.isFetching);
   const shared = coOwners.length + members.length + sharedGroups.length > 0;
 
   const go = () =>
     run(async () => {
-      if (!keys.data) return;
-      await runCommand(
-        deleteSpace,
-        { spaceId, permissionVersion: keys.data.permissionVersion },
-        { satisfies, ctx },
-      );
+      if (!keys) return;
+      try {
+        await runCommand(
+          deleteSpace,
+          { spaceId, permissionVersion: keys.permissionVersion },
+          { satisfies, ctx },
+        );
+      } catch (caught) {
+        // Who has access changed: show it as it is now, for another try.
+        if (caught instanceof ApiError && caught.code === 'permission-version') {
+          void access.refetch();
+        }
+        throw caught;
+      }
       onClose();
       await navigate({ to: '/' });
       await refreshAccess(queryClient, ctx);
@@ -525,7 +522,7 @@ function DeleteSpace({
           onChange={(event) => setTyped(event.target.value)}
         />
       </div>
-      <ErrorLine error={error ?? (failed ? sharingMessage(failed) : null)} />
+      <ErrorLine error={error ?? (access.error ? sharingMessage(access.error) : null)} />
       <DialogFooter>
         <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
           Cancel
@@ -535,10 +532,9 @@ function DeleteSpace({
           variant="destructive"
           disabled={
             busy ||
-            loading ||
-            !keys.data ||
-            !shares.data ||
-            !groups.data ||
+            access.isFetching ||
+            access.isError ||
+            !keys ||
             typed.trim() !== (name ?? 'delete').trim()
           }
         >
