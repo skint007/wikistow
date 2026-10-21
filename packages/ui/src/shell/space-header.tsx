@@ -34,7 +34,8 @@ import { SpaceIcon, SpaceLookDialog } from './space-look';
  * name and look, shares it, shows its members or its groups, or deletes it,
  * unless it is their home space.
  * A new owner who hasn't confirmed who added them gets a way back to that
- * question instead (section 6.5). Someone who holds only folders of a
+ * question instead (section 6.5). Keyed by space, so a dialog open in one
+ * space doesn't follow to the next. Someone who holds only folders of a
  * space sees no space name (section 7.7), just that the folders were
  * shared with them.
  */
@@ -59,10 +60,7 @@ export function SpaceHeader({
   const standing = useOwnerStanding(spaceId);
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
-  // Kept with the space it's for, so it closes when another space opens.
-  const [opened, setOpened] = useState<{ spaceId: SpaceId; action: OwnerAction } | null>(null);
-  const action = opened?.spaceId === spaceId ? opened.action : null;
-  const setAction = (next: OwnerAction) => setOpened({ spaceId, action: next });
+  const [action, setAction] = useState<OwnerAction | null>(null);
   const { data: order } = useQuery(spaceOrderQuery(ctx));
   const deletable = owner && order !== undefined && order.homeId !== spaceId;
   return (
@@ -142,7 +140,7 @@ export function SpaceHeader({
         spaceId={spaceId}
         action={action}
         onAction={setAction}
-        onClose={() => setOpened(null)}
+        onClose={() => setAction(null)}
       />
     </div>
   );

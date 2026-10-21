@@ -405,6 +405,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   return (
     <SidebarCard>
       <SpaceHeader
+        key={spaceId}
         spaceId={spaceId}
         name={spaceName}
         metadata={tree.space?.metadata}
