@@ -47,7 +47,7 @@ The app never uploads a copy without saying so on screen. The server tells the a
 
 The id is 16 random bytes in base64url (22 characters), from the server's CSPRNG, made each time a link is turned on. Turning a link off and on again gives a new id, so the old one stays dead. A copy replaced at publish keeps its link's id. The id is stored as it is, not hashed, so the dialog can show it again for Copy link; the copy itself sits beside it anyway.
 
-The audit log records each link turned on and each way one ends (turned off, unpublished, lost publish rights, a new version leaving it to be updated), with the page, the person and IDs only, never the id itself or anything of the page. Without it, a link turned off would leave no sign the page was ever public. Deleting a page or space records what it already records.
+The audit log records each link turned on and each way one ends (turned off, unpublished, or its sharer losing publish rights), with the page, the person and IDs only, never the id itself or anything of the page. Without it, a link turned off would leave no sign the page was ever public. Deleting a page or space records what it already records.
 
 ### 4. Storage
 
