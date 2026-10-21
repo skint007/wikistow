@@ -54,8 +54,8 @@ The audit log records each link turned on and each way one ends (turned off, unp
 
 Four tables, with no files on disk:
 
-- `public_links`: one row per page with a link: the page (foreign key to `nodes`, cascading), its id, its live copy if any, who turned it on, and when. Replacing a link deletes its row and adds a new one.
-- `public_copies`: a copy, staged or live: the page (cascading), the published revision it was made from, its title, Markdown and rendering, who uploaded it, and when.
+- `public_links`: one row per page with a link: the page (foreign key to `nodes`, cascading), its id, who turned it on, and when. Replacing a link deletes its row and adds a new one.
+- `public_copies`: a copy, staged or live, which the copy's own row says, so ending a copy never writes to a link's row: the page (cascading), the published revision it was made from, its title, Markdown and rendering, who uploaded it, and when.
 - `public_files`: a copy's attachments (cascading from the copy): attachment ID, name, media type, size and the bytes.
 - `public_targets`: a copy's links to other public pages (decision 6): the copy (cascading), the link, and the target page's link (cascading from `public_links`).
 
@@ -124,7 +124,7 @@ An embedded attachment (`![[file.png]]`) shows from the copy's files.
 
 ### 10. Proof
 
-`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and the attachments the body shows or links to are readable, never its draft, an older version, another attachment, or another page. Then turning the link off, unpublishing, deleting the page or its space, moving the page where its sharer can't publish, removing the sharer from the share, suspending them, removing a different person who uploaded the live copy, and publishing a new version each leave nothing readable of the old copy at once, and every ending of the link leaves no other public page's row naming it, and a link turned off answers 404.
+`content-leak.integration.test.ts` stays as it is. Its pages have no link, so nothing of them may be readable anywhere. A new integration test gives one page a link and checks a snapshot of the database, files, logs and mail: only that page's published title, body and the attachments the body shows or links to are readable, never its draft, an older version, another attachment, or another page. Then turning the link off, unpublishing, deleting the page or its space, moving the page where its sharer can't publish, removing the sharer from the share, suspending them, removing a different person who uploaded the live copy, and publishing a new version each leave nothing readable of the old copy at once, and every ending of the link leaves no other public page's row naming it, and every ended link's old `/p/<id>` answers 404.
 
 ## Considered options
 
@@ -153,5 +153,5 @@ Scott decided on 2026-10-21 to change the spec rather than drop the feature: the
 
 1. **This ADR and the spec.**
 2. **The shared reader.** The reader's plugins and `pageHtml` move to `@wikistow/client/reader`, unchanged, and the app imports them from there. The app reads pages exactly as before.
-3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, deleting links and copies on page, folder and space deletion, `backup.sh` and `docs/operations.md`, and the new leak test. `deleteNode` and space deletion (#158) delete their pages' links, copies and targets in lock order before deleting nodes (decision 5); the new test covers both. Space deletion's update of people's space order moves ahead of those deletes, so it locks account rows before link and copy rows, as suspension does.
+3. **The server.** The tables, the routes, rendering in a worker thread, the `/p/` pages, turning links off on unpublish and on lost publish rights, deleting copies on publish, deleting links and copies on page, folder and space deletion, `backup.sh` and `docs/operations.md`, and the new leak test. `deleteNode` and space deletion (#158) delete their pages' links, copies and targets in lock order before deleting nodes (decision 5); the new test covers both. Space deletion's update of people's space order moves ahead of those deletes and locks those account rows first, in order of ID, so it takes account rows before link and copy rows, as suspension does, and in the order committing does.
 4. **The app.** The menu item, the public link dialog, the Publish confirmation and its upload, the markers, and `ui-design.md`. Closes #154.
