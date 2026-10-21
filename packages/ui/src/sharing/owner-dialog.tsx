@@ -374,6 +374,14 @@ function RenewKeys({
   );
 }
 
+// A delete's own refusals; the rest read as any owner action's do.
+const deleteMessage = (error: unknown) =>
+  error instanceof ApiError && error.code === 'rate-limited'
+    ? 'The server is busy with this space, so nothing was deleted. Wait a moment and try again.'
+    : error instanceof ApiError && error.code === 'not-found'
+      ? 'This space isn’t there any more.'
+      : sharingMessage(error);
+
 /**
  * Delete the space for everyone, once the owner has typed its name, or
  * "delete" when its name can't be read. When anyone else has access, it
@@ -416,7 +424,7 @@ function DeleteSpace({
   const nameOfPerson = (id: string) => (people?.get(id) ?? describePerson(ctx, id, null)).name;
   const name = nameOf(tree?.space?.metadata);
   const [typed, setTyped] = useState('');
-  const { busy, error, run } = useAction();
+  const { busy, error, run } = useAction(deleteMessage);
   const shared = coOwners.length + members.length + sharedGroups.length > 0;
 
   const go = () =>
