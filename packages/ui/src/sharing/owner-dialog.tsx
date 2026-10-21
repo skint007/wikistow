@@ -411,7 +411,8 @@ function DeleteSpace({
       ...sharedGroups.flatMap((g) => peopleIn(g).map((m) => m.identity.id)),
     ]),
   ].filter((id) => id !== self && !coOwners.includes(id));
-  const agents = shares.data?.some((s) => s.agents.length > 0) ?? false;
+  // Other people's agents; those people are listed already.
+  const agents = shares.data?.some((s) => s.agents.some((a) => a.personId !== self)) ?? false;
   const { data: people } = useQuery({
     ...peopleQuery(ctx, [...coOwners, ...members]),
     enabled: coOwners.length + members.length > 0,
@@ -422,7 +423,7 @@ function DeleteSpace({
   const { busy, error, run } = useAction();
   const failed = keys.error ?? shares.error ?? groups.error;
   const loaded = keys.data && shares.data && groups.data;
-  const shared = coOwners.length + members.length + sharedGroups.length > 0 || agents;
+  const shared = coOwners.length + members.length + sharedGroups.length > 0;
 
   const go = () =>
     run(async () => {
