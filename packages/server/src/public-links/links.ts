@@ -226,6 +226,24 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
     for (const target of new Set(leadsTo.values())) {
       if (linked.has(target) && (await callerPublishes(tx, caller, target))) reachable.add(target);
     }
+    // A person stages one copy of a page at a time: a new one replaces
+    // any they staged before, so staging again and again can't pile up
+    // readable copies until the sweep.
+    const earlier = await tx
+      .select({ id: publicCopies.id })
+      .from(publicCopies)
+      .where(
+        and(
+          eq(publicCopies.pageId, pageId),
+          eq(publicCopies.uploadedBy, accountId),
+          eq(publicCopies.live, false),
+        ),
+      );
+    await endCopies(
+      tx,
+      pageId,
+      earlier.map((copy) => copy.id),
+    );
     const [copy] = await tx
       .insert(publicCopies)
       .values({

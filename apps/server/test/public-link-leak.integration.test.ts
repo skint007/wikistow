@@ -47,11 +47,11 @@ function markers() {
 const TARGET_TITLE = 'Target page';
 
 /**
- * A page in a folder with an older publication, then a published version
- * with frontmatter, an attachment its body shows and one it doesn't, and a
- * wikilink to another public page, which links back to it by address; and
- * a draft after it, and a private page beside it. Both pages' links are
- * on, each with a copy.
+ * A page in a folder with an older publication that had a public copy,
+ * then a published version with frontmatter, an attachment its body shows
+ * and one it doesn't, and a wikilink to another public page, which links
+ * back to it by address; and a draft after it, and a private page beside
+ * it. Both pages' links are on, each with a copy.
  */
 async function world() {
   const m = markers();
@@ -70,6 +70,8 @@ async function world() {
   });
   const page = { spaceId, pageId };
   await pages.publishPage(owner.ctx, page);
+  const id = await links.turnOn(owner.ctx, pageId);
+  await links.shareCopy(owner.ctx, page);
   const used = await pages.uploadAttachment(owner.ctx, page, {
     name: m.usedName,
     mediaType: 'image/png',
@@ -103,7 +105,6 @@ async function world() {
   });
   const target = { spaceId, pageId: targetId };
   await pages.publishPage(owner.ctx, target);
-  const id = await links.turnOn(owner.ctx, pageId);
   const targetLink = await links.turnOn(owner.ctx, targetId);
   await links.shareCopy(owner.ctx, page);
   await links.shareCopy(owner.ctx, target);
@@ -142,6 +143,10 @@ describe('a page with a public link', () => {
       m.otherPage,
     ];
     expect(await readable(...never)).toEqual(never.map(() => false));
+    // The link ids are in their rows, and nowhere else the server writes.
+    const said = JSON.stringify([t.logs, await t.db.select().from(schema.auditEvents)]);
+    expect(said).not.toContain(w.id);
+    expect(said).not.toContain(w.targetLink);
 
     // The public page: its own policy, with the hash of its one stylesheet.
     const res = await visit(`/p/${w.id}`);
@@ -225,7 +230,10 @@ describe('a page with a public link', () => {
       // At once, with no sweep.
       expect(await readable(...copied(w.m))).toEqual([false, false, false, false]);
       expect(await rowsNaming(w.page.pageId)).toEqual([]);
-      expect((await visit(`/p/${w.id}`)).status).toBe(404);
+      const dead = await visit(`/p/${w.id}`);
+      expect(dead.status).toBe(404);
+      const unknown = await visit(`/p/${randomBytes(16).toString('base64url')}`);
+      expect(await dead.text()).toBe(await unknown.text());
       expect((await visit(`/p/${w.id}/files/${w.used.id}`)).status).toBe(404);
     });
   }

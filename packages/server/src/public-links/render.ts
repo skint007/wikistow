@@ -74,8 +74,23 @@ function textOf(node: ElementContent): string {
 }
 
 /** A link to a page's address in a WikiStow app, on any host, as `findPageLinks` reads one. */
-const PAGE_URL =
-  /^(?:https?:\/\/[^/?#\s]+)?\/s\/([A-Za-z0-9_-]{1,64})\/p\/([A-Za-z0-9_-]{1,64})(?=$|[/?#])/;
+const PAGE_PATH = /^\/s\/([A-Za-z0-9_-]{1,64})\/p\/([A-Za-z0-9_-]{1,64})(?=$|\/)/;
+
+/**
+ * The page an address names, if it is a page's address in the app. The
+ * address is resolved as a browser would, so `//host/…` and `./` steps
+ * can't hide one.
+ */
+function pageOfAddress(href: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(href, 'https://wikistow.invalid/');
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+  return PAGE_PATH.exec(url.pathname)?.[2];
+}
 
 /**
  * Render a copy's body (`input.markdown`, its frontmatter already left out)
@@ -90,7 +105,7 @@ export function renderBody(input: RenderInput): Rendered {
   const gaps: Gap[] = [];
   const gapAt = (gap: Gap): ElementContent => {
     gaps.push(gap);
-    return text(`${mark}${gaps.length - 1}`);
+    return text(`\uE000${mark}${gaps.length - 1}\uE000`);
   };
   // A wikilink to another page goes out as a link to `#<mark>-<n>`, the
   // n-th gap's, which survives sanitizing; the walk below makes it a gap.
@@ -155,7 +170,7 @@ export function renderBody(input: RenderInput): Rendered {
     const id = attachmentOf(node);
     if (id !== null) return download(id, walk(node.children, true), inLink);
     // Its page names itself in its address, which never goes out as it is.
-    const [, , pageId] = PAGE_URL.exec(href) ?? [];
+    const pageId = pageOfAddress(href);
     if (pageId) {
       const written = textOf(node);
       return inLink ? text(written) : gapAt({ key: pageKey(pageId), text: written });
@@ -231,7 +246,7 @@ function languageOf(code: Element): string | undefined {
 /** `html` split at each gap's mark, into its segments. */
 function split(html: string, mark: string, gaps: readonly Gap[]): Segment[] {
   const segments: Segment[] = [];
-  const marks = new RegExp(`${mark}(\\d+)`, 'g');
+  const marks = new RegExp(`\uE000${mark}(\\d+)\uE000`, 'g');
   let from = 0;
   for (const found of html.matchAll(marks)) {
     const gap = gaps[Number(found[1])];

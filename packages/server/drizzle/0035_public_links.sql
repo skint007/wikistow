@@ -25,6 +25,8 @@ CREATE TABLE "public_files" (
 	CONSTRAINT "public_files_left_out" CHECK (not "public_files"."left_out" or "public_files"."bytes" is null)
 );
 --> statement-breakpoint
+ALTER TABLE "public_files" ALTER COLUMN "bytes" SET STORAGE EXTERNAL;
+--> statement-breakpoint
 CREATE TABLE "public_links" (
 	"page_id" text PRIMARY KEY NOT NULL,
 	"id" text NOT NULL,

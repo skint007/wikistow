@@ -86,7 +86,7 @@ export function mountPublicLinkRoutes(
         uploadBytes: limits.uploadBytes,
         ...body,
       }).catch(toApiError),
-    { rateLimit: STAGE_LIMIT, bodyLimit: STAGE_BODY },
+    { rateLimit: STAGE_LIMIT, bodyLimit: STAGE_BODY, bodyPool: 'staging' },
   );
 
   // Only the person who staged a copy adds to it: the account comes from
