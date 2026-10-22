@@ -30,8 +30,11 @@ trap 'rm -rf "$partial"' EXIT
 
 # The database first. A file saved after the dump is only an extra file in
 # blobs.tar, which the server deletes after a restore. The other order
-# could miss a file the dump lists.
-pg_dump --format=custom --file="$partial/database.dump" --dbname="$DATABASE_URL"
+# could miss a file the dump lists. Public links' rows stay out: they hold
+# readable copies of pages (ADR 0005), so a restore has every link off.
+pg_dump --format=custom --file="$partial/database.dump" --dbname="$DATABASE_URL" \
+  --exclude-table-data=public_links --exclude-table-data=public_copies \
+  --exclude-table-data=public_files --exclude-table-data=public_targets
 
 # Only objects/ (attachments) and plugins/ (the plugin library's versions):
 # staging/ and plugin-staging/ hold unfinished uploads, which no dump lists.

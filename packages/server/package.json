@@ -18,10 +18,13 @@
     "@wikistow/plugin-sdk": "workspace:*",
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.3",
+    "hast-util-to-html": "9.0.5",
     "postgres": "3.4.9",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/hast": "3.0.5",
+    "@types/mdast": "4.0.4",
     "@types/node": "^26.0.0",
     "drizzle-kit": "0.31.11"
   }

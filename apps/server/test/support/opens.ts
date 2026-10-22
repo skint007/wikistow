@@ -174,6 +174,7 @@ export async function everyAnswer(
   await get('shares', `/api/spaces/${spaceId}/shares`);
   await get('records', `/api/spaces/${spaceId}/records?scope=owner-region`);
   await get('groups', `/api/spaces/${spaceId}/groups`);
+  await get('publicLinks', `/api/spaces/${spaceId}/public-links`);
   await get('waiting', '/api/me/waiting');
   await get('contacts', '/api/me/contacts');
   await get('agents', '/api/me/agents');

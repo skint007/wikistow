@@ -2,6 +2,7 @@ import type { Nodes, Root } from 'hast';
 import type {} from 'mdast-util-to-hast';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize';
+import { unified } from 'unified';
 
 /** The property marking a registered syntax's placeholder span (`data-syntax`), which `pageHtml` keeps. */
 export const SYNTAX = 'dataSyntax';
@@ -63,3 +64,14 @@ export function pageHtml() {
   return (tree: Root, file: Parameters<typeof parse>[1]) =>
     hasHtml(tree) ? clean(parse(tree, file)) : tree;
 }
+
+const parseAndClean = unified().use(rehypeRaw, { tagfilter: true }).use(rehypeSanitize, schema);
+const cleanOnly = unified().use(rehypeSanitize, schema);
+
+/**
+ * `tree` as `pageHtml` leaves it, but sanitized whether or not it holds raw
+ * HTML: for a page shown outside the app (a public page, ADR 0005), where
+ * no `urlTransform` checks its link and image addresses first.
+ */
+export const sanitizedPage = (tree: Root): Root =>
+  (hasHtml(tree) ? parseAndClean : cleanOnly).runSync(tree);

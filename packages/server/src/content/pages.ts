@@ -62,6 +62,7 @@ import { currentIdentity, requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { charge, usedBytes } from './quota.ts';
 import { endPublicationsFrom } from './publications.ts';
+import { endCopies, endLinkFor, endLinks } from '../public-links/endings.ts';
 import { revisionKeyMaterial } from './serving.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
@@ -498,7 +499,8 @@ export async function saveDraft(
 /**
  * Publish the exact current draft as a separately encrypted version for the
  * published audience. Readers never see a half-made publication: it either
- * commits whole, with every attachment present, or not at all.
+ * commits whole, with every attachment present, or not at all. The page's
+ * public copies, of the version it replaces, go with it; its link stays.
  */
 export async function publish(
   db: Database,
@@ -554,6 +556,8 @@ export async function publish(
       publishedSeq,
       restoredFrom: null,
     });
+    // A public copy is only ever of the current published version (ADR 0005).
+    await endCopies(tx, page.id);
     await tx
       .update(pageHeads)
       .set({
@@ -574,8 +578,9 @@ export async function publish(
  * unless it was already unpublished just after that one, as when a retry
  * follows a lost answer: then nothing changes, and that is no error. It then
  * has none, its current reader history ends, so the next publish starts a
- * new one, and its permission version moves on. No keys change: editors and
- * owners keep the whole history, and readers keep what they already read.
+ * new one, its permission version moves on, and its public link, if it has
+ * one, is turned off. No keys change: editors and owners keep the whole
+ * history, and readers keep what they already read.
  */
 export async function unpublish(
   db: Database,
@@ -588,6 +593,8 @@ export async function unpublish(
     // As for publishing, which it undoes.
     if (!canEdit(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
+    // Publishing's locks, in its order, which turning a public link on takes too.
+    await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
     const [heads] = await tx
       .select()
@@ -626,6 +633,8 @@ export async function unpublish(
       .update(nodes)
       .set({ permissionVersion: sql`${nodes.permissionVersion} + 1` })
       .where(eq(nodes.id, page.id));
+    // Its public link ends with it, and every copy (ADR 0005, decision 8).
+    await endLinkFor(tx, page, { actor: caller.accountId, reason: 'unpublished' });
   });
 }
 
@@ -1319,7 +1328,7 @@ async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): P
  * the shares rooted in it, which are locked before its nodes, as saves and
  * rotations lock them. It holds the space against a share being made
  * meanwhile. Its pages' publications into other spaces end with them
- * (`endPublicationsFrom`). Its blob files, and those of any opening that
+ * (`endPublicationsFrom`), and so do their public links and copies. Its blob files, and those of any opening that
  * goes, are removed after the transaction commits, each kept if an upload
  * of the same bytes has stored it again by then. Any left by a failure
  * here go in the sweep's pass over files without rows.
@@ -1340,6 +1349,9 @@ export async function deleteNode(
     const ids = await lockSubtree(tx, input.spaceId, input.nodeId);
     if (ids.length === 0) throw new ContentError('not-found');
     const openingFiles = await endPublicationsFrom(tx, ids);
+    // Its pages' public links, copies and the target rows naming them, in
+    // their lock order, rather than by the cascade (ADR 0005, decision 5).
+    await endLinks(tx, ids);
     const doomed = await tx
       .select({ hash: blobs.hash })
       .from(blobs)

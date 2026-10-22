@@ -58,6 +58,7 @@ import { ContentError } from './errors.ts';
 import { deleteUnlistedFile } from './pages.ts';
 import { peopleById } from './people.ts';
 import { endPublicationsFrom } from './publications.ts';
+import { endLinks } from '../public-links/endings.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 import { isHomeSpace, requireIdentity } from './structure.ts';
 
@@ -627,7 +628,8 @@ export async function removeOwner(
  * its folders and pages with every version, key and attachment, its names,
  * shares, groups and owners, and copies published into it. Its pages'
  * publications into other spaces end as a deleted page's do
- * (`endPublicationsFrom`), and it drops out of everyone's saved order.
+ * (`endPublicationsFrom`), it drops out of everyone's saved order, and
+ * its pages' public links end, with their copies.
  * Once the space's row is gone, the tree trigger tells everyone who saw
  * it. As in `deleteNode`, the space is locked first, then its shares, then
  * its nodes, and blob files are removed after the commit.
@@ -663,6 +665,23 @@ export async function deleteSpace(
     for (let i = 0; i < ids.length; i += 5000) {
       openingFiles.push(...(await endPublicationsFrom(tx, ids.slice(i, i + 5000))));
     }
+    // It drops out of everyone's saved order. Their account rows are locked
+    // first, in order of ID, before any public link or copy row, as
+    // suspension and committing a public copy take them (ADR 0005).
+    const inOrder = sql`${spaceId} = any(${users.spaceOrder})`;
+    await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(inOrder)
+      .orderBy(users.id)
+      .for('no key update');
+    await tx
+      .update(users)
+      .set({ spaceOrder: sql`array_remove(${users.spaceOrder}, ${spaceId})` })
+      .where(inOrder);
+    // Its pages' public links, copies and the target rows naming them, in
+    // their lock order, rather than by the cascade.
+    await endLinks(tx, ids);
     const doomed = await tx
       .select({ hash: blobs.hash })
       .from(blobs)
@@ -694,10 +713,6 @@ export async function deleteSpace(
         ),
       );
     await tx.delete(spaces).where(eq(spaces.id, spaceId));
-    await tx
-      .update(users)
-      .set({ spaceOrder: sql`array_remove(${users.spaceOrder}, ${spaceId})` })
-      .where(sql`${spaceId} = any(${users.spaceOrder})`);
     await audit(tx, {
       actor: input.accountId,
       action: 'space.deleted',

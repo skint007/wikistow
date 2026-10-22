@@ -1,9 +1,11 @@
 import {
+  createRenderer,
   filePluginStore,
   readAiSettings,
   readMailSettings,
   type BlobStore,
   type Database,
+  type Renderer,
 } from '@wikistow/server';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -37,6 +39,7 @@ import { mountContentRoutes } from './routes/content.ts';
 import { mountDesktopRoutes } from './routes/desktop.ts';
 import { mountPluginDraftRoutes } from './routes/plugin-drafts.ts';
 import { mountPluginRoutes } from './routes/plugins.ts';
+import { mountPublicLinkRoutes } from './routes/public-links.ts';
 import { mountSystemRoutes } from './routes/system.ts';
 import { mountTreeChangeRoutes } from './routes/tree-changes.ts';
 import { aiSetup, mailSetup } from './settings.ts';
@@ -64,6 +67,8 @@ export type AppDeps = {
   blobs: BlobStore;
   /** How mail is sent; tests record it instead. */
   transport?: Transport;
+  /** Renders public copies (ADR 0005); one worker for the whole server. */
+  renderer?: Renderer;
 };
 
 const BLOB_UPLOAD = /^\/api\/pages\/[^/]+\/blobs$/;
@@ -71,7 +76,14 @@ const BLOB_UPLOAD = /^\/api\/pages\/[^/]+\/blobs$/;
 const JSON_BODY_LIMIT = 1024 * 1024;
 
 /** Build the whole HTTP app. Tests call this with their own database, log sink, and mailbox. */
-export function createApp({ db, config, log, blobs, transport = smtpDeliver }: AppDeps) {
+export function createApp({
+  db,
+  config,
+  log,
+  blobs,
+  transport = smtpDeliver,
+  renderer = createRenderer(),
+}: AppDeps) {
   const app = new Hono<AppEnv>();
   const guesses = createPasswordGuesses({ db, config });
   const mailer = createMailer({
@@ -193,9 +205,11 @@ export function createApp({ db, config, log, blobs, transport = smtpDeliver }: A
   const pluginStore = filePluginStore(config.blobDir);
   mountPluginRoutes(routes, { db, plugins: pluginStore });
   mountPluginDraftRoutes(routes, { db, plugins: pluginStore });
+  // Public pages (`/p/<id>`) answer before the web app's fallback would.
+  mountPublicLinkRoutes(routes, { db, renderer, limits: config.limits });
   if (config.webDist) serveWebApp(app, config.webDist);
 
   app.notFound((c) => errorResponse(c, new ApiError('not-found', 'Not found')));
   app.onError(onError(log));
-  return { app, auth, treeChanges };
+  return { app, auth, treeChanges, renderer };
 }
