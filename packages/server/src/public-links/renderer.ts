@@ -8,11 +8,18 @@ import type { RenderRequest, RenderResponse } from './render-worker.ts';
 
 const UNREADABLE = "This page couldn't be shown formatted, so here it is as written.";
 const TOO_SLOW = 'This page took too long to format, so here it is as written.';
+const TOO_LARGE = 'This page came out too large to show formatted, so here it is as written.';
 
 /** As the app gives up on a body, a render takes at most this. */
 const RENDER_LIMIT_MS = 10_000;
 /** Renders waiting at once, past which staging is refused as rate limited. */
 const MAX_WAITING = 8;
+/**
+ * The worker's heap. A page of a few hundred KiB renders in far less, and a
+ * body made to blow up (a wide table, filled out on every row) ends the
+ * worker instead of the server.
+ */
+const WORKER_HEAP_MB = 512;
 
 // The worker, beside this file: its source in development and tests, which
 // Node runs as it is, and its bundle beside the server's in a build.
@@ -47,7 +54,9 @@ export function createRenderer({ limitMs = RENDER_LIMIT_MS, maxWaiting = MAX_WAI
   });
 
   function start(): Worker {
-    const started = new Worker(WORKER_URL);
+    const started = new Worker(WORKER_URL, {
+      resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
+    });
     // Waiting for a render never keeps the process alive on its own.
     started.unref();
     // One that dies, as it does when it runs out of memory, is started
@@ -76,7 +85,9 @@ export function createRenderer({ limitMs = RENDER_LIMIT_MS, maxWaiting = MAX_WAI
       next();
     };
     const onMessage = (answer: RenderResponse) => {
-      if (answer.id === id) finish(answer.ok ? answer.rendered : written(job.input, UNREADABLE));
+      if (answer.id !== id) return;
+      if (answer.ok) finish(answer.rendered);
+      else finish(written(job.input, answer.tooLarge ? TOO_LARGE : UNREADABLE));
     };
     const onExit = () => finish(written(job.input, UNREADABLE));
     const timer = setTimeout(() => {

@@ -70,7 +70,7 @@ The server keeps no prompt or reply. It doesn't store them, and its log has one 
 
 Three things, taken together by `scripts/backup.sh`:
 
-- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys, the plugin library's records, people's plugin drafts and the installation ID. It leaves out public links and their copies, the one place the server keeps pages readable ([ADR 0005](adr/0005-public-links.md)). A restored server has every public link off, and anyone who wants one back turns it on again, which gives it a new address.
+- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys, the plugin library's records, people's plugin drafts and the installation ID. It also holds public links and their copies, the one place the server keeps pages readable ([ADR 0005](adr/0005-public-links.md)), but `backup.sh` leaves their rows out of the dump. A restored server has every public link off, and anyone who wants one back turns it on again, which gives it a new address.
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 - The plugin library's files in `BLOB_DIR/plugins`, one folder per uploaded version, named by its hash. These are plain text, as the server serves them to members.
 
