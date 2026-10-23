@@ -118,6 +118,12 @@ export async function shareCopy(
   const { payload, revisionId } = version;
   const { body } = splitFrontmatter(payload.markdown);
   const attachments = attachmentsUsed(body, payload.attachments);
+  // Every file is opened before anything readable goes up, so one that
+  // doesn't open sends nothing.
+  const bytesOf = new Map<string, Uint8Array>();
+  for (const ref of attachments) {
+    bytesOf.set(ref.id, await readAttachment(ctx, page, 'published', ref));
+  }
   const { copyId, files } = await ctx.api.call(publicLinkRoutes.stage, {
     params: { pageId: page.pageId },
     body: {
@@ -134,11 +140,9 @@ export async function shareCopy(
     },
   });
   // Whatever the server asks for, only the files this app chose go.
-  const ours = new Map(attachments.map((ref) => [ref.id, ref]));
   for (const id of files) {
-    const ref = ours.get(id);
-    if (!ref) continue;
-    const bytes = await readAttachment(ctx, page, 'published', ref);
+    const bytes = bytesOf.get(id);
+    if (!bytes) continue;
     const path = publicLinkRoutes.FILE_UPLOAD_PATH.replace(
       ':copyId',
       encodeURIComponent(copyId),

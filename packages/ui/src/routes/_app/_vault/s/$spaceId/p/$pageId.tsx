@@ -103,6 +103,9 @@ function PageView() {
   useChatPage(spaceId, pageId, tree?.pages.find((p) => p.id === pageId)?.title ?? null);
   // Bumped to open the draft afresh: after "view theirs", or a restore.
   const [opening, setOpening] = useState(0);
+  // The page whose public link dialog is open. Kept here, as the published
+  // view mounts afresh for each publication, which mustn't close it.
+  const [sharingLinkFor, setSharingLinkFor] = useState<string | null>(null);
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -157,6 +160,8 @@ function PageView() {
         await queryClient.refetchQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
         setOpening((n) => n + 1);
       }}
+      sharingLink={sharingLinkFor === pageId}
+      setSharingLink={(open) => setSharingLinkFor(open ? pageId : null)}
     />
   );
 }
@@ -171,6 +176,8 @@ function PageBody({
   crumbs,
   shareRoot,
   onReopen,
+  sharingLink,
+  setSharingLink,
 }: {
   page: pageOperations.PageRef;
   info: Info;
@@ -179,6 +186,9 @@ function PageBody({
   shareRoot: FolderId | null;
   /** Load the draft as it is now, dropping the editor's state. */
   onReopen: () => Promise<void>;
+  /** Whether the public link dialog is open, which outlasts this view. */
+  sharingLink: boolean;
+  setSharingLink: (open: boolean) => void;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -205,7 +215,6 @@ function PageBody({
   const [publishing, setPublishing] = useState(false);
   const [detaching, setDetaching] = useState(false);
   const [showingCopies, setShowingCopies] = useState(false);
-  const [sharingLink, setSharingLink] = useState(false);
   // Where Publish was pressed on a page with a public link, while it asks first.
   const [publishingFrom, setPublishingFrom] = useState<string | null>(null);
   const publicLink = usePublicLink(page);

@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { installationQuery } from '../api';
 import { errorMessage } from '../errors';
-import { publicLinksQuery } from '../data/queries';
+import { publicLinksQuery, treeQuery } from '../data/queries';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { useClient } from '../vault/store';
 import { publicLinkMessage } from './messages';
@@ -96,6 +96,9 @@ function LinkSteps({
 }) {
   const ctx = useClient();
   const links = useQuery(publicLinksQuery(ctx, page.spaceId));
+  // Unpublished while the dialog is open: it can have no link now.
+  const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
+  const unpublished = tree?.pages.find((p) => p.id === page.pageId)?.publishedHead === null;
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(publicLinkMessage);
   // What's running, said as it goes.
@@ -153,6 +156,27 @@ function LinkSteps({
             {links.isError ? errorMessage(links.error) : 'Checking for a public link…'}
           </DialogDescription>
         </DialogHeader>
+      </div>
+    );
+  }
+
+  if (!link && unpublished) {
+    return (
+      <div className="grid gap-4">
+        <DialogHeader>
+          <DialogTitle>
+            Public link for “<Name>{title}</Name>”
+          </DialogTitle>
+          <DialogDescription>
+            This page isn’t published any more, so it has no public link. Publish it to share it
+            again.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        </DialogFooter>
       </div>
     );
   }
