@@ -16,7 +16,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - **Delete space…** in a space's menu deletes it for everyone, with every page, folder, attachment and version in it. It names the co-owners, people and groups who lose access, offers leaving or a transfer instead, and asks for the space's name. It isn't offered for your home space. Anyone viewing a space that's gone, or no longer shared with them, goes to their home space. (#158)
-- **Share public link…**, in a page's right-click and ⋯ menus for people who can publish it, gives a published page a link anyone can open. Before the first link, the dialog says anyone with it can read the page and the server keeps a readable copy until the link is turned off. With a link on it has **Copy link** and **Turn off the link**, and **Update public page** when the public page is out of date. **Publish** on a page with a link asks first, then updates the public page. A globe marks pages with a link in the sidebar and on the page. (#TBD)
+- **Share public link…**, in a page's right-click and ⋯ menus for people who can publish it, gives a published page a link anyone can open. Before the first link, the dialog says anyone with it can read the page and the server keeps a readable copy until the link is turned off. With a link on it has **Copy link** and **Turn off the link**, and **Update public page** when the public page is out of date. **Publish** on a page with a link asks first, then updates the public page. A globe marks pages with a link in the sidebar and on the page. (#164)
 
 #### Server
 
