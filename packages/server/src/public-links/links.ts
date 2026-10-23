@@ -9,7 +9,7 @@
 // staging and committing, those of the pages its gaps lead to; then
 // copies; then target rows (`endings.ts`).
 import { publicLinkRoutes } from '@wikistow/contracts';
-import { and, eq, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
@@ -598,7 +598,7 @@ const STAGED_FOR_MS = 10 * 60 * 1000;
  */
 export async function sweepPublicLinks(db: Database) {
   const cutoff = new Date(Date.now() - STAGED_FOR_MS);
-  const stale = and(eq(publicCopies.live, false), sql`${publicCopies.touchedAt} < ${cutoff}`);
+  const stale = and(eq(publicCopies.live, false), lt(publicCopies.touchedAt, cutoff));
   let staged = 0;
   for (const { id } of await db.select({ id: publicCopies.id }).from(publicCopies).where(stale)) {
     staged += await db.transaction(async (tx) => {

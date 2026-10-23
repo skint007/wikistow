@@ -12,8 +12,8 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { exposes, readableCorpus } from '@wikistow/client/testing';
-import { PAGE_CSP, schema } from '@wikistow/server';
-import { eq } from 'drizzle-orm';
+import { PAGE_CSP, schema, sweepPublicLinks } from '@wikistow/server';
+import { and, eq } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
@@ -318,6 +318,35 @@ describe('a page with a public link', () => {
     expect(await res.text()).toContain('This page is being updated');
     expect((await visit(`/p/${w.id}/files/${w.used.id}`)).status).toBe(404);
     expect(await (await visit(`/p/${ownLink}`)).text()).toContain(kept);
+  });
+
+  it('is ended by the sweep when its sharer lost publish rights some other way', async () => {
+    const w = await world();
+    // Taken away without a change that ends what lapsed.
+    await t.db
+      .update(schema.shareMembers)
+      .set({ canPublish: false })
+      .where(
+        and(
+          eq(schema.shareMembers.shareId, w.shareId),
+          eq(schema.shareMembers.identityId, identityOf(w.sharer)),
+        ),
+      );
+    // And the target's copy staged long ago and left.
+    await t.db
+      .update(schema.publicCopies)
+      .set({ live: false, touchedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(schema.publicCopies.pageId, w.target.pageId));
+    await sweepPublicLinks(t.db);
+    expect(await readable(...copied(w.m))).toEqual([false, false, false, false]);
+    expect((await visit(`/p/${w.id}`)).status).toBe(404);
+    const copies = t.db
+      .select()
+      .from(schema.publicCopies)
+      .where(eq(schema.publicCopies.pageId, w.target.pageId));
+    expect(await copies).toEqual([]);
+    // The owner's link on the target stays.
+    expect((await visit(`/p/${w.targetLink}`)).status).toBe(200);
   });
 
   it('leaves nothing of its copy once a new version is published, and keeps its link', async () => {
