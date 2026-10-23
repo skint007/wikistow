@@ -499,31 +499,40 @@ export async function accessToPages(
   spaceId: string,
   pageIds: readonly string[],
 ): Promise<Map<string, Access | null>> {
+  if (pageIds.length === 0) return accessToPagesIn(db, who, spaceId, pageIds);
+  return readSnapshot(db, (tx) => accessToPagesIn(tx, who, spaceId, pageIds));
+}
+
+/** `accessToPages` in the caller's own transaction, as it sees the database. */
+export async function accessToPagesIn(
+  tx: Database,
+  who: Holder,
+  spaceId: string,
+  pageIds: readonly string[],
+): Promise<Map<string, Access | null>> {
   const access = new Map<string, Access | null>(pageIds.map((id) => [id, null]));
   if (pageIds.length === 0) return access;
-  return readSnapshot(db, async (tx) => {
-    // Every node on the pages' paths up, once each, so a cycle ends too.
-    const path = [
-      ...(await tx.execute<{ id: string; parent_id: string | null }>(sql`
-        with recursive up(id, parent_id) as (
-          select id, parent_id from nodes
-          where space_id = ${spaceId} and id = any(${sql.param([...pageIds])}::text[])
-          union
-          select n.id, n.parent_id from nodes n
-            join up on n.id = up.parent_id and n.space_id = ${spaceId}
-        )
-        select id, parent_id from up`)),
-    ].map(({ id, parent_id }) => ({ id, parentId: parent_id }));
-    const spaceShares = await tx.select().from(shares).where(eq(shares.spaceId, spaceId));
-    const parents = new Map(path.map((node) => [node.id, node.parentId]));
-    const view = await treeView(tx, who, spaceId, spaceShares, parents);
-    if (!view) return access;
-    const holding = sharesByNode(path, spaceShares);
-    for (const id of pageIds) {
-      if (parents.has(id)) access.set(id, view.at(holding.get(id) ?? null, id));
-    }
-    return access;
-  });
+  // Every node on the pages' paths up, once each, so a cycle ends too.
+  const path = [
+    ...(await tx.execute<{ id: string; parent_id: string | null }>(sql`
+      with recursive up(id, parent_id) as (
+        select id, parent_id from nodes
+        where space_id = ${spaceId} and id = any(${sql.param([...pageIds])}::text[])
+        union
+        select n.id, n.parent_id from nodes n
+          join up on n.id = up.parent_id and n.space_id = ${spaceId}
+      )
+      select id, parent_id from up`)),
+  ].map(({ id, parent_id }) => ({ id, parentId: parent_id }));
+  const spaceShares = await tx.select().from(shares).where(eq(shares.spaceId, spaceId));
+  const parents = new Map(path.map((node) => [node.id, node.parentId]));
+  const view = await treeView(tx, who, spaceId, spaceShares, parents);
+  if (!view) return access;
+  const holding = sharesByNode(path, spaceShares);
+  for (const id of pageIds) {
+    if (parents.has(id)) access.set(id, view.at(holding.get(id) ?? null, id));
+  }
+  return access;
 }
 
 /**

@@ -9,7 +9,7 @@
 // staging and committing, those of the pages its gaps lead to; then
 // copies; then target rows (`endings.ts`).
 import { publicLinkRoutes } from '@wikistow/contracts';
-import { and, eq, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
@@ -26,6 +26,7 @@ import {
 import {
   accessTo,
   accessToPages,
+  accessToPagesIn,
   canEdit,
   lockShare,
   lockSpaceOf,
@@ -65,6 +66,40 @@ async function personPublishes(db: Database, accountId: string, pageId: string) 
   const identity = await currentIdentity(db, accountId);
   if (!identity) return false;
   return callerPublishes(db, { accountId, identity, personId: null }, pageId);
+}
+
+const personPage = (accountId: string, pageId: string) => `${accountId} ${pageId}`;
+
+/**
+ * Which of `pairs` can publish their page now, as `personPublishes`
+ * decides, as `personPage` keys: a few queries for each person, and for
+ * each space of theirs, however many pages they have there.
+ */
+async function publishing(
+  tx: Database,
+  pairs: readonly { accountId: string; pageId: string; spaceId: string }[],
+) {
+  const out = new Set<string>();
+  for (const [accountId, theirs] of Map.groupBy(pairs, (pair) => pair.accountId)) {
+    const [user] = await tx
+      .select({ suspendedAt: users.suspendedAt })
+      .from(users)
+      .where(eq(users.id, accountId));
+    const identity = user && !user.suspendedAt ? await currentIdentity(tx, accountId) : null;
+    if (!identity) continue;
+    for (const [spaceId, here] of Map.groupBy(theirs, (pair) => pair.spaceId)) {
+      const access = await accessToPagesIn(
+        tx,
+        { identity, personId: null },
+        spaceId,
+        here.map((pair) => pair.pageId),
+      );
+      for (const pair of here) {
+        if (publishes(access.get(pair.pageId) ?? null)) out.add(personPage(accountId, pair.pageId));
+      }
+    }
+  }
+  return out;
 }
 
 /** Whether `caller` can publish the page `pageId`, in whichever space it is. */
@@ -550,29 +585,29 @@ export async function endLapsedWhere(tx: Database, where: Lapsing, actor: string
       id: publicCopies.id,
       pageId: publicCopies.pageId,
       uploadedBy: publicCopies.uploadedBy,
+      spaceId: nodes.spaceId,
     })
     .from(publicCopies)
+    .innerJoin(nodes, eq(nodes.id, publicCopies.pageId))
     .where(
       'accountId' in where
         ? eq(publicCopies.uploadedBy, where.accountId)
         : sql`${publicCopies.pageId} = any(${sql.param(links.map((link) => link.pageId))}::text[])`,
     );
-  const checked = new Map<string, boolean>();
-  const publishes = async (accountId: string, pageId: string) => {
-    const key = `${accountId} ${pageId}`;
-    const known = checked.get(key) ?? (await personPublishes(tx, accountId, pageId));
-    checked.set(key, known);
-    return known;
-  };
-  const lapsed = [];
-  for (const link of links) if (!(await publishes(link.sharedBy, link.pageId))) lapsed.push(link);
+  const publishers = await publishing(tx, [
+    ...links.map(({ sharedBy, pageId, spaceId }) => ({ accountId: sharedBy, pageId, spaceId })),
+    ...copies.map(({ uploadedBy, pageId, spaceId }) => ({
+      accountId: uploadedBy,
+      pageId,
+      spaceId,
+    })),
+  ]);
+  const lapsed = links.filter((link) => !publishers.has(personPage(link.sharedBy, link.pageId)));
   const ending = new Set(lapsed.map((link) => link.pageId));
-  const copyIds = [];
-  for (const copy of copies) {
-    if (!ending.has(copy.pageId) && !(await publishes(copy.uploadedBy, copy.pageId))) {
-      copyIds.push(copy.id);
-    }
-  }
+  const copyIds = copies
+    .filter((copy) => !ending.has(copy.pageId))
+    .filter((copy) => !publishers.has(personPage(copy.uploadedBy, copy.pageId)))
+    .map((copy) => copy.id);
   const ended = await endLinksAndCopies(tx, { linkIds: lapsed.map((link) => link.id), copyIds });
   const endedIds = new Set(ended.links.map((link) => link.id));
   for (const link of lapsed) {
@@ -598,7 +633,7 @@ const STAGED_FOR_MS = 10 * 60 * 1000;
  */
 export async function sweepPublicLinks(db: Database) {
   const cutoff = new Date(Date.now() - STAGED_FOR_MS);
-  const stale = and(eq(publicCopies.live, false), sql`${publicCopies.touchedAt} < ${cutoff}`);
+  const stale = and(eq(publicCopies.live, false), lt(publicCopies.touchedAt, cutoff));
   let staged = 0;
   for (const { id } of await db.select({ id: publicCopies.id }).from(publicCopies).where(stale)) {
     staged += await db.transaction(async (tx) => {
@@ -612,16 +647,28 @@ export async function sweepPublicLinks(db: Database) {
   }
   const people = [
     ...(await db
-      .select({ pageId: publicLinks.pageId, accountId: publicLinks.sharedBy })
-      .from(publicLinks)),
+      .select({
+        pageId: publicLinks.pageId,
+        accountId: publicLinks.sharedBy,
+        spaceId: nodes.spaceId,
+      })
+      .from(publicLinks)
+      .innerJoin(nodes, eq(nodes.id, publicLinks.pageId))),
     ...(await db
-      .selectDistinct({ pageId: publicCopies.pageId, accountId: publicCopies.uploadedBy })
-      .from(publicCopies)),
+      .selectDistinct({
+        pageId: publicCopies.pageId,
+        accountId: publicCopies.uploadedBy,
+        spaceId: nodes.spaceId,
+      })
+      .from(publicCopies)
+      .innerJoin(nodes, eq(nodes.id, publicCopies.pageId))),
   ];
-  const pages = new Set<string>();
-  for (const { pageId, accountId } of people) {
-    if (!pages.has(pageId) && !(await personPublishes(db, accountId, pageId))) pages.add(pageId);
-  }
+  const publishers = await publishing(db, people);
+  const pages = new Set(
+    people
+      .filter(({ accountId, pageId }) => !publishers.has(personPage(accountId, pageId)))
+      .map((person) => person.pageId),
+  );
   let links = 0;
   let copies = staged;
   for (const pageId of pages) {
