@@ -136,3 +136,17 @@ export function uploadMessage(error: unknown): string {
     return 'The server is busy with other uploads, so this one didn’t go. Wait a moment and try again.';
   return errorMessage(error);
 }
+
+const PUBLIC_LINK_REFUSED: Partial<Record<ApiError['code'], string>> = {
+  'not-found':
+    'This page isn’t published, or its public link was turned off meanwhile. Look again.',
+  forbidden: 'Only someone who can publish this page can share it with a public link.',
+  'stale-head': 'The page was published again meanwhile. Try again.',
+  'payload-too-large': 'The page is too large for a public link.',
+};
+
+/** A short message for a public link that failed to turn on, off, or update. */
+export function publicLinkMessage(error: unknown): string {
+  if (error instanceof ApiError) return PUBLIC_LINK_REFUSED[error.code] ?? errorMessage(error);
+  return errorMessage(error);
+}

@@ -4,6 +4,7 @@ import {
   ownerOperations,
   pageOperations,
   publicationOperations,
+  publicLinkOperations,
   searchOperations,
   sharingOperations,
   spaceKeys,
@@ -62,6 +63,18 @@ export const revisionQuery = (
     queryKey: [PLAIN, 'revision', page.spaceId, page.pageId, audience, revisionId],
     queryFn: () => pageOperations.openRevisionOf(ctx, page, audience, revisionId),
     staleTime: Infinity,
+  });
+
+/**
+ * The space's pages with a public link that this person can see, for the
+ * markers, with the link's id only where they can publish the page (ADR
+ * 0005). Loads again with the tree when the server says it changed, which
+ * it does when a link is turned on or off (`useTreeChanges`).
+ */
+export const publicLinksQuery = (ctx: ClientContext, spaceId: SpaceId) =>
+  queryOptions({
+    queryKey: [PLAIN, 'public-links', spaceId],
+    queryFn: () => publicLinkOperations.list(ctx, spaceId),
   });
 
 /** A copy of a page in another space that has a version: one the page lists. */
@@ -246,6 +259,7 @@ export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext
       'owner-to-confirm',
       'spaces',
       'tree',
+      'public-links',
       'people',
       'pending-owner-work',
       'agents',

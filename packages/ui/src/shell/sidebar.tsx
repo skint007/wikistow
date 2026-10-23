@@ -32,11 +32,12 @@ import { Label } from '@/components/ui/label';
 import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
-import { searchIndexChanged, treeQuery } from '../data/queries';
+import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
+import { PublicLinkDialog, PublicMarker } from '../page/public-link';
 import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
@@ -215,8 +216,8 @@ function PageRowIcon({
 type Creating = { kind: 'page' | 'folder'; parentId: FolderId | null } | null;
 
 /**
- * A page's Publish to another space, Unpublish or Delete chosen in its row's
- * menu, with the page's info loaded then. Kept while its dialog closes.
+ * A page's Publish to another space, Share public link, Unpublish or Delete
+ * chosen in its row's menu, with the page's info loaded then. Kept while its dialog closes.
  */
 type PageDialog = {
   action: Exclude<PageAction, 'move'>;
@@ -242,6 +243,8 @@ const DRAG_TYPE = 'application/x-wikistow-node';
 export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?: () => void }) {
   const ctx = useClient();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const { data: links } = useQuery(publicLinksQuery(ctx, spaceId));
+  const publicPages = useMemo(() => new Set(links?.map((link) => link.pageId)), [links]);
   const params = useParams({ strict: false });
   const navigate = useNavigate();
   const [expanded, setExpanded] = useExpandedFolders(spaceId);
@@ -596,6 +599,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 <span className="min-w-0 flex-1 truncate">
                   <Name>{row.title}</Name>
                 </span>
+                {publicPages.has(row.id) && <PublicMarker />}
                 {canEditAt(row.parentId) && row.unpublished && (
                   <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
                     <span className="sr-only">Unpublished changes</span>
@@ -828,8 +832,8 @@ function CreateDialog({
 }
 
 /**
- * Publish to another space, Unpublish or Delete for a page from its row's
- * menu: the dialogs its own page's menu opens, with the info loaded when
+ * Publish to another space, Share public link, Unpublish or Delete for a
+ * page from its row's menu: the dialogs its own page's menu opens, with the info loaded when
  * the row's menu opened.
  */
 function PageRowDialog({
@@ -864,6 +868,9 @@ function PageRowDialog({
         />
       )
     );
+  }
+  if (action === 'public-link') {
+    return <PublicLinkDialog page={page} title={title} open={open} onOpenChange={onOpenChange} />;
   }
   if (action === 'unpublish') {
     return (

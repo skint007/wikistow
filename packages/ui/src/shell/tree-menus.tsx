@@ -77,12 +77,13 @@ export function shownVersion(
 }
 
 /** What a page's menu does besides Open, given the page's info. */
-export type PageAction = 'move' | 'publish' | 'unpublish' | 'delete';
+export type PageAction = 'move' | 'publish' | 'public-link' | 'unpublish' | 'delete';
 
 /**
  * A page's actions after Open, by the rules of its own page's menu: Move
- * and Publish for editors, Publish only with publish rights, Unpublish with
- * those and a publication, Delete for owners who can share.
+ * and Publish for editors, Publish only with publish rights, Share public
+ * link and Unpublish with those and a publication, Delete for owners who
+ * can share.
  */
 function pageActions(
   info: PageInfo,
@@ -97,6 +98,10 @@ function pageActions(
     action(
       'Publish to another space…',
       when(canEdit && info.canPublish && shownVersion(info) !== null, 'publish'),
+    ),
+    action(
+      'Share public link…',
+      when(info.heads.publishedHead !== null && info.canPublish, 'public-link'),
     ),
     action('Unpublish…', when(info.heads.publishedHead !== null && info.canPublish, 'unpublish')),
     action('Delete page', when(sharer, 'delete'), true),

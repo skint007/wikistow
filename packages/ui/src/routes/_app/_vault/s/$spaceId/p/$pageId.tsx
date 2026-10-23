@@ -13,7 +13,7 @@ import {
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate, useRouter } from '@tanstack/react-router';
-import { Check, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
+import { Check, Globe, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Name } from '@/components/name';
@@ -40,6 +40,7 @@ import { ago } from '../../../../../../agents/model';
 import {
   historyQuery,
   pageQuery,
+  publicLinksQuery,
   publishedCopiesQuery,
   revisionQuery,
   searchIndexChanged,
@@ -58,6 +59,11 @@ import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
 import { MoveDialog } from '../../../../../../page/move-dialog';
 import { readWikilinks } from '../../../../../../page/page-reader';
+import {
+  PublicLinkDialog,
+  PublishWithLinkDialog,
+  usePublicLink,
+} from '../../../../../../page/public-link';
 import { PublishDialog } from '../../../../../../page/publish-dialog';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
@@ -199,6 +205,10 @@ function PageBody({
   const [publishing, setPublishing] = useState(false);
   const [detaching, setDetaching] = useState(false);
   const [showingCopies, setShowingCopies] = useState(false);
+  const [sharingLink, setSharingLink] = useState(false);
+  // Where Publish was pressed on a page with a public link, while it asks first.
+  const [publishingFrom, setPublishingFrom] = useState<string | null>(null);
+  const publicLink = usePublicLink(page);
   const copiesPill = useRef<HTMLButtonElement>(null);
   const crumbsNav = useRef<HTMLElement>(null);
   const [sharing, setSharing] = useState(false);
@@ -236,20 +246,34 @@ function PageBody({
     }
   }
 
+  const publishDraft = async () => {
+    await editor.current?.flush();
+    const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
+    searchIndexChanged(queryClient);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
+      queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
+    ]);
+    return written;
+  };
+  // A page opened without ?view=draft turns to its publication as soon as
+  // it refetches; if the person moved on meanwhile (Edit, another page),
+  // don't drag them back.
+  const showPublished = async (from: string) => {
+    if (router.state.location.href === from) await go('published');
+  };
+  // One click, unless the page has a public link: then Publish asks first,
+  // as publishing updates the public page too (ADR 0005).
   const publish = () =>
     act(async () => {
       const from = router.state.location.href;
-      await editor.current?.flush();
-      await pageOperations.publishPage(ctx, page, { read: readWikilinks });
-      searchIndexChanged(queryClient);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
-      ]);
-      // A page opened without ?view=draft turns to its publication as soon
-      // as it refetches; if the person moved on meanwhile (Edit, another
-      // page), don't drag them back.
-      if (router.state.location.href === from) await go('published');
+      const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
+      if (links.some((link) => link.pageId === page.pageId)) {
+        setPublishingFrom(from);
+        return;
+      }
+      await publishDraft();
+      await showPublished(from);
     });
 
   const commandEnv = {
@@ -486,6 +510,11 @@ function PageBody({
                       </DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
+                      <DropdownMenuItem onSelect={() => setSharingLink(true)}>
+                        Share public link…
+                      </DropdownMenuItem>
+                    )}
+                    {publishedHead && info.canPublish && (
                       <DropdownMenuItem onSelect={() => setUnpublishing(true)}>
                         Unpublish…
                       </DropdownMenuItem>
@@ -625,6 +654,26 @@ function PageBody({
                 </button>
               </span>
             )}
+            {/* Everyone who sees the page; only those who can publish it get the link. */}
+            {publicLink &&
+              (publisher && publishedHead ? (
+                <button
+                  type="button"
+                  onClick={() => setSharingLink(true)}
+                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
+                >
+                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                  <span>Public link ›</span>
+                </button>
+              ) : (
+                <span
+                  data-hint="Anyone with the link can read this page"
+                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+                >
+                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                  <span>Public link</span>
+                </span>
+              ))}
             {/* Editors only: the server tells readers of no draft. */}
             {info.agentEdit && (
               <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
@@ -768,6 +817,22 @@ function PageBody({
         version={{ revisionId, audience: model.view }}
         open={publishing}
         onOpenChange={setPublishing}
+      />
+      {publishedHead && info.canPublish && (
+        <PublicLinkDialog
+          page={page}
+          title={title}
+          open={sharingLink}
+          onOpenChange={setSharingLink}
+        />
+      )}
+      <PublishWithLinkDialog
+        page={page}
+        title={title}
+        open={publishingFrom !== null}
+        onOpenChange={(open) => !open && setPublishingFrom(null)}
+        publish={publishDraft}
+        onDone={() => publishingFrom !== null && void showPublished(publishingFrom)}
       />
       {/* Kept while open, so losing publish rights meanwhile doesn't take what it says away. */}
       {(publisher || showingCopies) && (

@@ -2,13 +2,14 @@ import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/cl
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
-import { sharedWithMeQuery, spacesQuery, treeQuery } from './queries';
+import { publicLinksQuery, sharedWithMeQuery, spacesQuery, treeQuery } from './queries';
 
 /**
  * While the vault is open (`ctx`), load a space's tree again when the
  * server says it changed: pages an agent adds, edits from another device
  * or from someone the space is shared with. The spaces and shares listed
- * load again too, for a space renamed, deleted or newly shared. The page
+ * load again too, for a space renamed, deleted or newly shared, and so do
+ * the space's public links, which turning one on or off tells of. The page
  * that is open stays as it is. A tab out of view stops listening, so
  * a dozen tabs don't hold a dozen connections, and its trees load again
  * when it is back in view, as every query does (`refetchOnWindowFocus`).
@@ -26,11 +27,15 @@ export function useTreeChanges(ctx: ClientContext | null) {
     void watchTreeChanges({
       signal: stop.signal,
       onChange: (spaceIds) => {
-        for (const spaceId of spaceIds) void reloadTree(queryClient, ctx, spaceId);
+        for (const spaceId of spaceIds) {
+          void reloadTree(queryClient, ctx, spaceId);
+          void queryClient.invalidateQueries({ queryKey: publicLinksQuery(ctx, spaceId).queryKey });
+        }
         reloadLists();
       },
       onMissed: () => {
         void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
+        void queryClient.invalidateQueries({ queryKey: [PLAIN, 'public-links'] });
         reloadLists();
       },
     });
