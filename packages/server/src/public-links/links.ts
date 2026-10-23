@@ -213,22 +213,22 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
     await lockAccounts(tx, [accountId]);
     // Each gap's page: a wikilink's as the app named it, an address's its own.
     const named = new Map(input.targets.map((target) => [target.key, target.pageId]));
-    // At most `MAX_TARGET_PAGES` pages, since every visit checks the
-    // uploader can still publish each; links to any past that stay text.
     const leadsTo = new Map<string, string>();
-    const pages = new Set<string>();
     for (const segment of rendered.segments) {
       if (typeof segment === 'string') continue;
       const target = pageOfKey(segment.key) ?? named.get(segment.key);
-      if (!target || (!pages.has(target) && pages.size >= MAX_TARGET_PAGES)) continue;
-      pages.add(target);
-      leadsTo.set(segment.key, target);
+      if (target) leadsTo.set(segment.key, target);
     }
+    // Only pages whose link is on lock a row here, however many the body names.
     const links = await lockLinks(tx, [pageId, ...leadsTo.values()], 'share');
     if (links.find((row) => row.pageId === pageId)?.id !== link.id) throw noLink();
     const linked = new Set(links.map((row) => row.pageId));
+    // At most `MAX_TARGET_PAGES` pages the uploader can publish, in the
+    // order the body names them, since every visit checks each again;
+    // links to any past that stay text.
     const reachable = new Set<string>();
     for (const target of new Set(leadsTo.values())) {
+      if (reachable.size >= MAX_TARGET_PAGES) break;
       if (linked.has(target) && (await callerPublishes(tx, caller, target))) reachable.add(target);
     }
     // A person stages one copy of a page at a time: a new one replaces
