@@ -4,11 +4,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.16.0 - 2026-10-23
+
 ### Highlights
 
 #### Features
 
-- You can delete a space you own, from its menu. The app says who loses access and asks you to type the space's name first. Your home space stays.
+- You can delete a space you own, from its menu. The app says who loses access and asks you to type the space’s name first. Your home space stays.
 - You can share a published page with anyone through a public link, even people without an account. Right-click the page and choose **Share public link…**.
 
 ### Changes
@@ -31,6 +33,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - ADR 0005 (`docs/adr/0005-public-links.md`) records how public links for pages work, and the spec's plaintext rule now allows their one exception: the published version of a page with a public link, stored readable only while the link is on. The protocol gains accepted risk A12. (#159)
 - The reader's Markdown rules (alerts, heading ids, highlighting, wikilinks and `pageHtml`'s sanitizing) move from `packages/ui` to `@wikistow/client/reader`, so the server can use them too. The app reads pages as before. (#160)
+- Q12 in the protocol's open questions records that a deleted space's ID can be used for a new space, and what former members' apps then accept there. (#165)
+- `AGENTS.md` tells coding agents how to see a release through: wait for CI on the merged version change, then check it before tagging. (#152)
+
+#### Releases and packaging
+
+- Electron 44.9.3, from 44.9.2. (#168)
 
 ## 0.15.0 - 2026-10-20
 
