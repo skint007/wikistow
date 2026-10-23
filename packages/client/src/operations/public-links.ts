@@ -121,9 +121,9 @@ export async function shareCopy(
   const { payload, revisionId } = version;
   const { body } = splitFrontmatter(payload.markdown);
   const attachments = attachmentsUsed(body, payload.attachments);
-  // Every file the copy keeps is opened before anything readable goes up,
-  // so one that doesn't open sends nothing. Those left out for size, as the
-  // server leaves them out, aren't opened at all.
+  // Every file the copy should keep is opened before anything readable
+  // goes up, so one that doesn't open sends nothing. Those left out for
+  // size, as the server leaves them out, aren't opened yet.
   const kept = chooseFiles(
     attachments.map((ref) => ref.id),
     attachments,
@@ -150,10 +150,16 @@ export async function shareCopy(
       targets: await wikilinkTargets(ctx, page, payload),
     },
   });
-  // Whatever the server asks for, only the files this app chose go.
+  // Whatever the server asks for, only the files on this app's list go. One
+  // it asks for that this app left out for size (its limits can be lower,
+  // which keeps others) is opened now.
+  const ours = new Map<string, (typeof attachments)[number]>(
+    attachments.map((ref) => [ref.id, ref]),
+  );
   for (const id of files) {
-    const bytes = bytesOf.get(id);
-    if (!bytes) continue;
+    const ref = ours.get(id);
+    if (!ref) continue;
+    const bytes = bytesOf.get(id) ?? (await readAttachment(ctx, page, 'published', ref));
     const path = publicLinkRoutes.FILE_UPLOAD_PATH.replace(
       ':copyId',
       encodeURIComponent(copyId),
