@@ -26,6 +26,7 @@ export * as peopleRoutes from './routes/people.ts';
 export * as pluginDraftRoutes from './routes/plugin-drafts.ts';
 export * as pluginRoutes from './routes/plugins.ts';
 export * as publicationRoutes from './routes/publications.ts';
+export * as publicLinkRoutes from './routes/public-links.ts';
 export * as sharingRoutes from './routes/sharing.ts';
 export * as structureRoutes from './routes/structure.ts';
 export * as systemRoutes from './routes/system.ts';

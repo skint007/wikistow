@@ -70,13 +70,13 @@ The server keeps no prompt or reply. It doesn't store them, and its log has one 
 
 Three things, taken together by `scripts/backup.sh`:
 
-- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys, the plugin library's records, people's plugin drafts and the installation ID.
+- The PostgreSQL database at `DATABASE_URL`. It holds accounts and their avatars, encrypted pages, everyone's wrapped keys, the plugin library's records, people's plugin drafts and the installation ID. It also holds public links and their copies, the one place the server keeps pages readable ([ADR 0005](adr/0005-public-links.md)), but `backup.sh` leaves their rows out of the dump. A restored server has every public link off, and anyone who wants one back turns it on again, which gives it a new address.
 - The attachment files in `BLOB_DIR/objects`. `BLOB_DIR` is `/data/blobs` in the image. These are encrypted bytes only.
 - The plugin library's files in `BLOB_DIR/plugins`, one folder per uploaded version, named by its hash. These are plain text, as the server serves them to members.
 
 Keep one more thing yourself, because the backup doesn't hold it: the server's `BETTER_AUTH_SECRET`. Better Auth encrypts what it stores with it, such as two-factor keys, so a restored server needs the same value. The secrets saved on the admin page, the SMTP password and the AI key, are encrypted with a key derived from it too. A server with another `BETTER_AUTH_SECRET` treats them as unset, and the admin page asks for them again. Keep it with your other secrets.
 
-Treat every backup as private. Page content is encrypted, but the dump also holds email addresses, password hashes and sessions. The scripts write backups readable only by the user who ran them. Encrypt any copy you send off the machine.
+Treat every backup as private. Page content is encrypted, and public copies are left out, but the dump also holds email addresses, password hashes and sessions. The scripts write backups readable only by the user who ran them. Encrypt any copy you send off the machine.
 
 ## Database first, then files
 
@@ -154,7 +154,7 @@ Restoring over the server's existing database works when it was last migrated by
 
 ## What a restore undoes
 
-A restore puts everything back as it was at the backup, including changes made on purpose since. Sessions and agent credentials you revoked work again. Passwords people changed go back to the old ones. People removed from a share get back what they could read then. Deleted accounts return, and agents enrolled since are gone. Redo those changes afterward.
+A restore puts everything back as it was at the backup, including changes made on purpose since. Sessions and agent credentials you revoked work again. Passwords people changed go back to the old ones. People removed from a share get back what they could read then. Deleted accounts return, and agents enrolled since are gone. Every public link is off, whenever it was turned on. Redo those changes afterward.
 
 The apps and the CLI remember the newest records they have seen, so they can catch a server that serves older ones. A restore of an older backup looks the same, so `restore.sh` records the restore, and when the backup was taken, and the server reports it in `/api/installation` as `restore`. A client that sees a restore it hasn't seen before takes what the server serves now as its new starting point instead of refusing, and says so:
 

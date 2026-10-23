@@ -55,9 +55,10 @@ type Options = {
    */
   bodyLimit?: number;
   /**
-   * The large-body slots it takes: `bulk` (the default) or `rotation`.
-   * Rotations and owner removals have their own, so large shares being
-   * made can't hold off removing someone.
+   * The large-body slots it takes: `bulk` (the default), `rotation` or
+   * `staging`. Rotations and owner removals have their own, so large shares
+   * being made can't hold off removing someone, and so does staging a
+   * public copy, which holds its slot while the copy renders.
    */
   bodyPool?: BodyPool;
   /**
@@ -81,7 +82,7 @@ type Options = {
 const BULK_PER_ACCOUNT = 1;
 const BULK_AT_ONCE = 4;
 
-export type BodyPool = 'bulk' | 'rotation';
+export type BodyPool = 'bulk' | 'rotation' | 'staging';
 
 // A pool's large bodies being read or handled now, in all and by account:
 // a slot for `accountId`, or `rate-limited` if none is free.
@@ -143,6 +144,7 @@ export function createRoutes({
   const takeSlot: Record<BodyPool, ReturnType<typeof bodySlots>> = {
     bulk: bodySlots(),
     rotation: bodySlots(),
+    staging: bodySlots(),
   };
 
   // Signed-in routes check the session, and count toward the account's rate

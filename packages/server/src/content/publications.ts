@@ -37,6 +37,7 @@ import {
 } from './access.ts';
 import { ContentError } from './errors.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
+import { endCopies } from '../public-links/endings.ts';
 import { requireCaller, type Actor } from './identities.ts';
 import {
   replayed,
@@ -391,7 +392,7 @@ async function requirePublicationAt(tx: Database, pageId: string): Promise<Publi
  * `permissionVersion`, and its published head `expectedPublishedHead`
  * (`stale-head` otherwise), so of two sent at once only one goes. A retry
  * of the same version is answered as before. Its first version is what
- * makes the page visible.
+ * makes the page visible. The page's public copies go, as on any publish.
  */
 export async function sendPublication(
   db: Database,
@@ -449,6 +450,8 @@ export async function sendPublication(
       sourceRevisionId: input.sourceRevisionId,
     });
     const revisionId = input.revision.record.revisionId;
+    // A public copy is only ever of the current published version (ADR 0005).
+    await endCopies(tx, page.id);
     if (heads) {
       await tx
         .update(pageHeads)

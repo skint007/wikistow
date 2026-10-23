@@ -7,10 +7,12 @@ import {
   listenForTreeChanges,
   lockDatabase,
   MIGRATIONS_DIR,
+  rerenderCopies,
   sweepBlobs,
   sweepDrafts,
   sweepPasswordBudgets,
   sweepPlugins,
+  sweepPublicLinks,
 } from '@wikistow/server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -41,7 +43,7 @@ await lock.migrate(config.migrationsDir ?? MIGRATIONS_DIR);
 stdoutLog({ level: 'info', event: 'migrated' });
 const { db, close } = connect(config.databaseUrl);
 const blobs = fileBlobStore(config.blobDir);
-const { app, treeChanges } = createApp({ db, config, log: stdoutLog, blobs });
+const { app, treeChanges, renderer } = createApp({ db, config, log: stdoutLog, blobs });
 // Should the database go away, losing the lock above stops the server too.
 const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.changed);
 
@@ -49,7 +51,9 @@ const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.
 // data nothing uses, and publications into another space nobody finished
 // (see sweepBlobs); library plugin files no version lists (see
 // sweepPlugins); old draft checkpoints nothing needs (see sweepDrafts);
-// and password allowances that are full again (see sweepPasswordBudgets).
+// password allowances that are full again (see sweepPasswordBudgets);
+// and public copies nobody finished, or whose sharer or uploader can no
+// longer publish their page (see sweepPublicLinks), every 10 minutes.
 const sweeps = [
   scheduleSweep(stdoutLog, 'blob-sweep', () => sweepBlobs(db, blobs)),
   scheduleSweep(stdoutLog, 'plugin-sweep', async () => ({
@@ -61,7 +65,20 @@ const sweeps = [
   scheduleSweep(stdoutLog, 'password-budget-sweep', async () => ({
     deleted: await sweepPasswordBudgets(db),
   })),
+  scheduleSweep(stdoutLog, 'public-link-sweep', () => sweepPublicLinks(db), 10 * 60 * 1000),
 ];
+
+// Public copies a release's reader renders differently are rendered again,
+// in the background; until then their pages say they are being updated.
+rerenderCopies(db, renderer).then(
+  (done) => stdoutLog({ level: 'info', event: 'public-rerender', ...done }),
+  (error: unknown) =>
+    stdoutLog({
+      level: 'error',
+      event: 'public-rerender-failed',
+      name: error instanceof Error ? error.name : 'unknown',
+    }),
+);
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   stdoutLog({ level: 'info', event: 'listening', port: info.port });
@@ -77,7 +94,7 @@ server.setTimeout(IDLE_TIMEOUT_MS);
 const shutdown = () => {
   for (const sweep of sweeps) clearInterval(sweep);
   server.close(() => {
-    void Promise.all([close(), treeListener.close()])
+    void Promise.all([close(), treeListener.close(), renderer.close()])
       .then(() => lock.release())
       .then(() => process.exit(0));
   });

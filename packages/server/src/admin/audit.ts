@@ -77,6 +77,15 @@ const DETAILS = {
     toShare: z.string().nullable(),
     records: z.number().int(),
   }),
+  // A page's public link (ADR 0005), never its id: who turned it on is the
+  // actor, and how it ended. One that lapsed has no actor, and names who
+  // turned it on.
+  'node.public-link-on': z.strictObject({ spaceId: z.string() }),
+  'node.public-link-off': z.strictObject({
+    spaceId: z.string(),
+    sharedBy: z.string(),
+    reason: z.enum(['turned-off', 'unpublished', 'lost-publish-rights']),
+  }),
   'space.owner-added': z.strictObject({ identityId: z.string(), keyVersion: z.number().int() }),
   'space.owner-removed': z.strictObject({ identityId: z.string(), shares: z.number().int() }),
   // How much went with it, never what.

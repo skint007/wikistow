@@ -5,6 +5,8 @@ import {
   contactsRecords,
   identities,
   metadataRevisions,
+  publicCopies,
+  publicFiles,
   revisions,
 } from '../db/schema/index.ts';
 import { ContentError } from './errors.ts';
@@ -18,7 +20,8 @@ const total = async (query: Promise<{ bytes: string }[]>) => Number((await query
 
 /**
  * Everything stored on an account's behalf: attachments it uploaded, page
- * and metadata versions it wrote, and what is kept of its contacts record.
+ * and metadata versions it wrote, what is kept of its contacts record, and
+ * the files of public copies it uploaded.
  * The sums run one after another: in a transaction they share a connection.
  */
 export async function usedBytes(db: Database, accountId: string): Promise<number> {
@@ -54,6 +57,13 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
         .select({ bytes: sum(contactsRecords.size) })
         .from(contactsRecords)
         .where(eq(contactsRecords.accountId, accountId)),
+    ),
+    await total(
+      db
+        .select({ bytes: sum(sql`octet_length(${publicFiles.bytes})`) })
+        .from(publicFiles)
+        .innerJoin(publicCopies, eq(publicCopies.id, publicFiles.copyId))
+        .where(eq(publicCopies.uploadedBy, accountId)),
     ),
   ];
   return parts.reduce((a, b) => a + b, 0);
