@@ -818,7 +818,7 @@ function PageBody({
         open={publishing}
         onOpenChange={setPublishing}
       />
-      {publishedHead && info.canPublish && (
+      {((publishedHead && info.canPublish) || sharingLink) && (
         <PublicLinkDialog
           page={page}
           title={title}

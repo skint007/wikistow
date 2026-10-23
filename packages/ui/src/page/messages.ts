@@ -143,6 +143,10 @@ const PUBLIC_LINK_REFUSED: Partial<Record<ApiError['code'], string>> = {
   forbidden: 'Only someone who can publish this page can share it with a public link.',
   'stale-head': 'The page was published again meanwhile. Try again.',
   'payload-too-large': 'The page is too large for a public link.',
+  'storage-full':
+    'Your storage is full, so the public page wasn’t uploaded. Free up some space, or ask your administrator for more.',
+  'request-timeout': 'The server took too long to answer. Look again before you try again.',
+  'missing-blob': 'A file didn’t reach the server, so the public page wasn’t uploaded. Try again.',
 };
 
 /** A short message for a public link that failed to turn on, off, or update. */
