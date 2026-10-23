@@ -88,10 +88,17 @@ async function lockPage(tx: Database, pageId: string, caller: Caller | null) {
   await lockSpaceOf(tx, pageId);
   const page = await requirePage(tx, pageId);
   if (caller) {
-    const access = await requirePageAccess(tx, caller, page);
-    if (!canEdit(access)) throw new ContentError('not-found');
-    if (!access.canPublish) throw new ContentError('forbidden');
-    await lockShare(tx, access.share);
+    const publisher = async () => {
+      const access = await requirePageAccess(tx, caller, page);
+      if (!canEdit(access)) throw new ContentError('not-found');
+      if (!access.canPublish) throw new ContentError('forbidden');
+      return access;
+    };
+    await lockShare(tx, (await publisher()).share);
+    // A member change holds the share until it commits, and ends the links
+    // and copies it finds lapsed. Checked again under the share's lock, so
+    // a link or copy can't be made on rights it just took away.
+    await publisher();
   } else {
     await shareAt(tx, page.spaceId, page.id, { lock: 'share' });
   }
