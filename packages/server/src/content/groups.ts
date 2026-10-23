@@ -303,6 +303,7 @@ async function settle(
     accountId,
     groupId,
     reach,
+    onlyGives = false,
   }: {
     spaceId: string;
     changed: readonly ShareRow[];
@@ -312,6 +313,8 @@ async function settle(
     groupId?: string;
     /** Which agents reached which of `changed` before the change (`agentReach`). */
     reach?: ReadonlySet<string>;
+    /** The change only gives access, so no one's publish rights went down. */
+    onlyGives?: boolean;
   },
 ) {
   const shareIds = changed.map((share) => share.id);
@@ -341,7 +344,7 @@ async function settle(
   await recomputeMembers(tx, shareIds);
   // Under the space's lock: public links and copies of people who lost
   // publish rights end here (ADR 0005, decision 8).
-  await endLapsedWhere(tx, { spaceId, under: null }, accountId);
+  if (!onlyGives) await endLapsedWhere(tx, { spaceId, under: null }, accountId);
   const nodeIds = [];
   for (const share of changed) nodeIds.push(...(await nodesUnder(tx, spaceId, share.rootId)));
   await bumpPermissions(tx, spaceId, nodeIds);
@@ -552,6 +555,7 @@ export async function addGroupMember(
       rotations: [],
       sealer: identity,
       accountId: input.accountId,
+      onlyGives: true,
     });
     await audit(tx, {
       actor: input.accountId,
@@ -1000,6 +1004,7 @@ export async function giveAccess(
       rotations: [],
       sealer: identity,
       accountId: input.accountId,
+      onlyGives: true,
     });
     for (const { share, access } of given) {
       await audit(tx, {
