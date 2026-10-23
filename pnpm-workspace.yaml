@@ -4,8 +4,9 @@ packages:
   - examples/plugins/*
 
 overrides:
-  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
-  vitest: 5.0.1
+  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vitest: 5.0.5
+  'vite@8': 8.3.4
 
 # The vite alias above reports its own version (1.0.0), which trips Vite peer ranges.
 peerDependencyRules:
