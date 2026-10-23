@@ -4,6 +4,24 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.16.1 - 2026-10-23
+
+### Highlights
+
+#### Maintenance
+
+- Dependencies with published security advisories are updated: DOMPurify, which the editor uses, and the Vite+ toolchain that builds and tests WikiStow.
+
+### Changes
+
+#### App
+
+- DOMPurify 3.4.17, from 3.4.16, in the editor. (#169)
+
+#### Development
+
+- Vite+ 1.3.0 and Vitest 5.0.5, from 1.0.0 and 5.0.1, with `@vitest/browser-playwright` to match. The Vite that Tailwind, TanStack Router and the React plugin load as a peer is 8.3.4, from 8.3.2, through a `vite@8` override. The rest of the lockfile is refreshed within its ranges. (#169)
+
 ## 0.16.0 - 2026-10-23
 
 ### Highlights
