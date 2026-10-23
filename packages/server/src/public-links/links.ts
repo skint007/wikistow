@@ -219,15 +219,31 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
       const target = pageOfKey(segment.key) ?? named.get(segment.key);
       if (target) leadsTo.set(segment.key, target);
     }
-    // Only pages whose link is on lock a row here, however many the body names.
-    const links = await lockLinks(tx, [pageId, ...leadsTo.values()], 'share');
+    // Which of the pages the body names have a link, in one query, unlocked;
+    // only the first `MAX_TARGET_CHECKS` of those are locked and checked, so
+    // a body naming thousands of public pages can't hold the page's locks
+    // for long. One turned on meanwhile stays text, one turned off is
+    // caught by the lock below.
+    const pagesNamed = [...new Set(leadsTo.values())];
+    const withLinks = new Set(
+      (
+        await tx
+          .select({ pageId: publicLinks.pageId })
+          .from(publicLinks)
+          .where(sql`${publicLinks.pageId} = any(${sql.param(pagesNamed)}::text[])`)
+      ).map((row) => row.pageId),
+    );
+    const candidates = pagesNamed
+      .filter((target) => withLinks.has(target))
+      .slice(0, MAX_TARGET_CHECKS);
+    const links = await lockLinks(tx, [pageId, ...candidates], 'share');
     if (links.find((row) => row.pageId === pageId)?.id !== link.id) throw noLink();
     const linked = new Set(links.map((row) => row.pageId));
     // At most `MAX_TARGET_PAGES` pages the uploader can publish, in the
     // order the body names them, since every visit checks each again;
     // links to any past that stay text.
     const reachable = new Set<string>();
-    for (const target of new Set(leadsTo.values())) {
+    for (const target of candidates) {
       if (reachable.size >= MAX_TARGET_PAGES) break;
       if (linked.has(target) && (await callerPublishes(tx, caller, target))) reachable.add(target);
     }
@@ -483,6 +499,8 @@ export async function endLapsed(db: Database, pageId: string) {
 
 /** The most other pages a copy links to; see `stageCopy`. */
 const MAX_TARGET_PAGES = 50;
+/** The most public pages staging checks for those; see `stageCopy`. */
+const MAX_TARGET_CHECKS = 100;
 
 /** How long a staged copy waits for its next request before the sweep deletes it. */
 const STAGED_FOR_MS = 10 * 60 * 1000;
