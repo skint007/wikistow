@@ -138,8 +138,8 @@ export function uploadMessage(error: unknown): string {
 }
 
 const PUBLIC_LINK_REFUSED: Partial<Record<ApiError['code'], string>> = {
-  'not-found':
-    'This page isn’t published, or its public link was turned off meanwhile. Look again.',
+  // Also what an upload gets when the page was published again partway.
+  'not-found': 'The page or its public link changed meanwhile. Look again.',
   forbidden: 'Only someone who can publish this page can share it with a public link.',
   'stale-head': 'The page was published again meanwhile. Try again.',
   'payload-too-large': 'The page is too large for a public link.',
