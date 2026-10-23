@@ -20,7 +20,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- Vite+ 1.3.0 and Vitest 5.0.5, from 1.0.0 and 5.0.1, with `@vitest/browser-playwright` to match. The Vite that Tailwind, TanStack Router and the React plugin load as a peer is 8.3.4, from 8.3.2, through a `vite@8` override. The rest of the lockfile is refreshed within its ranges. (#169)
+- Vite+ 1.3.0 and Vitest 5.0.5, from 1.0.0 and 5.0.1, with `@vitest/browser-playwright` to match. The Vite that Tailwind, TanStack Router and the React plugin load as a peer is 8.3.4, from 8.3.2, through a `vite@8` override, and a `playwright` override keeps Playwright on 1.63.0, the version in the browser tests' image. The rest of the lockfile is refreshed within its ranges. (#169)
 
 ## 0.16.0 - 2026-10-23
 
