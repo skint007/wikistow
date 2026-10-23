@@ -59,6 +59,7 @@ import { deleteUnlistedFile } from './pages.ts';
 import { peopleById } from './people.ts';
 import { endPublicationsFrom } from './publications.ts';
 import { endLinks } from '../public-links/endings.ts';
+import { endLapsedWhere } from '../public-links/links.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 import { isHomeSpace, requireIdentity } from './structure.ts';
 
@@ -605,6 +606,8 @@ export async function removeOwner(
       personIds: [input.identityId],
       shareIds: spaceShares.map((share) => share.id),
     });
+    // And their public links and copies in the space (ADR 0005, decision 8).
+    await endLapsedWhere(tx, { spaceId: input.spaceId, under: null }, input.accountId);
     await bumpPermissions(
       tx,
       input.spaceId,

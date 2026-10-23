@@ -78,8 +78,9 @@ const DETAILS = {
     records: z.number().int(),
   }),
   // A page's public link (ADR 0005), never its id: who turned it on is the
-  // actor, and how it ended. One that lapsed has no actor, and names who
-  // turned it on.
+  // actor, and how it ended. One that lapsed names who turned it on, and
+  // has as its actor whoever's change took their rights, or none when
+  // serving or the sweep found it.
   'node.public-link-on': z.strictObject({ spaceId: z.string() }),
   'node.public-link-off': z.strictObject({
     spaceId: z.string(),

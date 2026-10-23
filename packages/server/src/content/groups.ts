@@ -21,6 +21,7 @@ import {
   spaceOwners,
   spaces,
 } from '../db/schema/index.ts';
+import { endLapsedWhere } from '../public-links/links.ts';
 import { agentGrantsOf, currentOwners, isOwner, type ShareRow } from './access.ts';
 import {
   effectiveAccess,
@@ -338,6 +339,9 @@ async function settle(
     });
   }
   await recomputeMembers(tx, shareIds);
+  // Under the space's lock: public links and copies of people who lost
+  // publish rights end here (ADR 0005, decision 8).
+  await endLapsedWhere(tx, { spaceId, under: null }, accountId);
   const nodeIds = [];
   for (const share of changed) nodeIds.push(...(await nodesUnder(tx, spaceId, share.rootId)));
   await bumpPermissions(tx, spaceId, nodeIds);

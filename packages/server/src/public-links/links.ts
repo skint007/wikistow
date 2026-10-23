@@ -30,6 +30,7 @@ import {
   lockShare,
   lockSpaceOf,
   shareAt,
+  subtreeOf,
   treesSeenBy,
   type Access,
 } from '../content/access.ts';
@@ -37,7 +38,7 @@ import { ContentError } from '../content/errors.ts';
 import { currentIdentity, humanActor, requireCaller, type Caller } from '../content/identities.ts';
 import { requirePage, requirePageAccess } from '../content/pages.ts';
 import { charge } from '../content/quota.ts';
-import { endCopies, endLinkFor } from './endings.ts';
+import { endCopies, endLinkFor, endLinksAndCopies, recordEnded } from './endings.ts';
 import { escapeHtml } from './page.ts';
 import type { ListedFile } from './render.ts';
 import type { Renderer } from './renderer.ts';
@@ -87,10 +88,17 @@ async function lockPage(tx: Database, pageId: string, caller: Caller | null) {
   await lockSpaceOf(tx, pageId);
   const page = await requirePage(tx, pageId);
   if (caller) {
-    const access = await requirePageAccess(tx, caller, page);
-    if (!canEdit(access)) throw new ContentError('not-found');
-    if (!access.canPublish) throw new ContentError('forbidden');
-    await lockShare(tx, access.share);
+    const publisher = async () => {
+      const access = await requirePageAccess(tx, caller, page);
+      if (!canEdit(access)) throw new ContentError('not-found');
+      if (!access.canPublish) throw new ContentError('forbidden');
+      return access;
+    };
+    await lockShare(tx, (await publisher()).share);
+    // A member change holds the share until it commits, and ends the links
+    // and copies it finds lapsed. Checked again under the share's lock, so
+    // a link or copy can't be made on rights it just took away.
+    await publisher();
   } else {
     await shareAt(tx, page.spaceId, page.id, { lock: 'share' });
   }
@@ -495,6 +503,84 @@ export async function endLapsed(db: Database, pageId: string) {
     ended.copies = await endCopies(tx, pageId, lapsed);
     return ended;
   });
+}
+
+/**
+ * Where a change of publish rights may have left links or copies lapsed:
+ * the pages of a space, or of the subtree at `under` in it, or what one
+ * account shared and uploaded.
+ */
+export type Lapsing = { spaceId: string; under: string | null } | { accountId: string };
+
+/**
+ * End what a change of publish rights left lapsed (decision 8), in the
+ * change's own transaction once the rights have changed: each link whose
+ * sharer can no longer publish its page, with every copy of the page,
+ * and each other copy whose uploader can't. Copies of pages their
+ * uploader can still publish stay. Records each link ended as `actor`'s.
+ *
+ * The change holds a lock that staging and committing take too, over all
+ * of `where`: the space, the share, or the account's row. So none of its
+ * links or copies is added meanwhile, but for a copy someone else stages
+ * of a page whose link the account turned on; that staging holds the
+ * link's row, which `endLinksAndCopies` locks before it reads the page's
+ * copies. The rows go in lock order, after the change's own locks.
+ */
+export async function endLapsedWhere(tx: Database, where: Lapsing, actor: string | null) {
+  const pages =
+    'accountId' in where
+      ? eq(publicLinks.sharedBy, where.accountId)
+      : where.under === null
+        ? eq(nodes.spaceId, where.spaceId)
+        : sql`${nodes.id} in (${subtreeOf(where.spaceId, where.under)} select id from subtree)`;
+  const links = await tx
+    .select({
+      id: publicLinks.id,
+      pageId: publicLinks.pageId,
+      sharedBy: publicLinks.sharedBy,
+      spaceId: nodes.spaceId,
+    })
+    .from(publicLinks)
+    .innerJoin(nodes, eq(nodes.id, publicLinks.pageId))
+    .where(pages);
+  // A copy hangs off its page's link, so a place with no links has no copies.
+  if (links.length === 0 && !('accountId' in where)) return { links: 0, copies: 0 };
+  const copies = await tx
+    .select({
+      id: publicCopies.id,
+      pageId: publicCopies.pageId,
+      uploadedBy: publicCopies.uploadedBy,
+    })
+    .from(publicCopies)
+    .where(
+      'accountId' in where
+        ? eq(publicCopies.uploadedBy, where.accountId)
+        : sql`${publicCopies.pageId} = any(${sql.param(links.map((link) => link.pageId))}::text[])`,
+    );
+  const checked = new Map<string, boolean>();
+  const publishes = async (accountId: string, pageId: string) => {
+    const key = `${accountId} ${pageId}`;
+    const known = checked.get(key) ?? (await personPublishes(tx, accountId, pageId));
+    checked.set(key, known);
+    return known;
+  };
+  const lapsed = [];
+  for (const link of links) if (!(await publishes(link.sharedBy, link.pageId))) lapsed.push(link);
+  const ending = new Set(lapsed.map((link) => link.pageId));
+  const copyIds = [];
+  for (const copy of copies) {
+    if (!ending.has(copy.pageId) && !(await publishes(copy.uploadedBy, copy.pageId))) {
+      copyIds.push(copy.id);
+    }
+  }
+  const ended = await endLinksAndCopies(tx, { linkIds: lapsed.map((link) => link.id), copyIds });
+  const endedIds = new Set(ended.links.map((link) => link.id));
+  for (const link of lapsed) {
+    if (endedIds.has(link.id)) {
+      await recordEnded(tx, link, link.spaceId, { actor, reason: 'lost-publish-rights' });
+    }
+  }
+  return { links: endedIds.size, copies: ended.copies };
 }
 
 /** The most other pages a copy links to; see `stageCopy`. */
