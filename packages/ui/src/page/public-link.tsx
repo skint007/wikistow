@@ -3,6 +3,7 @@
 // which pages are public. A readable copy goes up only from a button in
 // one of these dialogs, never in the background.
 import { publicLinkOperations, type pageOperations } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Globe } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -167,8 +168,8 @@ function LinkSteps({
           </DialogDescription>
         </DialogHeader>
         <p role="note" className="rounded-control bg-muted p-3 text-sm">
-          <strong>The server keeps a readable copy.</strong> Your pages are encrypted, but this one
-          can’t be. The server keeps a readable copy of the published version, with the images and
+          <strong>The server keeps a readable copy.</strong> Your pages stay encrypted. For the link
+          to work, the server keeps a readable copy of the published version, with the images and
           files it uses, until you turn the link off. Drafts stay private.
         </p>
         {status}
@@ -228,16 +229,20 @@ function LinkSteps({
   );
 }
 
-/** The link as `<origin>/p/<id>`, by the server's own origin, which the desktop app isn't on. */
+/**
+ * The link as `<origin>/p/<id>`, by the server's own origin, which the
+ * desktop app isn't on. Empty, with nothing to copy, until that is known.
+ */
 function LinkField({ id }: { id: string }) {
   const { data } = useQuery(installationQuery);
-  const url = `${data?.origin ?? location.origin}/p/${id}`;
+  const url = data ? `${data.origin}/p/${id}` : '';
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex gap-2">
       <Input readOnly aria-label="Public link" value={url} className="font-mono text-sm" />
       <Button
         variant="outline"
+        disabled={!url}
         onClick={() =>
           void navigator.clipboard.writeText(url).then(
             () => setCopied(true),
@@ -343,10 +348,14 @@ function PublishSteps({
       try {
         await publicLinkOperations.shareCopy(ctx, page, { published: version });
       } catch (caught) {
-        throw new Error(
-          `Published, but the public page wasn’t updated. ${publicLinkMessage(caught)}`,
-          { cause: caught },
-        );
+        // A newer publication can't be sent from here, which has only this one.
+        const why =
+          caught instanceof ApiError && caught.code === 'stale-head'
+            ? 'The page was published again meanwhile. Use Share public link… to update it.'
+            : publicLinkMessage(caught);
+        throw new Error(`Published, but the public page wasn’t updated. ${why}`, {
+          cause: caught,
+        });
       } finally {
         setStep(null);
         await refresh();
