@@ -204,8 +204,8 @@ function LinkSteps({
       {!link.live && (
         <div role="note" className="grid justify-items-start gap-2 rounded-control bg-muted p-3">
           <p className="text-sm">
-            <strong>The public page is out of date.</strong> It says the page is being updated until
-            someone updates it.
+            <strong>The public page is out of date.</strong> Until it’s updated, visitors see a note
+            that the page is being updated.
           </p>
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void upload(false)}>
             Update public page
@@ -235,13 +235,7 @@ function LinkField({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex gap-2">
-      <Input
-        readOnly
-        aria-label="Public link"
-        value={url}
-        onFocus={(event) => event.currentTarget.select()}
-        className="font-mono text-sm"
-      />
+      <Input readOnly aria-label="Public link" value={url} className="font-mono text-sm" />
       <Button
         variant="outline"
         onClick={() =>
