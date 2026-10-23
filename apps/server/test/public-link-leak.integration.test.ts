@@ -2,8 +2,10 @@
 // link has its published version stored readable, and nothing else of it,
 // and every way the link or its copy ends leaves nothing readable at once.
 import {
+  moveOperations as moves,
   pageOperations as pages,
   publicLinkOperations as links,
+  sharingOperations as sharing,
   spaceOperations,
   utf8,
   type PageId,
@@ -14,13 +16,17 @@ import { PAGE_CSP, schema } from '@wikistow/server';
 import { eq } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { signedInPerson } from './support/accounts.ts';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
+import { invite, shareFolder, type Person } from './support/sharing.ts';
 import { snapshot } from './support/snapshot.ts';
 
 let t: TestApp;
+let admin: Awaited<ReturnType<typeof signedInPerson>>;
 beforeAll(async () => {
   t = await createTestApp();
+  admin = await signedInPerson(t, 'admin');
 });
 afterAll(() => t.drop());
 
@@ -47,20 +53,32 @@ function markers() {
 const TARGET_TITLE = 'Target page';
 
 /**
- * A page in a folder with an older publication that had a public copy,
+ * A page in a folder the owner shares with a sharer and an uploader, both
+ * editors who publish, with an older publication that had a public copy,
  * then a published version with frontmatter, an attachment its body shows
  * and one it doesn't, and a wikilink to another public page, which links
  * back to it by address; and a draft after it, and a private page beside
- * it. Both pages' links are on, each with a copy.
+ * it. Both pages' links are on, each with a copy the owner uploaded; the
+ * sharer turned the first page's on.
  */
 async function world() {
   const m = markers();
   const owner = await personWithVault(t);
+  const sharer = await personWithVault(t);
+  const uploader = await personWithVault(t);
   const spaceId = await spaceOperations.createSpace(owner.ctx, { name: 'Space', kind: 'shared' });
   const folderId = await spaceOperations.createFolder(owner.ctx, {
     spaceId,
     parentId: null,
     name: 'Folder',
+  });
+  const shareId = await shareFolder(owner.ctx, {
+    spaceId,
+    rootId: folderId,
+    people: [
+      await invite(owner, sharer, 'editor', true),
+      await invite(owner, uploader, 'editor', true),
+    ],
   });
   const pageId = await pages.createPage(owner.ctx, {
     spaceId,
@@ -70,7 +88,7 @@ async function world() {
   });
   const page = { spaceId, pageId };
   await pages.publishPage(owner.ctx, page);
-  const id = await links.turnOn(owner.ctx, pageId);
+  const id = await links.turnOn(sharer.ctx, pageId);
   await links.shareCopy(owner.ctx, page);
   const used = await pages.uploadAttachment(owner.ctx, page, {
     name: m.usedName,
@@ -108,12 +126,19 @@ async function world() {
   const targetLink = await links.turnOn(owner.ctx, targetId);
   await links.shareCopy(owner.ctx, page);
   await links.shareCopy(owner.ctx, target);
-  return { m, owner, page, folderId, target, id, targetLink, used };
+  return { m, owner, sharer, uploader, shareId, page, folderId, target, id, targetLink, used };
 }
 
 type World = Awaited<ReturnType<typeof world>>;
 
 const visit = (path: string) => t.app.request(path);
+
+const identityOf = (person: Person) => person.vault.identity.public.id;
+
+const suspend = async (person: Person) => {
+  const path = `/api/admin/accounts/${person.id}/suspend`;
+  expect((await admin.browser.request(path, { method: 'POST' })).status).toBe(200);
+};
 
 /** Whether a snapshot of everything the server keeps or says holds `text`. */
 async function readable(...texts: string[]) {
@@ -220,6 +245,29 @@ describe('a page with a public link', () => {
           permissionVersion: await version(w.page.spaceId),
         }),
     ],
+    // Its sharer losing publish rights, while the live copy is the owner's.
+    [
+      'moving it where its sharer can’t publish',
+      async (w) => {
+        const { spaceId, pageId } = w.page;
+        const preview = await moves.previewMove(w.owner.ctx, {
+          spaceId,
+          nodeId: pageId,
+          parentId: null,
+        });
+        await moves.moveNode(w.owner.ctx, { preview });
+      },
+    ],
+    [
+      'removing its sharer from the share',
+      (w) =>
+        sharing.removeMember(w.owner.ctx, {
+          spaceId: w.page.spaceId,
+          shareId: w.shareId,
+          identityId: identityOf(w.sharer),
+        }),
+    ],
+    ['suspending its sharer', (w) => suspend(w.sharer)],
   ];
 
   for (const [ending, end] of endings) {
@@ -237,6 +285,40 @@ describe('a page with a public link', () => {
       expect((await visit(`/p/${w.id}/files/${w.used.id}`)).status).toBe(404);
     });
   }
+
+  it('loses only the live copy when its uploader is removed, and keeps its link', async () => {
+    const w = await world();
+    await links.shareCopy(w.uploader.ctx, w.page);
+    // A page of the uploader's own, which they can still publish.
+    const own = await spaceOperations.createSpace(w.uploader.ctx, { name: 'Own', kind: 'shared' });
+    const kept = `PLAINTEXT-STILL-PUBLIC-${randomBytes(4).toString('hex')}`;
+    const ownPage = {
+      spaceId: own,
+      pageId: await pages.createPage(w.uploader.ctx, {
+        spaceId: own,
+        parentId: null,
+        title: 'Own',
+        markdown: kept,
+      }),
+    };
+    await pages.publishPage(w.uploader.ctx, ownPage);
+    const ownLink = await links.turnOn(w.uploader.ctx, ownPage.pageId);
+    await links.shareCopy(w.uploader.ctx, ownPage);
+
+    await sharing.removeMember(w.owner.ctx, {
+      spaceId: w.page.spaceId,
+      shareId: w.shareId,
+      identityId: identityOf(w.uploader),
+    });
+    expect(await readable(...copied(w.m), kept)).toEqual([false, false, false, false, true]);
+    // The sharer's link stays on, and the target's copy still leads to it.
+    expect(await rowsNaming(w.page.pageId)).toHaveLength(1);
+    const res = await visit(`/p/${w.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('This page is being updated');
+    expect((await visit(`/p/${w.id}/files/${w.used.id}`)).status).toBe(404);
+    expect(await (await visit(`/p/${ownLink}`)).text()).toContain(kept);
+  });
 
   it('leaves nothing of its copy once a new version is published, and keeps its link', async () => {
     const w = await world();
