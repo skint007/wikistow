@@ -17,7 +17,9 @@ const BUSY_GATHER_MS = 3000;
 /**
  * One open stream. `seen` holds the spaces its person sees some of, as of
  * the last change to each, so someone a change shuts out still hears of
- * it, and their sidebar drops what they lost.
+ * it, and their sidebar drops what they lost. A space also joins it as its
+ * changes start gathering, if they see it then, so access given and taken
+ * away before anyone hears of either still counts.
  */
 type Listener = {
   accountId: string;
@@ -43,6 +45,14 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
   const quick = gathering(GATHER_MS);
   const busy = gathering(BUSY_GATHER_MS);
 
+  function failed(error: unknown) {
+    log({
+      level: 'error',
+      event: 'tree-changes-failed',
+      name: error instanceof Error ? error.name : 'unknown',
+    });
+  }
+
   // Spaces gathered for `ms`, then told of together.
   function gathering(ms: number) {
     let gathered = new Set<string>();
@@ -55,17 +65,29 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
           const spaceIds = [...gathered];
           gathered = new Set();
           timer = null;
-          tell(spaceIds).catch((error: unknown) =>
-            log({
-              level: 'error',
-              event: 'tree-changes-failed',
-              name: error instanceof Error ? error.name : 'unknown',
-            }),
-          );
+          tell(spaceIds).catch(failed);
         }, ms);
       },
       stop: () => timer && clearTimeout(timer),
     };
+  }
+
+  // Notes `spaceId` in the streams of everyone who sees it now. The notice
+  // comes after the change commits, so this sees access the change gave.
+  // Only those who haven't noted it already are asked.
+  async function noteSeen(spaceId: string) {
+    const unsure = new Set<string>();
+    for (const listener of listeners) {
+      if (!listener.seen.has(spaceId)) unsure.add(listener.accountId);
+    }
+    await Promise.all(
+      [...unsure].map(async (accountId) => {
+        if (!(await treesSeenBy(db, accountId, [spaceId])).has(spaceId)) return;
+        for (const listener of listeners) {
+          if (listener.accountId === accountId) listener.seen.add(spaceId);
+        }
+      }),
+    );
   }
 
   // Each person's streams hear of the spaces they see, or saw.
@@ -163,6 +185,9 @@ export function mountTreeChangeRoutes(routes: Routes, { db, log }: { db: Databas
       // its first change, not three seconds after the last notice.
       const told = lastTold.get(spaceId);
       const recent = told !== undefined && Date.now() - told < BUSY_GATHER_MS;
+      if (!quick.has(spaceId) && !busy.has(spaceId)) {
+        noteSeen(spaceId).catch(failed);
+      }
       (recent || busy.has(spaceId) ? busy : quick).add(spaceId);
     },
     close: () => {
