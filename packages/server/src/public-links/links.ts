@@ -213,11 +213,16 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
     await lockAccounts(tx, [accountId]);
     // Each gap's page: a wikilink's as the app named it, an address's its own.
     const named = new Map(input.targets.map((target) => [target.key, target.pageId]));
+    // At most `MAX_TARGET_PAGES` pages, since every visit checks the
+    // uploader can still publish each; links to any past that stay text.
     const leadsTo = new Map<string, string>();
+    const pages = new Set<string>();
     for (const segment of rendered.segments) {
       if (typeof segment === 'string') continue;
       const target = pageOfKey(segment.key) ?? named.get(segment.key);
-      if (target) leadsTo.set(segment.key, target);
+      if (!target || (!pages.has(target) && pages.size >= MAX_TARGET_PAGES)) continue;
+      pages.add(target);
+      leadsTo.set(segment.key, target);
     }
     const links = await lockLinks(tx, [pageId, ...leadsTo.values()], 'share');
     if (links.find((row) => row.pageId === pageId)?.id !== link.id) throw noLink();
@@ -475,6 +480,9 @@ export async function endLapsed(db: Database, pageId: string) {
     return ended;
   });
 }
+
+/** The most other pages a copy links to; see `stageCopy`. */
+const MAX_TARGET_PAGES = 50;
 
 /** How long a staged copy waits for its next request before the sweep deletes it. */
 const STAGED_FOR_MS = 10 * 60 * 1000;

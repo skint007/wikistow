@@ -33,7 +33,12 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
 /** A page body's attachments it shows or links to, as the server's reader finds them. */
 export function attachmentsUsed(body: string, attachments: PagePayload['attachments']) {
   const tree = bodyHtml(readBody(body), (link) =>
-    link.embed ? embedHtml(link, attachments) : { type: 'text', value: link.value },
+    // An embed the reader can't show stays text, as the server renders it.
+    link.unsupported
+      ? { type: 'text', value: link.source }
+      : link.embed
+        ? embedHtml(link, attachments)
+        : { type: 'text', value: link.value },
   );
   const used = new Set(attachmentsShown(tree));
   return attachments.filter((ref) => used.has(ref.id));
