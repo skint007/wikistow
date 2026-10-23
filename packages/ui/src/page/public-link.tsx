@@ -357,8 +357,8 @@ function PublishSteps({
         const code = caught instanceof ApiError ? caught.code : null;
         setStale(code === 'stale-head' || code === 'not-found' || code === 'forbidden');
         const why =
-          code === 'stale-head'
-            ? 'The page was published again meanwhile. Use Share public link… to update it.'
+          code === 'stale-head' || code === 'not-found'
+            ? 'The page or its public link changed meanwhile. Use Share public link… to see where it stands.'
             : publicLinkMessage(caught);
         throw new Error(`Published, but the public page wasn’t updated. ${why}`, {
           cause: caught,
