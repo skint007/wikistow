@@ -109,3 +109,28 @@ it('tells everyone who sees some of a space that its tree changed, and nobody el
     stop.abort();
   }
 });
+
+it('tells someone given access and shut out again before either is told', async () => {
+  const [owner, member] = await Promise.all([personWithVault(t), personWithVault(t)]);
+  const lib = await library(owner);
+  const stop = new AbortController();
+  try {
+    const [byOwner, byMember] = await Promise.all([
+      hearing(owner, stop.signal),
+      hearing(member, stop.signal),
+    ]);
+    // Once the owner hears of a change made now, the library's own changes
+    // are told, and the share starts the next gathering.
+    await pages.createPage(owner.ctx, { spaceId: lib.spaceId, parentId: null, title: 'New' });
+    await expect.poll(() => byOwner, SOON).toContain(lib.spaceId);
+    await shareFolder(owner.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [await invite(owner, member, 'reader')],
+    });
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.shared });
+    await expect.poll(() => byMember, SOON).toContain(lib.spaceId);
+  } finally {
+    stop.abort();
+  }
+});
