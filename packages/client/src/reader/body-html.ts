@@ -82,3 +82,27 @@ export function attachmentsShown(tree: HastRoot): string[] {
   }
   return [...found];
 }
+
+/** Whether a public copy keeps an attachment, or leaves it out for size. */
+export type ChosenFile = { id: string; leftOut: boolean };
+
+/**
+ * Which of the attachments the body uses (`used`, in order) a public copy
+ * keeps: each up to `fileBytes`, until together they would pass
+ * `copyBytes`. The server chooses so, and the app opens only those.
+ */
+export function chooseFiles(
+  used: readonly string[],
+  attachments: readonly { id: string; size: number }[],
+  { fileBytes, copyBytes }: { fileBytes: number; copyBytes: number },
+): ChosenFile[] {
+  const listed = new Map(attachments.map((a) => [a.id, a]));
+  let total = 0;
+  return used.flatMap((id) => {
+    const file = listed.get(id);
+    if (!file) return [];
+    const leftOut = file.size > fileBytes || total + file.size > copyBytes;
+    if (!leftOut) total += file.size;
+    return [{ id, leftOut }];
+  });
+}

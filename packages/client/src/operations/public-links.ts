@@ -10,7 +10,7 @@ import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
 import { findWikilinks, foldTitle, linkablePages } from '../links.ts';
 import { splitFrontmatter } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
-import { attachmentsShown, bodyHtml, embedHtml } from '../reader/body-html.ts';
+import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
 import { loadPage, openRevisionOf, openRevisions, readAttachment, type PageRef } from './pages.ts';
 import type { ClientContext } from './session.ts';
@@ -31,7 +31,7 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
   return (await ctx.api.call(publicLinkRoutes.list, { params: { spaceId } })).links;
 }
 
-/** A page body's attachments it shows or links to, as the server's reader finds them. */
+/** A page body's attachments it shows or links to, in the order the server's reader finds them. */
 export function attachmentsUsed(body: string, attachments: PagePayload['attachments']) {
   const tree = bodyHtml(readBody(body), (link) =>
     // An embed the reader can't show stays text, as the server renders it.
@@ -41,8 +41,11 @@ export function attachmentsUsed(body: string, attachments: PagePayload['attachme
         ? embedHtml(link, attachments)
         : { type: 'text', value: link.value },
   );
-  const used = new Set(attachmentsShown(tree));
-  return attachments.filter((ref) => used.has(ref.id));
+  // Keyed by plain string, as the tree's addresses are.
+  const byId = new Map<string, (typeof attachments)[number]>(
+    attachments.map((ref) => [ref.id, ref]),
+  );
+  return attachmentsShown(tree).flatMap((id) => byId.get(id) ?? []);
 }
 
 /**
@@ -118,11 +121,19 @@ export async function shareCopy(
   const { payload, revisionId } = version;
   const { body } = splitFrontmatter(payload.markdown);
   const attachments = attachmentsUsed(body, payload.attachments);
-  // Every file is opened before anything readable goes up, so one that
-  // doesn't open sends nothing.
+  // Every file the copy keeps is opened before anything readable goes up,
+  // so one that doesn't open sends nothing. Those left out for size, as the
+  // server leaves them out, aren't opened at all.
+  const kept = chooseFiles(
+    attachments.map((ref) => ref.id),
+    attachments,
+    { fileBytes: publicLinkRoutes.MAX_FILE_BYTES, copyBytes: publicLinkRoutes.MAX_COPY_BYTES },
+  );
   const bytesOf = new Map<string, Uint8Array>();
   for (const ref of attachments) {
-    bytesOf.set(ref.id, await readAttachment(ctx, page, 'published', ref));
+    if (kept.some((file) => file.id === ref.id && !file.leftOut)) {
+      bytesOf.set(ref.id, await readAttachment(ctx, page, 'published', ref));
+    }
   }
   const { copyId, files } = await ctx.api.call(publicLinkRoutes.stage, {
     params: { pageId: page.pageId },

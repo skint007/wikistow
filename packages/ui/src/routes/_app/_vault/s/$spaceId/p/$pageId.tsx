@@ -103,9 +103,12 @@ function PageView() {
   useChatPage(spaceId, pageId, tree?.pages.find((p) => p.id === pageId)?.title ?? null);
   // Bumped to open the draft afresh: after "view theirs", or a restore.
   const [opening, setOpening] = useState(0);
-  // The page whose public link dialog is open. Kept here, as the published
-  // view mounts afresh for each publication, which mustn't close it.
+  // The page whose public link dialog is open. It lives here, as the
+  // published view mounts afresh for each publication, which mustn't close
+  // it or forget an upload. Leaving the page closes it for good.
   const [sharingLinkFor, setSharingLinkFor] = useState<string | null>(null);
+  useEffect(() => setSharingLinkFor(null), [pageId]);
+  const sharingLink = sharingLinkFor === pageId;
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -147,22 +150,31 @@ function PageView() {
   // a publication is shown per revision.
   const key = model.view === 'draft' ? `${pageId}:draft:${opening}` : `${pageId}:${model.revision}`;
   return (
-    <PageBody
-      key={key}
-      page={page}
-      info={info}
-      model={model}
-      crumbs={[spaceName, folderName].filter((c): c is string => Boolean(c))}
-      // Share opens the share the page is in, or offers to share its folder,
-      // or the space for a top-level page.
-      shareRoot={tree ? (shareCovering(tree, info.parentId)?.rootId ?? info.parentId) : null}
-      onReopen={async () => {
-        await queryClient.refetchQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
-        setOpening((n) => n + 1);
-      }}
-      sharingLink={sharingLinkFor === pageId}
-      setSharingLink={(open) => setSharingLinkFor(open ? pageId : null)}
-    />
+    <>
+      <PageBody
+        key={key}
+        page={page}
+        info={info}
+        model={model}
+        crumbs={[spaceName, folderName].filter((c): c is string => Boolean(c))}
+        // Share opens the share the page is in, or offers to share its folder,
+        // or the space for a top-level page.
+        shareRoot={tree ? (shareCovering(tree, info.parentId)?.rootId ?? info.parentId) : null}
+        onReopen={async () => {
+          await queryClient.refetchQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
+          setOpening((n) => n + 1);
+        }}
+        onShareLink={() => setSharingLinkFor(pageId)}
+      />
+      {((info.heads.publishedHead && info.canPublish) || sharingLink) && (
+        <PublicLinkDialog
+          page={page}
+          title={pageTitle(tree?.pages.find((p) => p.id === pageId)?.title ?? null)}
+          open={sharingLink}
+          onOpenChange={(open) => setSharingLinkFor(open ? pageId : null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -176,8 +188,7 @@ function PageBody({
   crumbs,
   shareRoot,
   onReopen,
-  sharingLink,
-  setSharingLink,
+  onShareLink,
 }: {
   page: pageOperations.PageRef;
   info: Info;
@@ -186,9 +197,8 @@ function PageBody({
   shareRoot: FolderId | null;
   /** Load the draft as it is now, dropping the editor's state. */
   onReopen: () => Promise<void>;
-  /** Whether the public link dialog is open, which outlasts this view. */
-  sharingLink: boolean;
-  setSharingLink: (open: boolean) => void;
+  /** Open the public link dialog, which outlasts this view. */
+  onShareLink: () => void;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -519,9 +529,7 @@ function PageBody({
                       </DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
-                      <DropdownMenuItem onSelect={() => setSharingLink(true)}>
-                        Share public link…
-                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={onShareLink}>Share public link…</DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
                       <DropdownMenuItem onSelect={() => setUnpublishing(true)}>
@@ -668,7 +676,7 @@ function PageBody({
               (publisher && publishedHead ? (
                 <button
                   type="button"
-                  onClick={() => setSharingLink(true)}
+                  onClick={onShareLink}
                   className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
                 >
                   <Globe aria-hidden className="size-3.5" strokeWidth={2} />
@@ -827,14 +835,6 @@ function PageBody({
         open={publishing}
         onOpenChange={setPublishing}
       />
-      {((publishedHead && info.canPublish) || sharingLink) && (
-        <PublicLinkDialog
-          page={page}
-          title={title}
-          open={sharingLink}
-          onOpenChange={setSharingLink}
-        />
-      )}
       <PublishWithLinkDialog
         page={page}
         title={title}
