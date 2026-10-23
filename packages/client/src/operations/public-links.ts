@@ -149,8 +149,12 @@ export async function shareCopy(
   return { copyId };
 }
 
-// The page's published head, as the server names it, opened as a reader opens it.
-async function openPublished(ctx: ClientContext, page: PageRef) {
+/**
+ * The page's published head, as the server names it, opened as a reader
+ * opens it. Sends nothing readable, so the app can open it before turning
+ * a link on and know it can share it.
+ */
+export async function openPublished(ctx: ClientContext, page: PageRef) {
   const { publishedHead } = (await loadPage(ctx, page.pageId)).heads;
   if (!publishedHead) throw new ApiError(404, 'not-found', 'The page isn’t published');
   const { opened } = await openRevisionOf(ctx, page, 'published', publishedHead);

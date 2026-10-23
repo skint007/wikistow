@@ -106,12 +106,14 @@ function LinkSteps({
   const upload = (turnOn: boolean) =>
     run(async () => {
       try {
+        // Opened first, so a version this app can't read turns no link on.
+        const published = await publicLinkOperations.openPublished(ctx, page);
         if (turnOn) {
           setStep('Turning on the link…');
           await publicLinkOperations.turnOn(ctx, page.pageId);
         }
         setStep('Uploading the public page…');
-        await publicLinkOperations.shareCopy(ctx, page);
+        await publicLinkOperations.shareCopy(ctx, page, { published });
       } finally {
         setStep(null);
         await refresh();
@@ -333,7 +335,8 @@ function PublishSteps({
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(errorMessage);
   const [step, setStep] = useState<string | null>(null);
-  // Once the page is published again, the version kept here can't be sent.
+  // Once the page is published again, its link is off, or the person can't
+  // publish it, the version kept here can't be sent: only Close is left.
   const [stale, setStale] = useState(false);
   const confirm = () =>
     run(async () => {
@@ -351,11 +354,12 @@ function PublishSteps({
         await publicLinkOperations.shareCopy(ctx, page, { published: version });
       } catch (caught) {
         // A newer publication can't be sent from here, which has only this one.
-        const newer = caught instanceof ApiError && caught.code === 'stale-head';
-        setStale(newer);
-        const why = newer
-          ? 'The page was published again meanwhile. Use Share public link… to update it.'
-          : publicLinkMessage(caught);
+        const code = caught instanceof ApiError ? caught.code : null;
+        setStale(code === 'stale-head' || code === 'not-found' || code === 'forbidden');
+        const why =
+          code === 'stale-head'
+            ? 'The page was published again meanwhile. Use Share public link… to update it.'
+            : publicLinkMessage(caught);
         throw new Error(`Published, but the public page wasn’t updated. ${why}`, {
           cause: caught,
         });
