@@ -4,6 +4,7 @@
 // screen: from the public link dialog, or a Publish that asked first.
 import { publicLinkRoutes, type PageId, type RevisionId, type SpaceId } from '@wikistow/contracts';
 import { ApiError } from '../api/client.ts';
+import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
 import { findWikilinks, foldTitle, linkablePages } from '../links.ts';
@@ -154,7 +155,7 @@ async function openPublished(ctx: ClientContext, page: PageRef) {
   if (!publishedHead) throw new ApiError(404, 'not-found', 'The page isn’t published');
   const { opened } = await openRevisionOf(ctx, page, 'published', publishedHead);
   if (opened.kind !== 'current') {
-    throw new ApiError(409, 'stale-head', 'A newer app published this page');
+    throw new CryptoError('unsupported-format', 'A newer app published this page');
   }
   return { revisionId: publishedHead, payload: opened.payload };
 }

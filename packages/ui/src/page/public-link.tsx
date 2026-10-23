@@ -333,6 +333,8 @@ function PublishSteps({
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(errorMessage);
   const [step, setStep] = useState<string | null>(null);
+  // Once the page is published again, the version kept here can't be sent.
+  const [stale, setStale] = useState(false);
   const confirm = () =>
     run(async () => {
       let version = published;
@@ -349,10 +351,11 @@ function PublishSteps({
         await publicLinkOperations.shareCopy(ctx, page, { published: version });
       } catch (caught) {
         // A newer publication can't be sent from here, which has only this one.
-        const why =
-          caught instanceof ApiError && caught.code === 'stale-head'
-            ? 'The page was published again meanwhile. Use Share public link… to update it.'
-            : publicLinkMessage(caught);
+        const newer = caught instanceof ApiError && caught.code === 'stale-head';
+        setStale(newer);
+        const why = newer
+          ? 'The page was published again meanwhile. Use Share public link… to update it.'
+          : publicLinkMessage(caught);
         throw new Error(`Published, but the public page wasn’t updated. ${why}`, {
           cause: caught,
         });
@@ -382,9 +385,11 @@ function PublishSteps({
         <Button variant="ghost" disabled={busy} onClick={onClose}>
           {published ? 'Close' : 'Cancel'}
         </Button>
-        <Button disabled={busy} onClick={() => void confirm()}>
-          {published ? 'Update public page' : 'Publish'}
-        </Button>
+        {!stale && (
+          <Button disabled={busy} onClick={() => void confirm()}>
+            {published ? 'Update public page' : 'Publish'}
+          </Button>
+        )}
       </DialogFooter>
     </div>
   );

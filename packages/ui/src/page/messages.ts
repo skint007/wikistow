@@ -148,5 +148,8 @@ const PUBLIC_LINK_REFUSED: Partial<Record<ApiError['code'], string>> = {
 /** A short message for a public link that failed to turn on, off, or update. */
 export function publicLinkMessage(error: unknown): string {
   if (error instanceof ApiError) return PUBLIC_LINK_REFUSED[error.code] ?? errorMessage(error);
+  if (error instanceof CryptoError && error.code === 'unsupported-format') {
+    return 'This page was published by a newer version of WikiStow. Update the app to share it.';
+  }
   return errorMessage(error);
 }
