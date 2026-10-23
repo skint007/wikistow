@@ -5,6 +5,7 @@ import type { Role } from '../accounts/invitations.ts';
 import type { Database } from '../db/client.ts';
 import { revokeAgentCredentials } from '../content/agents.ts';
 import { invitations, sessions, users } from '../db/schema/index.ts';
+import { endLapsedWhere } from '../public-links/links.ts';
 import { audit } from './audit.ts';
 
 /** What the dashboard shows per account. Never content, keys, or vault data. */
@@ -168,6 +169,11 @@ export function suspendAccount(db: Database, change: Change) {
     if (changed.length === 0) return;
     const sessionsRevoked = await revokeCredentials(tx, change.target);
     const invitationsRevoked = await revokeInvitationsIssuedBy(tx, change.target);
+    // Under the account's row, which staging and committing take: every
+    // public link it turned on ends, and every copy it uploaded goes
+    // (ADR 0005, decision 8). No content locks, so none of the spaces
+    // these are in waits on it.
+    await endLapsedWhere(tx, { accountId: change.target }, change.actor);
     await audit(tx, {
       actor: change.actor,
       action: 'account.suspended',

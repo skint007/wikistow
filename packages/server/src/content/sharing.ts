@@ -30,6 +30,7 @@ import {
   spaceOwners,
   spaces,
 } from '../db/schema/index.ts';
+import { endLapsedWhere } from '../public-links/links.ts';
 import { readSettings } from '../settings.ts';
 import {
   accessTo,
@@ -806,6 +807,8 @@ export async function addMember(
         );
     }
     await recomputeMembers(tx, [share.id]);
+    // Lower publish rights end the person's public links and copies here.
+    await endLapsedWhere(tx, { spaceId: share.spaceId, under: share.rootId }, input.accountId);
     await bumpPermissions(tx, share.spaceId, await nodesUnder(tx, share.spaceId, share.rootId));
     await audit(tx, {
       actor: input.accountId,
@@ -921,6 +924,8 @@ export async function rotateShare(
       sealer: identity,
       owners: await currentOwners(tx, share.spaceId),
     });
+    // Those removed or demoted lose their public links and copies here.
+    await endLapsedWhere(tx, { spaceId: share.spaceId, under: share.rootId }, input.accountId);
     await audit(tx, {
       actor: input.accountId,
       action: 'share.rotated',

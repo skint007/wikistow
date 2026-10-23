@@ -23,6 +23,7 @@ import {
   revisionWraps,
   shares,
 } from '../db/schema/index.ts';
+import { endLapsedWhere } from '../public-links/links.ts';
 import {
   accessTo,
   canEdit,
@@ -189,6 +190,9 @@ export async function moveNode(
     }
     await bumpPermissions(tx, spaceId, subtree);
     if (rewrapped) {
+      // Its public links and copies whose people can't publish it where it
+      // went end with the move (ADR 0005, decision 8).
+      await endLapsedWhere(tx, { spaceId, under: nodeId }, input.actor.accountId);
       // Who gained or lost keys follows from the shares, by ID only.
       await audit(tx, {
         actor: input.actor.accountId,
