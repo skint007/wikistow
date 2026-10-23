@@ -1,10 +1,11 @@
 // Ending public links and copies (ADR 0005, decisions 5 and 8). Every
 // change that ends some locks the rows it deletes first: the links, then
 // the copies, then the target rows, each in order of ID. Changes that end
-// them hold the page's locks already (its space, share, node and heads, or
-// a delete's locks), and any account rows before these, so two endings
-// that meet wait for each other instead of deadlocking.
-import { and, eq, sql } from 'drizzle-orm';
+// them hold the page's locks already (its space, share, node and heads, a
+// delete's locks, or a change of rights's space or share), or for a
+// suspension the account's row, and any account rows before these, so two
+// endings that meet wait for each other instead of deadlocking.
+import { and, eq, or, sql, type SQL } from 'drizzle-orm';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import { publicCopies, publicLinks, publicTargets } from '../db/schema/index.ts';
@@ -39,24 +40,42 @@ async function lockTargets(
  */
 export async function endLinks(tx: Database, pageIds: readonly string[]) {
   if (pageIds.length === 0) return [];
-  const links = await tx
-    .select()
-    .from(publicLinks)
-    .where(anyOf(publicLinks.pageId, pageIds))
-    .orderBy(publicLinks.pageId)
-    .for('update');
-  if (links.length === 0) return [];
-  const ended = links.map((link) => link.pageId);
+  return (await end(tx, anyOf(publicLinks.pageId, pageIds), [])).links;
+}
+
+/**
+ * End the links `linkIds` (by link ID, so one turned off and on again
+ * meanwhile stays), with every copy of their pages, and the copies
+ * `copyIds`, all locked in one pass in the order above. What ended.
+ */
+export async function endLinksAndCopies(
+  tx: Database,
+  { linkIds, copyIds }: { linkIds: readonly string[]; copyIds: readonly string[] },
+) {
+  return end(tx, linkIds.length === 0 ? null : anyOf(publicLinks.id, linkIds), copyIds);
+}
+
+// Lock the links `links` picks, then their pages' copies and `copyIds`,
+// then the target rows of those copies and those naming those pages, and
+// delete them all.
+async function end(tx: Database, links: SQL | null, copyIds: readonly string[]) {
+  const ended = links
+    ? await tx.select().from(publicLinks).where(links).orderBy(publicLinks.pageId).for('update')
+    : [];
+  const pageIds = ended.map((link) => link.pageId);
+  if (pageIds.length === 0 && copyIds.length === 0) return { links: ended, copies: 0 };
   const copies = await tx
     .select({ id: publicCopies.id })
     .from(publicCopies)
-    .where(anyOf(publicCopies.pageId, ended))
+    .where(or(anyOf(publicCopies.pageId, pageIds), anyUuid(publicCopies.id, copyIds)))
     .orderBy(publicCopies.id)
     .for('update');
-  await lockTargets(tx, { copyIds: copies.map((copy) => copy.id), pageIds: ended });
-  // Their copies, files and target rows go with them, all locked above.
-  await tx.delete(publicLinks).where(anyOf(publicLinks.pageId, ended));
-  return links;
+  const ids = copies.map((copy) => copy.id);
+  await lockTargets(tx, { copyIds: ids, pageIds });
+  // Their files and target rows go with them, all locked above.
+  if (ids.length > 0) await tx.delete(publicCopies).where(anyUuid(publicCopies.id, ids));
+  if (pageIds.length > 0) await tx.delete(publicLinks).where(anyOf(publicLinks.pageId, pageIds));
+  return { links: ended, copies: ids.length };
 }
 
 /**
@@ -82,24 +101,27 @@ export async function endCopies(
   return ids.length;
 }
 
+type Ended = { actor: string | null; reason: 'turned-off' | 'unpublished' | 'lost-publish-rights' };
+
+/** Record that a link of a page in `spaceId` ended, and how. */
+export function recordEnded(
+  tx: Database,
+  link: { pageId: string; sharedBy: string },
+  spaceId: string,
+  { actor, reason }: Ended,
+) {
+  return audit(tx, {
+    actor,
+    action: 'node.public-link-off',
+    target: { kind: 'node', id: link.pageId },
+    details: { spaceId, sharedBy: link.sharedBy, reason },
+  });
+}
+
 /**
  * End a page's link, under its locks, and record how. Unpublishing ends
  * the link this way too.
  */
-export async function endLinkFor(
-  tx: Database,
-  page: { id: string; spaceId: string },
-  {
-    actor,
-    reason,
-  }: { actor: string | null; reason: 'turned-off' | 'unpublished' | 'lost-publish-rights' },
-) {
-  for (const link of await endLinks(tx, [page.id])) {
-    await audit(tx, {
-      actor,
-      action: 'node.public-link-off',
-      target: { kind: 'node', id: page.id },
-      details: { spaceId: page.spaceId, sharedBy: link.sharedBy, reason },
-    });
-  }
+export async function endLinkFor(tx: Database, page: { id: string; spaceId: string }, how: Ended) {
+  for (const link of await endLinks(tx, [page.id])) await recordEnded(tx, link, page.spaceId, how);
 }
