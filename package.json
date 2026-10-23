@@ -1,6 +1,6 @@
 {
   "name": "wikistow",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,7 @@
   "devDependencies": {
     "@types/node": "^26.0.0",
     "typescript": "^7.0.2",
-    "vite-plus": "1.0.0"
+    "vite-plus": "1.3.0"
   },
   "engines": {
     "node": ">=26"
