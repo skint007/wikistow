@@ -19,6 +19,7 @@ import {
   memberWithVault,
   newPage,
   PASSPHRASE,
+  sourceOf,
   waitForSave,
 } from '../e2e/vault';
 
@@ -408,4 +409,143 @@ test('capture the editors, [[ completion, search, the cover pickers and publicat
   await search.getByRole('combobox', { name: 'Search pages' }).fill('water');
   await expect(search.getByRole('option')).toHaveCount(2);
   await shoot('search');
+});
+
+const PLANTING = (
+  image: string,
+) => `Spring is the busy season. Here is the plan for the **front beds**, with a few _notes_ on timing.
+
+## What goes where
+
+- Peas along the fence, sown in March
+- Lettuce in the shady corner
+- Beans once the soil is warm
+
+${image}
+
+## Setting up the timer
+
+\`\`\`sh
+timer set --zone front --start 06:30 --minutes 20
+\`\`\`
+
+Water as [[Watering]] says, and check the beds every Saturday.
+`;
+
+/** A small drawing of a garden, as a PNG, so the public page shows a real image. */
+async function gardenPicture(page: Page) {
+  const base64 = await page.evaluate(async () => {
+    const canvas = new OffscreenCanvas(480, 240);
+    const draw = canvas.getContext('2d');
+    if (!draw) throw new Error('No 2D context');
+    const sky = draw.createLinearGradient(0, 0, 0, 240);
+    sky.addColorStop(0, '#9fd3f5');
+    sky.addColorStop(1, '#e6f4fb');
+    draw.fillStyle = sky;
+    draw.fillRect(0, 0, 480, 240);
+    draw.fillStyle = '#f7c948';
+    draw.beginPath();
+    draw.arc(390, 60, 30, 0, Math.PI * 2);
+    draw.fill();
+    draw.fillStyle = '#6aa84f';
+    draw.fillRect(0, 160, 480, 80);
+    draw.fillStyle = '#8b5a2b';
+    for (const x of [40, 180, 320]) draw.fillRect(x, 175, 120, 40);
+    draw.fillStyle = '#2e7d32';
+    for (const x of [60, 100, 140, 200, 240, 280, 340, 380, 420]) {
+      draw.beginPath();
+      draw.arc(x, 180, 12, Math.PI, 0);
+      draw.fill();
+    }
+    const bytes = new Uint8Array(await (await canvas.convertToBlob()).arrayBuffer());
+    return btoa(String.fromCharCode(...bytes));
+  });
+  return Buffer.from(base64, 'base64');
+}
+
+/** Open a page's public link dialog from its right-click menu in the tree. */
+async function openLinkDialog(page: Page, title: string) {
+  await page.getByRole('treeitem', { name: new RegExp(title) }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Share public link…' }).click();
+}
+
+test('capture public links: the dialog, the markers, the Publish prompt and the public page', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'public-link-');
+  await page.clock.setFixedTime(new Date('2026-10-01T09:30:00Z'));
+  const picture = await gardenPicture(page);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Garden club');
+
+  // A page to link to, with a link of its own.
+  await newPage(page, 'Watering');
+  await fillSource(page, '## Mornings\n\nWater before nine, at the roots.');
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await openLinkDialog(page, 'Watering');
+  let dialog = page.getByRole('dialog', { name: 'Share “Watering” with a public link?' });
+  await expect(dialog.getByText('The server keeps a readable copy.')).toBeVisible();
+  await shoot('dialog-first');
+  await dialog.getByRole('button', { name: 'Turn on public link' }).click();
+  dialog = page.getByRole('dialog', { name: 'Public link for “Watering”' });
+  await expect(dialog.getByLabel('Public link')).toHaveValue(/\/p\/[\w-]{22}$/);
+  await shoot('dialog-on');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+
+  // The page itself: formatting, an image, code, and a link to the public page above.
+  await newPage(page, 'Spring planting');
+  await page
+    .locator('input[type=file]')
+    .setInputFiles({ name: 'beds.png', mimeType: 'image/png', buffer: picture });
+  await expectSource(page, /attachment:/);
+  const image = (await sourceOf(page)).trim();
+  await fillSource(page, PLANTING(image));
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+
+  // Its first upload fails, so the link is on and the public page out of date.
+  await page.route('**/api/pages/*/public-copies', (route) => route.abort());
+  await page.getByRole('button', { name: 'Page actions' }).click();
+  await page.getByRole('menuitem', { name: 'Share public link…' }).click();
+  await page.getByRole('button', { name: 'Turn on public link' }).click();
+  dialog = page.getByRole('dialog', { name: 'Public link for “Spring planting”' });
+  await expect(dialog.getByText('The public page is out of date.')).toBeVisible();
+  await page.unroute('**/api/pages/*/public-copies');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Public link ›' }).click();
+  await expect(dialog.getByText('The public page is out of date.')).toBeVisible();
+  await shoot('dialog-out-of-date');
+  await dialog.getByRole('button', { name: 'Update public page' }).click();
+  await expect(dialog.getByText('The public page is out of date.')).toBeHidden();
+  const url = await dialog.getByLabel('Public link').inputValue();
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('treeitem', { name: /Spring planting/ })).toContainText(
+    'Public link',
+  );
+  await shoot('markers');
+
+  // Publish asks first on a page with a link.
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await fillSource(page, `${PLANTING(image)}\nSow the second row of peas in April.\n`);
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  const asking = page.getByRole('dialog', { name: 'Publish “Spring planting”?' });
+  await expect(asking.getByText('This page has a public link.')).toBeVisible();
+  await shoot('publish-prompt');
+  await asking.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Published v2')).toBeVisible();
+
+  // The public page, as anyone with the link sees it.
+  const visitor = await freshPage();
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  await visitor.goto(url);
+  await expect(visitor.getByText('Sow the second row of peas in April.')).toBeVisible();
+  await expect(visitor.getByRole('link', { name: 'Watering' })).toBeVisible();
+  await visitor.screenshot({ path: 'screenshots/public-link-page.png', fullPage: true });
 });

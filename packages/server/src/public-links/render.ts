@@ -9,11 +9,13 @@ import {
   attachmentOf,
   attachmentsShown,
   bodyHtml,
+  chooseFiles,
   embedHtml,
   headingId,
   highlightCode,
   readBody,
   type AlertType,
+  type ChosenFile,
 } from '@wikistow/client/reader';
 import type { Element, ElementContent } from 'hast';
 import { toHtml } from 'hast-util-to-html';
@@ -24,8 +26,7 @@ import { pageKey, RASTER_TYPES, type Gap, type Segment } from './segments.ts';
 /** An attachment the app listed for a copy. */
 export type ListedFile = { id: string; name: string; mediaType: string; size: number };
 
-/** Whether the copy keeps a file the body uses, or leaves it out for its size. */
-export type ChosenFile = { id: string; leftOut: boolean };
+export type { ChosenFile };
 
 export type RenderInput = {
   markdown: string;
@@ -38,26 +39,6 @@ export type RenderInput = {
 };
 
 export type Rendered = { segments: Segment[]; files: ChosenFile[] };
-
-/**
- * Which of the attachments the body uses (`used`, in order) the copy keeps:
- * each up to `fileBytes`, until together they would pass `copyBytes`.
- */
-export function chooseFiles(
-  used: readonly string[],
-  attachments: readonly ListedFile[],
-  { fileBytes, copyBytes }: RenderInput['limits'],
-): ChosenFile[] {
-  const listed = new Map(attachments.map((a) => [a.id, a]));
-  let total = 0;
-  return used.flatMap((id) => {
-    const file = listed.get(id);
-    if (!file) return [];
-    const leftOut = file.size > fileBytes || total + file.size > copyBytes;
-    if (!leftOut) total += file.size;
-    return [{ id, leftOut }];
-  });
-}
 
 const text = (value: string): ElementContent => ({ type: 'text', value });
 const element = (

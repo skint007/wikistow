@@ -13,7 +13,7 @@ import {
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate, useRouter } from '@tanstack/react-router';
-import { Check, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
+import { Check, Globe, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Name } from '@/components/name';
@@ -40,6 +40,7 @@ import { ago } from '../../../../../../agents/model';
 import {
   historyQuery,
   pageQuery,
+  publicLinksQuery,
   publishedCopiesQuery,
   revisionQuery,
   searchIndexChanged,
@@ -58,6 +59,11 @@ import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
 import { MoveDialog } from '../../../../../../page/move-dialog';
 import { readWikilinks } from '../../../../../../page/page-reader';
+import {
+  PublicLinkDialog,
+  PublishWithLinkDialog,
+  usePublicLink,
+} from '../../../../../../page/public-link';
 import { PublishDialog } from '../../../../../../page/publish-dialog';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
@@ -97,6 +103,12 @@ function PageView() {
   useChatPage(spaceId, pageId, tree?.pages.find((p) => p.id === pageId)?.title ?? null);
   // Bumped to open the draft afresh: after "view theirs", or a restore.
   const [opening, setOpening] = useState(0);
+  // The page whose public link dialog is open. It lives here, as the
+  // published view mounts afresh for each publication, which mustn't close
+  // it or forget an upload. Leaving the page closes it for good.
+  const [sharingLinkFor, setSharingLinkFor] = useState<string | null>(null);
+  useEffect(() => setSharingLinkFor(null), [pageId]);
+  const sharingLink = sharingLinkFor === pageId;
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -138,20 +150,31 @@ function PageView() {
   // a publication is shown per revision.
   const key = model.view === 'draft' ? `${pageId}:draft:${opening}` : `${pageId}:${model.revision}`;
   return (
-    <PageBody
-      key={key}
-      page={page}
-      info={info}
-      model={model}
-      crumbs={[spaceName, folderName].filter((c): c is string => Boolean(c))}
-      // Share opens the share the page is in, or offers to share its folder,
-      // or the space for a top-level page.
-      shareRoot={tree ? (shareCovering(tree, info.parentId)?.rootId ?? info.parentId) : null}
-      onReopen={async () => {
-        await queryClient.refetchQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
-        setOpening((n) => n + 1);
-      }}
-    />
+    <>
+      <PageBody
+        key={key}
+        page={page}
+        info={info}
+        model={model}
+        crumbs={[spaceName, folderName].filter((c): c is string => Boolean(c))}
+        // Share opens the share the page is in, or offers to share its folder,
+        // or the space for a top-level page.
+        shareRoot={tree ? (shareCovering(tree, info.parentId)?.rootId ?? info.parentId) : null}
+        onReopen={async () => {
+          await queryClient.refetchQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
+          setOpening((n) => n + 1);
+        }}
+        onShareLink={() => setSharingLinkFor(pageId)}
+      />
+      {((info.heads.publishedHead && info.canPublish) || sharingLink) && (
+        <PublicLinkDialog
+          page={page}
+          title={pageTitle(tree?.pages.find((p) => p.id === pageId)?.title ?? null)}
+          open={sharingLink}
+          onOpenChange={(open) => setSharingLinkFor(open ? pageId : null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -165,6 +188,7 @@ function PageBody({
   crumbs,
   shareRoot,
   onReopen,
+  onShareLink,
 }: {
   page: pageOperations.PageRef;
   info: Info;
@@ -173,6 +197,8 @@ function PageBody({
   shareRoot: FolderId | null;
   /** Load the draft as it is now, dropping the editor's state. */
   onReopen: () => Promise<void>;
+  /** Open the public link dialog, which outlasts this view. */
+  onShareLink: () => void;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -199,6 +225,9 @@ function PageBody({
   const [publishing, setPublishing] = useState(false);
   const [detaching, setDetaching] = useState(false);
   const [showingCopies, setShowingCopies] = useState(false);
+  // Where Publish was pressed on a page with a public link, while it asks first.
+  const [publishingFrom, setPublishingFrom] = useState<string | null>(null);
+  const publicLink = usePublicLink(page);
   const copiesPill = useRef<HTMLButtonElement>(null);
   const crumbsNav = useRef<HTMLElement>(null);
   const [sharing, setSharing] = useState(false);
@@ -236,20 +265,34 @@ function PageBody({
     }
   }
 
+  const publishDraft = async () => {
+    await editor.current?.flush();
+    const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
+    searchIndexChanged(queryClient);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
+      queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
+    ]);
+    return written;
+  };
+  // A page opened without ?view=draft turns to its publication as soon as
+  // it refetches; if the person moved on meanwhile (Edit, another page),
+  // don't drag them back.
+  const showPublished = async (from: string) => {
+    if (router.state.location.href === from) await go('published');
+  };
+  // One click, unless the page has a public link: then Publish asks first,
+  // as publishing updates the public page too (ADR 0005).
   const publish = () =>
     act(async () => {
       const from = router.state.location.href;
-      await editor.current?.flush();
-      await pageOperations.publishPage(ctx, page, { read: readWikilinks });
-      searchIndexChanged(queryClient);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
-      ]);
-      // A page opened without ?view=draft turns to its publication as soon
-      // as it refetches; if the person moved on meanwhile (Edit, another
-      // page), don't drag them back.
-      if (router.state.location.href === from) await go('published');
+      const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
+      if (links.some((link) => link.pageId === page.pageId)) {
+        setPublishingFrom(from);
+        return;
+      }
+      await publishDraft();
+      await showPublished(from);
     });
 
   const commandEnv = {
@@ -486,6 +529,9 @@ function PageBody({
                       </DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
+                      <DropdownMenuItem onSelect={onShareLink}>Share public link…</DropdownMenuItem>
+                    )}
+                    {publishedHead && info.canPublish && (
                       <DropdownMenuItem onSelect={() => setUnpublishing(true)}>
                         Unpublish…
                       </DropdownMenuItem>
@@ -625,6 +671,26 @@ function PageBody({
                 </button>
               </span>
             )}
+            {/* Everyone who sees the page; only those who can publish it get the link. */}
+            {publicLink &&
+              (publisher && publishedHead ? (
+                <button
+                  type="button"
+                  onClick={onShareLink}
+                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
+                >
+                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                  <span>Public link ›</span>
+                </button>
+              ) : (
+                <span
+                  data-hint="Anyone with the link can read this page"
+                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+                >
+                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                  <span>Public link</span>
+                </span>
+              ))}
             {/* Editors only: the server tells readers of no draft. */}
             {info.agentEdit && (
               <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
@@ -768,6 +834,14 @@ function PageBody({
         version={{ revisionId, audience: model.view }}
         open={publishing}
         onOpenChange={setPublishing}
+      />
+      <PublishWithLinkDialog
+        page={page}
+        title={title}
+        open={publishingFrom !== null}
+        onOpenChange={(open) => !open && setPublishingFrom(null)}
+        publish={publishDraft}
+        onDone={() => publishingFrom !== null && void showPublished(publishingFrom)}
       />
       {/* Kept while open, so losing publish rights meanwhile doesn't take what it says away. */}
       {(publisher || showingCopies) && (

@@ -4,12 +4,13 @@
 // screen: from the public link dialog, or a Publish that asked first.
 import { publicLinkRoutes, type PageId, type RevisionId, type SpaceId } from '@wikistow/contracts';
 import { ApiError } from '../api/client.ts';
+import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
 import { findWikilinks, foldTitle, linkablePages } from '../links.ts';
 import { splitFrontmatter } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
-import { attachmentsShown, bodyHtml, embedHtml } from '../reader/body-html.ts';
+import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
 import { loadPage, openRevisionOf, openRevisions, readAttachment, type PageRef } from './pages.ts';
 import type { ClientContext } from './session.ts';
@@ -30,7 +31,7 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
   return (await ctx.api.call(publicLinkRoutes.list, { params: { spaceId } })).links;
 }
 
-/** A page body's attachments it shows or links to, as the server's reader finds them. */
+/** A page body's attachments it shows or links to, in the order the server's reader finds them. */
 export function attachmentsUsed(body: string, attachments: PagePayload['attachments']) {
   const tree = bodyHtml(readBody(body), (link) =>
     // An embed the reader can't show stays text, as the server renders it.
@@ -40,8 +41,11 @@ export function attachmentsUsed(body: string, attachments: PagePayload['attachme
         ? embedHtml(link, attachments)
         : { type: 'text', value: link.value },
   );
-  const used = new Set(attachmentsShown(tree));
-  return attachments.filter((ref) => used.has(ref.id));
+  // Keyed by plain string, as the tree's addresses are.
+  const byId = new Map<string, (typeof attachments)[number]>(
+    attachments.map((ref) => [ref.id, ref]),
+  );
+  return attachmentsShown(tree).flatMap((id) => byId.get(id) ?? []);
 }
 
 /**
@@ -117,6 +121,20 @@ export async function shareCopy(
   const { payload, revisionId } = version;
   const { body } = splitFrontmatter(payload.markdown);
   const attachments = attachmentsUsed(body, payload.attachments);
+  // Every file the copy should keep is opened before anything readable
+  // goes up, so one that doesn't open sends nothing. Those left out for
+  // size, as the server leaves them out, aren't opened yet.
+  const kept = chooseFiles(
+    attachments.map((ref) => ref.id),
+    attachments,
+    { fileBytes: publicLinkRoutes.MAX_FILE_BYTES, copyBytes: publicLinkRoutes.MAX_COPY_BYTES },
+  );
+  const bytesOf = new Map<string, Uint8Array>();
+  for (const ref of attachments) {
+    if (kept.some((file) => file.id === ref.id && !file.leftOut)) {
+      bytesOf.set(ref.id, await readAttachment(ctx, page, 'published', ref));
+    }
+  }
   const { copyId, files } = await ctx.api.call(publicLinkRoutes.stage, {
     params: { pageId: page.pageId },
     body: {
@@ -132,12 +150,16 @@ export async function shareCopy(
       targets: await wikilinkTargets(ctx, page, payload),
     },
   });
-  // Whatever the server asks for, only the files this app chose go.
-  const ours = new Map(attachments.map((ref) => [ref.id, ref]));
+  // Whatever the server asks for, only the files on this app's list go. One
+  // it asks for that this app left out for size (its limits can be lower,
+  // which keeps others) is opened now.
+  const ours = new Map<string, (typeof attachments)[number]>(
+    attachments.map((ref) => [ref.id, ref]),
+  );
   for (const id of files) {
     const ref = ours.get(id);
     if (!ref) continue;
-    const bytes = await readAttachment(ctx, page, 'published', ref);
+    const bytes = bytesOf.get(id) ?? (await readAttachment(ctx, page, 'published', ref));
     const path = publicLinkRoutes.FILE_UPLOAD_PATH.replace(
       ':copyId',
       encodeURIComponent(copyId),
@@ -148,13 +170,17 @@ export async function shareCopy(
   return { copyId };
 }
 
-// The page's published head, as the server names it, opened as a reader opens it.
-async function openPublished(ctx: ClientContext, page: PageRef) {
+/**
+ * The page's published head, as the server names it, opened as a reader
+ * opens it. Sends nothing readable, so the app can open it before turning
+ * a link on and know it can share it.
+ */
+export async function openPublished(ctx: ClientContext, page: PageRef) {
   const { publishedHead } = (await loadPage(ctx, page.pageId)).heads;
   if (!publishedHead) throw new ApiError(404, 'not-found', 'The page isn’t published');
   const { opened } = await openRevisionOf(ctx, page, 'published', publishedHead);
   if (opened.kind !== 'current') {
-    throw new ApiError(409, 'stale-head', 'A newer app published this page');
+    throw new CryptoError('unsupported-format', 'A newer app published this page');
   }
   return { revisionId: publishedHead, payload: opened.payload };
 }
