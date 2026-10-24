@@ -526,6 +526,57 @@ export async function spaceOfFolder(ctx: ClientContext, folderId: FolderId): Pro
   throw new ApiError(404, 'not-found', 'No such folder');
 }
 
+/**
+ * Where a folder goes with no `--parent`: the top of the space, if this
+ * agent was given all of it, else the folder its one share there starts at.
+ */
+async function shareStart(ctx: ClientContext, spaceId: SpaceId): Promise<FolderId | null> {
+  const starts = (await sharingOperations.sharedWithMe(ctx))
+    .filter((item) => item.share.spaceId === spaceId)
+    .map((item) => item.folderId);
+  if (starts.includes(null)) return null;
+  const [start] = starts;
+  if (start === undefined) throw new CliError('not-found', 'This agent has no share in that space');
+  if (starts.length > 1) {
+    throw new CliError(
+      'usage',
+      'This agent has more than one share in that space: give --parent, a folder from spaces list or tree',
+    );
+  }
+  return start;
+}
+
+/** `folder create`: a new folder, as New folder makes it, where this agent may edit. */
+export async function createFolder(
+  io: Io,
+  out: Printer,
+  args: ContentArgs & { spaceId: SpaceId | null; parentId: FolderId | null; name: string },
+  deps: Deps,
+) {
+  const input = inputHash('folder create', [args.spaceId, args.parentId, args.name]);
+  const made = await withAgent(
+    io,
+    out,
+    args,
+    deps,
+    async (agent) => {
+      const { ctx } = agent;
+      let { spaceId, parentId } = args;
+      if (spaceId === null) {
+        if (parentId === null) throw new CliError('usage', 'Give --space, --parent or both');
+        spaceId = await spaceOfFolder(ctx, parentId);
+      } else if (parentId === null) {
+        parentId = await shareStart(ctx, spaceId);
+      }
+      await spaceOperations.createFolder(ctx, { spaceId, parentId, name: args.name });
+      // On a retry, the first run's folder: its request went out again, ID and all.
+      return { spaceId, parentId, folderId: answered(agent).folderId as FolderId };
+    },
+    input,
+  );
+  out.result({ ...made, name: args.name }, () => out.line(`Created folder ${made.folderId}`));
+}
+
 /** `page create`: a new page with its first draft, in a folder this agent was given. */
 export async function createPage(
   io: Io,

@@ -89,6 +89,7 @@ Commands:
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
   export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
+  folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
   page read PAGE_ID [--draft] [--revision REVISION_ID]
   page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
   page draft PAGE_ID --base REVISION_ID --file PATH|- [--title TITLE]
@@ -112,6 +113,8 @@ The usual loop, with --json:
   page publish P --revision D --base-published B --permission-version N
                                       D the draft head, B the published head, or none,
                                       and N the permissionVersion page read showed
+  folder create --space S --name N    a folder for new pages, at the top of the
+                                      agent's share there; --parent F puts it in F
   Without --draft, page read gives the published version, whose revisionId is
   never a --base. When someone else wrote first (exit 3), --json names the
   current draftHead and publishedHead: read again from there.
@@ -322,6 +325,18 @@ permissionVersion changes whenever who can read the page changes: give it
 to page publish to publish only to the readers there were when you looked.
 Without --json, the Markdown alone is printed.
 `,
+  'folder create': `Usage: wikistow folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
+
+A new folder named NAME, where this agent may edit, with the look WikiStow's
+New folder starts with. Prints its folder ID. --parent puts it in that
+folder; without it, it goes at the top of the agent's share in --space: the
+space's top level if the share is the whole space, else the folder the share
+starts at. With more than one share in the space, give --parent. --space
+saves looking up which space --parent is in. NAME is trimmed, and must be 1
+to 200 characters. A folder may share its name with another beside it, so
+look in tree before making one again without a KEY.
+
+${RETRYING}`,
   'page create': `Usage: wikistow page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
 
 A new page in a folder this agent may edit, with the Markdown as its first

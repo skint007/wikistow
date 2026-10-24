@@ -262,7 +262,7 @@ Frontmatter is supported syntax, kept as opaque text. A page has frontmatter whe
 - **Published view.** Readers see the same collapsed box, read-only.
 - **No meaning in this version.** The application does not read titles, tags, aliases, or other fields from it. Search indexes it as plain text. Agents read and write it as part of the page's Markdown. Export writes it unchanged.
 
-There is no importer. Notes from Obsidian or elsewhere arrive as ordinary Markdown, pasted into the source or visual editor, or written by an agent with `wikistow page create` or `page draft`. Obsidian wikilinks and attachment embeds work as described above. Frontmatter is preserved as described above. Other Obsidian syntax arrives as source text and follows the unsupported-syntax rule. Images and files are added as attachments through the editor or the CLI. Pasting rich text must not silently drop content.
+There is no importer. Notes from Obsidian or elsewhere arrive as ordinary Markdown, pasted into the source or visual editor, or written by an agent with `wikistow page create` or `page draft`, which can make their folders first with `folder create` (#170). Obsidian wikilinks and attachment embeds work as described above. Frontmatter is preserved as described above. Other Obsidian syntax arrives as source text and follows the unsupported-syntax rule. Images and files are added as attachments through the editor or the CLI. Pasting rich text must not silently drop content.
 
 Use stable IDs for links inside the application. For wikilinks, the encrypted link table holds these IDs. Export writes wikilinks with current titles, so the files open in Obsidian, and copies attachments into a readable directory (see **Export**). *Proposed, not built:* an export option converts wikilinks to relative Markdown paths instead. Preserve plugin syntax as source text rather than claiming it works in the visual editor. The supported subset is validated against representative documents, including pasted Obsidian notes, during the editor milestone.
 
@@ -319,6 +319,7 @@ wikistow tree --space SPACE_ID --json
 wikistow search "backup procedure" --json
 wikistow export --space SPACE_ID --out ~/notes-export --json
 wikistow page read PAGE_ID --draft --json
+wikistow folder create --space SPACE_ID --parent FOLDER_ID --name "Network" --json
 wikistow page create --folder FOLDER_ID --title "Network notes" --file network.md --json
 wikistow page attach PAGE_ID --file router-photo.jpg --json
 wikistow page draft PAGE_ID --file network.md --base REVISION_ID --json
