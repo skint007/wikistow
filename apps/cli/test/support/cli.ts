@@ -2,7 +2,7 @@
 // listening on a loopback port, with a hook to make that server lie.
 import { serve, type ServerType } from '@hono/node-server';
 import { agentOperations } from '@wikistow/client';
-import type { PageId, RevisionId, SpaceId } from '@wikistow/contracts';
+import type { FolderId, PageId, RevisionId, SpaceId } from '@wikistow/contracts';
 import type { TestApp } from '@wikistow/server-app/testing/harness';
 import type { Person } from '@wikistow/server-app/testing/sharing';
 import { execFile, spawn } from 'node:child_process';
@@ -84,6 +84,7 @@ export type CliHome = Awaited<ReturnType<typeof cliHome>>;
 export type Answer = {
   [field: string]: unknown;
   error: { exit: number; code: string; message: string; [field: string]: unknown };
+  folderId: FolderId;
   pageId: PageId;
   revisionId: RevisionId;
   spaceId: SpaceId;

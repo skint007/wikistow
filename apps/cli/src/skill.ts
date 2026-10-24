@@ -38,6 +38,10 @@ they grant this agent folders under Agents in WikiStow.
 Before creating a page, \`search\` for one on the same subject, and draft on
 that one rather than making a second.
 
+To move in notes kept in folders, such as an Obsidian vault or Joplin
+notebooks, make the folders first with \`folder create\`, under the share
+the person named, then create each page in its folder.
+
 ## Edit on the current draft
 
 \`page draft\` replaces the whole Markdown. Read the draft with

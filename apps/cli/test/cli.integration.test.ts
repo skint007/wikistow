@@ -262,6 +262,64 @@ describe('an enrolled agent', () => {
   }, 60_000);
 });
 
+describe('making folders', () => {
+  it('makes a folder in its share, one inside that, and a page there', async () => {
+    const { alice, lib, run } = await bobsAgent();
+    const { spaceId } = lib;
+
+    // With no --parent, at the top of its share.
+    const outer = await run(['folder', 'create', '--space', spaceId, '--name', ' Notebooks ']);
+    expect(outer.code, outer.stdout).toBe(0);
+    const notebooks = outer.json();
+    expect(notebooks).toEqual({
+      spaceId,
+      parentId: lib.shared,
+      folderId: expect.any(String),
+      name: 'Notebooks',
+    });
+    // With only --parent, the space is looked up.
+    const inner = await run(['folder', 'create', '--parent', notebooks.folderId, '--name', 'Home']);
+    expect(inner.code, inner.stdout).toBe(0);
+    const home = inner.json();
+    expect(home).toMatchObject({ spaceId, parentId: notebooks.folderId });
+    const page = await run(
+      ['page', 'create', '--folder', home.folderId, '--title', 'Router', '--file', '-'],
+      { stdin: 'notes' },
+    );
+    expect(page.code, page.stdout).toBe(0);
+
+    const tree = (await run(['tree', '--space', spaceId])).json();
+    expect(tree.folders).toEqual(
+      expect.arrayContaining([
+        { id: notebooks.folderId, parentId: lib.shared, name: 'Notebooks' },
+        { id: home.folderId, parentId: notebooks.folderId, name: 'Home' },
+      ]),
+    );
+    expect(tree.pages).toContainEqual(
+      expect.objectContaining({ id: page.json().pageId, parentId: home.folderId }),
+    );
+    // Alice sees them too, with the look New folder starts with.
+    const hers = await spaceOperations.loadTree(alice.ctx, spaceId);
+    const made = hers.folders.find((f) => f.id === home.folderId)?.metadata?.opened;
+    expect(made?.kind === 'current' && made.metadata).toMatchObject({ name: 'Home', emoji: '⭐' });
+  }, 60_000);
+
+  it('is refused outside its shares, as page create is', async () => {
+    const { lib, run } = await bobsAgent();
+    const where = ['--space', lib.spaceId];
+    const folder = await run(['folder', 'create', ...where, '--parent', lib.above, '--name', 'X']);
+    const page = await run(
+      ['page', 'create', ...where, '--folder', lib.above, '--title', 'X', '--file', '-'],
+      { stdin: 'x' },
+    );
+    expect(page.code).not.toBe(0);
+    expect(folder.code, folder.stdout).toBe(page.code);
+    expect(folder.json().error.code).toBe(page.json().error.code);
+    const tree = (await run(['tree', '--space', lib.spaceId])).json();
+    expect(tree.folders).toEqual([{ id: lib.shared, parentId: null, name: 'Shared' }]);
+  }, 60_000);
+});
+
 describe('an export', () => {
   const FRONTMATTER = '---\r\ntags: [network]\r\nlink: "[[Plan]]"\r\n---\r\n';
 
@@ -447,6 +505,39 @@ describe('an idempotency key', () => {
       );
       expect(other.code).toBe(3);
       expect(other.json().error.code).toBe('journal-mismatch');
+    } finally {
+      server.hooks.intercept = null;
+    }
+  });
+
+  it('makes one folder when a folder create’s answer is lost', async () => {
+    const { lib, run } = await bobsAgent();
+    const sent: string[] = [];
+    let drop = true;
+    server.hooks.intercept = async (request, forward) => {
+      if (request.method !== 'POST' || !request.url.endsWith(`/spaces/${lib.spaceId}/folders`)) {
+        return forward();
+      }
+      sent.push(await request.clone().text());
+      const res = await forward();
+      if (!drop) return res;
+      drop = false;
+      return new Response('upstream went away', { status: 502 });
+    };
+    try {
+      const args = ['folder', 'create', '--space', lib.spaceId, '--name', 'Once'];
+      const key = ['--idempotency-key', 'folder-retry-1'];
+      const first = await run([...args, ...key]);
+      expect(first.code).toBe(1);
+      expect(first.json().error).toMatchObject({ outcomeUnknown: true });
+      const second = await run([...args, ...key]);
+      expect(second.code, second.stdout).toBe(0);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]).toBe(sent[0]);
+      expect(second.json().folderId).toBe(JSON.parse(sent[0] ?? '{}').folderId);
+      const tree = (await run(['tree', '--space', lib.spaceId])).json();
+      const folders = tree.folders as { name: string }[];
+      expect(folders.filter((f) => f.name === 'Once')).toHaveLength(1);
     } finally {
       server.hooks.intercept = null;
     }

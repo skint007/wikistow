@@ -6,6 +6,7 @@ import { cliFetch, systemSecretStore, type UnlockOptions } from './agent.ts';
 import { enroll, secretStore, status, type Deps } from './commands/agent.ts';
 import {
   attachFile,
+  createFolder,
   createPage,
   downloadAttachment,
   draftPage,
@@ -58,6 +59,10 @@ const COMMANDS = {
   search: { options: { space: { type: 'string' } }, positionals: 1 },
   export: {
     options: { space: { type: 'string' }, folder: { type: 'string' }, out: { type: 'string' } },
+    positionals: 0,
+  },
+  'folder create': {
+    options: { space: { type: 'string' }, parent: { type: 'string' }, name: { type: 'string' } },
     positionals: 0,
   },
   'page read': {
@@ -275,7 +280,7 @@ function parse(argv: readonly string[]) {
     );
   }
   const key = optional(values, 'idempotency-key');
-  const changes = ['page create', 'page draft', 'page publish', 'page attach'];
+  const changes = ['folder create', 'page create', 'page draft', 'page publish', 'page attach'];
   if (key !== null && !changes.includes(name)) {
     throw new CliError('usage', '--idempotency-key is only for create, draft, publish and attach');
   }
@@ -420,6 +425,29 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
           spaceId: space === null ? null : id(SpaceId, space, 'space'),
           folderId: folder === null ? null : id(FolderId, folder, 'folder'),
           out: required(values, 'out'),
+        },
+        deps,
+      );
+    }
+    case 'folder create': {
+      const space = optional(values, 'space');
+      const parent = optional(values, 'parent');
+      if (space === null && parent === null) {
+        throw new CliError('usage', 'folder create takes --space, --parent or both');
+      }
+      // Trimmed, as WikiStow's New folder trims it, and as long as a folder's name may be.
+      const name = required(values, 'name').trim();
+      if (name === '' || name.length > 200) {
+        throw new CliError('usage', '--name takes a name of 1 to 200 characters');
+      }
+      return createFolder(
+        io,
+        out,
+        {
+          ...content,
+          spaceId: space === null ? null : id(SpaceId, space, 'space'),
+          parentId: parent === null ? null : id(FolderId, parent, 'folder'),
+          name,
         },
         deps,
       );

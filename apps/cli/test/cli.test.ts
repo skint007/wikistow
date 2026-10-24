@@ -20,6 +20,9 @@ describe('the command line', () => {
     [['frobnicate']],
     [['page', 'publish', PAGE, '--revision', REV]],
     [['page', 'publish-to', PAGE, '--space', PAGE, '--revision', REV]],
+    [['folder', 'create', '--name', 'Notes']],
+    [['folder', 'create', '--space', PAGE, '--name', '   ']],
+    [['folder', 'create', '--space', PAGE, '--name', 'x'.repeat(201)]],
   ])('refuses %j as a usage error, before touching anything', async (argv) => {
     const result = await runIn([...argv, '--json']);
     expect(result.status).toBe(EXIT.usage);
@@ -55,7 +58,7 @@ describe('skill', () => {
     const spans = [...SKILL.matchAll(/`([^`]+)`/g)].map(([, span = '']) => span);
     const commands = spans
       .map((span) => span.replace(/^wikistow /, ''))
-      .filter((span) => /^(agent|page|spaces|tree|search|export)\b/.test(span))
+      .filter((span) => /^(agent|folder|page|spaces|tree|search|export)\b/.test(span))
       .map((span) => span.split(' ').filter((word) => !word.startsWith('-')));
     expect(commands.length).toBeGreaterThan(5);
     for (const words of commands) {
