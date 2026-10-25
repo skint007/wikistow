@@ -161,8 +161,8 @@ export function renameProperty(frontmatter: string, key: string, to: string): Pr
 
 /**
  * `frontmatter` without the key `key` (exactly as written): its lines go,
- * from its key's to its value's last, and any comment lines indented under
- * it when a block of text above would read them as its own.
+ * from its key's to its value's last, with the comment lines indented
+ * under it, unless a block of text above would then read them as its own.
  */
 export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   const read = readBlock(frontmatter);
@@ -186,8 +186,9 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
     : entry.property.valueSpan.end;
   const newline = frontmatter.indexOf('\n', valueEnd - 1);
   const end = newline < 0 || newline >= read.closeStart ? read.closeStart : newline + 1;
-  // Comment lines indented under the key come after it too: left behind,
-  // a block of text before them could read them as its own.
+  // Comment lines indented under the key go with it, unless the block
+  // then reads differently: left behind, a block of text before them could
+  // read them as its own.
   const under = new RegExp(
     `^(?:[ \\t]{${(/^[ \t]*/.exec(frontmatter.slice(start))?.[0].length ?? 0) + 1},}#[^\\n]*\\n)*`,
   );
@@ -195,7 +196,7 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   const expected = read.entries.flatMap(({ property }) =>
     property === entry.property ? [] : [property],
   );
-  for (const to of new Set([end, withComments])) {
+  for (const to of new Set([withComments, end])) {
     const result = verified(frontmatter.slice(0, start) + frontmatter.slice(to), expected);
     if (result) return result;
   }
@@ -351,9 +352,8 @@ function readBlock(frontmatter: string | null): ReadBlock {
       source: read === undefined,
     });
   }
-  const first = map.items[0]?.key as Scalar | undefined;
-  const firstStart = first?.range?.[0] ?? 0;
-  // The first key's line's indentation, before any `?`, anchor or tag.
+  // The map's line's indentation, before any `?`, anchor or tag.
+  const firstStart = map.range?.[0] ?? 0;
   const indent = /^[ \t]*/.exec(yaml.slice(yaml.lastIndexOf('\n', firstStart - 1) + 1))?.[0] ?? '';
   return {
     ok: true,
@@ -421,7 +421,7 @@ function lockOf(node: Node, yaml: string, item = false): string | null {
 }
 
 const DATE =
-  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/;
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?: ?(?:Z|[+-]\d{2}(?::?\d{2})?))?)?$/;
 
 function isDate(text: string): boolean {
   const [, year, month, day, hour = '0', minute = '0', second = '0'] = DATE.exec(text) ?? [];
@@ -525,9 +525,11 @@ function readsAs(text: string, value: PropertyScalar, context: Context): boolean
 
 // The ways to write a key, most like `style` first: plain only when it
 // reads as that text, so a key such as `0x10` or `~` stays a string to
-// every reader.
+// every reader, and `<<` isn't a merge key to those that have them.
 const keyTexts = (key: string, style: Style) => {
-  const texts = scalarTexts(key, style).filter((text) => readsAs(text, key, 'block'));
+  const texts = scalarTexts(key, style).filter(
+    (text) => text !== '<<' && readsAs(text, key, 'block'),
+  );
   return texts.length > 0 ? texts : [doubleQuoted(key)];
 };
 

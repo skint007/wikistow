@@ -145,6 +145,7 @@ not_a_day: 2026-02-30
 leap_day: 2024-02-29
 with_seconds: 2026-10-12 18:30:05
 with_zone: 2026-10-12T18:30:05.25+02:00
+spaced_zone: 2026-10-12 10:00 +01:00
 not_a_time: 2026-10-12T25:00
 ftp: ftp://example.com
 bare: example.com
@@ -172,6 +173,7 @@ infinite: .inf
       ['leap_day', 'date', '2024-02-29'],
       ['with_seconds', 'date', '2026-10-12 18:30:05'],
       ['with_zone', 'date', '2026-10-12T18:30:05.25+02:00'],
+      ['spaced_zone', 'date', '2026-10-12 10:00 +01:00'],
       ['not_a_time', 'text', '2026-10-12T25:00'],
       ['ftp', 'text', 'ftp://example.com'],
       ['bare', 'text', 'example.com'],
@@ -542,6 +544,12 @@ describe('adding a key', () => {
       crlf('---\na: 1\n# end\nb: x\n---\n'),
     );
     expect(edited(setProperty('---\n  a: 1\n---\n', 'b', 2))).toBe('---\n  a: 1\n  b: 2\n---\n');
+    expect(edited(setProperty('---\n?\n  a\n: 1\n---\n', 'b', 2))).toBe(
+      '---\n?\n  a\n: 1\nb: 2\n---\n',
+    );
+    expect(edited(setProperty('---\n  !!str a: 1\n---\n', 'b', 2))).toBe(
+      '---\n  !!str a: 1\n  b: 2\n---\n',
+    );
     expect(edited(setProperty('---\na: 1\n...', 'b', true))).toBe('---\na: 1\nb: true\n...');
     expect(edited(setProperty('---\nnotes: |\n  text\n---\n', 'b', ['x']))).toBe(
       '---\nnotes: |\n  text\nb: [x]\n---\n',
@@ -560,7 +568,7 @@ describe('adding a key', () => {
   });
 
   it('quotes a new key that would read as a number, null or true', () => {
-    for (const key of ['0x10', '1e3', '~', 'null', 'true', '35']) {
+    for (const key of ['0x10', '1e3', '~', 'null', 'true', '35', '<<']) {
       const result = edited(setProperty('---\n---\n', key, 'v'));
       expect(result).toBe(`---\n"${key}": v\n---\n`);
       expect(edited(renameProperty('---\na: v\n---\n', 'a', key))).toBe(result);
@@ -659,6 +667,16 @@ last: 1
       edited(removeProperty('---\ntags:\n  - a\n  # inside\n  - b\nc: 1\n---\n', 'tags')),
     ).toBe('---\nc: 1\n---\n');
     expect(edited(removeProperty('---\na:\n---', 'a'))).toBe('---\n---');
+  });
+
+  it('removes the comment lines indented under a key with it', () => {
+    expect(edited(removeProperty('---\na: 1\nb: 2\n  # under b\nc: 3\n---\n', 'b'))).toBe(
+      '---\na: 1\nc: 3\n---\n',
+    );
+    // Not one at the key's own indentation, which is the next key's.
+    expect(edited(removeProperty('---\na: 1\nb: 2\n# about c\nc: 3\n---\n', 'b'))).toBe(
+      '---\na: 1\n# about c\nc: 3\n---\n',
+    );
   });
 
   it('removes a key after a `?`, an anchor or a tag on its line', () => {
