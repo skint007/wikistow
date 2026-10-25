@@ -10,6 +10,7 @@ import {
   searchFilter,
   searchTerms,
   searchText,
+  tagProperties,
 } from '../src/index.ts';
 import { cpuTime, growth } from './support/timing.ts';
 
@@ -128,6 +129,13 @@ describe('tags', () => {
     // The first key a reference would take is the one read.
     expect(tagged('tags: winter\nTags: soup', 'soup')).toBe(false);
     expect(hasTag([], 'soup')).toBe(false);
+  });
+
+  it('are in the properties a reference would find first as tags and tag', () => {
+    const keys = (yaml: string) =>
+      tagProperties(propertyData(`---\n${yaml}\n---\n`)).map(({ key }) => key);
+    expect(keys('TAG: x\nnotes: y\nTags: [a]\ntags: b')).toEqual(['Tags', 'TAG']);
+    expect(keys('category: soup')).toEqual([]);
   });
 });
 

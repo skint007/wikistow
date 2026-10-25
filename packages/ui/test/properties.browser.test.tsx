@@ -95,7 +95,9 @@ async function editor(initial: string, propertyKeys?: PropertyKeys) {
       />
     );
   }
-  const container = await render(<Draft />);
+  // Routed, as the page is, so its tags can link to their search.
+  const container = await render(routed(<Draft />));
+  await expect.poll(() => container.querySelector('section')).not.toBeNull();
   return { container, blocks, last: () => blocks.at(-1) };
 }
 
