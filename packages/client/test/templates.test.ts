@@ -39,7 +39,11 @@ describe('reading a template’s variables', () => {
   // How variables were read before #198, kept as it was: the pattern, and
   // what each match stands for. The new reading must give the same.
   const BEFORE = /\{\{\s*([\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*?)\s*(?:([|:])([^}\n]*))?\}\}/gu;
-  const variableBefore = (name: string, mark: string | undefined, rest = '') => {
+  type Before =
+    | { kind: 'asked'; key: string; label: string; initial: string }
+    | { kind: 'date' | 'time'; format: string }
+    | { kind: 'title' | 'me' };
+  const variableBefore = (name: string, mark: string | undefined, rest = ''): Before | null => {
     const label = name.normalize('NFC').replace(/\s+/g, ' ');
     const key = label.toLowerCase();
     if (key === 'date' || key === 'time') {
@@ -59,15 +63,16 @@ describe('reading a template’s variables', () => {
     text.replace(BEFORE, (match, name: string, mark?: string, rest?: string) => {
       const variable = variableBefore(name, mark, rest);
       if (variable === null) return match;
-      if ('format' in variable) return formatDate(named.now, variable.format);
-      if ('key' in variable) return `«${variable.key}»`;
+      if (variable.kind === 'date' || variable.kind === 'time')
+        return formatDate(named.now, variable.format);
+      if (variable.kind === 'asked') return `«${variable.key}»`;
       return variable.kind === 'title' ? named.title : named.me;
     });
   const fieldsBefore = (text: string) => {
     const fields = new Map<string, { key: string; label: string; initial: string }>();
     for (const [, name = '', mark, rest] of text.matchAll(BEFORE)) {
       const variable = variableBefore(name, mark, rest);
-      if (variable && 'key' in variable && !fields.has(variable.key)) {
+      if (variable?.kind === 'asked' && !fields.has(variable.key)) {
         const { key, label, initial } = variable;
         fields.set(key, { key, label, initial });
       }
