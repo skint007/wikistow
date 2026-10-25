@@ -25,12 +25,20 @@ export function parsePropertyReference(code: string): PropertyReference | null {
  * ASCII punctuation character escaped with a backslash, so nothing in it
  * is syntax (no emphasis, link, HTML, entity, code, table cell or
  * wikilink), and each line break or tab a space, so it stays in its
- * paragraph and starts no block. A space at either end is written as a
- * character reference, which Markdown doesn't trim.
+ * paragraph and starts no block. Its first character, and a space at
+ * either end, which Markdown would trim, are written as character
+ * references, so the letters it starts with can't finish what the text
+ * before it opened: a tag name after `<`, an entity after `&`, a link
+ * label after `[`.
  */
 export function markdownLiteral(text: string): string {
-  return text
-    .replace(/\r\n?|[\n\t]/g, ' ')
+  const flat = text.replace(/\r\n?|[\n\t]/g, ' ');
+  const first = flat.codePointAt(0);
+  if (first === undefined) return '';
+  const head = String.fromCodePoint(first);
+  const escaped = flat
+    .slice(head.length)
     .replace(/[!-/:-@[-`{-~]/g, (char) => `\\${char}`)
-    .replace(/^ | $/g, '&#32;');
+    .replace(/ $/, '&#32;');
+  return `&#${first};${escaped}`;
 }

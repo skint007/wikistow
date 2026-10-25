@@ -433,6 +433,38 @@ describe('completing a reference', () => {
       .toBe(page.replace('Serves \n', 'Serves `=servings` people\n'));
   });
 
+  it('completes a name typed into in the source editor, its rest and closing backtick kept', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nServes `=servngs` people\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    // After `serv`.
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(13) + 'i',
+    );
+    const labels = () =>
+      [...container.querySelectorAll('div')].flatMap((div) =>
+        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+          (l) => l.textContent,
+        ),
+      );
+    await expect.poll(labels).toEqual(['servings']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\nservings: 4\n---\nServes `=servings` people\n');
+  });
+
+  it('opens no list for a reference the visual editor’s cursor is merely put in', async () => {
+    const page = '---\nservings: 4\n---\nServes `=servings` now.\n';
+    const { container, ref } = await pageEditor(page, 'visual');
+    await userEvent.click(container.querySelector('#page-visual code')!);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.querySelector('[role=listbox][aria-label=Property]')).toBeNull();
+    expect(ref.current?.read()).toBe(page);
+  });
+
   it('offers them in the visual editor too, writing the reference as code', async () => {
     const { container, ref } = await pageEditor(page, 'visual');
     await userEvent.click(container.querySelector('#page-visual p')!);

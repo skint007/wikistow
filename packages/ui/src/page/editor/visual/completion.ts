@@ -18,17 +18,14 @@ const ATOM = '￼';
 
 /**
  * What's being typed, the cursor at `to`: a link, `[[` at `from` and the
- * text between; or a reference to one of the page's values, its name from
- * `from`, typed as text after `` `= `` (`prefix`, from its backtick on), or
- * inside inline code already.
+ * text between; or a reference to one of the page's values, typed as text
+ * after `` `= `` (`prefix`, from its backtick on), its name from `from`.
+ * Code already a span isn't completed: the cursor is only ever in one as
+ * it's put there, not as a reference is typed.
  */
 type Typing =
   | { kind: 'link'; from: number; to: number; typed: string }
-  | { kind: 'reference'; from: number; to: number; typed: string; prefix: string }
-  | { kind: 'in-code'; from: number; to: number; typed: string };
-
-// A reference's start, as inline code holds it, up to the cursor.
-const IN_CODE = /^=[ \t]*(?:this\.)?([\p{L}\p{N} _-]*)$/u;
+  | { kind: 'reference'; from: number; to: number; typed: string; prefix: string };
 
 function typingAt(state: EditorState): Typing | null {
   const { selection } = state;
@@ -36,15 +33,7 @@ function typingAt(state: EditorState): Typing | null {
   const { $from } = selection;
   const { parent } = $from;
   if (!parent.isTextblock || parent.type.spec.code) return null;
-  if ($from.marks().some((mark) => mark.type.spec.code)) {
-    const code = $from.nodeBefore;
-    const name =
-      code?.isText && code.marks.some((mark) => mark.type.spec.code)
-        ? IN_CODE.exec(code.text ?? '')?.[1]
-        : undefined;
-    if (name === undefined) return null;
-    return { kind: 'in-code', from: $from.pos - name.length, to: $from.pos, typed: name };
-  }
+  if ($from.marks().some((mark) => mark.type.spec.code)) return null;
   const offset = $from.parentOffset;
   const before = parent.textBetween(Math.max(0, offset - 500), offset, undefined, ATOM);
   const match = TYPING_LINK.exec(before);
@@ -217,19 +206,13 @@ export class LinkCompletion {
   }
 
   /**
-   * Write `name` as the reference being typed: in the code it's typed in,
-   * or as inline code from its backtick on, the closing one included if
-   * it's there, the cursor after it.
+   * Write `name` as the reference being typed, as inline code from its
+   * backtick on, the closing one included if it's there, the cursor after it.
    */
-  #reference(view: EditorView, typing: Exclude<Typing, { kind: 'link' }>, name: string) {
+  #reference(view: EditorView, typing: Extract<Typing, { kind: 'reference' }>, name: string) {
     const { state } = view;
     const code = state.schema.marks['inlineCode'];
     if (!code) return;
-    if (typing.kind === 'in-code') {
-      view.dispatch(state.tr.insertText(name, typing.from, typing.to).scrollIntoView());
-      view.focus();
-      return;
-    }
     const start = typing.from - typing.prefix.length;
     const closed =
       state.doc.textBetween(typing.to, Math.min(typing.to + 1, state.doc.content.size)) === '`';

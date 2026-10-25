@@ -44,9 +44,10 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
  * The Markdown a public copy holds (ADR 0006, decision 9): the page's
  * body without its frontmatter, each reference to one of its values
  * (`` `=servings` ``) written in as the value's text, escaped so that it
- * reads as just that text, never as Markdown or HTML; a web address in
- * it is still linked, as GFM links one in any text. Dates go as written,
- * as the copy has no reader's locale. A reference that names no
+ * reads as just that text, never as Markdown or HTML; a web or email
+ * address in it is still linked, as GFM links one in any text. Dates go
+ * as written, as the copy has no reader's locale, and an empty value as a
+ * dash, as the reader shows it. A reference that names no
  * property, or a page whose block doesn't read, stays as written.
  */
 export function copyBody(markdown: string): string {
@@ -62,8 +63,9 @@ export function copyBody(markdown: string): string {
     const start = node.position.start.offset;
     const end = node.position.end.offset;
     if (!property || start === undefined || end === undefined || start < at) continue;
-    copy +=
-      body.slice(at, start) + markdownLiteral(propertyText(property, { dates: 'as-written' }));
+    // An empty value is a dash, as the reader shows it, so no blank line is left.
+    const value = propertyText(property, { dates: 'as-written' }) || '–';
+    copy += body.slice(at, start) + markdownLiteral(value);
     at = end;
   }
   return copy + body.slice(at);

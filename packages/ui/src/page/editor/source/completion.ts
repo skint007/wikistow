@@ -130,12 +130,19 @@ function referable(state: EditorState, from: number): boolean {
   return frontmatter === null || from >= frontmatter.length;
 }
 
-/** Accepting a key: write it, with the closing backtick unless it's there, and go on after it. */
+/**
+ * Accepting a key: write it in place of the name typed, the rest of it
+ * after the cursor too if a backtick closes it, and the closing backtick
+ * unless it's there, and go on after it.
+ */
 function insertName(text: string) {
   return (view: EditorView, completion: Completion, from: number, to: number) => {
-    const closed = view.state.sliceDoc(to, to + 1) === '`';
+    const rest = /^[\p{L}\p{N} _-]*/u.exec(view.state.sliceDoc(to, to + 200))?.[0] ?? '';
+    const end =
+      view.state.sliceDoc(to + rest.length, to + rest.length + 1) === '`' ? to + rest.length : to;
+    const closed = view.state.sliceDoc(end, end + 1) === '`';
     view.dispatch({
-      changes: { from, to, insert: closed ? text : `${text}\`` },
+      changes: { from, to: end, insert: closed ? text : `${text}\`` },
       selection: { anchor: from + text.length + 1 },
       userEvent: 'input.complete',
       annotations: pickedCompletion.of(completion),

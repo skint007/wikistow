@@ -73,6 +73,32 @@ describe('values written into a public copy', () => {
     );
   });
 
+  it('render as their text whatever the text around them opens', () => {
+    const page = [
+      '---\nb: b\nimg: img src\nfoo: foo\nlt: lt\nempty:\n---',
+      'x <`=b`> y **z**',
+      '',
+      '<`=img`=x>',
+      '',
+      '[`=foo`] and &`=lt`;',
+      '',
+      'Para',
+      '`=empty`',
+      '---',
+      '',
+      '[foo]: https://evil.example/',
+      '',
+    ].join('\n');
+    const html = rendered(publicLinkOperations.copyBody(page));
+    for (const tag of ['b', 'img', 'hr'])
+      expect(html, tag).not.toMatch(new RegExp(`<${tag}[\\s>]`));
+    expect(html).not.toContain('evil.example');
+    expect(textOf(html)).toContain('x <b> y z');
+    expect(textOf(html)).toContain('[foo] and &lt;');
+    // A heading, as the app shows it, an empty value a dash in it.
+    expect(textOf(/<h2[^>]*>[\s\S]*?<\/h2>/.exec(html)?.[0] ?? '')).toBe('Para\n–');
+  });
+
   it('leaves a reference to no property, and real code, as code', () => {
     const html = rendered(publicLinkOperations.copyBody('---\na: 1\n---\n`=b` and `x = 1`\n'));
     expect(html).toContain('<code>=b</code>');
