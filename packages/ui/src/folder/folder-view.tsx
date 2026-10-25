@@ -1,4 +1,5 @@
 import {
+  deviceTag,
   findProperty,
   linkablePages,
   linkTableOf,
@@ -9,6 +10,7 @@ import {
   type PageId,
   type Property,
   type PropertyData,
+  type RevisionId,
   type searchOperations,
   type SpaceId,
   type spaceOperations,
@@ -16,7 +18,15 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { AlertTriangle, Columns3, List, Table2, X } from 'lucide-react';
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -92,7 +102,22 @@ export function FolderView({
     [index, spaceId, folderId],
   );
   const keys = useMemo(() => index?.keys({ spaceId, folderId }) ?? [], [index, spaceId, folderId]);
-  const columns = useMemo(() => folderColumns(keys, choice.hidden), [keys, choice.hidden]);
+  // Hidden columns are kept as tags, worked out once each.
+  const tag = useMemo(() => {
+    const tags = new Map<string, string>();
+    return (folded: string) => {
+      let tagged = tags.get(folded);
+      if (tagged === undefined) {
+        tagged = deviceTag(ctx.identity, 'wikistow.folder-columns', folded);
+        tags.set(folded, tagged);
+      }
+      return tagged;
+    };
+  }, [ctx]);
+  const columns = useMemo(
+    () => folderColumns(keys, choice.hidden, tag),
+    [keys, choice.hidden, tag],
+  );
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
   const edits = useCellEdits(spaceId, save);
 
@@ -158,7 +183,9 @@ export function FolderView({
             {layout === 'table' && columns.length > 0 && (
               <ColumnsMenu
                 columns={columns}
-                onChange={(key, hide) => setChoice((current) => withColumn(current, key, hide))}
+                onChange={(key, hide) =>
+                  setChoice((current) => withColumn(current, key, hide, tag))
+                }
               />
             )}
             <div
@@ -484,14 +511,23 @@ function PageList({ spaceId, tree, entries, columns, linkable, canEdit }: Listed
   );
 }
 
+/** The version of a page a row's cells read: what the index showed, and the version built on. */
+type RowVersion = { indexed: RevisionId; basedOn: RevisionId; markdown: string };
+
+/** The cell whose field is open, with the version it opened on, which it shows and saves against. */
+type OpenCell = { id: string; pageId: PageId; version: RowVersion };
+
 /**
  * The pages as a table: the title, then a column per key, which scrolls
  * sideways where it's wider than the card. Editors edit a cell in place.
  */
 function PropertyTable({ edits, ...listed }: Listed & { edits: CellEdits }) {
   const { entries, columns, tree } = listed;
-  // The cell whose field is open, one at a time.
-  const [opened, setOpened] = useState<string | null>(null);
+  // One field open at a time.
+  const [opened, setOpened] = useState<OpenCell | null>(null);
+  // The cell that had the focus when its value was set, which gets it back
+  // once its page is saved and its control is drawn again.
+  const refocus = useRef<string | null>(null);
   return (
     <div className="overflow-x-auto rounded-control border border-border">
       <table className="w-full border-collapse text-sm [--row:2rem]">
@@ -515,6 +551,7 @@ function PropertyTable({ edits, ...listed }: Listed & { edits: CellEdits }) {
               edits={edits}
               opened={opened}
               onOpened={setOpened}
+              refocus={refocus}
             />
           ))}
         </tbody>
@@ -553,7 +590,9 @@ const EMPTY_LINKS: ReadonlyMap<string, string> = new Map();
 /**
  * One page's row. An editor's row reads the draft the index holds, or this
  * view's own write since, for which values can change in place; until it
- * has, its cells show what the index holds.
+ * has, its cells show what the index holds. A field open on the row keeps
+ * the version it opened on, even if the index moves on meanwhile, so what's
+ * typed is saved against what was read, or shows a conflict.
  */
 function PageRow({
   spaceId,
@@ -565,14 +604,17 @@ function PageRow({
   edits,
   opened,
   onOpened,
+  refocus,
 }: Listed & {
   entry: searchOperations.IndexedEntry;
   treePage: TreePage | undefined;
   edits: CellEdits;
-  opened: string | null;
-  onOpened: (cell: string | null) => void;
+  opened: OpenCell | null;
+  onOpened: (cell: OpenCell | null) => void;
+  refocus: RefObject<string | null>;
 }) {
   const ctx = useClient();
+  const row = useRef<HTMLTableRowElement>(null);
   const page = { spaceId, pageId: entry.pageId };
   // A copy of another page has no draft to change until it is detached.
   const editable = canEdit && treePage !== undefined && treePage.draftHead !== null;
@@ -582,16 +624,33 @@ function PageRow({
     enabled: editable,
   });
   const payload = revision?.opened.kind === 'current' ? revision.opened.payload : null;
+  const read = shown.markdown ?? payload?.markdown ?? null;
+  const version: RowVersion | null =
+    opened?.pageId === entry.pageId
+      ? opened.version
+      : read === null
+        ? null
+        : { indexed: entry.revisionId, basedOn: shown.revisionId, markdown: read };
   const saving = edits.saving.get(entry.pageId);
-  const markdown = saving ?? shown.markdown ?? payload?.markdown ?? null;
-  const read = useMemo(
+  const markdown = saving ?? version?.markdown ?? null;
+  const properties = useMemo(
     () => (markdown === null ? null : readProperties(splitFrontmatter(markdown).frontmatter)),
     [markdown],
   );
   const links = payload ? linkTableOf(payload) : EMPTY_LINKS;
   const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  useEffect(() => {
+    const id = refocus.current;
+    if (saving !== undefined || !id?.startsWith(`${entry.pageId} `)) return;
+    refocus.current = null;
+    row.current
+      ?.querySelector(`[data-cell="${CSS.escape(id)}"]`)
+      ?.querySelector<HTMLElement>('button, input')
+      ?.focus();
+  });
   return (
     <tr
+      ref={row}
       className="border-t border-border align-top hover:bg-muted/40"
       aria-busy={saving !== undefined}
     >
@@ -608,16 +667,16 @@ function PageRow({
         const value = valueIn(entry.properties, column);
         const problem = edits.problem(entry.pageId, column.key);
         let cell: ReactNode;
-        if (!editable || read === null || markdown === null) {
+        if (!editable || properties === null || version === null) {
           cell = value ? <PropertyValueView property={value} scope={scope} /> : <Blank />;
-        } else if (!read.ok) {
+        } else if (!properties.ok) {
           cell = (
-            <OpensPage spaceId={spaceId} pageId={entry.pageId} why={read.reason}>
+            <OpensPage spaceId={spaceId} pageId={entry.pageId} why={properties.reason}>
               {value ? <PropertyValueView property={value} scope={scope} /> : <Blank />}
             </OpensPage>
           );
         } else {
-          const property = findProperty(read.properties, column.key) ?? missing(column.key);
+          const property = findProperty(properties.properties, column.key) ?? missing(column.key);
           const multiline = typeof property.value === 'string' && /[\r\n]/.test(property.value);
           cell =
             saving !== undefined ? (
@@ -629,16 +688,22 @@ function PageRow({
                 property={property}
                 label={`${column.label} of ${pageTitle(entry.title)}`}
                 scope={scope}
-                opened={opened === id}
-                onOpened={(open) => onOpened(open ? id : null)}
+                opened={opened?.id === id}
+                onOpened={(open) => onOpened(open ? { id, pageId: entry.pageId, version } : null)}
                 onSet={(next) => {
+                  if (
+                    row.current
+                      ?.querySelector(`[data-cell="${CSS.escape(id)}"]`)
+                      ?.contains(document.activeElement)
+                  )
+                    refocus.current = id;
                   edits.edit({
                     pageId: entry.pageId,
-                    indexed: entry.revisionId,
-                    basedOn: shown.revisionId,
-                    markdown,
+                    indexed: version.indexed,
+                    basedOn: version.basedOn,
+                    markdown: version.markdown,
                     column: column.key,
-                    key: cellKey(read.properties, column.key),
+                    key: cellKey(properties.properties, column.key),
                     value: next,
                   });
                   return true;
@@ -655,7 +720,7 @@ function PageRow({
             );
         }
         return (
-          <td key={column.key} className="max-w-[20rem] min-w-[9rem] px-3 py-1.5">
+          <td key={column.key} data-cell={id} className="max-w-[20rem] min-w-[9rem] px-3 py-1.5">
             {cell}
             {problem && (
               <CellNote

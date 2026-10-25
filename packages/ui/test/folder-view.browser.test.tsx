@@ -38,6 +38,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 // building behind the one shown, and a refetched tree keeps the one cached.
 const ctx = {
   installationId: 'install',
+  identity: { boxSecretKey: new Uint8Array(32) },
   revisions: { generation: 0 },
   api: { call: () => new Promise(() => {}) },
 } as unknown as ClientContext;
@@ -234,6 +235,8 @@ describe('a folder’s view', () => {
     await userEvent.click(button(document, 'Notes'));
     await userEvent.keyboard('{Escape}');
     expect(headings(container)).toEqual(['Title', 'Cook Time', 'Servings', 'Tags']);
+    // Kept as a tag: no property's name is stored in the clear.
+    expect(Object.values(localStorage).join(' ').toLowerCase()).not.toContain('notes');
     await userEvent.click(button(container, 'List'));
     expect(container.querySelector('table')).toBeNull();
     expect(container.querySelector('ul[aria-label=Pages]')?.textContent).toContain('Servings4');
@@ -276,6 +279,10 @@ describe('a folder’s view', () => {
       },
     ]);
     await expect.poll(() => cellsOf(rowOf(container, 'Tomato soup'))[2]).toBe('6');
+    // The keyboard is back on the cell, as it is after a row's edit.
+    await expect
+      .poll(() => document.activeElement?.getAttribute('aria-label'))
+      .toBe('Servings of Tomato soup: 6. Edit');
 
     // The page's own spelling of the key, and a page with no block gets one.
     await userEvent.click(button(container, /^Cook Time of Garlic bread: 25/));

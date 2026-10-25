@@ -1,4 +1,4 @@
-import { canonical } from './encoding.ts';
+import { canonical, toBase64, utf8 } from './encoding.ts';
 import type { PrivateIdentity } from './identity.ts';
 import { sodium } from './sodium.ts';
 
@@ -10,6 +10,15 @@ import { sodium } from './sodium.ts';
 
 const deviceKey = (identity: PrivateIdentity, keyDomain: string) =>
   sodium.crypto_generichash(32, canonical(keyDomain, []), identity.boxSecretKey);
+
+/**
+ * A tag for `text` under the key `keyDomain` names for this person: the same
+ * text always gives the same tag, and without their unlocked vault nobody
+ * can tell which text it is. So a choice kept on the device in the clear
+ * can name page content, such as a property's name, without holding it.
+ */
+export const deviceTag = (identity: PrivateIdentity, keyDomain: string, text: string): string =>
+  toBase64(sodium.crypto_generichash(16, utf8(text), deviceKey(identity, keyDomain)));
 
 /** `plaintext` sealed under the key `keyDomain` names for this person, bound to `ad`. */
 export function sealOnDevice(

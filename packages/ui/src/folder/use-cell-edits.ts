@@ -15,12 +15,12 @@ import { lineBreakOf } from '../page/editor/surface';
 import { readWikilinks } from '../page/page-reader';
 import { joinPage } from '../page/properties';
 import { useClient } from '../vault/store';
-import { cellProblem, type CellProblem, type OwnWrite } from './folder-model';
+import { cellProblem, nextOwnWrite, type CellProblem, type OwnWrite } from './folder-model';
 
 /** A cell's edit: the page, the version it read and builds on, and the value set. */
 export type CellEdit = {
   pageId: PageId;
-  /** The version the index shows, which `OwnWrite.indexed` keeps. */
+  /** The version the index showed the cell, which an own write stands in for (`OwnWrite`). */
   indexed: RevisionId;
   /** The version the cell read: the index's, or this view's own write on top of it. */
   basedOn: RevisionId;
@@ -99,11 +99,13 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
       } else if (result.written) {
         const { revisionId, payload } = result.written;
         setOwn((current) =>
-          new Map(current).set(cell.pageId, {
-            indexed: cell.indexed,
-            revisionId,
-            markdown: payload.markdown,
-          }),
+          new Map(current).set(
+            cell.pageId,
+            nextOwnWrite(current.get(cell.pageId), cell.indexed, {
+              revisionId,
+              markdown: payload.markdown,
+            }),
+          ),
         );
         void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
         void queryClient.invalidateQueries({ queryKey: pageQuery(ctx, cell.pageId).queryKey });

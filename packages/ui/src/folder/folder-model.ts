@@ -9,10 +9,17 @@ import { propertyLabel } from '../page/property-model';
 /** How a folder shows its pages. */
 export type FolderLayout = 'list' | 'table';
 
-/** What the device keeps for a folder: its layout, if chosen, and the columns hidden, by folded key. */
+/**
+ * What the device keeps for a folder: its layout, if chosen, and the
+ * columns hidden, each as its folded key's tag (`ColumnTag`), so no
+ * property's name is stored in the clear.
+ */
 export type FolderChoice = { layout: FolderLayout | null; hidden: readonly string[] };
 
 export const NO_CHOICE: FolderChoice = { layout: null, hidden: [] };
+
+/** A folded key's tag on this device (`deviceTag`, in the app). */
+export type ColumnTag = (folded: string) => string;
 
 /** A property column: the key as first written in the folder, in sentence case. */
 export type Column = { key: string; label: string; hidden: boolean };
@@ -22,20 +29,29 @@ export type Column = { key: string; label: string; hidden: boolean };
  * them (each once, in the order first used), each hidden or not as kept.
  * Keys are hidden by folded name, so `Cook time` hides `cook_time` too.
  */
-export function folderColumns(keys: readonly string[], hidden: readonly string[]): Column[] {
+export function folderColumns(
+  keys: readonly string[],
+  hidden: readonly string[],
+  tag: ColumnTag,
+): Column[] {
   const off = new Set(hidden);
   return keys.map((key) => ({
     key,
     label: propertyLabel(key),
-    hidden: off.has(foldPropertyName(key)),
+    hidden: off.has(tag(foldPropertyName(key))),
   }));
 }
 
 /** `choice` with the column `key` hidden, or shown again. */
-export function withColumn(choice: FolderChoice, key: string, hide: boolean): FolderChoice {
-  const folded = foldPropertyName(key);
-  const rest = choice.hidden.filter((other) => other !== folded);
-  return { ...choice, hidden: hide ? [...rest, folded] : rest };
+export function withColumn(
+  choice: FolderChoice,
+  key: string,
+  hide: boolean,
+  tag: ColumnTag,
+): FolderChoice {
+  const tagged = tag(foldPropertyName(key));
+  const rest = choice.hidden.filter((other) => other !== tagged);
+  return { ...choice, hidden: hide ? [...rest, tagged] : rest };
 }
 
 /**
@@ -47,22 +63,40 @@ export const cellKey = (properties: readonly { key: string }[], column: string) 
   findProperty(properties, column)?.key ?? column;
 
 /**
- * A page's draft as this view last wrote it: the version the index showed
- * when it did (`indexed`), and the one it wrote on top. Until the index
- * shows something else, the view shows and builds on its own version.
+ * A page's draft as this view last wrote it, and the versions that write
+ * stands in for: the one the index showed when this view first wrote, and
+ * the view's own writes since, which an index built meanwhile may show.
  */
-export type OwnWrite = { indexed: RevisionId; revisionId: RevisionId; markdown: string };
+export type OwnWrite = {
+  over: readonly RevisionId[];
+  revisionId: RevisionId;
+  markdown: string;
+};
 
 /**
  * The version a page's cells show and their edits build on: this view's
- * own write while the index still shows the version it was made from, else
- * the index's (`indexed`). Once the index moves on, to that write or to
- * someone else's, the index's is the one read.
+ * own last write while the index shows a version it stands in for, else
+ * the index's (`indexed`). Once the index shows that write, or someone
+ * else's, the index's is the one read.
  */
 export const shownVersion = (indexed: RevisionId, own: OwnWrite | undefined) =>
-  own && own.indexed === indexed
+  own?.over.includes(indexed)
     ? { revisionId: own.revisionId, markdown: own.markdown }
     : { revisionId: indexed, markdown: null };
+
+/**
+ * The own write after `written`, made on a cell that read the index's
+ * `indexed`: one more in `previous`'s line while that still stands, else
+ * the first over `indexed`.
+ */
+export const nextOwnWrite = (
+  previous: OwnWrite | undefined,
+  indexed: RevisionId,
+  written: { revisionId: RevisionId; markdown: string },
+): OwnWrite => ({
+  over: previous?.over.includes(indexed) ? [...previous.over, previous.revisionId] : [indexed],
+  ...written,
+});
 
 /** Why a cell's edit wasn't saved. */
 export type CellProblem = { kind: 'conflict' } | { kind: 'failed'; message: string };

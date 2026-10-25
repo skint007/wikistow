@@ -548,9 +548,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                     type="button"
                     tabIndex={-1}
                     aria-label={`${row.expanded ? 'Close' : 'Open'} ${plainText(row.name)} in the tree`}
+                    // The focus stays on the row, whose keys move through the tree.
+                    onMouseDown={(event) => event.preventDefault()}
                     onClick={(event) => {
                       event.stopPropagation();
                       toggle(row.id);
+                      focusRow(row);
                     }}
                     className="-mr-1.5 grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground hover:tint hover:text-foreground active:tint-strong pointer-coarse:size-8"
                   >
