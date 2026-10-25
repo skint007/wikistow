@@ -549,3 +549,54 @@ test('capture public links: the dialog, the markers, the Publish prompt and the 
   await expect(visitor.getByRole('link', { name: 'Watering' })).toBeVisible();
   await visitor.screenshot({ path: 'screenshots/public-link-page.png', fullPage: true });
 });
+
+const RECIPE_PROPERTIES = `# From Obsidian
+title: Garlic bread
+tags: [recipe, bread, sides]
+cook_time: 25 # minutes
+servings: 4
+vegetarian: true
+created: 2026-10-12
+source: https://example.com/garlic-bread
+goes_with: "[[Tomato soup]]"
+notes: |
+  Use fresh garlic.`;
+
+test('capture the property rows, on the published and the draft view, wide and on a phone', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'properties-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newPage(page, 'Tomato soup');
+  await fillSource(page, 'Simmer for an hour.');
+  await waitForSave(page);
+  await newPage(page, 'Garlic bread');
+  await page.getByRole('button', { name: 'Add properties' }).click();
+  await page.getByLabel('New property’s name').press('Escape');
+  await page.getByRole('button', { name: 'Edit as text' }).click();
+  await page.getByLabel('Properties as text').fill(RECIPE_PROPERTIES);
+  await page.getByRole('button', { name: 'Show as rows' }).click();
+  await fillSource(page, 'Slice the loaf, butter it, and bake.');
+  await waitForSave(page);
+  const rows = page.getByRole('region', { name: 'Properties' });
+  await rows.getByRole('button', { name: /^Cook time/ }).hover();
+  await shoot('draft', rows);
+  await shoot('draft-phone', page, true);
+  await rows.getByRole('button', { name: 'Actions for Servings' }).click();
+  await page.getByRole('menuitem', { name: 'Type' }).click();
+  await shoot('menu', page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await page.getByRole('button', { name: 'Show 3 more' }).waitFor();
+  await shoot('reader', rows);
+  await shoot('reader-phone', page, true);
+  await page.getByRole('button', { name: 'Show 3 more' }).click();
+  await shoot('reader-all', rows);
+});

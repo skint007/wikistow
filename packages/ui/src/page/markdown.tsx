@@ -25,6 +25,7 @@ import { BodyLink } from './body-link';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
+import { bodyLinkScope } from './property-value';
 
 export { ATTACHMENT_SCHEME, type AttachmentContext };
 
@@ -165,7 +166,7 @@ const TOO_SLOW = 'This page took too long to format, so here it is as written.';
 /**
  * A page body: GitHub-flavoured Markdown, the HTML in it (`pageHtml`) and
  * the registered syntaxes, with nothing that can run or reach out.
- * Frontmatter is shown above it in a collapsed Properties box, as written.
+ * Frontmatter is shown above it as property rows (`PropertiesBox`).
  * The body is read in a worker, off the page's thread (`READ_BUDGET_MS`),
  * and only turned into HTML here.
  */
@@ -210,7 +211,9 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
   };
   return (
     <PageBody value={context}>
-      {frontmatter !== null && <PropertiesBox frontmatter={frontmatter} />}
+      {frontmatter !== null && (
+        <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
+      )}
       {read.isPending ? (
         <StillReading />
       ) : read.isSuccess ? (

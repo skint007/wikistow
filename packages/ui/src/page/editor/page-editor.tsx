@@ -108,7 +108,8 @@ export function PageEditor({
   const [first] = useState(() => splitFrontmatter(initial));
   const frontmatter = useRef(first.frontmatter);
   const [properties, setProperties] = useState(first.frontmatter);
-  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  // Whether Properties was just added, to open on a new property's name.
+  const [propertiesAdded, setPropertiesAdded] = useState(false);
   const body = useRef(first.body);
   // Text given that no editor shown holds yet, as the visual editor's
   // check of it runs: what the page holds until one does.
@@ -131,6 +132,8 @@ export function PageEditor({
   // In split, the source's text waiting for the visual editor (`syncVisual`),
   // and how long giving it the last took.
   const syncing = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null);
+  // In split, the side the person was in last, where Insert in page puts its code.
+  const lastSide = useRef<'source' | 'visual'>('visual');
   const synced = useRef(0);
   const [attach] = useState(() => (handle: EditorSurfaceHandle | null) => {
     surface.current = handle;
@@ -323,6 +326,27 @@ export function PageEditor({
     });
   };
 
+  /**
+   * Put inline code, a property reference, where the cursor is in the
+   * editor the person was in last (in split, either side), and turn to it.
+   * While neither takes edits (the visual editor's check of given text
+   * runs), at the body's end.
+   */
+  const insertCode = (code: string) => {
+    const source =
+      modeNow.current === 'split' && (lastSide.current === 'source' || given.current !== null);
+    const target = source ? mirror.current : given.current === null ? surface.current : null;
+    if (target?.insertCode) {
+      target.insertCode(code);
+      return;
+    }
+    const text = bodyNow();
+    const lineBreak = lineBreakOf(frontmatter.current ?? text);
+    const next = `${text}${text === '' || text.endsWith('\n') ? '' : lineBreak}\`${code}\`${lineBreak}`;
+    give(next, false);
+    changed(next);
+  };
+
   // The source editor too, which an edit the visual editor can't write turns to.
   useEffect(() => {
     if (mode === 'visual') preloadSourceEditor();
@@ -426,7 +450,7 @@ export function PageEditor({
               variant="ghost"
               onClick={() => {
                 setFrontmatter(emptyProperties(lineBreakOf(body.current)));
-                setPropertiesOpen(true);
+                setPropertiesAdded(true);
                 changed();
               }}
             >
@@ -466,16 +490,24 @@ export function PageEditor({
       {properties !== null && (
         <PropertiesEditor
           frontmatter={properties}
-          open={propertiesOpen}
-          onOpenChange={setPropertiesOpen}
+          adding={propertiesAdded}
+          scope={{
+            spaceId: assist.page?.spaceId ?? '',
+            selfId: assist.links.selfId,
+            pages: assist.links.pages,
+            links: assist.links.table,
+            editor: true,
+          }}
           onChange={(block) => {
             setFrontmatter(block);
             changed();
           }}
           onRemove={() => {
             setFrontmatter(null);
+            setPropertiesAdded(false);
             changed();
           }}
+          onInsert={insertCode}
         />
       )}
       {/* The editor fills the space the page leaves it, at least two fifths of
@@ -497,7 +529,14 @@ export function PageEditor({
           )}
         >
           {mode !== 'visual' && mode !== 'checking' && (
-            <div key="source" className="min-h-0 min-w-0" onFocusCapture={takeVisual}>
+            <div
+              key="source"
+              className="min-h-0 min-w-0"
+              onFocusCapture={() => {
+                lastSide.current = 'source';
+                takeVisual();
+              }}
+            >
               <SourceEditor {...(mode === 'source' ? surfaceProps : mirrorProps)} />
             </div>
           )}
@@ -506,7 +545,10 @@ export function PageEditor({
               key="visual"
               // As the pointer comes, before a click, so a key typed there isn't left out.
               onPointerEnter={syncNow}
-              onFocusCapture={syncNow}
+              onFocusCapture={() => {
+                lastSide.current = 'visual';
+                syncNow();
+              }}
               className={cn('min-h-0 min-w-0', mode === 'split' && note && 'opacity-60')}
             >
               {checking ? (
