@@ -10,7 +10,7 @@ import {
   type LinkOption,
   type LinkOptions,
 } from '../link-completions';
-import { propertyOptions, TYPING_REFERENCE } from '../property-completions';
+import { matchingProperties, propertyOptions, TYPING_REFERENCE } from '../property-completions';
 import type { LinkAssist } from '../surface';
 
 // What an atom (a link, an image, a line break) reads as in the text before the cursor.
@@ -144,7 +144,12 @@ export class LinkCompletion {
     }
     void this.#options(typing).then((found) => {
       if (asked !== this.#asked || this.#view !== view) return;
-      const options = found ? matching(found.options, typing.typed.slice(found.start)) : [];
+      const typed = typing.typed.slice(found?.start ?? 0);
+      const options = !found
+        ? []
+        : typing.kind === 'link'
+          ? matching(found.options, typed)
+          : matchingProperties(found.options, typed);
       if (!found || options.length === 0) {
         this.#show(null);
         return;

@@ -522,6 +522,32 @@ describe('completing a reference', () => {
     expect(ref.current?.read()).toBe(page);
   });
 
+  it('matches a name as references do, `_`, `-` and spaces alike, in both editors', async () => {
+    for (const mode of ['source', 'visual'] as const) {
+      const { container, ref } = await pageEditor(page, mode);
+      act(() => ref.current?.focus());
+      await userEvent.keyboard(
+        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=cook t' : '{End} `=cook t',
+      );
+      const shown = () =>
+        mode === 'source'
+          ? [...container.querySelectorAll('div')].flatMap((div) =>
+              [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+                (l) => l.textContent,
+              ),
+            )
+          : [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
+              (option) => option.firstChild?.textContent,
+            );
+      await expect.poll(shown).toEqual(['cook_time']);
+      await userEvent.keyboard('{Enter}');
+      await expect
+        .poll(() => ref.current?.read())
+        .toBe(page.replace('Serves \n', 'Serves `=cook_time`\n'));
+      for (const unmount of unmounts.splice(0)) unmount();
+    }
+  });
+
   it('offers them in the visual editor too, writing the reference as code', async () => {
     const { container, ref } = await pageEditor(page, 'visual');
     await userEvent.click(container.querySelector('#page-visual p')!);

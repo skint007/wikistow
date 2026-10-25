@@ -3,8 +3,8 @@ import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { foldPropertyName, splitFrontmatter, type PropertyData } from '@wikistow/client';
-import { linkOptions, matching, TYPING, TYPING_LINK } from '../link-completions';
-import { propertyOptions, TYPING_NAME, TYPING_REFERENCE } from '../property-completions';
+import { linkOptions, TYPING, TYPING_LINK } from '../link-completions';
+import { matchingProperties, propertyOptions, TYPING_REFERENCE } from '../property-completions';
 import type { LinkAssist } from '../surface';
 
 // Syntax that holds no links: code and HTML. Frontmatter holds none either.
@@ -104,7 +104,7 @@ export function referenceCompletions(
     const match = context.matchBefore(TYPING_REFERENCE);
     if (!match || !referable(context.state, match.from)) return null;
     const name = TYPING_REFERENCE.exec(match.text)?.[1] ?? '';
-    const options = matching(propertyOptions(properties() ?? null), name);
+    const options = matchingProperties(propertyOptions(properties() ?? null), name);
     if (options.length === 0) return null;
     return {
       from: match.to - name.length,
@@ -114,7 +114,8 @@ export function referenceCompletions(
         type: 'property',
         apply: insertName(text),
       })),
-      validFor: TYPING_NAME,
+      // Matched here as names match keys, and so asked again at each key.
+      filter: false,
     };
   };
 }
