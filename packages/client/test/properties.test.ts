@@ -335,6 +335,17 @@ flow_lines: [a,
       reason: 'Map keys must be unique (line 3).',
     });
     expect(readProperties('---\ntrue: a\n"true": b\n---\n')).toMatchObject({ ok: false });
+    // Or the same key to a reader's object.
+    for (const [a, b] of [
+      ['0x1F', '"31"'],
+      ['1.0', '"1"'],
+      ['1e3', '1000'],
+      ['~', '""'],
+    ]) {
+      expect(readProperties(`---\n${a}: x\n${b}: y\n---\n`), `${a} ${b}`).toMatchObject({
+        ok: false,
+      });
+    }
     expect(readProperties('---\na: *x\nb: &x 1\n---\n')).toEqual({
       ok: false,
       reason: 'An alias names no anchor before it (line 2).',
@@ -719,6 +730,15 @@ describe('renaming a key', () => {
       reason: 'There is already a property Cook Time.',
     });
     expect(renameProperty(block, 'cook_time', '')).toMatchObject({ ok: false });
+    // Nor one that a reader's object would have as another key.
+    expect(renameProperty('---\n0x1F: a\nx: b\n---\n', 'x', '31')).toEqual({
+      ok: false,
+      reason: 'There is already a property 0x1F.',
+    });
+    expect(setProperty('---\n1.0: a\n---\n', '1', 'b')).toEqual({
+      ok: false,
+      reason: 'There is already a property 1.0.',
+    });
     // Alike once folded is allowed: the first in the block still wins.
     expect(edited(renameProperty(block, 'cook_time', 'COOK_TIME'))).toBe(
       '---\nCOOK_TIME: 1\nCook Time: 2\n---\n',

@@ -111,6 +111,8 @@ export function setProperty(
   const entry = read.entries.find(({ property }) => property.key === key);
   if (!entry) {
     if (key === '') return refused('A property needs a name.');
+    const taken = read.entries.find((other) => other.joined === key);
+    if (taken) return refused(`There is already a property ${taken.property.key}.`);
     const at = read.closeStart;
     const candidates = keyTexts(key, 'PLAIN').flatMap((keyText) =>
       valueTexts(value, null).map((valueText) => {
@@ -139,9 +141,10 @@ export function renameProperty(frontmatter: string, key: string, to: string): Pr
   if (!entry) return refused(`There is no property ${key}.`);
   if (to === key) return { ok: true, frontmatter };
   if (to === '') return refused('A property needs a name.');
-  if (read.entries.some(({ property }) => property.key === to)) {
-    return refused(`There is already a property ${to}.`);
-  }
+  const taken = read.entries.find(
+    (other) => other !== entry && (other.property.key === to || other.joined === to),
+  );
+  if (taken) return refused(`There is already a property ${taken.property.key}.`);
   // Aliases elsewhere name the key's anchor, and would read as the new name.
   if (entry.key.anchor) return refused('The key has an anchor.');
   const style = entry.key.type;
@@ -269,6 +272,8 @@ const refused = (reason: string) => ({ ok: false, reason }) as const;
 type Entry = {
   property: Property;
   key: Scalar;
+  // The key as an object reading the block has it.
+  joined: string;
   value: Node | null;
   colon: number;
   lock: string | null;
@@ -324,7 +329,8 @@ function readBlock(frontmatter: string | null): ReadBlock {
     return yaml.slice(start, end).trimEnd();
   };
   const entries: Entry[] = [];
-  // Keys as written: `1` and `"1"` differ to YAML, but would be one here.
+  // Keys as written and as a YAML reader's object has them: `1` and
+  // `"1"`, or `0x1F` and `31`, differ to YAML but would be one key.
   const keys = new Set<string>();
   for (const pair of map.items) {
     const key = pair.key;
@@ -350,10 +356,11 @@ function readBlock(frontmatter: string | null): ReadBlock {
         ? { type: 'text' as const, value: value ? sourceOf(value) : '' }
         : { type: typeOf(read), value: read };
     const written = typeof key.value === 'string' ? key.value : sourceOf(key);
-    if (keys.has(written)) {
+    const joined = objectKey(key, written);
+    if (keys.has(written) || keys.has(joined)) {
       return refused(`Map keys must be unique (line ${lineOf(yaml, key.range[0])}).`);
     }
-    keys.add(written);
+    keys.add(written).add(joined);
     entries.push({
       property: {
         key: written,
@@ -364,6 +371,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
       },
       key,
       value,
+      joined,
       colon: colon < 0 ? -1 : base + colon,
       lock,
       source: read === undefined,
@@ -382,6 +390,14 @@ function readBlock(frontmatter: string | null): ReadBlock {
     indent,
     lineBreak,
   };
+}
+
+// A key as a YAML reader's object has it: `0x1F` as `31`, `~` as the
+// empty string. A value of another kind (a tagged date, say) as written.
+function objectKey({ value }: Scalar, written: string): string {
+  if (value === null) return '';
+  const plain = ['string', 'number', 'boolean', 'bigint'].includes(typeof value);
+  return plain ? String(value as string | number | boolean | bigint) : written;
 }
 
 // The longest YAML read, in UTF-16 code units: far more than any person
