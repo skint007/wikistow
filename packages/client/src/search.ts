@@ -272,17 +272,18 @@ const isList = <T>(value: T | readonly T[]): value is readonly T[] => Array.isAr
 export type SearchFilter = { key: string; value: string };
 
 /**
- * A query's words and filters. A filter is a word starting with a name, as
- * a property reference's (letters, digits, `_` and `-`; for a key with
- * spaces, `_` stands in, as `cook_time` finds `cook time`), then `:` and its
- * value: what follows up to a space, or in double quotes, which allow
- * spaces, with `\"` and `\\` for a quote and a backslash in them (any
- * other backslash is itself). A quote
- * not closed runs to the query's end. Everything else is words, a word in
- * quotes too, and so are a name of digits alone, as a time is (`10:30`),
- * and a value starting `//`, as a web address's does (`https://…`). A
- * filter with no value (`tag:`, `tag:#`, `status:""`) ending the query, as
- * one half typed, is left out; elsewhere it is words (`Re: dinner`). Linear in the query's length.
+ * A query's words and filters, read a word at a time: up to a space, or
+ * a word or value in double quotes up to its closing quote, after which
+ * the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
+ * a backslash in them (any other backslash is itself), and one not closed
+ * runs to the query's end. A filter is a name, as a property reference's
+ * (letters, digits, `_` and `-`; for a key with spaces, `_` stands in, as
+ * `cook_time` finds `cook time`), then `:` and its value. Everything else
+ * is words: a word in quotes, a name of digits alone, as a time's
+ * (`10:30`), and a value starting `//`, as a web address's (`https://…`).
+ * A filter with no value (`tag:`, `tag:#`, `status:""`) ending the query,
+ * as one half typed, is left out; elsewhere it is words (`Re: dinner`).
+ * Linear in the query's length.
  */
 export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
   const words: string[] = [];
