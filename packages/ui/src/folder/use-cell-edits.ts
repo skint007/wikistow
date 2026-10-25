@@ -90,10 +90,16 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
     if (before) {
       const settled = await before;
       if (!settled) {
-        return fail(id, {
-          kind: 'failed',
-          message: 'An earlier change to this page wasn’t saved, so this one wasn’t either.',
-        });
+        // What the earlier edit's cell says stays, if it was this cell: a conflict, say.
+        setProblems((current) =>
+          current.has(id)
+            ? current
+            : new Map(current).set(id, {
+                kind: 'failed',
+                message: 'An earlier change to this page wasn’t saved, so this one wasn’t either.',
+              }),
+        );
+        return null;
       }
       basedOn = settled.basedOn;
     }

@@ -349,6 +349,24 @@ describe('a folder’s view', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Add to Tags of Tomato soup');
   });
 
+  it('keeps a conflict on its cell when an edit waiting on it fails too', async () => {
+    const answers: ((error: unknown) => void)[] = [];
+    const { save } = server(() => new Promise((_, reject) => answers.push(reject)));
+    const { container } = await mount([SOUP], { save });
+    const add = () =>
+      container.querySelector<HTMLInputElement>('input[aria-label="Add to Tags of Tomato soup"]')!;
+    await userEvent.click(add());
+    await userEvent.keyboard('dinner{Enter}');
+    await userEvent.click(add());
+    await userEvent.keyboard('quick{Enter}');
+    answers[0]?.(new ApiError(409, 'stale-head', 'Someone saved since you loaded the page'));
+    const row = rowOf(container, 'Tomato soup');
+    await expect.poll(() => cellsOf(row)[1]).not.toContain('quick');
+    expect(row.querySelector('[role=alert]')?.textContent).toContain(
+      'This page changed since the table read it.',
+    );
+  });
+
   it('shows a conflict on the cell, keeping the value read, and opens the page for a value it can’t change', async () => {
     const { save } = server(() =>
       Promise.reject(new ApiError(409, 'stale-head', 'Someone saved since you loaded the page')),
