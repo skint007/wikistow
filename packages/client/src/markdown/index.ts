@@ -6,6 +6,7 @@ import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 
 export * from './frontmatter.ts';
 export * from './link-spans.ts';
+export * from './properties.ts';
 export * from './wikilink.ts';
 
 /**
