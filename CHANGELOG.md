@@ -16,6 +16,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- Search, query tables, folder tables and other pages' values keep up with a change by reading again only what it touched, rather than rebuilding the whole search index: your own saves go in as written without asking the server, a change someone else makes lists only its space and opens only the pages that changed, and the server's word of your own save changes nothing. A tab coming back into view updates the index once, rather than twice. The desktop app writes its kept index once your saves pause, rather than after each, and at once when anything leaves the index, as when access to a page is lost. (#199)
 - Reading a template's `{{variables}}` takes time linear in its length. A long run of spaces after `{{name`, or a line of many `{{name|` that no `}}` closes, took time quadratic in it: a template with 64 KiB of spaces after `{{name` held up the template dialog for over a second when it was picked, and again when the page was made. The same variables are read as before. (#198)
 - A property reference, a template variable or a search filter can name a key written with combining marks, such as `=मूल्य`, `{{ราคาที่ดี}}` or `मूल्य:40`, and a name with an accent typed apart from its letter finds the key typed with it, and the other way round. Both editors complete such names too. (#197)
 - In the visual editor, the hint showing a wikilink's source opens above it, as a link's hint does, instead of below, where the pointer covered it. (#194)
