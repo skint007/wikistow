@@ -4,10 +4,17 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- A page's properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout. Write `=servings` in inline code to show a value in the page.
+
 ### Changes
 
 #### App
 
+- Inline code `=servings` in a page's body, or Dataview's `= this.servings`, shows the page's `servings` value, with a dotted underline and a hint naming the property: a list comma-separated, a date in your locale, a page link as a link. A name the page has no property for shows as written. The visual editor shows the value beside the code, and typing `` `= `` completes the page's keys in both editors. **Add property** suggests the keys that pages in the same folder use. A public link's copy has the values written in as plain text, its frontmatter still left out. (#188)
 - Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
 - A page's properties show as rows between its status pills and its body, each key in sentence case and each value as what it reads as: a list as pills, a number, a checkbox, a date in your locale, a web address, a page link or text. Readers see six, then **Show N more**. On the draft, a value is edited in place, and each row's menu renames it, changes its type, removes it or puts a reference to it in the page; **Add property** adds one. Only the edited characters of the frontmatter change, so its comments, quoting and order stay as written. A value that can't be changed that way, or a block that doesn't read as properties, opens as text. (#185)
 

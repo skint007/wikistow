@@ -600,3 +600,46 @@ test('capture the property rows, on the published and the draft view, wide and o
   await page.getByRole('button', { name: 'Show 3 more' }).click();
   await shoot('reader-all', rows);
 });
+
+test('capture property references: in the reader, the visual editor and its completion', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'references-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newPage(page, 'Tomato soup');
+  await fillSource(page, 'Simmer for an hour.');
+  await waitForSave(page);
+  await newPage(page, 'Garlic bread');
+  await page.getByRole('button', { name: 'Add properties' }).click();
+  await page.getByLabel('New property’s name').press('Escape');
+  await page.getByRole('button', { name: 'Edit as text' }).click();
+  await page.getByLabel('Properties as text').fill(RECIPE_PROPERTIES);
+  await page.getByRole('button', { name: 'Show as rows' }).click();
+  await fillSource(
+    page,
+    'Serves `=servings`, ready in `=cook time` minutes. Tagged `= this.tags`, written `=created`, and best with `=goes_with`.\n\nNot a property: `=oven`.',
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('[data-hint="servings · property"]')).toHaveText('4');
+  await shoot('visual', visual);
+  await typeAtEnd(page, ' Bake at `=se');
+  await expect(page.getByRole('listbox', { name: 'Property' })).toBeVisible();
+  await shoot('completion', page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+z');
+  await waitForSave(page);
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  const body = page.locator('.page-body').first();
+  await expect(body.getByText('4', { exact: true })).toBeVisible();
+  await body.getByText('4', { exact: true }).hover();
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+});

@@ -12,7 +12,7 @@ import {
 } from '@wikistow/client';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Paperclip, Trash2 } from 'lucide-react';
-import { useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { Name, plainText } from '@/components/name';
 import { Button, uploadButtonClass } from '@/components/ui/button';
 import { notCredential } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
+import { usePageIndex } from '../data/page-index';
 import { revisionQuery, treeQuery } from '../data/queries';
 import { errorMessage, stopMessage } from '../errors';
 import { decryptedQuery } from './attachments';
@@ -27,6 +28,7 @@ import type { SaveStatus } from './autosave';
 import { LinkChooser } from './editor/link-chooser';
 import { candidatesFor, linkHeadings } from './editor/link-model';
 import { PageEditor } from './editor/page-editor';
+import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession } from './use-draft-session';
@@ -119,6 +121,7 @@ export function DraftEditor({
     surface,
   });
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
+  const propertyKeys = usePropertyKeys(ctx, page);
   const queryClient = useQueryClient();
   const listed = useMemo(
     () => snapshot.attachments.filter((a) => !hiddenAttachments.includes(a.id)),
@@ -212,6 +215,7 @@ export function DraftEditor({
         links={links.assist}
         attachments={attachments}
         page={page}
+        propertyKeys={propertyKeys}
         onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
         status={
           <span role="status" aria-live="polite">
@@ -301,6 +305,26 @@ function pickWhenListed(queryClient: QueryClient, pick: () => boolean) {
     if (event.type === 'updated' && pick()) stop();
   });
   const timer = setTimeout(stop, PICK_WAIT_MS);
+}
+
+/**
+ * The keys the pages in this page's folder use, from the search index,
+ * which is built only once Add property asks for them.
+ */
+function usePropertyKeys(ctx: ClientContext, page: pageOperations.PageRef): PropertyKeys {
+  const [wanted, setWanted] = useState(false);
+  const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
+  const { index } = usePageIndex(ctx, { enabled: wanted });
+  const parentId = tree?.pages.find((p) => p.id === page.pageId)?.parentId;
+  const keys = useMemo(
+    () =>
+      parentId === undefined
+        ? undefined
+        : index?.keys({ spaceId: page.spaceId, folderId: parentId }),
+    [index, page.spaceId, parentId],
+  );
+  const load = useCallback(() => setWanted(true), []);
+  return useMemo(() => ({ keys, load }), [keys, load]);
 }
 
 /**

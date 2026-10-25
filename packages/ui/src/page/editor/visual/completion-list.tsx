@@ -47,7 +47,7 @@ export function CompletionListbox({ completion }: { completion: LinkCompletion }
       ref={box}
       id={list.id}
       role="listbox"
-      aria-label="Link to"
+      aria-label={list.label}
       className={cn(
         'fixed z-50 max-h-72 w-72 overflow-y-auto rounded-control border bg-popover p-1 text-sm text-popover-foreground shadow-md',
         !place && 'invisible',
