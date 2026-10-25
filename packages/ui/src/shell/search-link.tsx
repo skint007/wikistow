@@ -38,6 +38,8 @@ export function SearchLink({
       to="."
       search
       hash={searchHash(query)}
+      // The page's own address, which isn't the page as it is (`aria-current`) by its fragment.
+      activeOptions={{ includeHash: true }}
       onClick={onClick}
       {...(className === undefined ? {} : { className })}
     >

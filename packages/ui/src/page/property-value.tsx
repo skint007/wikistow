@@ -176,10 +176,13 @@ export function PropertyPill({ children, className }: { children: ReactNode; cla
 
 /**
  * The search for a tag a value's item is, as `tag:` search reads it
- * (`filterQuery`), or null for an item that isn't one: nothing, or a list.
+ * (`filterQuery`), or null for an item that isn't one: nothing, a list, or
+ * no more than a `#`.
  */
-export const tagQuery = (item: PropertyValue): string | null =>
-  item === null || Array.isArray(item) ? null : filterQuery('tag', String(item as PropertyScalar));
+export function tagQuery(item: PropertyValue): string | null {
+  if (item === null || Array.isArray(item)) return null;
+  return filterQuery('tag', String(item as PropertyScalar)) || null;
+}
 
 /** A pill that opens its tag's search over the page (`SearchLink`), underlined on hover. */
 export function TagPill({ query, children }: { query: string; children: ReactNode }) {
@@ -226,10 +229,12 @@ export function PropertyValueView({
     );
   }
   if (value === null || value === '') return EMPTY;
-  if (tagSearch && (type === 'text' || type === 'number')) {
+  // A tag alone, unless it shows as its type: a date, say, or a checkbox.
+  const query = tagSearch && (type === 'text' || type === 'number') ? tagQuery(value) : null;
+  if (query !== null) {
     return (
       <span className="flex min-h-(--row) items-center">
-        <TagPill query={filterQuery('tag', String(value))}>{String(value)}</TagPill>
+        <TagPill query={query}>{String(value)}</TagPill>
       </span>
     );
   }

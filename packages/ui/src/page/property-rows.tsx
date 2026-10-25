@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { filterQuery, SearchLink } from '../shell/search-link';
+import { SearchLink } from '../shell/search-link';
 import {
   convertValue,
   fieldText,
@@ -345,7 +345,8 @@ function TextField({
   }
   const scalar = value as PropertyScalar;
   const edit = `${label}: ${text || 'empty'}. Edit`;
-  if (tagSearch && (type === 'text' || type === 'number') && text !== '') {
+  const query = tagSearch && (type === 'text' || type === 'number') ? tagQuery(scalar) : null;
+  if (query !== null) {
     // The button first, as the focus put back finds it, and under the pill,
     // so a click beside the pill opens the field, as beside a list's pills.
     return (
@@ -357,7 +358,7 @@ function TextField({
           className={cn(SHOWN, 'absolute inset-y-0 left-0')}
         />
         <span className="relative flex min-w-0">
-          <TagPill query={filterQuery('tag', text)}>{text}</TagPill>
+          <TagPill query={query}>{text}</TagPill>
         </span>
       </div>
     );
@@ -414,11 +415,15 @@ function ListField({
             : String(item);
         const query = tagSearch ? tagQuery(item) : null;
         return (
-          <PropertyPill key={i} className="gap-0.5 pr-0.5">
+          // A tag's text, its padding too, is its link.
+          <PropertyPill key={i} className={cn('gap-0.5 pr-0.5', query !== null && 'pl-0')}>
             {query === null ? (
               shown
             ) : (
-              <SearchLink query={query} className="rounded-full underline-offset-2 hover:underline">
+              <SearchLink
+                query={query}
+                className="rounded-full pl-2 underline-offset-2 hover:underline"
+              >
                 {shown}
               </SearchLink>
             )}

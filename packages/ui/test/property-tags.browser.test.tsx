@@ -179,14 +179,17 @@ it('opens a tag’s search from its pill on the published view, staying on the p
   const { container, router } = await mount(
     <PropertiesBox
       frontmatter={
-        '---\nTags: [soup, "soup kitchen", [a, b]]\nTAG: winter\ncategory: [soup]\nnote: soup\n---\n'
+        '---\nTags: [soup, "soup kitchen", [a, b], "", "#"]\nTAG: winter\ncategory: [soup]\nnote: soup\n---\n'
       }
       scope={scope}
     />,
   );
   // The tags, whatever their key's case, and Obsidian's older `tag`, a tag
-  // alone too; a list in the list isn't one tag, and other keys aren't tags.
+  // alone too; a list in the list, or nothing past a `#`, isn't one tag, and
+  // other keys aren't tags.
   expect(links(container)).toEqual(['soup', 'soup kitchen', 'winter']);
+  // Its address is the page's own, but it isn't the page.
+  expect(tagLink(container, 'soup').getAttribute('aria-current')).toBeNull();
   expect(linkedSearch(new URL(tagLink(container, 'soup kitchen').href).hash)).toBe(
     'tag:"soup kitchen"',
   );
