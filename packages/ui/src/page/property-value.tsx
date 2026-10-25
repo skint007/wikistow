@@ -155,9 +155,15 @@ export function WikilinkChip({
     case 'ambiguous': {
       const hint =
         view.kind === 'missing' ? 'No page has this title' : 'More than one page has this title';
-      // Above it, as a link's hint (`linkHint`), where the pointer doesn't cover it.
+      // Above it, as a link's hint is (`linkHint`), where the pointer doesn't cover
+      // it; but in the button that edits the value, below, as a button's.
       return (
-        <span data-hint={hint} data-hint-side="top" aria-description={hint} className={UNRESOLVED}>
+        <span
+          data-hint={hint}
+          {...(navigable ? { 'data-hint-side': 'top' } : {})}
+          aria-description={hint}
+          className={UNRESOLVED}
+        >
           {view.text}
         </span>
       );
