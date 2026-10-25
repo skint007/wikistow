@@ -156,14 +156,10 @@ export function WikilinkChip({
       const hint =
         view.kind === 'missing' ? 'No page has this title' : 'More than one page has this title';
       // Above it, as a link's hint is (`linkHint`), where the pointer doesn't cover
-      // it; but in the button that edits the value, below, as a button's.
+      // it. In a button that edits or opens the value too: it reads as a link, as
+      // a missing wikilink's Create this page does.
       return (
-        <span
-          data-hint={hint}
-          {...(navigable ? { 'data-hint-side': 'top' } : {})}
-          aria-description={hint}
-          className={UNRESOLVED}
-        >
+        <span data-hint={hint} data-hint-side="top" aria-description={hint} className={UNRESOLVED}>
           {view.text}
         </span>
       );
