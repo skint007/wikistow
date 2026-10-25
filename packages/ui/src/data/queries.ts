@@ -237,10 +237,13 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
  * changes meanwhile share that one: autosaves don't keep cancelling it.
  */
 export function searchIndexChanged(queryClient: QueryClient) {
-  const running = queryClient.isFetching({ queryKey: searchIndexKey }) > 0;
   const changed = () =>
     queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
-  void changed().then(() => (running ? changed() : undefined));
+  // Followed once it settles, whether anything shows it or not: its success
+  // would mark it fresh again.
+  const running = queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.promise;
+  void changed();
+  if (running) void running.then(changed, changed);
 }
 
 /**

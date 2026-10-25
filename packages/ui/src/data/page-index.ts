@@ -45,7 +45,7 @@ export function usePageIndex(
     index: query.data,
     progress,
     error: query.error,
-    updating: query.isFetching,
+    updating: query.isFetching && query.data !== undefined,
     retry: () => void query.refetch(),
   };
 }

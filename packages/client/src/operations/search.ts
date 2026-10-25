@@ -59,7 +59,9 @@ export class IndexAbandoned extends Error {
 }
 
 /** A page as the index holds it, for what reads its properties (`PageIndex`). */
-export type IndexedEntry = Readonly<SearchPage> & {
+export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
+  readonly folderIds: readonly FolderId[];
+  readonly path: readonly (string | null)[];
   readonly title: string;
   readonly properties: readonly PropertyData[];
 };
@@ -88,8 +90,9 @@ export type PageScope = {
  * It doesn't change once built: as pages change, a newer index stands in
  * for it (`usePageIndex`, in the app). Pages are listed in the order the
  * space's tree lists them. The first read groups them, in time linear in
- * the index; after that `page` takes constant time, `list` time linear in
- * the space's pages, and `keys` in their properties too.
+ * the index; after that `page` takes constant time, and `list` and `keys`
+ * time linear in the space's pages, their folders' depth when `nested`,
+ * and their properties when matching a `tag` or giving keys.
  */
 export class PageIndex extends SearchIndex<SearchPage> {
   #bySpace: Map<SpaceId, IndexedEntry[]> | null = null;
