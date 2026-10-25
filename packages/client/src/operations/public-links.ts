@@ -8,7 +8,16 @@ import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
 import { findWikilinks, foldTitle, linkablePages } from '../links.ts';
-import { splitFrontmatter } from '../markdown/index.ts';
+import {
+  findProperty,
+  markdownLiteral,
+  markdownNodes,
+  parseMarkdown,
+  parsePropertyReference,
+  propertyText,
+  readProperties,
+  splitFrontmatter,
+} from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
 import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
@@ -29,6 +38,35 @@ export async function turnOff(ctx: ClientContext, pageId: PageId) {
 /** The space's pages with a link on, as the server tells this person (`ListedLink`). */
 export async function list(ctx: ClientContext, spaceId: SpaceId) {
   return (await ctx.api.call(publicLinkRoutes.list, { params: { spaceId } })).links;
+}
+
+/**
+ * The Markdown a public copy holds (ADR 0006, decision 9): the page's
+ * body without its frontmatter, each reference to one of its values
+ * (`` `=servings` ``) written in as the value's text, escaped so that it
+ * reads as just that text, never as Markdown or HTML; a web address in
+ * it is still linked, as GFM links one in any text. Dates go as written,
+ * as the copy has no reader's locale. A reference that names no
+ * property, or a page whose block doesn't read, stays as written.
+ */
+export function copyBody(markdown: string): string {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  const read = readProperties(frontmatter);
+  if (!read.ok || read.properties.length === 0) return body;
+  let copy = '';
+  let at = 0;
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type !== 'inlineCode' || !node.position) continue;
+    const reference = parsePropertyReference(node.value);
+    const property = reference && findProperty(read.properties, reference.name);
+    const start = node.position.start.offset;
+    const end = node.position.end.offset;
+    if (!property || start === undefined || end === undefined || start < at) continue;
+    copy +=
+      body.slice(at, start) + markdownLiteral(propertyText(property, { dates: 'as-written' }));
+    at = end;
+  }
+  return copy + body.slice(at);
 }
 
 /** A page body's attachments it shows or links to, in the order the server's reader finds them. */
@@ -140,7 +178,7 @@ export async function shareCopy(
     body: {
       revisionId,
       title: payload.title,
-      markdown: body,
+      markdown: copyBody(payload.markdown),
       attachments: attachments.map(({ id, name, mediaType, size }) => ({
         id,
         name,
