@@ -13,14 +13,17 @@ export const SearchOpener = createContext<((query: string) => void) | null>(null
  * address, so opening it in another tab, or copying it, opens search there
  * too, after unlocking if that comes first (`withoutSearchHash`). The query stays in the fragment, which the browser
  * never sends: it comes from pages the server can't read. `filterQuery`
- * writes a filter's query.
+ * writes a filter's query. `hint` says what it opens, where its text alone
+ * doesn't, as a hint and to a screen reader.
  */
 export function SearchLink({
   query,
+  hint,
   className,
   children,
 }: {
   query: string;
+  hint?: string;
   className?: string;
   children: ReactNode;
 }) {
@@ -41,6 +44,7 @@ export function SearchLink({
       // The page's own address, which isn't the page as it is (`aria-current`) by its fragment.
       activeOptions={{ includeHash: true }}
       onClick={onClick}
+      {...(hint === undefined ? {} : { 'data-hint': hint, 'aria-description': hint })}
       {...(className === undefined ? {} : { className })}
     >
       {children}

@@ -184,10 +184,17 @@ export function tagQuery(item: PropertyValue): string | null {
   return filterQuery('tag', String(item as PropertyScalar)) || null;
 }
 
+/** What a tag's link opens, as its hint says: `Search tag:soup`. */
+export const tagHint = (query: string) => `Search ${query}`;
+
 /** A pill that opens its tag's search over the page (`SearchLink`), underlined on hover. */
 export function TagPill({ query, children }: { query: string; children: ReactNode }) {
   return (
-    <SearchLink query={query} className={cn(PILL, 'underline-offset-2 hover:underline')}>
+    <SearchLink
+      query={query}
+      hint={tagHint(query)}
+      className={cn(PILL, 'underline-offset-2 hover:underline')}
+    >
       {children}
     </SearchLink>
   );

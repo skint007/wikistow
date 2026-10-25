@@ -190,6 +190,10 @@ it('opens a tag’s search from its pill on the published view, staying on the p
   expect(links(container)).toEqual(['soup', 'soup kitchen', 'winter']);
   // Its address is the page's own, but it isn't the page.
   expect(tagLink(container, 'soup').getAttribute('aria-current')).toBeNull();
+  // It says what it opens, which its text alone doesn't.
+  expect(tagLink(container, 'soup kitchen').getAttribute('aria-description')).toBe(
+    'Search tag:"soup kitchen"',
+  );
   expect(linkedSearch(new URL(tagLink(container, 'soup kitchen').href).hash)).toBe(
     'tag:"soup kitchen"',
   );
@@ -208,6 +212,7 @@ it('opens a tag’s search from the draft’s pill, its remove button still remo
     <Draft initial={'---\ntags: [soup, winter]\n---\n'} blocks={blocks} />,
   );
   const soup = tagLink(container, 'soup');
+  expect(soup.getAttribute('data-hint')).toBe('Search tag:soup');
   await userEvent.click(soup);
   await expect.poll(searchBox).toBe('tag:soup');
   await expect.poll(titles).toEqual(['Bean soup', 'Pea soup']);

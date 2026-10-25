@@ -35,6 +35,7 @@ import {
   PropertyPill,
   PropertyValueView,
   ROW,
+  tagHint,
   tagQuery,
   TagPill,
   WikilinkChip,
@@ -417,13 +418,14 @@ function ListField({
         const query = tagSearch ? tagQuery(item) : null;
         return (
           // A tag's text, its padding too, is its link.
-          <PropertyPill key={i} className={cn('gap-0.5 pr-0.5', query !== null && 'pl-0')}>
+          <PropertyPill key={i} className={cn('gap-0.5 pr-0.5', query !== null && 'py-0 pl-0')}>
             {query === null ? (
               shown
             ) : (
               <SearchLink
                 query={query}
-                className="rounded-full pl-2 underline-offset-2 hover:underline"
+                hint={tagHint(query)}
+                className="rounded-full py-0.5 pl-2 underline-offset-2 hover:underline"
               >
                 {shown}
               </SearchLink>
