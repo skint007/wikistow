@@ -38,6 +38,14 @@ export function usePublicLink(page: pageOperations.PageRef) {
   return data?.find((link) => link.pageId === page.pageId) ?? null;
 }
 
+/** Said, rather than uploading, when a version shows values from other pages the dialog hadn't noted. */
+const UNNOTED =
+  'This page shows values from other pages, which the public page would show too. Read the note, then try again.';
+
+/** Whether a copy of `markdown` shows values from other pages. */
+const showsOthers = (markdown: string | null | undefined) =>
+  markdown != null && publicLinkOperations.fromOtherPages(markdown).values;
+
 /**
  * What a public copy of `markdown` shows of other pages, said where a copy
  * is made: anyone with the link can read it too, as it was at the publish.
@@ -141,7 +149,16 @@ function LinkSteps({
   const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
   const publishedHead = tree?.pages.find((p) => p.id === page.pageId)?.publishedHead;
   const unpublished = publishedHead === null;
-  const published = usePublishedMarkdown(page, publishedHead);
+  const opened = usePublishedMarkdown(page, publishedHead);
+  // A version opened to upload that the note hadn't been worked out from, once shown.
+  const [seen, setSeen] = useState<{ revisionId: RevisionId; markdown: string } | null>(null);
+  const published =
+    seen && (seen.revisionId !== publishedHead || opened.markdown === null)
+      ? { markdown: seen.markdown, settled: true }
+      : opened;
+  const noted = (revisionId: RevisionId) =>
+    seen?.revisionId === revisionId ||
+    (revisionId === publishedHead && showsOthers(opened.markdown));
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(publicLinkMessage);
   // What's running, said as it goes.
@@ -154,6 +171,12 @@ function LinkSteps({
       try {
         // Opened first, so a version this app can't read turns no link on.
         const published = await publicLinkOperations.openPublished(ctx, page);
+        // The version the note was worked out from may not be this one.
+        const { markdown } = published.payload;
+        if (showsOthers(markdown) && !noted(published.revisionId)) {
+          setSeen({ revisionId: published.revisionId, markdown });
+          throw new Error(UNNOTED);
+        }
         if (turnOn) {
           setStep('Turning on the link…');
           await publicLinkOperations.turnOn(ctx, page.pageId);
@@ -427,6 +450,10 @@ function PublishSteps({
           version = await publish();
         } finally {
           setStep(null);
+        }
+        // Published, but its copy waits until the note is on screen for it.
+        if (showsOthers(version.payload.markdown) && !showsOthers(markdown)) {
+          throw new Error(`Published. ${UNNOTED}`);
         }
       }
       setStep('Updating the public page…');
