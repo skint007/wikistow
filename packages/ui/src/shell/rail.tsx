@@ -51,6 +51,7 @@ import { isApple } from './search-model';
 import { SpaceIcon } from './space-look';
 import { RowMenu } from './tree-menus';
 import { useVault, vaultStore, type VaultState } from '../vault/store';
+import { takeHeldSearch } from './search-link';
 
 // The running build's version, set by the web app's Vite config.
 declare const __APP_VERSION__: string;
@@ -442,6 +443,8 @@ export function useSignOut() {
       return;
     }
     await desktop?.signedOut();
+    // A search a link asked for was this person's, not the next one's.
+    takeHeldSearch();
     await navigate({ to: '/sign-in' });
     queryClient.clear();
   }, [navigate, queryClient]);

@@ -5,6 +5,7 @@ import {
   linkTableOf,
   readProperties,
   setProperty,
+  tagProperties,
   splitFrontmatter,
   type FolderId,
   type LinkablePage,
@@ -534,6 +535,8 @@ function ListItem({
 }) {
   const { links } = useShownRevision(spaceId, entry, undefined, editsDraft(canEdit, treePage));
   const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  // Tags link to their search, as the page's rows do.
+  const tags = tagProperties(entry.properties);
   const values = columns
     .map((column) => ({ column, property: valueIn(entry.properties, column) }))
     .filter(
@@ -550,7 +553,11 @@ function ListItem({
                 {column.label}
               </dt>
               <dd className="min-w-0">
-                <PropertyValueView property={property} scope={scope} />
+                <PropertyValueView
+                  property={property}
+                  scope={scope}
+                  tagSearch={tags.includes(property)}
+                />
               </dd>
             </div>
           ))}
@@ -732,7 +739,15 @@ function PageRow({
         const problem = edits.problem(entry.pageId, column.key);
         let cell: ReactNode;
         if (!editable || properties === null || version === null) {
-          cell = value ? <PropertyValueView property={value} scope={scope} /> : <Blank />;
+          cell = value ? (
+            <PropertyValueView
+              property={value}
+              scope={scope}
+              tagSearch={tagProperties(entry.properties).includes(value)}
+            />
+          ) : (
+            <Blank />
+          );
         } else if (!properties.ok) {
           cell = (
             <OpensPage spaceId={spaceId} pageId={entry.pageId} why={properties.reason}>
@@ -750,6 +765,7 @@ function PageRow({
               </OpensPage>
             ) : property.editable && !multiline ? (
               <ValueField
+                tagSearch={tagProperties(properties.properties).includes(property)}
                 property={property}
                 label={`${column.label} of ${pageTitle(entry.title)}`}
                 scope={scope}

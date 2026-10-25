@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   hasTag,
   markdownNodes,
+  matchesFilter,
   parseMarkdown,
+  parseSearch,
   propertyData,
   SearchIndex,
+  searchFilter,
   searchTerms,
   searchText,
+  tagProperties,
 } from '../src/index.ts';
-import { growth } from './support/timing.ts';
+import { cpuTime, growth } from './support/timing.ts';
 
 function indexOf(pages: Record<string, string>) {
   const index = new SearchIndex<string>();
@@ -105,8 +109,14 @@ describe('tags', () => {
     expect(tagged('tags: [[soup], winter]', 'soup')).toBe(true);
     expect(tagged('tags: "#soup"', 'soup')).toBe(true);
     expect(tagged('tags: soup', '#soup')).toBe(true);
-    // The key is named as a reference names it.
+    // The key is named as a reference names it, and Obsidian's older `tag` is tags too.
     expect(tagged('Tags: soup', 'soup')).toBe(true);
+    expect(tagged('tag: [soup]', 'soup')).toBe(true);
+    expect(tagged('tags: winter\ntag: soup', 'soup')).toBe(true);
+    // `tags:` is a tag filter too.
+    expect(
+      matchesFilter(propertyData('---\ntag: "#Soup"\n---\n'), { key: 'tags', value: 'soup' }),
+    ).toBe(true);
   });
 
   it('match only a whole tag, in tags', () => {
@@ -119,6 +129,226 @@ describe('tags', () => {
     // The first key a reference would take is the one read.
     expect(tagged('tags: winter\nTags: soup', 'soup')).toBe(false);
     expect(hasTag([], 'soup')).toBe(false);
+  });
+
+  it('are in the properties a reference would find first as tags and tag', () => {
+    const keys = (yaml: string) =>
+      tagProperties(propertyData(`---\n${yaml}\n---\n`)).map(({ key }) => key);
+    expect(keys('TAG: x\nnotes: y\nTags: [a]\ntags: b')).toEqual(['Tags', 'TAG']);
+    expect(keys('category: soup')).toEqual([]);
+  });
+});
+
+describe('filters in a query', () => {
+  it('are a name, a colon and a value, the value in quotes if it has spaces', () => {
+    expect(parseSearch('tag:soup')).toEqual({
+      words: '',
+      filters: [{ key: 'tag', value: 'soup' }],
+    });
+    expect(parseSearch('bean status:"in progress" tag:Soup soup')).toEqual({
+      words: 'bean soup',
+      filters: [
+        { key: 'status', value: 'in progress' },
+        { key: 'tag', value: 'Soup' },
+      ],
+    });
+    expect(parseSearch('cook_time:40 cook-time:"4 0"').filters).toEqual([
+      { key: 'cook_time', value: '40' },
+      { key: 'cook-time', value: '4 0' },
+    ]);
+    expect(parseSearch('note:"say \\"hi\\" \\\\ bye"').filters).toEqual([
+      { key: 'note', value: 'say "hi" \\ bye' },
+    ]);
+    // Any other backslash is itself.
+    expect(parseSearch('path:"C:\\Users\\n"').filters).toEqual([
+      { key: 'path', value: 'C:\\Users\\n' },
+    ]);
+    // As a phone's keyboard writes quotes.
+    expect(parseSearch('status:“in progress” note:„a b“ x:“c d" y:„w toku” zupa')).toEqual({
+      words: 'zupa',
+      filters: [
+        { key: 'status', value: 'in progress' },
+        { key: 'note', value: 'a b' },
+        { key: 'x', value: 'c d' },
+        { key: 'y', value: 'w toku' },
+      ],
+    });
+    // A quote not closed runs to the end, as one being typed does.
+    expect(parseSearch('status:"in prog').filters).toEqual([{ key: 'status', value: 'in prog' }]);
+  });
+
+  it('leave words, quoted words and half-typed filters be', () => {
+    expect(parseSearch('tag:')).toEqual({ words: '', filters: [] });
+    expect(parseSearch('tag:#')).toEqual({ words: '', filters: [] });
+    expect(parseSearch('tags:"#"')).toEqual({ words: '', filters: [] });
+    // Only at the end: elsewhere, a name and a colon are words.
+    expect(parseSearch('Re: dinner tag:')).toEqual({ words: 'Re: dinner', filters: [] });
+    expect(parseSearch('soup status:""')).toEqual({ words: 'soup', filters: [] });
+    expect(parseSearch('"10:30" "https://example.com" (tag:soup) :x')).toEqual({
+      words: '"10:30" "https://example.com" (tag:soup) :x',
+      filters: [],
+    });
+    expect(parseSearch('  ').filters).toEqual([]);
+    // A time and a web address are words, unquoted too.
+    expect(parseSearch('10:30 https://example.com/recipe tag:soup')).toEqual({
+      words: '10:30 https://example.com/recipe',
+      filters: [{ key: 'tag', value: 'soup' }],
+    });
+    // In any digits.
+    expect(parseSearch('١٠:٣٠ १०:३० １０:３０').filters).toEqual([]);
+    expect(parseSearch('url:"//example.com"').filters).toEqual([
+      { key: 'url', value: '//example.com' },
+    ]);
+  });
+
+  it('are read in time linear in the query', () => {
+    const query = (n: number) =>
+      `${'tag:soup word "quoted words" '.repeat(n)}status:"${'x'.repeat(n)}`;
+    // 8 times the query; quadratic would be 64.
+    expect(growth((q) => parseSearch(q), query(2000), query(16_000))).toBeLessThan(24);
+    expect(cpuTime(() => parseSearch(`a${'_'.repeat(200_000)}`)).ms).toBeLessThan(500);
+    // Names with no value, before a long run of spaces.
+    const empty = (n: number) => `${'a: '.repeat(n)}z${' '.repeat(10 * n)}`;
+    expect(growth((q) => parseSearch(q), empty(2000), empty(16_000))).toBeLessThan(24);
+  });
+
+  it('can be written for a key and value, quoted where they need it', () => {
+    expect(searchFilter('tag', 'soup')).toBe('tag:soup');
+    expect(searchFilter('status', 'in progress')).toBe('status:"in progress"');
+    expect(searchFilter('cook time', '40')).toBe('cook_time:40');
+    expect(searchFilter('note', 'say "hi" \\ bye')).toBe('note:"say \\"hi\\" \\\\ bye"');
+    expect(searchFilter('a.b', 'x')).toBeNull();
+    expect(searchFilter('tag', ' ')).toBeNull();
+    expect(searchFilter('tags', '#')).toBeNull();
+    // A name of digits alone would read as a time, so no filter has one.
+    expect(searchFilter('2024', 'x')).toBeNull();
+    expect(searchFilter('２０２４', 'x')).toBeNull();
+    expect(searchFilter('url', '//example.com')).toBe('url:"//example.com"');
+    expect(searchFilter('tag', '“odd')).toBe('tag:"“odd"');
+    expect(parseSearch(searchFilter('tag', '“odd') ?? '').filters).toEqual([
+      { key: 'tag', value: '“odd' },
+    ]);
+    for (const [key, value] of [
+      ['status', 'in progress'],
+      ['note', 'say "hi" \\ bye'],
+      ['tag', 'soup'],
+    ] as const) {
+      expect(parseSearch(searchFilter(key, value) ?? '').filters).toEqual([{ key, value }]);
+    }
+  });
+});
+
+describe('matching a filter', () => {
+  const props = propertyData(
+    [
+      '---',
+      'status: In Progress',
+      'servings: 4',
+      'tried: true',
+      'cook_time: 40',
+      'made: 2026-10-01',
+      'cuisine: [Italian, "Crème"]',
+      'goes_with: "[[Garlic bread]]"',
+      'side: "[[Recipes/Green salad|salad]]"',
+      'empty:',
+      'tags: soup',
+      '---',
+      '',
+    ].join('\n'),
+  );
+  const passes = (key: string, value: string) => matchesFilter(props, { key, value });
+
+  it('finds a key as a reference does, and its value whatever its case', () => {
+    expect(passes('status', 'in progress')).toBe(true);
+    expect(passes('Cook time', '40')).toBe(true);
+    expect(passes('cook-time', '40')).toBe(true);
+    expect(passes('servings', '4')).toBe(true);
+    expect(passes('servings', '4.0')).toBe(true);
+    expect(passes('tried', 'TRUE')).toBe(true);
+    expect(passes('made', '2026-10-01')).toBe(true);
+    expect(passes('cuisine', 'italian')).toBe(true);
+    expect(passes('cuisine', 'creme')).toBe(true);
+    expect(passes('goes_with', 'garlic bread')).toBe(true);
+    expect(passes('goes_with', '[[Garlic bread]]')).toBe(true);
+    expect(passes('side', 'green salad')).toBe(true);
+    expect(passes('side', 'Recipes/Green salad')).toBe(true);
+    expect(passes('side', 'recipes')).toBe(false);
+    expect(passes('tag', 'Soup')).toBe(true);
+  });
+
+  it('matches whole values only', () => {
+    expect(passes('status', 'progress')).toBe(false);
+    expect(passes('servings', '44')).toBe(false);
+    expect(passes('servings', 'four')).toBe(false);
+    expect(passes('cuisine', 'Italian, Crème')).toBe(false);
+    expect(passes('empty', 'null')).toBe(false);
+    expect(passes('missing', 'x')).toBe(false);
+    expect(passes('tag', 'italian')).toBe(false);
+    // An empty filter passes nothing, not even an empty text.
+    const empty = propertyData('---\nstatus: ""\n---\n');
+    expect(matchesFilter(empty, { key: 'status', value: '' })).toBe(false);
+    expect(passes('status', ' ')).toBe(false);
+  });
+});
+
+describe('a search with filters', () => {
+  const index = indexOf({
+    'Bean soup': '---\ntags: [soup, winter]\nstatus: tried\n---\nBeans and stock.',
+    'Pea soup': '---\ntags: soup\nstatus: in progress\n---\nPeas, mint, stock.',
+    Bread: '---\ntags: [bread]\n---\nFlour and stock of yeast.',
+    'Soup notes': 'Soup without tags.',
+  });
+
+  it('finds pages passing every filter, alone or with words, by title when alone', () => {
+    expect(found(index, 'tag:soup')).toEqual(['Bean soup', 'Pea soup']);
+    expect(found(index, 'tag:SOUP tag:winter')).toEqual(['Bean soup']);
+    expect(found(index, 'status:"in progress"')).toEqual(['Pea soup']);
+    expect(found(index, 'mint tag:soup')).toEqual(['Pea soup']);
+    expect(found(index, 'stock tag:soup')).toEqual(['Bean soup', 'Pea soup']);
+    expect(found(index, 'stock tag:bread')).toEqual(['Bread']);
+    expect(found(index, 'flour tag:soup')).toEqual([]);
+    expect(found(index, 'tag:nothing')).toEqual([]);
+    // A half-typed filter is left out: the words still search.
+    expect(found(index, 'soup tag:')).toEqual(['Bean soup', 'Pea soup', 'Soup notes']);
+    expect(found(index, 'tag:')).toEqual([]);
+  });
+
+  it('marks the title by words only, and with filters alone the snippet by their values', () => {
+    const [hit] = index.search('tag:winter');
+    expect(hit?.score).toBe(0);
+    expect(hit?.title.highlights).toEqual([]);
+    const snippet = hit?.snippet();
+    expect(snippet?.text).toContain('winter');
+    const marked = snippet?.highlights.map(({ start, end }) => snippet.text.slice(start, end));
+    expect(marked).toEqual(['winter']);
+    const [worded] = index.search('mint tag:soup');
+    expect(worded?.title.highlights).toEqual([]);
+    expect(worded?.snippet().highlights).toHaveLength(1);
+  });
+
+  it('takes time linear in the pages it tries', () => {
+    const pages = (n: number) =>
+      indexOf(
+        Object.fromEntries(
+          Array.from({ length: n }, (_, i) => [
+            `Page ${i}`,
+            `---\ntags: [t${i % 7}, soup]\nn: ${i}\n---\nText ${i}`,
+          ]),
+        ),
+      );
+    const [small, large] = [pages(500), pages(4000)];
+    const run = (size: string) =>
+      (size === 's' ? small : large).search('tag:soup n:3', { limit: 50 });
+    // 8 times the pages; quadratic would be 64.
+    expect(growth(run, 's', 'l')).toBeLessThan(24);
+    // A filter is read once, not for each page, and the same one only once.
+    const long = `n:${'é'.repeat(20_000)}`;
+    expect(cpuTime(() => large.search(long)).ms).toBeLessThan(500);
+    expect(cpuTime(() => large.search('tag:soup '.repeat(300))).ms).toBeLessThan(500);
+    // Every page passes, so all are sorted by title: n log n.
+    const all = (size: string) => (size === 's' ? small : large).search('tag:soup', { limit: 50 });
+    expect(all('l')).toHaveLength(50);
+    expect(growth(all, 's', 'l')).toBeLessThan(24);
   });
 });
 

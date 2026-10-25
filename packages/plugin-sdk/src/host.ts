@@ -51,7 +51,11 @@ export interface Pages {
   /** The draft where the person edits the page, else its published version. */
   read(page: PageRef): Promise<PageVersion>;
   list(folder: FolderRef): Promise<FolderEntry[]>;
-  /** Pages within the plugin's access whose text matches, best first. */
+  /**
+   * Pages within the plugin's access whose text matches, best first. Words
+   * may come with filters on properties, as in the app's search: `tag:soup`,
+   * `status:"in progress"`.
+   */
   search(text: string, options?: { limit?: number | undefined }): Promise<SearchResult[]>;
   create(
     folder: FolderRef,

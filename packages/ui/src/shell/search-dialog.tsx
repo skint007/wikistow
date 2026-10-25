@@ -16,19 +16,25 @@ type Hit = SearchHit<searchOperations.SearchPage>;
 const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
 
 /**
- * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple). The index is built
- * on this device from the pages this person can read (`usePageIndex`),
- * with its progress shown until it is ready. Up and down move through the
- * results, Enter or a click opens one: its draft, for a draft hit. A copy
- * unpublished where it is opens as its page does, at its last publication.
+ * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple), or
+ * opened with `query` from a link (`SearchLink`). Words search titles and
+ * text, and filters properties: `tag:soup`, `status:"in progress"`
+ * (`parseSearch`). The index is built on this device from the pages this
+ * person can read (`usePageIndex`), with its progress shown until it is
+ * ready. Up and down move through the results, Enter or a click opens one:
+ * its draft, for a draft hit. A copy unpublished where it is opens as its
+ * page does, at its last publication.
  */
 export function SearchDialog({
   ctx,
   open,
+  query = '',
   onOpenChange,
 }: {
   ctx: ClientContext;
   open: boolean;
+  /** What it opens with. */
+  query?: string;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
@@ -36,18 +42,27 @@ export function SearchDialog({
       <DialogContent dialogClassName="sm:max-w-xl" className="grid gap-3 p-4 pt-5">
         <DialogTitle className="sr-only">Search</DialogTitle>
         <DialogDescription className="sr-only">
-          Titles and text of the pages you can read, searched on this device.
+          Titles, text and properties of the pages you can read, searched on this device.
         </DialogDescription>
-        <SearchBody ctx={ctx} onDone={() => onOpenChange(false)} />
+        {/* Opened again with another query, as by a link, it starts over with it. */}
+        <SearchBody key={query} ctx={ctx} initial={query} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void }) {
+function SearchBody({
+  ctx,
+  initial,
+  onDone,
+}: {
+  ctx: ClientContext;
+  initial: string;
+  onDone: () => void;
+}) {
   const navigate = useNavigate();
   const { index, progress, error, updating, retry } = usePageIndex(ctx);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initial);
   const deferred = useDeferredValue(query);
   const results = useMemo(() => index?.search(deferred, { limit: 50 }) ?? [], [index, deferred]);
   // The hit chosen for a query, by its page, so the index rebuilding as
@@ -98,6 +113,7 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
           autoFocus
           {...notCredential}
           spellCheck={false}
+          maxLength={1000}
           placeholder="Search pages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

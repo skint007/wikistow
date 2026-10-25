@@ -332,9 +332,7 @@ describe('a folder’s view', () => {
     await userEvent.click(button(container, /^Servings of Tomato soup: 4/));
     // Tab leaves the field, which saves it, on to the next cell's control.
     await userEvent.keyboard('{Control>}a{/Control}6{Tab}');
-    expect(document.activeElement?.getAttribute('aria-label')).toBe(
-      'Remove soup from Tags of Tomato soup',
-    );
+    expect(document.activeElement?.closest('td')?.dataset['cell']).toBe(`${SOUP.id} tags`);
     await userEvent.click(
       container.querySelector('input[aria-label="Add to Tags of Tomato soup"]')!,
     );

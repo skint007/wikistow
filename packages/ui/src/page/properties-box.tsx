@@ -4,6 +4,7 @@ import {
   removeProperty,
   renameProperty,
   setProperty,
+  tagProperties,
   type Property,
   type PropertyEdit,
   type PropertyValue,
@@ -61,6 +62,7 @@ export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; sco
   if (properties.length === 0) return null;
   const more = properties.length - SHOWN_ROWS;
   const shown = all || more <= 0 ? properties : properties.slice(0, SHOWN_ROWS);
+  const tags = tagProperties(properties);
   return (
     <section aria-label="Properties" className={cn(PANEL, READ)}>
       <dl className="grid">
@@ -68,7 +70,11 @@ export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; sco
           <div key={property.key} className={ROW}>
             <PropertyKey property={property} />
             <dd className="min-w-0">
-              <PropertyValueView property={property} scope={scope} />
+              <PropertyValueView
+                property={property}
+                scope={scope}
+                tagSearch={tags.includes(property)}
+              />
             </dd>
           </div>
         ))}
@@ -172,6 +178,7 @@ export function PropertiesEditor({
   }
   const { properties } = read;
   const label = (property: Property) => propertyLabel(property.key);
+  const tags = tagProperties(properties);
   const focusFor = (key: string) => (at: RowFocus | null) => setFocusing(at ? { key, at } : null);
   return (
     <section aria-label="Properties" className={cn(PANEL, EDITED)}>
@@ -191,6 +198,7 @@ export function PropertiesEditor({
               onFocus={focusFor(property.key)}
               lock={locks.get(property.key) ?? ''}
               referable={referable(property, properties)}
+              tagSearch={tags.includes(property)}
               onSet={(value: PropertyValue) =>
                 apply(setProperty(frontmatter, property.key, value), label(property))
               }

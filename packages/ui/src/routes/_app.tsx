@@ -5,6 +5,7 @@ import { meQuery } from '../api';
 import { ReauthProvider } from '../auth/reauth';
 import { desktop } from '../desktop';
 import { AppShell } from '../shell/app-shell';
+import { withoutSearchHash } from '../shell/search-link';
 import { idleTooLong, useIdleLock } from '../vault/idle-lock';
 import { restoreInTab } from '../vault/open';
 import { forgetKeptUnlock, vaultStore } from '../vault/store';
@@ -17,7 +18,11 @@ export const Route = createFileRoute('/_app')({
       // The session ended while nobody was here (revoked from another
       // device, say): the kept unlock goes with it.
       await forgetKeptUnlock();
-      throw redirect({ to: '/sign-in', search: { redirect: location.href } });
+      // A search the address asks for isn't kept for whoever signs in.
+      throw redirect({
+        to: '/sign-in',
+        search: { redirect: withoutSearchHash(location.href, { hold: false }) },
+      });
     }
     // After a refresh, a browser tab opens the vault it kept, whichever page
     // it is on, unless it was left idle past the lock delay. The desktop app
@@ -42,7 +47,10 @@ function AppLayout() {
   useEffect(() => {
     if (me !== null) return;
     vaultStore.lock();
-    void navigate({ to: '/sign-in', search: { redirect: router.state.location.href } });
+    void navigate({
+      to: '/sign-in',
+      search: { redirect: withoutSearchHash(router.state.location.href, { hold: false }) },
+    });
   }, [me, navigate, router]);
   // Locks after the delay chosen in Settings with nobody using the app.
   useIdleLock();
