@@ -51,6 +51,13 @@ export function formatPropertyDate(
   }
 }
 
+/** A key in sentence case, as written otherwise: `cook_time` reads "Cook time". */
+export function propertyLabel(key: string): string {
+  const words = key.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const [first = ''] = words;
+  return words === '' ? key : first.toLocaleUpperCase() + words.slice(first.length);
+}
+
 const scalarText = (value: PropertyScalar) => (value === null ? '' : String(value));
 
 /** The text a wikilink value shows: its own text, else its page and heading. */

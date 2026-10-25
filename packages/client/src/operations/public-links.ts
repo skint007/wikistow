@@ -6,7 +6,7 @@ import { publicLinkRoutes, type PageId, type RevisionId, type SpaceId } from '@w
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
-import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
+import { linkKey, linkTableOf, resolveLinked, writableInLink } from '../link-table.ts';
 import {
   findWikilinks,
   foldTitle,
@@ -21,6 +21,7 @@ import {
   mayReferOtherPages,
   parseMarkdown,
   parsePropertyReference,
+  propertyLabel,
   propertyText,
   readProperties,
   splitFrontmatter,
@@ -29,6 +30,13 @@ import {
   type Wikilink,
 } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
+import {
+  parsePageQuery,
+  QUERY_LANGUAGE,
+  runPageQuery,
+  type QueryPage,
+  type QueryRow,
+} from '../query.ts';
 import { sameRegion } from '../regions.ts';
 import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
@@ -40,6 +48,7 @@ import {
   readAttachment,
   type PageRef,
 } from './pages.ts';
+import { nameOf } from './search.ts';
 import type { ClientContext } from './session.ts';
 import { loadTree } from './spaces.ts';
 
@@ -83,13 +92,26 @@ export type OtherValues = (page: Wikilink) => readonly PropertyData[] | undefine
  * (a paragraph, heading or table cell) with a value written in is escaped
  * too, which leaves it the text it was.
  */
-export function copyBody(markdown: string, others: OtherValues = () => undefined): string {
+export function copyBody(
+  markdown: string,
+  others: OtherValues = () => undefined,
+  tables: QueryTables = () => undefined,
+): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   const read = readProperties(frontmatter);
   const own = read.ok ? read.properties : [];
-  if (own.length === 0 && !mayReferOtherPages(body)) return body;
+  if (own.length === 0 && !mayReferOtherPages(body) && !body.includes(QUERY_LANGUAGE)) return body;
   const edits: { start: number; end: number; text: string }[] = [];
   for (const block of markdownNodes(parseMarkdown(body))) {
+    if (block.type === 'code' && block.lang === QUERY_LANGUAGE) {
+      const table = tables(block.value);
+      const start = block.position?.start.offset;
+      const end = block.position?.end.offset;
+      if (table && start !== undefined && end !== undefined) {
+        edits.push({ start, end, text: tableIn(body, start, end, table) });
+      }
+      continue;
+    }
     if (block.type !== 'paragraph' && block.type !== 'heading' && block.type !== 'tableCell') {
       continue;
     }
@@ -131,6 +153,28 @@ export function copyBody(markdown: string, others: OtherValues = () => undefined
   return copy + body.slice(at);
 }
 
+/**
+ * `table`'s lines in place of the block from `start` to `end` of `body`,
+ * inside whatever holds it: each line after the first starts as the
+ * block's first line does before it, a list item's marker as spaces, a
+ * quote's `>` kept. With a blank line before it where text ends just
+ * above, and after it where text starts just below, so neither is read as
+ * part of the table.
+ */
+function tableIn(body: string, start: number, end: number, table: readonly string[]): string {
+  const lineStart = body.lastIndexOf('\n', start - 1) + 1;
+  const prefix = body.slice(lineStart, start).replace(/[^>\s]/g, ' ');
+  const gap = prefix.trimEnd();
+  const blank = (line: string) => line.replace(/[>\s]/g, '') === '';
+  const lineBefore =
+    lineStart === 0 ? '' : body.slice(body.lastIndexOf('\n', lineStart - 2) + 1, lineStart - 1);
+  const after = body.slice(end);
+  const lineAfter = after.startsWith('\n') ? (after.slice(1).split('\n', 1)[0] ?? '') : '';
+  const before = lineStart === 0 || blank(lineBefore) || prefix.trim() !== '' ? '' : `\n${gap}`;
+  const closing = after.startsWith('\n') && !blank(lineAfter) ? `\n${gap}` : '';
+  return `${before}${table.join(`\n${prefix}`)}${closing}`;
+}
+
 /** The pages a body's references to other pages' values name (`` `=[[Page]].key` ``), in order. */
 function referencedPages(body: string): ReferencedPage[] {
   if (!mayReferOtherPages(body)) return [];
@@ -146,10 +190,12 @@ function referencedPages(body: string): ReferencedPage[] {
 /**
  * What a public copy of `markdown` shows of other pages, which the public
  * link dialog and the Publish confirmation say anyone with the link can
- * read: `values`, when a reference in its body names another page's value.
+ * read: `values`, when a reference in its body names another page's
+ * value, and `lists`, when it holds a query table.
  */
-export function fromOtherPages(markdown: string): { values: boolean } {
-  return { values: referencedPages(splitFrontmatter(markdown).body).length > 0 };
+export function fromOtherPages(markdown: string): { values: boolean; lists: boolean } {
+  const { body } = splitFrontmatter(markdown);
+  return { values: referencedPages(body).length > 0, lists: queryBlocks(body).length > 0 };
 }
 
 /**
@@ -183,17 +229,7 @@ async function otherValues(
     if (!found) opened.set(pageId, (found = publication(ctx, page, pageId, summaries)));
     return found;
   };
-  const summaries = new Map<string, (typeof loaded.pages)[number]>(
-    loaded.pages.map((summary) => [summary.id, summary]),
-  );
-  // The copied version's region, as its key material puts it; none where it can't be told.
-  const region = summaries.get(page.pageId)?.region ?? null;
-  const reached = (pageId: string) => {
-    const there = summaries.get(pageId)?.region;
-    return region !== null && (region.kind === 'owner' || (!!there && sameRegion(there, region)));
-  };
-  const published = (pageId: string) =>
-    pageId === page.pageId || (!!summaries.get(pageId)?.publishedHead && reached(pageId));
+  const { summaries, published, folders } = audienceOf(loaded, page);
   const table = linkTableOf(payload);
   // A link whose entry names a published page goes there, as a reader's does.
   const chosen = new Map<string, string>();
@@ -204,19 +240,7 @@ async function otherValues(
   const untabled = links.filter((link) => !chosen.has(linkKey(link)));
   if (untabled.length > 0) {
     // Every page it reaches under its published title; this page under the copied version's.
-    // A share's readers see no folder above its root.
-    const root =
-      region?.kind === 'share'
-        ? loaded.shares.find(
-            (share) => share.spaceId === region.spaceId && share.shareId === region.shareId,
-          )?.rootId
-        : undefined;
-    const linkable = linkablePages({
-      folders: loaded.folders.map((folder) =>
-        folder.id === root ? { ...folder, parentId: null } : folder,
-      ),
-      pages: loaded.pages,
-    });
+    const linkable = linkablePages({ folders, pages: loaded.pages });
     const changed = loaded.pages.filter(
       (summary) =>
         summary.id !== page.pageId &&
@@ -263,6 +287,177 @@ async function otherValues(
     if (found) values.set(key, found);
   }
   return (link) => values.get(linkKey(link));
+}
+
+type LoadedTree = Awaited<ReturnType<typeof loadTree>>;
+
+/**
+ * What a public copy of `page` may show of other pages: those everyone
+ * who can open its version can open, as its link table names only those.
+ * Any page in the owner region, which only owners read, who hold every
+ * key; else those in its share. `published` says whether a page is one of
+ * those with a publication, or `page` itself; `folders` are the tree's,
+ * starting at the share's root for a share, where its readers' start.
+ */
+function audienceOf(loaded: LoadedTree, page: PageRef) {
+  const summaries = new Map<string, (typeof loaded.pages)[number]>(
+    loaded.pages.map((summary) => [summary.id, summary]),
+  );
+  // The copied version's region, as its key material puts it; none where it can't be told.
+  const region = summaries.get(page.pageId)?.region ?? null;
+  const reached = (pageId: string) => {
+    const there = summaries.get(pageId)?.region;
+    return region !== null && (region.kind === 'owner' || (!!there && sameRegion(there, region)));
+  };
+  const published = (pageId: string) =>
+    pageId === page.pageId || (!!summaries.get(pageId)?.publishedHead && reached(pageId));
+  const root =
+    region?.kind === 'share'
+      ? loaded.shares.find(
+          (share) => share.spaceId === region.spaceId && share.shareId === region.shareId,
+        )?.rootId
+      : undefined;
+  const folders = loaded.folders.map((folder) =>
+    folder.id === root ? { ...folder, parentId: null } : folder,
+  );
+  return { summaries, region, root, published, folders };
+}
+
+/**
+ * A query table as a public copy holds it: a GFM table, the page then each
+ * column, every cell written as its text (`markdownLiteral`), so a `|`, a
+ * line break or any Markdown or HTML in a value is only text. A page's
+ * cell is `[[Title]]` where `linked` says it may link, else its title. A
+ * value is written as the rows show it, a date as written, a list
+ * comma-separated; a missing one leaves its cell empty.
+ */
+export function queryTableMarkdown<P extends { title: string }>(
+  { columns, rows }: { columns: readonly string[]; rows: readonly QueryRow<P>[] },
+  linked: (page: P) => boolean,
+): string[] {
+  const line = (cells: readonly string[]) => `| ${cells.join(' | ')} |`;
+  return [
+    line(['Page', ...columns.map((column) => markdownLiteral(propertyLabel(column)))]),
+    line(['---', ...columns.map(() => '---')]),
+    ...rows.map(({ page, values }) =>
+      line([
+        linked(page) ? `[[${page.title}]]` : markdownLiteral(page.title || 'Untitled'),
+        ...values.map((value) =>
+          value ? markdownLiteral(propertyText(value, { dates: 'as-written' })) : '',
+        ),
+      ]),
+    ),
+  ];
+}
+
+/** A query block's text, as a public copy writes it: its table's lines, or undefined to leave it as written. */
+export type QueryTables = (source: string) => string[] | undefined;
+
+/** The query blocks in a body, by their text: fenced code labelled `wikistow-query`. */
+function queryBlocks(body: string): string[] {
+  if (!body.includes(QUERY_LANGUAGE)) return [];
+  const sources: string[] = [];
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type === 'code' && node.lang === QUERY_LANGUAGE) sources.push(node.value);
+  }
+  return sources;
+}
+
+/**
+ * Each query block of the copied version as its public copy writes it
+ * (ADR 0006, decision 9): the table as it stands now, run over the
+ * published versions of the pages the copy may show (`audienceOf`), opened
+ * here, never a draft. A page links only to a public page: one with a link
+ * of its own, named by its published title alone, which the server is
+ * told as a target (`targets`), as for the body's wikilinks, unless the
+ * body or another row writes that text for another page. Any other is its
+ * title as text. A block that doesn't read, or can't run, stays as written.
+ */
+async function queryTables(
+  ctx: ClientContext,
+  page: PageRef,
+  payload: PagePayload,
+  tree: () => ReturnType<typeof loadTree>,
+  body: { keys: ReadonlySet<string>; targets: ReadonlyMap<string, PageId> },
+): Promise<{ tables: QueryTables; targets: { key: string; pageId: PageId }[] }> {
+  const blocks = queryBlocks(splitFrontmatter(payload.markdown).body);
+  if (blocks.length === 0) return { tables: () => undefined, targets: [] };
+  const loaded = await tree();
+  const { summaries, published, folders, root } = audienceOf(loaded, page);
+  const others = loaded.pages.filter(
+    (summary) => summary.id !== page.pageId && published(summary.id),
+  );
+  const opened = await openPublications(
+    ctx,
+    page.spaceId,
+    others.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
+  );
+  // Each folder a reader of the copy sees: under the share's root, for a share.
+  const parents = new Map<string, string | null>(
+    folders.map((folder) => [folder.id, folder.parentId]),
+  );
+  const above = (id: string | null) => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (let at = id; at !== null && !seen.has(at); at = parents.get(at) ?? null) {
+      seen.add(at);
+      ids.unshift(at);
+    }
+    return ids;
+  };
+  const seen = (ids: readonly string[]) => root === undefined || ids[0] === root;
+  const pages: (QueryPage & { pageId: PageId })[] = [];
+  const own = readProperties(splitFrontmatter(payload.markdown).frontmatter);
+  for (const summary of [summaries.get(page.pageId), ...others]) {
+    if (!summary) continue;
+    const version =
+      summary.id === page.pageId
+        ? { title: payload.title, properties: own.ok ? own.properties : [] }
+        : (() => {
+            const found = opened.get(summary.id);
+            return found && publicationOf(found);
+          })();
+    if (version) pages.push({ pageId: summary.id, folderIds: above(summary.parentId), ...version });
+  }
+  // In the order the index lists them: by title, then ID.
+  pages.sort(
+    (a, b) =>
+      a.title.localeCompare(b.title) || (a.pageId < b.pageId ? -1 : a.pageId > b.pageId ? 1 : 0),
+  );
+  const shown = folders
+    .filter((folder) => seen(above(folder.id)))
+    .map((folder) => ({ id: folder.id, parentId: folder.parentId, name: nameOf(folder.metadata) }));
+  const linkOn = new Set((await list(ctx, page.spaceId)).map((link) => link.pageId));
+  // A title two rows' pages share names neither; nor does one the body writes for another page.
+  const titled = new Map<string, Set<string>>();
+  for (const { title, pageId } of pages) {
+    const key = foldTitle(title);
+    titled.set(key, (titled.get(key) ?? new Set()).add(pageId));
+  }
+  const targets = new Map<string, PageId>();
+  const linked = (row: { title: string; pageId: PageId }) => {
+    const key = foldTitle(row.title);
+    const ok =
+      row.pageId !== page.pageId &&
+      linkOn.has(row.pageId) &&
+      writableInLink(row.title) &&
+      titled.get(key)?.size === 1 &&
+      (body.targets.get(key) ?? row.pageId) === row.pageId &&
+      (!body.keys.has(key) || body.targets.get(key) === row.pageId);
+    if (ok) targets.set(key, row.pageId);
+    return ok;
+  };
+  const written = new Map<string, string[] | undefined>();
+  for (const source of blocks) {
+    if (written.has(source)) continue;
+    const read = parsePageQuery(source);
+    const result = read.ok ? runPageQuery(read.query, { pages, folders: shown }) : null;
+    written.set(source, result?.ok ? queryTableMarkdown(result, linked) : undefined);
+  }
+  return {
+    tables: (source) => written.get(source),
+    targets: [...targets].map(([key, pageId]) => ({ key, pageId })),
+  };
 }
 
 /** A page's publication as a public copy reads it: its title and properties. */
@@ -387,6 +582,16 @@ export async function shareCopy(
   let loading: ReturnType<typeof loadTree> | undefined;
   const tree = () => (loading ??= loadTree(ctx, page.spaceId));
   const others = await otherValues(ctx, page, payload, tree);
+  const targets = await wikilinkTargets(ctx, page, payload, tree);
+  const listed = await queryTables(ctx, page, payload, tree, {
+    keys: new Set(
+      findWikilinks(payload.markdown)
+        .filter((link) => !link.embed)
+        .map(linkKey),
+    ),
+    targets: new Map(targets.map(({ key, pageId }) => [key, pageId])),
+  });
+  const { tables } = listed;
   const attachments = attachmentsUsed(body, payload.attachments);
   // Every file the copy should keep is opened before anything readable
   // goes up, so one that doesn't open sends nothing. Those left out for
@@ -407,14 +612,14 @@ export async function shareCopy(
     body: {
       revisionId,
       title: payload.title,
-      markdown: copyBody(payload.markdown, others),
+      markdown: copyBody(payload.markdown, others, tables),
       attachments: attachments.map(({ id, name, mediaType, size }) => ({
         id,
         name,
         mediaType,
         size,
       })),
-      targets: await wikilinkTargets(ctx, page, payload, tree),
+      targets: [...targets, ...listed.targets],
     },
   });
   // Whatever the server asks for, only the files on this app's list go. One

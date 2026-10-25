@@ -135,13 +135,17 @@ describe('a public copy’s values from other pages', () => {
   it('says what a copy shows of other pages', () => {
     expect(publicLinkOperations.fromOtherPages('`=[[Garlic bread]].cook_time`')).toEqual({
       values: true,
+      lists: false,
     });
     for (const markdown of [
       '---\nx: "[[Garlic bread]]"\n---\n`=x` [[Garlic bread]]',
       '```\n`=[[Garlic bread]].cook_time`\n```',
       '`=[[Garlic bread#x]].cook_time`',
     ]) {
-      expect(publicLinkOperations.fromOtherPages(markdown), markdown).toEqual({ values: false });
+      expect(publicLinkOperations.fromOtherPages(markdown), markdown).toEqual({
+        values: false,
+        lists: false,
+      });
     }
   });
 });
