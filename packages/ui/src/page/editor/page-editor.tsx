@@ -108,7 +108,8 @@ export function PageEditor({
   const [first] = useState(() => splitFrontmatter(initial));
   const frontmatter = useRef(first.frontmatter);
   const [properties, setProperties] = useState(first.frontmatter);
-  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  // Whether Properties was just added, to open on a new property's name.
+  const [propertiesAdded, setPropertiesAdded] = useState(false);
   const body = useRef(first.body);
   // Text given that no editor shown holds yet, as the visual editor's
   // check of it runs: what the page holds until one does.
@@ -323,6 +324,23 @@ export function PageEditor({
     });
   };
 
+  /**
+   * Put inline code, a property reference, where the cursor is in the
+   * editor the page reads, and turn to it; while none takes edits (the
+   * visual editor's check of given text runs), at the body's end.
+   */
+  const insertCode = (code: string) => {
+    if (surface.current?.insertCode && given.current === null) {
+      surface.current.insertCode(code);
+      return;
+    }
+    const text = bodyNow();
+    const lineBreak = lineBreakOf(frontmatter.current ?? text);
+    const next = `${text}${text === '' || text.endsWith('\n') ? '' : lineBreak}\`${code}\`${lineBreak}`;
+    give(next, false);
+    changed(next);
+  };
+
   // The source editor too, which an edit the visual editor can't write turns to.
   useEffect(() => {
     if (mode === 'visual') preloadSourceEditor();
@@ -426,7 +444,7 @@ export function PageEditor({
               variant="ghost"
               onClick={() => {
                 setFrontmatter(emptyProperties(lineBreakOf(body.current)));
-                setPropertiesOpen(true);
+                setPropertiesAdded(true);
                 changed();
               }}
             >
@@ -466,16 +484,24 @@ export function PageEditor({
       {properties !== null && (
         <PropertiesEditor
           frontmatter={properties}
-          open={propertiesOpen}
-          onOpenChange={setPropertiesOpen}
+          adding={propertiesAdded}
+          scope={{
+            spaceId: assist.page?.spaceId ?? '',
+            selfId: assist.links.selfId,
+            pages: assist.links.pages,
+            links: assist.links.table,
+            editor: true,
+          }}
           onChange={(block) => {
             setFrontmatter(block);
             changed();
           }}
           onRemove={() => {
             setFrontmatter(null);
+            setPropertiesAdded(false);
             changed();
           }}
+          onInsert={insertCode}
         />
       )}
       {/* The editor fills the space the page leaves it, at least two fifths of
