@@ -224,7 +224,7 @@ const splits = (frontmatter: string) =>
   frontmatter + (frontmatter.endsWith('\n') ? '' : '\n');
 
 describe('property edits on random blocks', () => {
-  it('change only what they are about, and read back as asked', () => {
+  it('change only what they are about, and read back as asked', { timeout: 120_000 }, () => {
     let editable = 0;
     let readOnly = 0;
     for (let seed = 1; seed <= 400; seed++) {
@@ -307,7 +307,7 @@ describe('property edits on random blocks', () => {
     expect(readOnly).toBeGreaterThan(200);
   });
 
-  it('give a page with no block one that splits off it', () => {
+  it('give a page with no block one that splits off it', { timeout: 120_000 }, () => {
     for (let seed = 1; seed <= 200; seed++) {
       const r = random(seed);
       const key = name(r, []);

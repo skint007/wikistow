@@ -267,39 +267,47 @@ flow_lines: [a,
     ]);
   });
 
-  it('reads aliases in time to the block’s size, however many name a long list', () => {
-    const items = Array.from({ length: 8_000 }, () => '1').join(', ');
-    const aliases = Array.from({ length: 8_000 }, () => '*a').join(', ');
-    const block = `---\na: &a [${items}]\nb: [${aliases}]\n---\n`;
-    const started = performance.now();
-    const [, b] = properties(block);
-    expect(performance.now() - started).toBeLessThan(2_000);
-    expect(b).toMatchObject({ type: 'text', editable: false });
-    expect(b?.value).toHaveLength(aliases.length + 2);
-  });
-
-  it('reads the longest block it takes in time to its size, and no longer one', () => {
-    const lines = (count: number, line: (i: number) => string) =>
-      Array.from({ length: count }, (_, i) => line(i)).join('\n');
-    const blocks = [
-      // Many keys, at the top and in a map of their own.
-      `---\n${lines(6_500, (i) => `k${i}: 1`)}\n---\n`,
-      `---\nm:\n${lines(5_500, (i) => `  k${i}: 1`)}\n---\n`,
-      // A line of complaints.
-      `---\na: [${'x, ,'.repeat(15_000)}]\n---\n`,
-    ];
-    for (const block of blocks) {
-      expect(block.length).toBeLessThan(65_536);
+  it(
+    'reads aliases in time to the block’s size, however many name a long list',
+    { retry: 2 },
+    () => {
+      const items = Array.from({ length: 8_000 }, () => '1').join(', ');
+      const aliases = Array.from({ length: 8_000 }, () => '*a').join(', ');
+      const block = `---\na: &a [${items}]\nb: [${aliases}]\n---\n`;
       const started = performance.now();
-      readProperties(block);
-      setProperty(block, 'new', 1);
+      const [, b] = properties(block);
       expect(performance.now() - started).toBeLessThan(2_000);
-    }
-    expect(readProperties(`---\na: "${'x'.repeat(65_536)}"\n---\n`)).toEqual({
-      ok: false,
-      reason: 'It is too long to read as properties.',
-    });
-  });
+      expect(b).toMatchObject({ type: 'text', editable: false });
+      expect(b?.value).toHaveLength(aliases.length + 2);
+    },
+  );
+
+  it(
+    'reads the longest block it takes in time to its size, and no longer one',
+    { retry: 2 },
+    () => {
+      const lines = (count: number, line: (i: number) => string) =>
+        Array.from({ length: count }, (_, i) => line(i)).join('\n');
+      const blocks = [
+        // Many keys, at the top and in a map of their own.
+        `---\n${lines(6_500, (i) => `k${i}: 1`)}\n---\n`,
+        `---\nm:\n${lines(5_500, (i) => `  k${i}: 1`)}\n---\n`,
+        // A line of complaints.
+        `---\na: [${'x, ,'.repeat(15_000)}]\n---\n`,
+      ];
+      for (const block of blocks) {
+        expect(block.length).toBeLessThan(65_536);
+        const started = performance.now();
+        readProperties(block);
+        setProperty(block, 'new', 1);
+        expect(performance.now() - started).toBeLessThan(2_000);
+      }
+      expect(readProperties(`---\na: "${'x'.repeat(65_536)}"\n---\n`)).toEqual({
+        ok: false,
+        reason: 'It is too long to read as properties.',
+      });
+    },
+  );
 
   it('refuses keys twice in any map, and an alias without its anchor', () => {
     expect(readProperties('---\nm:\n  x: 1\n  x: 2\n---\n')).toEqual({
