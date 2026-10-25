@@ -165,11 +165,15 @@ export type IndexedPage<T> = {
   doc: T;
   title: string;
   text: string;
-  properties: readonly PropertyData[];
+  properties: readonly Readonly<PropertyData>[];
 };
 
 /** A page as `addText` takes it. */
-export type IndexedText = { title: string; text: string; properties?: readonly PropertyData[] };
+export type IndexedText = {
+  title: string;
+  text: string;
+  properties?: readonly Readonly<PropertyData>[];
+};
 
 /** What the index keeps of a page's Markdown: its text for search, and its properties. */
 export function indexedContent(markdown: string): {
@@ -188,7 +192,7 @@ export function indexedContent(markdown: string): {
  * compare as search terms do, whatever their accents and case, and without
  * a `#` before them, so `#Soup` is `soup`.
  */
-export function hasTag(properties: readonly PropertyData[], tag: string): boolean {
+export function hasTag(properties: readonly Readonly<PropertyData>[], tag: string): boolean {
   const wanted = tagName(tag);
   return (
     wanted !== '' &&

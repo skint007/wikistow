@@ -63,7 +63,7 @@ export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   readonly folderIds: readonly FolderId[];
   readonly path: readonly (string | null)[];
   readonly title: string;
-  readonly properties: readonly PropertyData[];
+  readonly properties: readonly Readonly<PropertyData>[];
 };
 
 /** Which pages of the index to list (`PageIndex.list`). */
@@ -273,7 +273,7 @@ type IndexedContent = {
   revisionId: RevisionId;
   title: string;
   text: string;
-  properties: readonly PropertyData[];
+  properties: readonly Readonly<PropertyData>[];
 };
 
 /**
@@ -287,7 +287,7 @@ export type KeptPages = ReadonlyMap<
     pageId: PageId;
     title: string;
     text: string;
-    properties: readonly PropertyData[];
+    properties: readonly Readonly<PropertyData>[];
   }
 >;
 
