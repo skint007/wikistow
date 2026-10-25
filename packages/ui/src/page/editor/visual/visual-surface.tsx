@@ -6,7 +6,7 @@ import {
   serializerCtx,
   type Editor,
 } from '@milkdown/kit/core';
-import type { Node, Slice } from '@milkdown/kit/prose/model';
+import type { Node, ResolvedPos, Slice } from '@milkdown/kit/prose/model';
 import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { Transform } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
@@ -376,23 +376,28 @@ function Surface({
         const inCode = !!tr.selection.$from.parent.type.spec.code;
         const marked = (node: Node | null | undefined) =>
           !inCode && !!node && mark.isInSet(node.marks);
-        // A cursor in a code span puts it after the span, not inside.
-        if (tr.selection.empty) {
-          const $at = tr.selection.$from;
-          if (marked($at.nodeBefore) && marked($at.nodeAfter)) {
-            let end = $at.parentOffset;
-            let offset = 0;
-            for (let i = 0; i < $at.parent.childCount; i++) {
-              const child = $at.parent.child(i);
-              const childEnd = offset + child.nodeSize;
-              if (childEnd > $at.parentOffset) {
-                if (!marked(child)) break;
-                end = childEnd;
-              }
-              offset = childEnd;
+        // Where the code span `$at` is strictly inside ends, if it is in one.
+        const spanEnd = ($at: ResolvedPos) => {
+          if (!marked($at.nodeBefore) || !marked($at.nodeAfter)) return null;
+          let end = $at.parentOffset;
+          let offset = 0;
+          for (let i = 0; i < $at.parent.childCount; i++) {
+            const child = $at.parent.child(i);
+            const childEnd = offset + child.nodeSize;
+            if (childEnd > $at.parentOffset) {
+              if (!marked(child)) break;
+              end = childEnd;
             }
-            tr.setSelection(TextSelection.create(tr.doc, $at.start() + end));
+            offset = childEnd;
           }
+          return $at.start() + end;
+        };
+        // A cursor or a selection end in a code span puts it after the span,
+        // replacing nothing, so no span is cut.
+        const { $from: $start, $to: $end } = tr.selection;
+        const after = spanEnd($end) ?? $end.pos;
+        if (after !== $end.pos || (!tr.selection.empty && spanEnd($start) !== null)) {
+          tr.setSelection(TextSelection.create(tr.doc, after));
         }
         // Code beside it would join it into one span: a space keeps them apart.
         const { from, to, $from, $to } = tr.selection;

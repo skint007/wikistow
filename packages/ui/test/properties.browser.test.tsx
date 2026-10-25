@@ -408,6 +408,22 @@ describe('Insert in page', () => {
       .toBe('---\nservings: 4\n---\nUse `abcd` `=servings` now\n');
   });
 
+  it('cuts no code span with a selection ending in one, in the visual editor', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nUse `abcd` now\n',
+      'visual',
+    );
+    act(() => ref.current?.focus());
+    // `bc` selected: in the editor's text, "Use abcd now".
+    await userEvent.keyboard(
+      '{Control>}{Home}{/Control}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{Shift>}{ArrowRight}{ArrowRight}{/Shift}',
+    );
+    await fromMenu(container, 'Servings', 'Insert in page');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\nservings: 4\n---\nUse `abcd` `=servings` now\n');
+  });
+
   it('puts a reference after a code span the source editor’s cursor is in', async () => {
     const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `xy` now\n', 'source');
     act(() => ref.current?.focus());
