@@ -65,7 +65,7 @@ export function linkedSearch(hash: string): string | null {
 
 // A search an address asked for, held while signing in or unlocking comes
 // first: in memory only, never in the address those pages return to, which
-// the browser sends, nor in the browser's storage.
+// the browser sends, nor in the browser's storage. Signing out drops it.
 let held: string | null = null;
 
 /**

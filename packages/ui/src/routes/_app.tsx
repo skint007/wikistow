@@ -44,7 +44,10 @@ function AppLayout() {
   useEffect(() => {
     if (me !== null) return;
     vaultStore.lock();
-    void navigate({ to: '/sign-in', search: { redirect: router.state.location.href } });
+    void navigate({
+      to: '/sign-in',
+      search: { redirect: withoutSearchHash(router.state.location.href) },
+    });
   }, [me, navigate, router]);
   // Locks after the delay chosen in Settings with nobody using the app.
   useIdleLock();

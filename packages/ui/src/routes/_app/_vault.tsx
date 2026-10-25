@@ -30,7 +30,10 @@ function VaultLayout() {
   // it left is read once, not tracked, so the redirect never nests itself.
   useEffect(() => {
     if (vault.status !== 'locked') return;
-    void navigate({ to: '/vault/unlock', search: { redirect: router.state.location.href } });
+    void navigate({
+      to: '/vault/unlock',
+      search: { redirect: withoutSearchHash(router.state.location.href) },
+    });
   }, [vault.status, navigate, router]);
   // Ownership work left unfinished, in this session or an earlier one, is
   // listed once the vault opens (protocol section 7.6).
