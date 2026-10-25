@@ -45,7 +45,8 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
  * body without its frontmatter, each reference to one of its values
  * (`` `=servings` ``) written in as the value's text, escaped so that it
  * reads as just that text, never as Markdown or HTML; a web or email
- * address in it is still linked, as GFM links one in any text. Dates go
+ * address in it, or one it makes with the text after it, is still linked,
+ * whole, as GFM links one in any text. Dates go
  * as written, as the copy has no reader's locale, and an empty value as a
  * dash, as the reader shows it. A reference that names no property, or a
  * page whose block doesn't read, stays as written.

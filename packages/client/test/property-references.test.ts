@@ -42,8 +42,8 @@ Not \`=nothing\`, nor \`=SUM(A1:A3)\`, but \`=evil\`.
 describe('a public copy’s body', () => {
   it('writes each of the page’s values in as text, its frontmatter left out', () => {
     expect(publicLinkOperations.copyBody(PAGE)).toBe(
-      'Serves &#52; with &#115;oup\\, bread, from &#50;026\\-10\\-12, beside &#84;omato soup.\n\n' +
-        'Not `=nothing`, nor `=SUM(A1:A3)`, but &#60;b\\>bold\\<\\/b\\>.\n',
+      'Serves &#52; with &#115;oup\\, brea&#100;, from &#50;026\\-10\\-1&#50;, beside &#84;omato sou&#112;.\n\n' +
+        'Not `=nothing`, nor `=SUM(A1:A3)`, but &#60;b\\>bold\\<\\/b&#62;.\n',
     );
   });
 
@@ -73,11 +73,12 @@ describe('the text beside a value written in', () => {
 describe('a value written as Markdown text', () => {
   it('escapes all ASCII punctuation, writes its first character as a reference, and keeps to one line', () => {
     expect(markdownLiteral('<a href="x">*hi*</a> | `c` [[p]] &amp;')).toBe(
-      '&#60;a href\\=\\"x\\"\\>\\*hi\\*\\<\\/a\\> \\| \\`c\\` \\[\\[p\\]\\] \\&amp\\;',
+      '&#60;a href\\=\\"x\\"\\>\\*hi\\*\\<\\/a\\> \\| \\`c\\` \\[\\[p\\]\\] \\&amp&#59;',
     );
-    expect(markdownLiteral('one\r\ntwo\tthree')).toBe('&#111;ne two three');
+    expect(markdownLiteral('one\r\ntwo\tthree')).toBe('&#111;ne two thre&#101;');
     expect(markdownLiteral(' edge ')).toBe('&#32;edge&#32;');
-    expect(markdownLiteral('😀 Größe 4')).toBe('&#128512; Größe 4');
+    expect(markdownLiteral('😀 Größe 4')).toBe('&#128512; Größe &#52;');
     expect(markdownLiteral('')).toBe('');
+    expect(markdownLiteral('x')).toBe('&#120;');
   });
 });

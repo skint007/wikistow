@@ -107,6 +107,16 @@ describe('values written into a public copy', () => {
     expect(textOf(/<h2[^>]*>[\s\S]*?<\/h2>/.exec(html)?.[0] ?? '')).toBe('Para\n–');
   });
 
+  it('links an address a value makes with the text after it whole, as GFM links one', () => {
+    const html = rendered(
+      publicLinkOperations.copyBody('---\nuser: bob\n---\nWrite to `=user`@example.com\n'),
+    );
+    expect(textOf(html)).toBe('Write to bob@example.com');
+    expect([...html.matchAll(/href="([^"]*)"/g)].map(([, href]) => href)).toEqual([
+      'mailto:bob@example.com',
+    ]);
+  });
+
   it('leaves a reference to no property, and real code, as code', () => {
     const html = rendered(publicLinkOperations.copyBody('---\na: 1\n---\n`=b` and `x = 1`\n'));
     expect(html).toContain('<code>=b</code>');

@@ -25,20 +25,21 @@ export function parsePropertyReference(code: string): PropertyReference | null {
  * ASCII punctuation character escaped with a backslash, so nothing in it
  * is syntax (no emphasis, link, HTML, entity, code, table cell or
  * wikilink), and each line break or tab a space, so it stays in its
- * paragraph and starts no block. Its first character, and a space at
- * either end, which Markdown would trim, are written as character
- * references, so the letters it starts with can't finish what the text
- * before it opened: a tag name after `<`, an entity after `&`, a link
- * label after `[`.
+ * paragraph and starts no block. Its first and last characters are
+ * written as character references, which Markdown doesn't trim, as it
+ * would a space, and which the text before can't read into: the letters
+ * it starts with can't finish a tag name after `<`, an entity
+ * after `&` or a link label after `[`.
  */
 export function markdownLiteral(text: string): string {
-  const flat = text.replace(/\r\n?|[\n\t]/g, ' ');
-  const first = flat.codePointAt(0);
-  if (first === undefined) return '';
-  const head = String.fromCodePoint(first);
-  const escaped = flat
-    .slice(head.length)
-    .replace(/[!-/:-@[-`{-~]/g, (char) => `\\${char}`)
-    .replace(/ $/, '&#32;');
-  return `&#${first};${escaped}`;
+  const chars = [...text.replace(/\r\n?|[\n\t]/g, ' ')];
+  const reference = (char: string | undefined) =>
+    char === undefined ? '' : `&#${char.codePointAt(0) ?? 0};`;
+  const middle = chars
+    .slice(1, -1)
+    .join('')
+    .replace(/[!-/:-@[-`{-~]/g, (char) => `\\${char}`);
+  return chars.length < 2
+    ? reference(chars[0])
+    : `${reference(chars[0])}${middle}${reference(chars.at(-1))}`;
 }
