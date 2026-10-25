@@ -63,6 +63,12 @@ const BREAD: Page = {
   markdown: '---\nCook_Time: 25\nnotes: |\n  Fresh garlic.\n---\nBake.',
   revision: rev(2),
 };
+const FLOW: Page = {
+  id: 'flow' as PageId,
+  title: 'Flow notes',
+  markdown: '---\n{ servings: 2 }\n---\n',
+  revision: rev(4),
+};
 const SALAD: Page = { id: 'salad' as PageId, title: 'Salad', markdown: 'Toss.', revision: rev(3) };
 
 const named = (name: string) => ({
@@ -319,24 +325,53 @@ describe('a folder’s view', () => {
       .toBe('Add to Tags of Tomato soup');
   });
 
+  it('saves edits to one page in turn, each on the one before, keeping the keyboard where it went', async () => {
+    const answers: ((value: Awaited<ReturnType<SaveProperty>>) => void)[] = [];
+    const { calls, save } = server(() => new Promise((resolve) => answers.push(resolve)));
+    const { container } = await mount([SOUP], { save });
+    await userEvent.click(button(container, /^Servings of Tomato soup: 4/));
+    // Tab leaves the field, which saves it, on to the next cell's control.
+    await userEvent.keyboard('{Control>}a{/Control}6{Tab}');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      'Remove soup from Tags of Tomato soup',
+    );
+    await userEvent.click(
+      container.querySelector('input[aria-label="Add to Tags of Tomato soup"]')!,
+    );
+    await userEvent.keyboard('dinner{Enter}');
+    // The second waits for the first, and shows meanwhile.
+    expect(calls).toHaveLength(1);
+    expect(cellsOf(rowOf(container, 'Tomato soup'))[1]).toContain('dinner');
+    answers[0]?.(await written(SOUP.markdown.replace('4 #', '6 #'), 11));
+    await expect.poll(() => calls.length).toBe(2);
+    expect(calls[1]).toMatchObject({ basedOn: rev(11), key: 'tags' });
+    answers[1]?.(await written(SOUP.markdown, 12));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Add to Tags of Tomato soup');
+  });
+
   it('shows a conflict on the cell, keeping the value read, and opens the page for a value it can’t change', async () => {
     const { save } = server(() =>
       Promise.reject(new ApiError(409, 'stale-head', 'Someone saved since you loaded the page')),
     );
-    const { container, router } = await mount([SOUP, BREAD], { save });
+    const { container, router } = await mount([SOUP, BREAD, FLOW], { save });
     await userEvent.click(button(container, /^Servings of Tomato soup: 4/));
     await userEvent.keyboard('{Control>}a{/Control}6{Enter}');
     const row = rowOf(container, 'Tomato soup');
     await expect
       .poll(() => row.querySelector('[role=alert]')?.textContent)
       .toContain('Not saved. This page changed since the table read it.');
-    expect(row.querySelectorAll('td')[2]?.textContent).toMatch(/^4/);
+    // Columns by first use: Servings, Cook Time, Notes, Tags.
+    expect(row.querySelectorAll('td')[0]?.textContent).toMatch(/^4/);
     await userEvent.click(button(row, 'Dismiss'));
     expect(row.querySelector('[role=alert]')).toBeNull();
 
+    // Nor can a key be added to a block written as one flow map.
+    const flow = rowOf(container, 'Flow notes').querySelectorAll('td')[3]?.querySelector('button');
+    expect(flow?.getAttribute('aria-description')).toContain('Opens the page.');
+
     // A block scalar can't change in place: its cell opens the draft.
     const notes = rowOf(container, 'Garlic bread')
-      .querySelectorAll('td')[1]
+      .querySelectorAll('td')[2]
       ?.querySelector('button');
     expect(notes?.getAttribute('aria-description')).toContain('Opens the page.');
     await userEvent.click(notes as HTMLElement);

@@ -4,6 +4,7 @@ import {
   linkablePages,
   linkTableOf,
   readProperties,
+  setProperty,
   splitFrontmatter,
   type FolderId,
   type LinkablePage,
@@ -54,6 +55,7 @@ import {
   withColumn,
   type Column,
   type FolderLayout,
+  type OwnWrite,
 } from './folder-model';
 import { useCellEdits, type CellEdits, type SaveProperty } from './use-cell-edits';
 
@@ -461,6 +463,38 @@ function TitleLink({
   );
 }
 
+/** Whether an editor can change `treePage`'s values: a copy has no draft until it is detached. */
+const editsDraft = (canEdit: boolean, treePage: TreePage | undefined) =>
+  canEdit && treePage !== undefined && treePage.draftHead !== null;
+
+const EMPTY_LINKS: ReadonlyMap<string, string> = new Map();
+
+/**
+ * The version of a page this view shows, opened, for its Markdown and the
+ * link table its page links resolve by: the draft an editor changes (or
+ * this view's own write since), else the version the index read. The
+ * index opened it already, so it is mostly in memory.
+ */
+function useShownRevision(
+  spaceId: SpaceId,
+  entry: searchOperations.IndexedEntry,
+  own: OwnWrite | undefined,
+  draft: boolean,
+) {
+  const ctx = useClient();
+  const shown = shownVersion(entry.revisionId, own);
+  const { data } = useQuery(
+    revisionQuery(
+      ctx,
+      { spaceId, pageId: entry.pageId },
+      draft ? 'draft' : 'published',
+      shown.revisionId,
+    ),
+  );
+  const payload = data?.opened.kind === 'current' ? data.opened.payload : null;
+  return { shown, payload, links: payload ? linkTableOf(payload) : EMPTY_LINKS };
+}
+
 /** The value of `column` on a page, from what the index holds of it. */
 const valueIn = (properties: readonly PropertyData[], column: Column) =>
   findProperty(properties, column.key);
@@ -472,42 +506,57 @@ const valueIn = (properties: readonly PropertyData[], column: Column) =>
 function PageList({ spaceId, tree, entries, columns, linkable, canEdit }: Listed) {
   return (
     <ul aria-label="Pages" className="grid gap-1">
-      {entries.map((entry) => {
-        const scope = scopeOf(spaceId, entry.pageId, linkable, new Map(), canEdit);
-        const values = columns
-          .map((column) => ({ column, property: valueIn(entry.properties, column) }))
-          .filter(
-            (cell): cell is { column: Column; property: PropertyData } =>
-              cell.property !== undefined,
-          );
-        return (
-          <li
-            key={entry.pageId}
-            className="grid gap-1.5 rounded-control px-3 py-2.5 [--row:1.5rem] hover:tint"
-          >
-            <TitleLink
-              spaceId={spaceId}
-              entry={entry}
-              treePage={tree.pages.find((p) => p.id === entry.pageId)}
-            />
-            {values.length > 0 && (
-              <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                {values.map(({ column, property }) => (
-                  <div key={column.key} className="flex min-w-0 items-center gap-1.5">
-                    <dt className="shrink-0 text-[13px] font-semibold text-muted-foreground">
-                      {column.label}
-                    </dt>
-                    <dd className="min-w-0">
-                      <PropertyValueView property={property} scope={scope} />
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </li>
-        );
-      })}
+      {entries.map((entry) => (
+        <ListItem
+          key={entry.pageId}
+          spaceId={spaceId}
+          entry={entry}
+          treePage={tree.pages.find((p) => p.id === entry.pageId)}
+          columns={columns}
+          linkable={linkable}
+          canEdit={canEdit}
+        />
+      ))}
     </ul>
+  );
+}
+
+function ListItem({
+  spaceId,
+  entry,
+  treePage,
+  columns,
+  linkable,
+  canEdit,
+}: Omit<Listed, 'tree' | 'entries'> & {
+  entry: searchOperations.IndexedEntry;
+  treePage: TreePage | undefined;
+}) {
+  const { links } = useShownRevision(spaceId, entry, undefined, editsDraft(canEdit, treePage));
+  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  const values = columns
+    .map((column) => ({ column, property: valueIn(entry.properties, column) }))
+    .filter(
+      (cell): cell is { column: Column; property: PropertyData } => cell.property !== undefined,
+    );
+  return (
+    <li className="grid gap-1.5 rounded-control px-3 py-2.5 [--row:1.5rem] hover:tint">
+      <TitleLink spaceId={spaceId} entry={entry} treePage={treePage} />
+      {values.length > 0 && (
+        <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          {values.map(({ column, property }) => (
+            <div key={column.key} className="flex min-w-0 items-center gap-1.5">
+              <dt className="shrink-0 text-[13px] font-semibold text-muted-foreground">
+                {column.label}
+              </dt>
+              <dd className="min-w-0">
+                <PropertyValueView property={property} scope={scope} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </li>
   );
 }
 
@@ -588,8 +637,6 @@ function ColumnHead({
   );
 }
 
-const EMPTY_LINKS: ReadonlyMap<string, string> = new Map();
-
 /**
  * One page's row. An editor's row reads the draft the index holds, or this
  * view's own write since, for which values can change in place; until it
@@ -616,38 +663,45 @@ function PageRow({
   onOpened: (cell: OpenCell | null) => void;
   refocus: RefObject<Refocus | null>;
 }) {
-  const ctx = useClient();
   const row = useRef<HTMLTableRowElement>(null);
-  const page = { spaceId, pageId: entry.pageId };
-  // A copy of another page has no draft to change until it is detached.
-  const editable = canEdit && treePage !== undefined && treePage.draftHead !== null;
-  const shown = shownVersion(entry.revisionId, edits.own.get(entry.pageId));
-  const { data: revision } = useQuery({
-    ...revisionQuery(ctx, page, 'draft', shown.revisionId),
-    enabled: editable,
-  });
-  const payload = revision?.opened.kind === 'current' ? revision.opened.payload : null;
+  const editable = editsDraft(canEdit, treePage);
+  const own = edits.own.get(entry.pageId);
+  const { shown, payload, links } = useShownRevision(spaceId, entry, own, editable);
   const read = shown.markdown ?? payload?.markdown ?? null;
-  const version: RowVersion | null =
-    opened?.pageId === entry.pageId
+  // An open field keeps its version, unless this view's own write replaced it since.
+  const held =
+    opened?.pageId === entry.pageId && !own?.over.includes(opened.version.basedOn)
       ? opened.version
-      : read === null
-        ? null
-        : { indexed: entry.revisionId, basedOn: shown.revisionId, markdown: read };
+      : null;
+  const version: RowVersion | null =
+    held ??
+    (read === null
+      ? null
+      : { indexed: entry.revisionId, basedOn: shown.revisionId, markdown: read });
   const saving = edits.saving.get(entry.pageId);
   const markdown = saving ?? version?.markdown ?? null;
-  const properties = useMemo(
-    () => (markdown === null ? null : readProperties(splitFrontmatter(markdown).frontmatter)),
-    [markdown],
-  );
-  const links = payload ? linkTableOf(payload) : EMPTY_LINKS;
+  const { properties, refusals } = useMemo(() => {
+    if (markdown === null) return { properties: null, refusals: new Map<string, string>() };
+    const { frontmatter } = splitFrontmatter(markdown);
+    const read = readProperties(frontmatter);
+    // Why a key the page hasn't can't be added, as for a block written as one flow map.
+    const refusals = new Map<string, string>();
+    if (read.ok) {
+      for (const { key } of columns) {
+        if (findProperty(read.properties, key)) continue;
+        const added = setProperty(frontmatter, key, null);
+        if (!added.ok) refusals.set(key, added.reason);
+      }
+    }
+    return { properties: read, refusals };
+  }, [markdown, columns]);
   const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
   // Back to the control used, or one in its place: the field it opened from,
   // or a list's Add field once the item removed has gone. Only if nothing
   // else took the focus meanwhile, as the control it had is gone.
   useEffect(() => {
     const kept = refocus.current;
-    if (saving !== undefined || !kept?.cell.startsWith(`${entry.pageId} `)) return;
+    if (!kept?.cell.startsWith(`${entry.pageId} `)) return;
     refocus.current = null;
     if (document.activeElement !== null && document.activeElement !== document.body) return;
     const cell = row.current?.querySelector(`[data-cell="${CSS.escape(kept.cell)}"]`);
@@ -688,11 +742,12 @@ function PageRow({
         } else {
           const property = findProperty(properties.properties, column.key) ?? missing(column.key);
           const multiline = typeof property.value === 'string' && /[\r\n]/.test(property.value);
+          const refused = refusals.get(column.key);
           cell =
-            saving !== undefined ? (
-              <span className="flex min-h-(--row) items-center opacity-60">
-                <PropertyValueView property={property} scope={scope} />
-              </span>
+            refused !== undefined ? (
+              <OpensPage spaceId={spaceId} pageId={entry.pageId} why={refused}>
+                <Blank />
+              </OpensPage>
             ) : property.editable && !multiline ? (
               <ValueField
                 property={property}
@@ -716,7 +771,7 @@ function PageRow({
                     pageId: entry.pageId,
                     indexed: version.indexed,
                     basedOn: version.basedOn,
-                    markdown: version.markdown,
+                    markdown: saving ?? version.markdown,
                     column: column.key,
                     key: cellKey(properties.properties, column.key),
                     value: next,
