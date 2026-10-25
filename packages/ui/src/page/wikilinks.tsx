@@ -50,10 +50,12 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
       if (inLink || !editing?.create) return view.text;
       return <CreateLink body={body} parentId={editing.parentId} {...view} />;
     case 'ambiguous':
-      // The chooser comes with the source editor; until then, just a hint.
+      // The chooser comes with the source editor; until then, just a hint,
+      // above it, as a link's (`linkHint`), where the pointer doesn't cover it.
       return (
         <span
           data-hint="More than one page has this title"
+          data-hint-side="top"
           aria-description="More than one page has this title"
           className="underline decoration-dotted underline-offset-2"
         >
@@ -130,9 +132,11 @@ function CreateLink({
   };
   return (
     <>
+      {/* Above it, as a link's hint (`linkHint`): it reads as a link, one line of text. */}
       <button
         type="button"
         data-hint="Create this page"
+        data-hint-side="top"
         aria-description="Create this page"
         onClick={() => void create()}
         className="text-muted-foreground underline decoration-dashed underline-offset-2 hover:text-foreground"

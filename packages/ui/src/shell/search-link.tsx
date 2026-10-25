@@ -44,7 +44,10 @@ export function SearchLink({
       // The page's own address, which isn't the page as it is (`aria-current`) by its fragment.
       activeOptions={{ includeHash: true }}
       onClick={onClick}
-      {...(hint === undefined ? {} : { 'data-hint': hint, 'aria-description': hint })}
+      {...(hint === undefined
+        ? {}
+        : // Above it, as a link's hint (`linkHint`), where the pointer doesn't cover it.
+          { 'data-hint': hint, 'data-hint-side': 'top', 'aria-description': hint })}
       {...(className === undefined ? {} : { className })}
     >
       {children}

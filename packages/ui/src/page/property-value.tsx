@@ -147,8 +147,9 @@ export function WikilinkChip({
     case 'ambiguous': {
       const hint =
         view.kind === 'missing' ? 'No page has this title' : 'More than one page has this title';
+      // Above it, as a link's hint (`linkHint`), where the pointer doesn't cover it.
       return (
-        <span data-hint={hint} aria-description={hint} className={UNRESOLVED}>
+        <span data-hint={hint} data-hint-side="top" aria-description={hint} className={UNRESOLVED}>
           {view.text}
         </span>
       );

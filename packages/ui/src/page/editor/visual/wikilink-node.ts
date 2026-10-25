@@ -90,6 +90,7 @@ class WikilinkView implements NodeView {
     const link = parseWikilink(this.#source);
     this.dom.dataset.hint = this.#source;
     // Above it, as a link's hint (`linkHint`): below, the pointer resting on its line covers it.
+    // So are the hints on its text; the chooser's button keeps a button's side.
     this.dom.dataset.hintSide = 'top';
     this.dom.className = '';
     if (!link) {
@@ -115,6 +116,7 @@ class WikilinkView implements NodeView {
       case 'missing':
         text.className = MISSING;
         text.dataset.hint = 'No page has this title yet';
+        text.dataset.hintSide = 'top';
         text.setAttribute('aria-description', text.dataset.hint);
         break;
       case 'image': {
@@ -136,6 +138,7 @@ class WikilinkView implements NodeView {
     // A button can't sit inside a link's `<a>`; there Alt+Enter alone opens the chooser.
     if (this.#inLink) {
       text.dataset.hint = hint;
+      text.dataset.hintSide = 'top';
       text.setAttribute('aria-description', hint);
       return;
     }
