@@ -186,8 +186,14 @@ describe('a reference beside a link’s edge, or another mark’s', () => {
     ]);
 
   // Code that ends a link's text and code just after it are two code spans,
-  // as are code before italic and code in it.
+  // as are code before italic and code in it. So are two links to one
+  // address, or italic written two ways, one after the other.
   it.each([
+    [
+      '[`=serv`](https://example.com)[`ings`](https://example.com)',
+      [['No property has this name', '=serv']],
+    ],
+    ['*`=serv`*_`ings`_', [['No property has this name', '=serv']]],
     [
       '`=nope`*`=servings`*',
       [
