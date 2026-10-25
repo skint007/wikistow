@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
 - A page's properties show as rows between its status pills and its body, each key in sentence case and each value as what it reads as: a list as pills, a number, a checkbox, a date in your locale, a web address, a page link or text. Readers see six, then **Show N more**. On the draft, a value is edited in place, and each row's menu renames it, changes its type, removes it or puts a reference to it in the page; **Add property** adds one. Only the edited characters of the frontmatter change, so its comments, quoting and order stay as written. A value that can't be changed that way, or a block that doesn't read as properties, opens as text. (#185)
 
 #### Desktop
@@ -21,6 +22,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Development
 
 - The client reads a page's frontmatter as typed properties, with the `yaml` package, and edits one value, key or property's lines without rewriting the rest of the block. The property rows, references to values, and property search will build on it. (#181)
+- The search index keeps each page's properties beside its text, and lists pages by space, folder and tag, with the keys they use, for query tables, the folder view and references to other pages' values. The desktop app reads every page once more after updating. (#184)
 
 ## 0.16.1 - 2026-10-23
 

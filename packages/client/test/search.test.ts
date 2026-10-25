@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  hasTag,
   markdownNodes,
   parseMarkdown,
+  propertyData,
   SearchIndex,
   searchTerms,
   searchText,
 } from '../src/index.ts';
+import { growth } from './support/timing.ts';
 
 function indexOf(pages: Record<string, string>) {
   const index = new SearchIndex<string>();
@@ -46,6 +49,76 @@ describe('a search index', () => {
     expect(found(accents, 'テキスト')).toEqual(['Notes']);
     expect(found(accents, '日本')).toEqual(['Notes']);
     expect(found(accents, '中国')).toEqual([]);
+  });
+});
+
+describe('properties in a search index', () => {
+  const held = (markdown: string) => {
+    const index = new SearchIndex<string>();
+    index.add('page', { title: 'Page', markdown });
+    return index.pages()[0]?.properties;
+  };
+
+  it('keeps each page’s properties beside its text, from its frontmatter', () => {
+    const markdown = '---\ntags: [soup, Winter]\nservings: 4\n---\nBean soup.';
+    expect(held(markdown)).toEqual([
+      { key: 'tags', type: 'list', value: ['soup', 'Winter'] },
+      { key: 'servings', type: 'number', value: 4 },
+    ]);
+    // The block is still searched as text.
+    const index = new SearchIndex<string>();
+    index.add('page', { title: 'Page', markdown });
+    expect(index.search('winter').map(({ doc }) => doc)).toEqual(['page']);
+  });
+
+  it('reads properties only from a block the page starts with, not from its text', () => {
+    expect(held('Bean soup.\n\n---\ntags: soup\n---\n')).toEqual([]);
+    expect(held('tags: soup')).toEqual([]);
+    expect(held('---\n- not\n- a map\n---\nText')).toEqual([]);
+    expect(held('---\ntags: [soup\n---\nText')).toEqual([]);
+    const index = new SearchIndex<string>();
+    index.addText('kept', { title: 'Kept', text: 'kept text' });
+    expect(index.pages()[0]?.properties).toEqual([]);
+  });
+
+  it('takes time linear in the block, which is read up to 64 KiB', () => {
+    const block = (lines: number) =>
+      `---\n${Array.from({ length: lines }, (_, i) => `key_${i}: [a, "b ${i}", 3]`).join('\n')}\n---\nText`;
+    const index = (markdown: string) =>
+      new SearchIndex<string>().add('page', { title: '', markdown });
+    // 7 times the lines; quadratic would be 49.
+    expect(growth(index, block(300), block(2100))).toBeLessThan(20);
+    expect(held(block(2100))).toHaveLength(2100);
+    expect(held(block(4000))).toEqual([]);
+  });
+});
+
+describe('tags', () => {
+  const tagged = (yaml: string, tag: string) => hasTag(propertyData(`---\n${yaml}\n---\n`), tag);
+
+  it('are a tags list holding the tag, or a tags value that is it, whatever its case and accents', () => {
+    expect(tagged('tags: [soup, winter]', 'soup')).toBe(true);
+    expect(tagged('tags:\n  - Soup\n  - winter', 'SOUP')).toBe(true);
+    expect(tagged('tags: soup', 'soup')).toBe(true);
+    expect(tagged('tags: Crème', 'creme')).toBe(true);
+    expect(tagged('tags: [2024]', '2024')).toBe(true);
+    expect(tagged('tags: [[soup], winter]', 'soup')).toBe(true);
+    expect(tagged('tags: "#soup"', 'soup')).toBe(true);
+    expect(tagged('tags: soup', '#soup')).toBe(true);
+    // The key is named as a reference names it.
+    expect(tagged('Tags: soup', 'soup')).toBe(true);
+  });
+
+  it('match only a whole tag, in tags', () => {
+    expect(tagged('tags: [soups]', 'soup')).toBe(false);
+    expect(tagged('tags: soup, winter', 'soup')).toBe(false);
+    expect(tagged('category: soup', 'soup')).toBe(false);
+    expect(tagged('tags:', 'soup')).toBe(false);
+    expect(tagged('tags: [~, soup]', '')).toBe(false);
+    expect(tagged('tags: [~]', 'null')).toBe(false);
+    // The first key a reference would take is the one read.
+    expect(tagged('tags: winter\nTags: soup', 'soup')).toBe(false);
+    expect(hasTag([], 'soup')).toBe(false);
   });
 });
 
