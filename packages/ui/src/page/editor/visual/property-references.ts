@@ -4,7 +4,7 @@ import {
   propertyText,
   type PropertyData,
 } from '@wikistow/client';
-import type { Node } from '@milkdown/kit/prose/model';
+import type { Mark, Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -51,7 +51,14 @@ function decorations(
 ): DecorationSet {
   const found: Decoration[] = [];
   // A run of inline code, which may be several text nodes as other marks change.
-  let run: { from: number; to: number; text: string; inLink: boolean } | null = null;
+  // Whether any of it is in a link, and the marks of its end, where its chip goes.
+  let run: {
+    from: number;
+    to: number;
+    text: string;
+    inLink: boolean;
+    marks: readonly Mark[];
+  } | null = null;
   const flush = () => {
     const reference = run && parsePropertyReference(run.text);
     const other = reference?.page ? others?.(reference.page) : undefined;
@@ -66,11 +73,16 @@ function decorations(
       if (property) {
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
+        // In the code's marks but its own, so it's in a link just where the code is,
+        // not the next text's.
+        const marks = run.marks.filter((mark) => mark.type.name !== 'inlineCode');
+        const inLink = marks.some((mark) => mark.type.name === 'link');
         found.push(
-          Decoration.widget(run.to, chip(property, hint, run.inLink), {
+          Decoration.widget(run.to, chip(property, hint, inLink), {
             side: 1,
+            marks,
             ignoreSelection: true,
-            key: `property:${hint}:${value}:${run.inLink}`,
+            key: `property:${hint}:${value}:${marks.map((mark) => mark.type.name).join(',')}`,
           }),
         );
       } else {
@@ -99,9 +111,16 @@ function decorations(
           run.to += child.nodeSize;
           run.text += child.text ?? '';
           run.inLink ||= inLink;
+          run.marks = child.marks;
         } else {
           flush();
-          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', inLink };
+          run = {
+            from: at,
+            to: at + child.nodeSize,
+            text: child.text ?? '',
+            inLink,
+            marks: child.marks,
+          };
         }
       });
       flush();
