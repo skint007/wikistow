@@ -2,7 +2,7 @@ import { findProperty, propertyText, type Wikilink } from '@wikistow/client';
 import { use } from 'react';
 import { InLink, OtherPagesContext, PageBody, PageProperties } from './body-context';
 import { referenceHint } from './other-pages';
-import { bodyLinkScope, WikilinkChip } from './property-value';
+import { bodyLinkScope, WikilinkChip, wikilinkValueView } from './property-value';
 
 // A reference to a value in a page body, `` `=servings` `` or
 // `` `=[[Garlic bread]].cook_time` `` (ADR 0006, decisions 4 and 5), as the
@@ -63,11 +63,12 @@ export function PropertyReferenceView({
   // Another page's link resolves by title, as that page's table isn't this one's.
   const scope = body && { ...bodyLinkScope(body), ...(page ? { links: new Map() } : {}) };
   const chip = property.type === 'wikilink' && scope && !inLink;
+  // A page link chip's text is a link's too, where it has no hint of its own.
+  const onLink = chip && wikilinkValueView(String(property.value), scope)?.kind === 'page';
   return (
     <span
       data-hint={hint}
-      // A link chip's text is a link's too, where it has no hint of its own.
-      {...(chip ? { 'data-hint-side': 'top' } : side)}
+      {...(onLink ? { 'data-hint-side': 'top' } : side)}
       aria-description={hint}
       className="underline decoration-primary decoration-dotted decoration-[1.5px] underline-offset-4"
     >

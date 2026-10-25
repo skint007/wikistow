@@ -92,12 +92,13 @@ async function hinted(container: HTMLElement, selector: string) {
 const PAGES = [
   { id: 'dal-1', title: 'Dal', folders: [] },
   { id: 'dal-2', title: 'Dal', folders: [] },
+  { id: 'soup', title: 'Soup', folders: [] },
 ];
 const MISSING_AND_AMBIGUOUS =
   'See [[Nowhere]] and [[Dal]], or [read [[Dal]]](https://example.com) first.\n';
 // References in a link's text: a value found, and a name not found.
 const REFERENCES_IN_LINK = '[Serves `=servings`, not `=nope`](https://example.com).\n';
-const FRONTMATTER = '---\ngoes_with: "[[Nowhere]]"\nservings: 4\n---\n';
+const FRONTMATTER = '---\ngoes_with: "[[Nowhere]]"\nwith: "[[Soup]]"\nservings: 4\n---\n';
 
 it('shows a link hint above the link', async () => {
   const container = await render(
@@ -149,7 +150,7 @@ it('shows the hints on a link’s text above it in the reader', async () => {
   const node = (
     <>
       <Markdown
-        source={`${FRONTMATTER}${MISSING_AND_AMBIGUOUS}\nWith \`=goes_with\`.\n\n${REFERENCES_IN_LINK}`}
+        source={`${FRONTMATTER}${MISSING_AND_AMBIGUOUS}\nWith \`=goes_with\` or \`=with\`.\n\n${REFERENCES_IN_LINK}`}
         attachments={{
           ctx: {} as ClientContext,
           page: { spaceId: 's-home' as SpaceId, pageId: 'p-self' as PageId },
@@ -186,14 +187,17 @@ it('shows the hints on a link’s text above it in the reader', async () => {
   expect(await hinted(container, '.page-body p > span[data-hint]')).toEqual(ambiguous);
   // In a Markdown link's text.
   expect(await hinted(container, '.page-body a [data-hint]')).toEqual(ambiguous);
-  // A reference's page link chip, as a property row shows one. The
-  // reference's own hint is on a link's text too.
-  const chipped = '[data-hint="goes_with · property"]';
-  expect(await hinted(container, `${chipped} [data-hint]`)).toEqual({
+  // A reference's page link chip, as a property row shows one.
+  expect(await hinted(container, '[data-hint="goes_with · property"] [data-hint]')).toEqual({
     text: 'No page has this title',
     side: 'top',
   });
-  expect(container.querySelector<HTMLElement>(chipped)?.dataset['hintSide']).toBe('top');
+  // Where the chip links a page, the reference's hint is on a link's text too,
+  // the one it shows in a browser, where `linkHint` gives the link none.
+  const hintSide = (selector: string) =>
+    container.querySelector<HTMLElement>(selector)?.dataset['hintSide'];
+  expect(hintSide('[data-hint="with · property"]')).toBe('top');
+  expect(hintSide('[data-hint="goes_with · property"]')).toBeUndefined();
   expect(await hinted(container, 'a [data-hint="servings · property"]')).toEqual({
     text: 'servings · property',
     side: 'top',
