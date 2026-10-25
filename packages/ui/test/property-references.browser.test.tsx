@@ -1,4 +1,10 @@
-import type { ClientContext, PageId, SpaceId } from '@wikistow/client';
+import {
+  readProperties,
+  splitFrontmatter,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -10,6 +16,8 @@ import {
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
+import type { LinkAssist } from '../src/page/editor/surface.ts';
+import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { Markdown } from '../src/page/markdown.tsx';
 
 // References to the page's values in its body, as the reader draws them:
@@ -130,5 +138,100 @@ describe('a reference to one of the page’s values', () => {
     const container = await render('---\n- a list\n---\nServes `=servings`.\n', false);
     expect(paragraphs(container)).toEqual(['Serves =servings.']);
     expect(container.querySelector('.page-body code')?.textContent).toBe('=servings');
+  });
+});
+
+describe('a reference beside a link’s edge, or another mark’s', () => {
+  // The visual editor drawing `body` of a page whose frontmatter is `frontmatter`.
+  async function visual(frontmatter: string, body: string) {
+    const read = readProperties(splitFrontmatter(frontmatter).frontmatter);
+    const links: LinkAssist = {
+      pages: [],
+      targets: () => null,
+      selfId: 'p-self',
+      table: new Map(),
+      headings: async () => [],
+      ownHeadings: async () => [],
+      create: () => {},
+      pick: () => {},
+      choose: () => {},
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <VisualSurface
+          initial={body}
+          onChange={() => {}}
+          links={links}
+          attachments={{ list: [], url: async () => '' }}
+          onFiles={() => {}}
+          properties={read.ok ? read.properties : null}
+        />,
+      ),
+    );
+    unmounts.push(() => {
+      act(() => root.unmount());
+      container.remove();
+    });
+    await expect.poll(() => container.querySelector('#page-visual p')).not.toBeNull();
+    return container;
+  }
+  // The references shown, each its hint and its text: a value, or a name no property has.
+  const shown = (within: Element | null) =>
+    [...(within?.querySelectorAll<HTMLElement>('[data-hint]') ?? [])].map((element) => [
+      element.dataset['hint'],
+      element.textContent,
+    ]);
+
+  // Code that ends a link's text and code just after it are two code spans,
+  // as are code before italic and code in it. So are two links to one
+  // address, or italic written two ways, one after the other.
+  it.each([
+    [
+      '[`=serv`](https://example.com)[`ings`](https://example.com)',
+      [['No property has this name', '=serv']],
+    ],
+    ['*`=serv`*_`ings`_', [['No property has this name', '=serv']]],
+    [
+      '`=nope`*`=servings`*',
+      [
+        ['No property has this name', '=nope'],
+        ['servings · property', '4'],
+      ],
+    ],
+    ['[`=nope`](https://example.com)`_x`', [['No property has this name', '=nope']]],
+    [
+      '[`=a `](https://example.com)`=servings`',
+      [
+        ['No property has this name', '=a '],
+        ['servings · property', '4'],
+      ],
+    ],
+  ])('reads %s in the visual editor as the reader does', async (body, references) => {
+    const frontmatter = '---\nservings: 4\n---\n';
+    const reader = await render(`${frontmatter}${body}\n`, true);
+    expect(shown(reader.querySelector('.page-body'))).toEqual(references);
+    const editor = await visual(frontmatter, `${body}\n`);
+    await expect.poll(() => shown(editor.querySelector('#page-visual'))).toEqual(references);
+  });
+
+  // Between two code spans, the value's chip is out of both, and never
+  // alone in a mark's element, where the cursor could land beside it.
+  it.each([
+    '`=servings`[`x` more](https://example.com)',
+    '[`=servings`*`x`*](https://example.com)',
+    '[~~`=servings`~~`x`](https://example.com)',
+    '~~`=servings`*`x`*~~',
+    '*`=servings`~~`x`~~*',
+  ])('draws the chip of %s out of the code after it', async (body) => {
+    const editor = await visual('---\nservings: 4\n---\n', `${body}\n`);
+    await expect
+      .poll(() => editor.querySelector('#page-visual [data-hint="servings · property"]'))
+      .not.toBeNull();
+    const chip = editor.querySelector('#page-visual [data-hint="servings · property"]')!;
+    expect(chip.closest('code')).toBeNull();
+    expect(chip.parentElement?.textContent).not.toBe(chip.textContent);
   });
 });

@@ -4,7 +4,7 @@ import {
   propertyText,
   type PropertyData,
 } from '@wikistow/client';
-import type { Node } from '@milkdown/kit/prose/model';
+import { Mark, type Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -26,13 +26,18 @@ const UNKNOWN = 'underline decoration-border decoration-dashed underline-offset-
 const UNKNOWN_HINT = 'No property has this name';
 const NO_PAGE_HINT = 'No page has this title';
 
-/** The value a reference shows, as a chip drawn after the code, its hint `hint`. */
-function chip(property: PropertyData, hint: string) {
+/**
+ * The value a reference shows, as a chip drawn after the code, its hint
+ * `hint`, above it if it's drawn in a link's text, as a link's hint is
+ * (`linkHint`).
+ */
+function chip(property: PropertyData, hint: string, inLink: boolean) {
   return () => {
     const dom = document.createElement('span');
     dom.className = CHIP;
     dom.contentEditable = 'false';
     dom.dataset['hint'] = hint;
+    if (inLink) dom.dataset['hintSide'] = 'top';
     dom.setAttribute('aria-label', hint);
     dom.textContent = propertyText(property) || '–';
     return dom;
@@ -46,9 +51,12 @@ function decorations(
   others: OtherPages | null,
 ): DecorationSet {
   const found: Decoration[] = [];
-  // A run of inline code, which may be several text nodes as other marks change.
-  let run: { from: number; to: number; text: string } | null = null;
-  const flush = () => {
+  // A run of inline code in one set of marks. Where its marks change, as at
+  // a link's edge or where italic starts, Markdown has two code spans, as
+  // the reader reads them.
+  let run: { from: number; to: number; text: string; marks: readonly Mark[] } | null = null;
+  // `after` holds the marks of what follows the run.
+  const flush = (after: readonly Mark[] = []) => {
     const reference = run && parsePropertyReference(run.text);
     const other = reference?.page ? others?.(reference.page) : undefined;
     // Another page's reference waits for the index, showing nothing meanwhile.
@@ -62,11 +70,21 @@ function decorations(
       if (property) {
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
+        // ProseMirror draws the chip in the marks of what follows the code.
+        // Where that's more code, it's drawn out of it, in the marks both
+        // share outside their `<code>`, such as italic: a mark inside it, as
+        // a link is, would wrap the chip alone, where the cursor can land.
+        const code = (mark: Mark) => mark.type.name === 'inlineCode';
+        // The run's marks hold its code, so some mark ends what's shared.
+        const shared = run.marks.findIndex((mark, i) => code(mark) || !after[i]?.eq(mark));
+        const marks = after.some(code) ? run.marks.slice(0, shared) : undefined;
+        const inLink = (marks ?? after).some((mark) => mark.type.name === 'link');
         found.push(
-          Decoration.widget(run.to, chip(property, hint), {
+          Decoration.widget(run.to, chip(property, hint, inLink), {
             side: 1,
+            ...(marks ? { marks } : {}),
             ignoreSelection: true,
-            key: `property:${hint}:${value}`,
+            key: `property:${hint}:${value}:${inLink}`,
           }),
         );
       } else {
@@ -75,6 +93,9 @@ function decorations(
           Decoration.inline(run.from, run.to, {
             class: UNKNOWN,
             'data-hint': hint,
+            ...(run.marks.some((mark) => mark.type.name === 'link')
+              ? { 'data-hint-side': 'top' }
+              : {}),
             'aria-description': hint,
           }),
         );
@@ -88,13 +109,13 @@ function decorations(
       node.forEach((child, offset) => {
         const at = pos + 1 + offset;
         const code = child.isText && child.marks.some((mark) => mark.type.name === 'inlineCode');
-        if (!code) return flush();
-        if (run && run.to === at) {
+        if (!code) return flush(child.marks);
+        if (run && run.to === at && Mark.sameSet(run.marks, child.marks)) {
           run.to += child.nodeSize;
           run.text += child.text ?? '';
         } else {
-          flush();
-          run = { from: at, to: at + child.nodeSize, text: child.text ?? '' };
+          flush(child.marks);
+          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', marks: child.marks };
         }
       });
       flush();

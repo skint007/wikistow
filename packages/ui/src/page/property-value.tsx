@@ -104,6 +104,21 @@ export const bodyLinkScope = ({
 const CHIP = 'inline rounded-row bg-primary-soft px-1.5 py-px font-bold text-primary-ink';
 const UNRESOLVED = 'text-muted-foreground underline decoration-dashed underline-offset-2';
 
+/** What a value that is one wikilink reads as in `scope`, as a body's wikilinks do; null for any other value. */
+export function wikilinkValueView(value: string, scope: LinkScope) {
+  const link = parseWikilink(value);
+  return (
+    link &&
+    wikilinkView(link, {
+      pages: scope.pages,
+      links: scope.links,
+      selfId: scope.selfId,
+      attachments: [],
+      editor: scope.editor,
+    })
+  );
+}
+
 /**
  * A value that is one wikilink (`"[[Tomato soup]]"`), as a chip that opens
  * its page, resolved as a body's wikilinks are. A reader who can't open the
@@ -120,15 +135,8 @@ export function WikilinkChip({
   scope: LinkScope;
   navigable?: boolean;
 }) {
-  const link = parseWikilink(value);
-  if (!link) return value;
-  const view = wikilinkView(link, {
-    pages: scope.pages,
-    links: scope.links,
-    selfId: scope.selfId,
-    attachments: [],
-    editor: scope.editor,
-  });
+  const view = wikilinkValueView(value, scope);
+  if (!view) return value;
   switch (view.kind) {
     case 'page':
       if (!navigable) return <span className={CHIP}>{view.text}</span>;
@@ -147,8 +155,11 @@ export function WikilinkChip({
     case 'ambiguous': {
       const hint =
         view.kind === 'missing' ? 'No page has this title' : 'More than one page has this title';
+      // Above it, as a link's hint is (`linkHint`), where the pointer doesn't cover
+      // it. In a button that edits or opens the value too: it reads as a link, as
+      // a missing wikilink's Create this page does.
       return (
-        <span data-hint={hint} aria-description={hint} className={UNRESOLVED}>
+        <span data-hint={hint} data-hint-side="top" aria-description={hint} className={UNRESOLVED}>
           {view.text}
         </span>
       );
