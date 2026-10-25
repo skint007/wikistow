@@ -388,6 +388,16 @@ export async function updateIndex(
   return index.with(pages, { spaces: changes.spaces === 'all' ? 'all' : ids });
 }
 
+/**
+ * Whether `after` lacks a version of a page `before` held: the page is
+ * gone, or another version stands in for it. Linear in `before`'s pages.
+ */
+export function letGo(before: PageIndex, after: PageIndex): boolean {
+  return before
+    .pages()
+    .some(({ doc }) => after.page(doc.spaceId, doc.pageId)?.revisionId !== doc.revisionId);
+}
+
 /** Throws `IndexAbandoned` once the revision cache is cleared, or `signal` aborts. */
 function liveness(ctx: ClientContext, signal: AbortSignal | undefined) {
   const generation = ctx.revisions.generation;

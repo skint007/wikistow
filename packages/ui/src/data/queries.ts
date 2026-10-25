@@ -200,7 +200,8 @@ declare const __APP_VERSION__: string;
  * version changed are opened and indexed again, and an update that finds
  * nothing changed leaves the same index. Locking drops it with everything
  * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
- * grant. The desktop app keeps it once changes pause (`keepLater`).
+ * grant. The desktop app keeps it once changes pause, or at once when
+ * it lets a version go (`keepLater`).
  *
  * Not built again when the window is focused: coming back into view tells
  * it what it may have missed (`useTreeChanges`), and one update follows.
@@ -233,7 +234,11 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         changed(queryClient, changes.spaces);
         throw error;
       }
-      if (device && index !== shown) keepLater(queryClient, ctx, device, index);
+      if (device && index !== shown) {
+        // What the file held of a version let go goes at once, as from memory.
+        const now = !shown || searchOperations.letGo(shown, index);
+        keepLater(queryClient, ctx, device, index, now);
+      }
       return index;
     },
     // Shown again within a minute, it is kept; after that it updates behind it.
@@ -326,38 +331,40 @@ function follow(queryClient: QueryClient) {
 /**
  * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
  * after it first changed, the desktop app keeps it, sealed for this person
- * and build: once for a burst of changes, not once each. Failing to keep
- * it only means reading more pages at the next launch. An index locked
- * away or built afresh meanwhile isn't kept.
+ * and build: once for a burst of changes, not once each. With `now`, as
+ * for an index built afresh or one that let a version go, at once, so the
+ * file holds nothing longer than memory does. Failing to keep it only
+ * means reading more pages at the next launch. An index locked away or
+ * built afresh meanwhile isn't kept.
  */
 function keepLater(
   queryClient: QueryClient,
   ctx: ClientContext,
   device: DesktopBridge,
   index: searchOperations.PageIndex,
+  now: boolean,
 ) {
   const state = followingOf(queryClient);
-  const now = Date.now();
-  const since = state.keeping?.since ?? now;
+  const at = Date.now();
+  const since = state.keeping?.since ?? at;
   if (state.keeping) clearTimeout(state.keeping.timer);
-  const timer = setTimeout(
-    () => {
-      state.keeping = null;
-      if (queryClient.getQueryData(searchIndexKey) !== index) return;
-      try {
-        const sealed = searchOperations.sealKept(
-          ctx,
-          searchOperations.keptPages(index),
-          __APP_VERSION__,
-        );
-        void device.keepSearchIndex(sealed).catch(() => {});
-      } catch {
-        // Locked meanwhile: nothing to keep.
-      }
-    },
-    Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - now)),
-  );
-  state.keeping = { since, timer };
+  const keep = () => {
+    state.keeping = null;
+    if (queryClient.getQueryData(searchIndexKey) !== index) return;
+    try {
+      const sealed = searchOperations.sealKept(
+        ctx,
+        searchOperations.keptPages(index),
+        __APP_VERSION__,
+      );
+      void device.keepSearchIndex(sealed).catch(() => {});
+    } catch {
+      // Locked meanwhile: nothing to keep.
+    }
+  };
+  // Even at once, after React Query takes it as the index shown.
+  const wait = now ? 0 : Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - at));
+  state.keeping = { since: now ? at : since, timer: setTimeout(keep, wait) };
 }
 
 /**

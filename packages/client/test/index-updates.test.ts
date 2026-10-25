@@ -325,6 +325,22 @@ describe('a page index derived change by change', () => {
     expect(seen(index)).toEqual(seen(fresh(world)));
   });
 
+  it('says when an index lets a version go, and not when it only adds', () => {
+    const r = random(13);
+    const world: World = new Map();
+    const page = newPage(r, world);
+    world.set(keyOf(page.doc), page);
+    const index = fresh(world);
+    const more = newPage(r, world);
+    const added = index.with([[more.doc, more.content]]);
+    expect(searchOperations.letGo(index, added)).toBe(false);
+    const saved = { ...page.doc, revisionId: RevisionId.parse('saved') };
+    expect(searchOperations.letGo(added, added.with([[saved, page.content]]))).toBe(true);
+    expect(searchOperations.letGo(added, added.with([], { spaces: [page.doc.spaceId] }))).toBe(
+      true,
+    );
+  });
+
   it('takes time for what changed, not for every page held', () => {
     const r = random(5);
     const world: World = new Map();

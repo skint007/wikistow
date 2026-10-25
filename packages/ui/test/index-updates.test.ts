@@ -8,6 +8,7 @@ const client = vi.hoisted(() => ({
   indexSpaces: vi.fn(),
   updateIndex: vi.fn(),
   keepSearchIndex: vi.fn(),
+  letGo: vi.fn(),
   index: 0,
 }));
 
@@ -19,6 +20,7 @@ vi.mock('@wikistow/client', async (actual) => {
       ...real.searchOperations,
       indexSpaces: client.indexSpaces,
       updateIndex: client.updateIndex,
+      letGo: client.letGo,
       keptPages: () => new Map(),
       sealKept: () => new Uint8Array([1]),
       openKept: () => null,
@@ -72,6 +74,8 @@ beforeEach(() => {
   client.indexSpaces.mockReset().mockImplementation(async () => anIndex());
   client.updateIndex.mockReset().mockImplementation(async () => anIndex());
   client.keepSearchIndex.mockReset().mockResolvedValue(undefined);
+  // Updates that only add, unless a test says otherwise.
+  client.letGo.mockReset().mockReturnValue(false);
 });
 afterEach(() => void vi.useRealTimers());
 
@@ -121,8 +125,8 @@ describe('the app’s search index', () => {
 
   it('is kept on the desktop once a burst of changes ends, not after each', async () => {
     const { queryClient, stop, data } = await shown();
-    // The first build, kept once nothing follows it.
-    await vi.advanceTimersByTimeAsync(KEEP_MS);
+    // The first build, kept at once.
+    await vi.advanceTimersByTimeAsync(0);
     expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
     for (let i = 0; i < 6; i++) {
       searchIndexChanged(queryClient, { spaceIds: [home] });
@@ -143,19 +147,42 @@ describe('the app’s search index', () => {
 
   it('is kept at least once a minute while changes keep coming', async () => {
     const { queryClient, stop } = await shown();
+    await vi.advanceTimersByTimeAsync(0);
     for (let at = 0; at < KEEP_AT_MOST_MS * 2.5; at += 1_000) {
       searchIndexChanged(queryClient, { spaceIds: [home] });
       await vi.advanceTimersByTimeAsync(1_000);
     }
+    // The first build, then once a minute.
+    expect(client.keepSearchIndex).toHaveBeenCalledTimes(3);
+    stop();
+  });
+
+  it('is kept at once when an update lets a version go, as from memory', async () => {
+    const { queryClient, stop } = await shown();
+    await vi.advanceTimersByTimeAsync(0);
+    searchIndexChanged(queryClient, { spaceIds: [home] });
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
+    // Access lost, say: the page leaves the file with the next update.
+    client.letGo.mockReturnValue(true);
+    searchIndexChanged(queryClient, { spaceIds: [home] });
+    await vi.advanceTimersByTimeAsync(GATHER_MS + 1);
+    expect(client.keepSearchIndex).toHaveBeenCalledTimes(2);
+    // Nothing waits to keep the one before it later.
+    await vi.advanceTimersByTimeAsync(KEEP_AT_MOST_MS);
     expect(client.keepSearchIndex).toHaveBeenCalledTimes(2);
     stop();
   });
 
   it('isn’t kept once locked away', async () => {
     const { queryClient, stop } = await shown();
+    await vi.advanceTimersByTimeAsync(0);
+    searchIndexChanged(queryClient, { spaceIds: [home] });
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    // Locked while the update waits to be kept.
     stop();
     queryClient.clear();
-    await vi.advanceTimersByTimeAsync(KEEP_MS);
-    expect(client.keepSearchIndex).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(KEEP_AT_MOST_MS);
+    expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
   });
 });
