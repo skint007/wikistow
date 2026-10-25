@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { filterQuery, SearchLink } from '../shell/search-link';
 import {
   convertValue,
   fieldText,
@@ -34,6 +35,8 @@ import {
   PropertyPill,
   PropertyValueView,
   ROW,
+  tagQuery,
+  TagPill,
   WikilinkChip,
   type LinkScope,
 } from './property-value';
@@ -60,6 +63,7 @@ export function PropertyRow({
   onFocus,
   lock,
   referable,
+  tagSearch = false,
   onSet,
   onRename,
   onRemove,
@@ -78,6 +82,8 @@ export function PropertyRow({
   lock: string;
   /** Whether `` `=key` `` would show it. */
   referable: boolean;
+  /** Its value is the page's tags (`tagProperties`), and each opens its search. */
+  tagSearch?: boolean;
   /** Each returns whether the edit was made. */
   onSet: (value: PropertyValue) => boolean;
   /** `keyboard` when Enter renamed it, so the focus goes to its menu under the new name. */
@@ -141,11 +147,16 @@ export function PropertyRow({
             scope={scope}
             opened={opened}
             onOpened={onOpened}
+            tagSearch={tagSearch}
             onSet={onSet}
           />
         ) : (
           <div className="grid gap-0.5 py-1">
-            <PropertyValueView property={property} scope={{ ...scope, editor: true }} />
+            <PropertyValueView
+              property={property}
+              scope={{ ...scope, editor: true }}
+              tagSearch={tagSearch}
+            />
             <span className="text-xs text-muted-foreground">
               {property.editable ? BROKEN : lock}{' '}
               <button
@@ -255,6 +266,7 @@ function ValueField({
   scope,
   opened,
   onOpened,
+  tagSearch,
   onSet,
 }: {
   property: Property;
@@ -262,6 +274,7 @@ function ValueField({
   scope: LinkScope;
   opened: boolean;
   onOpened: (open: boolean, keyboard?: boolean) => void;
+  tagSearch: boolean;
   onSet: (value: PropertyValue) => boolean;
 }) {
   const { type, value } = property;
@@ -277,7 +290,9 @@ function ValueField({
       </span>
     );
   }
-  if (Array.isArray(value)) return <ListField label={label} value={value} onSet={onSet} />;
+  if (Array.isArray(value)) {
+    return <ListField label={label} value={value} tagSearch={tagSearch} onSet={onSet} />;
+  }
   return (
     <TextField
       property={property}
@@ -285,6 +300,7 @@ function ValueField({
       scope={scope}
       opened={opened}
       onOpened={onOpened}
+      tagSearch={tagSearch}
       onSet={onSet}
     />
   );
@@ -292,7 +308,8 @@ function ValueField({
 
 /**
  * A value shown as it reads, a field once clicked: Enter or leaving it
- * keeps what's typed, Escape doesn't. A day alone is a date field.
+ * keeps what's typed, Escape doesn't. A day alone is a date field. A tag
+ * alone is its pill, which opens its search, over the field's button.
  */
 function TextField({
   property: { type, value },
@@ -300,6 +317,7 @@ function TextField({
   scope,
   opened,
   onOpened,
+  tagSearch,
   onSet,
 }: {
   property: Property;
@@ -307,6 +325,7 @@ function TextField({
   scope: LinkScope;
   opened: boolean;
   onOpened: (open: boolean, keyboard?: boolean) => void;
+  tagSearch: boolean;
   onSet: (value: PropertyValue) => boolean;
 }) {
   const text = fieldText(value);
@@ -325,10 +344,28 @@ function TextField({
     );
   }
   const scalar = value as PropertyScalar;
+  const edit = `${label}: ${text || 'empty'}. Edit`;
+  if (tagSearch && (type === 'text' || type === 'number') && text !== '') {
+    // The button first, as the focus put back finds it, and under the pill,
+    // so a click beside the pill opens the field, as beside a list's pills.
+    return (
+      <div className="relative flex min-h-(--row) items-center">
+        <button
+          type="button"
+          aria-label={edit}
+          onClick={() => onOpened(true)}
+          className={cn(SHOWN, 'absolute inset-y-0 left-0')}
+        />
+        <span className="relative flex min-w-0">
+          <TagPill query={filterQuery('tag', text)}>{text}</TagPill>
+        </span>
+      </div>
+    );
+  }
   return (
     <button
       type="button"
-      aria-label={`${label}: ${text || 'empty'}. Edit`}
+      aria-label={edit}
       onClick={() => onOpened(true)}
       className={cn(SHOWN, type === 'number' && 'tabular-nums')}
     >
@@ -347,14 +384,19 @@ function TextField({
   );
 }
 
-/** A list's items as pills, each with a button that removes it, and a field that adds one. */
+/**
+ * A list's items as pills, each with a button that removes it, and a field
+ * that adds one. A tag's text opens its search, and its button stays its own.
+ */
 function ListField({
   label,
   value,
+  tagSearch,
   onSet,
 }: {
   label: string;
   value: readonly (PropertyScalar | readonly PropertyScalar[])[];
+  tagSearch: boolean;
   onSet: (value: PropertyValue) => boolean;
 }) {
   const [text, setText] = useState('');
@@ -370,9 +412,16 @@ function ListField({
           : item === null
             ? ''
             : String(item);
+        const query = tagSearch ? tagQuery(item) : null;
         return (
           <PropertyPill key={i} className="gap-0.5 pr-0.5">
-            {shown}
+            {query === null ? (
+              shown
+            ) : (
+              <SearchLink query={query} className="rounded-full underline-offset-2 hover:underline">
+                {shown}
+              </SearchLink>
+            )}
             {/* An item's own button, after its text. */}
             <button
               type="button"

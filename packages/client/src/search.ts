@@ -240,10 +240,17 @@ export function hasTag(properties: readonly Readonly<PropertyData>[], tag: strin
 /** Whether `properties` hold the tag `wanted`, already a `tagName`. */
 function tagged(properties: readonly Readonly<PropertyData>[], wanted: string): boolean {
   const matches = (value: string | number | boolean) => tagName(String(value)) === wanted;
-  return (
-    wanted !== '' &&
-    (holds(findProperty(properties, 'tags')?.value, matches) ||
-      holds(findProperty(properties, 'tag')?.value, matches))
+  return wanted !== '' && tagProperties(properties).some(({ value }) => holds(value, matches));
+}
+
+/**
+ * The properties a page's tags are in, as `hasTag` reads them: its `tags`,
+ * then Obsidian's older `tag`, each the first a reference would find
+ * (`findProperty`), so `Tags` too.
+ */
+export function tagProperties<P extends { key: string }>(properties: readonly P[]): P[] {
+  return [findProperty(properties, 'tags'), findProperty(properties, 'tag')].filter(
+    (property) => property !== undefined,
   );
 }
 

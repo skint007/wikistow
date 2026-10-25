@@ -643,3 +643,51 @@ test('capture property references: in the reader, the visual editor and its comp
   await shoot('reader', page);
   await shoot('reader-phone', page, true);
 });
+
+test('capture tag pills, which open tag search, on the draft and the published view', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'tag-pills-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  for (const [title, block] of [
+    ['Pea soup', 'tags: soup\nservings: 4'],
+    ['Bean soup', 'tags: [soup, winter]\nservings: 6'],
+  ] as const) {
+    await newPage(page, title);
+    await page.getByRole('button', { name: 'Add properties' }).click();
+    await page.getByLabel('New property’s name').press('Escape');
+    await page.getByRole('button', { name: 'Edit as text' }).click();
+    await page.getByLabel('Properties as text').fill(block);
+    await page.getByRole('button', { name: 'Show as rows' }).click();
+    await fillSource(page, `${title}, simmered.`);
+    await waitForSave(page);
+  }
+  const rows = page.getByRole('region', { name: 'Properties' });
+  await rows.getByRole('link', { name: 'soup' }).hover();
+  await shoot('draft', rows);
+  await rows.getByRole('link', { name: 'soup' }).click();
+  await expect(page.getByLabel('Search pages')).toHaveValue('tag:soup');
+  await expect(page.getByRole('option')).toHaveCount(2);
+  await shoot('search', page);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await rows.getByRole('link', { name: 'winter' }).hover();
+  await shoot('reader', rows);
+
+  await page.getByRole('treeitem', { name: /Pea soup/ }).click();
+  const tag = rows.getByRole('link', { name: 'soup' });
+  await tag.waitFor();
+  const box = await tag.boundingBox();
+  if (!box) throw new Error('No pill');
+  // Beside the pill, the value's own field opens.
+  await page.mouse.move(box.x + box.width + 120, box.y + box.height / 2);
+  await shoot('alone-draft', rows);
+  await page.mouse.click(box.x + box.width + 120, box.y + box.height / 2);
+  await expect(rows.getByLabel('Tags', { exact: true })).toHaveValue('soup');
+});

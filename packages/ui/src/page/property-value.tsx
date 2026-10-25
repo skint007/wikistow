@@ -26,6 +26,7 @@ import {
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { linkHint } from '../desktop';
+import { filterQuery, SearchLink } from '../shell/search-link';
 import type { PageBodyContext } from './body-context';
 import { propertyLabel } from './property-model';
 import { wikilinkView } from './wikilink-model';
@@ -165,17 +166,27 @@ const itemText = (item: PropertyValue) =>
       ? ''
       : String(item as PropertyScalar);
 
+const PILL =
+  'inline-flex max-w-full min-w-0 items-center rounded-full bg-folder-blue px-2 py-0.5 text-xs font-semibold wrap-anywhere text-foreground';
+
 /** A pill, as a list's items show. */
 export function PropertyPill({ children, className }: { children: ReactNode; className?: string }) {
+  return <span className={cn(PILL, className)}>{children}</span>;
+}
+
+/**
+ * The search for a tag a value's item is, as `tag:` search reads it
+ * (`filterQuery`), or null for an item that isn't one: nothing, or a list.
+ */
+export const tagQuery = (item: PropertyValue): string | null =>
+  item === null || Array.isArray(item) ? null : filterQuery('tag', String(item as PropertyScalar));
+
+/** A pill that opens its tag's search over the page (`SearchLink`), underlined on hover. */
+export function TagPill({ query, children }: { query: string; children: ReactNode }) {
   return (
-    <span
-      className={cn(
-        'inline-flex max-w-full min-w-0 items-center rounded-full bg-folder-blue px-2 py-0.5 text-xs font-semibold wrap-anywhere text-foreground',
-        className,
-      )}
-    >
+    <SearchLink query={query} className={cn(PILL, 'underline-offset-2 hover:underline')}>
       {children}
-    </span>
+    </SearchLink>
   );
 }
 
@@ -184,26 +195,44 @@ const EMPTY = <span className="text-muted-foreground">Empty</span>;
 /**
  * A property's value as the reader's rows show it: a list as pills, a
  * checkbox, a date in the reader's locale, a web address as a link, a page
- * link as a chip (`WikilinkChip`), a number or text as it reads.
+ * link as a chip (`WikilinkChip`), a number or text as it reads. With
+ * `tagSearch`, each tag opens its search (`TagPill`), one alone a pill too.
  */
 export function PropertyValueView({
   property: { key, type, value },
   scope,
+  tagSearch = false,
 }: {
   property: PropertyData;
   scope: LinkScope;
+  /** The value is the page's tags (`tagProperties`), and each links to its search. */
+  tagSearch?: boolean;
 }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return EMPTY;
     return (
       <span className="flex min-h-(--row) flex-wrap items-center gap-1">
-        {value.map((item: PropertyValue, i) => (
-          <PropertyPill key={i}>{itemText(item)}</PropertyPill>
-        ))}
+        {value.map((item: PropertyValue, i) => {
+          const query = tagSearch ? tagQuery(item) : null;
+          return query === null ? (
+            <PropertyPill key={i}>{itemText(item)}</PropertyPill>
+          ) : (
+            <TagPill key={i} query={query}>
+              {itemText(item)}
+            </TagPill>
+          );
+        })}
       </span>
     );
   }
   if (value === null || value === '') return EMPTY;
+  if (tagSearch && (type === 'text' || type === 'number')) {
+    return (
+      <span className="flex min-h-(--row) items-center">
+        <TagPill query={filterQuery('tag', String(value))}>{String(value)}</TagPill>
+      </span>
+    );
+  }
   switch (type) {
     case 'boolean':
       return (
