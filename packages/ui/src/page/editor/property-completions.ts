@@ -19,7 +19,7 @@ import type { OtherPages } from '../other-pages';
  * name so far, up to the cursor: the link is group `page`, the name `name`.
  */
 export const TYPING_REFERENCE =
-  /`=[ \t]*(?:this\.|(?<page>\[\[[^[\]\r\n]+\]\])\.)?(?<name>[\p{L}\p{N} _-]*)$/u;
+  /`=[ \t]*(?:this\.|(?<page>\[\[[^[\]\r\n]+\]\])\.)?(?<name>[\p{L}\p{M}\p{N} _-]*)$/u;
 
 /** Text before `[[` that makes the link a reference's page: `` `= ``. */
 export const REFERENCE_PAGE = /`=[ \t]*$/;
@@ -72,9 +72,11 @@ export function propertyOptions(properties: readonly PropertyData[] | null): Lin
  * holding its letters in order.
  */
 export function matchingProperties(options: readonly LinkOption[], typed: string): LinkOption[] {
-  const query = foldPropertyName(typed.trim());
+  // Decomposed, so a letter typed before its accent finds the key with both.
+  const fold = (name: string) => foldPropertyName(name).normalize('NFD');
+  const query = fold(typed.trim());
   const rank = (option: LinkOption) => {
-    const label = foldPropertyName(option.label);
+    const label = fold(option.label);
     if (label.startsWith(query)) return 0;
     if (label.split(' ').some((word) => word.startsWith(query))) return 1;
     if (label.includes(query)) return 2;

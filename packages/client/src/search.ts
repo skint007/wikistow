@@ -284,13 +284,13 @@ export type SearchFilter = { key: string; value: string };
  * `“…”`, `„…“` or `„…”`) up to its closing quote, after which the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
  * a backslash in them (any other backslash is itself), and one not closed
  * runs to the query's end. A filter is a name, as a property reference's
- * (letters, digits, `_` and `-`; for a key with spaces, `_` stands in, as
- * `cook_time` finds `cook time`), then `:` and its value. Everything else
- * is words: a word in quotes, a name of digits alone, as a time's
- * (`10:30`), and a value starting `//`, as a web address's (`https://…`).
- * A filter with no value (`tag:`, `tag:#`, `status:""`) ending the query,
- * as one half typed, is left out; elsewhere it is words (`Re: dinner`).
- * Linear in the query's length.
+ * (letters, digits, combining marks, `_` and `-`; for a key with spaces,
+ * `_` stands in, as `cook_time` finds `cook time`), then `:` and its
+ * value. Everything else is words: a word in quotes, a name of digits
+ * alone, as a time's (`10:30`), and a value starting `//`, as a web
+ * address's (`https://…`). A filter with no value (`tag:`, `tag:#`,
+ * `status:""`) ending the query, as one half typed, is left out; elsewhere
+ * it is words (`Re: dinner`). Linear in the query's length.
  */
 export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
   const words: string[] = [];
@@ -334,7 +334,7 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
 const QUOTES: Record<string, string> = { '"': '"', '“': '”"', '„': '“”"' };
 
 /** A filter's name and its colon, at a word's start. */
-const FILTER_NAME = /([\p{L}\p{N}][\p{L}\p{N}_-]*):/uy;
+const FILTER_NAME = /([\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*):/uy;
 
 /** Where the word from `at` ends: the next space, or the query's end. */
 function wordEnd(query: string, at: number): number {

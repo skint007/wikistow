@@ -59,7 +59,7 @@ Considered:
 
 ### 4. A value in the page is inline code starting with `=`
 
-`` `=servings` `` shows this page's `servings` value. Dataview's form, `` `= this.servings` ``, means the same, so notes move between Obsidian and WikiStow both ways. A name follows the template-variable rule (letters, digits, spaces, `_` and `-`). It matches a key whatever its case, with `_`, `-` and spaces counting as the same, so `` `=cook time` `` finds `cook_time`. If two keys match, the first in the block wins.
+`` `=servings` `` shows this page's `servings` value. Dataview's form, `` `= this.servings` ``, means the same, so notes move between Obsidian and WikiStow both ways. A name follows the template-variable rule (a letter or digit, then letters, digits, combining marks, spaces, `_` and `-`). It matches a key whatever its case, with `_`, `-` and spaces counting as the same, so `` `=cook time` `` finds `cook_time`, and an accent typed apart from its letter (NFD) the same as one typed with it (NFC). If two keys match, the first in the block wins.
 
 How values show:
 - A list shows comma-separated, a date in the reader's locale, a wikilink as a link chip.

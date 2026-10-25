@@ -901,6 +901,30 @@ describe('property names', () => {
     expect(findProperty(read, 'cooking')).toBeUndefined();
     expect(findProperty(propertyData(OBSIDIAN), 'Goes With')?.type).toBe('wikilink');
   });
+
+  it('take combining marks after their first letter or digit', () => {
+    // Devanagari's vowel signs and virama, Thai's vowel and tone marks, and
+    // an accent typed apart from its letter (NFD).
+    for (const name of ['मूल्य', 'कीमत', 'ราคาที่ดี', 'จำนวน', 'cafe\u0301', 'e\u0301 x']) {
+      expect(isPropertyName(name), name).toBe(true);
+    }
+    // A mark can't start one: there's no letter for it to go on.
+    for (const name of ['\u0301', '\u0301e', '\u093Fकीमत', '\u0E35x', ' \u0301']) {
+      expect(isPropertyName(name), name).toBe(false);
+    }
+  });
+
+  it('match keys whether their accents are typed apart (NFD) or with the letter (NFC)', () => {
+    expect(foldPropertyName('Cafe\u0301')).toBe(foldPropertyName('caf\u00E9'));
+    expect(foldPropertyName('\u00C5ngstr\u00F6m')).toBe(foldPropertyName('A\u030Angstro\u0308m'));
+    // As canonically the same, not the same letters: an accent isn't dropped.
+    expect(foldPropertyName('cafe')).not.toBe(foldPropertyName('caf\u00E9'));
+    const nfc = properties('---\ncaf\u00E9: 1\nमूल्य: 2\n---\n');
+    expect(findProperty(nfc, 'CAFE\u0301')?.value).toBe(1);
+    expect(findProperty(nfc, 'मूल्य')?.value).toBe(2);
+    const nfd = properties('---\ncafe\u0301_au_lait: 3\n---\n');
+    expect(findProperty(nfd, 'caf\u00E9 au lait')?.value).toBe(3);
+  });
 });
 
 describe('a wikilink value', () => {
