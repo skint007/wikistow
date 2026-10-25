@@ -29,7 +29,7 @@ const NO_PAGE_HINT = 'No page has this title';
 /**
  * The value a reference shows, as a chip drawn after the code, its hint
  * `hint`, above it if it's drawn in a link's text, as a link's hint is
- * (`linkHint`). ProseMirror draws it in the marks of what follows the code.
+ * (`linkHint`).
  */
 function chip(property: PropertyData, hint: string, inLink: boolean) {
   return () => {
@@ -55,7 +55,7 @@ function decorations(
   // a link's edge or where italic starts, Markdown has two code spans, as
   // the reader reads them.
   let run: { from: number; to: number; text: string; marks: readonly Mark[] } | null = null;
-  // `after` holds the marks of what follows the run, which its chip is drawn in.
+  // `after` holds the marks of what follows the run.
   const flush = (after: readonly Mark[] = []) => {
     const reference = run && parsePropertyReference(run.text);
     const other = reference?.page ? others?.(reference.page) : undefined;
@@ -70,10 +70,18 @@ function decorations(
       if (property) {
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
-        const inLink = after.some((mark) => mark.type.name === 'link');
+        // ProseMirror draws the chip in the marks of what follows the code. Where
+        // that's more code, it's drawn in the marks both share, out of that code.
+        const code = (mark: Mark) => mark.type.name === 'inlineCode';
+        const before = run.marks;
+        const marks = after.some(code)
+          ? after.filter((mark) => !code(mark) && mark.isInSet(before))
+          : undefined;
+        const inLink = (marks ?? after).some((mark) => mark.type.name === 'link');
         found.push(
           Decoration.widget(run.to, chip(property, hint, inLink), {
             side: 1,
+            ...(marks ? { marks } : {}),
             ignoreSelection: true,
             key: `property:${hint}:${value}:${inLink}`,
           }),

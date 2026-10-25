@@ -98,7 +98,7 @@ const MISSING_AND_AMBIGUOUS =
   'See [[Nowhere]] and [[Dal]], or [read [[Dal]]](https://example.com) first.\n';
 // References in a link's text: a value found, and a name not found.
 const REFERENCES_IN_LINK = '[Serves `=servings`, not `=nope`](https://example.com).\n';
-const FRONTMATTER = '---\ngoes_with: "[[Nowhere]]"\nwith: "[[Soup]]"\nservings: 4\n---\n';
+const FRONTMATTER = '---\ngoes_with: "[[Nowhere]]"\nwith: "[[Soup]]"\nservings: 4\ncook: 25\n---\n';
 
 it('shows a link hint above the link', async () => {
   const container = await render(
@@ -225,7 +225,7 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
   const read = readProperties(splitFrontmatter(FRONTMATTER).frontmatter);
   const container = await render(
     <VisualSurface
-      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[\`x\` more](https://example.com), and [ending one \`=goes_with\`](https://example.com) here.\n`}
+      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[read more](https://example.com), before code, \`=cook\`[\`x\` more](https://example.com), and [ending one \`=goes_with\`](https://example.com) here.\n`}
       properties={read.ok ? read.properties : null}
       onChange={() => {}}
       links={links}
@@ -262,11 +262,17 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
     side: 'top',
   });
   // The chip is drawn in what follows its code: in a link just after it, so
-  // its hint is above, even where the link starts with code, and after a
-  // link it ends, where it keeps its side.
+  // its hint is above, and after a link it ends, where it keeps its side.
+  // Before more code, it's out of that code, and its link.
   expect(await hinted(container, 'a [data-hint="with · property"]')).toEqual({
     text: 'with · property',
     side: 'top',
+  });
+  expect(container.querySelector('a [data-hint="cook · property"]')).toBeNull();
+  expect(container.querySelector('code [data-hint="cook · property"]')).toBeNull();
+  expect(await hinted(container, '[data-hint="cook · property"]')).toEqual({
+    text: 'cook · property',
+    side: 'bottom',
   });
   expect(container.querySelector('a [data-hint="goes_with · property"]')).toBeNull();
   expect(await hinted(container, '[data-hint="goes_with · property"]')).toEqual({
