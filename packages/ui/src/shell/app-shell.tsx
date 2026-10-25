@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useRouterState } from '@tanstack/react-router';
+import { useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -32,8 +32,9 @@ const SlotContext = createContext<Slot | null>(null);
  * move into a drawer behind a top bar. Space pages tell the shell which
  * space is open with `useShellSpace`. A refused sign-out is reported here,
  * not in the rail, so it still shows after the drawer closed. Search opens
- * from the rail, the top bar or `isSearchKey` while the vault is open, and
- * meanwhile trees others change load again (`useTreeChanges`).
+ * from the rail, the top bar or `isSearchKey` while the vault is open, or
+ * with a query from a link (`SearchLink`), and meanwhile trees others
+ * change load again (`useTreeChanges`).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [spaceId, setSpace] = useState<SpaceId | null>(null);
@@ -47,15 +48,40 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { data: update } = useQuery(desktopUpdateQuery);
   // The session search was opened in: unlocking again starts a new one, closed.
   const [searchIn, setSearchIn] = useState<ClientContext | null>(null);
-  const search = useCallback(() => {
+  // What it opens with: empty, or a link's query.
+  const [searchFor, setSearchFor] = useState('');
+  const search = useCallback((query = '') => {
     const now = vaultStore.get();
     if (now.status !== 'unlocked') return;
     void runCommand(
       openSearch,
       {},
-      { satisfies: requirementsHere(), openSearch: () => setSearchIn(now.ctx) },
+      {
+        satisfies: requirementsHere(),
+        openSearch: () => {
+          setSearchFor(query);
+          setSearchIn(now.ctx);
+        },
+      },
     );
   }, []);
+  // A link to a search (`SearchLink`) opens it, and the URL lets the query go,
+  // so reloading or going back doesn't open it again.
+  const navigate = useNavigate();
+  const linked = useSearch({ strict: false }).q;
+  useEffect(() => {
+    if (linked === undefined || vault.status !== 'unlocked') return;
+    void navigate({
+      to: '.',
+      search: (prev) => {
+        const rest = { ...prev };
+        delete rest.q;
+        return rest;
+      },
+      replace: true,
+    });
+    search(linked);
+  }, [linked, vault.status, navigate, search]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // Left to whatever handled it first, such as an editor's own keys.
@@ -81,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
       >
         <div className="hidden min-[900px]:block">
-          <Rail onSignOut={signOut} onSearch={search} />
+          <Rail onSignOut={signOut} onSearch={() => search()} />
         </div>
         <header
           data-region="topbar"
@@ -103,7 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button
               type="button"
               aria-label="Search"
-              onClick={search}
+              onClick={() => search()}
               className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
             >
               <Search className="size-5" strokeWidth={1.75} />
@@ -126,7 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <DialogTitle className="sr-only">Navigation</DialogTitle>
           <div className="w-[70px] shrink-0">
-            <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={search} />
+            <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
           </div>
           <div className="min-w-0 flex-1">
             {/* Locking re-renders this before the space page lets go of its space. */}
@@ -140,6 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SearchDialog
           ctx={vault.ctx}
           open={searchIn === vault.ctx}
+          query={searchFor}
           onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
         />
       )}

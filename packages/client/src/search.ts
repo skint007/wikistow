@@ -1,7 +1,9 @@
 import { splitFrontmatter } from './markdown/frontmatter.ts';
 import {
   findProperty,
+  foldPropertyName,
   propertyData,
+  propertyWikilink,
   type PropertyData,
   type PropertyValue,
 } from './markdown/properties.ts';
@@ -31,18 +33,29 @@ import {
  *   `cafe`. Han, Hiragana and Katakana don't separate words, so each of their
  *   characters is a term of its own, and a query for `日本` finds pages with
  *   both characters.
- * - **Queries** match pages holding every term. The last term also matches
- *   as a prefix (`back` finds `backup`), the others only whole.
+ * - **Queries** are words and filters (`parseSearch`), and match pages
+ *   holding every term of the words and passing every filter. The last term
+ *   also matches as a prefix (`back` finds `backup`), the others only whole.
+ * - **Filters** match properties (`matchesFilter`): `tag:soup` a page
+ *   tagged `soup` (`hasTag`), `key:value` one whose `key` is `value` or a
+ *   list holding it, `status:"in progress"` in quotes. A filter only
+ *   narrows: it adds nothing to a page's score.
  * - **Ranking** sums, per query term, its rarity (`log(1 + pages / pages with
  *   it)`) times `TITLE_BOOST` if the title has it plus the text's saturated
  *   count (`n / (n + 1.2)`, under 1). A title match therefore beats any count
  *   in the text. A longer word matched by prefix counts `PREFIX_WEIGHT` as
- *   much. Equal scores sort by title.
+ *   much. Equal scores sort by title, so filters alone list pages by title.
  * - **Snippets** are about `SNIPPET` characters of text around the window
  *   with the most distinct query terms among the first `SNIPPET_SCAN`, cut
- *   at spaces and marked `…` where cut; with no match there, its start. A
+ *   at spaces and marked `…` where cut; with no match there, its start. With
+ *   filters alone, the terms of their values stand in, matched whole, so a
+ *   snippet shows the frontmatter line a filter matched where it can. A
  *   hit builds its snippet when asked, so only the rows shown pay for one.
  *   Highlights are UTF-16 offsets into the snippet's (or title's) own text.
+ *
+ * Searching takes time linear in the postings of its terms, and with
+ * filters, in the properties of the pages they're tried on: those holding
+ * the words, or with filters alone, every page.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
@@ -90,10 +103,14 @@ export class SearchIndex<T> {
     return this.#pages;
   }
 
-  /** The best `limit` pages holding every term of `query`, best first. */
+  /**
+   * The best `limit` pages holding every term of `query`'s words and passing
+   * each of its filters (`parseSearch`), best first.
+   */
   search(query: string, { limit = 50 }: { limit?: number } = {}): SearchHit<T>[] {
-    const wanted = queryTerms(query);
-    if (wanted.length === 0) return [];
+    const { words, filters } = parseSearch(query);
+    const wanted = queryTerms(words);
+    if (wanted.length === 0 && filters.length === 0) return [];
     let scores: Map<number, number> | null = null;
     // Pages whose text, not only title, holds some query term.
     const inTexts = new Set<number>();
@@ -122,10 +139,19 @@ export class SearchIndex<T> {
       if (scores.size === 0) return [];
     }
     const hits: { page: IndexedPage<T>; score: number; inText: boolean }[] = [];
-    for (const [id, score] of scores ?? []) {
-      const page = this.#pages[id];
-      if (page) hits.push({ page, score, inText: inTexts.has(id) });
+    const passes = (page: IndexedPage<T>) =>
+      filters.every((filter) => matchesFilter(page.properties, filter));
+    if (scores === null) {
+      for (const page of this.#pages) if (passes(page)) hits.push({ page, score: 0, inText: true });
+    } else {
+      for (const [id, score] of scores) {
+        const page = this.#pages[id];
+        if (page && passes(page)) hits.push({ page, score, inText: inTexts.has(id) });
+      }
     }
+    // With filters alone, the snippet looks for their values' terms, whole.
+    const shown = wanted.length > 0 ? wanted : filterTerms(filters);
+    const prefix = wanted.length > 0;
     return hits
       .sort((a, b) => b.score - a.score || a.page.title.localeCompare(b.page.title))
       .slice(0, limit)
@@ -136,7 +162,7 @@ export class SearchIndex<T> {
           score,
           title: { text: page.title, highlights: matchesIn(page.title, wanted) },
           // A title-only hit shows the text's start without looking through it.
-          snippet: () => (snippet ??= snippetOf(page.text, inText ? wanted : [])),
+          snippet: () => (snippet ??= snippetOf(page.text, inText ? shown : [], prefix)),
         };
       });
   }
@@ -221,6 +247,120 @@ function holds(
 // `Array.isArray` doesn't narrow a readonly array.
 const isList = <T>(value: T | readonly T[]): value is readonly T[] => Array.isArray(value);
 
+/**
+ * A filter in a query (`parseSearch`): `tag:soup` as `{ key: 'tag', value:
+ * 'soup' }`, `status:"in progress"` as `{ key: 'status', value: 'in
+ * progress' }`.
+ */
+export type SearchFilter = { key: string; value: string };
+
+/**
+ * A query's words and filters. A filter is a word starting with a name, as
+ * a property reference's (letters, digits, `_` and `-`; for a key with
+ * spaces, `_` stands in, as `cook_time` finds `cook time`), then `:` and its
+ * value: what follows up to a space, or in double quotes, which allow
+ * spaces, with `\"` and `\\` for a quote and a backslash in them. A quote
+ * not closed runs to the query's end. Everything else is words, a word in
+ * quotes too, so `"10:30"` or `"https://example.com"` searches text. A
+ * filter with no value (`tag:`, `status:""`), as one half typed, is left
+ * out. Linear in the query's length.
+ */
+export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
+  const words: string[] = [];
+  const filters: SearchFilter[] = [];
+  let at = 0;
+  while (at < query.length) {
+    if (/\s/u.test(query.charAt(at))) {
+      at++;
+      continue;
+    }
+    FILTER_NAME.lastIndex = at;
+    const name = FILTER_NAME.exec(query)?.[1];
+    if (name !== undefined) {
+      const quoted = readQuoted(query, at + name.length + 1);
+      const end = quoted?.end ?? wordEnd(query, at + name.length + 1);
+      const value = quoted?.text ?? query.slice(at + name.length + 1, end);
+      if (value.trim() !== '') filters.push({ key: name, value });
+      at = end;
+      continue;
+    }
+    const end = readQuoted(query, at)?.end ?? wordEnd(query, at);
+    words.push(query.slice(at, end));
+    at = end;
+  }
+  return { words: words.join(' '), filters };
+}
+
+/** A filter's name and its colon, at a word's start. */
+const FILTER_NAME = /([\p{L}\p{N}][\p{L}\p{N}_-]*):/uy;
+
+/** Where the word from `at` ends: the next space, or the query's end. */
+function wordEnd(query: string, at: number): number {
+  let end = at;
+  while (end < query.length && !/\s/u.test(query.charAt(end))) end++;
+  return end;
+}
+
+/** The text in double quotes from `at`, unescaped, and where it ends, or null if none starts there. */
+function readQuoted(query: string, at: number): { text: string; end: number } | null {
+  if (query.charAt(at) !== '"') return null;
+  let text = '';
+  for (let end = at + 1; end < query.length; end++) {
+    const char = query.charAt(end);
+    if (char === '"') return { text, end: end + 1 };
+    if (char === '\\' && end + 1 < query.length) text += query.charAt(++end);
+    else text += char;
+  }
+  return { text, end: query.length };
+}
+
+/**
+ * A filter's text, for a query or a link to search (`parseSearch`):
+ * `tag:soup`, or `status:"in progress"` when the value needs quotes. A
+ * key's spaces become `_`, which finds it all the same. Null for a key no
+ * filter can name, or an empty value.
+ */
+export function searchFilter(key: string, value: string): string | null {
+  const name = key.trim().replace(/ /g, '_');
+  if (!new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) || value.trim() === '') {
+    return null;
+  }
+  const plain = /^[^\s"\\]+$/u.test(value);
+  return `${name}:${plain ? value : `"${value.replace(/[\\"]/g, '\\$&')}"`}`;
+}
+
+/**
+ * Whether `properties` pass a filter. `tag` asks for a tag (`hasTag`).
+ * Another key is found as a reference finds it (`findProperty`), and passes
+ * when its value, or an item of its list, is the filter's: a number as a
+ * number (`4` is `4.0`), anything else as text, whatever its accents and
+ * case (`foldTerm`), a wikilink as written or as its page's name
+ * (`goes_with:"Garlic bread"` is `[[Garlic bread]]`). Empty values never
+ * pass.
+ */
+export function matchesFilter(
+  properties: readonly Readonly<PropertyData>[],
+  { key, value }: SearchFilter,
+): boolean {
+  if (foldPropertyName(key) === 'tag') return hasTag(properties, value);
+  const wanted = foldTerm(value.trim());
+  const number = NUMBER.test(value.trim()) ? Number(value) : null;
+  return holds(findProperty(properties, key)?.value, (scalar) => {
+    if (typeof scalar === 'number') return scalar === number;
+    if (foldTerm(String(scalar).trim()) === wanted) return true;
+    const link = propertyWikilink(scalar);
+    return link !== null && foldTerm(link.target.trim()) === wanted;
+  });
+}
+
+/** A number as YAML writes one, in decimal. */
+const NUMBER = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+
+/** The terms of filters' values, each once, for snippets. */
+function filterTerms(filters: readonly SearchFilter[]): string[] {
+  return [...new Set(filters.flatMap(({ value }) => searchTerms(value).map(({ term }) => term)))];
+}
+
 /** Text with the parts a query matched, as UTF-16 offsets into `text`. */
 export type Marked = { text: string; highlights: { start: number; end: number }[] };
 
@@ -288,11 +428,11 @@ function queryTerms(query: string): string[] {
   return [...new Set(terms.slice(0, -1).filter((term) => term !== last)), last];
 }
 
-/** Which query term a word matches, or -1. */
-function termIndex(term: string, wanted: readonly string[]): number {
+/** Which query term a word matches, or -1; with `prefix`, the last also as a prefix. */
+function termIndex(term: string, wanted: readonly string[], prefix = true): number {
   const last = wanted.length - 1;
-  const prefix = wanted[last];
-  return prefix !== undefined && term.startsWith(prefix) ? last : wanted.indexOf(term);
+  const start = wanted[last];
+  return prefix && start !== undefined && term.startsWith(start) ? last : wanted.indexOf(term);
 }
 
 function matchesIn(text: string, wanted: readonly string[]): Marked['highlights'] {
@@ -303,11 +443,11 @@ function matchesIn(text: string, wanted: readonly string[]): Marked['highlights'
   return found;
 }
 
-function snippetOf(text: string, wanted: readonly string[]): Marked {
+function snippetOf(text: string, wanted: readonly string[], prefix = true): Marked {
   const matches: { start: number; end: number; term: number }[] = [];
   if (wanted.length > 0) {
     eachTerm(clip(text, SNIPPET_SCAN), (term, start, end) => {
-      const index = termIndex(term, wanted);
+      const index = termIndex(term, wanted, prefix);
       if (index >= 0) matches.push({ start, end, term: index });
     });
   }

@@ -21,6 +21,10 @@ export function markedParts({ text, highlights }: Marked): { text: string; mark:
 export const breadcrumb = (path: searchOperations.SearchPage['path']) =>
   path.map((name) => name ?? 'Unreadable folder').join(' / ');
 
+/** What the search dialog says before a query: what it searches, and how to filter. */
+export const SEARCH_HELP =
+  'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress".';
+
 /** What the search dialog says above its results. */
 export function searchStatus({
   index,
@@ -39,7 +43,7 @@ export function searchStatus({
       : 'Finding your pages…';
   }
   if (index.size === 0) return 'There are no pages to search yet.';
-  if (!query.trim()) return 'Search the titles and text of every page you can read.';
+  if (!query.trim()) return SEARCH_HELP;
   if (results === 0) return 'No pages match.';
   return `${results} page${results === 1 ? '' : 's'}`;
 }
