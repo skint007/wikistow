@@ -237,12 +237,25 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
  * running may have started before the change, so another follows it, and
  * changes meanwhile share that one: autosaves don't keep cancelling it.
  */
-export function searchIndexChanged(queryClient: QueryClient) {
+export function searchIndexChanged(
+  queryClient: QueryClient,
+  {
+    following = true,
+  }: {
+    /**
+     * False for changes the rebuild running may already hold, as those missed
+     * while a tab was hidden, which its focus refetch has just started for.
+     */
+    following?: boolean;
+  } = {},
+) {
   const changed = () =>
     queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
   // Followed once it settles, whether anything shows it or not: its success
   // would mark it fresh again.
-  const running = queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.promise;
+  const running = following
+    ? queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.promise
+    : undefined;
   void changed();
   if (running) void running.then(changed, changed);
 }
