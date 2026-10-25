@@ -51,18 +51,22 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
  * page whose block doesn't read, stays as written.
  *
  * A code span keeps the text either side of it apart: `<a href=` before
- * one is text, not the start of a tag. So each `<` in the text beside a
- * value written in is escaped too, which leaves it the text it was.
+ * one is text, not the start of a tag. So each `<` in the text of a block
+ * (a paragraph, heading or table cell) with a value written in is escaped
+ * too, which leaves it the text it was.
  */
 export function copyBody(markdown: string): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   const read = readProperties(frontmatter);
   if (!read.ok || read.properties.length === 0) return body;
   const edits: { start: number; end: number; text: string }[] = [];
-  for (const parent of markdownNodes(parseMarkdown(body))) {
-    if (!('children' in parent)) continue;
+  for (const block of markdownNodes(parseMarkdown(body))) {
+    if (block.type !== 'paragraph' && block.type !== 'heading' && block.type !== 'tableCell') {
+      continue;
+    }
+    const inline = [...markdownNodes(block)];
     let written = false;
-    for (const node of parent.children) {
+    for (const node of inline) {
       if (node.type !== 'inlineCode') continue;
       const reference = parsePropertyReference(node.value);
       const property = reference && findProperty(read.properties, reference.name);
@@ -75,7 +79,7 @@ export function copyBody(markdown: string): string {
       written = true;
     }
     if (!written) continue;
-    for (const node of parent.children) {
+    for (const node of inline) {
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       if (node.type !== 'text' || start === undefined || end === undefined) continue;

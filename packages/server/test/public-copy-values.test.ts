@@ -84,6 +84,8 @@ describe('values written into a public copy', () => {
       '',
       '<a href=`=foo`>go</a> <span title=`=b`>hi</span> <img src=`=foo`> \\<i>`=b`',
       '',
+      '<a href=**`=foo`**>bold</a> <b title=*`=b`*>slanted',
+      '',
       'Para',
       '`=empty`',
       '---',
@@ -99,6 +101,7 @@ describe('values written into a public copy', () => {
     expect(textOf(html)).toContain('[foo] and &lt;');
     // The closing tags are HTML as written, which the reader drops too.
     expect(textOf(html)).toContain('<a href=foo>go <span title=b>hi <img src=foo> <i>b');
+    expect(textOf(html)).toContain('<a href=foo>bold <b title=b>slanted');
     for (const tag of ['a', 'span']) expect(html, tag).not.toMatch(new RegExp(`<${tag}[\\s>]`));
     // A heading, as the app shows it, an empty value a dash in it.
     expect(textOf(/<h2[^>]*>[\s\S]*?<\/h2>/.exec(html)?.[0] ?? '')).toBe('Para\n–');
