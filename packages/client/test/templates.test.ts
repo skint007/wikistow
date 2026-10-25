@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { fillTemplate, templateFields } from '../src/index.ts';
+import { fillTemplate, formatDate, templateFields } from '../src/index.ts';
 import { cpuTime, growth } from './support/timing.ts';
 
 const values = (asked: Record<string, string>) => ({
@@ -36,19 +36,43 @@ describe('a template variable’s name', () => {
 });
 
 describe('reading a template’s variables', () => {
-  // The pattern variables were read by before #196, whose matches are kept.
+  // How variables were read before #198, kept as it was: the pattern, and
+  // what each match stands for. The new reading must give the same.
   const BEFORE = /\{\{\s*([\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*?)\s*(?:([|:])([^}\n]*))?\}\}/gu;
+  const variableBefore = (name: string, mark: string | undefined, rest = '') => {
+    const label = name.normalize('NFC').replace(/\s+/g, ' ');
+    const key = label.toLowerCase();
+    if (key === 'date' || key === 'time') {
+      if (mark === '|') return null;
+      return { kind: key, format: rest.trim() || (key === 'date' ? 'YYYY-MM-DD' : 'HH:mm') };
+    }
+    if (key === 'title' || key === 'me') return mark === undefined ? { kind: key } : null;
+    if (mark === ':') return null;
+    return { kind: 'asked', key, label, initial: rest.trim() };
+  };
   // Every asked value names its key, so a variable read with other bounds or another name shows.
   const named = {
     ...values({}),
     asked: new Proxy({}, { get: (_, key) => `«${String(key)}»` }),
   };
-  // What each variable `BEFORE` matched reads as alone, and the text between as written.
   const filledBefore = (text: string) =>
-    text.replace(BEFORE, (match) => fillTemplate(match, named));
+    text.replace(BEFORE, (match, name: string, mark?: string, rest?: string) => {
+      const variable = variableBefore(name, mark, rest);
+      if (variable === null) return match;
+      if ('format' in variable) return formatDate(named.now, variable.format);
+      if ('key' in variable) return `«${variable.key}»`;
+      return variable.kind === 'title' ? named.title : named.me;
+    });
   const fieldsBefore = (text: string) => {
-    const fields = [...text.matchAll(BEFORE)].flatMap(([match]) => templateFields(match));
-    return fields.filter((field, i) => fields.findIndex(({ key }) => key === field.key) === i);
+    const fields = new Map<string, { key: string; label: string; initial: string }>();
+    for (const [, name = '', mark, rest] of text.matchAll(BEFORE)) {
+      const variable = variableBefore(name, mark, rest);
+      if (variable && 'key' in variable && !fields.has(variable.key)) {
+        const { key, label, initial } = variable;
+        fields.set(key, { key, label, initial });
+      }
+    }
+    return [...fields.values()];
   };
 
   const cases = [
