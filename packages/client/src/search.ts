@@ -180,9 +180,12 @@ export function indexedContent(markdown: string): {
   text: string;
   properties: PropertyData[];
 } {
+  const properties = propertyData(splitFrontmatter(markdown).frontmatter);
   return {
     text: searchText(markdown),
-    properties: propertyData(splitFrontmatter(markdown).frontmatter),
+    // Copied: a string cut from the page's Markdown can hold all of it in memory.
+    properties:
+      properties.length > 0 ? (JSON.parse(JSON.stringify(properties)) as PropertyData[]) : [],
   };
 }
 
