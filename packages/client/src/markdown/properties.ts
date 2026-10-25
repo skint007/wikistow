@@ -250,18 +250,22 @@ const COMMENT = 'It has a comment inside it.';
 const TOO_LONG = 'It is too long to read as properties.';
 const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.';
 
-// Just after the colon that follows a key ending at `from`, past spaces,
-// line breaks and comments, or -1.
-function colonAfter(yaml: string, from: number): number {
+// Where the text after `from` goes on past spaces, line breaks and comments.
+function pastBlanks(yaml: string, from: number): number {
   for (let at = from; at < yaml.length; at++) {
     const char = yaml[at];
-    if (char === ':') return at + 1;
     if (char === '#') {
       at = yaml.indexOf('\n', at);
-      if (at < 0) return -1;
-    } else if (char !== ' ' && char !== '\t' && char !== '\r' && char !== '\n') return -1;
+      if (at < 0) return yaml.length;
+    } else if (char !== ' ' && char !== '\t' && char !== '\r' && char !== '\n') return at;
   }
-  return -1;
+  return yaml.length;
+}
+
+// Just after the colon that follows a key ending at `from`, or -1.
+function colonAfter(yaml: string, from: number): number {
+  const at = pastBlanks(yaml, from);
+  return yaml[at] === ':' ? at + 1 : -1;
 }
 
 const refused = (reason: string) => ({ ok: false, reason }) as const;
@@ -341,9 +345,14 @@ function readBlock(frontmatter: string | null): ReadBlock {
     // An empty value is at its colon: the parser has it after any comment.
     const empty = !value?.range || value.range[0] === value.range[1];
     const at = base + (colon < 0 ? key.range[1] : colon);
+    // A value's source from its anchor or tag, which the parser has it after.
+    const [from = 0, to = 0] = value?.range ?? [];
+    const first =
+      (value?.anchor || value?.tag) && colon >= 0 ? Math.min(pastBlanks(yaml, colon), from) : from;
+    const source = yaml.slice(first, to).trimEnd();
     const valueSpan =
       value?.range && !empty
-        ? { start: base + value.range[0], end: base + value.range[0] + sourceOf(value).length }
+        ? { start: base + first, end: base + first + source.length }
         : { start: at, end: at };
     const read = value === null ? null : valueOf(value);
     const lock = map.flow
@@ -353,7 +362,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
         : (lockOf(value, yaml) ?? (read === undefined && !isScalar(value) ? UNREADABLE : null));
     const data =
       read === undefined
-        ? { type: 'text' as const, value: value ? sourceOf(value) : '' }
+        ? { type: 'text' as const, value: source }
         : { type: typeOf(read), value: read };
     const written = typeof key.value === 'string' ? key.value : sourceOf(key);
     const joined = objectKey(key, written);
@@ -666,7 +675,8 @@ const itemText = (item: Item, style: Style | null, context: Context) =>
 // The ways to write `value` anew as a map's value on its line: a scalar,
 // or a flow list. An empty value is nothing at all.
 function valueTexts(value: PropertyValue, style: Style | null): string[] {
-  if (value === null) return [''];
+  // `null` where nothing at all wouldn't read, as before a tab-only line.
+  if (value === null) return ['', 'null'];
   if (!Array.isArray(value)) {
     const scalar = value as PropertyScalar;
     return [...new Set([scalarText(scalar, style, 'block'), ...scalarTexts(scalar, style)])];

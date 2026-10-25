@@ -368,6 +368,21 @@ flow_lines: [a,
     expect(byKey(result, 'safe')?.value).toBe(2 ** 60);
   });
 
+  it('shows a value’s source from its anchor or tag', () => {
+    const block = '---\nmeta: &m\n  x: 1\ntagged: !t {x: 1}\nshared: &s 5\n---\n';
+    const read = properties(block);
+    expect(read.map(({ key, value }) => [key, value])).toEqual([
+      ['meta', '&m\n  x: 1'],
+      ['tagged', '!t {x: 1}'],
+      ['shared', 5],
+    ]);
+    expect(read.map(({ valueSpan }) => block.slice(valueSpan.start, valueSpan.end))).toEqual([
+      '&m\n  x: 1',
+      '!t {x: 1}',
+      '&s 5',
+    ]);
+  });
+
   it('reads a top-level flow map, without editing it in place', () => {
     const block = '---\n{a: 1, b: [x]}\n---\n';
     expect(properties(block).map(({ key, value, editable }) => [key, value, editable])).toEqual([
@@ -501,6 +516,13 @@ describe('setting a value', () => {
     expect(setProperty('---\nm: {x: 1}\n---\n', 'm', '{x: 1}')).toMatchObject({ ok: false });
     expect(setProperty('---\nm: *a\n---\n', 'm', '*a')).toMatchObject({ ok: false });
     expect(edited(setProperty('---\nn: .inf\n---\n', 'n', '.inf'))).toBe('---\nn: ".inf"\n---\n');
+  });
+
+  it('empties a value as null where nothing at all wouldn’t read', () => {
+    // YAML takes a tab-only line after `a: 1`, but not after `a:`.
+    expect(edited(setProperty('---\na: 1\n\t\nb: 2\n---\n', 'a', null))).toBe(
+      '---\na: null\n\t\nb: 2\n---\n',
+    );
   });
 
   it('returns the block as it was for the value it already has', () => {
