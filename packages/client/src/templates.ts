@@ -81,7 +81,7 @@ type Match = { index: number; text: string; name: string; mark?: string; rest?: 
  * The variables in `text`, in order, none overlapping. A default or format
  * runs up to the first `}` or line break, and the variable ends there if a
  * `}}` does. If none does, its braces are text, and the search goes on
- * from its second `{`. Where a rest ends is found once for every mark
+ * from its second `{`. Where a rest ends is found once, for all the marks
  * before it, so a line of openings that no `}}` closes is read once, not
  * once for each.
  */

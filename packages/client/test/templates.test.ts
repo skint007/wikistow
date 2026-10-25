@@ -132,6 +132,8 @@ describe('reading a template’s variables', () => {
       '1',
     ];
     pieces.push('_', '-', '\u0301', '#', 'date', 'title', 'me', 'x y', 'YYYY');
+    // Whole openings and closings, so most texts hold several variables, closed or not.
+    pieces.push('{{a|', '{{b:', '{{date:', '{{ c ', 'x}}', '}}', '|y}}');
     for (let run = 0; run < 20_000; run++) {
       const length = Math.floor(random() * 16);
       const text = Array.from({ length }, () => pieces[Math.floor(random() * pieces.length)]).join(
