@@ -47,26 +47,52 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
  * reads as just that text, never as Markdown or HTML; a web or email
  * address in it is still linked, as GFM links one in any text. Dates go
  * as written, as the copy has no reader's locale, and an empty value as a
- * dash, as the reader shows it. A reference that names no
- * property, or a page whose block doesn't read, stays as written.
+ * dash, as the reader shows it. A reference that names no property, or a
+ * page whose block doesn't read, stays as written.
+ *
+ * A code span keeps the text either side of it apart: `<a href=` before
+ * one is text, not the start of a tag. So each `<` in the text beside a
+ * value written in is escaped too, which leaves it the text it was.
  */
 export function copyBody(markdown: string): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   const read = readProperties(frontmatter);
   if (!read.ok || read.properties.length === 0) return body;
+  const edits: { start: number; end: number; text: string }[] = [];
+  for (const parent of markdownNodes(parseMarkdown(body))) {
+    if (!('children' in parent)) continue;
+    let written = false;
+    for (const node of parent.children) {
+      if (node.type !== 'inlineCode') continue;
+      const reference = parsePropertyReference(node.value);
+      const property = reference && findProperty(read.properties, reference.name);
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (!property || start === undefined || end === undefined) continue;
+      // An empty value is a dash, as the reader shows it, so no blank line is left.
+      const value = propertyText(property, { dates: 'as-written' }) || '–';
+      edits.push({ start, end, text: markdownLiteral(value) });
+      written = true;
+    }
+    if (!written) continue;
+    for (const node of parent.children) {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (node.type !== 'text' || start === undefined || end === undefined) continue;
+      // A `<` after an odd run of backslashes is escaped already.
+      for (const found of body.slice(start, end).matchAll(/(?<!\\)(?:\\\\)*</g)) {
+        const at = start + found.index + found[0].length - 1;
+        edits.push({ start: at, end: at, text: '\\' });
+      }
+    }
+  }
+  edits.sort((a, b) => a.start - b.start);
   let copy = '';
   let at = 0;
-  for (const node of markdownNodes(parseMarkdown(body))) {
-    if (node.type !== 'inlineCode' || !node.position) continue;
-    const reference = parsePropertyReference(node.value);
-    const property = reference && findProperty(read.properties, reference.name);
-    const start = node.position.start.offset;
-    const end = node.position.end.offset;
-    if (!property || start === undefined || end === undefined || start < at) continue;
-    // An empty value is a dash, as the reader shows it, so no blank line is left.
-    const value = propertyText(property, { dates: 'as-written' }) || '–';
-    copy += body.slice(at, start) + markdownLiteral(value);
-    at = end;
+  for (const edit of edits) {
+    if (edit.start < at) continue;
+    copy += body.slice(at, edit.start) + edit.text;
+    at = edit.end;
   }
   return copy + body.slice(at);
 }

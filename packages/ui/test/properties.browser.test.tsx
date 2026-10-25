@@ -456,6 +456,30 @@ describe('completing a reference', () => {
       .toBe('---\nservings: 4\n---\nServes `=servings` people\n');
   });
 
+  it('leaves the words after a name being typed, up to a later code span', async () => {
+    const { container, ref } = await pageEditor(
+      '---\ncook_time: 25\n---\nBake for  minutes at `350F`.\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(9) + '`=co',
+    );
+    await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')].flatMap((div) =>
+          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+            (l) => l.textContent,
+          ),
+        ),
+      )
+      .toEqual(['cook_time']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\ncook_time: 25\n---\nBake for `=cook_time` minutes at `350F`.\n');
+  });
+
   it('opens no list for a reference the visual editor’s cursor is merely put in', async () => {
     const page = '---\nservings: 4\n---\nServes `=servings` now.\n';
     const { container, ref } = await pageEditor(page, 'visual');

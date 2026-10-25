@@ -131,13 +131,14 @@ function referable(state: EditorState, from: number): boolean {
 }
 
 /**
- * Accepting a key: write it in place of the name typed, the rest of it
- * after the cursor too if a backtick closes it, and the closing backtick
- * unless it's there, and go on after it.
+ * Accepting a key: write it in place of the name typed, and the rest of
+ * the word after the cursor too if a backtick closes it, with the closing
+ * backtick unless it's there, and go on after it.
  */
 function insertName(text: string) {
   return (view: EditorView, completion: Completion, from: number, to: number) => {
-    const rest = /^[\p{L}\p{N} _-]*/u.exec(view.state.sliceDoc(to, to + 200))?.[0] ?? '';
+    // The rest of a word typed into, spaces not: past one may be other text.
+    const rest = /^[\p{L}\p{N}_-]*/u.exec(view.state.sliceDoc(to, to + 200))?.[0] ?? '';
     const end =
       view.state.sliceDoc(to + rest.length, to + rest.length + 1) === '`' ? to + rest.length : to;
     const closed = view.state.sliceDoc(end, end + 1) === '`';

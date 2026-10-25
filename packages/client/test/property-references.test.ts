@@ -60,6 +60,16 @@ describe('a public copy’s body', () => {
   });
 });
 
+describe('the text beside a value written in', () => {
+  it('escapes a `<` that a code span kept from starting a tag, and nothing else', () => {
+    // `</a>` and `<c>` after an escaped backslash are HTML as written, and stay so.
+    const body = '<a href=`=v`>go</a> \\<b> \\\\<c> `<d>`\n\n<e>\n';
+    expect(publicLinkOperations.copyBody(`---\nv: x\n---\n${body}`)).toBe(
+      '\\<a href=&#120;>go</a> \\<b> \\\\<c> `<d>`\n\n<e>\n',
+    );
+  });
+});
+
 describe('a value written as Markdown text', () => {
   it('escapes all ASCII punctuation, writes its first character as a reference, and keeps to one line', () => {
     expect(markdownLiteral('<a href="x">*hi*</a> | `c` [[p]] &amp;')).toBe(
