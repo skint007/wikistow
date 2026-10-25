@@ -413,6 +413,42 @@ describe('a reference in the visual editor', () => {
   });
 });
 
+describe('completing a reference', () => {
+  const page = '---\nservings: 4\ncook_time: 25\n"a.b": 1\n---\nServes \n';
+
+  it('offers the page’s keys after `= in the source editor, writing the closing backtick', async () => {
+    const { container, ref } = await pageEditor(page, 'source');
+    act(() => ref.current?.focus());
+    await userEvent.keyboard('{Control>}{End}{/Control}{ArrowUp}{End}`=se');
+    const labels = () =>
+      [...container.querySelectorAll('div')].flatMap((div) =>
+        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+          (l) => l.textContent,
+        ),
+      );
+    await expect.poll(labels).toEqual(['servings']);
+    await userEvent.keyboard('{Enter} people');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe(page.replace('Serves \n', 'Serves `=servings` people\n'));
+  });
+
+  it('offers them in the visual editor too, writing the reference as code', async () => {
+    const { container, ref } = await pageEditor(page, 'visual');
+    await userEvent.click(container.querySelector('#page-visual p')!);
+    await userEvent.keyboard('{End} `= this.co');
+    const options = () =>
+      [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
+        (option) => option.textContent,
+      );
+    await expect.poll(options).toEqual(['cook_time25']);
+    await userEvent.keyboard('{Enter} minutes');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe(page.replace('Serves \n', 'Serves `= this.cook_time` minutes\n'));
+  });
+});
+
 describe('Insert in page', () => {
   for (const mode of ['source', 'visual'] as const) {
     it(`keeps a reference apart from code beside it in the ${mode} editor`, async () => {

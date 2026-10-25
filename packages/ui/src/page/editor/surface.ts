@@ -97,7 +97,7 @@ export type EditorSurfaceProps = {
    * The page's properties, as its frontmatter has them now, which its
    * references (`` `=key` ``) show and `` `= `` completes; null for none.
    */
-  properties?: readonly PropertyData[] | null;
+  properties?: readonly PropertyData[] | null | undefined;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
   ref?: Ref<EditorSurfaceHandle>;

@@ -431,6 +431,7 @@ function Surface({
       new LinkCompletion(
         () => latest.current.links,
         () => surface.read(),
+        () => latest.current.properties ?? null,
       ),
   );
   const [format] = useState(() => new FormatWatch());
