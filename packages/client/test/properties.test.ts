@@ -122,6 +122,9 @@ describe('reading properties', () => {
       ok: false,
       reason: 'Map keys must be unique (line 4).',
     });
+    // A complaint quoting the source is cut short.
+    const tagged = readProperties(`---\na: !!${'!'.repeat(60_000)} x\n---\n`);
+    expect(!tagged.ok && tagged.reason.length).toBeLessThan(200);
     const broken = readProperties('---\ntags: [a, b\ntitle: x\n---\n');
     expect(broken.ok).toBe(false);
     expect(!broken.ok && broken.reason).toMatch(/\(line \d+\)\.$/);
@@ -298,6 +301,8 @@ flow_lines: [a,
         `---\nk: a${' '.repeat(60_000)}b\n---\n`,
         `---\nk:\n  a: 1\n${'\n'.repeat(60_000)}  b: 2\n---\n`,
         `---\nk:\n  - a\n${'\n'.repeat(60_000)}  - b\n---\n`,
+        // Comment lines after an empty node, which the parser has it take in.
+        `---\nk:\n  x:\n${'#\n'.repeat(30_000)}b: 1\n---\n`,
       ];
       for (const block of blocks) {
         expect(block.length).toBeLessThan(65_536);
@@ -700,7 +705,7 @@ describe('adding a key', () => {
   });
 
   it('quotes a new key that would read as a number, null or true', () => {
-    for (const key of ['0x10', '1e3', '~', 'null', 'true', '35', '<<']) {
+    for (const key of ['0x10', '1e3', '~', 'null', 'true', '35', '<<', '---', '...x']) {
       const result = edited(setProperty('---\n---\n', key, 'v'));
       expect(result).toBe(`---\n"${key}": v\n---\n`);
       expect(edited(renameProperty('---\na: v\n---\n', 'a', key))).toBe(result);
@@ -831,6 +836,14 @@ last: 1
     expect(edited(removeProperty('---\n? a\n: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
     expect(edited(removeProperty('---\n&k a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
     expect(edited(removeProperty('---\n!!str a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
+  });
+
+  it('keeps the comments after a value that ends empty', () => {
+    const list = '---\ntags:\n  - a\n  -\n# about b\nb: 1\n---\n';
+    expect(edited(removeProperty(list, 'tags'))).toBe('---\n# about b\nb: 1\n---\n');
+    const map = '---\nauthor:\n  name: Ann\n  url:\n\n# Publishing\nstatus: draft\n---\n';
+    expect(edited(removeProperty(map, 'author'))).toBe('---\n\n# Publishing\nstatus: draft\n---\n');
+    expect(byKey(map, 'author')?.value).toBe('name: Ann\n  url:');
   });
 
   it('refuses to remove an anchor while aliases may name it', () => {

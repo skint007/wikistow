@@ -186,11 +186,7 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   if (read.aliased && (anchored(entry.key) || anchored(entry.value))) {
     return refused('It holds an anchor, which aliases may name.');
   }
-  // The value's source as the parser has it: a block list's ends with its
-  // last item's comment lines.
-  const valueEnd = entry.value?.range
-    ? read.base + entry.value.range[1]
-    : entry.property.valueSpan.end;
+  const valueEnd = entry.property.valueSpan.end;
   const newline = frontmatter.indexOf('\n', valueEnd - 1);
   const end = newline < 0 || newline >= read.closeStart ? read.closeStart : newline + 1;
   // Comment lines indented under the key go with it, unless the block
@@ -254,14 +250,30 @@ const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.
 // blanks, not all Unicode spaces, which a plain scalar may end with. A
 // loop, as a regex ending `+$` would retry every blank in a long run.
 function trimBlanks(text: string): string {
-  let end = text.length;
-  for (
-    let code = text.charCodeAt(end - 1);
-    code === 0x20 || code === 0x09 || code === 0x0d || code === 0x0a;
-  ) {
-    code = text.charCodeAt(--end - 1);
+  return text.slice(0, blanksStart(text, 0, text.length));
+}
+
+// Where the blanks `text` has before `end`, and after `start`, begin.
+function blanksStart(text: string, start: number, end: number): number {
+  let at = end;
+  for (let code = text.charCodeAt(at - 1); at > start; code = text.charCodeAt(--at - 1)) {
+    if (code !== 0x20 && code !== 0x09 && code !== 0x0d && code !== 0x0a) break;
   }
-  return text.slice(0, end);
+  return at;
+}
+
+// Where a value's source from `start` ends: the parser's `end`, less the
+// blanks, and the comment lines no deeper than its key's, after it. The
+// parser has an empty node at a value's end take in the comments after.
+function sourceEnd(yaml: string, start: number, end: number, column: number): number {
+  for (let stop = end; ;) {
+    stop = blanksStart(yaml, start, stop);
+    const line = yaml.lastIndexOf('\n', stop - 1) + 1;
+    let at = line;
+    while (yaml[at] === ' ' || yaml[at] === '\t') at++;
+    if (line <= start || yaml[at] !== '#' || at - line > column) return stop;
+    stop = line;
+  }
 }
 
 // Where the text after `from` goes on past spaces, line breaks and comments.
@@ -326,8 +338,12 @@ function readBlock(frontmatter: string | null): ReadBlock {
   if (yaml.length > MAX_YAML) return refused(TOO_LONG);
   const doc = parseDocument(yaml, PARSING);
   const [error] = doc.errors;
-  if (error)
-    return refused(`${error.message.split('\n')[0]} (line ${lineOf(yaml, error.pos[0])}).`);
+  if (error) {
+    // Some complaints quote the source, which can be as long as the block.
+    const [message = ''] = error.message.split('\n');
+    const short = message.length > 120 ? `${message.slice(0, 119)}…` : message;
+    return refused(`${short} (line ${lineOf(yaml, error.pos[0])}).`);
+  }
   const { problem, aliased } = checked(doc, yaml);
   if (problem) return refused(problem);
   const lineBreak = open.endsWith('\r\n') ? '\r\n' : '\n';
@@ -346,6 +362,9 @@ function readBlock(frontmatter: string | null): ReadBlock {
     const [start, end] = node.range ?? [0, 0];
     return trimBlanks(yaml.slice(start, end));
   };
+  // The map's line's indentation, before any `?`, anchor or tag.
+  const firstStart = map.range?.[0] ?? 0;
+  const indent = /^[ \t]*/.exec(yaml.slice(yaml.lastIndexOf('\n', firstStart - 1) + 1))?.[0] ?? '';
   const entries: Entry[] = [];
   // Keys as written and as a YAML reader's object has them: `1` and
   // `"1"`, or `0x1F` and `31`, differ to YAML but would be one key.
@@ -363,7 +382,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
     const [from = 0, to = 0] = value?.range ?? [];
     const first =
       (value?.anchor || value?.tag) && colon >= 0 ? Math.min(pastBlanks(yaml, colon), from) : from;
-    const source = trimBlanks(yaml.slice(first, to));
+    const source = yaml.slice(first, sourceEnd(yaml, first, to, indent.length));
     const valueSpan =
       value?.range && !empty
         ? { start: base + first, end: base + first + source.length }
@@ -400,9 +419,6 @@ function readBlock(frontmatter: string | null): ReadBlock {
       source: read === undefined,
     });
   }
-  // The map's line's indentation, before any `?`, anchor or tag.
-  const firstStart = map.range?.[0] ?? 0;
-  const indent = /^[ \t]*/.exec(yaml.slice(yaml.lastIndexOf('\n', firstStart - 1) + 1))?.[0] ?? '';
   return {
     ok: true,
     entries,
@@ -657,7 +673,9 @@ function readsAs(text: string, value: PropertyScalar, context: Context): boolean
 // every reader, and `<<` isn't a merge key to those that have them.
 const keyTexts = (key: string, style: Style) => {
   const texts = scalarTexts(key, style).filter(
-    (text) => text !== '<<' && readsAs(text, key, 'block'),
+    // Nor a line starting `---` or `...`, which some readers take for the
+    // block's end.
+    (text) => text !== '<<' && !/^(?:---|\.\.\.)/.test(text) && readsAs(text, key, 'block'),
   );
   return texts.length > 0 ? texts : [doubleQuoted(key)];
 };
