@@ -1,4 +1,4 @@
-import type { FolderId, LinkablePage } from '@wikistow/client';
+import type { FolderId, LinkablePage, PropertyData } from '@wikistow/client';
 import { createContext } from 'react';
 import type { AttachmentContext } from './attachments';
 
@@ -26,3 +26,9 @@ export const PageBody = createContext<PageBodyContext | null>(null);
  * its own, it would take the click the link should.
  */
 export const InLink = createContext(false);
+
+/**
+ * The page's properties, which its references (`` `=key` ``) show; null
+ * when it has no block, or one that doesn't read as properties.
+ */
+export const PageProperties = createContext<readonly PropertyData[] | null>(null);
