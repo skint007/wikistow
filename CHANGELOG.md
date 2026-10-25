@@ -30,6 +30,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A link's hint, saying where it goes, shows above the link instead of below it, where the pointer covered it. Near the top of the window it still shows below. (#179)
 
+#### Server
+
+- Nodemailer 10.1.4, from 10.0.13, for outgoing mail. It fixes three published advisories in how it reads addresses, where a crafted address could add a recipient or send to a domain the header doesn't name. (#183)
+
 #### CLI
 
 - `wikistow search` takes the same filters as the app's search, `tag:soup` and `key:value`, and so do agents' and plugins' searches. (#187)
