@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Desktop
 
-- A link's hint, saying where it goes, shows above the link instead of below it, where the pointer covered it. Near the top of the window it still shows below. (#PR)
+- A link's hint, saying where it goes, shows above the link instead of below it, where the pointer covered it. Near the top of the window it still shows below. (#179)
 
 #### CLI
 
