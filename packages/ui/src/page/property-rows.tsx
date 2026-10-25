@@ -106,7 +106,9 @@ export function PropertyRow({
             label={`New name for ${label}`}
             onDone={(to, keyboard) => {
               const key = to?.trim();
-              const kept = key === undefined || key === '' || key === property.key;
+              // As it was, its own spaces included, is no change.
+              const kept =
+                key === undefined || to === property.key || key === '' || key === property.key;
               if (!kept && !onRename(key, keyboard)) return;
               setRenaming(false);
               if (kept && keyboard) onFocus('menu');
@@ -439,8 +441,7 @@ function OneLine({
       }}
       onKeyDown={(event) => {
         // Enter that ends an IME's composition is the IME's.
-        if ((event.key !== 'Enter' && event.key !== 'Escape') || event.nativeEvent.isComposing)
-          return;
+        if ((event.key !== 'Enter' && event.key !== 'Escape') || composing(event)) return;
         event.preventDefault();
         done.current = true;
         onDone(event.key === 'Enter' ? text : undefined, true);

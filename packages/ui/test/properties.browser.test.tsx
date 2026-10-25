@@ -249,6 +249,13 @@ describe('the draft’s property rows', () => {
     expect(last()).toBe(NOTE.replace('Use fresh garlic.\n', 'Use fresh garlic.\nrating: 4.5\n'));
   });
 
+  it('leaves a key as it was, its spaces too, when Rename changes nothing', async () => {
+    const { container, blocks } = await editor('---\n"pad ": 1\n---\n');
+    await fromMenu(container, 'Pad', 'Rename');
+    await userEvent.keyboard('{Enter}');
+    expect(blocks).toEqual([]);
+  });
+
   it('says why an edit can’t be made, and refuses a key the block has', async () => {
     const { container, blocks } = await editor('---\nname: x\n---\n');
     await userEvent.click(button(container, 'Add property'));
@@ -362,6 +369,22 @@ describe('Insert in page', () => {
         .toBe('---\nservings: 4\n---\nUse `x` `=servings`\n');
     });
   }
+
+  it('cuts no code span with a selection ending in one, in the source editor', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nUse `abcd` now\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    // `bc` selected.
+    await userEvent.keyboard(
+      '{Control>}{Home}{/Control}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{Shift>}{ArrowRight}{ArrowRight}{/Shift}',
+    );
+    await fromMenu(container, 'Servings', 'Insert in page');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\nservings: 4\n---\nUse `abcd` `=servings` now\n');
+  });
 
   it('puts a reference after a code span the source editor’s cursor is in', async () => {
     const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `xy` now\n', 'source');

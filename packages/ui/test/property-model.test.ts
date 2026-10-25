@@ -64,6 +64,8 @@ describe('property rows', () => {
     expect(convertValue(null, 'list')).toEqual([]);
     expect(convertValue(['soup', 'bread'], 'text')).toBe('soup, bread');
     expect(convertValue(['35'], 'number')).toBe(35);
+    expect(convertValue([4], 'number')).toBe(4);
+    expect(convertValue([true], 'boolean')).toBe(true);
     expect(convertValue(['a', 'b'], 'number')).toBe(null);
     expect(convertValue('Tomato soup', 'wikilink')).toBe('[[Tomato soup]]');
     expect(convertValue('a ] b', 'wikilink')).toBe(null);

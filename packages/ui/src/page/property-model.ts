@@ -108,6 +108,8 @@ function converted(value: PropertyValue, to: PropertyType): PropertyValue | null
     return value.length === 1 && !Array.isArray(only) ? converted(only ?? null, to) : null;
   }
   const scalar = value as PropertyScalar;
+  // An item out of a list that is one already.
+  if (scalar !== null && typeOfValue(scalar) === to) return scalar;
   switch (to) {
     case 'text':
       return scalarText(scalar);

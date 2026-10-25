@@ -116,16 +116,17 @@ export default function CodeMirrorSurface({
         if (!editor) return;
         const { state } = editor;
         let { from, to } = state.selection.main;
-        // A cursor in a code span puts it after the span, not inside.
-        if (from === to) {
-          for (let node = syntaxTree(state).resolveInner(to, -1); ; node = node.parent) {
-            if (node.name === 'InlineCode' && node.from < to && to < node.to) {
-              from = to = node.to;
-              break;
-            }
-            if (!node.parent) break;
+        // Where the code span `at` is strictly inside ends, if it is in one.
+        const spanEnd = (at: number) => {
+          for (let node = syntaxTree(state).resolveInner(at, -1); ; node = node.parent) {
+            if (node.name === 'InlineCode' && node.from < at && at < node.to) return node.to;
+            if (!node.parent) return null;
           }
-        }
+        };
+        // A cursor or a selection end in a code span puts it after the span,
+        // replacing nothing, so no span is cut or left a backtick short.
+        const end = spanEnd(to) ?? to;
+        if (end !== to || (from !== to && spanEnd(from) !== null)) from = to = end;
         // A backtick beside it would make one span of the two.
         const before = state.sliceDoc(from - 1, from) === '`' ? ' ' : '';
         const after = state.sliceDoc(to, to + 1) === '`' ? ' ' : '';
