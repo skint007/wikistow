@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Features
 
+- List pages by their properties with a `wikistow-query` block: say where they are, which must hold, which values to show and how to sort them, and the page shows a table that keeps up as pages change.
 - Open a folder to see its pages as a table of their properties, and change a value right in its cell.
 - A page's properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout. Write `=servings` in inline code to show a value in the page.
 
@@ -15,6 +16,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- A fenced code block labelled `wikistow-query` lists pages as a table: `from` a folder or `#tag`, `where` conditions (`=`, `!=`, `<`, `<=`, `>`, `>=`, `has`; numbers and dates compare as such), `show` columns, `sort` a key or `title`, and `limit`. The table runs over your own search index, so it lists only pages you can open, and updates as they change. A block that doesn't read shows as code with a line saying why. The visual editor keeps the block as code and shows the table under it. Dataview blocks stay code. A public link's copy holds the table as it stood at publish, from published versions only, linking only pages with a public link of their own, and the public link dialog says the page lists other pages. (#PR)
 - A folder opens to its pages, as a list or a table of their properties: click its name in the sidebar, or **Open** in its menu, and its chevron still just opens or closes it there. The table's columns are the keys the pages use, which you can hide, and the list or table choice is kept per folder on this device. Readers see published values, and editors their drafts, labelled. Editors change a value in its cell, which saves that page's draft changing only that value; if someone saved the page since, the cell says so and nothing is overwritten. On phones the list comes first, and the table scrolls sideways. (#192)
 - Clicking a tag in a page's properties opens search for that tag, on the published page and the draft, without leaving the page. On the draft, a tag's × still removes it. (#191)
 - Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. An address ending `#search=` and a query opens search with it. (#187)

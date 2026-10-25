@@ -13,12 +13,8 @@ import {
 // decisions 2 and 3): what a key reads as, what a typed value is, and
 // what a row's Type can turn a value into.
 
-/** A key in sentence case, as written otherwise: `cook_time` reads "Cook time". */
-export function propertyLabel(key: string): string {
-  const words = key.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const [first = ''] = words;
-  return words === '' ? key : first.toLocaleUpperCase() + words.slice(first.length);
-}
+/** A key in sentence case (`propertyLabel`), which a public copy's query table writes too. */
+export { propertyLabel } from '@wikistow/client';
 
 /** What each type is called in a row's Type menu, in the order it lists them. */
 export const PROPERTY_TYPES: readonly { type: PropertyType; label: string }[] = [

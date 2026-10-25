@@ -1,4 +1,4 @@
-import type { AttachmentRef } from '@wikistow/client';
+import { QUERY_LANGUAGE, type AttachmentRef } from '@wikistow/client';
 import { CODE_LANGUAGES, type AlertType } from '@wikistow/client/reader';
 import { Fragment, type Node } from '@milkdown/kit/prose/model';
 import { NodeSelection, Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
@@ -21,6 +21,7 @@ import { setKind, type QuoteKind } from './formatting';
 import { claimedBlock } from '@wikistow/plugin-sdk';
 import type { PluginBlock } from '../../../plugins/runtime';
 import { attachmentById, type VisualHost } from './host';
+import type { QueryResults } from './query-results';
 
 /** A note in place of an image that isn't shown, as the reader writes it. */
 export function notLoaded(alt: string): HTMLElement {
@@ -205,6 +206,9 @@ class CodeBlockView implements NodeView {
   readonly #picker = createRoot(this.#header);
   readonly #block = document.createElement('div');
   readonly #pre = document.createElement('pre');
+  // A query block's result, under its code (`QueryResults`).
+  readonly #result = document.createElement('div');
+  #query: ReturnType<QueryResults['add']> | null = null;
   readonly #view: EditorView;
   readonly #getPos: () => number | undefined;
   readonly #host: VisualHost;
@@ -225,6 +229,8 @@ class CodeBlockView implements NodeView {
     this.#block.className = 'plugin-block';
     this.#block.contentEditable = 'false';
     this.#pre.append(this.contentDOM);
+    this.#result.className = 'query-result';
+    this.#result.contentEditable = 'false';
     this.dom.append(this.#header, this.#block, this.#pre);
     this.#show();
     this.#unsubscribe = host.plugins()?.subscribe(() => this.#drawBlock()) ?? (() => {});
@@ -298,6 +304,24 @@ class CodeBlockView implements NodeView {
     else delete this.#pre.dataset.language;
     this.#renderHeader();
     this.#drawBlock();
+    this.#drawQuery();
+  }
+
+  /** A query block's result under it, for its text now; any other block has none. */
+  #drawQuery() {
+    const queries = this.#host.queries;
+    const query = String(this.#node.attrs.language) === QUERY_LANGUAGE && queries;
+    if (!query) {
+      this.#query?.remove();
+      this.#query = null;
+      this.#result.remove();
+      return;
+    }
+    if (this.#query) this.#query.set(this.#node.textContent);
+    else {
+      this.dom.append(this.#result);
+      this.#query = query.add(this.#result, this.#node.textContent);
+    }
   }
 
   #renderHeader() {
@@ -327,23 +351,31 @@ class CodeBlockView implements NodeView {
     const relabelled = node.attrs.language !== this.#node.attrs.language;
     this.#node = node;
     if (relabelled) this.#show();
-    else this.#drawBlock();
+    else {
+      this.#drawBlock();
+      this.#drawQuery();
+    }
     return true;
   }
 
   stopEvent = (event: Event) =>
     event.target instanceof globalThis.Node &&
-    (this.#header.contains(event.target) || this.#block.contains(event.target));
+    (this.#header.contains(event.target) ||
+      this.#block.contains(event.target) ||
+      this.#result.contains(event.target));
 
   ignoreMutation = (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) =>
     mutation.type === 'selection'
-      ? this.#header.contains(mutation.target) || this.#block.contains(mutation.target)
+      ? this.#header.contains(mutation.target) ||
+        this.#block.contains(mutation.target) ||
+        this.#result.contains(mutation.target)
       : !this.contentDOM.contains(mutation.target);
 
   // Not while React may be rendering, as the editor can update then.
   destroy() {
     this.#unsubscribe();
     this.#undraw();
+    this.#query?.remove();
     queueMicrotask(() => this.#picker.unmount());
   }
 }

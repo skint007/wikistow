@@ -11,7 +11,16 @@ import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { Transform } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
-import { use, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import {
+  use,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { createPortal } from 'react-dom';
 import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
@@ -23,6 +32,7 @@ import { codeHighlights } from './highlight';
 import { propertiesChanged, propertyReferences } from './property-references';
 import { usePluginRuntime } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
+import { QueryResults } from './query-results';
 import {
   cellLinks,
   EXTERNAL,
@@ -170,6 +180,8 @@ export default function VisualSurface(props: VisualSurfaceProps) {
   );
 }
 
+const noQueries = new QueryResults();
+
 function Surface({
   initial,
   onChange,
@@ -183,6 +195,7 @@ function Surface({
   page,
   properties,
   otherPages,
+  queryTable,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -230,7 +243,13 @@ function Surface({
     live: new Set(),
     page: () => latest.current.page ?? null,
     plugins: () => plugins,
+    queries: new QueryResults(),
   }));
+  // Each query block's result, drawn under its code where the editor put a place for it.
+  const queries = useSyncExternalStore(
+    host.queries?.subscribe ?? noQueries.subscribe,
+    host.queries?.list ?? noQueries.list,
+  );
   const text = useRef(initial);
   // The editor once it's made, its writer, and the text it was last given,
   // with the document it made of it: an unchanged document gives it back.
@@ -558,6 +577,10 @@ function Surface({
       <div className="min-h-0 flex-1 overflow-y-auto [&_.milkdown]:h-full [&>[data-milkdown-root]]:h-full">
         <Milkdown />
         <CompletionListbox completion={completion} />
+        {queryTable &&
+          queries.map(({ key, element, source }) =>
+            createPortal(queryTable(source), element, String(key)),
+          )}
       </div>
     </div>
   );

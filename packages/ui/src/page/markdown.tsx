@@ -1,6 +1,7 @@
 import {
   mayReferOtherPages,
   parsePropertyReference,
+  QUERY_LANGUAGE,
   readProperties,
   splitFrontmatter,
 } from '@wikistow/client';
@@ -14,6 +15,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -41,6 +43,7 @@ import { otherPages } from './other-pages';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
 import { PropertyReferenceView } from './property-reference';
+import { QueryTable } from './query-table';
 import { bodyLinkScope } from './property-value';
 
 export { ATTACHMENT_SCHEME, type AttachmentContext };
@@ -142,11 +145,48 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
         .find((name) => name.startsWith('language-'))
         ?.slice('language-'.length)
     : undefined;
+  // A query block is its table; one that doesn't read, its code and why.
+  if (language === QUERY_LANGUAGE && body) {
+    const { attachments, pages, editing } = body;
+    return (
+      <QueryTable
+        source={textOf(code)}
+        scope={{
+          ctx: attachments.ctx,
+          spaceId: attachments.page.spaceId,
+          pageId: attachments.page.pageId,
+          pages,
+          editor: editing !== null,
+        }}
+        failed={(error) => (
+          <>
+            <WrittenCode language={language} text={textOf(code)} pre={props} />
+            <p role="note" className="query-table-error mb-4 text-xs text-muted-foreground">
+              {error}
+            </p>
+          </>
+        )}
+      />
+    );
+  }
   // A fence a running plugin claims is its view; without the plugin, its text.
   const block = language ? blocks.get(language) : undefined;
   if (block && body) {
     return <ReaderBlock block={block} source={textOf(code)} page={body.attachments.page} />;
   }
+  return <WrittenCode language={language} text={textOf(code)} pre={props} />;
+};
+
+/** A code block as written, under its language and a button that copies it. */
+function WrittenCode({
+  language,
+  text,
+  pre,
+}: {
+  language: string | undefined;
+  text: string;
+  pre: ComponentProps<'pre'>;
+}) {
   const claimed = language ? claimedBlock(language) : null;
   return (
     <div className="code-block">
@@ -156,12 +196,12 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
           {language || 'text'}
           {claimed && ` · shown as written, without the ${claimed.pluginId} plugin`}
         </span>
-        <CopyCode text={textOf(code)} />
+        <CopyCode text={text} />
       </div>
-      <pre {...props} />
+      <pre {...pre} />
     </div>
   );
-};
+}
 
 /** Copies a code block's text, as written, showing a check for a moment once it's copied. */
 function CopyCode({ text }: { text: string }) {

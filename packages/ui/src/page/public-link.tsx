@@ -40,11 +40,22 @@ export function usePublicLink(page: pageOperations.PageRef) {
 
 /** Said, rather than uploading, when a version shows values from other pages the dialog hadn't noted. */
 const UNNOTED =
-  'This page shows values from other pages, which the public page would show too. Read the note, then try again.';
+  'This page shows other pages’ titles or values, which the public page would show too. Read the note, then try again.';
 
-/** Whether a copy of `markdown` shows values from other pages. */
-const showsOthers = (markdown: string | null | undefined) =>
-  markdown != null && publicLinkOperations.fromOtherPages(markdown).values;
+const fromOthers = (markdown: string | null | undefined) =>
+  markdown == null ? null : publicLinkOperations.fromOtherPages(markdown);
+
+/** Whether a copy of `markdown` shows anything of other pages. */
+const showsOthers = (markdown: string | null | undefined) => {
+  const shows = fromOthers(markdown);
+  return !!shows && (shows.values || shows.lists);
+};
+
+/** Whether a copy of `markdown` shows something of other pages a note for `noted` doesn't say. */
+const unnoted = (markdown: string, noted: string | null | undefined) => {
+  const [shows, said] = [fromOthers(markdown), fromOthers(noted)];
+  return !!shows && ((shows.values && !said?.values) || (shows.lists && !said?.lists));
+};
 
 /**
  * What a public copy of `markdown` shows of other pages, said where a copy
@@ -52,16 +63,21 @@ const showsOthers = (markdown: string | null | undefined) =>
  * Nothing while `markdown` isn't known, or shows nothing of them.
  */
 function FromOtherPages({ markdown }: { markdown: string | null | undefined }) {
-  const shows = useMemo(
-    () => (markdown == null ? null : publicLinkOperations.fromOtherPages(markdown)),
-    [markdown],
-  );
-  if (!shows?.values) return null;
+  const shows = useMemo(() => fromOthers(markdown), [markdown]);
+  if (!shows || (!shows.values && !shows.lists)) return null;
+  const what =
+    shows.values && shows.lists
+      ? 'This page shows values from other pages, and lists other pages.'
+      : shows.values
+        ? 'This page shows values from other pages.'
+        : 'This page lists other pages.';
+  const read = shows.lists
+    ? 'Anyone with the link can read those pages’ titles and the values shown too.'
+    : 'Anyone with the link can read them too.';
   return (
     <p role="note" className="rounded-control bg-muted p-3 text-sm">
-      <strong>This page shows values from other pages.</strong> Anyone with the link can read them
-      too. They’re taken from those pages’ published versions, as they are when this page is
-      published, and stay so until it’s published again.
+      <strong>{what}</strong> {read} They’re taken from those pages’ published versions, as they are
+      when this page is published, and stay so until it’s published again.
     </p>
   );
 }
@@ -156,9 +172,9 @@ function LinkSteps({
     seen && (seen.revisionId !== publishedHead || opened.markdown === null)
       ? { markdown: seen.markdown, settled: true }
       : opened;
+  // The note was worked out from this version: the one opened, or one refused before.
   const noted = (revisionId: RevisionId) =>
-    seen?.revisionId === revisionId ||
-    (revisionId === publishedHead && showsOthers(opened.markdown));
+    seen?.revisionId === revisionId || (revisionId === publishedHead && opened.markdown !== null);
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(publicLinkMessage);
   // What's running, said as it goes.
@@ -452,7 +468,7 @@ function PublishSteps({
           setStep(null);
         }
         // Published, but its copy waits until the note is on screen for it.
-        if (showsOthers(version.payload.markdown) && !showsOthers(markdown)) {
+        if (unnoted(version.payload.markdown, markdown)) {
           throw new Error(`Published. ${UNNOTED}`);
         }
       }

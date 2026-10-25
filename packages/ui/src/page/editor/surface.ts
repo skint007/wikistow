@@ -1,5 +1,5 @@
 import type { AttachmentRef, LinkablePage, PropertyData } from '@wikistow/client';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
 
 // An editor surface is one way of editing a page's Markdown body: the
@@ -105,6 +105,11 @@ export type EditorSurfaceProps = {
    * completes; none until it is built.
    */
   otherPages?: OtherPages | null | undefined;
+  /**
+   * A query block's result (`wikistow-query`), drawn under its code in the
+   * visual editor, for the block's text now; none where nobody sees it.
+   */
+  queryTable?: ((source: string) => ReactNode) | undefined;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
   ref?: Ref<EditorSurfaceHandle>;
