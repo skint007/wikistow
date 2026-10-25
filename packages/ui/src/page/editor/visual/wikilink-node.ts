@@ -89,6 +89,8 @@ class WikilinkView implements NodeView {
     const shown = ++this.#shown;
     const link = parseWikilink(this.#source);
     this.dom.dataset.hint = this.#source;
+    // Above it, as a link's hint (`linkHint`): below, the pointer resting on its line covers it.
+    this.dom.dataset.hintSide = 'top';
     this.dom.className = '';
     if (!link) {
       this.dom.replaceChildren(this.#source);
