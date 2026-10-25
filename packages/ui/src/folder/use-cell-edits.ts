@@ -122,6 +122,16 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
           }),
         ),
       );
+      searchIndexChanged(queryClient, {
+        saved: {
+          spaceId,
+          pageId: cell.pageId,
+          basedOn,
+          revisionId,
+          title: payload.title,
+          markdown: payload.markdown,
+        },
+      });
       void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
       void queryClient.invalidateQueries({ queryKey: pageQuery(ctx, cell.pageId).queryKey });
       return { basedOn: revisionId };
@@ -145,12 +155,13 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
     const line = lines.current;
     const run = saveCell(cell, line.get(cell.pageId));
     line.set(cell.pageId, run);
-    void run.then(() => {
+    void run.then((settled) => {
+      // After a conflict or a failure, the index reads the draft as it is
+      // now; each save went in as it landed.
+      if (!settled) searchIndexChanged(queryClient, { spaceIds: [spaceId] });
       if (line.get(cell.pageId) !== run) return;
       line.delete(cell.pageId);
       setSaving((current) => without(current, cell.pageId));
-      // After a save or a conflict alike, the index reads the draft as it is now.
-      searchIndexChanged(queryClient);
     });
   }
 

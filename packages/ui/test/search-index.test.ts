@@ -1,7 +1,7 @@
 import type { ClientContext } from '@wikistow/client';
 import { QueryClient, QueryObserver, type QueryKey } from '@tanstack/react-query';
-import { describe, expect, it } from 'vite-plus/test';
-import { searchIndexChanged, searchIndexQuery } from '../src/data/queries.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { GATHER_MS, searchIndexChanged, searchIndexQuery } from '../src/data/queries.ts';
 
 // The index's key, with builds this test finishes by hand: each resolves
 // when `finish` is called, and `aborted` says whether React Query gave up on it.
@@ -19,7 +19,12 @@ function harness() {
   return { queryClient, queryKey, builds };
 }
 
-const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+// Timers are the test's: changes gather for `GATHER_MS` while the index is shown.
+const settled = () => vi.advanceTimersByTimeAsync(0);
+const gathered = () => vi.advanceTimersByTimeAsync(GATHER_MS);
+
+beforeEach(() => void vi.useFakeTimers());
+afterEach(() => void vi.useRealTimers());
 
 describe('a change to the search index', () => {
   it('follows a build already running with another, without cancelling it', async () => {
@@ -31,7 +36,7 @@ describe('a change to the search index', () => {
     searchIndexChanged(queryClient);
     searchIndexChanged(queryClient);
     searchIndexChanged(queryClient);
-    await settled();
+    await gathered();
     expect(builds).toHaveLength(1);
     builds[0]?.finish();
     await settled();
@@ -51,8 +56,41 @@ describe('a change to the search index', () => {
     builds[0]?.finish();
     await settled();
     searchIndexChanged(queryClient);
-    await settled();
+    await vi.advanceTimersByTimeAsync(GATHER_MS - 1);
+    expect(builds).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(builds).toHaveLength(2);
+    stop();
+  });
+
+  it('gathers the changes heard while it is shown into one update', async () => {
+    const { queryClient, queryKey, builds } = harness();
+    const stop = new QueryObserver(queryClient, { queryKey }).subscribe(() => {});
+    await settled();
+    builds[0]?.finish();
+    await settled();
+    for (let i = 0; i < 5; i++) {
+      searchIndexChanged(queryClient);
+      await vi.advanceTimersByTimeAsync(GATHER_MS / 5 - 1);
+    }
+    await gathered();
+    expect(builds).toHaveLength(2);
+    stop();
+  });
+
+  it('updates while changes keep coming, rather than waiting for them to stop', async () => {
+    const { queryClient, queryKey, builds } = harness();
+    const stop = new QueryObserver(queryClient, { queryKey }).subscribe(() => {});
+    await settled();
+    builds[0]?.finish();
+    await settled();
+    // An autosave every tenth of the time changes gather, for ten times as long.
+    for (let i = 0; i < 100; i++) {
+      searchIndexChanged(queryClient);
+      await vi.advanceTimersByTimeAsync(GATHER_MS / 10);
+      builds.at(-1)?.finish();
+    }
+    expect(builds.length).toBeGreaterThanOrEqual(10);
     stop();
   });
 
