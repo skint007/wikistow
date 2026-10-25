@@ -1,5 +1,6 @@
 import {
   PageId,
+  pageIndex,
   resolveLinked,
   SpaceId,
   type PropertyData,
@@ -36,12 +37,15 @@ export function otherPages(
   scope: LinkScope,
   own?: readonly PropertyData[] | null,
 ): OtherPages {
+  // Titles looked up once, not each page read for each reference.
+  const titles = scope.pages && pageIndex(scope.pages);
   return (link) => {
-    if (!index || !scope.pages) return undefined;
+    if (!index || !scope.pages || !titles) return undefined;
     const [found] = resolveLinked([link], {
       pages: scope.pages,
       selfId: scope.selfId,
       table: scope.links,
+      index: titles,
     });
     const pageId = found?.status === 'resolved' ? found.targets[0] : undefined;
     if (pageId === undefined) return { kind: 'none' };

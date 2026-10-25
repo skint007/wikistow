@@ -60,7 +60,7 @@ export type DraftEditorHandle = {
   checkSize(changes?: PayloadChanges): void;
   /** The draft revision everything shown is saved in, or null while some of it isn't. */
   saved(): RevisionId | null;
-  /** The draft's Markdown as the editor has it now, saved or not. */
+  /** The draft's Markdown as the editor has it now, saved or not, an edit not yet reported included. */
   markdown(): string;
 };
 
@@ -164,7 +164,7 @@ export function DraftEditor({
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),
       saved: () => session.savedRevision(),
-      markdown: () => markdown.current,
+      markdown: () => surface.current?.read() ?? markdown.current,
     }),
     [session],
   );

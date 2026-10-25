@@ -7,7 +7,13 @@ import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
-import { findWikilinks, foldTitle, linkablePages, type LinkablePage } from '../links.ts';
+import {
+  findWikilinks,
+  foldTitle,
+  linkablePages,
+  resolveWikilinks,
+  type LinkablePage,
+} from '../links.ts';
 import {
   findProperty,
   markdownLiteral,
@@ -144,11 +150,12 @@ export function fromOtherPages(markdown: string): { values: boolean } {
  * copied version finds it, among the pages of the space this person sees
  * that are published: by the version's link table first, then by
  * published title, with its folders. A draft never counts: not its value,
- * even where this person edits the page, nor its title, which is the
- * tree's for a page whose draft changed since it was published, so that
- * page's publication is opened for its title. A page whose publication
- * can't be fetched names none, and the reference stays as written. A
- * reference to this page takes the version being copied.
+ * even where this person edits the page, nor its title. The tree gives a
+ * page's draft title where its draft changed since it was published, so
+ * those pages' publications are opened for their titles, and only when a
+ * reference isn't in the table. A page whose publication can't be fetched
+ * or opened names none, and the reference stays as written. A reference to
+ * this page takes the version being copied.
  */
 async function otherValues(
   ctx: ClientContext,
@@ -165,28 +172,53 @@ async function otherValues(
     if (!found) opened.set(pageId, (found = publication(ctx, page, pageId, loaded)));
     return found;
   };
-  // Every published page, under its published title; this page under the copied version's.
-  const pages: LinkablePage[] = [];
-  for (const [i, linkable] of linkablePages(loaded).entries()) {
-    const summary = loaded.pages[i];
-    let title: string | null = null;
-    if (linkable.id === page.pageId) title = payload.title;
-    else if (summary?.publishedHead && (summary.draftHead === null || !summary.draftChanges)) {
-      title = linkable.title;
-    } else if (summary?.publishedHead) title = (await open(linkable.id))?.title ?? null;
-    pages.push({ ...linkable, title });
+  const summaries = new Map<string, (typeof loaded.pages)[number]>(
+    loaded.pages.map((summary) => [summary.id, summary]),
+  );
+  const published = (pageId: string) =>
+    pageId === page.pageId || !!summaries.get(pageId)?.publishedHead;
+  const table = linkTableOf(payload);
+  // A link whose entry names a published page goes there, as a reader's does.
+  const chosen = new Map<string, string>();
+  for (const link of links) {
+    const entry = table.get(linkKey(link));
+    if (entry !== undefined && published(entry)) chosen.set(linkKey(link), entry);
   }
-  const resolved = resolveLinked(links, {
-    pages,
-    selfId: page.pageId,
-    table: linkTableOf(payload),
-  });
+  const untabled = links.filter((link) => !chosen.has(linkKey(link)));
+  if (untabled.length > 0) {
+    // Every published page under its published title; this page under the copied version's.
+    const linkable = linkablePages(loaded);
+    const changed = loaded.pages.filter(
+      (summary) =>
+        summary.id !== page.pageId &&
+        summary.publishedHead &&
+        summary.draftHead !== null &&
+        summary.draftChanges,
+    );
+    for (let at = 0; at < changed.length; at += OPEN_AT_ONCE) {
+      await Promise.all(changed.slice(at, at + OPEN_AT_ONCE).map((summary) => open(summary.id)));
+    }
+    const pages: LinkablePage[] = [];
+    for (const [i, found] of linkable.entries()) {
+      const summary = loaded.pages[i];
+      const title =
+        found.id === page.pageId
+          ? payload.title
+          : !summary?.publishedHead
+            ? null
+            : opened.has(found.id)
+              ? ((await open(found.id))?.title ?? null)
+              : found.title;
+      pages.push({ ...found, title });
+    }
+    for (const link of resolveWikilinks(untabled, { pages, selfId: page.pageId })) {
+      const [pageId] = link.targets;
+      if (link.status === 'resolved' && pageId !== undefined) chosen.set(linkKey(link), pageId);
+    }
+  }
   const own = readProperties(splitFrontmatter(payload.markdown).frontmatter);
   const values = new Map<string, readonly PropertyData[]>();
-  for (const link of resolved) {
-    const [pageId] = link.targets;
-    const key = linkKey(link);
-    if (link.status !== 'resolved' || pageId === undefined || values.has(key)) continue;
+  for (const [key, pageId] of chosen) {
     const found =
       pageId === page.pageId
         ? own.ok
@@ -197,6 +229,9 @@ async function otherValues(
   }
   return (link) => values.get(linkKey(link));
 }
+
+// How many pages' publications a copy opens at a time, for their titles.
+const OPEN_AT_ONCE = 8;
 
 /** A page's publication as a public copy reads it: its title and properties. */
 type Publication = { title: string; properties: readonly PropertyData[] };
@@ -217,8 +252,8 @@ async function publication(
     const read = readProperties(splitFrontmatter(version.payload.markdown).frontmatter);
     return { title: version.payload.title, properties: read.ok ? read.properties : [] };
   } catch (error) {
-    // A page whose version can't be fetched shows no value.
-    if (!(error instanceof ApiError)) throw error;
+    // A page whose version can't be fetched, or fails its checks, shows no value.
+    if (!(error instanceof ApiError) && !(error instanceof CryptoError)) throw error;
     return null;
   }
 }
