@@ -13,6 +13,8 @@ import { breadcrumb, markedParts, searchStatus } from './search-model';
 
 type Hit = SearchHit<searchOperations.SearchPage>;
 
+const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
+
 /**
  * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple). The index is built
  * on this device from the pages this person can read (`usePageIndex`),
@@ -48,8 +50,15 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);
   const results = useMemo(() => index?.search(deferred, { limit: 50 }) ?? [], [index, deferred]);
-  const [active, setActive] = useState(0);
-  useEffect(() => setActive(0), [results]);
+  // The hit chosen for a query, by its page, so the index rebuilding as
+  // pages change doesn't move it; a new query starts at its first hit.
+  const [chosen, setChosen] = useState<{ query: string; key: string } | null>(null);
+  const found =
+    chosen?.query === deferred ? results.findIndex((hit) => hitKey(hit) === chosen.key) : -1;
+  const active = Math.max(found, 0);
+  const choose = (hit: Hit | undefined) => {
+    if (hit) setChosen({ query: deferred, key: hitKey(hit) });
+  };
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
   useEffect(() => {
@@ -93,7 +102,7 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
               const step = event.key === 'ArrowDown' ? 1 : -1;
-              setActive((at) => Math.min(Math.max(at + step, 0), results.length - 1));
+              choose(results[Math.min(Math.max(active + step, 0), results.length - 1)]);
             } else if (event.key === 'Enter') {
               const hit = results[active];
               if (hit) {
@@ -130,12 +139,12 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
         >
           {results.map((hit, i) => (
             <ResultRow
-              key={`${hit.doc.spaceId}/${hit.doc.pageId}`}
+              key={hitKey(hit)}
               hit={hit}
               id={optionId(i)}
               active={i === active}
               onOpen={() => openHit(hit)}
-              onHover={() => setActive(i)}
+              onHover={() => choose(hit)}
             />
           ))}
         </ul>
