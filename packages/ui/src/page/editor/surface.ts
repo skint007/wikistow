@@ -107,4 +107,9 @@ export type EditorSurfaceHandle = {
   focus(at?: number): void;
   /** Where the cursor is, as an offset in `read()`'s text; null if it can't tell. */
   caret?(): number | null;
+  /**
+   * Put `code` as inline code where the cursor is, in place of what's
+   * selected, and focus there, the cursor after it. Reported as an edit.
+   */
+  insertCode?(code: string): void;
 };

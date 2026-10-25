@@ -110,6 +110,12 @@ export default function CodeMirrorSurface({
         const anchor = Math.min(at - breaks * (lineBreak.length - 1), editor.state.doc.length);
         editor.dispatch({ selection: { anchor }, scrollIntoView: true });
       },
+      insertCode(code) {
+        const editor = view.current;
+        if (!editor) return;
+        editor.dispatch(editor.state.replaceSelection(`\`${code}\``), { scrollIntoView: true });
+        editor.focus();
+      },
     }),
     [],
   );

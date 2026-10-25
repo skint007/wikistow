@@ -7,7 +7,7 @@ import {
   type Editor,
 } from '@milkdown/kit/core';
 import type { Node, Slice } from '@milkdown/kit/prose/model';
-import { Plugin, Selection } from '@milkdown/kit/prose/state';
+import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { Transform } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
@@ -356,6 +356,28 @@ function Surface({
         view.focus();
       });
     },
+    /** Put `code` as inline code in place of the selection, or after a node selected. */
+    insertCode: (code: string) => {
+      editor.current?.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const { state } = view;
+        const mark = state.schema.marks['inlineCode'];
+        if (!mark) return;
+        const { selection } = state;
+        // In a code block, marks don't hold: the code is text there.
+        const text = state.schema.text(
+          code,
+          selection.$from.parent.type.spec.code ? [] : [mark.create()],
+        );
+        const tr =
+          selection instanceof TextSelection || selection.empty
+            ? state.tr.replaceSelectionWith(text, false)
+            : state.tr.insert(selection.to, text);
+        // Typing after it isn't code.
+        view.dispatch(tr.removeStoredMark(mark).scrollIntoView());
+        view.focus();
+      });
+    },
   }));
   const [completion] = useState(
     () =>
@@ -466,6 +488,7 @@ function Surface({
       replace: surface.show,
       caret: surface.caret,
       focus: surface.focus,
+      insertCode: surface.insertCode,
     }),
     [surface],
   );
