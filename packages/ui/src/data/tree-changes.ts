@@ -26,6 +26,9 @@ export function useTreeChanges(ctx: ClientContext | null) {
   const visible = useSyncExternalStore(onVisibility, () => document.visibilityState === 'visible');
   useEffect(() => {
     if (!ctx || !visible) return;
+    // Trees load again when the tab is back in view, being stale at once;
+    // the index, fresh for a minute, is told of what it may have missed.
+    searchIndexChanged(queryClient);
     const stop = new AbortController();
     const reloadLists = () => {
       void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });

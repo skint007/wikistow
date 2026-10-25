@@ -194,7 +194,8 @@ declare const __APP_VERSION__: string;
  * first search after an unlock the one the desktop app kept, sealed for this
  * person and build (`sealKept`). Locking drops it with everything else, and
  * `refreshAccess` rebuilds it, so nothing outlives a lost grant. This
- * person's own changes mark it stale (`searchIndexChanged`).
+ * person's own changes, and those the server tells of, mark it stale
+ * (`searchIndexChanged`).
  */
 export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =>
   queryOptions({
