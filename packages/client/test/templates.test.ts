@@ -92,6 +92,7 @@ describe('reading a template’s variables', () => {
     '{{#each}} {{ }} {{}} {{a b|}}',
     '{{{a}}} {{a}}}',
     '{{a|{{b}}',
+    '{{a|{{b\n|x}}',
     '{{a|b}c}} {{a|b\nc}} {{a b\tc}}',
     '{{a  ',
     '{{a|',
@@ -132,7 +133,7 @@ describe('reading a template’s variables', () => {
       '1',
     ];
     pieces.push('_', '-', '\u0301', '#', 'date', 'title', 'me', 'x y', 'YYYY');
-    // Whole openings and closings, so most texts hold several variables, closed or not.
+    // Whole openings and closings, so about half the texts hold one, and a fifth several.
     pieces.push('{{a|', '{{b:', '{{date:', '{{ c ', 'x}}', '}}', '|y}}');
     for (let run = 0; run < 20_000; run++) {
       const length = Math.floor(random() * 16);
