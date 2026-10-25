@@ -53,11 +53,19 @@ export function templatesIn<P extends Node & { title: string | null }>(
 }
 
 /**
- * `{{name}}`, `{{name|default}}` or `{{name:format}}`. A name starts with a
- * letter or digit and holds only those, spaces, `_` and `-`, so text such
- * as `{{#each}}` or `{{ }}` is left as it is.
+ * A variable's name: a letter or digit, then only those, spaces, `_` and
+ * `-`. A property reference's name follows the same rule.
  */
-const VARIABLE = /\{\{\s*([\p{L}\p{N}][\p{L}\p{N} _-]*?)\s*(?:([|:])([^}\n]*))?\}\}/gu;
+export const VARIABLE_NAME = /[\p{L}\p{N}][\p{L}\p{N} _-]*/u;
+
+/**
+ * `{{name}}`, `{{name|default}}` or `{{name:format}}`, by `VARIABLE_NAME`,
+ * so text such as `{{#each}}` or `{{ }}` is left as it is.
+ */
+const VARIABLE = new RegExp(
+  String.raw`\{\{\s*(${VARIABLE_NAME.source}?)\s*(?:([|:])([^}\n]*))?\}\}`,
+  'gu',
+);
 
 /** A field the person fills in: its value replaces every variable with `key`. */
 export type TemplateField = { key: string; label: string; initial: string };

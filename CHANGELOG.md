@@ -14,6 +14,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - `wikistow folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]` makes a folder where the agent may edit, at the top of its share unless `--parent` names one, so an agent can rebuild a set of notes' folders before creating their pages. It takes `--idempotency-key` like the other changes, and the skill says to use it when moving notes in. (#171)
 
+#### Development
+
+- The client reads a page's frontmatter as typed properties, with the `yaml` package, and edits one value, key or property's lines without rewriting the rest of the block. The property rows, references to values, and property search will build on it. (#181)
+
 ## 0.16.1 - 2026-10-23
 
 ### Highlights
