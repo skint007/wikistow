@@ -263,20 +263,25 @@ describe('property edits on random blocks', () => {
           );
         }
 
-        // Rename it.
+        // Rename it, unless aliases may name it through its anchor.
         const to = name(r, keys);
-        const after = edited(renameProperty(before, property.key, to), context(`rename to ${to}`));
-        expect(changedWithin(before, after, property.keySpan.start, property.keySpan.end)).toBe(
-          true,
-        );
-        expect(splits(after)).toBe(true);
-        expect(propertyData(after).map((p) => p.key)).toEqual(
-          keys.map((key, j) => (j === i ? to : key)),
-        );
+        const lineStart = before.lastIndexOf('\n', property.keySpan.start - 1) + 1;
+        const rename = renameProperty(before, property.key, to);
+        if (before.slice(lineStart, property.keySpan.start).includes('&')) {
+          expect(rename).toEqual({ ok: false, reason: 'The key has an anchor.' });
+        } else {
+          const after = edited(rename, context(`rename to ${to}`));
+          expect(changedWithin(before, after, property.keySpan.start, property.keySpan.end)).toBe(
+            true,
+          );
+          expect(splits(after)).toBe(true);
+          expect(propertyData(after).map((p) => p.key)).toEqual(
+            keys.map((key, j) => (j === i ? to : key)),
+          );
+        }
 
         // Remove it: from its line's start, its lines and nothing else.
         const removed = edited(removeProperty(before, property.key), context('remove'));
-        const lineStart = before.lastIndexOf('\n', property.keySpan.start - 1) + 1;
         const cut = before.length - removed.length;
         expect(removed).toBe(before.slice(0, lineStart) + before.slice(lineStart + cut));
         expect(lineStart + cut).toBeGreaterThanOrEqual(property.valueSpan.end);

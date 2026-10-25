@@ -4,7 +4,6 @@ import {
   isScalar,
   isSeq,
   parseDocument,
-  type Document,
   type Node,
   type Scalar,
   type YAMLError,
@@ -23,7 +22,8 @@ import { parseWikilink, type Wikilink } from './wikilink.ts';
 // - **Types** come from the values: a list (of scalars, or of lists of
 //   them), a number, `true` or `false`, a date (`YYYY-MM-DD`, or with a
 //   time), a web address, one wikilink alone (`"[[Page]]"`), otherwise text.
-//   Any other value (a nested map, say) is text: its source, read-only.
+//   Any other value is text, its source: a nested map or an alias,
+//   read-only, or a scalar that isn't JSON (`.inf`), which can be replaced.
 // - **Editing in place.** A value is editable unless it is on more than one
 //   line, a block scalar, an anchor, an alias or tagged, has a comment
 //   inside it, or isn't a scalar or a list of them. An edit replaces one
@@ -144,6 +144,8 @@ export function renameProperty(frontmatter: string, key: string, to: string): Pr
   if (read.entries.some(({ property }) => property.key === to)) {
     return refused(`There is already a property ${to}.`);
   }
+  // Aliases elsewhere name the key's anchor, and would read as the new name.
+  if (entry.key.anchor) return refused('The key has an anchor.');
   const style = entry.key.type;
   if (style !== 'PLAIN' && style !== 'QUOTE_DOUBLE' && style !== 'QUOTE_SINGLE') {
     return refused('The key is on more than one line.');
@@ -327,12 +329,12 @@ function readBlock(frontmatter: string | null): ReadBlock {
       value?.range && !empty
         ? { start: base + value.range[0], end: base + value.range[0] + sourceOf(value).length }
         : { start: at, end: at };
-    const read = value === null ? null : valueOf(value, doc);
+    const read = value === null ? null : valueOf(value);
     const lock = map.flow
       ? FLOW_MAP
       : value === null
         ? 'It has no value after its key.'
-        : (lockOf(value, yaml) ?? (read === undefined ? UNREADABLE : null));
+        : (lockOf(value, yaml) ?? (read === undefined && !isScalar(value) ? UNREADABLE : null));
     const data =
       read === undefined
         ? { type: 'text' as const, value: value ? sourceOf(value) : '' }
@@ -375,18 +377,19 @@ function errorReason(error: YAMLError): string {
 
 // A node's value as plain data, or undefined when it isn't a scalar or a
 // list of scalars and lists of scalars: a map, a tagged binary, a
-// non-finite number. An alias reads as what it names.
-function valueOf(node: Node, doc: Document, depth = 0): PropertyValue | undefined {
-  const target = isAlias(node) ? node.resolve(doc) : node;
-  if (isScalar(target)) {
-    const { value } = target;
+// non-finite number, an alias. An alias isn't followed: a few lines of
+// them, each naming a long list, would make a value far larger than its
+// block, and finding what each names walks the whole document.
+function valueOf(node: Node, depth = 0): PropertyValue | undefined {
+  if (isScalar(node)) {
+    const { value } = node;
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
   }
-  if (!isSeq(target) || depth > 1) return undefined;
+  if (!isSeq(node) || depth > 1) return undefined;
   const items: (PropertyScalar | PropertyScalar[])[] = [];
-  for (const item of (target as YAMLSeq<Node>).items) {
-    const read = valueOf(item, doc, depth + 1);
+  for (const item of (node as YAMLSeq<Node>).items) {
+    const read = valueOf(item, depth + 1);
     if (read === undefined) return undefined;
     items.push(read as PropertyScalar | PropertyScalar[]);
   }

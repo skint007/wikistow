@@ -186,10 +186,11 @@ infinite: .inf
       // Unquoted, YAML reads it as a list holding a list.
       ['unquoted_link', 'list', [['Page']]],
       ['nested', 'list', [['a', 'b'], 'c']],
-      // Not JSON, so its source, read-only.
+      // Not JSON, so its source; one line, so it can be replaced.
       ['infinite', 'text', '.inf'],
     ]);
-    expect(byKey(block, 'infinite')?.editable).toBe(false);
+    expect(byKey(block, 'infinite')?.editable).toBe(true);
+    expect(edited(setProperty(block, 'infinite', 2))).toContain('\ninfinite: 2\n');
   });
 
   it('keeps a value editable with a comment after it, not one with a comment inside', () => {
@@ -253,8 +254,8 @@ flow_lines: [a,
       ['literal', 'text', 'one\n', false],
       ['folded', 'text', 'one\n', false],
       ['anchored', 'number', 5, false],
-      // An alias reads as what it names.
-      ['alias', 'number', 5, false],
+      // An alias isn't followed: it shows as written.
+      ['alias', 'text', '*shared', false],
       ['tagged', 'text', '5', false],
       // Anything else shows its source.
       ['map', 'text', 'inner: 1', false],
@@ -264,6 +265,17 @@ flow_lines: [a,
       ['block_in_block', 'list', [['a', 'b']], false],
       ['flow_lines', 'list', ['a', 'b'], false],
     ]);
+  });
+
+  it('reads aliases in time to the block’s size, however many name a long list', () => {
+    const items = Array.from({ length: 12_000 }, () => '1').join(', ');
+    const aliases = Array.from({ length: 12_000 }, () => '*a').join(', ');
+    const block = `---\na: &a [${items}]\nb: [${aliases}]\n---\n`;
+    const started = performance.now();
+    const [, b] = properties(block);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(b).toMatchObject({ type: 'text', editable: false });
+    expect(b?.value).toHaveLength(aliases.length + 2);
   });
 
   it('reads a top-level flow map, without editing it in place', () => {
@@ -395,13 +407,10 @@ describe('setting a value', () => {
     );
   });
 
-  it('refuses to set a value shown as its source to that text', () => {
-    for (const block of ['---\nm: {x: 1}\n---\n', '---\nn: .inf\n---\n']) {
-      const [property] = properties(block);
-      expect(setProperty(block, property?.key ?? '', property?.value ?? null)).toMatchObject({
-        ok: false,
-      });
-    }
+  it('sets a value shown as its source to that text only as text', () => {
+    expect(setProperty('---\nm: {x: 1}\n---\n', 'm', '{x: 1}')).toMatchObject({ ok: false });
+    expect(setProperty('---\nm: *a\n---\n', 'm', '*a')).toMatchObject({ ok: false });
+    expect(edited(setProperty('---\nn: .inf\n---\n', 'n', '.inf'))).toBe('---\nn: ".inf"\n---\n');
   });
 
   it('returns the block as it was for the value it already has', () => {
@@ -606,6 +615,13 @@ describe('renaming a key', () => {
     expect(edited(renameProperty(block, 'cook_time', 'time: total'))).toBe(
       crlf(`---\n"time: total": 25 # minutes\n"Serves": 4\n---\n`),
     );
+  });
+
+  it('refuses to rename a key with an anchor, which aliases name', () => {
+    expect(renameProperty('---\n&k a: 1\nb: [*k]\n---\n', 'a', 'z')).toEqual({
+      ok: false,
+      reason: 'The key has an anchor.',
+    });
   });
 
   it('renames a key whose value is read-only', () => {
