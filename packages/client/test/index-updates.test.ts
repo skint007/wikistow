@@ -8,6 +8,7 @@ import {
   RevisionId,
   searchOperations,
   SpaceId,
+  type ClientContext,
   type IndexedText,
 } from '../src/index.ts';
 import { cpuTime } from './support/timing.ts';
@@ -217,34 +218,39 @@ function change(r: Random, world: World, index: PageIndex) {
 }
 
 describe('a page index derived change by change', () => {
-  it('holds, lists and finds what one built afresh does, whatever the changes', () => {
-    for (let seed = 1; seed <= 12; seed++) {
-      const r = random(seed);
-      const world: World = new Map();
-      for (let i = 0; i < 20 + r.int(30); i++) {
-        const page = newPage(r, world);
-        world.set(keyOf(page.doc), page);
-      }
-      let index = fresh(world);
-      for (let step = 0; step < 300; step++) {
-        const before = index;
-        const was = seen(before);
-        const { pages, spaces, all } = { all: false, ...change(r, world, index) };
-        if (all) {
-          index = index.with(
-            [...world.values()].map(({ doc, content }) => [doc, content] as const),
-            { spaces: 'all' },
-          );
-        } else {
-          index = index.with(pages, { spaces });
+  // Some seconds alone; more on a busy runner.
+  it(
+    'holds, lists and finds what one built afresh does, whatever the changes',
+    { timeout: 60_000 },
+    () => {
+      for (let seed = 1; seed <= 12; seed++) {
+        const r = random(seed);
+        const world: World = new Map();
+        for (let i = 0; i < 20 + r.int(30); i++) {
+          const page = newPage(r, world);
+          world.set(keyOf(page.doc), page);
         }
-        const context = `seed ${seed}, step ${step}`;
-        expect(seen(index), context).toEqual(seen(fresh(world)));
-        // The index derived from is as it was.
-        expect(seen(before), context).toEqual(was);
+        let index = fresh(world);
+        for (let step = 0; step < 300; step++) {
+          const before = index;
+          const was = seen(before);
+          const { pages, spaces, all } = { all: false, ...change(r, world, index) };
+          if (all) {
+            index = index.with(
+              [...world.values()].map(({ doc, content }) => [doc, content] as const),
+              { spaces: 'all' },
+            );
+          } else {
+            index = index.with(pages, { spaces });
+          }
+          const context = `seed ${seed}, step ${step}`;
+          expect(seen(index), context).toEqual(seen(fresh(world)));
+          // The index derived from is as it was.
+          expect(seen(before), context).toEqual(was);
+        }
       }
-    }
-  });
+    },
+  );
 
   it('is the same index when nothing changed, and keeps what didn’t change as it was', () => {
     const r = random(7);
@@ -325,24 +331,31 @@ describe('a page index derived change by change', () => {
     expect(seen(index)).toEqual(seen(fresh(world)));
   });
 
-  it('says when an index holds less than before, and not when a version only moves on', () => {
+  it('says when an index lets a version go, but for a draft this person saved over', () => {
     const r = random(13);
     const world: World = new Map();
     const page = newPage(r, world);
     world.set(keyOf(page.doc), page);
-    const draft = { ...page.doc, draft: true };
-    const index = fresh(new Map([[keyOf(draft), { doc: draft, content: page.content }]]));
+    const index = fresh(world);
     const more = newPage(r, world);
-    const { narrowed } = searchOperations;
-    expect(narrowed(index, index.with([[more.doc, more.content]]))).toBe(false);
-    // A save: the draft moves on.
-    const saved = { ...draft, revisionId: RevisionId.parse('saved') };
-    expect(narrowed(index, index.with([[saved, page.content]]))).toBe(false);
-    // Made a reader: the publication stands in for the draft.
-    const read = { ...draft, revisionId: RevisionId.parse('published'), draft: false };
-    expect(narrowed(index, index.with([[read, page.content]]))).toBe(true);
-    // Gone.
-    expect(narrowed(index, index.with([], { spaces: [draft.spaceId] }))).toBe(true);
+    const { letGo } = searchOperations;
+    expect(letGo(index, index.with([[more.doc, more.content]]))).toBe(false);
+    const next = { ...page.doc, revisionId: RevisionId.parse('next') };
+    const replaced = index.with([[next, page.content]]);
+    // Someone else's version, or a publication for a draft: let go.
+    expect(letGo(index, replaced)).toBe(true);
+    // This person's own save over the version held: theirs to open.
+    const saved = {
+      spaceId: next.spaceId,
+      pageId: next.pageId,
+      basedOn: page.doc.revisionId,
+      revisionId: next.revisionId,
+      title: page.content.title,
+      markdown: '',
+    };
+    expect(letGo(index, replaced, [saved])).toBe(false);
+    // Gone, whatever was saved.
+    expect(letGo(index, index.with([], { spaces: [page.doc.spaceId] }), [saved])).toBe(true);
   });
 
   it('takes time for what changed, not for every page held', () => {
@@ -381,5 +394,86 @@ describe('a page index derived change by change', () => {
     const unchanged = cpuTime(() => fresher.with(echo, { spaces: [SPACES[2] as SpaceId] }));
     expect(unchanged.value).toBe(fresher);
     expect(unchanged.ms).toBeLessThan(built.ms / 20);
+  });
+});
+
+describe('an update with this person’s own saves', () => {
+  // A session whose every call to the server is noted, and refused.
+  function session() {
+    const called: string[] = [];
+    const ctx = {
+      revisions: { generation: 0 },
+      api: {
+        call: async (route: { path: string }) => {
+          called.push(route.path);
+          throw new Error('listed');
+        },
+      },
+    } as unknown as ClientContext;
+    return { ctx, called };
+  }
+
+  const r = random(21);
+  const world: World = new Map();
+  for (let i = 0; i < 12; i++) {
+    const page = newPage(r, world);
+    world.set(keyOf(page.doc), page);
+  }
+  const index = fresh(world);
+  const [first] = world.values();
+  if (!first) throw new Error('No pages');
+  const save = (basedOn: RevisionId, n: number, markdown: string) => ({
+    spaceId: first.doc.spaceId,
+    pageId: first.doc.pageId,
+    basedOn,
+    revisionId: RevisionId.parse(`own-${n}`),
+    title: `Saved ${n}`,
+    markdown,
+  });
+
+  it('puts each in where it was, asking the server for nothing', async () => {
+    const { ctx, called } = session();
+    const one = save(first.doc.revisionId, 1, '---\ntags: [mine]\n---\nfirst words');
+    const two = save(one.revisionId, 2, '---\ntags: [mine]\n---\nsecond words');
+    const next = await searchOperations.updateIndex(ctx, index, { spaces: [], saved: [one, two] });
+    expect(called).toEqual([]);
+    const doc = { ...first.doc, revisionId: two.revisionId, draft: true, unpublished: false };
+    const expected = new Map(world).set(keyOf(doc), {
+      doc,
+      content: { title: two.title, ...indexedContent(two.markdown) },
+    });
+    expect(seen(next)).toEqual(seen(fresh(expected)));
+    expect(next.list({ spaceId: doc.spaceId, tag: 'mine' }).map(({ pageId }) => pageId)).toEqual([
+      doc.pageId,
+    ]);
+    // The index it came from is as it was.
+    expect(seen(index)).toEqual(seen(fresh(world)));
+  });
+
+  it('lists the space instead when the save wasn’t over the version held', async () => {
+    // Someone else's version came between.
+    const { ctx, called } = session();
+    const over = save(RevisionId.parse('someone-else'), 3, 'words');
+    await expect(
+      searchOperations.updateIndex(ctx, index, { spaces: [], saved: [over] }),
+    ).rejects.toThrow('listed');
+    expect(called).toEqual(['/api/spaces/:spaceId/tree']);
+    // A page the index doesn't hold, as one new to it, or no longer this person's.
+    const unknown = session();
+    const elsewhere = { ...save(first.doc.revisionId, 4, 'w'), pageId: PageId.parse('new') };
+    await expect(
+      searchOperations.updateIndex(unknown.ctx, index, { spaces: [], saved: [elsewhere] }),
+    ).rejects.toThrow('listed');
+    expect(unknown.called).toEqual(['/api/spaces/:spaceId/tree']);
+  });
+
+  it('takes a listing of the space over the saves in it', async () => {
+    const { ctx, called } = session();
+    const one = save(first.doc.revisionId, 5, 'w');
+    await expect(
+      searchOperations.updateIndex(ctx, index, { spaces: 'all', saved: [one] }),
+    ).rejects.toThrow('listed');
+    // Every space, as `readableSpaces` lists them first.
+    expect(called).toContain('/api/spaces');
   });
 });

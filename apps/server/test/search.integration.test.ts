@@ -12,7 +12,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
-import { invite, library, shareFolder, type Person } from './support/sharing.ts';
+import { draftHead, invite, library, shareFolder, type Person } from './support/sharing.ts';
 import { schema } from '@wikistow/server';
 import { eq } from 'drizzle-orm';
 
@@ -250,6 +250,83 @@ describe('a search index', () => {
     expect(paths.length).toBeLessThanOrEqual(3);
     // The space not named is kept as it was.
     expect(next.page(other, mine)).toBe(index.page(other, mine));
+  });
+
+  it('takes an editor’s own save as written, asking nothing, and its echo lists one tree', async () => {
+    const { ed, lib } = await shared();
+    const index = await search.indexSpaces(ed.ctx);
+    const basedOn = await draftHead(ed, lib.page);
+    const markdown = '---\ntags: [mine]\n---\nsaved here';
+    const written = await pages.editDraft(ed.ctx, lib.page, { markdown });
+    const paths = calls(ed.ctx);
+    const saved = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn,
+          revisionId: written.revisionId,
+          title: written.payload.title,
+          markdown: written.payload.markdown,
+        },
+      ],
+    });
+    expect(paths).toEqual([]);
+    expect(found(saved, 'saved')).toEqual([lib.page.pageId]);
+    expect(saved.list({ spaceId: lib.spaceId, tag: 'mine' }).map((p) => p.pageId)).toEqual([
+      lib.page.pageId,
+    ]);
+    expect(held(saved)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    // The server's word of it: the same index.
+    paths.length = 0;
+    expect(await search.updateIndex(ed.ctx, saved, { spaces: [lib.spaceId] })).toBe(saved);
+    expect(paths).toEqual(['/api/spaces/:spaceId/tree']);
+  });
+
+  it('drops a page saved into the index once its editor loses it', async () => {
+    const { alice, ed, lib, shareId } = await shared();
+    let index = await search.indexSpaces(ed.ctx);
+    const basedOn = await draftHead(ed, lib.page);
+    const written = await pages.editDraft(ed.ctx, lib.page, { markdown: 'mysavedsecret' });
+    index = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn,
+          revisionId: written.revisionId,
+          title: written.payload.title,
+          markdown: written.payload.markdown,
+        },
+      ],
+    });
+    expect(found(index, 'mysavedsecret')).toEqual([lib.page.pageId]);
+    await sharing.removeMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId,
+      identityId: identityOf(ed),
+    });
+    // As the server tells of the space.
+    index = await search.updateIndex(ed.ctx, index, { spaces: [lib.spaceId] });
+    expect(found(index, 'mysavedsecret')).toEqual([]);
+    expect(index.page(lib.spaceId, lib.page.pageId)).toBeUndefined();
+    expect(index.size).toBe(0);
+    expect(held(index)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    // A late save given for it lists its space, and keeps it out.
+    const late = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn: written.revisionId,
+          revisionId: written.revisionId,
+          title: 'Plan',
+          markdown: 'mysavedsecret again',
+        },
+      ],
+    });
+    expect(found(late, 'mysavedsecret')).toEqual([]);
+    expect(late.size).toBe(0);
   });
 
   it('is abandoned when the vault locks while it is built', async () => {

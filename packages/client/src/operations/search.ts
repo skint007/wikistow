@@ -354,6 +354,19 @@ export async function indexSpaces(
 export type IndexChanges = {
   /** The spaces whose trees may have changed, or every one. */
   spaces: 'all' | readonly SpaceId[];
+  /** Drafts this person saved since, in the order saved. */
+  saved?: readonly SavedVersion[];
+};
+
+/** A draft this person saved: the version written, and the one it was saved over (`basedOn`). */
+export type SavedVersion = {
+  spaceId: SpaceId;
+  pageId: PageId;
+  basedOn: RevisionId;
+  revisionId: RevisionId;
+  /** The title and Markdown written, as the server holds them. */
+  title: string;
+  markdown: string;
 };
 
 /**
@@ -364,6 +377,13 @@ export type IndexChanges = {
  * Only the versions `index` doesn't hold are opened, and only the pages
  * that changed are indexed again, so if nothing did, `index` is returned
  * itself. Stops with `IndexAbandoned` as `indexSpaces` does.
+ *
+ * A draft this person saved, in a space not listed, is put in without
+ * listing anything, where it was, as the draft its editor sees, if `index`
+ * holds the page in the version it was saved over, or in the one saved
+ * before it. Otherwise, as when the page is new to the index, someone
+ * else's version came between, or access changed, its space is listed.
+ * A save, given as it is written, needs nothing from the server.
  */
 export async function updateIndex(
   ctx: ClientContext,
@@ -375,35 +395,67 @@ export async function updateIndex(
   }: { onProgress?: (progress: IndexProgress) => void; signal?: AbortSignal } = {},
 ): Promise<PageIndex> {
   const live = liveness(ctx, signal);
-  const ids = changes.spaces === 'all' ? await readableSpaces(ctx) : [...new Set(changes.spaces)];
+  const all = changes.spaces === 'all';
+  const listing = new Set<SpaceId>(changes.spaces === 'all' ? [] : changes.spaces);
+  // Each saved page's version as saved in turn; one not saved over the
+  // version before it has its space listed instead.
+  const saves = new Map<string, SavedVersion>();
+  for (const saved of all ? [] : (changes.saved ?? [])) {
+    if (listing.has(saved.spaceId)) continue;
+    const key = pageKey(saved.spaceId, saved.pageId);
+    const before =
+      saves.get(key)?.revisionId ?? index.page(saved.spaceId, saved.pageId)?.revisionId;
+    if (before === saved.basedOn) saves.set(key, saved);
+    else listing.add(saved.spaceId);
+  }
+  const ids = all ? await readableSpaces(ctx) : [...listing];
   live();
   const pages: [SearchPage, IndexedText?][] = [];
-  await readPages(ctx, await loadSpaces(ctx, ids, true), {
-    reuse: (spaceId, page, head) =>
-      index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
-    live,
-    onProgress,
-    each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
-  });
+  if (ids.length > 0) {
+    await readPages(ctx, await loadSpaces(ctx, ids, true), {
+      reuse: (spaceId, page, head) =>
+        index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
+      live,
+      onProgress,
+      each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
+    });
+  }
+  for (const saved of saves.values()) {
+    const held = index.page(saved.spaceId, saved.pageId);
+    if (!held || listing.has(saved.spaceId)) continue;
+    pages.push([
+      {
+        spaceId: held.spaceId,
+        pageId: held.pageId,
+        revisionId: saved.revisionId,
+        parentId: held.parentId,
+        folderIds: [...held.folderIds],
+        path: [...held.path],
+        // As `readPages` labels a draft saved since: one readers don't see.
+        draft: true,
+        unpublished: false,
+      },
+      { title: saved.title, ...indexedContent(saved.markdown) },
+    ]);
+  }
   live();
-  return index.with(pages, { spaces: changes.spaces === 'all' ? 'all' : ids });
+  return index.with(pages, { spaces: all ? 'all' : ids });
 }
 
 /**
- * Whether `after` holds less than `before` could have shown this person: a
- * page gone, or one held in a version only its editors see (a draft, or a
- * copy unpublished) now held in another kind of version, as when they are
- * made a reader. A version moving on, as each save makes it, is neither.
- * Linear in `before`'s pages.
+ * Whether `after` lacks a version of a page `before` held: the page is
+ * gone, or another version stands in for it, but for one this person
+ * saved over (`saved`), which was theirs to open. Linear in `before`'s pages.
  */
-export function narrowed(before: PageIndex, after: PageIndex): boolean {
+export function letGo(
+  before: PageIndex,
+  after: PageIndex,
+  saved: readonly SavedVersion[] = [],
+): boolean {
+  const over = new Set(saved.map(({ basedOn }) => basedOn));
   return before.pages().some(({ doc }) => {
     const now = after.page(doc.spaceId, doc.pageId);
-    return (
-      !now ||
-      ((doc.draft || doc.unpublished) &&
-        (now.draft !== doc.draft || now.unpublished !== doc.unpublished))
-    );
+    return !now || (now.revisionId !== doc.revisionId && !over.has(doc.revisionId));
   });
 }
 

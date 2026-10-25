@@ -200,8 +200,8 @@ declare const __APP_VERSION__: string;
  * version changed are opened and indexed again, and an update that finds
  * nothing changed leaves the same index. Locking drops it with everything
  * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
- * grant. The desktop app keeps it once changes pause, or at once when
- * it holds less than before (`keepLater`).
+ * grant. The desktop app keeps it once this person's saves pause, and at
+ * once after any other change it lets a version go for (`keepLater`).
  *
  * Not built again when the window is focused: coming back into view tells
  * it what it may have missed (`useTreeChanges`), and one update follows.
@@ -231,12 +231,13 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         }
       } catch (error) {
         // Followed by the next update instead.
-        changed(queryClient, changes.spaces);
+        noteBack(queryClient, changes);
         throw error;
       }
       if (device && index !== shown) {
-        // What the file held of a page lost goes at once, as from memory.
-        const now = !shown || searchOperations.narrowed(shown, index);
+        // What the file held of a version let go goes at once, as from
+        // memory, but for this person's own drafts saved over.
+        const now = !shown || searchOperations.letGo(shown, index, changes.saved);
         keepLater(queryClient, ctx, device, now);
       }
       return index;
@@ -257,6 +258,8 @@ export const KEEP_AT_MOST_MS = 60_000;
 type Following = {
   /** The spaces changed since, or every one; null for none. */
   spaces: Set<SpaceId> | 'all' | null;
+  /** This person's own drafts saved since, in order. */
+  saved: searchOperations.SavedVersion[];
   gathering: ReturnType<typeof setTimeout> | null;
   keeping: { since: number; timer: ReturnType<typeof setTimeout> } | null;
 };
@@ -264,8 +267,10 @@ const following = new WeakMap<QueryClient, Following>();
 
 function followingOf(queryClient: QueryClient): Following {
   let state = following.get(queryClient);
-  if (!state)
-    following.set(queryClient, (state = { spaces: null, gathering: null, keeping: null }));
+  if (!state) {
+    state = { spaces: null, saved: [], gathering: null, keeping: null };
+    following.set(queryClient, state);
+  }
   return state;
 }
 
@@ -276,22 +281,39 @@ function changed(queryClient: QueryClient, spaces: Iterable<SpaceId> | 'all') {
   else state.spaces = new Set([...(state.spaces ?? []), ...spaces]);
 }
 
-/** What changed since the last update, for the next; with nothing noted, every space. */
+/** Whether anything changed that the index hasn't taken. */
+const noted = (state: Following) => state.spaces !== null || state.saved.length > 0;
+
+/**
+ * What changed since the last update, for the next. With nothing noted, as
+ * when the index is shown again a minute old, every space.
+ */
 function takeChanges(queryClient: QueryClient): searchOperations.IndexChanges {
   const state = followingOf(queryClient);
-  const { spaces } = state;
+  const { spaces, saved } = state;
+  const all = spaces === 'all' || !noted(state);
   state.spaces = null;
-  return { spaces: spaces === null || spaces === 'all' ? 'all' : [...spaces] };
+  state.saved = [];
+  return { spaces: all ? 'all' : [...(spaces ?? [])], saved };
+}
+
+/** Note again what an update that failed took, before what came since. */
+function noteBack(queryClient: QueryClient, changes: searchOperations.IndexChanges) {
+  changed(queryClient, changes.spaces);
+  const state = followingOf(queryClient);
+  state.saved = [...(changes.saved ?? []), ...state.saved];
 }
 
 /**
  * After a change to a page or folder: this person's own (a save, publish,
  * restore, creation, deletion, detach or unpublish), wherever its tree is
  * refetched or patched, and one the server tells of (`useTreeChanges`),
- * naming the spaces it changed in (`spaceIds`), or else in any. The index
- * is updated if something shows it (`usePageIndex`), with the other changes
- * in the next `GATHER_MS`, or else when next shown, so search and what
- * lists pages find what was just written.
+ * naming the spaces it changed in (`spaceIds`), or else in any. A draft
+ * this person saved is given as written (`saved`), so the index takes it
+ * without listing anything (`updateIndex`). The index is updated if
+ * something shows it (`usePageIndex`), with the other changes in the next
+ * `GATHER_MS`, or else when next shown, so search and what lists pages
+ * find what was just written.
  *
  * An update already running may have started before the change, so another
  * follows it if so, and changes meanwhile share that one: a stream of
@@ -299,10 +321,11 @@ function takeChanges(queryClient: QueryClient): searchOperations.IndexChanges {
  */
 export function searchIndexChanged(
   queryClient: QueryClient,
-  change?: { spaceIds: readonly SpaceId[] },
+  change?: { spaceIds: readonly SpaceId[] } | { saved: searchOperations.SavedVersion },
 ) {
-  changed(queryClient, change ? change.spaceIds : 'all');
   const state = followingOf(queryClient);
+  if (change && 'saved' in change) state.saved.push(change.saved);
+  else changed(queryClient, change ? change.spaceIds : 'all');
   if (!queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive()) {
     follow(queryClient);
     return;
@@ -317,13 +340,15 @@ export function searchIndexChanged(
 // already updating finishes first, then the changes it didn't take, if
 // any, mark it stale again: its success would mark it fresh.
 function follow(queryClient: QueryClient) {
+  // Taken already, by an update that started meanwhile.
+  if (!noted(followingOf(queryClient))) return;
   const stale = () =>
     queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
   const query = queryClient.getQueryCache().find({ queryKey: searchIndexKey });
   const running = query?.state.fetchStatus === 'fetching' ? query.promise : undefined;
   void stale();
   const untaken = () => {
-    if (followingOf(queryClient).spaces !== null) void stale();
+    if (noted(followingOf(queryClient))) void stale();
   };
   if (running) void running.then(untaken, untaken);
 }
@@ -332,9 +357,9 @@ function follow(queryClient: QueryClient) {
  * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
  * after it first changed, the desktop app keeps it, sealed for this person
  * and build: once for a burst of changes, not once each. With `now`, as
- * for an index built afresh or one that holds less than before
- * (`narrowed`), at once, so the file holds nothing longer than memory
- * does. Failing to keep it only means reading more pages at the next
+ * for an index built afresh or one that let go of a version other than a
+ * draft this person saved over (`letGo`), at once, so the file holds
+ * nothing longer than memory does. Failing to keep it only means reading more pages at the next
  * launch. It keeps the index then shown, if `ctx` still built it: the
  * vault locked or access changed meanwhile, nothing is kept, and nothing
  * here holds on to the index till then.
