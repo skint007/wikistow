@@ -1,11 +1,10 @@
 import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/client';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
 import {
   publicLinksQuery,
   searchIndexChanged,
-  searchIndexQuery,
   sharedWithMeQuery,
   spacesQuery,
   treeQuery,
@@ -25,16 +24,11 @@ import {
 export function useTreeChanges(ctx: ClientContext | null) {
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(onVisibility, () => document.visibilityState === 'visible');
-  // Whether the index was being built when listening stopped.
-  const building = useRef(false);
   useEffect(() => {
     if (!ctx || !visible) return;
     // Trees load again when the tab is back in view, being stale at once;
     // the index, fresh for a minute, is told of what it may have missed.
-    // A build running now started for that, as the window was focused,
-    // unless it was already running when listening stopped: then it may
-    // have read a space before a change, so another follows it.
-    searchIndexChanged(queryClient, { following: building.current });
+    searchIndexChanged(queryClient);
     const stop = new AbortController();
     const reloadLists = () => {
       void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
@@ -57,11 +51,7 @@ export function useTreeChanges(ctx: ClientContext | null) {
         searchIndexChanged(queryClient);
       },
     });
-    return () => {
-      stop.abort();
-      const { queryKey } = searchIndexQuery(ctx, queryClient);
-      building.current = queryClient.isFetching({ queryKey }) > 0;
-    };
+    return () => stop.abort();
   }, [ctx, visible, queryClient]);
 }
 

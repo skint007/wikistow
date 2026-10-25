@@ -69,21 +69,6 @@ describe('a change to the search index', () => {
     expect(queryClient.getQueryCache().find({ queryKey })?.isStale()).toBe(true);
   });
 
-  it('takes a build already running to hold changes it may hold', async () => {
-    const { queryClient, queryKey, builds } = harness();
-    const stop = new QueryObserver(queryClient, { queryKey }).subscribe(() => {});
-    await settled();
-    searchIndexChanged(queryClient, { following: false });
-    builds[0]?.finish();
-    await settled();
-    expect(builds).toHaveLength(1);
-    // With none running, it rebuilds as for any change.
-    searchIndexChanged(queryClient, { following: false });
-    await settled();
-    expect(builds).toHaveLength(2);
-    stop();
-  });
-
   it('only marks it stale when nothing builds or shows it', async () => {
     const { queryClient, queryKey, builds } = harness();
     queryClient.setQueryData(queryKey, 0);
