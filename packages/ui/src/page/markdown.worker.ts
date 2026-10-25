@@ -13,6 +13,8 @@ function run(request: MarkdownRequest) {
       return markdownJobs.links(request.input);
     case 'wikilinks':
       return markdownJobs.wikilinks(request.input);
+    case 'tableLinks':
+      return markdownJobs.tableLinks(request.input);
     case 'headings':
       return markdownJobs.headings(request.input);
     case 'fidelity':

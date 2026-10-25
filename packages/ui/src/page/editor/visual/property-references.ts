@@ -8,12 +8,15 @@ import type { Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
+import { referenceHint, type OtherPages } from '../../other-pages';
 
-// References to the page's values (`` `=servings` ``) in the visual editor
-// (ADR 0006, decision 4): the inline code stays as typed, a mark like any
-// other, and decorations only show what it names, so neither the document
-// nor what it writes changes. A name the page has shows its value in a chip
-// after the code; one it hasn't is underlined, dashed, with a hint.
+// References to values (`` `=servings` ``, `` `=[[Page]].key` ``) in the
+// visual editor (ADR 0006, decisions 4 and 5): the inline code stays as
+// typed, a mark like any other, and decorations only show what it names,
+// so neither the document nor what it writes changes. A value found shows
+// in a chip after the code; a name or page not found is underlined,
+// dashed, with a hint. Another page's value is as the editor's search
+// index holds it; until that is built, its reference is left as it is.
 
 const key = new PluginKey<DecorationSet>('propertyReferences');
 
@@ -21,12 +24,12 @@ const CHIP =
   'ml-1 rounded-row bg-folder-purple px-1.5 py-px font-sans text-[0.85em] font-semibold text-foreground select-none';
 const UNKNOWN = 'underline decoration-border decoration-dashed underline-offset-4';
 const UNKNOWN_HINT = 'No property has this name';
+const NO_PAGE_HINT = 'No page has this title';
 
-/** The value `name` shows, as a chip drawn after the code. */
-function chip(property: PropertyData) {
+/** The value a reference shows, as a chip drawn after the code, its hint `hint`. */
+function chip(property: PropertyData, hint: string) {
   return () => {
     const dom = document.createElement('span');
-    const hint = `${property.key} · property`;
     dom.className = CHIP;
     dom.contentEditable = 'false';
     dom.dataset['hint'] = hint;
@@ -36,30 +39,43 @@ function chip(property: PropertyData) {
   };
 }
 
-/** Each reference in `doc`, decorated as `properties` say. */
-function decorations(doc: Node, properties: readonly PropertyData[] | null): DecorationSet {
+/** Each reference in `doc`, decorated as `properties`, and `others` for other pages', say. */
+function decorations(
+  doc: Node,
+  properties: readonly PropertyData[] | null,
+  others: OtherPages | null,
+): DecorationSet {
   const found: Decoration[] = [];
   // A run of inline code, which may be several text nodes as other marks change.
   let run: { from: number; to: number; text: string } | null = null;
   const flush = () => {
     const reference = run && parsePropertyReference(run.text);
-    if (run && reference) {
-      const property = properties ? findProperty(properties, reference.name) : undefined;
+    const other = reference?.page ? others?.(reference.page) : undefined;
+    // Another page's reference waits for the index, showing nothing meanwhile.
+    if (run && reference && !(reference.page && other === undefined)) {
+      const shown = reference.page
+        ? other?.kind === 'page'
+          ? other.properties
+          : null
+        : properties;
+      const property = shown ? findProperty(shown, reference.name) : undefined;
       if (property) {
         const value = propertyText(property);
+        const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
         found.push(
-          Decoration.widget(run.to, chip(property), {
+          Decoration.widget(run.to, chip(property, hint), {
             side: 1,
             ignoreSelection: true,
-            key: `property:${property.key}:${value}`,
+            key: `property:${hint}:${value}`,
           }),
         );
       } else {
+        const hint = other?.kind === 'none' ? NO_PAGE_HINT : UNKNOWN_HINT;
         found.push(
           Decoration.inline(run.from, run.to, {
             class: UNKNOWN,
-            'data-hint': UNKNOWN_HINT,
-            'aria-description': UNKNOWN_HINT,
+            'data-hint': hint,
+            'aria-description': hint,
           }),
         );
       }
@@ -88,19 +104,28 @@ function decorations(doc: Node, properties: readonly PropertyData[] | null): Dec
   return DecorationSet.create(doc, found);
 }
 
-/** A transaction that changes nothing but tells the decorations the page's properties changed. */
+/**
+ * A transaction that changes nothing but tells the decorations the page's
+ * properties, or the other pages its references name, changed.
+ */
 export const propertiesChanged = (tr: Transaction) => tr.setMeta(key, true);
 
-/** References to the page's values decorated as `properties()`, the page's now, say. */
-export const propertyReferences = (properties: () => readonly PropertyData[] | null) =>
+/**
+ * References to values decorated as `properties()`, the page's now, and
+ * `others()`, the other pages as the editor's index has them now, say.
+ */
+export const propertyReferences = (
+  properties: () => readonly PropertyData[] | null,
+  others: () => OtherPages | null = () => null,
+) =>
   $prose(
     () =>
       new Plugin<DecorationSet>({
         key,
         state: {
-          init: (_, { doc }) => decorations(doc, properties()),
+          init: (_, { doc }) => decorations(doc, properties(), others()),
           apply: (tr, set) =>
-            tr.docChanged || tr.getMeta(key) ? decorations(tr.doc, properties()) : set,
+            tr.docChanged || tr.getMeta(key) ? decorations(tr.doc, properties(), others()) : set,
         },
         props: { decorations: (state) => key.getState(state) },
       }),

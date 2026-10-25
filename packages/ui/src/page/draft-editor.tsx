@@ -2,6 +2,7 @@ import {
   CryptoError,
   linkablePages,
   linkKey,
+  mayReferOtherPages,
   PageId,
   type ClientContext,
   type pageOperations,
@@ -12,7 +13,15 @@ import {
 } from '@wikistow/client';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Paperclip, Trash2 } from 'lucide-react';
-import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import {
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import { Name, plainText } from '@/components/name';
 import { Button, uploadButtonClass } from '@/components/ui/button';
 import { notCredential } from '@/components/ui/input';
@@ -28,6 +37,7 @@ import type { SaveStatus } from './autosave';
 import { LinkChooser } from './editor/link-chooser';
 import { candidatesFor, linkHeadings } from './editor/link-model';
 import { PageEditor } from './editor/page-editor';
+import { otherPages, type OtherPages } from './other-pages';
 import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
@@ -50,6 +60,8 @@ export type DraftEditorHandle = {
   checkSize(changes?: PayloadChanges): void;
   /** The draft revision everything shown is saved in, or null while some of it isn't. */
   saved(): RevisionId | null;
+  /** The draft's Markdown as the editor has it now, saved or not. */
+  markdown(): string;
 };
 
 const NONE: readonly string[] = [];
@@ -122,6 +134,11 @@ export function DraftEditor({
   });
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const propertyKeys = usePropertyKeys(ctx, page);
+  const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
+  const markdown = useRef(snapshot.markdown);
+  useLayoutEffect(() => {
+    markdown.current = snapshot.markdown;
+  });
   const queryClient = useQueryClient();
   const listed = useMemo(
     () => snapshot.attachments.filter((a) => !hiddenAttachments.includes(a.id)),
@@ -147,6 +164,7 @@ export function DraftEditor({
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),
       saved: () => session.savedRevision(),
+      markdown: () => markdown.current,
     }),
     [session],
   );
@@ -216,6 +234,7 @@ export function DraftEditor({
         attachments={attachments}
         page={page}
         propertyKeys={propertyKeys}
+        otherPages={others}
         onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
         status={
           <span role="status" aria-live="polite">
@@ -325,6 +344,35 @@ function usePropertyKeys(ctx: ClientContext, page: pageOperations.PageRef): Prop
   );
   const load = useCallback(() => setWanted(true), []);
   return useMemo(() => ({ keys, load }), [keys, load]);
+}
+
+/**
+ * The other pages the draft's references name (`` `=[[Page]].key` ``), from
+ * the search index, which is built only once the draft has one, or one is
+ * being typed. A reference to this page shows its saved draft's values.
+ */
+function useOtherPages(
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  assist: LinkAssist,
+  markdown: string,
+): OtherPages | null {
+  const wanted = mayReferOtherPages(markdown);
+  const { index } = usePageIndex(ctx, { enabled: wanted });
+  const { pages, table } = assist;
+  return useMemo(
+    () =>
+      wanted
+        ? otherPages(index, {
+            spaceId: page.spaceId,
+            selfId: page.pageId,
+            pages,
+            links: table,
+            editor: true,
+          })
+        : null,
+    [wanted, index, page.spaceId, page.pageId, pages, table],
+  );
 }
 
 /**

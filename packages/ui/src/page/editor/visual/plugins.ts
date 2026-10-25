@@ -486,7 +486,8 @@ function linkable(doc: Node, pos: number, node: Node) {
  * typed, or in pasted rich text) turns into its atom, which writes it back
  * as it is. Left as text, Markdown would escape its brackets. Only brackets
  * the change wrote make one: text already whole, as escaped brackets read
- * from the page are, stays text.
+ * from the page are, stays text. So does the page a reference names, typed
+ * after `` `= ``, which the closing backtick makes code.
  */
 export const typedLinks = $prose(
   (ctx) =>
@@ -504,6 +505,9 @@ export const typedLinks = $prose(
             if (!node.isText || !node.text?.includes('[[') || !linkable(state.doc, pos, node))
               return;
             for (const match of node.text.matchAll(WRITTEN)) {
+              // A reference's page (`` `=[[Page]].key ``), typed before its
+              // closing backtick makes it code, stays text.
+              if (/`=[ \t]*$/.test(node.text.slice(0, match.index))) continue;
               const from = pos + match.index;
               const to = from + match[0].length;
               const opening = from + match[0].indexOf('[[') + 2;

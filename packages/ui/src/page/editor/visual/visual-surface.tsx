@@ -182,6 +182,7 @@ function Surface({
   holding,
   page,
   properties,
+  otherPages,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -197,6 +198,7 @@ function Surface({
     holding,
     page,
     properties,
+    otherPages,
   });
   useLayoutEffect(() => {
     latest.current = {
@@ -210,15 +212,16 @@ function Surface({
       holding,
       page,
       properties,
+      otherPages,
     };
   });
-  // References show the values the frontmatter has now.
+  // References show the values the frontmatter, and the index for other pages', have now.
   useEffect(() => {
     editor.current?.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       view.dispatch(propertiesChanged(view.state.tr));
     });
-  }, [properties]);
+  }, [properties, otherPages]);
   // The runtime of the place it is drawn in, for the editor's whole life.
   const plugins = usePluginRuntime();
   const [host] = useState<VisualHost>(() => ({
@@ -432,6 +435,7 @@ function Surface({
         () => latest.current.links,
         () => surface.read(),
         () => latest.current.properties ?? null,
+        () => latest.current.otherPages ?? null,
       ),
   );
   const [format] = useState(() => new FormatWatch());
@@ -460,7 +464,10 @@ function Surface({
         unshownFootnotes,
         tableHeaders,
         codeHighlights,
-        propertyReferences(() => latest.current.properties ?? null),
+        propertyReferences(
+          () => latest.current.properties ?? null,
+          () => latest.current.otherPages ?? null,
+        ),
         alerts,
         linkKeys(host),
         format.plugin,

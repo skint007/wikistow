@@ -4,7 +4,13 @@ import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { foldPropertyName, splitFrontmatter, type PropertyData } from '@wikistow/client';
 import { linkOptions, TYPING, TYPING_LINK } from '../link-completions';
-import { matchingProperties, propertyOptions, TYPING_REFERENCE } from '../property-completions';
+import type { OtherPages } from '../../other-pages';
+import {
+  matchingProperties,
+  REFERENCE_PAGE,
+  referenceOptions,
+  TYPING_REFERENCE,
+} from '../property-completions';
 import type { LinkAssist } from '../surface';
 
 // Syntax that holds no links: code and HTML. Frontmatter holds none either.
@@ -24,39 +30,47 @@ const NO_LINKS = new Set([
  * has; after `#`, the headings of the page the link names. Nothing inside
  * code, HTML or frontmatter, nor for an embed (`![[`). A paragraph past
  * `INLINE_LIMIT` reads as plain text, so its code and HTML get them too.
+ * A reference's page, after `` `= ``, gets the pages alone, in its code too.
  */
 export function wikilinkCompletions(assist: () => LinkAssist): CompletionSource {
   return async (context) => {
     const match = context.matchBefore(TYPING_LINK);
-    if (!match || !linkable(context.state, match.from)) return null;
+    if (!match) return null;
+    const line = context.state.doc.lineAt(match.from);
+    const opening = context.state.sliceDoc(Math.max(line.from, match.from - 100), match.from);
+    const inReference = REFERENCE_PAGE.test(opening) && !/``=[ \t]*$/.test(opening);
+    if (!linkable(context.state, match.from, inReference)) return null;
+    if (inReference && match.text.includes('#')) return null;
     const found = await linkOptions(match.text, assist(), () =>
       context.state.doc.sliceString(0, undefined, '\n'),
     );
     if (!found || context.aborted) return null;
     return {
       from: match.from + found.start,
-      options: found.options.map(
-        ({ label, displayLabel, detail, type, text, accepted }): Completion => ({
-          label,
-          displayLabel,
-          ...(detail === null ? {} : { detail }),
-          type,
-          // In a section of its own, which lists after the pages however well they match.
-          ...(type === 'create' ? { section: 'New page' } : {}),
-          apply: insertLink(text, accepted),
-        }),
-      ),
+      options: (inReference
+        ? found.options.filter((option) => option.type === 'page')
+        : found.options
+      ).map(({ label, displayLabel, detail, type, text, accepted }): Completion => ({
+        label,
+        displayLabel,
+        ...(detail === null ? {} : { detail }),
+        type,
+        // In a section of its own, which lists after the pages however well they match.
+        ...(type === 'create' ? { section: 'New page' } : {}),
+        apply: insertLink(text, accepted),
+      })),
       validFor: TYPING,
     };
   };
 }
 
 // Whether a link may start at `from`: not an embed, and not in code, HTML
-// or frontmatter (typed into a page without Properties).
-function linkable(state: EditorState, from: number): boolean {
+// or frontmatter (typed into a page without Properties), apart from a
+// reference's page in its inline code (`inReference`).
+function linkable(state: EditorState, from: number, inReference = false): boolean {
   if (from > 0 && state.sliceDoc(from - 1, from) === '!') return false;
   for (let node = syntaxTree(state).resolveInner(from, 1); ; node = node.parent) {
-    if (NO_LINKS.has(node.name)) return false;
+    if (NO_LINKS.has(node.name) && !(inReference && node.name === 'InlineCode')) return false;
     if (!node.parent) break;
   }
   if (state.sliceDoc(0, 3) !== '---') return true;
@@ -93,18 +107,25 @@ const NO_REFERENCES = new Set([
 ]);
 
 /**
- * Completions for a reference to one of the page's values: after `` `= ``
- * (or `` `= this. ``), the keys a reference can name, each with its value.
- * Accepting one writes the key and the closing backtick, unless it's there.
+ * Completions for a reference to a value: after `` `= `` (or
+ * `` `= this. ``), the keys a reference can name, each with its value;
+ * after `` `=[[Page]]. ``, that page's, as `others` has them. Accepting one
+ * writes the key and the closing backtick, unless it's there.
  */
 export function referenceCompletions(
   properties: () => readonly PropertyData[] | null | undefined,
+  others: () => OtherPages | null | undefined = () => null,
 ): CompletionSource {
   return (context) => {
     const match = context.matchBefore(TYPING_REFERENCE);
     if (!match || !referable(context.state, match.from)) return null;
-    const name = TYPING_REFERENCE.exec(match.text)?.[1] ?? '';
-    const options = matchingProperties(propertyOptions(properties() ?? null), name);
+    const typed = TYPING_REFERENCE.exec(match.text);
+    if (!typed) return null;
+    const name = typed.groups?.['name'] ?? '';
+    const options = matchingProperties(
+      referenceOptions(typed, properties() ?? null, others() ?? null),
+      name,
+    );
     if (options.length === 0) return null;
     return {
       from: match.to - name.length,

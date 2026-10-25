@@ -227,6 +227,8 @@ function PageBody({
   const [showingCopies, setShowingCopies] = useState(false);
   // Where Publish was pressed on a page with a public link, while it asks first.
   const [publishingFrom, setPublishingFrom] = useState<string | null>(null);
+  // The draft as it was when Publish asked, for what the public copy will show.
+  const [publishingMarkdown, setPublishingMarkdown] = useState<string | null>(null);
   const publicLink = usePublicLink(page);
   const copiesPill = useRef<HTMLButtonElement>(null);
   const crumbsNav = useRef<HTMLElement>(null);
@@ -288,6 +290,7 @@ function PageBody({
       const from = router.state.location.href;
       const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
       if (links.some((link) => link.pageId === page.pageId)) {
+        setPublishingMarkdown(editor.current?.markdown() ?? null);
         setPublishingFrom(from);
         return;
       }
@@ -838,6 +841,7 @@ function PageBody({
       <PublishWithLinkDialog
         page={page}
         title={title}
+        markdown={publishingMarkdown}
         open={publishingFrom !== null}
         onOpenChange={(open) => !open && setPublishingFrom(null)}
         publish={publishDraft}

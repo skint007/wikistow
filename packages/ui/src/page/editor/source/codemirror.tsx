@@ -46,14 +46,15 @@ export default function CodeMirrorSurface({
   onFiles,
   lineBreak,
   properties,
+  otherPages,
   ref,
 }: EditorSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The editor is built once; it reads the latest of these when it needs them.
-  const latest = useRef({ onChange, links, onFiles, properties });
+  const latest = useRef({ onChange, links, onFiles, properties, otherPages });
   useLayoutEffect(() => {
-    latest.current = { onChange, links, onFiles, properties };
+    latest.current = { onChange, links, onFiles, properties, otherPages };
   });
   const text = useRef(initial);
 
@@ -158,7 +159,7 @@ function extensions({
   changed,
 }: {
   lineBreak: string;
-  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties'>;
+  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties' | 'otherPages'>;
   changed: (markdown: string) => void;
 }): Extension {
   const assist = () => latest().links;
@@ -173,7 +174,13 @@ function extensions({
     sourceLanguage,
     sourceTheme,
     autocompletion({
-      override: [wikilinkCompletions(assist), referenceCompletions(() => latest().properties)],
+      override: [
+        wikilinkCompletions(assist),
+        referenceCompletions(
+          () => latest().properties,
+          () => latest().otherPages,
+        ),
+      ],
       icons: false,
       // The list only opens inside `[[` or after `` `= ``, where Enter means to accept.
       interactionDelay: 0,
