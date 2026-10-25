@@ -7,16 +7,20 @@ import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked } from '../link-table.ts';
-import { findWikilinks, foldTitle, linkablePages } from '../links.ts';
+import { findWikilinks, foldTitle, linkablePages, type LinkablePage } from '../links.ts';
 import {
   findProperty,
   markdownLiteral,
   markdownNodes,
+  mayReferOtherPages,
   parseMarkdown,
   parsePropertyReference,
   propertyText,
   readProperties,
   splitFrontmatter,
+  type PropertyData,
+  type ReferencedPage,
+  type Wikilink,
 } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
 import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
@@ -41,25 +45,35 @@ export async function list(ctx: ClientContext, spaceId: SpaceId) {
 }
 
 /**
+ * The properties of the page a reference to another page's value names
+ * (`` `=[[Page]].key` ``), as a public copy writes them in: that page's
+ * published version's, or undefined when the link names none.
+ */
+export type OtherValues = (page: Wikilink) => readonly PropertyData[] | undefined;
+
+/**
  * The Markdown a public copy holds (ADR 0006, decision 9): the page's
- * body without its frontmatter, each reference to one of its values
- * (`` `=servings` ``) written in as the value's text, escaped so that it
- * reads as just that text, never as Markdown or HTML; a web or email
- * address in it, or one it makes with the text after it, is still linked,
- * whole, as GFM links one in any text. Dates go
- * as written, as the copy has no reader's locale, and an empty value as a
- * dash, as the reader shows it. A reference that names no property, or a
- * page whose block doesn't read, stays as written.
+ * body without its frontmatter, each reference to a value written in as
+ * the value's text, escaped so that it reads as just that text, never as
+ * Markdown or HTML; a web or email address in it, or one it makes with the
+ * text after it, is still linked, whole, as GFM links one in any text. A
+ * reference to one of the page's values (`` `=servings` ``) takes it from
+ * its frontmatter, and one to another page's (`` `=[[Page]].key` ``) from
+ * `others`. Dates go as written, as the copy has no reader's locale, and
+ * an empty value as a dash, as the reader shows it. A reference that names
+ * no property, or no page `others` knows, or a page whose block doesn't
+ * read, stays as written.
  *
  * A code span keeps the text either side of it apart: `<a href=` before
  * one is text, not the start of a tag. So each `<` in the text of a block
  * (a paragraph, heading or table cell) with a value written in is escaped
  * too, which leaves it the text it was.
  */
-export function copyBody(markdown: string): string {
+export function copyBody(markdown: string, others: OtherValues = () => undefined): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   const read = readProperties(frontmatter);
-  if (!read.ok || read.properties.length === 0) return body;
+  const own = read.ok ? read.properties : [];
+  if (own.length === 0 && !mayReferOtherPages(body)) return body;
   const edits: { start: number; end: number; text: string }[] = [];
   for (const block of markdownNodes(parseMarkdown(body))) {
     if (block.type !== 'paragraph' && block.type !== 'heading' && block.type !== 'tableCell') {
@@ -70,7 +84,8 @@ export function copyBody(markdown: string): string {
     for (const node of inline) {
       if (node.type !== 'inlineCode') continue;
       const reference = parsePropertyReference(node.value);
-      const property = reference && findProperty(read.properties, reference.name);
+      const properties = reference?.page ? others(reference.page) : own;
+      const property = reference && properties && findProperty(properties, reference.name);
       const start = node.position?.start.offset;
       const end = node.position?.end.offset;
       if (!property || start === undefined || end === undefined) continue;
@@ -102,6 +117,112 @@ export function copyBody(markdown: string): string {
   return copy + body.slice(at);
 }
 
+/** The pages a body's references to other pages' values name (`` `=[[Page]].key` ``), in order. */
+function referencedPages(body: string): ReferencedPage[] {
+  if (!mayReferOtherPages(body)) return [];
+  const pages: ReferencedPage[] = [];
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type !== 'inlineCode') continue;
+    const page = parsePropertyReference(node.value)?.page;
+    if (page) pages.push(page);
+  }
+  return pages;
+}
+
+/**
+ * What a public copy of `markdown` shows of other pages, which the public
+ * link dialog and the Publish confirmation say anyone with the link can
+ * read: `values`, when a reference in its body names another page's value.
+ */
+export function fromOtherPages(markdown: string): { values: boolean } {
+  return { values: referencedPages(splitFrontmatter(markdown).body).length > 0 };
+}
+
+/**
+ * The published properties of each page the body's references to other
+ * pages' values name (ADR 0006, decision 9), each page as a reader of the
+ * copied version finds it, among the pages of the space this person sees
+ * that are published: by the version's link table first, then by
+ * published title, with its folders. A draft never counts: not its value,
+ * even where this person edits the page, nor its title, which is the
+ * tree's for a page whose draft changed since it was published, so that
+ * page's publication is opened for its title. A page whose publication
+ * can't be fetched names none, and the reference stays as written. A
+ * reference to this page takes the version being copied.
+ */
+async function otherValues(
+  ctx: ClientContext,
+  page: PageRef,
+  payload: PagePayload,
+  tree: () => ReturnType<typeof loadTree>,
+): Promise<OtherValues> {
+  const links = referencedPages(splitFrontmatter(payload.markdown).body);
+  if (links.length === 0) return () => undefined;
+  const loaded = await tree();
+  const opened = new Map<string, Promise<Publication | null>>();
+  const open = (pageId: string) => {
+    let found = opened.get(pageId);
+    if (!found) opened.set(pageId, (found = publication(ctx, page, pageId, loaded)));
+    return found;
+  };
+  // Every published page, under its published title; this page under the copied version's.
+  const pages: LinkablePage[] = [];
+  for (const [i, linkable] of linkablePages(loaded).entries()) {
+    const summary = loaded.pages[i];
+    let title: string | null = null;
+    if (linkable.id === page.pageId) title = payload.title;
+    else if (summary?.publishedHead && (summary.draftHead === null || !summary.draftChanges)) {
+      title = linkable.title;
+    } else if (summary?.publishedHead) title = (await open(linkable.id))?.title ?? null;
+    pages.push({ ...linkable, title });
+  }
+  const resolved = resolveLinked(links, {
+    pages,
+    selfId: page.pageId,
+    table: linkTableOf(payload),
+  });
+  const own = readProperties(splitFrontmatter(payload.markdown).frontmatter);
+  const values = new Map<string, readonly PropertyData[]>();
+  for (const link of resolved) {
+    const [pageId] = link.targets;
+    const key = linkKey(link);
+    if (link.status !== 'resolved' || pageId === undefined || values.has(key)) continue;
+    const found =
+      pageId === page.pageId
+        ? own.ok
+          ? own.properties
+          : undefined
+        : (await open(pageId))?.properties;
+    if (found) values.set(key, found);
+  }
+  return (link) => values.get(linkKey(link));
+}
+
+/** A page's publication as a public copy reads it: its title and properties. */
+type Publication = { title: string; properties: readonly PropertyData[] };
+
+/** `pageId`'s current publication, or null when it has none this person can open. */
+async function publication(
+  ctx: ClientContext,
+  page: PageRef,
+  pageId: string,
+  tree: Awaited<ReturnType<typeof loadTree>>,
+): Promise<Publication | null> {
+  const head = tree.pages.find((summary) => summary.id === pageId)?.publishedHead;
+  if (!head) return null;
+  const target = { spaceId: page.spaceId, pageId: PageIdSchema.parse(pageId) };
+  try {
+    const version = (await openRevisions(ctx, target, 'published', [head])).get(head)?.opened;
+    if (version?.kind !== 'current') return null;
+    const read = readProperties(splitFrontmatter(version.payload.markdown).frontmatter);
+    return { title: version.payload.title, properties: read.ok ? read.properties : [] };
+  } catch (error) {
+    // A page whose version can't be fetched shows no value.
+    if (!(error instanceof ApiError)) throw error;
+    return null;
+  }
+}
+
 /** A page body's attachments it shows or links to, in the order the server's reader finds them. */
 export function attachmentsUsed(body: string, attachments: PagePayload['attachments']) {
   const tree = bodyHtml(readBody(body), (link) =>
@@ -131,11 +252,12 @@ async function wikilinkTargets(
   ctx: ClientContext,
   page: PageRef,
   payload: PagePayload,
+  loadSpace: () => ReturnType<typeof loadTree>,
 ): Promise<{ key: string; pageId: PageId }[]> {
   const links = findWikilinks(payload.markdown).filter((link) => !link.embed && link.target);
   if (links.length === 0) return [];
   const linked = new Set((await list(ctx, page.spaceId)).map((link) => link.pageId));
-  const tree = await loadTree(ctx, page.spaceId);
+  const tree = await loadSpace();
   // The published title of each page with a link on: only those can be targets.
   const published = new Map<string, string>();
   for (const summary of tree.pages) {
@@ -191,6 +313,10 @@ export async function shareCopy(
   const version = published ?? (await openPublished(ctx, page));
   const { payload, revisionId } = version;
   const { body } = splitFrontmatter(payload.markdown);
+  // The space's tree, loaded once, if anything needs it.
+  let loading: ReturnType<typeof loadTree> | undefined;
+  const tree = () => (loading ??= loadTree(ctx, page.spaceId));
+  const others = await otherValues(ctx, page, payload, tree);
   const attachments = attachmentsUsed(body, payload.attachments);
   // Every file the copy should keep is opened before anything readable
   // goes up, so one that doesn't open sends nothing. Those left out for
@@ -211,14 +337,14 @@ export async function shareCopy(
     body: {
       revisionId,
       title: payload.title,
-      markdown: copyBody(payload.markdown),
+      markdown: copyBody(payload.markdown, others),
       attachments: attachments.map(({ id, name, mediaType, size }) => ({
         id,
         name,
         mediaType,
         size,
       })),
-      targets: await wikilinkTargets(ctx, page, payload),
+      targets: await wikilinkTargets(ctx, page, payload, tree),
     },
   });
   // Whatever the server asks for, only the files on this app's list go. One

@@ -7,6 +7,9 @@ import {
   markdownNodes,
   markdownText,
   parseMarkdown,
+  parsePropertyReference,
+  propertyWikilink,
+  readProperties,
   splitFrontmatter,
   type Wikilink,
 } from './markdown/index.ts';
@@ -67,22 +70,79 @@ export const findWikilinks = (markdown: string): Wikilink[] =>
     embed,
   }));
 
-/** A wikilink and where it sits in the page's Markdown, from `start` up to `end`. */
-export type PlacedWikilink = Wikilink & { start: number; end: number };
+/**
+ * A wikilink and where it sits in the page's Markdown, from `start` up to
+ * `end`. A link that is a property's value (`tableWikilinks`) has
+ * `property`, its key as written, and the span of the value's source,
+ * quoted as the block writes it.
+ */
+export type PlacedWikilink = Wikilink & { start: number; end: number; property?: string };
 
 /** Every supported wikilink in `markdown`, as `findWikilinks` finds them, with where each is. */
-export function placedWikilinks(markdown: string): PlacedWikilink[] {
+export const placedWikilinks = (markdown: string): PlacedWikilink[] =>
+  readLinks(markdown, { references: false });
+
+/**
+ * The wikilinks a page's link table holds entries for (wikistow.md,
+ * Wikilinks), in the order they are written: each property whose value is
+ * exactly one wikilink (`goes_with: "[[Page]]"`), then the body's
+ * (`placedWikilinks`) and the page each reference to another page's value
+ * names (`` `=[[Page]].key` ``, ADR 0006 decision 5), which a save renames
+ * like any other. Readers show only the body's as links.
+ */
+export function tableWikilinks(markdown: string): PlacedWikilink[] {
+  if (!markdown.includes('[[')) return [];
+  const { frontmatter } = splitFrontmatter(markdown);
+  const read = frontmatter?.includes('[[') ? readProperties(frontmatter) : null;
+  const properties: PlacedWikilink[] = [];
+  for (const { key, value, valueSpan } of read?.ok ? read.properties : []) {
+    const link = propertyWikilink(value);
+    if (link) properties.push({ ...link, ...valueSpan, property: key });
+  }
+  return [...properties, ...readLinks(markdown, { references: true })];
+}
+
+/** The body's wikilinks, and with `references` the pages references to other pages' values name. */
+function readLinks(markdown: string, { references }: { references: boolean }): PlacedWikilink[] {
   // Every wikilink is written with `[[`; a page without one isn't parsed.
   if (!markdown.includes('[[')) return [];
   const { frontmatter, body } = splitFrontmatter(markdown);
   const offset = frontmatter?.length ?? 0;
   const links: PlacedWikilink[] = [];
   for (const node of markdownNodes(parseMarkdown(body))) {
-    if (node.type !== 'wikilink' || node.unsupported) continue;
-    const { source, target, heading, shown, embed, position } = node;
-    if (position?.start.offset === undefined || position.end.offset === undefined) continue;
-    const [start, end] = [offset + position.start.offset, offset + position.end.offset];
-    links.push({ source, target, heading, shown, embed, start, end });
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) continue;
+    if (node.type === 'wikilink' && !node.unsupported) {
+      const { source, target, heading, shown, embed } = node;
+      links.push({
+        source,
+        target,
+        heading,
+        shown,
+        embed,
+        start: offset + start,
+        end: offset + end,
+      });
+    } else if (references && node.type === 'inlineCode' && node.value.includes('[[')) {
+      const page = parsePropertyReference(node.value)?.page;
+      if (!page) continue;
+      // The code's text has its backticks and maybe a space taken off each
+      // side, and a line break read as a space: its link is the first `[[`
+      // of the source, which only backticks, spaces and `=` come before.
+      const at = body.indexOf('[[', start);
+      if (at < 0 || at >= end || !body.startsWith(page.source, at)) continue;
+      const { source, target, heading, shown, embed } = page;
+      links.push({
+        source,
+        target,
+        heading,
+        shown,
+        embed,
+        start: offset + at,
+        end: offset + at + source.length,
+      });
+    }
   }
   return links;
 }

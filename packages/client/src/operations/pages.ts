@@ -698,7 +698,7 @@ function current(revision: OpenedRevision): PagePayload {
  * write's region: `tableRegion`, by default `basedOnRegion` or the region
  * `basedOn` opens in. If the tree is needed and can't be loaded, the draft
  * is still saved, with its table carried and no link renamed (`linksKept`).
- * Its links are read with `read`, by default here (`placedWikilinks`); the
+ * Its links are read with `read`, by default here (`tableWikilinks`); the
  * web app reads them in a worker with a time limit. If that fails, the
  * draft is saved the same way. It is saved in the region of `basedOn` as
  * this app opens it (section 6.1): pass `basedOnRegion` if it was just

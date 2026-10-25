@@ -10,8 +10,12 @@ import {
   RevisionId,
   ShareId,
   SpaceId,
+  linksInUse,
   placedWikilinks,
+  readProperties,
   resolveLinked,
+  splitFrontmatter,
+  tableWikilinks,
   writeLinks as linked,
   type LinkTree,
   type LinkWrite,
@@ -241,6 +245,77 @@ describe('following a rename', () => {
   });
 });
 
+describe('links in properties and references to other pages’ values', () => {
+  const roadmap = renamedTo('p-plan', 'Roadmap');
+
+  it('rewrites a reference’s page to the published title, and keys it so', async () => {
+    const out = await writeLinks(
+      payload('Ready in `=[[Plan]].cook_time` and `` = [[plan]]. cook time `` min.', {
+        plan: 'p-plan',
+      }),
+      write(roadmap),
+    );
+    expect(out.markdown).toBe(
+      'Ready in `=[[Roadmap]].cook_time` and `` = [[Roadmap]]. cook time `` min.',
+    );
+    expect(Object.fromEntries(linkTableOf(out))).toEqual({ roadmap: 'p-plan', plan: 'p-plan' });
+  });
+
+  it('changes only a property value’s characters, byte for byte', async () => {
+    const block = (plan: string) =>
+      [
+        '---',
+        '# The pairing',
+        `goes_with:   "${plan}"   # a side`,
+        `single: '${plan}'`,
+        `plain_list: [a, b]`,
+        `shown: "[[Plan|the plan]]"`,
+        '---',
+        '',
+      ].join('\r\n');
+    const markdown = `${block('[[Plan]]')}Body [[Plan]].\r\n`;
+    const out = await writeLinks(payload(markdown, { plan: 'p-plan' }), write(roadmap));
+    expect(out.markdown).toBe(`${block('[[Roadmap]]')}Body [[Roadmap]].\r\n`);
+    expect(Object.fromEntries(linkTableOf(out))).toEqual({ roadmap: 'p-plan', plan: 'p-plan' });
+  });
+
+  it('keys a property’s link it can’t rewrite in place, and leaves the value as written', async () => {
+    const markdown = '---\nanchored: &a "[[Plan]]"\nalias: *a\n---\nBody\n';
+    const out = await writeLinks(payload(markdown, { plan: 'p-plan' }), write(roadmap));
+    expect(out.markdown).toBe(markdown);
+    expect(Object.fromEntries(linkTableOf(out))).toEqual({ plan: 'p-plan' });
+  });
+
+  it('writes a title a YAML string must quote so that it reads back', async () => {
+    const out = await writeLinks(
+      payload("---\nsee: '[[Plan]]'\n---\n", { plan: 'p-plan' }),
+      write(renamedTo('p-plan', `Bob's "plan": v2`)),
+    );
+    const read = readProperties(splitFrontmatter(out.markdown).frontmatter);
+    expect(read.ok && read.properties[0]?.value).toBe(`[[Bob's "plan": v2]]`);
+  });
+
+  it('gives a property’s link and a reference entries, as the body’s links get them', async () => {
+    const out = await writeLinks(
+      payload('---\nsee: "[[Plan]]"\nlong: "about [[Top]]"\n---\n`=[[Twin]].x` `=[[Deep]].y`'),
+      write({ audience: 'draft', region: OWNER_REGION, tableRegion: OWNER_REGION }),
+    );
+    // Twin is ambiguous; a link inside a longer value is text.
+    expect(Object.fromEntries(linkTableOf(out))).toEqual({ plan: 'p-plan', deep: 'p-deep' });
+  });
+
+  it('keeps their entries in use', async () => {
+    const trimmed = await linksInUse(
+      payload('---\nsee: "[[Plan]]"\n---\n`=[[Deep]].y`', {
+        plan: 'p-plan',
+        deep: 'p-deep',
+        gone: 'p-top',
+      }),
+    );
+    expect(Object.fromEntries(linkTableOf(trimmed))).toEqual({ plan: 'p-plan', deep: 'p-deep' });
+  });
+});
+
 describe('a page picked for an ambiguous link', () => {
   const chosen = (key: string, id: string) => new Map([[key, page(id)]]);
 
@@ -460,6 +535,8 @@ describe('rename byte safety', () => {
       `\\[[${old}]]`,
       `<!-- [[${old}]] -->`,
       `| [[${old}\\|cell]] | b |`,
+      `\`=[[${old}]].cook_time\``,
+      `\`\` = [[${old}]].x \`\``,
     ]),
     '\n',
     '\r\n',
@@ -502,14 +579,15 @@ describe('rename byte safety', () => {
       ]),
     );
     let renames = 0;
+    let [inProperties, inReferences] = [0, 0];
     for (const markdown of documents(1500)) {
       const out = await writeLinks(
         payload(markdown, entries),
         write({ tree: () => fuzzTree, published: opened.open }),
       );
       if (out.markdown === markdown) continue;
-      const before = placedWikilinks(markdown);
-      const after = placedWikilinks(out.markdown);
+      const before = tableWikilinks(markdown);
+      const after = tableWikilinks(out.markdown);
       expect(after.length, markdown).toBe(before.length);
       let [from, to] = [0, 0];
       before.forEach((link, i) => {
@@ -518,6 +596,12 @@ describe('rename byte safety', () => {
         expect(out.markdown.slice(to, now.start), markdown).toBe(markdown.slice(from, link.start));
         if (now.source !== link.source) {
           renames++;
+          if (now.property) inProperties++;
+          else if (
+            out.markdown[now.start - 1] !== '[' &&
+            /=[ \t]*$/.test(out.markdown.slice(0, now.start))
+          )
+            inReferences++;
           expect({ heading: now.heading, shown: now.shown, embed: now.embed }, markdown).toEqual({
             heading: link.heading,
             shown: link.shown,
@@ -535,5 +619,7 @@ describe('rename byte safety', () => {
     }
     // The fuzz reaches renames, not only documents it leaves alone.
     expect(renames).toBeGreaterThan(300);
+    expect(inProperties).toBeGreaterThan(50);
+    expect(inReferences).toBeGreaterThan(50);
   }, 60_000);
 });

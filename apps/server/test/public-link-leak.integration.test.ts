@@ -362,3 +362,55 @@ describe('a page with a public link', () => {
     expect(await rowsNaming(w.page.pageId)).toHaveLength(1);
   });
 });
+
+describe('a public page showing other pages’ values (ADR 0006, decision 9)', () => {
+  it('holds only those pages’ published values, never a draft its publisher can see', async () => {
+    const n = randomBytes(4).toString('hex');
+    const m = {
+      published: `PLAINTEXT-PUBLISHED-VALUE-${n}`,
+      draft: `PLAINTEXT-DRAFT-VALUE-${n}`,
+      unreferenced: `PLAINTEXT-UNREFERENCED-VALUE-${n}`,
+      unpublished: `PLAINTEXT-UNPUBLISHED-VALUE-${n}`,
+    };
+    const owner = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, {
+      name: 'Kitchen',
+      kind: 'shared',
+    });
+    const create = async (title: string, markdown: string) => ({
+      spaceId,
+      pageId: await pages.createPage(owner.ctx, { spaceId, parentId: null, title, markdown }),
+    });
+    const bread = await create(
+      'Garlic bread',
+      `---\ncook_time: "${m.published}"\nother: "${m.unreferenced}"\n---\nBake it.\n`,
+    );
+    await pages.publishPage(owner.ctx, bread);
+    // A draft after it, renamed too: its title chooses nothing, its value never goes.
+    await pages.editDraft(owner.ctx, bread, {
+      title: 'Garlic toast',
+      markdown: `---\ncook_time: "${m.draft}"\n---\nBake it.\n`,
+    });
+    // A page never published, whose draft its publisher can see.
+    await create('Secret soup', `---\nx: "${m.unpublished}"\n---\n`);
+    const notes = await create(
+      'Notes',
+      'Bake `=[[Garlic bread]].cook_time` min. Soup `=[[Secret soup]].x`, `=[[Garlic bread]].nope`.\n',
+    );
+    await pages.publishPage(owner.ctx, notes);
+    const id = await links.turnOn(owner.ctx, notes.pageId);
+    await links.shareCopy(owner.ctx, notes);
+
+    expect(await readable(m.published, m.draft, m.unreferenced, m.unpublished)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    const html = await (await visit(`/p/${id}`)).text();
+    expect(html).toContain(`Bake ${m.published} min.`);
+    // What doesn't resolve to a published value stays as written.
+    expect(html).toContain('<code>=[[Secret soup]].x</code>');
+    expect(html).toContain('<code>=[[Garlic bread]].nope</code>');
+  });
+});
