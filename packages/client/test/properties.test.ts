@@ -374,6 +374,34 @@ describe('setting a value', () => {
     );
   });
 
+  it('fills an empty value before a comment after it', () => {
+    const block = '---\nstatus: # workflow\nnext: 1\n---\n';
+    expect(byKey(block, 'status')).toMatchObject({
+      editable: true,
+      valueSpan: { start: 11, end: 11 },
+    });
+    expect(edited(setProperty(block, 'status', 'done'))).toBe(
+      '---\nstatus: done # workflow\nnext: 1\n---\n',
+    );
+    const cleared = edited(setProperty('---\nstatus: draft # workflow\n---\n', 'status', null));
+    expect(edited(setProperty(cleared, 'status', ['a']))).toBe(
+      '---\nstatus: [a] # workflow\n---\n',
+    );
+    // An explicit key's colon is the one after its comment.
+    expect(edited(setProperty('---\n? a # x: y\n:\nb: 1\n---\n', 'a', 5))).toBe(
+      '---\n? a # x: y\n: 5\nb: 1\n---\n',
+    );
+  });
+
+  it('refuses to set a value shown as its source to that text', () => {
+    for (const block of ['---\nm: {x: 1}\n---\n', '---\nn: .inf\n---\n']) {
+      const [property] = properties(block);
+      expect(setProperty(block, property?.key ?? '', property?.value ?? null)).toMatchObject({
+        ok: false,
+      });
+    }
+  });
+
   it('returns the block as it was for the value it already has', () => {
     const block = '---\nn: 0x23\nnotes: |\n  text\n---\n';
     expect(setProperty(block, 'n', 35)).toEqual({ ok: true, frontmatter: block });
@@ -531,6 +559,14 @@ describe('adding a key', () => {
     );
   });
 
+  it('quotes a new key that would read as a number, null or true', () => {
+    for (const key of ['0x10', '1e3', '~', 'null', 'true', '35']) {
+      const result = edited(setProperty('---\n---\n', key, 'v'));
+      expect(result).toBe(`---\n"${key}": v\n---\n`);
+      expect(edited(renameProperty('---\na: v\n---\n', 'a', key))).toBe(result);
+    }
+  });
+
   it('makes a block for a page with none', () => {
     expect(edited(setProperty(null, 'status', 'draft'))).toBe('---\nstatus: draft\n---\n');
     expect(edited(setProperty(null, 'status', 'draft', '\r\n'))).toBe(
@@ -625,6 +661,12 @@ last: 1
     expect(edited(removeProperty('---\na:\n---', 'a'))).toBe('---\n---');
   });
 
+  it('removes a key after a `?`, an anchor or a tag on its line', () => {
+    expect(edited(removeProperty('---\n? a\n: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
+    expect(edited(removeProperty('---\n&k a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
+    expect(edited(removeProperty('---\n!!str a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
+  });
+
   it('refuses a missing key', () => {
     expect(removeProperty('---\na: 1\n---\n', 'b')).toEqual({
       ok: false,
@@ -686,6 +728,7 @@ describe('a wikilink value', () => {
       '![[photo.png]]',
       '[[Page#^block]]',
       '[[]]',
+      '[[#Heading]]',
       '[[a\nb]]',
       ['[[A]]'],
       35,

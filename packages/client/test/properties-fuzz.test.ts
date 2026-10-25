@@ -47,6 +47,8 @@ const KEYS: [string, string][] = [
   ['goes_with', 'goes_with'],
   ['notes', 'notes'],
   ['empty', 'empty'],
+  ['&k anchored', 'anchored'],
+  ['!!str tagged', 'tagged'],
 ];
 
 // What follows a key's colon, read-only values too; `\n` is a line break.
@@ -60,6 +62,8 @@ const VALUES = [
   ' true',
   ' ~',
   '',
+  '   ',
+  ' # empty, with a note: here',
   ' 1 # a note',
   ' "[[Tomato soup]]"',
   " '[[Bread]]'",

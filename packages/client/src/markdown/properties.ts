@@ -111,7 +111,7 @@ export function setProperty(
     if (key === '') return refused('A property needs a name.');
     const expected = [...before, { key, value }];
     const at = read.closeStart;
-    for (const keyText of scalarTexts(key, 'PLAIN')) {
+    for (const keyText of keyTexts(key, 'PLAIN')) {
       for (const valueText of valueTexts(value, null)) {
         const line = `${read.indent}${keyText}:${valueText === '' ? '' : ` ${valueText}`}${read.lineBreak}`;
         const result = verified(block.slice(0, at) + line + block.slice(at), expected);
@@ -121,7 +121,8 @@ export function setProperty(
     return refused(UNSAFE);
   }
   const { property } = entry;
-  if (sameValue(property.value, value)) return { ok: true, frontmatter: block };
+  // A value shown as its source isn't that text, so no value is the one it has.
+  if (!entry.source && sameValue(property.value, value)) return { ok: true, frontmatter: block };
   if (!property.editable) return refused(entry.lock ?? UNSAFE);
   const expected = before.map((old) => (old === property ? { key, value } : old));
   for (const candidate of valueEdits(block, read.base, entry, value)) {
@@ -151,7 +152,7 @@ export function renameProperty(frontmatter: string, key: string, to: string): Pr
   const expected = read.entries.map(({ property }) =>
     property === entry.property ? { key: to, value: property.value } : property,
   );
-  for (const text of scalarTexts(to, style)) {
+  for (const text of keyTexts(to, style)) {
     const result = verified(frontmatter.slice(0, start) + text + frontmatter.slice(end), expected);
     if (result) return result;
   }
@@ -170,7 +171,12 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   const entry = read.entries.find(({ property }) => property.key === key);
   if (!entry) return refused(`There is no property ${key}.`);
   const start = frontmatter.lastIndexOf('\n', entry.property.keySpan.start - 1) + 1;
-  if (!/^[ \t]*$/.test(frontmatter.slice(start, entry.property.keySpan.start))) {
+  // Before the key on its line, only indentation, `?` and its anchor or tag.
+  if (
+    !/^[ \t]*(?:\?[ \t]+)?(?:[&!]\S*[ \t]+)*$/.test(
+      frontmatter.slice(start, entry.property.keySpan.start),
+    )
+  ) {
     return refused('The key doesn’t start its line.');
   }
   // The value's source as the parser has it: a block list's ends with its
@@ -182,7 +188,9 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   const end = newline < 0 || newline >= read.closeStart ? read.closeStart : newline + 1;
   // Comment lines indented under the key come after it too: left behind,
   // a block of text before them could read them as its own.
-  const under = new RegExp(`^(?:[ \\t]{${entry.property.keySpan.start - start + 1},}#[^\\n]*\\n)*`);
+  const under = new RegExp(
+    `^(?:[ \\t]{${(/^[ \t]*/.exec(frontmatter.slice(start))?.[0].length ?? 0) + 1},}#[^\\n]*\\n)*`,
+  );
   const withComments = end + (under.exec(frontmatter.slice(end, read.closeStart))?.[0].length ?? 0);
   const expected = read.entries.flatMap(({ property }) =>
     property === entry.property ? [] : [property],
@@ -222,7 +230,7 @@ const LINK_ALONE = /^\[\[[^[\]\n]+\]\]$/;
 export function propertyWikilink(value: PropertyValue): Wikilink | null {
   if (typeof value !== 'string' || !LINK_ALONE.test(value)) return null;
   const link = parseWikilink(value);
-  if (!link || link.unsupported) return null;
+  if (!link || link.unsupported || link.target === '') return null;
   const { source, target, heading, shown, embed } = link;
   return { source, target, heading, shown, embed };
 }
@@ -234,11 +242,33 @@ const UNSAFE = 'That can’t be written there without changing other text.';
 const COMMENT = 'It has a comment inside it.';
 const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.';
 
+// Just after the colon that follows a key ending at `from`, past spaces,
+// line breaks and comments, or -1.
+function colonAfter(yaml: string, from: number): number {
+  for (let at = from; at < yaml.length; at++) {
+    const char = yaml[at];
+    if (char === ':') return at + 1;
+    if (char === '#') {
+      at = yaml.indexOf('\n', at);
+      if (at < 0) return -1;
+    } else if (char !== ' ' && char !== '\t' && char !== '\r' && char !== '\n') return -1;
+  }
+  return -1;
+}
+
 const refused = (reason: string) => ({ ok: false, reason }) as const;
 
-// A property as read, with the nodes its edits need, and why its value
-// can't be edited in place, if it can't.
-type Entry = { property: Property; key: Scalar; value: Node | null; lock: string | null };
+// A property as read, with what its edits need: its nodes, where its
+// colon ends (or -1), why its value can't be edited in place if it can't,
+// and whether the value is shown as its source.
+type Entry = {
+  property: Property;
+  key: Scalar;
+  value: Node | null;
+  colon: number;
+  lock: string | null;
+  source: boolean;
+};
 
 type ReadBlock =
   | {
@@ -288,9 +318,14 @@ function readBlock(frontmatter: string | null): ReadBlock {
     if (!isScalar(key) || !key.range) return refused('A key isn’t plain text.');
     const value = (pair.value ?? null) as Node | null;
     const keySpan = { start: base + key.range[0], end: base + key.range[1] };
-    const valueSpan = value?.range
-      ? { start: base + value.range[0], end: base + value.range[0] + sourceOf(value).length }
-      : { start: keySpan.end, end: keySpan.end };
+    const colon = value ? colonAfter(yaml, key.range[1]) : -1;
+    // An empty value is at its colon: the parser has it after any comment.
+    const empty = !value?.range || value.range[0] === value.range[1];
+    const at = base + (colon < 0 ? key.range[1] : colon);
+    const valueSpan =
+      value?.range && !empty
+        ? { start: base + value.range[0], end: base + value.range[0] + sourceOf(value).length }
+        : { start: at, end: at };
     const read = value === null ? null : valueOf(value, doc);
     const lock = map.flow
       ? FLOW_MAP
@@ -311,19 +346,22 @@ function readBlock(frontmatter: string | null): ReadBlock {
       },
       key,
       value,
+      colon: colon < 0 ? -1 : base + colon,
       lock,
+      source: read === undefined,
     });
   }
   const first = map.items[0]?.key as Scalar | undefined;
   const firstStart = first?.range?.[0] ?? 0;
-  const indent = yaml.slice(yaml.lastIndexOf('\n', firstStart - 1) + 1, firstStart);
+  // The first key's line's indentation, before any `?`, anchor or tag.
+  const indent = /^[ \t]*/.exec(yaml.slice(yaml.lastIndexOf('\n', firstStart - 1) + 1))?.[0] ?? '';
   return {
     ok: true,
     entries,
     base,
     closeStart,
     flow: map.flow ?? false,
-    indent: /^[ \t]*$/.test(indent) ? indent : '',
+    indent,
     lineBreak,
   };
 }
@@ -485,6 +523,14 @@ function readsAs(text: string, value: PropertyScalar, context: Context): boolean
   return doc.errors.length === 0 && isScalar(item) && item.value === value;
 }
 
+// The ways to write a key, most like `style` first: plain only when it
+// reads as that text, so a key such as `0x10` or `~` stays a string to
+// every reader.
+const keyTexts = (key: string, style: Style) => {
+  const texts = scalarTexts(key, style).filter((text) => readsAs(text, key, 'block'));
+  return texts.length > 0 ? texts : [doubleQuoted(key)];
+};
+
 // A scalar written anew, in `style` if it reads back as itself there.
 const scalarText = (value: PropertyScalar, style: Style | null, context: Context) =>
   scalarTexts(value, style).find((text) => readsAs(text, value, context)) ??
@@ -529,13 +575,13 @@ function* valueEdits(
   entry: Entry,
   value: PropertyValue,
 ): Generator<string> {
-  const { keySpan, valueSpan } = entry.property;
+  const { valueSpan } = entry.property;
   const node = entry.value as Node;
   const replace = (start: number, end: number, text: string) =>
     block.slice(0, start) + text + block.slice(end);
   // From just after the key's colon: an empty value, and a scalar or a
   // flow list where a block list was.
-  const colon = block.indexOf(':', keySpan.end) + 1;
+  const { colon } = entry;
   const afterColon = (text: string) => replace(colon, valueSpan.end, text === '' ? '' : ` ${text}`);
   const seq = isSeq(node) ? (node as YAMLSeq<Node>) : null;
   if (value === null || valueSpan.start === valueSpan.end) {
