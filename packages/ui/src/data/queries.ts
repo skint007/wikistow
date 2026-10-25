@@ -14,7 +14,7 @@ import {
   type RevisionId,
   type SpaceId,
 } from '@wikistow/client';
-import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import { hashKey, queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { DesktopBridge } from '@wikistow/contracts';
 import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
@@ -217,6 +217,7 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
       const changes = takeChanges(queryClient);
+      const { generation } = ctx.revisions;
       let index: searchOperations.PageIndex;
       try {
         if (shown) {
@@ -230,8 +231,9 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
           });
         }
       } catch (error) {
-        // Followed by the next update instead.
-        noteBack(queryClient, changes);
+        // Followed by the next update instead, unless the vault locked or
+        // access changed: the next index is built afresh.
+        if (ctx.revisions.generation === generation) noteBack(queryClient, changes);
         throw error;
       }
       if (device && index !== shown) {
@@ -270,8 +272,39 @@ function followingOf(queryClient: QueryClient): Following {
   if (!state) {
     state = { spaces: null, saved: [], gathering: null, keeping: null };
     following.set(queryClient, state);
+    // Locking removes the index: what it waited to take goes with it.
+    queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'removed' && event.query.queryHash === searchIndexHash) {
+        forget(queryClient);
+      }
+    });
   }
   return state;
+}
+
+const searchIndexHash = hashKey(searchIndexKey);
+
+/** Drop what changed and what waits: the index it was for is gone. */
+function forget(queryClient: QueryClient) {
+  const state = following.get(queryClient);
+  if (!state) return;
+  if (state.gathering) clearTimeout(state.gathering);
+  if (state.keeping) clearTimeout(state.keeping.timer);
+  Object.assign(state, { spaces: null, saved: [], gathering: null, keeping: null });
+}
+
+/**
+ * Note each save as its space alone: the next update lists it, so no
+ * draft's text waits here while nothing shows the index.
+ */
+function savesAsSpaces(queryClient: QueryClient) {
+  const state = followingOf(queryClient);
+  if (state.saved.length === 0) return;
+  changed(
+    queryClient,
+    state.saved.map(({ spaceId }) => spaceId),
+  );
+  state.saved = [];
 }
 
 /** Note `spaces` changed (every one for 'all'). */
@@ -324,9 +357,12 @@ export function searchIndexChanged(
   change?: { spaceIds: readonly SpaceId[] } | { saved: searchOperations.SavedVersion },
 ) {
   const state = followingOf(queryClient);
-  if (change && 'saved' in change) state.saved.push(change.saved);
-  else changed(queryClient, change ? change.spaceIds : 'all');
-  if (!queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive()) {
+  const shown = queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive();
+  if (change && 'saved' in change) {
+    if (shown) state.saved.push(change.saved);
+    else changed(queryClient, [change.saved.spaceId]);
+  } else changed(queryClient, change ? change.spaceIds : 'all');
+  if (!shown) {
     follow(queryClient);
     return;
   }
@@ -342,13 +378,18 @@ export function searchIndexChanged(
 function follow(queryClient: QueryClient) {
   // Taken already, by an update that started meanwhile.
   if (!noted(followingOf(queryClient))) return;
+  const query = queryClient.getQueryCache().find({ queryKey: searchIndexKey });
+  if (!query?.isActive()) savesAsSpaces(queryClient);
   const stale = () =>
     queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
-  const query = queryClient.getQueryCache().find({ queryKey: searchIndexKey });
   const running = query?.state.fetchStatus === 'fetching' ? query.promise : undefined;
   void stale();
   const untaken = () => {
-    if (noted(followingOf(queryClient))) void stale();
+    if (!noted(followingOf(queryClient))) return;
+    if (!queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive()) {
+      savesAsSpaces(queryClient);
+    }
+    void stale();
   };
   if (running) void running.then(untaken, untaken);
 }
@@ -402,7 +443,9 @@ function keepLater(
  */
 export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext) {
   ctx.revisions.clear();
-  // Pages whose access was lost leave the search index now, not when it is next stale.
+  // Pages whose access was lost leave the search index now, not when it is
+  // next stale, and so do the saves it hasn't taken.
+  forget(queryClient);
   void queryClient.resetQueries({ queryKey: searchIndexKey });
   // An open page keeps what it shows while it reopens, so an editor on it stays
   // mounted with its own saves; the refetch cancels any opening under old access.

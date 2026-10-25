@@ -114,11 +114,13 @@ const updates = () =>
     saved.length > 0 ? [spaces, saved.map(({ revisionId }) => revisionId)] : spaces,
   );
 
+// What sealing checks of a session: its cache, cleared at a lock or access change.
+const ctxOf = (revisions = { generation: 0 }) => ({ revisions }) as unknown as ClientContext;
+
 async function shown() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // What sealing checks of a session: its cache, cleared at a lock or access change.
   const revisions = { generation: 0 };
-  const ctx = { revisions } as unknown as ClientContext;
+  const ctx = ctxOf(revisions);
   const options = searchIndexQuery(ctx, queryClient);
   const stop = new QueryObserver(queryClient, options).subscribe(() => {});
   await vi.advanceTimersByTimeAsync(1);
@@ -201,6 +203,41 @@ describe('the app’s search index', () => {
     const index = data() as searchOperations.PageIndex | undefined;
     expect(index?.page(home, PageId.parse('soup'))?.revisionId).toBe('own-2');
     stop();
+  });
+
+  it('keeps no draft’s text while nothing shows it, only its space', async () => {
+    const { queryClient, stop } = await shown();
+    stop();
+    const doc = put(home, 'soup', 'unshown words', 'own-1');
+    searchIndexChanged(queryClient, {
+      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'unshown words' },
+    });
+    const again = new QueryObserver(queryClient, searchIndexQuery(ctxOf(), queryClient));
+    const unsubscribe = again.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    expect(updates()).toEqual([[home]]);
+    unsubscribe();
+  });
+
+  it('forgets what it hadn’t taken when the vault locks', async () => {
+    const { queryClient, stop, data } = await shown();
+    const index = data();
+    const doc = put(home, 'soup', 'locked words', 'own-1');
+    searchIndexChanged(queryClient, {
+      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'locked words' },
+    });
+    // Locked before the update: the index and what it waited for go.
+    stop();
+    queryClient.removeQueries();
+    // Unlocked, with an index as fresh as a first build's: only what
+    // changes from then on is followed.
+    const options = searchIndexQuery(ctxOf(), queryClient);
+    queryClient.setQueryData(options.queryKey, index);
+    const unsubscribe = new QueryObserver(queryClient, options).subscribe(() => {});
+    searchIndexChanged(queryClient, { spaceIds: [work] });
+    await vi.advanceTimersByTimeAsync(GATHER_MS * 2);
+    expect(updates()).toEqual([[work]]);
+    unsubscribe();
   });
 
   it('takes a burst of autosaves on a page that shows it without listing every space, and is kept once', async () => {

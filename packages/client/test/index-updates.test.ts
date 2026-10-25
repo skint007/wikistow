@@ -354,6 +354,10 @@ describe('a page index derived change by change', () => {
       markdown: '',
     };
     expect(letGo(index, replaced, [saved])).toBe(false);
+    // Saved over, but someone else's version stands in, as when its editor
+    // is made a reader as they save.
+    const other = { ...page.doc, revisionId: RevisionId.parse('published') };
+    expect(letGo(index, index.with([[other, page.content]]), [saved])).toBe(true);
     // Gone, whatever was saved.
     expect(letGo(index, index.with([], { spaces: [page.doc.spaceId] }), [saved])).toBe(true);
   });

@@ -444,18 +444,30 @@ export async function updateIndex(
 
 /**
  * Whether `after` lacks a version of a page `before` held: the page is
- * gone, or another version stands in for it, but for one this person
- * saved over (`saved`), which was theirs to open. Linear in `before`'s pages.
+ * gone, or another version stands in for it, but for a draft this person
+ * saved over (`saved`), which was theirs to open, where one of their saves
+ * of the page stands in for it. Linear in `before`'s pages and `saved`.
  */
 export function letGo(
   before: PageIndex,
   after: PageIndex,
   saved: readonly SavedVersion[] = [],
 ): boolean {
-  const over = new Set(saved.map(({ basedOn }) => basedOn));
+  // Each page's versions saved over, and saved.
+  const mine = new Map<string, { over: Set<RevisionId>; made: Set<RevisionId> }>();
+  for (const { spaceId, pageId, basedOn, revisionId } of saved) {
+    const key = pageKey(spaceId, pageId);
+    const page = mine.get(key) ?? { over: new Set(), made: new Set() };
+    page.over.add(basedOn);
+    page.made.add(revisionId);
+    mine.set(key, page);
+  }
   return before.pages().some(({ doc }) => {
     const now = after.page(doc.spaceId, doc.pageId);
-    return !now || (now.revisionId !== doc.revisionId && !over.has(doc.revisionId));
+    if (!now) return true;
+    if (now.revisionId === doc.revisionId) return false;
+    const own = mine.get(pageKey(doc.spaceId, doc.pageId));
+    return !own?.over.has(doc.revisionId) || !own.made.has(now.revisionId);
   });
 }
 
