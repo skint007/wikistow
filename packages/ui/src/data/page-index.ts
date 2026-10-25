@@ -10,7 +10,7 @@ export type PageIndexState = {
   progress: searchOperations.IndexProgress | undefined;
   /** Why the last build failed, or null. `index` may still hold an older one. */
   error: Error | null;
-  /** A newer index is being built behind `index`. */
+  /** `index` is being updated behind it. */
   updating: boolean;
   /** Build it again, after an error. */
   retry: () => void;
@@ -22,12 +22,13 @@ export type PageIndexState = {
  * search and for whatever lists pages by their properties.
  *
  * One index serves every caller. While a component uses this (and
- * `enabled`), the index is built if it isn't, and built again after a
- * change to a page, this person's own or one the server tells of
- * (`searchIndexChanged`), or once a minute old when the component mounts
- * or the window is focused. Each build is a new `index` object, so derive
+ * `enabled`), the index is built if it isn't, and updated after a change
+ * to a page, this person's own or one the server tells of
+ * (`searchIndexChanged`), or once a minute old when the component mounts.
+ * Each update that changes anything is a new `index` object, so derive
  * from it with `useMemo([index])`, and a component shows changes as they
- * come. Building reads every space's tree, and opens each page whose
+ * come; one that finds nothing changed keeps the same object. Building it
+ * the first time reads every space's tree, and opens each page whose
  * version changed, so leave it disabled until it is needed: for instance
  * until a menu that suggests keys opens.
  */

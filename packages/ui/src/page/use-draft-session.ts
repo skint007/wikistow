@@ -139,7 +139,7 @@ function appPorts(
       const loaded = queryClient.getQueryData(tree.queryKey);
       return loaded ? draftLinkTargets(loaded, { id: page.pageId }, title) : null;
     },
-    async saved({ revisionId, payload, region, epoch }) {
+    async saved({ revisionId, basedOn, payload, written, region, epoch }) {
       pluginRuntime.editorSaved(page, revisionId);
       // A tree fetched before this save would land on the patch with the old title.
       const overtaken = queryClient.isFetching({ queryKey: tree.queryKey }) > 0;
@@ -164,7 +164,9 @@ function appPorts(
           }),
         };
       });
-      searchIndexChanged(queryClient);
+      searchIndexChanged(queryClient, {
+        saved: { ...page, basedOn, revisionId, title: written.title, markdown: written.markdown },
+      });
       // The first edit after publishing changes the tree's unpublished marker.
       if (changedStatus || overtaken)
         await queryClient.invalidateQueries({ queryKey: tree.queryKey });

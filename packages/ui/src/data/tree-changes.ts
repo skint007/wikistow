@@ -16,10 +16,12 @@ import {
  * or from someone the space is shared with. The spaces and shares listed
  * load again too, for a space renamed, deleted or newly shared, and so do
  * the space's public links, which turning one on or off tells of, and the
- * search index, which rebuilds now only if something shows it. The page
- * that is open stays as it is. A tab out of view stops listening, so
- * a dozen tabs don't hold a dozen connections, and its trees load again
- * when it is back in view, as every query does (`refetchOnWindowFocus`).
+ * search index, which lists those spaces again now only if something shows
+ * it. The page that is open stays as it is. A tab out of view stops
+ * listening, so a dozen tabs don't hold a dozen connections, and its trees
+ * load again when it is back in view, as every query does
+ * (`refetchOnWindowFocus`); the index, which doesn't, then lists every
+ * space again, once.
  */
 export function useTreeChanges(ctx: ClientContext | null) {
   const queryClient = useQueryClient();
@@ -27,7 +29,7 @@ export function useTreeChanges(ctx: ClientContext | null) {
   useEffect(() => {
     if (!ctx || !visible) return;
     // Trees load again when the tab is back in view, being stale at once;
-    // the index, fresh for a minute, is told of what it may have missed.
+    // the index is told it may have missed changes anywhere.
     searchIndexChanged(queryClient);
     const stop = new AbortController();
     const reloadLists = () => {
@@ -42,7 +44,7 @@ export function useTreeChanges(ctx: ClientContext | null) {
           void queryClient.invalidateQueries({ queryKey: publicLinksQuery(ctx, spaceId).queryKey });
         }
         reloadLists();
-        searchIndexChanged(queryClient);
+        searchIndexChanged(queryClient, { spaceIds });
       },
       onMissed: () => {
         void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });

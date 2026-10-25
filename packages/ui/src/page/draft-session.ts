@@ -55,11 +55,14 @@ export type DraftPorts = {
   /**
    * A save landed, with the vault still unlocked since `epoch`: show the
    * version saved (its title, emoji and region) as the page's, and load the
-   * page's heads again.
+   * page's heads again. `payload` is what was typed, `written` what the
+   * server holds (links renamed), and `basedOn` the version saved over.
    */
   saved(saved: {
     revisionId: RevisionId;
+    basedOn: RevisionId;
     payload: PagePayload;
+    written: PagePayload;
     region: Region;
     epoch: number;
   }): Promise<void>;
@@ -309,7 +312,13 @@ export class DraftSession {
     const generation = this.#ports.generation();
     const previous = this.#region;
     const tree = this.#ports.tree();
-    let saved: { revisionId: RevisionId; region: Region };
+    const basedOn = this.#base;
+    let saved: {
+      revisionId: RevisionId;
+      basedOn: RevisionId;
+      written: PagePayload;
+      region: Region;
+    };
     try {
       const {
         revisionId,
@@ -317,14 +326,14 @@ export class DraftSession {
         payload: written,
         inUse,
       } = await this.#ports.saveDraft({
-        basedOn: this.#base,
+        basedOn,
         ...(previous?.generation === generation ? { basedOnRegion: previous.region } : {}),
         tableRegion: this.#tableRegion,
         payload: next,
         ...(tree ? { tree } : {}),
         ...(this.#picks.size > 0 ? { linkChoices: new Map(this.#picks) } : {}),
       });
-      saved = { revisionId, region };
+      saved = { revisionId, basedOn, written, region };
       this.#known.add(revisionId);
       this.#base = revisionId;
       this.#region = { region, generation };

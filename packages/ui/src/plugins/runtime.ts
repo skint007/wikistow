@@ -302,7 +302,7 @@ export function createRuntime(source: RuntimeSource) {
     });
     // Pages it moved show their new place.
     void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
-    searchIndexChanged(queryClient);
+    searchIndexChanged(queryClient, { spaceIds: [SpaceId.parse(spaceId)] });
   };
 
   /** A plugin's draft save: shown afresh, and told to the other plugins. */
@@ -315,7 +315,7 @@ export function createRuntime(source: RuntimeSource) {
       };
       void queryClient.invalidateQueries({ queryKey: pageQuery(vault.ctx, pageId).queryKey });
       void queryClient.invalidateQueries({ queryKey: treeQuery(vault.ctx, spaceId).queryKey });
-      searchIndexChanged(queryClient);
+      searchIndexChanged(queryClient, { spaceIds: [spaceId] });
     }
     deliver({ event: 'draft.saved', payload: { page, revision } }, pluginId);
   };

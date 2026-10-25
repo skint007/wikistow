@@ -1,14 +1,20 @@
 import {
   closeSession,
+  moveOperations as moves,
   pageOperations as pages,
   searchOperations as search,
+  sharingOperations as sharing,
+  spaceOperations,
   type ClientContext,
   type SearchIndex,
+  type SpaceId,
 } from '@wikistow/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
-import { invite, library, shareFolder } from './support/sharing.ts';
+import { draftHead, invite, library, shareFolder, type Person } from './support/sharing.ts';
+import { schema } from '@wikistow/server';
+import { eq } from 'drizzle-orm';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -31,12 +37,12 @@ async function shared() {
   ]);
   const lib = await library(alice);
   await pages.editDraft(alice.ctx, lib.page, { markdown: `draft words ${DRAFT_ONLY}` });
-  await shareFolder(alice.ctx, {
+  const shareId = await shareFolder(alice.ctx, {
     spaceId: lib.spaceId,
     rootId: lib.shared,
     people: [await invite(alice, bob, 'reader'), await invite(alice, ed, 'editor')],
   });
-  return { bob, ed, lib };
+  return { alice, bob, ed, lib, shareId };
 }
 
 const hits = async (ctx: ClientContext, query: string) =>
@@ -47,6 +53,30 @@ const hits = async (ctx: ClientContext, query: string) =>
 
 const found = (index: SearchIndex<search.SearchPage>, query: string) =>
   index.search(query).map(({ doc }) => doc.pageId);
+
+/** What an index holds and finds, to compare an updated one with one built afresh. */
+const held = (index: search.PageIndex) => ({
+  pages: index
+    .pages()
+    .map(({ doc, title, text }) => ({ doc, title, text }))
+    .sort((a, b) => (a.doc.pageId < b.doc.pageId ? -1 : 1)),
+  found: ['published', 'republished', 'draft', 'private', 'plan', 'words', DRAFT_ONLY].map((q) =>
+    index.search(q).map(({ doc, score }) => ({ doc, score })),
+  ),
+});
+
+/** The paths of the routes `ctx` calls from now on. */
+function calls(ctx: ClientContext): string[] {
+  const paths: string[] = [];
+  const call = ctx.api.call.bind(ctx.api);
+  ctx.api.call = ((route, ...rest) => {
+    paths.push(route.path);
+    return call(route, ...rest);
+  }) as typeof ctx.api.call;
+  return paths;
+}
+
+const identityOf = (person: Person) => person.vault.identity.public.id;
 
 describe('a search index', () => {
   it('holds only published text for a reader, never a draft, and an editor’s drafts', async () => {
@@ -119,6 +149,184 @@ describe('a search index', () => {
     const next = await search.indexSpaces(ed.ctx, { kept: opened });
     expect(found(next, 'kept')).toEqual([]);
     expect(found(next, 'changed')).toEqual([lib.page.pageId]);
+  });
+
+  it('drops what a reader loses as it is updated, as one built afresh would', async () => {
+    const { alice, bob, lib, shareId } = await shared();
+    const update = (index: search.PageIndex) =>
+      search.updateIndex(bob.ctx, index, { spaces: [lib.spaceId] });
+    let index = await search.indexSpaces(bob.ctx);
+    expect(found(index, 'published')).toEqual([lib.page.pageId]);
+    // Published again: the reader's index holds the new publication only.
+    await pages.editDraft(alice.ctx, lib.page, { markdown: 'republished words' });
+    await pages.publishPage(alice.ctx, lib.page);
+    index = await update(index);
+    expect(found(index, 'republished')).toEqual([lib.page.pageId]);
+    expect(found(index, 'published')).toEqual([]);
+    expect(held(index)).toEqual(held(await search.indexSpaces(bob.ctx)));
+    // Moved out of the share: gone from every read.
+    const out = await moves.previewMove(alice.ctx, {
+      spaceId: lib.spaceId,
+      nodeId: lib.page.pageId,
+      parentId: lib.above,
+    });
+    await moves.moveNode(alice.ctx, { preview: out });
+    index = await update(index);
+    expect(index.page(lib.spaceId, lib.page.pageId)).toBeUndefined();
+    expect(found(index, 'republished')).toEqual([]);
+    expect(index.size).toBe(0);
+    expect(held(index)).toEqual(held(await search.indexSpaces(bob.ctx)));
+    // Moved back, then Bob is taken out of the share.
+    const back = await moves.previewMove(alice.ctx, {
+      spaceId: lib.spaceId,
+      nodeId: lib.page.pageId,
+      parentId: lib.shared,
+    });
+    await moves.moveNode(alice.ctx, { preview: back });
+    index = await update(index);
+    expect(found(index, 'republished')).toEqual([lib.page.pageId]);
+    await sharing.removeMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId,
+      identityId: identityOf(bob),
+    });
+    const removed = await update(index);
+    expect(removed.size).toBe(0);
+    expect(found(removed, 'republished')).toEqual([]);
+    expect(removed.list({ spaceId: lib.spaceId })).toEqual([]);
+    // Listing every space drops it too, as no longer shared with him.
+    expect((await search.updateIndex(bob.ctx, index, { spaces: 'all' })).size).toBe(0);
+  });
+
+  it('drops a space deleted, and an editor’s draft another replaced, as it is updated', async () => {
+    const { alice, ed, lib } = await shared();
+    let index = await search.indexSpaces(ed.ctx);
+    expect(found(index, DRAFT_ONLY)).toEqual([lib.page.pageId]);
+    await pages.editDraft(alice.ctx, lib.page, { markdown: 'replaced words' });
+    index = await search.updateIndex(ed.ctx, index, { spaces: [lib.spaceId] });
+    expect(found(index, DRAFT_ONLY)).toEqual([]);
+    expect(found(index, 'replaced')).toEqual([lib.page.pageId]);
+    expect(held(index)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    // A second space of Alice's, a home space being one that can't be deleted.
+    const second = await library(alice);
+    await shareFolder(alice.ctx, {
+      spaceId: second.spaceId,
+      rootId: second.shared,
+      people: [await invite(alice, ed, 'editor')],
+    });
+    index = await search.updateIndex(ed.ctx, index, { spaces: [second.spaceId] });
+    expect(index.list({ spaceId: second.spaceId })).toHaveLength(1);
+    const [space] = await t.db
+      .select({ permissionVersion: schema.spaces.permissionVersion })
+      .from(schema.spaces)
+      .where(eq(schema.spaces.id, second.spaceId));
+    await spaceOperations.deleteSpace(alice.ctx, {
+      spaceId: second.spaceId,
+      permissionVersion: space?.permissionVersion ?? 1,
+    });
+    index = await search.updateIndex(ed.ctx, index, { spaces: [second.spaceId] });
+    expect(index.list({ spaceId: second.spaceId })).toEqual([]);
+    expect(held(index)).toEqual(held(await search.indexSpaces(ed.ctx)));
+  });
+
+  it('lists only the spaces named, and opens only the versions it doesn’t hold', async () => {
+    const { alice, ed, lib } = await shared();
+    const other: SpaceId = await spaceOperations.createSpace(ed.ctx, { name: 'Notes' });
+    const mine = await pages.createPage(ed.ctx, { spaceId: other, parentId: null, title: 'Mine' });
+    const index = await search.indexSpaces(ed.ctx);
+    const paths = calls(ed.ctx);
+    // The echo of a change already held: one tree listed, nothing opened,
+    // and the same index.
+    const same = await search.updateIndex(ed.ctx, index, { spaces: [lib.spaceId] });
+    expect(same).toBe(index);
+    expect(paths).toEqual(['/api/spaces/:spaceId/tree']);
+    // Someone else's edit: the one version opened, besides the tree.
+    paths.length = 0;
+    await pages.editDraft(alice.ctx, lib.page, { markdown: 'edited elsewhere' });
+    const next = await search.updateIndex(ed.ctx, index, { spaces: [lib.spaceId] });
+    expect(found(next, 'elsewhere')).toEqual([lib.page.pageId]);
+    expect(paths.filter((path) => path === '/api/spaces/:spaceId/tree')).toHaveLength(1);
+    expect(paths).not.toContain('/api/spaces');
+    expect(paths.length).toBeLessThanOrEqual(3);
+    // The space not named is kept as it was.
+    expect(next.page(other, mine)).toBe(index.page(other, mine));
+  });
+
+  it('takes an editor’s own save as written, asking nothing, and its echo lists one tree', async () => {
+    const { ed, lib } = await shared();
+    const index = await search.indexSpaces(ed.ctx);
+    const basedOn = await draftHead(ed, lib.page);
+    const markdown = '---\ntags: [mine]\n---\nsaved here';
+    const written = await pages.editDraft(ed.ctx, lib.page, { markdown });
+    const paths = calls(ed.ctx);
+    const saved = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn,
+          revisionId: written.revisionId,
+          title: written.payload.title,
+          markdown: written.payload.markdown,
+        },
+      ],
+    });
+    expect(paths).toEqual([]);
+    expect(found(saved, 'saved')).toEqual([lib.page.pageId]);
+    expect(saved.list({ spaceId: lib.spaceId, tag: 'mine' }).map((p) => p.pageId)).toEqual([
+      lib.page.pageId,
+    ]);
+    expect(held(saved)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    // The server's word of it: the same index.
+    paths.length = 0;
+    expect(await search.updateIndex(ed.ctx, saved, { spaces: [lib.spaceId] })).toBe(saved);
+    expect(paths).toEqual(['/api/spaces/:spaceId/tree']);
+  });
+
+  it('drops a page saved into the index once its editor loses it', async () => {
+    const { alice, ed, lib, shareId } = await shared();
+    let index = await search.indexSpaces(ed.ctx);
+    const basedOn = await draftHead(ed, lib.page);
+    const written = await pages.editDraft(ed.ctx, lib.page, { markdown: 'mysavedsecret' });
+    index = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn,
+          revisionId: written.revisionId,
+          title: written.payload.title,
+          markdown: written.payload.markdown,
+        },
+      ],
+    });
+    expect(found(index, 'mysavedsecret')).toEqual([lib.page.pageId]);
+    await sharing.removeMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId,
+      identityId: identityOf(ed),
+    });
+    // As the server tells of the space.
+    index = await search.updateIndex(ed.ctx, index, { spaces: [lib.spaceId] });
+    expect(found(index, 'mysavedsecret')).toEqual([]);
+    expect(index.page(lib.spaceId, lib.page.pageId)).toBeUndefined();
+    expect(index.size).toBe(0);
+    expect(held(index)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    // A late save given for it lists its space, and keeps it out.
+    const late = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [
+        {
+          ...lib.page,
+          basedOn: written.revisionId,
+          revisionId: written.revisionId,
+          title: 'Plan',
+          markdown: 'mysavedsecret again',
+        },
+      ],
+    });
+    expect(found(late, 'mysavedsecret')).toEqual([]);
+    expect(late.size).toBe(0);
   });
 
   it('is abandoned when the vault locks while it is built', async () => {

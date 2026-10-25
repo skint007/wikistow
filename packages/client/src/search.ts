@@ -59,29 +59,58 @@ import {
  *   hit builds its snippet when asked, so only the rows shown pay for one.
  *   Highlights are UTF-16 offsets into the snippet's (or title's) own text.
  *
+ * - **Changes.** Pages are added as an index is built. Once built, or
+ *   once another is derived from it, it doesn't change: `with` derives a
+ *   new one without some of its pages and with others, sharing the rest.
+ *   A derived index keeps the pages added since it compacted in a small
+ *   index of their own, and passes over those removed. When these come to
+ *   more than `2√n` of its `n` pages (at least 64), or when asked, it
+ *   compacts: it drops the removed pages and lists the postings anew,
+ *   without reading any text again. Scores count only the pages it holds,
+ *   so a derived index ranks exactly as one built afresh with its pages.
+ *
  * Searching takes time linear in the query, in the postings of its terms,
- * and with filters, in the properties of the pages they're tried on, times
- * the number of different filters: the pages holding the words, or with
- * filters alone, every page. The last term also reads each indexed term it
- * starts, found in the terms sorted, which the first search after pages are
- * added sorts again. Then the pages found are sorted, in time `n log n` in
- * their number.
+ * those of pages removed since it compacted included, and with filters, in
+ * the properties of the pages they're tried on, times the number of
+ * different filters: the pages holding the words, or with filters alone,
+ * every page. The last term also reads each indexed term it starts, found
+ * in the terms sorted, which the first search after pages are added sorts
+ * again: after a compaction, by merging those already sorted, in time
+ * linear in their number. Then the pages found are sorted, in time
+ * `n log n` in their number.
+ *
+ * Deriving an index takes time linear in the text of the pages added, plus
+ * the postings of the pages added since it compacted, up to `2√n` pages'
+ * (and the first time an index is derived from, linear in its pages, to
+ * find those removed). A compaction takes time linear in all the postings:
+ * one past `2√n` is spread over the changes before it, so each pays for
+ * some `√n` pages', and one asked for is paid by the change that asks.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
  * size in memory, and the properties a few times their block's, which is
  * at most 64 KiB: up to some 16 times for a block of one-item lists, each
  * item an array of its own, much as a text of distinct words costs in
- * postings. That is fine for a family library of thousands of pages.
+ * postings. That is fine for a family library of thousands of pages. A
+ * derived index keeps, until it compacts, up to `2√n` pages it no longer
+ * holds, and shares the rest with the index it came from.
  */
 export class SearchIndex<T> {
-  readonly #pages: IndexedPage<T>[] = [];
-  // Each term's pages, as flat pairs: the page, and its counts as `add` packs them.
-  readonly #postings = new Map<string, number[]>();
-  #sorted: string[] | null = null;
+  // The pages indexed when it was built or last compacted. Shared with the
+  // indexes derived from it, so never changed once one is (`#frozen`).
+  #base = new Segment<T>(0);
+  // Pages added since, their ids following the base's. A derived index
+  // copies its own from the one before, sharing the postings it doesn't add to.
+  #added = new Segment<T>(0);
+  // The ids of pages in either that it no longer holds.
+  #removed: ReadonlySet<number> = new Set();
+  // Once derived, or derived from, pages can't be added.
+  #frozen = false;
+  // The pages it holds, listed when first asked for after a change.
+  #held: readonly IndexedPage<T>[] | null = null;
 
   get size(): number {
-    return this.#pages.length;
+    return this.#base.pages.length + this.#added.pages.length - this.#removed.size;
   }
 
   /** Index a page's title and Markdown; `doc` is what its hits return. */
@@ -91,26 +120,56 @@ export class SearchIndex<T> {
 
   /**
    * Index a page as another index read it (`pages`): its title, its text
-   * already reduced, and its properties, none if left out.
+   * already reduced, and its properties, none if left out. Only while the
+   * index is built: not once it is derived (`with`), or derived from.
    */
   addText(doc: T, { title, text, properties = [] }: IndexedText): void {
-    const id = this.#pages.length;
-    this.#pages.push({ doc, title, text, properties });
-    // Each term's count in the text, doubled, plus one if the title has it.
-    const counts = new Map<string, number>();
-    eachTerm(title, (term) => counts.set(term, (counts.get(term) ?? 0) | 1));
-    eachTerm(text, (term) => counts.set(term, (counts.get(term) ?? 0) + 2));
-    for (const [term, packed] of counts) {
-      let list = this.#postings.get(term);
-      if (!list) this.#postings.set(term, (list = []));
-      list.push(id, packed);
-    }
-    this.#sorted = null;
+    if (this.#frozen) throw new Error('An index derived, or derived from, doesn’t change');
+    this.#base.add({ doc, title, text, properties });
+    this.#held = null;
   }
 
-  /** Each page indexed, in the order added, with its text as reduced for search and its properties. */
+  /** Each page it holds, with its text as reduced for search and its properties. */
   pages(): readonly Readonly<IndexedPage<T>>[] {
-    return this.#pages;
+    if (this.#removed.size === 0 && this.#added.pages.length === 0) return this.#base.pages;
+    return (this.#held ??= [...this.#base.pages, ...this.#added.pages].filter(
+      (_, id) => !this.#removed.has(id),
+    ));
+  }
+
+  /**
+   * A new index holding this one's pages but `removed` (as `pages` gives
+   * them), and `added`, each as it is given. Neither changes again: the
+   * new one shares what it can with this one. With `compact`, the new one
+   * lets the pages removed go now, rather than when it next compacts.
+   */
+  protected derive(
+    removed: Iterable<Readonly<IndexedPage<T>>>,
+    added: Iterable<Readonly<IndexedPage<T>>>,
+    { compact = false }: { compact?: boolean } = {},
+  ): this {
+    this.#frozen = true;
+    const next = new (this.constructor as new () => this)();
+    next.#frozen = true;
+    const gone = new Set(this.#removed);
+    for (const page of removed) {
+      const id = this.#base.idOf(page) ?? this.#added.idOf(page);
+      if (id !== undefined) gone.add(id);
+    }
+    // An index being built adds to its base, so its own added pages, none,
+    // may start before the base's end.
+    const fresh =
+      this.#added.pages.length > 0 ? this.#added.copy() : new Segment<T>(this.#base.pages.length);
+    for (const page of added) fresh.add(page);
+    if (compact || fresh.pages.length + gone.size > compactAt(this.size)) {
+      next.#base = compacted(this.#base, fresh, gone);
+      next.#added = new Segment(next.#base.pages.length);
+    } else {
+      next.#base = this.#base;
+      next.#added = fresh;
+      next.#removed = gone;
+    }
+    return next;
   }
 
   /**
@@ -121,23 +180,39 @@ export class SearchIndex<T> {
     const { words, filters } = parseSearch(query);
     const wanted = queryTerms(words);
     if (wanted.length === 0 && filters.length === 0) return [];
+    const removed = this.#removed;
+    const ends = this.#base.pages.length;
+    const pageOf = (id: number) =>
+      id < ends ? this.#base.pages[id] : this.#added.pages[id - ends];
     let scores: Map<number, number> | null = null;
     // Pages whose text, not only title, holds some query term.
     const inTexts = new Set<number>();
     for (const [i, term] of wanted.entries()) {
       const found = new Map<number, number>();
       for (const [match, weight] of this.#expand(term, i === wanted.length - 1)) {
-        const list = this.#postings.get(match) ?? [];
-        const rarity = Math.log(1 + this.#pages.length / (list.length / 2));
-        for (let k = 0; k < list.length; k += 2) {
-          const id = list[k] ?? 0;
-          const packed = list[k + 1] ?? 0;
-          const inText = packed >>> 1;
-          if (inText > 0) inTexts.add(id);
-          const score =
-            weight * rarity * ((packed & 1 ? TITLE_BOOST : 0) + inText / (inText + 1.2));
-          // A page is scored on the best word a prefix matched in it.
-          found.set(id, Math.max(found.get(id) ?? 0, score));
+        const lists = [this.#base.postings.get(match), this.#added.postings.get(match)];
+        // The pages it holds with the term: those of a removed page don't count.
+        let holding = 0;
+        for (const list of lists) {
+          if (!list) continue;
+          if (removed.size === 0) holding += list.length / 2;
+          else for (let k = 0; k < list.length; k += 2) if (!removed.has(list[k] ?? 0)) holding++;
+        }
+        if (holding === 0) continue;
+        const rarity = Math.log(1 + this.size / holding);
+        for (const list of lists) {
+          if (!list) continue;
+          for (let k = 0; k < list.length; k += 2) {
+            const id = list[k] ?? 0;
+            if (removed.has(id)) continue;
+            const packed = list[k + 1] ?? 0;
+            const inText = packed >>> 1;
+            if (inText > 0) inTexts.add(id);
+            const score =
+              weight * rarity * ((packed & 1 ? TITLE_BOOST : 0) + inText / (inText + 1.2));
+            // A page is scored on the best word a prefix matched in it.
+            found.set(id, Math.max(found.get(id) ?? 0, score));
+          }
         }
       }
       const before: Map<number, number> | null = scores;
@@ -152,10 +227,11 @@ export class SearchIndex<T> {
     const tests = filterTests(filters);
     const passes = (page: IndexedPage<T>) => tests.every((test) => test(page.properties));
     if (scores === null) {
-      for (const page of this.#pages) if (passes(page)) hits.push({ page, score: 0, inText: true });
+      for (const page of this.pages())
+        if (passes(page)) hits.push({ page, score: 0, inText: true });
     } else {
       for (const [id, score] of scores) {
-        const page = this.#pages[id];
+        const page = pageOf(id);
         if (page && passes(page)) hits.push({ page, score, inText: inTexts.has(id) });
       }
     }
@@ -163,7 +239,12 @@ export class SearchIndex<T> {
     const shown = wanted.length > 0 ? wanted : filterTerms(filters);
     const prefix = wanted.length > 0;
     return hits
-      .sort((a, b) => b.score - a.score || a.page.title.localeCompare(b.page.title))
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.page.title.localeCompare(b.page.title) ||
+          this.order(a.page.doc, b.page.doc),
+      )
       .slice(0, limit)
       .map(({ page, score, inText }) => {
         let snippet: Marked | undefined;
@@ -177,24 +258,174 @@ export class SearchIndex<T> {
       });
   }
 
-  /** The indexed terms `term` stands for, each with its weight. */
+  /**
+   * How hits with the same score and title are ordered: as they were added,
+   * unless a kind of index gives an order of its own, which makes a derived
+   * index's hits come in the order of one built afresh.
+   */
+  protected order(_a: T, _b: T): number {
+    return 0;
+  }
+
+  /** The indexed terms `term` stands for, each once, with its weight. */
   *#expand(term: string, prefix: boolean): Generator<[string, number]> {
-    if (this.#postings.has(term)) yield [term, 1];
+    const base = this.#base.postings;
+    const added = this.#added.postings;
+    if (base.has(term) || added.has(term)) yield [term, 1];
     if (!prefix) return;
-    const sorted = (this.#sorted ??= [...this.#postings.keys()].sort());
-    let low = 0;
-    let high = sorted.length;
-    while (low < high) {
-      const mid = (low + high) >>> 1;
-      if ((sorted[mid] ?? '') <= term) low = mid + 1;
-      else high = mid;
-    }
-    for (let i = low; i < sorted.length; i++) {
-      const longer = sorted[i] ?? '';
-      if (!longer.startsWith(term)) break;
-      yield [longer, PREFIX_WEIGHT];
+    for (const segment of [this.#base, this.#added]) {
+      const sorted = segment.sorted();
+      for (let i = after(sorted, term); i < sorted.length; i++) {
+        const longer = sorted[i] ?? '';
+        if (!longer.startsWith(term)) break;
+        // A term in both is the base's.
+        if (segment === this.#base || !base.has(longer)) yield [longer, PREFIX_WEIGHT];
+      }
     }
   }
+}
+
+/** When a derived index of `size` pages compacts: past this many pages added and removed. */
+const compactAt = (size: number) => Math.max(64, 2 * Math.sqrt(size));
+
+/**
+ * Pages indexed together, with ids from `first` on: each term's postings,
+ * as flat pairs of a page's id and its counts (`add` packs them).
+ */
+class Segment<T> {
+  readonly pages: IndexedPage<T>[] = [];
+  readonly postings = new Map<string, number[]>();
+  #sorted: string[] | null = null;
+  #ids: Map<Readonly<IndexedPage<T>>, number> | null = null;
+  // The postings this one shares with another, which `add` copies before adding to.
+  #shared: Set<string> | null = null;
+
+  readonly first: number;
+
+  constructor(first: number) {
+    this.first = first;
+  }
+
+  /** Index `page`, as given. */
+  add(page: Readonly<IndexedPage<T>>): void {
+    const id = this.first + this.pages.length;
+    this.pages.push(page);
+    this.#ids?.set(page, id);
+    // Each term's count in the text, doubled, plus one if the title has it.
+    const counts = new Map<string, number>();
+    eachTerm(page.title, (term) => counts.set(term, (counts.get(term) ?? 0) | 1));
+    eachTerm(page.text, (term) => counts.set(term, (counts.get(term) ?? 0) + 2));
+    for (const [term, packed] of counts) {
+      let list = this.postings.get(term);
+      if (list && this.#shared?.delete(term)) this.postings.set(term, (list = [...list]));
+      if (!list) this.postings.set(term, (list = []));
+      list.push(id, packed);
+    }
+    this.#sorted = null;
+  }
+
+  /** A segment holding what this one does, to add to without changing this one. */
+  copy(): Segment<T> {
+    const copy = new Segment<T>(this.first);
+    copy.pages.push(...this.pages);
+    for (const [term, list] of this.postings) copy.postings.set(term, list);
+    copy.#shared = new Set(this.postings.keys());
+    copy.#sorted = this.#sorted;
+    return copy;
+  }
+
+  /** `page`'s id, if it is one of these. */
+  idOf(page: Readonly<IndexedPage<T>>): number | undefined {
+    this.#ids ??= new Map(this.pages.map((each, i) => [each, this.first + i]));
+    return this.#ids.get(page);
+  }
+
+  /** The terms indexed, sorted, as `#expand` reads them. */
+  sorted(): readonly string[] {
+    return (this.#sorted ??= [...this.postings.keys()].sort());
+  }
+
+  /** `sorted`, if it was already worked out. */
+  sortedIfKnown(): readonly string[] | null {
+    return this.#sorted;
+  }
+
+  /** Take `sorted` as worked out elsewhere. */
+  knowSorted(sorted: string[]): void {
+    this.#sorted = sorted;
+  }
+}
+
+/**
+ * The pages of `base` and `added` but those with an id in `removed`, as one
+ * segment from 0, their postings listed anew in the same order. Terms
+ * already sorted are merged, not sorted again.
+ */
+function compacted<T>(
+  base: Segment<T>,
+  added: Segment<T>,
+  removed: ReadonlySet<number>,
+): Segment<T> {
+  const next = new Segment<T>(0);
+  const ids = new Int32Array(added.first + added.pages.length).fill(-1);
+  for (const segment of [base, added]) {
+    for (const [i, page] of segment.pages.entries()) {
+      if (removed.has(segment.first + i)) continue;
+      ids[segment.first + i] = next.pages.length;
+      next.pages.push(page);
+    }
+  }
+  for (const segment of [base, added]) {
+    for (const [term, list] of segment.postings) {
+      let into = next.postings.get(term);
+      for (let k = 0; k < list.length; k += 2) {
+        const id = ids[list[k] ?? 0] ?? -1;
+        if (id < 0) continue;
+        if (!into) next.postings.set(term, (into = []));
+        into.push(id, list[k + 1] ?? 0);
+      }
+    }
+  }
+  const sorted = base.sortedIfKnown();
+  if (sorted !== null) {
+    const kept = sorted.filter((term) => next.postings.has(term));
+    const more = added
+      .sorted()
+      .filter((term) => next.postings.has(term) && !base.postings.has(term));
+    next.knowSorted(merged(kept, more));
+  }
+  return next;
+}
+
+/** Two sorted lists of distinct terms as one. */
+function merged(a: readonly string[], b: readonly string[]): string[] {
+  const out: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    const x = a[i];
+    const y = b[j];
+    if (y === undefined || (x !== undefined && x < y)) {
+      out.push(x ?? '');
+      i++;
+    } else {
+      out.push(y);
+      j++;
+    }
+  }
+  return out;
+}
+
+/** Where the terms in `sorted` after `term` start. */
+function after(sorted: readonly string[], term: string): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((sorted[mid] ?? '') <= term) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 }
 
 /** A page as an index holds it: what its hits return, its title, its reduced text and its properties. */
