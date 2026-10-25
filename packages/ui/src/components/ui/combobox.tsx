@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Input } from './input';
 
@@ -16,6 +16,8 @@ const SHOWN = 100;
  * move through it, and Enter picks the option they reach; otherwise Enter
  * is the form's, with the text as typed. Escape closes it, keeping the text.
  * `status` shows under the field, such as why the list couldn't be had.
+ * `onPick` hears of an option picked, after `onChange`; `field` goes on the
+ * text field, its key and blur handlers after the list's own.
  */
 export function Combobox({
   id,
@@ -26,6 +28,8 @@ export function Combobox({
   onFocus,
   placeholder,
   noun = 'options',
+  onPick,
+  field,
 }: {
   id: string;
   value: string;
@@ -37,6 +41,11 @@ export function Combobox({
   placeholder?: string;
   /** What the options are, for the count: "12 of 340 models". */
   noun?: string;
+  onPick?: (value: string) => void;
+  field?: Omit<
+    ComponentProps<'input'>,
+    'id' | 'value' | 'onChange' | 'onFocus' | 'placeholder' | 'role'
+  >;
 }) {
   const ids = useId();
   const [open, setOpen] = useState(false);
@@ -65,11 +74,13 @@ export function Combobox({
   function pick(option: ComboboxOption) {
     onChange(option.value);
     setOpen(false);
+    onPick?.(option.value);
   }
 
   return (
     <div className="relative grid gap-2">
       <Input
+        {...field}
         id={id}
         role="combobox"
         aria-expanded={listed}
@@ -85,7 +96,10 @@ export function Combobox({
           onFocus?.();
         }}
         onClick={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onBlur={(event) => {
+          setOpen(false);
+          field?.onBlur?.(event);
+        }}
         onChange={(event) => {
           onChange(event.target.value);
           setFilter(event.target.value);
@@ -103,10 +117,11 @@ export function Combobox({
               event.preventDefault();
               pick(option);
             }
-          } else if (event.key === 'Escape' && open) {
+          } else if (event.key === 'Escape' && open && options) {
             event.preventDefault();
             setOpen(false);
           }
+          if (!event.defaultPrevented) field?.onKeyDown?.(event);
         }}
       />
       {open && options && (

@@ -1,9 +1,17 @@
-import { splitFrontmatter } from '@wikistow/client';
+import { parsePropertyReference, readProperties, splitFrontmatter } from '@wikistow/client';
 import { pageHtml, SYNTAX } from '@wikistow/client/reader';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
-import type { Root, RootContent } from 'mdast';
-import { Component, use, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import type { InlineCode, Root, RootContent } from 'mdast';
+import {
+  Component,
+  use,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
 import { claimedBlock } from '@wikistow/plugin-sdk';
 import { Check, Copy } from 'lucide-react';
@@ -20,11 +28,12 @@ import {
   attachmentId,
   type AttachmentContext,
 } from './attachments';
-import { PageBody, type PageBodyContext } from './body-context';
+import { PageBody, PageProperties, type PageBodyContext } from './body-context';
 import { BodyLink } from './body-link';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
+import { PropertyReferenceView } from './property-reference';
 import { bodyLinkScope } from './property-value';
 
 export { ATTACHMENT_SCHEME, type AttachmentContext };
@@ -54,6 +63,32 @@ const syntaxHandlers = (held: ReactElement[]): Handlers =>
       return [type, handler];
     }),
   );
+
+/**
+ * Inline code that is a reference to one of the page's values
+ * (`` `=servings` ``) becomes a marked span, as a syntax does, which the
+ * `span` component draws as `PropertyReferenceView`; other code is code.
+ */
+const referenceHandler =
+  (held: ReactElement[]): NonNullable<Handlers[keyof Handlers]> =>
+  (state, node: InlineCode) => {
+    const reference = parsePropertyReference(node.value);
+    if (reference) {
+      held.push(<PropertyReferenceView name={reference.name} source={node.value} />);
+      return {
+        type: 'element',
+        tagName: 'span',
+        properties: { [SYNTAX]: held.length - 1 },
+        children: [],
+      };
+    }
+    // As mdast-util-to-hast writes it.
+    const text = { type: 'text' as const, value: node.value.replace(/\r?\n|\r/g, ' ') };
+    state.patch(node, text);
+    const code = { type: 'element' as const, tagName: 'code', properties: {}, children: [text] };
+    state.patch(node, code);
+    return state.applyData(node, code);
+  };
 
 // The components below hold page content, plugin blocks among them, so each
 // is the same on every render: a new one would draw everything in it afresh.
@@ -172,6 +207,10 @@ const TOO_SLOW = 'This page took too long to format, so here it is as written.';
  */
 export function Markdown({ source, ...context }: { source: string } & PageBodyContext) {
   const { frontmatter, body } = splitFrontmatter(source);
+  const properties = useMemo(() => {
+    const read = readProperties(frontmatter);
+    return read.ok ? read.properties : null;
+  }, [frontmatter]);
   const { attachments } = context;
   const read = useQuery(readQuery(body));
   const hash = useLocation({ select: (location) => location.hash });
@@ -211,29 +250,33 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
   };
   return (
     <PageBody value={context}>
-      {frontmatter !== null && (
-        <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
-      )}
-      {read.isPending ? (
-        <StillReading />
-      ) : read.isSuccess ? (
-        <AsWritten source={body}>
-          <div className="page-body">
-            <ReactMarkdown
-              remarkPlugins={[[readTree, read.data]]}
-              remarkRehypeOptions={{ handlers: syntaxHandlers(held) }}
-              rehypePlugins={[pageHtml]}
-              urlTransform={urlTransform}
-              components={components}
-            />
-          </div>
-        </AsWritten>
-      ) : (
-        <Written
-          source={body}
-          note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
-        />
-      )}
+      <PageProperties value={properties}>
+        {frontmatter !== null && (
+          <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
+        )}
+        {read.isPending ? (
+          <StillReading />
+        ) : read.isSuccess ? (
+          <AsWritten source={body}>
+            <div className="page-body">
+              <ReactMarkdown
+                remarkPlugins={[[readTree, read.data]]}
+                remarkRehypeOptions={{
+                  handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                }}
+                rehypePlugins={[pageHtml]}
+                urlTransform={urlTransform}
+                components={components}
+              />
+            </div>
+          </AsWritten>
+        ) : (
+          <Written
+            source={body}
+            note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
+          />
+        )}
+      </PageProperties>
     </PageBody>
   );
 }

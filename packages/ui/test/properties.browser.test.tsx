@@ -12,7 +12,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
-import { PropertiesBox, PropertiesEditor } from '../src/page/properties-box.tsx';
+import { PropertiesBox, PropertiesEditor, type PropertyKeys } from '../src/page/properties-box.tsx';
 import type { LinkScope } from '../src/page/property-value.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 
@@ -77,7 +77,7 @@ function routed(node: ReactNode) {
 }
 
 /** The draft's rows over `initial`, keeping each block they hand back. */
-async function editor(initial: string) {
+async function editor(initial: string, propertyKeys?: PropertyKeys) {
   const blocks: string[] = [];
   function Draft() {
     const [block, setBlock] = useState(initial);
@@ -91,6 +91,7 @@ async function editor(initial: string) {
         }}
         onRemove={() => {}}
         onInsert={() => {}}
+        propertyKeys={propertyKeys}
       />
     );
   }
@@ -278,6 +279,30 @@ describe('the draft’s property rows', () => {
     expect(value.querySelectorAll('button')).toHaveLength(1);
   });
 
+  it('suggests the keys pages near it use that it hasn’t, loading them only once asked', async () => {
+    let loads = 0;
+    const { container, last } = await editor(NOTE, {
+      keys: ['servings', 'cuisine', 'Cook Time'],
+      load: () => (loads += 1),
+    });
+    expect(loads).toBe(0);
+    await userEvent.click(button(container, 'Add property'));
+    expect(loads).toBe(1);
+    const options = () =>
+      [...container.querySelectorAll('[role=option]')].map((o) => o.textContent);
+    await expect.poll(options).toEqual(['cuisine']);
+    await userEvent.click(container.querySelector('[role=option]')!);
+    expect(last()).toBe(NOTE.replace('Use fresh garlic.\n', 'Use fresh garlic.\ncuisine:\n'));
+  });
+
+  it('closes the name field with one Escape when there are no keys to suggest', async () => {
+    const { container, blocks } = await editor(NOTE, { keys: undefined, load: () => {} });
+    await userEvent.click(button(container, 'Add property'));
+    await userEvent.type(field(container, 'New property’s name'), 'abc{Escape}');
+    expect(container.querySelector('input[aria-label="New property’s name"]')).toBeNull();
+    expect(blocks).toEqual([]);
+  });
+
   it('says why an edit can’t be made, and refuses a key the block has', async () => {
     const { container, blocks } = await editor('---\nname: x\n---\n');
     await userEvent.click(button(container, 'Add property'));
@@ -378,6 +403,166 @@ async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') 
   }
   return { container, ref };
 }
+
+describe('a reference in the visual editor', () => {
+  it('shows the value beside the code, follows the properties, and leaves the text as written', async () => {
+    const page = '---\nservings: 4\n---\nServes `=servings` and `= this.nope`.\n';
+    const { container, ref } = await pageEditor(page, 'visual');
+    const chip = () =>
+      container.querySelector<HTMLElement>('#page-visual [data-hint="servings · property"]');
+    await expect.poll(() => chip()?.textContent).toBe('4');
+    expect(chip()?.contentEditable).toBe('false');
+    const unknown = container.querySelector('#page-visual [data-hint="No property has this name"]');
+    expect(unknown?.textContent).toBe('= this.nope');
+    expect(ref.current?.read()).toBe(page);
+    act(() => ref.current?.replace(page.replace('servings: 4', 'servings: 6')));
+    await expect.poll(() => chip()?.textContent).toBe('6');
+    expect(ref.current?.read()).toBe(page.replace('servings: 4', 'servings: 6'));
+  });
+});
+
+describe('completing a reference', () => {
+  const page = '---\nservings: 4\ncook_time: 25\n"a.b": 1\n---\nServes \n';
+
+  it('offers the page’s keys after `= in the source editor, writing the closing backtick', async () => {
+    const { container, ref } = await pageEditor(page, 'source');
+    act(() => ref.current?.focus());
+    await userEvent.keyboard('{Control>}{End}{/Control}{ArrowUp}{End}`=se');
+    const labels = () =>
+      [...container.querySelectorAll('div')].flatMap((div) =>
+        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+          (l) => l.textContent,
+        ),
+      );
+    await expect.poll(labels).toEqual(['servings']);
+    await userEvent.keyboard('{Enter} people');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe(page.replace('Serves \n', 'Serves `=servings` people\n'));
+  });
+
+  it('completes a name typed into in the source editor, its rest and closing backtick kept', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nServes `=servngs` people\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    // After `serv`.
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(13) + 'i',
+    );
+    const labels = () =>
+      [...container.querySelectorAll('div')].flatMap((div) =>
+        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+          (l) => l.textContent,
+        ),
+      );
+    await expect.poll(labels).toEqual(['servings']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\nservings: 4\n---\nServes `=servings` people\n');
+  });
+
+  it('completes a name with a space typed into, keeping no rest of it', async () => {
+    const { container, ref } = await pageEditor(
+      '---\ncook_time: 25\n---\nBake `=cok time` long\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    // After `c`.
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(8) + 'o',
+    );
+    await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')].flatMap((div) =>
+          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+            (l) => l.textContent,
+          ),
+        ),
+      )
+      .toEqual(['cook_time']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\ncook_time: 25\n---\nBake `=cook_time` long\n');
+  });
+
+  it('leaves the words after a name being typed, up to a later code span', async () => {
+    const { container, ref } = await pageEditor(
+      '---\ncook_time: 25\n---\nBake for  minutes at `350F`.\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(9) + '`=co',
+    );
+    await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')].flatMap((div) =>
+          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+            (l) => l.textContent,
+          ),
+        ),
+      )
+      .toEqual(['cook_time']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\ncook_time: 25\n---\nBake for `=cook_time` minutes at `350F`.\n');
+  });
+
+  it('opens no list for a reference the visual editor’s cursor is merely put in', async () => {
+    const page = '---\nservings: 4\n---\nServes `=servings` now.\n';
+    const { container, ref } = await pageEditor(page, 'visual');
+    await userEvent.click(container.querySelector('#page-visual code')!);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.querySelector('[role=listbox][aria-label=Property]')).toBeNull();
+    expect(ref.current?.read()).toBe(page);
+  });
+
+  it('matches a name as references do, `_`, `-` and spaces alike, in both editors', async () => {
+    for (const mode of ['source', 'visual'] as const) {
+      const { container, ref } = await pageEditor(page, mode);
+      act(() => ref.current?.focus());
+      await userEvent.keyboard(
+        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=cook t' : '{End} `=cook t',
+      );
+      const shown = () =>
+        mode === 'source'
+          ? [...container.querySelectorAll('div')].flatMap((div) =>
+              [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+                (l) => l.textContent,
+              ),
+            )
+          : [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
+              (option) => option.firstChild?.textContent,
+            );
+      await expect.poll(shown).toEqual(['cook_time']);
+      await userEvent.keyboard('{Enter}');
+      await expect
+        .poll(() => ref.current?.read())
+        .toBe(page.replace('Serves \n', 'Serves `=cook_time`\n'));
+      for (const unmount of unmounts.splice(0)) unmount();
+    }
+  });
+
+  it('offers them in the visual editor too, writing the reference as code', async () => {
+    const { container, ref } = await pageEditor(page, 'visual');
+    await userEvent.click(container.querySelector('#page-visual p')!);
+    await userEvent.keyboard('{End} `= this.co');
+    const options = () =>
+      [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
+        (option) => option.textContent,
+      );
+    await expect.poll(options).toEqual(['cook_time25']);
+    await userEvent.keyboard('{Enter} minutes');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe(page.replace('Serves \n', 'Serves `= this.cook_time` minutes\n'));
+  });
+});
 
 describe('Insert in page', () => {
   for (const mode of ['source', 'visual'] as const) {

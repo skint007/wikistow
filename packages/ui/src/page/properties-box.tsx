@@ -1,4 +1,5 @@
 import {
+  findProperty,
   readProperties,
   removeProperty,
   renameProperty,
@@ -8,9 +9,9 @@ import {
   type PropertyValue,
 } from '@wikistow/client';
 import { Plus } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Combobox } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
 import { propertiesText, withProperties } from './properties';
 import { propertyLabel, referable } from './property-model';
@@ -20,6 +21,9 @@ import { PropertyKey, PropertyValueView, ROW, type LinkScope } from './property-
 // A page's frontmatter as rows (ADR 0006), between its status pills and its
 // body: one row per property, its key in sentence case and its value as the
 // type it reads as. A block that doesn't read as properties is its text.
+
+/** The keys pages near this one use, loaded once asked for: undefined until then. */
+export type PropertyKeys = { keys: readonly string[] | undefined; load: () => void };
 
 /** How many rows the reader shows before **Show N more**. */
 export const SHOWN_ROWS = 6;
@@ -95,9 +99,12 @@ export function PropertiesEditor({
   onChange,
   onRemove,
   onInsert,
+  propertyKeys,
 }: {
   frontmatter: string;
   scope: LinkScope;
+  /** The keys pages in the same folder use, which Add property suggests. */
+  propertyKeys?: PropertyKeys | undefined;
   /** Open with a new property's name being typed, as when the block was just added. */
   adding?: boolean;
   onChange: (frontmatter: string) => void;
@@ -109,6 +116,11 @@ export function PropertiesEditor({
   // which stays text until they go back to rows, not as soon as it reads.
   const [asText, setAsText] = useState<'chosen' | 'unread' | null>(null);
   const [adding, setAdding] = useState(addingFirst);
+  // The keys to suggest are loaded only once a property is being added.
+  const load = propertyKeys?.load;
+  useEffect(() => {
+    if (adding) load?.();
+  }, [adding, load]);
   const [error, setError] = useState<string | null>(null);
   // The row whose value is being typed, by key.
   const [opened, setOpened] = useState<string | null>(null);
@@ -202,25 +214,6 @@ export function PropertiesEditor({
           ))}
         </dl>
       )}
-      {adding && (
-        <NewProperty
-          onCancel={() => setAdding(false)}
-          onAdd={(key) => {
-            if (properties.some((property) => property.key === key)) {
-              setError(`There is already a property ${key}.`);
-              return;
-            }
-            if (!apply(setProperty(frontmatter, key, null), key)) return;
-            setAdding(false);
-            setOpened(key);
-          }}
-        />
-      )}
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      )}
       <div className="flex flex-wrap gap-1">
         <Button
           ref={addButton}
@@ -239,6 +232,27 @@ export function PropertiesEditor({
           Edit as text
         </Button>
       </div>
+      {/* Under the buttons, so that leaving it empty, which closes it, moves none of them. */}
+      {adding && (
+        <NewProperty
+          suggested={propertyKeys?.keys?.filter((key) => !findProperty(properties, key))}
+          onCancel={() => setAdding(false)}
+          onAdd={(key) => {
+            if (properties.some((property) => property.key === key)) {
+              setError(`There is already a property ${key}.`);
+              return;
+            }
+            if (!apply(setProperty(frontmatter, key, null), key)) return;
+            setAdding(false);
+            setOpened(key);
+          }}
+        />
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </section>
   );
 }
@@ -250,37 +264,59 @@ function lockOf(frontmatter: string, property: Property): string {
   return edit.ok ? '' : edit.reason;
 }
 
-/** The name of a property being added, typed in a row of its own. */
-function NewProperty({ onAdd, onCancel }: { onAdd: (key: string) => void; onCancel: () => void }) {
+/**
+ * The name of a property being added, typed in a row of its own, with the
+ * keys pages in the same folder use offered under it once they're known.
+ * Picking one adds it.
+ */
+function NewProperty({
+  suggested,
+  onAdd,
+  onCancel,
+}: {
+  suggested: readonly string[] | undefined;
+  onAdd: (key: string) => void;
+  onCancel: () => void;
+}) {
+  const id = useId();
   const [name, setName] = useState('');
-  const add = () => {
-    const key = name.trim();
+  const add = (typed: string) => {
+    const key = typed.trim();
     if (key === '') onCancel();
     else onAdd(key);
   };
   return (
-    <div className={ROW}>
-      <Input
-        autoFocus
-        aria-label="New property’s name"
-        placeholder="Name"
+    <div className="max-w-xs py-0.5">
+      <Combobox
+        id={id}
         value={name}
-        spellCheck={false}
-        onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (composing(event)) return;
-          if (event.key === 'Enter') {
-            event.preventDefault();
-            add();
-          } else if (event.key === 'Escape') {
-            event.preventDefault();
-            onCancel();
-          }
+        onChange={setName}
+        options={
+          suggested && suggested.length > 0
+            ? suggested.map((key) => ({ value: key, label: null }))
+            : undefined
+        }
+        noun="keys used in this folder"
+        placeholder="Name"
+        onPick={add}
+        field={{
+          autoFocus: true,
+          'aria-label': 'New property’s name',
+          className: 'h-8 bg-background',
+          onKeyDown: (event) => {
+            if (composing(event)) return;
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              add(name);
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancel();
+            }
+          },
+          onBlur: () => {
+            if (name.trim() === '') onCancel();
+          },
         }}
-        onBlur={() => {
-          if (name.trim() === '') onCancel();
-        }}
-        className="h-8 bg-background"
       />
     </div>
   );

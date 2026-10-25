@@ -20,6 +20,7 @@ import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { formatKeys } from './formatting';
 import { codeHighlights } from './highlight';
+import { propertiesChanged, propertyReferences } from './property-references';
 import { usePluginRuntime } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
 import {
@@ -180,6 +181,7 @@ function Surface({
   onUnfaithful,
   holding,
   page,
+  properties,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -194,6 +196,7 @@ function Surface({
     onUnfaithful,
     holding,
     page,
+    properties,
   });
   useLayoutEffect(() => {
     latest.current = {
@@ -206,8 +209,16 @@ function Surface({
       onUnfaithful,
       holding,
       page,
+      properties,
     };
   });
+  // References show the values the frontmatter has now.
+  useEffect(() => {
+    editor.current?.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(propertiesChanged(view.state.tr));
+    });
+  }, [properties]);
   // The runtime of the place it is drawn in, for the editor's whole life.
   const plugins = usePluginRuntime();
   const [host] = useState<VisualHost>(() => ({
@@ -420,6 +431,7 @@ function Surface({
       new LinkCompletion(
         () => latest.current.links,
         () => surface.read(),
+        () => latest.current.properties ?? null,
       ),
   );
   const [format] = useState(() => new FormatWatch());
@@ -448,6 +460,7 @@ function Surface({
         unshownFootnotes,
         tableHeaders,
         codeHighlights,
+        propertyReferences(() => latest.current.properties ?? null),
         alerts,
         linkKeys(host),
         format.plugin,

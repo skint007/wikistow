@@ -18,7 +18,7 @@ import { syntaxTree } from '@codemirror/language';
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { textEdits } from '../../link-renames';
 import { lineBreakFor, type EditorSurfaceProps } from '../surface';
-import { wikilinkCompletions } from './completion';
+import { referenceCompletions, wikilinkCompletions } from './completion';
 import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
@@ -45,14 +45,15 @@ export default function CodeMirrorSurface({
   links,
   onFiles,
   lineBreak,
+  properties,
   ref,
 }: EditorSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The editor is built once; it reads the latest of these when it needs them.
-  const latest = useRef({ onChange, links, onFiles });
+  const latest = useRef({ onChange, links, onFiles, properties });
   useLayoutEffect(() => {
-    latest.current = { onChange, links, onFiles };
+    latest.current = { onChange, links, onFiles, properties };
   });
   const text = useRef(initial);
 
@@ -157,7 +158,7 @@ function extensions({
   changed,
 }: {
   lineBreak: string;
-  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles'>;
+  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties'>;
   changed: (markdown: string) => void;
 }): Extension {
   const assist = () => latest().links;
@@ -172,9 +173,9 @@ function extensions({
     sourceLanguage,
     sourceTheme,
     autocompletion({
-      override: [wikilinkCompletions(assist)],
+      override: [wikilinkCompletions(assist), referenceCompletions(() => latest().properties)],
       icons: false,
-      // The list only opens inside `[[`, where Enter means to accept.
+      // The list only opens inside `[[` or after `` `= ``, where Enter means to accept.
       interactionDelay: 0,
     }),
     linkMarks(assist),
