@@ -2,16 +2,44 @@ import {
   findProperty,
   foldPropertyName,
   isPropertyName,
+  parsePropertyReference,
   propertyText,
   type PropertyData,
 } from '@wikistow/client';
 import type { LinkOption } from './link-completions';
+import type { OtherPages } from '../other-pages';
 
-// What either editor offers while a reference to one of the page's values
-// is typed (`` `= ``): the page's keys a reference can name.
+// What either editor offers while a reference to a value is typed: after
+// `` `= ``, the page's keys a reference can name; after `` `=[[ ``, the
+// pages a link names, as for a link; after `` `=[[Page]]. ``, that page's
+// keys, as the editor's index has them.
 
-/** `` `= ``, Dataview's `this.` if typed, and the name so far, up to the cursor. */
-export const TYPING_REFERENCE = /`=[ \t]*(?:this\.)?([\p{L}\p{N} _-]*)$/u;
+/**
+ * `` `= ``, Dataview's `this.` or a page's link and a dot if typed, and the
+ * name so far, up to the cursor: the link is group `page`, the name `name`.
+ */
+export const TYPING_REFERENCE =
+  /`=[ \t]*(?:this\.|(?<page>\[\[[^[\]\r\n]+\]\])\.)?(?<name>[\p{L}\p{N} _-]*)$/u;
+
+/** Text before `[[` that makes the link a reference's page: `` `= ``. */
+export const REFERENCE_PAGE = /`=[ \t]*$/;
+
+/**
+ * The keys a reference being typed can name, as `TYPING_REFERENCE` matched
+ * it: this page's, or those of the page its link names, from `others`. None
+ * for a link a reference can't name, or a page not found (yet).
+ */
+export function referenceOptions(
+  typed: RegExpExecArray,
+  properties: readonly PropertyData[] | null,
+  others: OtherPages | null,
+): LinkOption[] {
+  const source = typed.groups?.['page'];
+  if (source === undefined) return propertyOptions(properties);
+  const page = parsePropertyReference(`=${source}.x`)?.page;
+  const other = page && others?.(page);
+  return other?.kind === 'page' ? propertyOptions(other.properties) : [];
+}
 
 const DETAIL = 24;
 

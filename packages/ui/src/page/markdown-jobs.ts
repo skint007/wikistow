@@ -1,7 +1,7 @@
 // What the Markdown worker (`markdown.worker.ts`) does, by name, and the
 // messages to and from it. Each job takes and gives what structured clone
 // copies: strings and plain objects.
-import { findLinks, placedWikilinks } from '@wikistow/client/links';
+import { findLinks, placedWikilinks, tableWikilinks } from '@wikistow/client/links';
 import { linkSpans } from '@wikistow/client/markdown';
 import { headingTexts, highlightCode, readBody } from '@wikistow/client/reader';
 import { meaningOf, readerFidelity } from './editor/visual/reader-fidelity';
@@ -16,8 +16,14 @@ export const markdownJobs = {
   spans: linkSpans,
   /** A page's wikilinks and links to pages, for the publish preview (`findLinks`). */
   links: findLinks,
-  /** A page's wikilinks where each is written, for saving and publishing (`placedWikilinks`). */
+  /** A body's wikilinks where each is written, for the source editor to mark (`placedWikilinks`). */
   wikilinks: placedWikilinks,
+  /**
+   * A page's wikilinks its link table holds entries for, where each is
+   * written, for saving and publishing (`tableWikilinks`): properties' and
+   * references' too.
+   */
+  tableLinks: tableWikilinks,
   /** A page's headings, for a link to name (`headingTexts`). */
   headings: headingTexts,
   /** A body as the visual editor's check reads it, or why it stays in source mode (`readerFidelity`). */

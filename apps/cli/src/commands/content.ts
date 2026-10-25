@@ -5,6 +5,7 @@ import {
   withoutLinkTable,
   CryptoError,
   findWikilinks,
+  tableWikilinks,
   linkablePages,
   linkTableOf,
   outcomeUnknown,
@@ -400,14 +401,17 @@ async function linkTargets(
   markdown: string,
 ): Promise<LinkTargets> {
   let links: Wikilink[] | null;
+  // A property's link or a reference's page is renamed too (`tableWikilinks`).
+  let tabled = false;
   try {
     links = findWikilinks(markdown);
+    tabled = tableWikilinks(markdown).length > 0;
   } catch {
     links = null;
   }
   return {
     links,
-    tree: links?.length ? await spaceOperations.loadTree(ctx, spaceId) : null,
+    tree: links?.length || tabled ? await spaceOperations.loadTree(ctx, spaceId) : null,
   };
 }
 
@@ -1103,7 +1107,7 @@ async function attachTree(
 ): Promise<{ tree: LinkTree | null; linksKept: boolean }> {
   let linked: boolean;
   try {
-    linked = findWikilinks(markdown).some((link) => !link.embed && link.target !== '');
+    linked = tableWikilinks(markdown).some((link) => !link.embed && link.target !== '');
   } catch {
     linked = false;
   }

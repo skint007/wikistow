@@ -1,5 +1,6 @@
 import type { AttachmentRef, LinkablePage, PropertyData } from '@wikistow/client';
 import type { Ref } from 'react';
+import type { OtherPages } from '../other-pages';
 
 // An editor surface is one way of editing a page's Markdown body: the
 // source editor or the visual one. The draft session around it owns
@@ -98,6 +99,12 @@ export type EditorSurfaceProps = {
    * references (`` `=key` ``) show and `` `= `` completes; null for none.
    */
   properties?: readonly PropertyData[] | null | undefined;
+  /**
+   * The other pages references name (`` `=[[Page]].key` ``), as the
+   * editor's search index holds them, which they show and `` `=[[Page]]. ``
+   * completes; none until it is built.
+   */
+  otherPages?: OtherPages | null | undefined;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
   ref?: Ref<EditorSurfaceHandle>;

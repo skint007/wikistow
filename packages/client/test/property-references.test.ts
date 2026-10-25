@@ -1,5 +1,61 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { markdownLiteral, parsePropertyReference, publicLinkOperations } from '../src/index.ts';
+import {
+  markdownLiteral,
+  mayReferOtherPages,
+  parsePropertyReference,
+  publicLinkOperations,
+  type PropertyData,
+  type Wikilink,
+} from '../src/index.ts';
+
+describe('a reference to another page’s value', () => {
+  it('is `=[[Page]].name`: a link to the page by its title, then the name', () => {
+    const page = (target: string, start = 1) => ({
+      source: `[[${target}]]`,
+      target,
+      heading: null,
+      shown: null,
+      embed: false,
+      start,
+      end: start + target.length + 4,
+    });
+    expect(parsePropertyReference('=[[Garlic bread]].cook_time')).toEqual({
+      name: 'cook_time',
+      page: page('Garlic bread'),
+    });
+    expect(parsePropertyReference('= [[Recipes/Garlic bread]]. cook time ')).toEqual({
+      name: 'cook time',
+      page: page('Recipes/Garlic bread', 2),
+    });
+  });
+
+  it('leaves anything else as code, links with a heading, text or embed included', () => {
+    for (const code of [
+      '=[[Page]]',
+      '=[[Page]].',
+      '=[[Page]]key',
+      '=[[Page]].SUM(A1)',
+      '=[[Page#Dates]].key',
+      '=[[Page|text]].key',
+      '=![[Page]].key',
+      '=[[#Dates]].key',
+      '=[[]].key',
+      '=[[Page#^block]].key',
+      '=[[a\nb]].key',
+      '=[[[Page]]].key',
+      '= this.[[Page]].key',
+      '[[Page]].key',
+    ]) {
+      expect(parsePropertyReference(code), code).toBe(null);
+    }
+  });
+
+  it('is told apart from other text by `=[[`', () => {
+    expect(mayReferOtherPages('see `=[[Page]].x`')).toBe(true);
+    expect(mayReferOtherPages('see `= \t[[Page]].x`')).toBe(true);
+    expect(mayReferOtherPages('see `=servings` and [[Page]]')).toBe(false);
+  });
+});
 
 describe('a reference to one of the page’s values', () => {
   it('is inline code naming a property, as WikiStow or Dataview writes it', () => {
@@ -11,17 +67,7 @@ describe('a reference to one of the page’s values', () => {
   });
 
   it('leaves code that names no property as code', () => {
-    for (const code of [
-      'servings',
-      '=',
-      '= ',
-      '=SUM(A1:A3)',
-      '=a.b',
-      '=[[Page]].key',
-      '==x',
-      '=_x',
-      '=x\ny',
-    ]) {
+    for (const code of ['servings', '=', '= ', '=SUM(A1:A3)', '=a.b', '==x', '=_x', '=x\ny']) {
       expect(parsePropertyReference(code), code).toBe(null);
     }
   });
@@ -57,6 +103,46 @@ describe('a public copy’s body', () => {
   it('leaves code in a code block, and code spans that aren’t references, as written', () => {
     const page = '---\nx: 1\n---\n```\n`=x`\n```\n\n``=x`` and `` `=x` ``\n';
     expect(publicLinkOperations.copyBody(page)).toBe('```\n`=x`\n```\n\n&#49; and `` `=x` ``\n');
+  });
+});
+
+describe('a public copy’s values from other pages', () => {
+  const others = (link: Wikilink): PropertyData[] | undefined =>
+    link.target.toLowerCase() === 'garlic bread'
+      ? [
+          { key: 'cook_time', type: 'number', value: 35 },
+          { key: 'evil', type: 'text', value: '<img src=x onerror=alert(1)> | a\nb' },
+          { key: 'made', type: 'date', value: '2026-10-12' },
+        ]
+      : undefined;
+
+  it('writes each in from what `others` gives, escaped, and leaves the rest as written', () => {
+    const page =
+      'Bake `=[[Garlic bread]].cook_time` min, `= [[garlic bread]].made`, `=[[Garlic bread]].evil`.\n\n' +
+      'Not `=[[Garlic bread]].nothing`, `=[[Secret]].cook_time` or `=[[Garlic bread#x]].cook_time`.\n';
+    expect(publicLinkOperations.copyBody(page, others)).toBe(
+      'Bake &#51;&#53; min, &#50;026\\-10\\-1&#50;, &#60;img src\\=x onerror\\=alert\\(1\\)\\> \\| a &#98;.\n\n' +
+        'Not `=[[Garlic bread]].nothing`, `=[[Secret]].cook_time` or `=[[Garlic bread#x]].cook_time`.\n',
+    );
+  });
+
+  it('leaves every one as written without `others`, in a page with properties or without', () => {
+    const body = 'Bake `=[[Garlic bread]].cook_time` min.\n';
+    expect(publicLinkOperations.copyBody(body)).toBe(body);
+    expect(publicLinkOperations.copyBody(`---\ncook_time: 9\n---\n${body}`)).toBe(body);
+  });
+
+  it('says what a copy shows of other pages', () => {
+    expect(publicLinkOperations.fromOtherPages('`=[[Garlic bread]].cook_time`')).toEqual({
+      values: true,
+    });
+    for (const markdown of [
+      '---\nx: "[[Garlic bread]]"\n---\n`=x` [[Garlic bread]]',
+      '```\n`=[[Garlic bread]].cook_time`\n```',
+      '`=[[Garlic bread#x]].cook_time`',
+    ]) {
+      expect(publicLinkOperations.fromOtherPages(markdown), markdown).toEqual({ values: false });
+    }
   });
 });
 

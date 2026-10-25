@@ -1,6 +1,7 @@
 import type { FolderId, LinkablePage, PropertyData } from '@wikistow/client';
 import { createContext } from 'react';
 import type { AttachmentContext } from './attachments';
+import type { OtherPages } from './other-pages';
 
 /** What a page body's syntax renderers need to know about the page and its viewer. */
 export type PageBodyContext = {
@@ -32,3 +33,9 @@ export const InLink = createContext(false);
  * when it has no block, or one that doesn't read as properties.
  */
 export const PageProperties = createContext<readonly PropertyData[] | null>(null);
+
+/**
+ * The other pages references in the body name (`` `=[[Page]].key` ``), as
+ * the viewer's index holds them (`otherPages`); null where the body has none.
+ */
+export const OtherPagesContext = createContext<OtherPages | null>(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { findWikilinks, resolveWikilinks } from '../src/index.ts';
+import { findWikilinks, placedWikilinks, resolveWikilinks, tableWikilinks } from '../src/index.ts';
 
 const targets = (markdown: string) => findWikilinks(markdown).map((link) => link.source);
 
@@ -38,6 +38,56 @@ describe('resolving wikilinks', () => {
       ['[[plan]]', 'resolved', ['p-plan']],
       ['[[Nowhere]]', 'missing', []],
       ['[[Notes]]', 'ambiguous', ['p-dup-1', 'p-dup-2']],
+    ]);
+  });
+});
+
+describe('the wikilinks a link table holds', () => {
+  const PAGE = [
+    '---',
+    'goes_with: "[[Tomato soup]]" # side',
+    "after: '[[Folder/Pie|the pie]]'",
+    'list: ["[[Not a value]]"]',
+    'text: "see [[Not alone]]"',
+    '---',
+    'With [[Bread]] in `=[[Garlic bread]].cook_time` and `` = [[Pie]].x ``.',
+    '',
+    '`[[Code]]`, `=[[Head#ing]].x`, `=Plain`.',
+    '',
+    '```',
+    '`=[[Fenced]].x`',
+    '```',
+    '',
+  ].join('\n');
+
+  it('are the properties’ links, then the body’s and the pages its references name, in order', () => {
+    const links = tableWikilinks(PAGE);
+    expect(links.map(({ target, property }) => [target, property])).toEqual([
+      ['Tomato soup', 'goes_with'],
+      ['Folder/Pie', 'after'],
+      ['Bread', undefined],
+      ['Garlic bread', undefined],
+      ['Pie', undefined],
+    ]);
+    for (const link of links) {
+      const written = PAGE.slice(link.start, link.end);
+      if (link.property) expect(written).toContain(link.source);
+      else expect(written).toBe(link.source);
+    }
+    expect(links[0]?.source).toBe('[[Tomato soup]]');
+    expect(PAGE.slice(links[0]?.start, links[0]?.end)).toBe('"[[Tomato soup]]"');
+    expect(links[1]?.shown).toBe('the pie');
+  });
+
+  it('leave the body’s links as readers show them', () => {
+    expect(placedWikilinks(PAGE).map((link) => link.target)).toEqual(['Bread']);
+    expect(findWikilinks(PAGE).map((link) => link.target)).toEqual(['Bread']);
+  });
+
+  it('are none without `[[`, or in a block that doesn’t read', () => {
+    expect(tableWikilinks('`=servings`')).toEqual([]);
+    expect(tableWikilinks('---\n- "[[A]]"\n---\n`=[[B]].x`').map((link) => link.target)).toEqual([
+      'B',
     ]);
   });
 });

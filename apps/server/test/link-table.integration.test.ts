@@ -188,6 +188,25 @@ describe('a rename written into a link', () => {
   });
 });
 
+describe('a rename written into a reference or a property', () => {
+  it('follows the page, changing only the link’s characters, and only once it is published', async () => {
+    const w = await world();
+    const linker = await w.page(w.team, 'Linker', false);
+    const markdown = (title: string) =>
+      `---\n# pairing\ngoes_with:  "[[${title}]]"  # side\n---\nReady in \`=[[${title}]].cook_time\` min.\n`;
+    await pages.editDraft(w.ed.ctx, linker, { markdown: markdown('Plan') });
+    await pages.editDraft(w.olive.ctx, w.plan, { title: 'Roadmap' });
+    const kept = await pages.editDraft(w.ed.ctx, linker, {});
+    expect(kept.payload.markdown).toBe(markdown('Plan'));
+    expect(table(kept.payload)).toEqual({ plan: w.plan.pageId });
+
+    await pages.publishPage(w.olive.ctx, w.plan);
+    const after = await pages.editDraft(w.ed.ctx, linker, {});
+    expect(after.payload.markdown).toBe(markdown('Roadmap'));
+    expect(table(after.payload)).toEqual({ roadmap: w.plan.pageId, plan: w.plan.pageId });
+  });
+});
+
 describe('a draft saved when the tree can’t be loaded', () => {
   it('is still saved, its table carried as it was and no link renamed', async () => {
     const w = await world();

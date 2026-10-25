@@ -3,6 +3,8 @@
 // it names, so a link follows its page through a rename. It names only
 // pages everyone who can open that version can open too; any other link
 // has no entry, and each viewer resolves it by title in their own tree.
+// Its links are the body's, a property's value that is one wikilink, and
+// the page a reference to another page's value names (`tableWikilinks`).
 
 import type { Audience, FolderId, PageId, RevisionId, ShareId, SpaceId } from '@wikistow/contracts';
 import { z } from 'zod';
@@ -10,14 +12,14 @@ import { PageId as PageIdSchema } from './ids.ts';
 import {
   foldTitle,
   linkablePages,
-  placedWikilinks,
   resolveWikilinks,
+  tableWikilinks,
   type LinkablePage,
   type PageIndex,
   type PlacedWikilink,
   type ResolvedLink,
 } from './links.ts';
-import type { Wikilink } from './markdown/index.ts';
+import { setProperty, splitFrontmatter, type Wikilink } from './markdown/index.ts';
 import type { OpenedMetadata } from './metadata.ts';
 import type { PagePayload } from './payload.ts';
 import { regionInTree, sameRegion, type Region } from './regions.ts';
@@ -177,18 +179,18 @@ export type LinkWrite = {
   chosen?: ReadonlyMap<string, PageId>;
   /**
    * How the Markdown's wikilinks are read, by default here
-   * (`placedWikilinks`). Some text takes that far longer than its size
+   * (`tableWikilinks`). Some text takes that far longer than its size
    * suggests (#47), so the web app reads them in a worker with a time
    * limit. If the read fails, the table is kept as it was (`writeLinks`).
    */
   read?: ReadWikilinks;
 };
 
-/** Reads a page's wikilinks as `placedWikilinks` does, maybe somewhere it can end. */
+/** Reads a page's wikilinks as `tableWikilinks` does, maybe somewhere it can end. */
 export type ReadWikilinks = (markdown: string) => Promise<PlacedWikilink[]>;
 
 // Reading them here, on this thread.
-const readHere: ReadWikilinks = async (markdown) => placedWikilinks(markdown);
+const readHere: ReadWikilinks = async (markdown) => tableWikilinks(markdown);
 
 /** A payload as `writeLinks` wrote it. */
 export type Linked = {
@@ -244,8 +246,10 @@ type Decision = { link: PlacedWikilink; pageId: PageId | null; renamed: string |
  *   less than an earlier writer. Everyone who opened that version opens
  *   this one;
  * - in a draft, a link without its own text whose entry is kept names its
- *   page's published title in the source (`[[Old]]` becomes `[[New]]`),
- *   when that publication is in this write's region (`renameTo`). The
+ *   page's published title in the source (`[[Old]]` becomes `[[New]]`,
+ *   in a property's value through `setProperty`, changing only its
+ *   characters), when that publication is in this write's region
+ *   (`renameTo`). The
  *   entry keeps its old key too, for this version, so text from before
  *   the rename still names the page, unless the old text is the title of
  *   another page this version could name.
@@ -636,10 +640,12 @@ type Keyed = { key: string; pageId: PageId | null };
 /**
  * `markdown` with each rename written into its link's source, the key and
  * page each link ends with, the old key of each renamed link, and each
- * target text renamed, once. A rename onto a key another link names
- * differently is skipped, so no link changes meaning; if the result doesn't
- * read back (`read`) as the same links with the new targets, none is
- * written.
+ * target text renamed, once. A link that is a property's value is
+ * rewritten with `setProperty`, which changes only that value's characters
+ * and refuses a value it can't change so. A rename onto a key another link
+ * names differently is skipped, so no link changes meaning; if the result
+ * doesn't read back (`read`) as the same links with the new targets, none
+ * is written.
  */
 async function renamed(
   markdown: string,
@@ -657,29 +663,51 @@ async function renamed(
     formerly: [],
     renames: [],
   };
+  // Properties' links are in the frontmatter, written first; the body's
+  // are written into the text after it.
+  const block = splitFrontmatter(markdown).frontmatter;
+  let frontmatter = block;
   let next = '';
-  let at = 0;
+  let at = block?.length ?? 0;
+  let changed = false;
   const keyed: Keyed[] = [];
   const formerly: Keyed[] = [];
   for (const { link, pageId, renamed } of decisions) {
     const key = renamed === null ? null : foldTitle(renamed);
     const free = key !== null && (!named.has(key) || named.get(key) === pageId);
-    const source = markdown.slice(link.start, link.end);
-    if (renamed === null || key === null || !free || source !== link.source) {
+    if (renamed === null || key === null || !free) {
       keyed.push({ key: linkKey(link), pageId });
       continue;
     }
+    if (link.property !== undefined) {
+      const edit =
+        frontmatter === null
+          ? null
+          : setProperty(frontmatter, link.property, withTarget(link.source, renamed));
+      if (!edit?.ok) {
+        keyed.push({ key: linkKey(link), pageId });
+        continue;
+      }
+      frontmatter = edit.frontmatter;
+    } else {
+      const source = markdown.slice(link.start, link.end);
+      if (source !== link.source || link.start < at) {
+        keyed.push({ key: linkKey(link), pageId });
+        continue;
+      }
+      next += markdown.slice(at, link.start) + withTarget(source, renamed);
+      at = link.end;
+    }
+    changed = true;
     named.set(key, pageId);
-    next += markdown.slice(at, link.start) + withTarget(source, renamed);
-    at = link.end;
     keyed.push({ key, pageId });
     // No other page this version could name has the old text as its title,
     // or the title would have won over the entry (`decide`): it still names
     // this one.
     formerly.push({ key: linkKey(link), pageId });
   }
-  if (at === 0) return unchanged;
-  next += markdown.slice(at);
+  if (!changed) return unchanged;
+  next = (frontmatter ?? '') + next + markdown.slice(at);
   // Read back: the same links, in order, now with the new targets.
   let back: PlacedWikilink[];
   try {
@@ -711,7 +739,7 @@ export type RenamedLink = { from: string; to: string };
 export function renamedLinks(sent: string, saved: string): RenamedLink[] {
   if (saved === sent) return [];
   try {
-    const [before, after] = [placedWikilinks(sent), placedWikilinks(saved)];
+    const [before, after] = [tableWikilinks(sent), tableWikilinks(saved)];
     if (before.length !== after.length) return [];
     const renamed = new Map<string, RenamedLink>();
     before.forEach((link, i) => {

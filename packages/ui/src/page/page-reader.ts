@@ -30,7 +30,7 @@ vaultStore.subscribe(() => {
  * for saving and publishing to work out its link table (`writeLinks`).
  */
 export const readWikilinks: ReadWikilinks = (markdown) =>
-  pageReader.run('wikilinks', markdown, { budgetMs: READ_BUDGET_MS });
+  pageReader.run('tableLinks', markdown, { budgetMs: READ_BUDGET_MS });
 
 // The reads under way in `editReader` that the next ones end.
 const editing = { trim: new AbortController(), headings: new AbortController() };
@@ -41,7 +41,7 @@ const editing = { trim: new AbortController(), headings: new AbortController() }
  * `ends` reads under way there: a slow page's read mustn't hold up the
  * next page's.
  */
-function readToEdit<J extends 'wikilinks' | 'headings'>(
+function readToEdit<J extends 'tableLinks' | 'headings'>(
   job: J,
   markdown: string,
   kind: keyof typeof editing,
@@ -57,7 +57,7 @@ function readToEdit<J extends 'wikilinks' | 'headings'>(
  * (`linksInUse`). The draft opened before needs nothing more read for it.
  */
 export const readOpeningLinks: ReadWikilinks = (markdown) =>
-  readToEdit('wikilinks', markdown, 'trim', ['trim', 'headings']);
+  readToEdit('tableLinks', markdown, 'trim', ['trim', 'headings']);
 
 /**
  * The text of each heading of a page's Markdown (`headingTexts`), for `[[#`

@@ -362,3 +362,97 @@ describe('a page with a public link', () => {
     expect(await rowsNaming(w.page.pageId)).toHaveLength(1);
   });
 });
+
+describe('a public page showing other pages’ values (ADR 0006, decision 9)', () => {
+  it('holds only those pages’ published values, never a draft its publisher can see', async () => {
+    const n = randomBytes(4).toString('hex');
+    const m = {
+      published: `PLAINTEXT-PUBLISHED-VALUE-${n}`,
+      draft: `PLAINTEXT-DRAFT-VALUE-${n}`,
+      unreferenced: `PLAINTEXT-UNREFERENCED-VALUE-${n}`,
+      unpublished: `PLAINTEXT-UNPUBLISHED-VALUE-${n}`,
+    };
+    const owner = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, {
+      name: 'Kitchen',
+      kind: 'shared',
+    });
+    const create = async (title: string, markdown: string) => ({
+      spaceId,
+      pageId: await pages.createPage(owner.ctx, { spaceId, parentId: null, title, markdown }),
+    });
+    const bread = await create(
+      'Garlic bread',
+      `---\ncook_time: "${m.published}"\nother: "${m.unreferenced}"\n---\nBake it.\n`,
+    );
+    await pages.publishPage(owner.ctx, bread);
+    // A draft after it, renamed too: its title chooses nothing, its value never goes.
+    await pages.editDraft(owner.ctx, bread, {
+      title: 'Garlic toast',
+      markdown: `---\ncook_time: "${m.draft}"\n---\nBake it.\n`,
+    });
+    // A page never published, whose draft its publisher can see.
+    await create('Secret soup', `---\nx: "${m.unpublished}"\n---\n`);
+    const notes = await create(
+      'Notes',
+      'Bake `=[[Garlic bread]].cook_time` min. Soup `=[[Secret soup]].x`, `=[[Garlic bread]].nope`.\n',
+    );
+    await pages.publishPage(owner.ctx, notes);
+    const id = await links.turnOn(owner.ctx, notes.pageId);
+    await links.shareCopy(owner.ctx, notes);
+
+    expect(await readable(m.published, m.draft, m.unreferenced, m.unpublished)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    const html = await (await visit(`/p/${id}`)).text();
+    expect(html).toContain(`Bake ${m.published} min.`);
+    // What doesn't resolve to a published value stays as written.
+    expect(html).toContain('<code>=[[Secret soup]].x</code>');
+    expect(html).toContain('<code>=[[Garlic bread]].nope</code>');
+  });
+
+  it('shows a page in a share no value from a page its readers can’t open', async () => {
+    const n = randomBytes(4).toString('hex');
+    const [inside, outside] = [`PLAINTEXT-SHARED-VALUE-${n}`, `PLAINTEXT-OWNERS-ONLY-VALUE-${n}`];
+    const owner = await personWithVault(t);
+    const reader = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, {
+      name: 'Office',
+      kind: 'shared',
+    });
+    const team = await spaceOperations.createFolder(owner.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Team',
+    });
+    await shareFolder(owner.ctx, {
+      spaceId,
+      rootId: team,
+      people: [await invite(owner, reader, 'reader')],
+    });
+    const create = async (parentId: typeof team | null, title: string, markdown: string) => {
+      const ref = {
+        spaceId,
+        pageId: await pages.createPage(owner.ctx, { spaceId, parentId, title, markdown }),
+      };
+      await pages.publishPage(owner.ctx, ref);
+      return ref;
+    };
+    await create(team, 'Budget', `---\ntotal: "${inside}"\n---\n`);
+    await create(null, 'Salaries', `---\ntotal: "${outside}"\n---\n`);
+    const notes = await create(
+      team,
+      'Notes',
+      'Budget `=[[Budget]].total`, salaries `=[[Salaries]].total`.\n',
+    );
+    const id = await links.turnOn(owner.ctx, notes.pageId);
+    await links.shareCopy(owner.ctx, notes);
+
+    expect(await readable(inside, outside)).toEqual([true, false]);
+    const html = await (await visit(`/p/${id}`)).text();
+    expect(html).toContain('<code>=[[Salaries]].total</code>');
+  });
+});

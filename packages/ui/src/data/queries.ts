@@ -181,7 +181,8 @@ export const agentGroupsQuery = (ctx: ClientContext) =>
 /** How far the search index being built has got, kept beside it so a reopened dialog sees it too. */
 export const searchProgressKey = [PLAIN, 'search-progress'] as const;
 
-const searchIndexKey = [PLAIN, 'search-index'] as const;
+/** The search index (`usePageIndex`), one for the whole app. */
+export const searchIndexKey = [PLAIN, 'search-index'] as const;
 
 // The running build's version, set by the web app's Vite config. Only the
 // desktop app's path reads it, so tests without the define never do.
