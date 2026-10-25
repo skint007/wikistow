@@ -167,7 +167,7 @@ export function agentTools({ ctx, propose, noticePage }: AgentToolsOptions, canE
     aiTool({
       name: 'search',
       description:
-        'Search the text and titles of every page this agent can read. Answers the best matches with a snippet each.',
+        'Search the text and titles of every page this agent can read, and filter by properties: tag:soup for a tag, key:value for any property (key:"two words" in quotes). Put a word with a colon in quotes ("10:30") to search it as text. Answers the best matches with a snippet each.',
       input: z.object({ query: z.string().min(1).max(200) }),
       run: async ({ query }) => {
         // Built afresh from the agent's trees each time, so a page it lost

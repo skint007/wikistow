@@ -258,7 +258,10 @@ and publishedHead (null until it is published).
 
 The pages this agent can read whose title or text holds every word of
 QUERY, best first; the last word also matches the start of a longer one.
-Case and accents don't matter. Each page is searched as page read would
+Case and accents don't matter. Filters narrow by properties: tag:soup for
+a tag, key:value for any property, and key:"two words" in double quotes,
+inside the shell's single ones: 'status:"in progress"'. A word in double
+quotes is always text. Each page is searched as page read would
 show it: the draft if this agent edits the page, the published version
 otherwise. --space searches only that space. With --json:
   {"results":[{"pageId":"...","spaceId":"...","title":"...","draft":false,
