@@ -348,9 +348,10 @@ function TextField({
   const query = tagSearch && (type === 'text' || type === 'number') ? tagQuery(scalar) : null;
   if (query !== null) {
     // The button first, as the focus put back finds it, and under the pill,
-    // so a click beside the pill opens the field, as beside a list's pills.
+    // so a click beside the pill opens the field, as beside a list's pills:
+    // the pill leaves it the row's end, however long the tag.
     return (
-      <div className="relative flex min-h-(--row) items-center">
+      <div className="relative flex min-h-(--row) items-center pr-8">
         <button
           type="button"
           aria-label={edit}
