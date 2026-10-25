@@ -1,16 +1,11 @@
 import { createFileRoute, Outlet, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
-import { z } from 'zod';
 import { meQuery } from '../../api';
 import { PendingOwnerWork } from '../../sharing/pending-owner-work';
 import { useVault, vaultStore } from '../../vault/store';
 
-/**
- * Everything that needs the vault open: spaces and pages. `?q=` on any of
- * them opens search with that query (`SearchLink`), then leaves the URL.
- */
+/** Everything that needs the vault open: spaces and pages. */
 export const Route = createFileRoute('/_app/_vault')({
-  validateSearch: z.object({ q: z.string().max(1000).optional().catch(undefined) }),
   beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me?.identity) throw redirect({ to: '/vault/setup' });

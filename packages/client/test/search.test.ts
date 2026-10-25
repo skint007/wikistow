@@ -145,6 +145,10 @@ describe('filters in a query', () => {
     expect(parseSearch('note:"say \\"hi\\" \\\\ bye"').filters).toEqual([
       { key: 'note', value: 'say "hi" \\ bye' },
     ]);
+    // Any other backslash is itself.
+    expect(parseSearch('path:"C:\\Users\\n"').filters).toEqual([
+      { key: 'path', value: 'C:\\Users\\n' },
+    ]);
     // A quote not closed runs to the end, as one being typed does.
     expect(parseSearch('status:"in prog').filters).toEqual([{ key: 'status', value: 'in prog' }]);
   });
@@ -226,6 +230,10 @@ describe('matching a filter', () => {
     expect(passes('empty', 'null')).toBe(false);
     expect(passes('missing', 'x')).toBe(false);
     expect(passes('tag', 'italian')).toBe(false);
+    // An empty filter passes nothing, not even an empty text.
+    const empty = propertyData('---\nstatus: ""\n---\n');
+    expect(matchesFilter(empty, { key: 'status', value: '' })).toBe(false);
+    expect(passes('status', ' ')).toBe(false);
   });
 });
 
@@ -279,6 +287,10 @@ describe('a search with filters', () => {
       (size === 's' ? small : large).search('tag:soup n:3', { limit: 50 });
     // 8 times the pages; quadratic would be 64.
     expect(growth(run, 's', 'l')).toBeLessThan(24);
+    // Every page passes, so all are sorted by title: n log n.
+    const all = (size: string) => (size === 's' ? small : large).search('tag:soup', { limit: 50 });
+    expect(all('l')).toHaveLength(50);
+    expect(growth(all, 's', 'l')).toBeLessThan(24);
   });
 });
 

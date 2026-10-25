@@ -36,6 +36,9 @@ import {
  * - **Queries** are words and filters (`parseSearch`), and match pages
  *   holding every term of the words and passing every filter. The last term
  *   also matches as a prefix (`back` finds `backup`), the others only whole.
+ *   A filter with no value, as one half typed (`tag:`), is left out; a quote
+ *   left open runs to the query's end; a word in quotes is always words, so
+ *   `"10:30"` searches text, where `10:30` would be a filter.
  * - **Filters** match properties (`matchesFilter`): `tag:soup` a page
  *   tagged `soup` (`hasTag`), `key:value` one whose `key` is `value` or a
  *   list holding it, `status:"in progress"` in quotes. A filter only
@@ -55,7 +58,8 @@ import {
  *
  * Searching takes time linear in the postings of its terms, and with
  * filters, in the properties of the pages they're tried on: those holding
- * the words, or with filters alone, every page.
+ * the words, or with filters alone, every page. Then the pages found are
+ * sorted, in time `n log n` in their number.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
@@ -259,7 +263,8 @@ export type SearchFilter = { key: string; value: string };
  * a property reference's (letters, digits, `_` and `-`; for a key with
  * spaces, `_` stands in, as `cook_time` finds `cook time`), then `:` and its
  * value: what follows up to a space, or in double quotes, which allow
- * spaces, with `\"` and `\\` for a quote and a backslash in them. A quote
+ * spaces, with `\"` and `\\` for a quote and a backslash in them (any
+ * other backslash is itself). A quote
  * not closed runs to the query's end. Everything else is words, a word in
  * quotes too, so `"10:30"` or `"https://example.com"` searches text. A
  * filter with no value (`tag:`, `status:""`), as one half typed, is left
@@ -308,7 +313,8 @@ function readQuoted(query: string, at: number): { text: string; end: number } | 
   for (let end = at + 1; end < query.length; end++) {
     const char = query.charAt(end);
     if (char === '"') return { text, end: end + 1 };
-    if (char === '\\' && end + 1 < query.length) text += query.charAt(++end);
+    const next = query.charAt(end + 1);
+    if (char === '\\' && (next === '"' || next === '\\')) text += query.charAt(++end);
     else text += char;
   }
   return { text, end: query.length };
@@ -335,13 +341,14 @@ export function searchFilter(key: string, value: string): string | null {
  * when its value, or an item of its list, is the filter's: a number as a
  * number (`4` is `4.0`), anything else as text, whatever its accents and
  * case (`foldTerm`), a wikilink as written or as its page's name
- * (`goes_with:"Garlic bread"` is `[[Garlic bread]]`). Empty values never
- * pass.
+ * (`goes_with:"Garlic bread"` is `[[Garlic bread]]`). Empty values, the
+ * filter's or the property's, never pass.
  */
 export function matchesFilter(
   properties: readonly Readonly<PropertyData>[],
   { key, value }: SearchFilter,
 ): boolean {
+  if (value.trim() === '') return false;
   if (foldPropertyName(key) === 'tag') return hasTag(properties, value);
   const wanted = foldTerm(value.trim());
   const number = NUMBER.test(value.trim()) ? Number(value) : null;

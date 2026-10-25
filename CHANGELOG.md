@@ -17,6 +17,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
+- `wikistow search` takes the same filters as the app's search, `tag:soup` and `key:value`, and so do agents' and plugins' searches. (#187)
 - `wikistow folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]` makes a folder where the agent may edit, at the top of its share unless `--parent` names one, so an agent can rebuild a set of notes' folders before creating their pages. It takes `--idempotency-key` like the other changes, and the skill says to use it when moving notes in. (#171)
 
 #### Development
