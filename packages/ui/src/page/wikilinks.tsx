@@ -79,7 +79,7 @@ function PageLink({
     ...(hash ? { hash } : {}),
   } as const;
   return (
-    <Link {...to} data-hint={linkHint(name)} className="text-primary underline">
+    <Link {...to} {...linkHint(name)} className="text-primary underline">
       {text}
     </Link>
   );

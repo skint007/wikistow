@@ -557,7 +557,7 @@ function UpdateEntry({ update }: { update: DesktopUpdate }) {
           target="_blank"
           rel="noreferrer"
           aria-describedby={about}
-          data-hint={linkHint(update.url)}
+          {...linkHint(update.url)}
         >
           <ExternalLink strokeWidth={1.75} /> {route.link}
         </a>

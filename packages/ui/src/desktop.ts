@@ -20,15 +20,17 @@ export const desktop: DesktopBridge | null =
 const LONGEST_ADDRESS = 200;
 
 /**
- * Where a link goes, as its hint (`data-hint`), in the desktop app: it has
+ * Where a link goes, as its hint's attributes, in the desktop app: it has
  * no status bar showing it, as a browser does, so in a browser there's none.
  * A link to a page of the wiki gives the page's name, not its `app://` address.
  * A long address wraps after a slash (a zero-width space), not mid-word.
+ * It shows above the link: a link is one line of text, so just below it the
+ * pointer resting on that line would cover the hint.
  */
-export function linkHint(where: string) {
-  if (!desktop) return undefined;
+export function linkHint(where: string): { 'data-hint'?: string; 'data-hint-side'?: 'top' } {
+  if (!desktop) return {};
   const shown = where.length > LONGEST_ADDRESS ? `${where.slice(0, LONGEST_ADDRESS - 1)}…` : where;
-  return shown.replaceAll(/\/(?!\/)/g, '/\u200B');
+  return { 'data-hint': shown.replaceAll(/\/(?!\/)/g, '/\u200B'), 'data-hint-side': 'top' };
 }
 
 /**

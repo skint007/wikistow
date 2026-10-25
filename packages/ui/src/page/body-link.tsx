@@ -12,7 +12,7 @@ export function BodyLink({ href, children }: { href: string; children: ReactNode
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      data-hint={href.startsWith('#') ? undefined : linkHint(href)}
+      {...(href.startsWith('#') ? {} : linkHint(href))}
       className="text-primary underline"
     >
       <InLink value>{children}</InLink>

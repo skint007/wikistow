@@ -236,13 +236,9 @@ export const autoLink = linkSchema.extendSchema((prev) => (ctx) => {
       const { auto: _a, bare: _b, read: _r, id: _i, ...rest } = attrs as Record<string, unknown>;
       // Where it goes, in the desktop app; an attachment's address or a `#` place says nothing.
       const href = String(mark.attrs.href);
-      const hint =
-        href.startsWith(ATTACHMENT_SCHEME) || href.startsWith('#') ? undefined : linkHint(href);
+      const hint = href.startsWith(ATTACHMENT_SCHEME) || href.startsWith('#') ? {} : linkHint(href);
       // Its title as data, not `title`, which would show the browser's own tooltip.
-      return [
-        String(tag),
-        { ...rest, title: undefined, 'data-title': mark.attrs.title, 'data-hint': hint },
-      ];
+      return [String(tag), { ...rest, title: undefined, 'data-title': mark.attrs.title, ...hint }];
     },
   };
 });
