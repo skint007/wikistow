@@ -294,6 +294,10 @@ flow_lines: [a,
         `---\nm:\n${lines(5_500, (i) => `  k${i}: 1`)}\n---\n`,
         // A line of complaints.
         `---\na: [${'x, ,'.repeat(15_000)}]\n---\n`,
+        // Long runs of blanks inside a value, a map and a list.
+        `---\nk: a${' '.repeat(60_000)}b\n---\n`,
+        `---\nk:\n  a: 1\n${'\n'.repeat(60_000)}  b: 2\n---\n`,
+        `---\nk:\n  - a\n${'\n'.repeat(60_000)}  - b\n---\n`,
       ];
       for (const block of blocks) {
         expect(block.length).toBeLessThan(65_536);

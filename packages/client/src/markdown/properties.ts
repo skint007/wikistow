@@ -251,8 +251,18 @@ const TOO_LONG = 'It is too long to read as properties.';
 const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.';
 
 // `text` without the spaces, tabs and line breaks it ends with: YAML's
-// blanks, not all Unicode spaces, which a plain scalar may end with.
-const trimBlanks = (text: string) => text.replace(/[ \t\r\n]+$/, '');
+// blanks, not all Unicode spaces, which a plain scalar may end with. A
+// loop, as a regex ending `+$` would retry every blank in a long run.
+function trimBlanks(text: string): string {
+  let end = text.length;
+  for (
+    let code = text.charCodeAt(end - 1);
+    code === 0x20 || code === 0x09 || code === 0x0d || code === 0x0a;
+  ) {
+    code = text.charCodeAt(--end - 1);
+  }
+  return text.slice(0, end);
+}
 
 // Where the text after `from` goes on past spaces, line breaks and comments.
 function pastBlanks(yaml: string, from: number): number {
