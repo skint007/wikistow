@@ -21,6 +21,7 @@ import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
+import { SearchOpener } from './search-link';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
 
@@ -65,8 +66,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       },
     );
   }, []);
-  // A link to a search (`SearchLink`) opens it, and the URL lets the query go,
-  // so reloading or going back doesn't open it again.
+  // An address with a query (`SearchLink`'s, opened in a new tab) opens
+  // search, and lets the query go, so reloading or going back doesn't open
+  // it again.
   const navigate = useNavigate();
   const linked = useSearch({ strict: false }).q;
   useEffect(() => {
@@ -102,84 +104,86 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => closeDrawer(), [href, closeDrawer]);
   return (
     <SlotContext value={slot}>
-      <div
-        data-region="app"
-        className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
-      >
-        <div className="hidden min-[900px]:block">
-          <Rail onSignOut={signOut} onSearch={() => search()} />
-        </div>
-        <header
-          data-region="topbar"
-          className="sticky top-(--titlebar-height) z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
+      <SearchOpener value={search}>
+        <div
+          data-region="app"
+          className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
         >
-          <button
-            type="button"
-            aria-label={update ? 'Open navigation, update available' : 'Open navigation'}
-            onClick={() => setDrawer(true)}
-            className="relative grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+          <div className="hidden min-[900px]:block">
+            <Rail onSignOut={signOut} onSearch={() => search()} />
+          </div>
+          <header
+            data-region="topbar"
+            className="sticky top-(--titlebar-height) z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
           >
-            <Menu className="size-5" strokeWidth={1.75} />
-            {update && <UpdateDot />}
-          </button>
-          <span className="font-extrabold">
-            Wiki<span className="text-primary">Stow</span>
-          </span>
-          {vault.status === 'unlocked' && (
             <button
               type="button"
-              aria-label="Search"
-              onClick={() => search()}
-              className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+              aria-label={update ? 'Open navigation, update available' : 'Open navigation'}
+              onClick={() => setDrawer(true)}
+              className="relative grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
             >
-              <Search className="size-5" strokeWidth={1.75} />
+              <Menu className="size-5" strokeWidth={1.75} />
+              {update && <UpdateDot />}
             </button>
-          )}
-        </header>
-        <div
-          data-region="main"
-          className="min-h-0 p-2 min-[900px]:py-3.5 min-[900px]:pr-3.5 min-[900px]:pl-0"
-        >
-          {children}
-        </div>
-      </div>
-      <Dialog open={drawer} onOpenChange={setDrawer}>
-        <DialogContent
-          side="left"
-          dialogClassName="w-[92vw] max-w-none"
-          className="flex gap-2 p-2"
-          showCloseButton={false}
-        >
-          <DialogTitle className="sr-only">Navigation</DialogTitle>
-          <div className="w-[70px] shrink-0">
-            <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
-          </div>
-          <div className="min-w-0 flex-1">
-            {/* Locking re-renders this before the space page lets go of its space. */}
-            {spaceId && vault.status === 'unlocked' && (
-              <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+            <span className="font-extrabold">
+              Wiki<span className="text-primary">Stow</span>
+            </span>
+            {vault.status === 'unlocked' && (
+              <button
+                type="button"
+                aria-label="Search"
+                onClick={() => search()}
+                className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+              >
+                <Search className="size-5" strokeWidth={1.75} />
+              </button>
             )}
+          </header>
+          <div
+            data-region="main"
+            className="min-h-0 p-2 min-[900px]:py-3.5 min-[900px]:pr-3.5 min-[900px]:pl-0"
+          >
+            {children}
           </div>
-        </DialogContent>
-      </Dialog>
-      {vault.status === 'unlocked' && (
-        <SearchDialog
-          ctx={vault.ctx}
-          open={searchIn === vault.ctx}
-          query={searchFor}
-          onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
-        />
-      )}
-      <SafeModeBanner />
-      <RestoreNotice />
-      {signOutFailed && (
-        <p
-          role="alert"
-          className="fixed bottom-4 left-4 z-50 rounded-card bg-card px-4 py-2 text-sm text-destructive shadow-card min-[900px]:left-20"
-        >
-          Couldn’t sign out. Try again.
-        </p>
-      )}
+        </div>
+        <Dialog open={drawer} onOpenChange={setDrawer}>
+          <DialogContent
+            side="left"
+            dialogClassName="w-[92vw] max-w-none"
+            className="flex gap-2 p-2"
+            showCloseButton={false}
+          >
+            <DialogTitle className="sr-only">Navigation</DialogTitle>
+            <div className="w-[70px] shrink-0">
+              <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
+            </div>
+            <div className="min-w-0 flex-1">
+              {/* Locking re-renders this before the space page lets go of its space. */}
+              {spaceId && vault.status === 'unlocked' && (
+                <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+        {vault.status === 'unlocked' && (
+          <SearchDialog
+            ctx={vault.ctx}
+            open={searchIn === vault.ctx}
+            query={searchFor}
+            onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
+          />
+        )}
+        <SafeModeBanner />
+        <RestoreNotice />
+        {signOutFailed && (
+          <p
+            role="alert"
+            className="fixed bottom-4 left-4 z-50 rounded-card bg-card px-4 py-2 text-sm text-destructive shadow-card min-[900px]:left-20"
+          >
+            Couldn’t sign out. Try again.
+          </p>
+        )}
+      </SearchOpener>
     </SlotContext>
   );
 }

@@ -16,7 +16,15 @@ import { forgetKeptUnlock, vaultStore } from '../vault/store';
  * query, once the vault is open (`SearchLink`), then leaves the URL.
  */
 export const Route = createFileRoute('/_app')({
-  validateSearch: z.object({ q: z.string().max(1000).optional().catch(undefined) }),
+  // The router reads `?q=2024` as a number, and `?q=true` as true.
+  validateSearch: z.object({
+    q: z
+      .union([z.string(), z.number(), z.boolean()])
+      .transform(String)
+      .pipe(z.string().max(1000))
+      .optional()
+      .catch(undefined),
+  }),
   beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) {

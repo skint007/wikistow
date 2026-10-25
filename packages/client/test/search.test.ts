@@ -108,8 +108,10 @@ describe('tags', () => {
     expect(tagged('tags: [[soup], winter]', 'soup')).toBe(true);
     expect(tagged('tags: "#soup"', 'soup')).toBe(true);
     expect(tagged('tags: soup', '#soup')).toBe(true);
-    // The key is named as a reference names it.
+    // The key is named as a reference names it, and Obsidian's older `tag` is tags too.
     expect(tagged('Tags: soup', 'soup')).toBe(true);
+    expect(tagged('tag: [soup]', 'soup')).toBe(true);
+    expect(tagged('tags: winter\ntag: soup', 'soup')).toBe(true);
   });
 
   it('match only a whole tag, in tags', () => {
@@ -287,6 +289,10 @@ describe('a search with filters', () => {
       (size === 's' ? small : large).search('tag:soup n:3', { limit: 50 });
     // 8 times the pages; quadratic would be 64.
     expect(growth(run, 's', 'l')).toBeLessThan(24);
+    // A filter is read once, not for each page, and the same one only once.
+    const long = `n:${'é'.repeat(20_000)}`;
+    expect(cpuTime(() => large.search(long)).ms).toBeLessThan(500);
+    expect(cpuTime(() => large.search('tag:soup '.repeat(300))).ms).toBeLessThan(500);
     // Every page passes, so all are sorted by title: n log n.
     const all = (size: string) => (size === 's' ? small : large).search('tag:soup', { limit: 50 });
     expect(all('l')).toHaveLength(50);

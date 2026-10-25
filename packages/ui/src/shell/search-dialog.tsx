@@ -112,6 +112,7 @@ function SearchBody({
           autoFocus
           {...notCredential}
           spellCheck={false}
+          maxLength={1000}
           placeholder="Search pages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}

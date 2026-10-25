@@ -40,7 +40,8 @@ import {
  *   left open runs to the query's end; a word in quotes is always words, so
  *   `"10:30"` searches text, where `10:30` would be a filter.
  * - **Filters** match properties (`matchesFilter`): `tag:soup` a page
- *   tagged `soup` (`hasTag`), `key:value` one whose `key` is `value` or a
+ *   tagged `soup` (`hasTag`; so a property named `tag` is read as tags),
+ *   `key:value` one whose `key` is `value` or a
  *   list holding it, `status:"in progress"` in quotes. A filter only
  *   narrows: it adds nothing to a page's score.
  * - **Ranking** sums, per query term, its rarity (`log(1 + pages / pages with
@@ -56,10 +57,11 @@ import {
  *   hit builds its snippet when asked, so only the rows shown pay for one.
  *   Highlights are UTF-16 offsets into the snippet's (or title's) own text.
  *
- * Searching takes time linear in the postings of its terms, and with
- * filters, in the properties of the pages they're tried on: those holding
- * the words, or with filters alone, every page. Then the pages found are
- * sorted, in time `n log n` in their number.
+ * Searching takes time linear in the query, in the postings of its terms,
+ * and with filters, in the properties of the pages they're tried on, times
+ * the number of different filters: the pages holding the words, or with
+ * filters alone, every page. Then the pages found are sorted, in time
+ * `n log n` in their number.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
@@ -143,8 +145,8 @@ export class SearchIndex<T> {
       if (scores.size === 0) return [];
     }
     const hits: { page: IndexedPage<T>; score: number; inText: boolean }[] = [];
-    const passes = (page: IndexedPage<T>) =>
-      filters.every((filter) => matchesFilter(page.properties, filter));
+    const tests = filterTests(filters);
+    const passes = (page: IndexedPage<T>) => tests.every((test) => test(page.properties));
     if (scores === null) {
       for (const page of this.#pages) if (passes(page)) hits.push({ page, score: 0, inText: true });
     } else {
@@ -221,16 +223,23 @@ export function indexedContent(markdown: string): {
 }
 
 /**
- * Whether `properties` are tagged `tag`: their `tags` (named as a
- * reference names it, `findProperty`) is a list holding it, or is it. Tags
+ * Whether `properties` are tagged `tag`: their `tags`, or Obsidian's older
+ * `tag` (named as a reference names it, `findProperty`), is a list holding
+ * it, or is it. Tags
  * compare as search terms do, whatever their accents and case, and without
  * a `#` before them, so `#Soup` is `soup`.
  */
 export function hasTag(properties: readonly Readonly<PropertyData>[], tag: string): boolean {
-  const wanted = tagName(tag);
+  return tagged(properties, tagName(tag));
+}
+
+/** Whether `properties` hold the tag `wanted`, already a `tagName`. */
+function tagged(properties: readonly Readonly<PropertyData>[], wanted: string): boolean {
+  const matches = (value: string | number | boolean) => tagName(String(value)) === wanted;
   return (
     wanted !== '' &&
-    holds(findProperty(properties, 'tags')?.value, (value) => tagName(String(value)) === wanted)
+    (holds(findProperty(properties, 'tags')?.value, matches) ||
+      holds(findProperty(properties, 'tag')?.value, matches))
   );
 }
 
@@ -346,18 +355,43 @@ export function searchFilter(key: string, value: string): string | null {
  */
 export function matchesFilter(
   properties: readonly Readonly<PropertyData>[],
-  { key, value }: SearchFilter,
+  filter: SearchFilter,
 ): boolean {
-  if (value.trim() === '') return false;
-  if (foldPropertyName(key) === 'tag') return hasTag(properties, value);
-  const wanted = foldTerm(value.trim());
-  const number = NUMBER.test(value.trim()) ? Number(value) : null;
-  return holds(findProperty(properties, key)?.value, (scalar) => {
+  return filterTest(filter)(properties);
+}
+
+/** `matchesFilter` for one filter, its value read once, to try on many pages. */
+function filterTest({
+  key,
+  value,
+}: SearchFilter): (properties: readonly Readonly<PropertyData>[]) => boolean {
+  const trimmed = value.trim();
+  if (trimmed === '') return () => false;
+  const name = foldPropertyName(key);
+  if (name === 'tag') {
+    const tag = tagName(trimmed);
+    return (properties) => tagged(properties, tag);
+  }
+  const wanted = foldTerm(trimmed);
+  const number = NUMBER.test(trimmed) ? Number(trimmed) : null;
+  const matches = (scalar: string | number | boolean) => {
     if (typeof scalar === 'number') return scalar === number;
     if (foldTerm(String(scalar).trim()) === wanted) return true;
     const link = propertyWikilink(scalar);
     return link !== null && foldTerm(link.target.trim()) === wanted;
-  });
+  };
+  // The first key a reference would take, as `findProperty` finds it.
+  return (properties) =>
+    holds(properties.find((property) => foldPropertyName(property.key) === name)?.value, matches);
+}
+
+/** Each of `filters` once, ready to try on pages. */
+function filterTests(filters: readonly SearchFilter[]) {
+  const unique = new Map<string, SearchFilter>();
+  for (const filter of filters) {
+    unique.set(`${foldPropertyName(filter.key)}\n${filter.value.trim()}`, filter);
+  }
+  return [...unique.values()].map(filterTest);
 }
 
 /** A number as YAML writes one, in decimal. */
