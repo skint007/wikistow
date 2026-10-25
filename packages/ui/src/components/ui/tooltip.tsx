@@ -42,9 +42,10 @@ const moves = (scrolled: EventTarget | null, element: HTMLElement) => {
  * Hover and keyboard-focus hints, in the theme's popover colours, for every
  * element with a `data-hint` attribute: `<button data-hint="Bold">` in React,
  * `element.dataset.hint = …` in editor DOM. `data-hint-keys` adds a shortcut
- * beside it, and `data-hint-side` moves it from below the element (as along
- * the rail, where below would cover the next tile). One layer for the app,
- * so a hint costs an attribute, even on each of a grid's thousand buttons.
+ * beside it, and `data-hint-side` moves it from below the element: along the
+ * rail, where below would cover the next tile, and above a link (`linkHint`),
+ * where the pointer would cover it. One layer for the app, so a hint costs
+ * an attribute, even on each of a grid's thousand buttons.
  * Screen readers don't get the hint: an icon-only control needs an
  * `aria-label` too, and a hint that says more than the element's name its
  * own `aria-description`.

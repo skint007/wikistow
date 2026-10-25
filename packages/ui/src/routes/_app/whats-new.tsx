@@ -149,7 +149,7 @@ function ReleaseNotes({
         ))}
         <a
           href={changes}
-          data-hint={linkHint(changes)}
+          {...linkHint(changes)}
           target="_blank"
           rel="noreferrer"
           className="flex w-fit items-center gap-1.5 text-sm font-bold text-primary-ink underline-offset-4 hover:underline"
