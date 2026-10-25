@@ -514,6 +514,9 @@ function PageList({ spaceId, tree, entries, columns, linkable, canEdit }: Listed
 /** The version of a page a row's cells read: what the index showed, and the version built on. */
 type RowVersion = { indexed: RevisionId; basedOn: RevisionId; markdown: string };
 
+/** Where the focus goes back to after a cell's save: the cell, and its control's label. */
+type Refocus = { cell: string; label: string | null };
+
 /** The cell whose field is open, with the version it opened on, which it shows and saves against. */
 type OpenCell = { id: string; pageId: PageId; version: RowVersion };
 
@@ -525,9 +528,9 @@ function PropertyTable({ edits, ...listed }: Listed & { edits: CellEdits }) {
   const { entries, columns, tree } = listed;
   // One field open at a time.
   const [opened, setOpened] = useState<OpenCell | null>(null);
-  // The cell that had the focus when its value was set, which gets it back
-  // once its page is saved and its control is drawn again.
-  const refocus = useRef<string | null>(null);
+  // The cell that had the focus when its value was set, and the control in
+  // it, which get it back once its page is saved and the cell drawn again.
+  const refocus = useRef<Refocus | null>(null);
   return (
     <div className="overflow-x-auto rounded-control border border-border">
       <table className="w-full border-collapse text-sm [--row:2rem]">
@@ -611,7 +614,7 @@ function PageRow({
   edits: CellEdits;
   opened: OpenCell | null;
   onOpened: (cell: OpenCell | null) => void;
-  refocus: RefObject<string | null>;
+  refocus: RefObject<Refocus | null>;
 }) {
   const ctx = useClient();
   const row = useRef<HTMLTableRowElement>(null);
@@ -639,14 +642,21 @@ function PageRow({
   );
   const links = payload ? linkTableOf(payload) : EMPTY_LINKS;
   const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  // Back to the control used, or one in its place: the field it opened from,
+  // or a list's Add field once the item removed has gone. Only if nothing
+  // else took the focus meanwhile, as the control it had is gone.
   useEffect(() => {
-    const id = refocus.current;
-    if (saving !== undefined || !id?.startsWith(`${entry.pageId} `)) return;
+    const kept = refocus.current;
+    if (saving !== undefined || !kept?.cell.startsWith(`${entry.pageId} `)) return;
     refocus.current = null;
-    row.current
-      ?.querySelector(`[data-cell="${CSS.escape(id)}"]`)
-      ?.querySelector<HTMLElement>('button, input')
-      ?.focus();
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const cell = row.current?.querySelector(`[data-cell="${CSS.escape(kept.cell)}"]`);
+    const controls = [...(cell?.querySelectorAll<HTMLElement>('button, input') ?? [])];
+    const control =
+      controls.find((element) => element.getAttribute('aria-label') === kept.label) ??
+      controls.findLast((element) => element instanceof HTMLInputElement) ??
+      controls[0];
+    control?.focus();
   });
   return (
     <tr
@@ -691,12 +701,12 @@ function PageRow({
                 opened={opened?.id === id}
                 onOpened={(open) => onOpened(open ? { id, pageId: entry.pageId, version } : null)}
                 onSet={(next) => {
-                  if (
-                    row.current
-                      ?.querySelector(`[data-cell="${CSS.escape(id)}"]`)
-                      ?.contains(document.activeElement)
-                  )
-                    refocus.current = id;
+                  const focused = document.activeElement;
+                  refocus.current = row.current
+                    ?.querySelector(`[data-cell="${CSS.escape(id)}"]`)
+                    ?.contains(focused)
+                    ? { cell: id, label: focused?.getAttribute('aria-label') ?? null }
+                    : null;
                   edits.edit({
                     pageId: entry.pageId,
                     indexed: version.indexed,

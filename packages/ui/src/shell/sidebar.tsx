@@ -542,12 +542,13 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   )}
                   style={{ ...indent, paddingLeft: `${(row.level - 1) * 20}px` }}
                 >
-                  {/* Opens or closes the folder in the tree only. Not a tab stop:
-                      the row's arrow keys do the same. */}
+                  {/* Opens or closes the folder in the tree only, for a pointer.
+                      Hidden from assistive technology and not a tab stop: the
+                      row's arrow keys do the same, and its aria-expanded says it. */}
                   <button
                     type="button"
                     tabIndex={-1}
-                    aria-label={`${row.expanded ? 'Close' : 'Open'} ${plainText(row.name)} in the tree`}
+                    aria-hidden
                     // The focus stays on the row, whose keys move through the tree.
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={(event) => {

@@ -295,6 +295,24 @@ describe('a folder’s view', () => {
     ]);
   });
 
+  it('adds to a list in a cell, keeping the keyboard in its Add field', async () => {
+    const { calls, save } = server(() =>
+      written(SOUP.markdown.replace('winter]', 'winter, dinner]'), 12),
+    );
+    const { container } = await mount([SOUP], { save });
+    await userEvent.click(
+      container.querySelector('input[aria-label="Add to Tags of Tomato soup"]')!,
+    );
+    await userEvent.keyboard('dinner{Enter}');
+    expect(calls.map(({ key, value }) => ({ key, value }))).toEqual([
+      { key: 'tags', value: ['soup', 'winter', 'dinner'] },
+    ]);
+    await expect.poll(() => cellsOf(rowOf(container, 'Tomato soup'))[1]).toContain('dinner');
+    await expect
+      .poll(() => document.activeElement?.getAttribute('aria-label'))
+      .toBe('Add to Tags of Tomato soup');
+  });
+
   it('shows a conflict on the cell, keeping the value read, and opens the page for a value it can’t change', async () => {
     const { save } = server(() =>
       Promise.reject(new ApiError(409, 'stale-head', 'Someone saved since you loaded the page')),
