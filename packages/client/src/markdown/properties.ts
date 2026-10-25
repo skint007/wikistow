@@ -2,11 +2,13 @@ import {
   isAlias,
   isMap,
   isScalar,
+  isNode,
   isSeq,
   parseDocument,
+  visit,
+  type Document,
   type Node,
   type Scalar,
-  type YAMLError,
   type YAMLSeq,
 } from 'yaml';
 import { VARIABLE_NAME } from '../templates.ts';
@@ -181,6 +183,11 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   ) {
     return refused('The key doesn’t start its line.');
   }
+  // An alias reads as written whatever it names, so reading the block
+  // back can't tell whether one lost its anchor, or now names another.
+  if (read.aliased && (anchored(entry.key) || anchored(entry.value))) {
+    return refused('It holds an anchor, which aliases may name.');
+  }
   // The value's source as the parser has it: a block list's ends with its
   // last item's comment lines.
   const valueEnd = entry.value?.range
@@ -282,6 +289,8 @@ type ReadBlock =
       closeStart: number;
       // A top-level flow map, `{ a: 1 }`, which only the text edits.
       flow: boolean;
+      // Whether an alias names an anchor somewhere.
+      aliased: boolean;
       // A new key's indentation and line break: the map's and the opening line's.
       indent: string;
       lineBreak: string;
@@ -296,13 +305,17 @@ function readBlock(frontmatter: string | null): ReadBlock {
   const base = open.length;
   const closeStart = base + rest.replace(/\n$/, '').lastIndexOf('\n') + 1;
   const yaml = frontmatter.slice(base, closeStart);
-  const doc = parseDocument(yaml, { version: '1.2', prettyErrors: true });
+  if (yaml.length > MAX_YAML) return refused('It is too long to read as properties.');
+  const doc = parseDocument(yaml, PARSING);
   const [error] = doc.errors;
-  if (error) return refused(errorReason(error));
+  if (error)
+    return refused(`${error.message.split('\n')[0]} (line ${lineOf(yaml, error.pos[0])}).`);
+  const { problem, aliased } = checked(doc, yaml);
+  if (problem) return refused(problem);
   const lineBreak = open.endsWith('\r\n') ? '\r\n' : '\n';
   const map = doc.contents;
   if (map === null) {
-    return { ok: true, entries: [], base, closeStart, flow: false, indent: '', lineBreak };
+    return { ok: true, entries: [], base, closeStart, flow: false, aliased, indent: '', lineBreak };
   }
   if (!isMap(map)) {
     return refused(
@@ -363,16 +376,61 @@ function readBlock(frontmatter: string | null): ReadBlock {
     base,
     closeStart,
     flow: map.flow ?? false,
+    aliased,
     indent,
     lineBreak,
   };
 }
 
-// The parser's first complaint, without its position, with the block's line.
-function errorReason(error: YAMLError): string {
-  const message = (error.message.split('\n')[0] ?? '').replace(/ at line \d+, column \d+:?$/, '');
-  const line = error.linePos?.[0].line;
-  return line === undefined ? `${message}.` : `${message} (line ${line + 1}).`;
+// The longest YAML read, in UTF-16 code units: far more than any person
+// writes, and little enough that reading and editing it take a moment.
+const MAX_YAML = 64 * 1024;
+
+// YAML 1.2. The parser's own checks for duplicate keys, and the source
+// line it quotes with each complaint, take time in the square of the
+// block's size, so `checked` and `lineOf` do what's needed of them.
+const PARSING = { version: '1.2', uniqueKeys: false, prettyErrors: false } as const;
+
+// The line `offset` in the YAML is on, counting the opening delimiter's as 1.
+const lineOf = (yaml: string, offset: number) => yaml.slice(0, offset).split('\n').length + 1;
+
+// What the parser, so set, lets through that YAML doesn't allow, or null:
+// a key twice in one map, or an alias naming no anchor before it. And
+// whether the block has aliases.
+function checked(doc: Document.Parsed, yaml: string): { problem: string | null; aliased: boolean } {
+  const anchors = new Set<string>();
+  let problem: string | null = null;
+  let aliased = false;
+  visit(doc, (_, node) => {
+    if (isNode(node) && node.anchor) anchors.add(node.anchor);
+    aliased ||= isAlias(node);
+    if (isAlias(node) && !anchors.has(node.source)) {
+      problem = `An alias names no anchor before it (line ${lineOf(yaml, node.range?.[0] ?? 0)}).`;
+    }
+    if (isMap(node)) {
+      const keys = new Set<unknown>();
+      for (const { key } of node.items) {
+        if (!isScalar(key)) continue;
+        if (keys.has(key.value)) {
+          problem = `Map keys must be unique (line ${lineOf(yaml, key.range?.[0] ?? 0)}).`;
+          break;
+        }
+        keys.add(key.value);
+      }
+    }
+    return problem === null ? undefined : visit.BREAK;
+  });
+  return { problem, aliased };
+}
+
+// Whether `node` or any node in it has an anchor.
+function anchored(node: Node | null): boolean {
+  let found = false;
+  visit(node, (_, child) => {
+    found = isNode(child) && child.anchor !== undefined;
+    return found ? visit.BREAK : undefined;
+  });
+  return found;
 }
 
 // A node's value as plain data, or undefined when it isn't a scalar or a
@@ -384,7 +442,11 @@ function valueOf(node: Node, depth = 0): PropertyValue | undefined {
   if (isScalar(node)) {
     const { value } = node;
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    // A number JSON can't hold, or an integer written out in more digits
+    // than it holds exactly, is its source.
+    const exact =
+      Number.isSafeInteger(value) || !/^[-+]?(?:0x[\da-f]+|0o[0-7]+|\d+)$/i.test(node.source ?? '');
+    return typeof value === 'number' && Number.isFinite(value) && exact ? value : undefined;
   }
   if (!isSeq(node) || depth > 1) return undefined;
   const items: (PropertyScalar | PropertyScalar[])[] = [];
@@ -509,6 +571,14 @@ const singleQuoted = (text: string) => `'${text.replace(/'/g, "''")}'`;
 // The ways to write a scalar, most like `style` first. Plain text that
 // reads as something else is caught when it is read back.
 function scalarTexts(value: PropertyScalar, style: Style | null): string[] {
+  if (typeof value === 'number') {
+    // An integer past what's exact, in digits, would read as its source.
+    return [
+      Number.isSafeInteger(value) || !Number.isInteger(value)
+        ? String(value)
+        : value.toExponential(),
+    ];
+  }
   if (typeof value !== 'string') return [value === null ? 'null' : String(value)];
   if (UNPRINTABLE.test(value) || style === 'QUOTE_DOUBLE') return [doubleQuoted(value)];
   if (style === 'QUOTE_SINGLE') return [singleQuoted(value), doubleQuoted(value)];
@@ -520,7 +590,7 @@ type Context = 'block' | 'flow';
 // Whether `text` reads as `value` on its own: in a flow list, or in a
 // block (as a list item, which reads plain text as a map's value does).
 function readsAs(text: string, value: PropertyScalar, context: Context): boolean {
-  const doc = parseDocument(context === 'flow' ? `[${text}]` : `- ${text}`, { version: '1.2' });
+  const doc = parseDocument(context === 'flow' ? `[${text}]` : `- ${text}`, PARSING);
   const list = doc.contents;
   const item = isSeq(list) && list.items.length === 1 ? (list.items[0] as Node) : null;
   return doc.errors.length === 0 && isScalar(item) && item.value === value;

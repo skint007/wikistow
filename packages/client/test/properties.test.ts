@@ -268,14 +268,67 @@ flow_lines: [a,
   });
 
   it('reads aliases in time to the block’s size, however many name a long list', () => {
-    const items = Array.from({ length: 12_000 }, () => '1').join(', ');
-    const aliases = Array.from({ length: 12_000 }, () => '*a').join(', ');
+    const items = Array.from({ length: 8_000 }, () => '1').join(', ');
+    const aliases = Array.from({ length: 8_000 }, () => '*a').join(', ');
     const block = `---\na: &a [${items}]\nb: [${aliases}]\n---\n`;
     const started = performance.now();
     const [, b] = properties(block);
     expect(performance.now() - started).toBeLessThan(2_000);
     expect(b).toMatchObject({ type: 'text', editable: false });
     expect(b?.value).toHaveLength(aliases.length + 2);
+  });
+
+  it('reads the longest block it takes in time to its size, and no longer one', () => {
+    const lines = (count: number, line: (i: number) => string) =>
+      Array.from({ length: count }, (_, i) => line(i)).join('\n');
+    const blocks = [
+      // Many keys, at the top and in a map of their own.
+      `---\n${lines(6_500, (i) => `k${i}: 1`)}\n---\n`,
+      `---\nm:\n${lines(5_500, (i) => `  k${i}: 1`)}\n---\n`,
+      // A line of complaints.
+      `---\na: [${'x, ,'.repeat(15_000)}]\n---\n`,
+    ];
+    for (const block of blocks) {
+      expect(block.length).toBeLessThan(65_536);
+      const started = performance.now();
+      readProperties(block);
+      setProperty(block, 'new', 1);
+      expect(performance.now() - started).toBeLessThan(2_000);
+    }
+    expect(readProperties(`---\na: "${'x'.repeat(65_536)}"\n---\n`)).toEqual({
+      ok: false,
+      reason: 'It is too long to read as properties.',
+    });
+  });
+
+  it('refuses keys twice in any map, and an alias without its anchor', () => {
+    expect(readProperties('---\nm:\n  x: 1\n  x: 2\n---\n')).toEqual({
+      ok: false,
+      reason: 'Map keys must be unique (line 4).',
+    });
+    expect(readProperties('---\nm: {x: 1, x: 2}\n---\n')).toMatchObject({ ok: false });
+    // A number and a string are different keys to YAML.
+    expect(readProperties('---\n1: a\n"1": b\n---\n')).toMatchObject({ ok: true });
+    expect(readProperties('---\na: *x\nb: &x 1\n---\n')).toEqual({
+      ok: false,
+      reason: 'An alias names no anchor before it (line 2).',
+    });
+  });
+
+  it('reads an integer longer than a number holds exactly as its source', () => {
+    const block =
+      '---\nid: 12345678901234567890\nbig: 9007199254740993\nsafe: 9007199254740991\n---\n';
+    expect(
+      properties(block).map(({ key, type, value, editable }) => [key, type, value, editable]),
+    ).toEqual([
+      ['id', 'text', '12345678901234567890', true],
+      ['big', 'text', '9007199254740993', true],
+      ['safe', 'number', 9007199254740991, true],
+    ]);
+    // Such a number is written so that it reads back as itself.
+    const result = edited(setProperty(block, 'safe', 2 ** 60));
+    expect(result).toContain('\nsafe: 1.152921504606847e+18\n');
+    expect(byKey(result, 'safe')?.value).toBe(2 ** 60);
   });
 
   it('reads a top-level flow map, without editing it in place', () => {
@@ -699,6 +752,24 @@ last: 1
     expect(edited(removeProperty('---\n? a\n: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
     expect(edited(removeProperty('---\n&k a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
     expect(edited(removeProperty('---\n!!str a: 1\nb: 2\n---\n', 'a'))).toBe('---\nb: 2\n---\n');
+  });
+
+  it('refuses to remove an anchor while aliases may name it', () => {
+    for (const block of [
+      '---\na: &x 1\nb: *x\n---\n',
+      '---\na: &x 1\nc: &x 2\nb: *x\n---\n',
+      '---\nm: {k: &x [1, 2]}\nb: [*x]\n---\n',
+      '---\n&x a: 1\nb: *x\n---\n',
+    ]) {
+      const key = properties(block)[block.includes('c: &x') ? 1 : 0]?.key ?? '';
+      expect(removeProperty(block, key)).toEqual({
+        ok: false,
+        reason: 'It holds an anchor, which aliases may name.',
+      });
+    }
+    expect(edited(removeProperty('---\na: &x 1\nb: *x\nc: 2\n---\n', 'c'))).toBe(
+      '---\na: &x 1\nb: *x\n---\n',
+    );
   });
 
   it('refuses a missing key', () => {
