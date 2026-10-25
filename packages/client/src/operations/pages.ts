@@ -645,12 +645,13 @@ const publicationsFor =
  * Each page's current publication, opened through the revision cache, in
  * as few requests as `fetchRevisions` makes: those that don't open, are in
  * a newer format, or bind another page are left out, and every one when
- * they can't be fetched.
+ * they can't be fetched, unless `strict`, which throws then instead.
  */
 export async function openPublications(
   ctx: ClientContext,
   spaceId: SpaceId,
   pages: readonly { id: PageId; publishedHead: RevisionId }[],
+  { strict = false }: { strict?: boolean } = {},
 ): Promise<Map<PageId, PagePayload>> {
   const opened = new Map<PageId, PagePayload>();
   if (pages.length === 0) return opened;
@@ -661,7 +662,7 @@ export async function openPublications(
   try {
     fetched = await fetchRevisions(ctx, spaceId, wanted);
   } catch (error) {
-    if (error instanceof ApiError || error instanceof CryptoError) return opened;
+    if (!strict && (error instanceof ApiError || error instanceof CryptoError)) return opened;
     throw error;
   }
   for (const page of pages) {

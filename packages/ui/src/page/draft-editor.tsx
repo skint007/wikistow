@@ -38,6 +38,7 @@ import { LinkChooser } from './editor/link-chooser';
 import { candidatesFor, linkHeadings } from './editor/link-model';
 import { PageEditor } from './editor/page-editor';
 import { otherPages, type OtherPages } from './other-pages';
+import { QueryTable } from './query-table';
 import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
@@ -135,6 +136,22 @@ export function DraftEditor({
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const propertyKeys = usePropertyKeys(ctx, page);
   const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
+  const { pages } = links.assist;
+  // A query block's result, under its code in the visual editor.
+  const queryTable = useCallback(
+    (source: string) => (
+      <QueryTable
+        source={source}
+        scope={{ ctx, spaceId: page.spaceId, pageId: page.pageId, pages, editor: true }}
+        failed={(error) => (
+          <p role="note" className="query-table-error text-xs text-muted-foreground">
+            {error}
+          </p>
+        )}
+      />
+    ),
+    [ctx, page.spaceId, page.pageId, pages],
+  );
   const markdown = useRef(snapshot.markdown);
   useLayoutEffect(() => {
     markdown.current = snapshot.markdown;
@@ -235,6 +252,7 @@ export function DraftEditor({
         page={page}
         propertyKeys={propertyKeys}
         otherPages={others}
+        queryTable={queryTable}
         onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
         status={
           <span role="status" aria-live="polite">

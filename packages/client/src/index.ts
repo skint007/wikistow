@@ -20,6 +20,7 @@ export * from './ids.ts';
 export * from './json.ts';
 export * from './link-table.ts';
 export * from './links.ts';
+export * from './query.ts';
 export * from './markdown/index.ts';
 export * from './key-versions.ts';
 export { KeptMarks, type KeptFile } from './kept-marks.ts';

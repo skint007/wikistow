@@ -856,3 +856,68 @@ test('capture other pages’ values: in the reader, the visual editor, its compl
   await expect(dialog.getByText('This page shows values from other pages.')).toBeVisible();
   await shoot('dialog', page);
 });
+
+test('capture query tables: in the reader, the visual editor, a block that doesn’t read, and the public page', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(300_000);
+  const shoot = bothPalettes(page, 'query-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newFolder(page, 'Recipes');
+  await recipeIn(
+    page,
+    'Recipes',
+    'Garlic bread',
+    'tried: true\nservings: 4\ncook_time: 25\nlast_made: 2026-10-12\ntags: [bread, sides]',
+    'Slice, butter and bake.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Tomato soup',
+    'tried: true\nservings: 6\ncook_time: 60\nlast_made: 2026-09-01\ntags: [soup]\ngoes_with: "[[Garlic bread]]"',
+    'Simmer for an hour.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Lemon tart',
+    'tried: false\nservings: 8\ncook_time: 90\ntags: [dessert]',
+    'Not made yet.',
+  );
+  await newPage(page, 'Tried recipes');
+  await fillSource(
+    page,
+    'What we make again:\n\n```wikistow-query\nfrom: Recipes\nwhere: tried = true, servings >= 2\nshow: servings, cook_time, last_made, goes_with\nsort: last_made desc\n```\n\nAnd one that doesn’t read:\n\n```wikistow-query\nfrom: Recipes\nwhere: servings\n```\n',
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('.query-result tr')).toHaveCount(3);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await shoot('visual', visual);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  const body = page.locator('.page-body').first();
+  await expect(body.locator('.query-table tr')).toHaveCount(3);
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+
+  await openLinkDialog(page, 'Tried recipes');
+  let dialog = page.getByRole('dialog', { name: 'Share “Tried recipes” with a public link?' });
+  await expect(dialog.getByText('This page lists other pages.')).toBeVisible();
+  await shoot('dialog', page);
+  await dialog.getByRole('button', { name: 'Turn on public link' }).click();
+  dialog = page.getByRole('dialog', { name: 'Public link for “Tried recipes”' });
+  await expect(dialog.getByLabel('Public link')).toHaveValue(/\/p\/[\w-]{22}$/);
+  const url = await dialog.getByLabel('Public link').inputValue();
+  const visitor = await freshPage();
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  await visitor.goto(url);
+  await expect(visitor.getByRole('table')).toBeVisible();
+  await visitor.screenshot({ path: 'screenshots/query-public-page.png', fullPage: true });
+});
