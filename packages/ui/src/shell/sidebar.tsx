@@ -183,7 +183,7 @@ function contentsOf(tree: Tree, folderId: FolderId) {
  * A page row's image as a 20px rounded square, or its icon, or its emoji,
  * which also shows while either loads or if it fails to.
  */
-function PageRowIcon({
+export function PageRowIcon({
   page,
   emoji,
   icon,
@@ -307,11 +307,20 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const topOpened = tree.space?.metadata !== null;
   const canEdit = canEditAt(null) && topOpened;
   const focusId =
-    focused && rows.some((r) => r.id === focused) ? focused : (params.pageId ?? rows[0]?.id);
+    focused && rows.some((r) => r.id === focused)
+      ? focused
+      : (params.pageId ?? params.folderId ?? rows[0]?.id);
 
   const openPage = (pageId: PageId) => {
     onNavigate?.();
     void navigate({ to: '/s/$spaceId/p/$pageId', params: { spaceId, pageId } });
+  };
+  // Opening a folder shows its pages, and opens it in the tree too; only
+  // its chevron, or the arrow keys, close it.
+  const openFolder = (folderId: FolderId) => {
+    toggle(folderId, true);
+    onNavigate?.();
+    void navigate({ to: '/s/$spaceId/f/$folderId', params: { spaceId, folderId } });
   };
   const focusRow = (row: Row | undefined) => {
     if (!row) return;
@@ -319,7 +328,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     itemRefs.current.get(row.id)?.focus();
   };
 
-  // The WAI-ARIA tree pattern: arrows move, Left and Right fold, Enter opens.
+  // The WAI-ARIA tree pattern: arrows move, Left and Right fold, Enter opens
+  // a page or a folder's view.
   function onKeyDown(event: KeyboardEvent<HTMLUListElement>) {
     // Only keys pressed on a row. A folder's menu and its button sit inside
     // the tree in React, so their keys bubble here too; they handle their own.
@@ -352,7 +362,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         return focusRow(rows.find((r) => r.id === row.parentId));
       case 'Enter':
         handled();
-        return row.kind === 'folder' ? toggle(row.id) : openPage(row.id);
+        return row.kind === 'folder' ? openFolder(row.id) : openPage(row.id);
       default:
         // Type-ahead: jump to the next row starting with that letter.
         if (event.key.length === 1 && /\S/.test(event.key)) {
@@ -497,6 +507,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           if (row.kind === 'folder') {
             // One list for both menus, so they can't differ.
             const actions = folderActions({
+              onOpen: () => openFolder(row.id),
               editing: canEditAt(row.id)
                 ? {
                     onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
@@ -511,31 +522,44 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 : null,
               onExport: () => setExporting({ folderId: row.id, name: row.name }),
             });
+            const shown = params.folderId === row.id;
             return (
               <RowMenu key={row.id} items={<FolderMenuItems actions={actions} />}>
                 <li
                   {...common}
                   aria-expanded={row.expanded}
-                  onClick={() => toggle(row.id)}
+                  aria-selected={shown}
+                  onClick={() => openFolder(row.id)}
                   draggable={canEditAt(row.id)}
                   onDragStart={(event) =>
                     startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                   }
                   className={cn(
-                    'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none',
+                    'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
+                    shown && 'bg-primary-soft text-primary-ink',
                     dragging?.over?.parentId === row.id &&
                       'bg-primary-soft ring-2 ring-primary ring-inset',
                   )}
-                  style={indent}
+                  style={{ ...indent, paddingLeft: `${(row.level - 1) * 20}px` }}
                 >
-                  <ChevronRight
-                    aria-hidden
-                    className={cn(
-                      'size-3.5 shrink-0 text-muted-foreground transition-transform',
-                      row.expanded && 'rotate-90',
-                    )}
-                    strokeWidth={1.75}
-                  />
+                  {/* Opens or closes the folder in the tree only. Not a tab stop:
+                      the row's arrow keys do the same. */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={`${row.expanded ? 'Close' : 'Open'} ${plainText(row.name)} in the tree`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggle(row.id);
+                    }}
+                    className="-mr-1.5 grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground hover:tint hover:text-foreground active:tint-strong pointer-coarse:size-8"
+                  >
+                    <ChevronRight
+                      aria-hidden
+                      className={cn('size-3.5 transition-transform', row.expanded && 'rotate-90')}
+                      strokeWidth={1.75}
+                    />
+                  </button>
                   <FolderTile
                     metadata={row.metadata}
                     emoji={row.emoji}
@@ -722,7 +746,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             onDone={() => {
               setDeleting(null);
               const current = tree.pages.find((p) => p.id === params.pageId);
-              if (current && deleting && isInside(tree, current.parentId, deleting)) {
+              const shownIn = current ? current.parentId : (params.folderId ?? null);
+              if (deleting && isInside(tree, shownIn, deleting)) {
                 void navigate({ to: '/s/$spaceId', params: { spaceId } });
               }
             }}

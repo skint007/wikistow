@@ -30,11 +30,13 @@ export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
   onSelect && { label, onSelect, destructive };
 
-/** A folder's actions: for editors, what they can do there; for everyone, Export. */
+/** A folder's actions: for everyone, Open and Export; for editors, what they can do there. */
 export function folderActions({
+  onOpen,
   editing,
   onExport,
 }: {
+  onOpen: () => void;
   editing: {
     onNewPage: () => void;
     onNewFromTemplate: () => void;
@@ -48,6 +50,7 @@ export function folderActions({
   onExport: () => void;
 }): MenuAction[] {
   return [
+    action('Open', onOpen),
     action('New page here', editing?.onNewPage),
     action('New page from template here', editing?.onNewFromTemplate),
     action('New folder here', editing?.onNewFolder),

@@ -248,8 +248,8 @@ function TypeItems({
   );
 }
 
-/** An editable value, as its type is edited. */
-function ValueField({
+/** An editable value, as its type is edited: a row's, or a folder table's cell. */
+export function ValueField({
   property,
   label,
   scope,
