@@ -156,11 +156,15 @@ describe('filters in a query', () => {
       { key: 'path', value: 'C:\\Users\\n' },
     ]);
     // As a phone's keyboard writes quotes.
-    expect(parseSearch('status:“in progress” note:„a b“ x:“c d"').filters).toEqual([
-      { key: 'status', value: 'in progress' },
-      { key: 'note', value: 'a b' },
-      { key: 'x', value: 'c d' },
-    ]);
+    expect(parseSearch('status:“in progress” note:„a b“ x:“c d" y:„w toku” zupa')).toEqual({
+      words: 'zupa',
+      filters: [
+        { key: 'status', value: 'in progress' },
+        { key: 'note', value: 'a b' },
+        { key: 'x', value: 'c d' },
+        { key: 'y', value: 'w toku' },
+      ],
+    });
     // A quote not closed runs to the end, as one being typed does.
     expect(parseSearch('status:"in prog').filters).toEqual([{ key: 'status', value: 'in prog' }]);
   });

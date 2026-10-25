@@ -274,7 +274,7 @@ export type SearchFilter = { key: string; value: string };
 /**
  * A query's words and filters, read a word at a time: up to a space, or
  * a word or value in double quotes (`"…"`, or as a phone may write them,
- * `“…”` or `„…“`) up to its closing quote, after which the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
+ * `“…”`, `„…“` or `„…”`) up to its closing quote, after which the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
  * a backslash in them (any other backslash is itself), and one not closed
  * runs to the query's end. A filter is a name, as a property reference's
  * (letters, digits, `_` and `-`; for a key with spaces, `_` stands in, as
@@ -321,9 +321,10 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
 
 /**
  * The double quotes that open a word or value, each with those that close
- * it: a phone's keyboard may make `"` into `“` and `”`, or `„` and `“`.
+ * it: a phone's keyboard may make `"` into `“` and `”`, or `„` and `“` or
+ * `”`, as languages write them.
  */
-const QUOTES: Record<string, string> = { '"': '"', '“': '”"', '„': '“"' };
+const QUOTES: Record<string, string> = { '"': '"', '“': '”"', '„': '“”"' };
 
 /** A filter's name and its colon, at a word's start. */
 const FILTER_NAME = /([\p{L}\p{N}][\p{L}\p{N}_-]*):/uy;
