@@ -1,4 +1,4 @@
-import type { AttachmentRef, LinkablePage } from '@wikistow/client';
+import type { AttachmentRef, LinkablePage, PropertyData } from '@wikistow/client';
 import type { Ref } from 'react';
 
 // An editor surface is one way of editing a page's Markdown body: the
@@ -93,6 +93,11 @@ export type EditorSurfaceProps = {
   onFiles: (files: File[], place: (markdown: string) => boolean) => void;
   /** The page's line break, its frontmatter's, for text with none of its own yet; LF if not given. */
   lineBreak?: LineBreak;
+  /**
+   * The page's properties, as its frontmatter has them now, which its
+   * references (`` `=key` ``) show and `` `= `` completes; null for none.
+   */
+  properties?: readonly PropertyData[] | null;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
   ref?: Ref<EditorSurfaceHandle>;

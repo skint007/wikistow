@@ -396,6 +396,23 @@ async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') 
   return { container, ref };
 }
 
+describe('a reference in the visual editor', () => {
+  it('shows the value beside the code, follows the properties, and leaves the text as written', async () => {
+    const page = '---\nservings: 4\n---\nServes `=servings` and `= this.nope`.\n';
+    const { container, ref } = await pageEditor(page, 'visual');
+    const chip = () =>
+      container.querySelector<HTMLElement>('#page-visual [data-hint="servings · property"]');
+    await expect.poll(() => chip()?.textContent).toBe('4');
+    expect(chip()?.contentEditable).toBe('false');
+    const unknown = container.querySelector('#page-visual [data-hint="No property has this name"]');
+    expect(unknown?.textContent).toBe('= this.nope');
+    expect(ref.current?.read()).toBe(page);
+    act(() => ref.current?.replace(page.replace('servings: 4', 'servings: 6')));
+    await expect.poll(() => chip()?.textContent).toBe('6');
+    expect(ref.current?.read()).toBe(page.replace('servings: 4', 'servings: 6'));
+  });
+});
+
 describe('Insert in page', () => {
   for (const mode of ['source', 'visual'] as const) {
     it(`keeps a reference apart from code beside it in the ${mode} editor`, async () => {

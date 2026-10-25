@@ -1,8 +1,9 @@
-import { splitFrontmatter } from '@wikistow/client';
+import { readProperties, splitFrontmatter } from '@wikistow/client';
 import { Plus } from 'lucide-react';
 import {
   useEffect,
   useImperativeHandle,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -415,6 +416,10 @@ export function PageEditor({
   };
 
   const lineBreak = lineBreakOf(frontmatter.current ?? '');
+  const propertyData = useMemo(() => {
+    const read = readProperties(properties);
+    return read.ok ? read.properties : null;
+  }, [properties]);
   const surfaceProps: EditorSurfaceProps = {
     ...assist,
     ref: attach,
@@ -428,6 +433,7 @@ export function PageEditor({
     onFiles: (files, place) =>
       assist.onFiles(files, (markdown) => given.current === null && place(markdown)),
     lineBreak,
+    properties: propertyData,
   };
   // The source beside the visual editor: its edits go there once typing pauses.
   const mirrorProps: EditorSurfaceProps = {
@@ -440,6 +446,7 @@ export function PageEditor({
         syncVisual(text, Math.max(SYNC_MS, SYNC_SHARE * synced.current));
     },
     lineBreak,
+    properties: propertyData,
   };
   const chosen = picked(mode);
   const checking = mode === 'checking' || mode === 'checking-split';
