@@ -44,6 +44,7 @@ import {
 // already can write it otherwise (`.inf` comes back quoted).
 
 const FIELD = 'h-8 bg-background';
+const BROKEN = 'It has a line break, which a field can’t show.';
 const SHOWN =
   'block min-h-(--row) w-full min-w-0 rounded-row px-2 py-1 -mx-2 text-left wrap-anywhere hover:bg-background/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none';
 
@@ -87,6 +88,8 @@ export function PropertyRow({
 }) {
   const [renaming, setRenaming] = useState(false);
   const label = propertyLabel(property.key);
+  // A field is one line: a value with a line break in it (`"a\nb"`) would lose it there.
+  const broken = typeof property.value === 'string' && /[\r\n]/.test(property.value);
   const menu = useRef<HTMLButtonElement>(null);
   const value = useRef<HTMLElement>(null);
   // A field the keyboard closed, or one whose value now shows otherwise (a
@@ -131,7 +134,7 @@ export function PropertyRow({
         </PropertyKey>
       )}
       <dd ref={value} className="min-w-0">
-        {property.editable ? (
+        {property.editable && !broken ? (
           <ValueField
             property={property}
             label={label}
@@ -144,7 +147,7 @@ export function PropertyRow({
           <div className="grid gap-0.5 py-1">
             <PropertyValueView property={property} scope={{ ...scope, editor: true }} />
             <span className="text-xs text-muted-foreground">
-              {lock}{' '}
+              {property.editable ? BROKEN : lock}{' '}
               <button
                 type="button"
                 onClick={onAsText}
@@ -314,7 +317,6 @@ function TextField({
         initial={text}
         label={label}
         type={day ? 'date' : type === 'url' ? 'url' : 'text'}
-        inputMode={type === 'number' ? 'decimal' : undefined}
         onDone={(typed, keyboard) => {
           const next = typed === undefined ? value : typedValue(typed, value);
           if (sameValue(next, value) || onSet(next)) onOpened(false, keyboard);
@@ -414,13 +416,11 @@ function OneLine({
   initial,
   label,
   type = 'text',
-  inputMode,
   onDone,
 }: {
   initial: string;
   label: string;
   type?: 'text' | 'date' | 'url';
-  inputMode?: 'decimal' | undefined;
   onDone: (typed: string | undefined, keyboard: boolean) => void;
 }) {
   const [text, setText] = useState(initial);
@@ -432,7 +432,6 @@ function OneLine({
       autoFocus
       aria-label={label}
       type={type}
-      inputMode={inputMode}
       value={text}
       spellCheck={false}
       onChange={(event) => {
@@ -443,11 +442,15 @@ function OneLine({
         // Enter that ends an IME's composition is the IME's.
         if ((event.key !== 'Enter' && event.key !== 'Escape') || composing(event)) return;
         event.preventDefault();
+        // A date half typed reads as nothing: Enter waits for the rest.
+        const half = event.currentTarget.validity.badInput;
+        if (event.key === 'Enter' && half) return;
         done.current = true;
         onDone(event.key === 'Enter' ? text : undefined, true);
       }}
-      onBlur={() => {
-        if (!done.current) onDone(text, false);
+      onBlur={(event) => {
+        // Left half typed, it puts back what was there.
+        if (!done.current) onDone(event.currentTarget.validity.badInput ? undefined : text, false);
       }}
       className={FIELD}
     />

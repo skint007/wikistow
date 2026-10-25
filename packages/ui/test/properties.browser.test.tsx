@@ -256,6 +256,28 @@ describe('the draft’s property rows', () => {
     expect(blocks).toEqual([]);
   });
 
+  it('puts a date back that was left half typed', async () => {
+    const { container, blocks } = await editor(NOTE);
+    await userEvent.click(button(container, /^Created: 2026-10-12/));
+    const date = field(container, 'Created');
+    expect(date.type).toBe('date');
+    await userEvent.keyboard('{Backspace}');
+    expect(date.validity.badInput).toBe(true);
+    await userEvent.keyboard('{Enter}');
+    expect(field(container, 'Created')).toBe(date);
+    await userEvent.click(container.querySelector('dt')!);
+    expect(blocks).toEqual([]);
+    expect(button(container, /^Created: 2026-10-12/)).toBeTruthy();
+  });
+
+  it('keeps a value with a line break in it out of a one-line field', async () => {
+    const { container } = await editor('---\ndesc: "line one\\nline two"\n---\n');
+    const value = container.querySelector('dd')!;
+    expect(value.textContent).toContain('line one\nline two');
+    expect(value.textContent).toContain('It has a line break');
+    expect(value.querySelectorAll('button')).toHaveLength(1);
+  });
+
   it('says why an edit can’t be made, and refuses a key the block has', async () => {
     const { container, blocks } = await editor('---\nname: x\n---\n');
     await userEvent.click(button(container, 'Add property'));
