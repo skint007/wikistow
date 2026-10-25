@@ -234,6 +234,10 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         // Followed by the next update instead, unless the vault locked or
         // access changed: the next index is built afresh.
         if (ctx.revisions.generation === generation) noteBack(queryClient, changes);
+        // Given up as nothing shows it any more: no draft's text waits.
+        if (!queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive()) {
+          savesAsSpaces(queryClient);
+        }
         throw error;
       }
       if (device && index !== shown) {

@@ -24,6 +24,8 @@ const client = vi.hoisted(() => ({
   server: new Map<string, { doc: unknown; content: unknown }>(),
   updates: [] as unknown[],
   failNext: false,
+  // The next update waits until it is given up.
+  slowNext: false,
   keepSearchIndex: vi.fn(),
 }));
 
@@ -44,8 +46,19 @@ vi.mock('@wikistow/client', async (actual) => {
       },
       // As the client's: spaces named are listed from the server, and a
       // save in another is put in where the index holds its page.
-      updateIndex: async (_ctx: unknown, index: searchOperations.PageIndex, changes: Changes) => {
+      updateIndex: async (
+        _ctx: unknown,
+        index: searchOperations.PageIndex,
+        changes: Changes,
+        { signal }: { signal?: AbortSignal } = {},
+      ) => {
         client.updates.push(changes);
+        if (client.slowNext) {
+          client.slowNext = false;
+          await new Promise((_, reject) =>
+            signal?.addEventListener('abort', () => reject(new ops.IndexAbandoned())),
+          );
+        }
         if (client.failNext) {
           client.failNext = false;
           throw new Error('offline');
@@ -134,6 +147,7 @@ beforeEach(() => {
   client.server.clear();
   client.updates = [];
   client.failNext = false;
+  client.slowNext = false;
   client.keepSearchIndex.mockReset().mockResolvedValue(undefined);
   put(home, 'soup', 'bean soup');
   put(home, 'bread', 'rye bread');
@@ -216,6 +230,24 @@ describe('the app’s search index', () => {
     const unsubscribe = again.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(GATHER_MS);
     expect(updates()).toEqual([[home]]);
+    unsubscribe();
+  });
+
+  it('keeps no draft’s text from an update given up as nothing shows it', async () => {
+    const { queryClient, stop } = await shown();
+    client.slowNext = true;
+    const doc = put(home, 'soup', 'given up words', 'own-1');
+    searchIndexChanged(queryClient, {
+      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'given up words' },
+    });
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    // Navigated away while it updated: React Query gives it up.
+    stop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const again = new QueryObserver(queryClient, searchIndexQuery(ctxOf(), queryClient));
+    const unsubscribe = again.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    expect(updates()).toEqual([[[], ['own-1']], [home]]);
     unsubscribe();
   });
 
