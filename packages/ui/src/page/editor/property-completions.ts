@@ -19,7 +19,7 @@ import type { OtherPages } from '../other-pages';
  * name so far, up to the cursor: the link is group `page`, the name `name`.
  */
 export const TYPING_REFERENCE =
-  /`=[ \t]*(?:this\.|(?<page>\[\[[^[\]\r\n]+\]\])\.)?(?<name>[\p{L}\p{N} _-]*)$/u;
+  /`=[ \t]*(?:this\.|(?<page>\[\[[^[\]\r\n]+\]\])\.)?(?<name>[\p{L}\p{M}\p{N} _-]*)$/u;
 
 /** Text before `[[` that makes the link a reference's page: `` `= ``. */
 export const REFERENCE_PAGE = /`=[ \t]*$/;

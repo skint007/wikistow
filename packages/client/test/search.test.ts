@@ -175,6 +175,13 @@ describe('filters in a query', () => {
     });
     // A quote not closed runs to the end, as one being typed does.
     expect(parseSearch('status:"in prog').filters).toEqual([{ key: 'status', value: 'in prog' }]);
+    // Names with combining marks, as a reference's may have.
+    expect(parseSearch('मूल्य:40 ราคาที่ดี:5 cafe\u0301:x').filters).toEqual([
+      { key: 'मूल्य', value: '40' },
+      { key: 'ราคาที่ดี', value: '5' },
+      { key: 'cafe\u0301', value: 'x' },
+    ]);
+    expect(parseSearch('\u0301x:1')).toEqual({ words: '\u0301x:1', filters: [] });
   });
 
   it('leave words, quoted words and half-typed filters be', () => {
@@ -207,6 +214,7 @@ describe('filters in a query', () => {
     // 8 times the query; quadratic would be 64.
     expect(growth((q) => parseSearch(q), query(2000), query(16_000))).toBeLessThan(24);
     expect(cpuTime(() => parseSearch(`a${'_'.repeat(200_000)}`)).ms).toBeLessThan(500);
+    expect(cpuTime(() => parseSearch(`a${'\u0301'.repeat(200_000)}`)).ms).toBeLessThan(500);
     // Names with no value, before a long run of spaces.
     const empty = (n: number) => `${'a: '.repeat(n)}z${' '.repeat(10 * n)}`;
     expect(growth((q) => parseSearch(q), empty(2000), empty(16_000))).toBeLessThan(24);
@@ -216,6 +224,7 @@ describe('filters in a query', () => {
     expect(searchFilter('tag', 'soup')).toBe('tag:soup');
     expect(searchFilter('status', 'in progress')).toBe('status:"in progress"');
     expect(searchFilter('cook time', '40')).toBe('cook_time:40');
+    expect(searchFilter('मूल्य', '40')).toBe('मूल्य:40');
     expect(searchFilter('note', 'say "hi" \\ bye')).toBe('note:"say \\"hi\\" \\\\ bye"');
     expect(searchFilter('a.b', 'x')).toBeNull();
     expect(searchFilter('tag', ' ')).toBeNull();
@@ -274,6 +283,11 @@ describe('matching a filter', () => {
     expect(passes('side', 'Recipes/Green salad')).toBe(true);
     expect(passes('side', 'recipes')).toBe(false);
     expect(passes('tag', 'Soup')).toBe(true);
+    // A key with its accent typed apart from its letter (NFD), or with it (NFC).
+    const accented = propertyData('---\ncaf\u00E9: au lait\nprix_de_cafe\u0301: 3\n---\n');
+    expect(matchesFilter(accented, { key: 'cafe\u0301', value: 'au lait' })).toBe(true);
+    expect(matchesFilter(accented, { key: 'prix_de_caf\u00E9', value: '3' })).toBe(true);
+    expect(matchesFilter(accented, { key: 'cafe', value: 'au lait' })).toBe(false);
   });
 
   it('matches whole values only', () => {

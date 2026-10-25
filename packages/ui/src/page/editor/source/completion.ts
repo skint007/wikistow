@@ -163,8 +163,8 @@ function referable(state: EditorState, from: number): boolean {
 function insertName(text: string) {
   return (view: EditorView, completion: Completion, from: number, to: number) => {
     const after = view.state.sliceDoc(to, to + 200);
-    const word = /^[\p{L}\p{N}_-]*/u.exec(after)?.[0] ?? '';
-    const rest = /^[\p{L}\p{N} _-]*(?=`)/u.exec(after)?.[0];
+    const word = /^[\p{L}\p{M}\p{N}_-]*/u.exec(after)?.[0] ?? '';
+    const rest = /^[\p{L}\p{M}\p{N} _-]*(?=`)/u.exec(after)?.[0];
     const ends = (part: string) =>
       foldPropertyName(text).endsWith(foldPropertyName(part.trimEnd()));
     const end = rest !== undefined && (rest === word || ends(rest)) ? to + rest.length : to;

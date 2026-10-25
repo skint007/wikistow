@@ -27,6 +27,7 @@ describe('a reference to another page’s value', () => {
       name: 'cook time',
       page: page('Recipes/Garlic bread', 2),
     });
+    expect(parsePropertyReference('=[[दाल]].मूल्य')).toEqual({ name: 'मूल्य', page: page('दाल') });
   });
 
   it('leaves anything else as code, links with a heading, text or embed included', () => {
@@ -35,6 +36,7 @@ describe('a reference to another page’s value', () => {
       '=[[Page]].',
       '=[[Page]]key',
       '=[[Page]].SUM(A1)',
+      '=[[Page]].\u0301x',
       '=[[Page#Dates]].key',
       '=[[Page|text]].key',
       '=![[Page]].key',
@@ -64,10 +66,25 @@ describe('a reference to one of the page’s values', () => {
     expect(parsePropertyReference('=this.cook time')).toEqual({ name: 'cook time' });
     expect(parsePropertyReference('=  cook_time ')).toEqual({ name: 'cook_time' });
     expect(parsePropertyReference('=Größe')).toEqual({ name: 'Größe' });
+    // Combining marks after the first letter: Devanagari, Thai, an accent typed apart.
+    expect(parsePropertyReference('=मूल्य')).toEqual({ name: 'मूल्य' });
+    expect(parsePropertyReference('= this.ราคาที่ดี')).toEqual({ name: 'ราคาที่ดี' });
+    expect(parsePropertyReference('=cafe\u0301')).toEqual({ name: 'cafe\u0301' });
   });
 
   it('leaves code that names no property as code', () => {
-    for (const code of ['servings', '=', '= ', '=SUM(A1:A3)', '=a.b', '==x', '=_x', '=x\ny']) {
+    for (const code of [
+      'servings',
+      '=',
+      '= ',
+      '=SUM(A1:A3)',
+      '=a.b',
+      '==x',
+      '=_x',
+      '=x\ny',
+      '=\u0301e',
+      '=\u093Fकीमत',
+    ]) {
       expect(parsePropertyReference(code), code).toBe(null);
     }
   });

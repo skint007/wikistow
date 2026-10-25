@@ -205,9 +205,12 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
   );
 }
 
-/** A name as names match keys: case folded, and `_`, `-` and spaces alike. */
+/**
+ * A name as names match keys: case folded, `_`, `-` and spaces alike, and
+ * an accent typed apart from its letter (NFD) the same as one with it (NFC).
+ */
 export const foldPropertyName = (name: string) =>
-  name.toLocaleLowerCase('en').replace(/[_ -]/g, ' ');
+  name.normalize('NFC').toLocaleLowerCase('en').replace(/[_ -]/g, ' ');
 
 const NAME = new RegExp(`^${VARIABLE_NAME.source}$`, 'u');
 

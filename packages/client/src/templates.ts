@@ -53,10 +53,11 @@ export function templatesIn<P extends Node & { title: string | null }>(
 }
 
 /**
- * A variable's name: a letter or digit, then only those, spaces, `_` and
- * `-`. A property reference's name follows the same rule.
+ * A variable's name: a letter or digit, then only those, combining marks
+ * (as Devanagari's vowel signs, or an accent typed apart from its letter),
+ * spaces, `_` and `-`. A property reference's name follows the same rule.
  */
-export const VARIABLE_NAME = /[\p{L}\p{N}][\p{L}\p{N} _-]*/u;
+export const VARIABLE_NAME = /[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*/u;
 
 /**
  * `{{name}}`, `{{name|default}}` or `{{name:format}}`, by `VARIABLE_NAME`,
@@ -78,7 +79,7 @@ type Variable =
 // What one match stands for, or null for text left as it is: a format
 // only goes on a date or time, and a default only on an asked variable.
 function variableOf(name: string, mark: string | undefined, rest = ''): Variable | null {
-  const label = name.replace(/\s+/g, ' ');
+  const label = name.normalize('NFC').replace(/\s+/g, ' ');
   const key = label.toLowerCase();
   if (key === 'date' || key === 'time') {
     if (mark === '|') return null;

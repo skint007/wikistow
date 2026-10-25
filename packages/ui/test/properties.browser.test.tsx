@@ -550,6 +550,34 @@ describe('completing a reference', () => {
     }
   });
 
+  it('completes a name with combining marks, as Devanagari has, in both editors', async () => {
+    const marked = '---\nमूल्य: 40\n---\nServes \n';
+    for (const mode of ['source', 'visual'] as const) {
+      const { container, ref } = await pageEditor(marked, mode);
+      act(() => ref.current?.focus());
+      // Up to its virama, a combining mark.
+      await userEvent.keyboard(
+        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=मूल्' : '{End} `=मूल्',
+      );
+      const shown = () =>
+        mode === 'source'
+          ? [...container.querySelectorAll('div')].flatMap((div) =>
+              [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+                (l) => l.textContent,
+              ),
+            )
+          : [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
+              (option) => option.firstChild?.textContent,
+            );
+      await expect.poll(shown).toEqual(['मूल्य']);
+      await userEvent.keyboard('{Enter}');
+      await expect
+        .poll(() => ref.current?.read())
+        .toBe(marked.replace('Serves \n', 'Serves `=मूल्य`\n'));
+      for (const unmount of unmounts.splice(0)) unmount();
+    }
+  });
+
   it('offers them in the visual editor too, writing the reference as code', async () => {
     const { container, ref } = await pageEditor(page, 'visual');
     await userEvent.click(container.querySelector('#page-visual p')!);
