@@ -28,7 +28,8 @@ const NO_PAGE_HINT = 'No page has this title';
 
 /**
  * The value a reference shows, as a chip drawn after the code, its hint
- * `hint`, above it in a link's text, as a link's hint is (`linkHint`).
+ * `hint`, above it if it's drawn in a link's text, as a link's hint is
+ * (`linkHint`). ProseMirror draws it in the marks of what follows the code.
  */
 function chip(property: PropertyData, hint: string, inLink: boolean) {
   return () => {
@@ -51,15 +52,9 @@ function decorations(
 ): DecorationSet {
   const found: Decoration[] = [];
   // A run of inline code, which may be several text nodes as other marks change.
-  // Whether any of it is in a link, and the marks of its end, where its chip goes.
-  let run: {
-    from: number;
-    to: number;
-    text: string;
-    inLink: boolean;
-    marks: readonly Mark[];
-  } | null = null;
-  const flush = () => {
+  let run: { from: number; to: number; text: string; inLink: boolean } | null = null;
+  // `after` holds the marks of what follows the run, which its chip is drawn in.
+  const flush = (after: readonly Mark[] = []) => {
     const reference = run && parsePropertyReference(run.text);
     const other = reference?.page ? others?.(reference.page) : undefined;
     // Another page's reference waits for the index, showing nothing meanwhile.
@@ -73,16 +68,12 @@ function decorations(
       if (property) {
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
-        // In the code's marks but its own, so it's in a link just where the code is,
-        // not the next text's.
-        const marks = run.marks.filter((mark) => mark.type.name !== 'inlineCode');
-        const inLink = marks.some((mark) => mark.type.name === 'link');
+        const inLink = after.some((mark) => mark.type.name === 'link');
         found.push(
           Decoration.widget(run.to, chip(property, hint, inLink), {
             side: 1,
-            marks,
             ignoreSelection: true,
-            key: `property:${hint}:${value}:${marks.map((mark) => mark.type.name).join(',')}`,
+            key: `property:${hint}:${value}:${inLink}`,
           }),
         );
       } else {
@@ -105,22 +96,15 @@ function decorations(
       node.forEach((child, offset) => {
         const at = pos + 1 + offset;
         const code = child.isText && child.marks.some((mark) => mark.type.name === 'inlineCode');
-        if (!code) return flush();
+        if (!code) return flush(child.marks);
         const inLink = child.marks.some((mark) => mark.type.name === 'link');
         if (run && run.to === at) {
           run.to += child.nodeSize;
           run.text += child.text ?? '';
           run.inLink ||= inLink;
-          run.marks = child.marks;
         } else {
           flush();
-          run = {
-            from: at,
-            to: at + child.nodeSize,
-            text: child.text ?? '',
-            inLink,
-            marks: child.marks,
-          };
+          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', inLink };
         }
       });
       flush();

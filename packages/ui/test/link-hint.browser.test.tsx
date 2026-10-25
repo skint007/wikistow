@@ -225,7 +225,7 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
   const read = readProperties(splitFrontmatter(FRONTMATTER).frontmatter);
   const container = await render(
     <VisualSurface
-      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[read more](https://example.com).\n`}
+      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[read more](https://example.com), and [ending one \`=goes_with\`](https://example.com) here.\n`}
       properties={read.ok ? read.properties : null}
       onChange={() => {}}
       links={links}
@@ -249,7 +249,7 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
     text: 'More than one page has this title. Choose which page “Dal” means (Alt+Enter).',
     side: 'bottom',
   });
-  // References in a link's text: the value's chip, in the link with its code, and a name not found.
+  // References in a link's text: the value's chip, and a name not found.
   await expect
     .poll(() => container.querySelector('a [data-hint="servings · property"]'))
     .not.toBeNull();
@@ -261,10 +261,15 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
     text: 'No property has this name',
     side: 'top',
   });
-  // Just before a link, the chip is outside it, as its code is, and keeps its side.
-  expect(container.querySelector('a [data-hint="with · property"]')).toBeNull();
-  expect(await hinted(container, '[data-hint="with · property"]')).toEqual({
+  // The chip is drawn in what follows its code: in a link just after it, so
+  // its hint is above, and after a link it ends, where it keeps its side.
+  expect(await hinted(container, 'a [data-hint="with · property"]')).toEqual({
     text: 'with · property',
+    side: 'top',
+  });
+  expect(container.querySelector('a [data-hint="goes_with · property"]')).toBeNull();
+  expect(await hinted(container, '[data-hint="goes_with · property"]')).toEqual({
+    text: 'goes_with · property',
     side: 'bottom',
   });
 });
