@@ -176,6 +176,8 @@ describe('filters in a query', () => {
       words: '10:30 https://example.com/recipe',
       filters: [{ key: 'tag', value: 'soup' }],
     });
+    // In any digits.
+    expect(parseSearch('١٠:٣٠ १०:३० １０:３０').filters).toEqual([]);
     expect(parseSearch('url:"//example.com"').filters).toEqual([
       { key: 'url', value: '//example.com' },
     ]);
@@ -202,6 +204,7 @@ describe('filters in a query', () => {
     expect(searchFilter('tags', '#')).toBeNull();
     // A name of digits alone would read as a time, so no filter has one.
     expect(searchFilter('2024', 'x')).toBeNull();
+    expect(searchFilter('２０２４', 'x')).toBeNull();
     expect(searchFilter('url', '//example.com')).toBe('url:"//example.com"');
     for (const [key, value] of [
       ['status', 'in progress'],

@@ -299,7 +299,7 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
     FILTER_NAME.lastIndex = at;
     const name = FILTER_NAME.exec(query)?.[1];
     // A time (`10:30`) is words.
-    if (name !== undefined && !/^\d+$/u.test(name)) {
+    if (name !== undefined && !/^\p{N}+$/u.test(name)) {
       const from = at + name.length + 1;
       const quoted = readQuoted(query, from);
       const end = quoted?.end ?? wordEnd(query, from);
@@ -351,7 +351,8 @@ function readQuoted(query: string, at: number): { text: string; end: number } | 
  */
 export function searchFilter(key: string, value: string): string | null {
   const name = key.trim().replace(/ /g, '_');
-  const named = new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) && !/^\d+$/u.test(name);
+  const named =
+    new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) && !/^\p{N}+$/u.test(name);
   if (!named || emptyFilter(name, value)) {
     return null;
   }
