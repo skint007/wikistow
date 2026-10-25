@@ -70,13 +70,14 @@ function decorations(
       if (property) {
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
-        // ProseMirror draws the chip in the marks of what follows the code. Where
-        // that's more code, it's drawn in the marks both share, out of that code.
+        // ProseMirror draws the chip in the marks of what follows the code.
+        // Where that's more code, it's drawn out of it, in the marks both
+        // share outside their `<code>`, such as italic: a mark inside it, as
+        // a link is, would wrap the chip alone, where the cursor can land.
         const code = (mark: Mark) => mark.type.name === 'inlineCode';
-        const before = run.marks;
-        const marks = after.some(code)
-          ? after.filter((mark) => !code(mark) && mark.isInSet(before))
-          : undefined;
+        // The run's marks hold its code, so some mark ends what's shared.
+        const shared = run.marks.findIndex((mark, i) => code(mark) || !after[i]?.eq(mark));
+        const marks = after.some(code) ? run.marks.slice(0, shared) : undefined;
         const inLink = (marks ?? after).some((mark) => mark.type.name === 'link');
         found.push(
           Decoration.widget(run.to, chip(property, hint, inLink), {

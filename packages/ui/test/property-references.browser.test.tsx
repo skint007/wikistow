@@ -210,4 +210,22 @@ describe('a reference beside a link’s edge, or another mark’s', () => {
     const editor = await visual(frontmatter, `${body}\n`);
     await expect.poll(() => shown(editor.querySelector('#page-visual'))).toEqual(references);
   });
+
+  // Between two code spans, the value's chip is out of both, and never
+  // alone in a mark's element, where the cursor could land beside it.
+  it.each([
+    '`=servings`[`x` more](https://example.com)',
+    '[`=servings`*`x`*](https://example.com)',
+    '[~~`=servings`~~`x`](https://example.com)',
+    '~~`=servings`*`x`*~~',
+    '*`=servings`~~`x`~~*',
+  ])('draws the chip of %s out of the code after it', async (body) => {
+    const editor = await visual('---\nservings: 4\n---\n', `${body}\n`);
+    await expect
+      .poll(() => editor.querySelector('#page-visual [data-hint="servings · property"]'))
+      .not.toBeNull();
+    const chip = editor.querySelector('#page-visual [data-hint="servings · property"]')!;
+    expect(chip.closest('code')).toBeNull();
+    expect(chip.parentElement?.textContent).not.toBe(chip.textContent);
+  });
 });
