@@ -8,12 +8,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Features
 
+- Open a folder to see its pages as a table of their properties, and change a value right in its cell.
 - A page's properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout. Write `=servings` in inline code to show a value in the page.
 
 ### Changes
 
 #### App
 
+- A folder opens to its pages, as a list or a table of their properties: click its name in the sidebar, or **Open** in its menu, and its chevron still just opens or closes it there. The table's columns are the keys the pages use, which you can hide, and the list or table choice is kept per folder on this device. Readers see published values, and editors their drafts, labelled. Editors change a value in its cell, which saves that page's draft changing only that value; if someone saved the page since, the cell says so and nothing is overwritten. On phones the list comes first, and the table scrolls sideways. (#192)
 - Clicking a tag in a page's properties opens search for that tag, on the published page and the draft, without leaving the page. On the draft, a tag's × still removes it. (#191)
 - Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. An address ending `#search=` and a query opens search with it. (#187)
 - Inline code `=servings` in a page's body, or Dataview's `= this.servings`, shows the page's `servings` value, with a dotted underline and a hint naming the property: a list comma-separated, a date in your locale, a page link as a link. A name the page has no property for shows as written. The visual editor shows the value beside the code, and typing `` `= `` completes the page's keys in both editors. **Add property** suggests the keys that pages in the same folder use. A public link's copy has the values written in as plain text, its frontmatter still left out. (#188)
