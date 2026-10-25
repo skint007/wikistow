@@ -25,7 +25,7 @@ In short: **Share public link…** uploads a readable copy of the page's publish
 
 The server stores no plaintext page content except the published version of a page someone has given a public link, and only while the link is on. That copy is:
 
-- the published version's title and Markdown body. Its frontmatter is left out, so properties stay encrypted;
+- the published version's title and Markdown body. Its frontmatter is left out, so properties stay encrypted, apart from the values the body shows, which ADR 0006 (decision 9) writes in as text;
 - the attachments the body shows or links to, by `attachment:<id>` or `![[file]]`, and no others;
 - its own link table's entries for the wikilinks that name, by its published title alone, a page whose link is on, kept only while that page's link is (decision 6);
 - the server's own rendering of that body.

@@ -118,6 +118,18 @@ A file referenced by a page version, such as an image or downloadable script. It
 A page in a folder named Templates that new pages can start from. Its `{{variables}}` are filled in by the person making the page; the copy is an ordinary page with no tie to its template.
 _Avoid_: Blueprint, page type.
 
+**Property**
+A key and its value in a page's frontmatter, such as `servings: 4`. Its type is whatever its value reads as; nothing declares it.
+_Avoid_: Field, attribute, metadata (folder metadata is something else).
+
+**Property reference**
+Inline code such as `` `=servings` `` or `` `=[[Page]].servings` `` that shows a property's value in a page's body.
+_Avoid_: Variable (template variables are filled once, when a page is made), placeholder.
+
+**Query table**
+A `wikistow-query` code block, shown as a table of the pages that match it, as each viewer can see them.
+_Avoid_: Dataview, database view.
+
 **Wikilink**
 A link written as `[[Page title]]` that resolves to a page in the same space by title. It follows the page when the page is renamed.
 
