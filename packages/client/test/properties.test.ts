@@ -315,8 +315,12 @@ flow_lines: [a,
       reason: 'Map keys must be unique (line 4).',
     });
     expect(readProperties('---\nm: {x: 1, x: 2}\n---\n')).toMatchObject({ ok: false });
-    // A number and a string are different keys to YAML.
-    expect(readProperties('---\n1: a\n"1": b\n---\n')).toMatchObject({ ok: true });
+    // A number and a string differ to YAML, but are the same key as written.
+    expect(readProperties('---\n1: a\n"1": b\n---\n')).toEqual({
+      ok: false,
+      reason: 'Map keys must be unique (line 3).',
+    });
+    expect(readProperties('---\ntrue: a\n"true": b\n---\n')).toMatchObject({ ok: false });
     expect(readProperties('---\na: *x\nb: &x 1\n---\n')).toEqual({
       ok: false,
       reason: 'An alias names no anchor before it (line 2).',

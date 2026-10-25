@@ -329,6 +329,8 @@ function readBlock(frontmatter: string | null): ReadBlock {
     return yaml.slice(start, end).trimEnd();
   };
   const entries: Entry[] = [];
+  // Keys as written: `1` and `"1"` differ to YAML, but would be one here.
+  const keys = new Set<string>();
   for (const pair of map.items) {
     const key = pair.key;
     if (!isScalar(key) || !key.range) return refused('A key isn’t plain text.');
@@ -352,9 +354,14 @@ function readBlock(frontmatter: string | null): ReadBlock {
       read === undefined
         ? { type: 'text' as const, value: value ? sourceOf(value) : '' }
         : { type: typeOf(read), value: read };
+    const written = typeof key.value === 'string' ? key.value : sourceOf(key);
+    if (keys.has(written)) {
+      return refused(`Map keys must be unique (line ${lineOf(yaml, key.range[0])}).`);
+    }
+    keys.add(written);
     entries.push({
       property: {
-        key: typeof key.value === 'string' ? key.value : sourceOf(key),
+        key: written,
         ...data,
         keySpan,
         valueSpan,
