@@ -178,16 +178,12 @@ const OPERATORS = ['!=', '<=', '>=', '=', '<', '>'] as const;
 
 function readCondition(text: string): QueryCondition | string {
   const shape = `“${text}” isn’t a condition: a property name, then =, !=, <, <=, >, >= or has, then a value.`;
-  // The operator is the first outside quotes; a name has none in it.
+  // The operator is the first outside quotes, as a name holds none; ` has `
+  // only where there is none of those, as a name may hold the word.
   let at = -1;
   let operator: QueryOperator | null = null;
-  const has = /[ \t]has[ \t]/i.exec(text);
   for (let i = 0; i < text.length && operator === null; i++) {
     if (text[i] === '"') break;
-    if (has && has.index === i) {
-      [at, operator] = [i, 'has'];
-      break;
-    }
     for (const candidate of OPERATORS) {
       if (text.startsWith(candidate, i)) {
         [at, operator] = [i, candidate];
@@ -195,12 +191,26 @@ function readCondition(text: string): QueryCondition | string {
       }
     }
   }
+  if (operator === null) {
+    const has = /[ \t]has[ \t]/i.exec(text);
+    if (has && !text.slice(0, has.index).includes('"')) [at, operator] = [has.index, 'has'];
+  }
   if (operator === null) return shape;
   const name = text.slice(0, at).trim();
   const written = text.slice(at + (operator === 'has' ? 5 : operator.length)).trim();
-  if (!isPropertyName(name) || written === '') return shape;
+  // A value starting as an operator does is a mistyped one: `==`, `=<`.
+  if (!isPropertyName(name) || written === '' || /^[=<>!]/.test(written)) return shape;
   const value = readLiteral(written);
   if (value === null) return shape;
+  if (
+    operator !== '=' &&
+    operator !== '!=' &&
+    operator !== 'has' &&
+    value.kind !== 'number' &&
+    value.kind !== 'date'
+  ) {
+    return `“${text}” compares with ${operator}, which takes a number or a date, as 4 or 2026-10-12.`;
+  }
   return { name, operator, value };
 }
 
@@ -316,34 +326,30 @@ function folderAt(
   folders: readonly QueryFolder[],
 ): { id: string } | { error: string } {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
-  // Each folder's names from the top, as far as the folders given go.
-  const pathOf = (folder: QueryFolder) => {
-    const names: string[] = [];
-    const seen = new Set<string>();
-    for (let at: QueryFolder | undefined = folder; at && !seen.has(at.id);) {
-      seen.add(at.id);
-      names.unshift(foldTitle(at.name ?? ''));
-      at = at.parentId === null ? undefined : byId.get(at.parentId);
-    }
-    return names;
-  };
   const wanted = path.map(foldTitle);
-  const paths = folders.map((folder) => ({ folder, names: pathOf(folder) }));
-  const same = (names: string[], from: number) =>
-    wanted.every((part, i) => names[from + i] === part);
-  const whole = paths.filter(({ names }) => names.length === wanted.length && same(names, 0));
-  const ending =
-    whole.length > 0
-      ? whole
-      : paths.filter(
-          ({ names }) => names.length >= wanted.length && same(names, names.length - wanted.length),
-        );
+  // Whether `folder` and those above it end with the path: looked at only
+  // as far up as the path goes, so a deep tree costs no more. `whole` asks
+  // that the path start at the top too, where no folder given is above it.
+  const at = (folder: QueryFolder, whole: boolean) => {
+    let outermost = folder;
+    for (let i = wanted.length - 1; i >= 0; i--) {
+      if (foldTitle(outermost.name ?? '') !== wanted[i]) return false;
+      if (i === 0) break;
+      const parent = outermost.parentId === null ? undefined : byId.get(outermost.parentId);
+      if (!parent) return false;
+      outermost = parent;
+    }
+    return !whole || outermost.parentId === null || !byId.has(outermost.parentId);
+  };
+  const whole = folders.filter((folder) => at(folder, true));
+  const ending = whole.length > 0 ? whole : folders.filter((folder) => at(folder, false));
   const shown = path.join('/');
   const [only] = ending;
   if (!only) return { error: `No folder here is at ${shown}.` };
-  if (ending.length > 1)
+  if (ending.length > 1) {
     return { error: `More than one folder is at ${shown}; give more of its path.` };
-  return { id: only.folder.id };
+  }
+  return { id: only.id };
 }
 
 // A property's scalar as a condition reads it.

@@ -76,9 +76,18 @@ describe('reading a query block', () => {
     });
   });
 
+  it('reads a name with “has” in it before an operator as the name', () => {
+    expect(parsed('where: who has pets = true').where).toEqual([
+      { name: 'who has pets', operator: '=', value: { kind: 'boolean', value: true } },
+    ]);
+    expect(parsed('where: tags has "a = b"').where).toEqual([
+      { name: 'tags', operator: 'has', value: { kind: 'text', value: 'a = b' } },
+    ]);
+  });
+
   it('reads a date the calendar hasn’t as text, and years before 100 as written', () => {
     for (const text of ['2024-13-45', '2024-02-30', '2026-10-12T24:00']) {
-      expect(parsed(`where: due < ${text}`).where[0]?.value, text).toEqual({
+      expect(parsed(`where: due = ${text}`).where[0]?.value, text).toEqual({
         kind: 'text',
         value: text,
       });
@@ -111,6 +120,10 @@ describe('reading a query block', () => {
       ['show: =x', /isn’t one/],
       ['sort: ', /sort: takes/],
       ['sort: (x) desc', /sort: takes/],
+      ['where: status == done', /isn’t a condition/],
+      ['where: n =< 5', /isn’t a condition/],
+      ['where: last_made > 2024-02-30', /takes a number or a date/],
+      ['where: status < b', /takes a number or a date/],
       ['limit: 0', /1 to 500/],
       ['limit: 501', /1 to 500/],
       ['limit: 2.5', /1 to 500/],
@@ -268,7 +281,6 @@ describe('running a query', () => {
     expect(titles('where: last_made < 2026-10-01')).toEqual(['Tomato soup']);
     expect(titles('where: last_made >= 2026-10-12T00:00')).toEqual(['Garlic bread']);
     expect(titles('where: status = done')).toEqual(['Garlic bread']);
-    expect(titles('where: status > a')).toEqual([]);
     expect(titles('where: status = 35')).toEqual([]);
     expect(titles('where: status = "35"')).toEqual(['Tomato soup']);
     expect(titles('where: tried = false')).toEqual(['Lemon tart']);
@@ -279,7 +291,7 @@ describe('running a query', () => {
     expect(titles('where: tags = SOUP')).toEqual(['Tomato soup']);
     expect(titles('where: tags has dessert')).toEqual(['Lemon tart']);
     expect(titles('where: tried != true')).toEqual(['Lemon tart', 'Old broth', 'Notes']);
-    expect(titles('where: tags > a')).toEqual([]);
+    expect(titles('where: tags > 1')).toEqual([]);
   });
 
   it('sorts, missing values last either way, then as given, and keeps to its limit', () => {
@@ -300,6 +312,26 @@ describe('running a query', () => {
     expect(titles('sort: title desc\nlimit: 2')).toEqual(['Tomato soup', 'Old broth']);
     const limited = run('sort: title\nlimit: 2');
     expect(limited.ok && limited.total).toBe(5);
+  });
+
+  it('finds a folder deep in a tree in time linear in the folders', () => {
+    const deep = (n: number): QueryFolder[] =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `d${i}`,
+        parentId: i === 0 ? null : `d${i - 1}`,
+        name: i === n - 1 ? 'Recipes' : `Level ${i}`,
+      }));
+    const query = parsed('from: Recipes');
+    const sizes = new Map([
+      ['small', deep(1000)],
+      ['large', deep(8000)],
+    ]);
+    const ratio = growth(
+      (which) => runPageQuery(query, { pages: [], folders: sizes.get(which) ?? [] }),
+      'small',
+      'large',
+    );
+    expect(ratio).toBeLessThan(20);
   });
 
   it('runs over many pages in time linear in them', () => {
