@@ -4,13 +4,30 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.17.0 - 2026-10-25
+
 ### Highlights
 
 #### Features
 
+- A page’s properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout.
+- Show a property’s value in the page with inline code: `=servings` for this page’s, or `=[[Garlic bread]].cook_time` for another page’s, which keeps working when that page is renamed.
+- Search finds pages by their properties: type `tag:soup` or `status:"in progress"`, alone or with words, or click a tag in a page’s properties.
 - List pages by their properties with a `wikistow-query` block: say where they are, which must hold, which values to show and how to sort them, and the page shows a table that keeps up as pages change.
-- Open a folder to see its pages as a table of their properties, and change a value right in its cell.
-- A page's properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout. Write `=servings` in inline code to show a value in the page.
+- Open a folder to see its pages as a list or a table of their properties, and change a value right in its cell. Clicking a folder’s name in the sidebar now opens it, where it used to only open or close it in the tree; its arrow still does that.
+
+#### Fixes
+
+- Hints on links open above the link, where the pointer no longer covers them.
+- A template with a very long run of spaces in a `{{variable}}` no longer holds up the template dialog.
+
+#### Optimizations
+
+- Search, query tables and folder tables take in a change by reading again only the pages it touched, rather than rebuilding the whole search index after every save.
+
+#### Maintenance
+
+- Nodemailer, which sends the server’s mail, is updated for three published advisories in how it reads addresses.
 
 ### Changes
 
@@ -46,6 +63,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
+- ADR 0006 (`docs/adr/0006-page-properties.md`) records page properties: how frontmatter is read and changed one value at a time, references to values in the page, tag and property search, query tables and the folder view. It amends ADR 0005, decision 1: a public link’s copy now holds the values its body shows. The spec, the protocol’s A12, `ui-design.md` and the glossary change with it. (#178)
 - The client reads a page's frontmatter as typed properties, with the `yaml` package, and edits one value, key or property's lines without rewriting the rest of the block. The property rows, references to values, and property search will build on it. (#181)
 - The search index keeps each page's properties beside its text, and lists pages by space, folder and tag, with the keys they use, for query tables, the folder view and references to other pages' values. The desktop app reads every page once more after updating. (#184)
 
