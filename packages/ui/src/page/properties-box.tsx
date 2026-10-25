@@ -214,6 +214,25 @@ export function PropertiesEditor({
           ))}
         </dl>
       )}
+      <div className="flex flex-wrap gap-1">
+        <Button
+          ref={addButton}
+          size="sm"
+          variant="ghost"
+          className="-ml-2"
+          onClick={() => {
+            setError(null);
+            setAdding(true);
+          }}
+        >
+          <Plus className="size-4" strokeWidth={1.75} />
+          Add property
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setAsText('chosen')}>
+          Edit as text
+        </Button>
+      </div>
+      {/* Under the buttons, so that leaving it empty, which closes it, moves none of them. */}
       {adding && (
         <NewProperty
           suggested={propertyKeys?.keys?.filter((key) => !findProperty(properties, key))}
@@ -234,24 +253,6 @@ export function PropertiesEditor({
           {error}
         </p>
       )}
-      <div className="flex flex-wrap gap-1">
-        <Button
-          ref={addButton}
-          size="sm"
-          variant="ghost"
-          className="-ml-2"
-          onClick={() => {
-            setError(null);
-            setAdding(true);
-          }}
-        >
-          <Plus className="size-4" strokeWidth={1.75} />
-          Add property
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setAsText('chosen')}>
-          Edit as text
-        </Button>
-      </div>
     </section>
   );
 }
@@ -290,7 +291,11 @@ function NewProperty({
         id={id}
         value={name}
         onChange={setName}
-        options={suggested?.map((key) => ({ value: key, label: null }))}
+        options={
+          suggested && suggested.length > 0
+            ? suggested.map((key) => ({ value: key, label: null }))
+            : undefined
+        }
         noun="keys used in this folder"
         placeholder="Name"
         onPick={add}

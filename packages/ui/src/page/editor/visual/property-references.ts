@@ -18,7 +18,7 @@ import { $prose } from '@milkdown/kit/utils';
 const key = new PluginKey<DecorationSet>('propertyReferences');
 
 const CHIP =
-  'ml-1 inline-block max-w-[24ch] truncate rounded-row bg-folder-purple px-1.5 align-baseline font-sans text-[0.85em] font-semibold text-foreground select-none';
+  'ml-1 rounded-row bg-folder-purple px-1.5 py-px font-sans text-[0.85em] font-semibold text-foreground select-none';
 const UNKNOWN = 'underline decoration-border decoration-dashed underline-offset-4';
 const UNKNOWN_HINT = 'No property has this name';
 
