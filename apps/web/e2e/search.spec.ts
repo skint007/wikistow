@@ -3,8 +3,8 @@ import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './v
 
 /**
  * Pages with properties are found by `tag:` and `key:value` filters typed in
- * search, alone and with words, and a link with `?q=` opens search with its
- * query, then lets it go from the address.
+ * search, alone and with words, and an address with `#search=` opens search
+ * with its query on its page, then lets it go.
  */
 test('search finds pages by tag and property, typed or from a link', async ({
   page,
@@ -41,13 +41,18 @@ test('search finds pages by tag and property, typed or from a link', async ({
     await expect(search).toBeHidden();
   });
 
-  await test.step('a link opens search with its query', async () => {
+  await test.step('a link opens search with its query, on its page', async () => {
     const url = new URL(page.url());
-    url.searchParams.set('q', 'tag:winter');
+    url.hash = `search=${encodeURIComponent('tag:winter')}`;
+    // Loaded afresh, as in a new tab: the tab stays unlocked.
+    await page.goto('about:blank');
     await page.goto(url.href);
     await expect(box).toHaveValue('tag:winter');
     await expect(titles).toHaveText(['Bean soup'], { timeout: 30_000 });
-    await expect.poll(() => new URL(page.url()).searchParams.has('q')).toBe(false);
+    // The query leaves the address, which stays on the page it was.
+    await expect.poll(() => new URL(page.url()).hash).toBe('');
+    expect(new URL(page.url()).pathname).toBe(url.pathname);
+    await expect(page.locator('#page-title')).toHaveValue('Bread');
     await page.keyboard.press('Enter');
     await expect(search).toBeHidden();
     await expect(page.locator('#page-title')).toHaveValue('Bean soup');

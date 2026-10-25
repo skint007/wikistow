@@ -112,6 +112,10 @@ describe('tags', () => {
     expect(tagged('Tags: soup', 'soup')).toBe(true);
     expect(tagged('tag: [soup]', 'soup')).toBe(true);
     expect(tagged('tags: winter\ntag: soup', 'soup')).toBe(true);
+    // `tags:` is a tag filter too.
+    expect(
+      matchesFilter(propertyData('---\ntag: "#Soup"\n---\n'), { key: 'tags', value: 'soup' }),
+    ).toBe(true);
   });
 
   it('match only a whole tag, in tags', () => {
@@ -157,6 +161,7 @@ describe('filters in a query', () => {
 
   it('leave words, quoted words and half-typed filters be', () => {
     expect(parseSearch('tag:')).toEqual({ words: '', filters: [] });
+    expect(parseSearch('tag:# tags:"#"')).toEqual({ words: '', filters: [] });
     expect(parseSearch('status:"" soup')).toEqual({ words: 'soup', filters: [] });
     expect(parseSearch('"10:30" "https://example.com" (tag:soup) :x')).toEqual({
       words: '"10:30" "https://example.com" (tag:soup) :x',

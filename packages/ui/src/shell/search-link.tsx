@@ -8,10 +8,12 @@ export const SearchOpener = createContext<((query: string) => void) | null>(null
 /**
  * A link that opens search with `query`. A click in the app opens it where
  * the page is, without leaving it, so a draft's unsaved changes aren't
- * asked about. Its address is the page's own with `?q=` (which `AppShell`
- * opens search from, then takes out of the address), so opening it in
- * another tab, or copying it, opens search there too. `filterQuery` writes
- * a filter's query.
+ * asked about. Its address is the page's own with `#search=` and the query
+ * (`searchHash`), which `AppShell` opens search from, then takes out of the
+ * address, so opening it in another tab, or copying it, opens search there
+ * too. The query stays in the fragment, which the browser never sends: it
+ * comes from pages the server can't read. `filterQuery` writes a filter's
+ * query.
  */
 export function SearchLink({
   query,
@@ -34,13 +36,30 @@ export function SearchLink({
   return (
     <Link
       to="."
-      search={(prev) => ({ ...prev, q: query })}
+      search
+      hash={searchHash(query)}
       onClick={onClick}
       {...(className === undefined ? {} : { className })}
     >
       {children}
     </Link>
   );
+}
+
+const PREFIX = 'search=';
+
+/** The fragment, `#` left out, of an address that opens search with `query`. */
+export const searchHash = (query: string) => PREFIX + encodeURIComponent(query);
+
+/** The query an address's fragment (`#` or not) opens search with, or null for any other. */
+export function linkedSearch(hash: string): string | null {
+  const fragment = hash.replace(/^#/, '');
+  if (!fragment.startsWith(PREFIX)) return null;
+  try {
+    return decodeURIComponent(fragment.slice(PREFIX.length)).slice(0, 1000);
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -23,7 +23,7 @@ import { afterEach, expect, it } from 'vite-plus/test';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { searchIndexQuery } from '../src/data/queries.ts';
 import { SearchDialog } from '../src/shell/search-dialog.tsx';
-import { filterQuery, SearchLink, SearchOpener } from '../src/shell/search-link.tsx';
+import { filterQuery, linkedSearch, SearchLink, SearchOpener } from '../src/shell/search-link.tsx';
 import { SEARCH_HELP } from '../src/shell/search-model.ts';
 import { vaultStore } from '../src/vault/store.ts';
 
@@ -184,20 +184,19 @@ it('links to a search, opening it where the page is without leaving', async () =
   );
   const link = document.querySelector('a');
   if (!link) throw new Error('No link');
-  // Its address opens search too, in another tab, on the same page.
+  // Its address opens search too, in another tab, on the same page, with
+  // the query in the fragment, which the browser never sends.
   const href = new URL(link.href);
   expect(href.pathname).toBe('/s/home/p/bean-soup');
-  expect(href.searchParams.get('view')).toBe('draft');
-  // As the router reads it back, a query that reads as JSON too.
-  const read = (url: URL) => router.options.parseSearch(url.search) as { q?: unknown };
-  expect(read(href).q).toBe('status:"in progress"');
+  expect(href.search).toBe('?view=draft');
+  expect(linkedSearch(href.hash)).toBe('status:"in progress"');
   await act(async () => link.click());
   expect(opened).toEqual(['status:"in progress"']);
   expect(router.state.location.href).toBe('/s/home/p/bean-soup?view=draft');
 });
 
-it('links to queries the router would read as JSON, and gets them back as written', async () => {
-  const queries = ['"10:30"', '2024', 'true', 'null', '{"a":1}', '[1]'];
+it('gets a link’s query back as written, as the router reads its address', async () => {
+  const queries = ['tag:soup', 'status:"in progress"', '"10:30" #x%20&y=1', 'ünï 日本'];
   const router = await mount(
     '',
     <>
@@ -208,8 +207,14 @@ it('links to queries the router would read as JSON, and gets them back as writte
       ))}
     </>,
   );
-  const read = [...document.querySelectorAll('a')].map(
-    (link) => (router.options.parseSearch(new URL(link.href).search) as { q?: unknown }).q,
-  );
+  const read: (string | null)[] = [];
+  for (const link of document.querySelectorAll('a')) {
+    const { pathname, search, hash } = new URL(link.href);
+    await act(() => router.navigate({ href: pathname + search + hash }));
+    read.push(linkedSearch(router.state.location.hash));
+  }
   expect(read).toEqual(queries);
+  expect(linkedSearch('#ingredients')).toBeNull();
+  expect(linkedSearch('')).toBeNull();
+  expect(linkedSearch('#search=%E0%A4%A')).toBeNull();
 });

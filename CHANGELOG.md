@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. A link with `?q=` opens search with its query. (#187)
+- Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. An address ending `#search=` and a query opens search with it. (#187)
 - Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
 
 #### Desktop

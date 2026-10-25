@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
+import { useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -21,7 +21,7 @@ import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
-import { SearchOpener } from './search-link';
+import { linkedSearch, SearchOpener } from './search-link';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
 
@@ -67,21 +67,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }, []);
   // An address with a query (`SearchLink`'s, opened in a new tab) opens
-  // search, and lets the query go, so reloading or going back doesn't open
-  // it again.
+  // search on its page, and lets the query go, so reloading or going back
+  // doesn't open it again.
   const navigate = useNavigate();
-  const linked = useSearch({ strict: false }).q;
+  const linked = linkedSearch(useLocation({ select: (location) => location.hash }));
   useEffect(() => {
-    if (linked === undefined || vault.status !== 'unlocked') return;
-    void navigate({
-      to: '.',
-      search: (prev) => {
-        const rest = { ...prev };
-        delete rest.q;
-        return rest;
-      },
-      replace: true,
-    });
+    if (linked === null || vault.status !== 'unlocked') return;
+    void navigate({ to: '.', search: true, hash: '', replace: true });
     search(linked);
   }, [linked, vault.status, navigate, search]);
   useEffect(() => {

@@ -44,7 +44,8 @@ export function SearchDialog({
         <DialogDescription className="sr-only">
           Titles, text and properties of the pages you can read, searched on this device.
         </DialogDescription>
-        <SearchBody ctx={ctx} initial={query} onDone={() => onOpenChange(false)} />
+        {/* Opened again with another query, as by a link, it starts over with it. */}
+        <SearchBody key={query} ctx={ctx} initial={query} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );

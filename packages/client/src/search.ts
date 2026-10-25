@@ -36,11 +36,12 @@ import {
  * - **Queries** are words and filters (`parseSearch`), and match pages
  *   holding every term of the words and passing every filter. The last term
  *   also matches as a prefix (`back` finds `backup`), the others only whole.
- *   A filter with no value, as one half typed (`tag:`), is left out; a quote
+ *   A filter with no value, as one half typed (`tag:`, `tag:#`), is left out; a quote
  *   left open runs to the query's end; a word in quotes is always words, so
  *   `"10:30"` searches text, where `10:30` would be a filter.
- * - **Filters** match properties (`matchesFilter`): `tag:soup` a page
- *   tagged `soup` (`hasTag`; so a property named `tag` is read as tags),
+ * - **Filters** match properties (`matchesFilter`): `tag:soup` or
+ *   `tags:soup` a page tagged `soup` (`hasTag`, which reads Obsidian's
+ *   older `tag` as tags too),
  *   `key:value` one whose `key` is `value` or a
  *   list holding it, `status:"in progress"` in quotes. A filter only
  *   narrows: it adds nothing to a page's score.
@@ -276,8 +277,8 @@ export type SearchFilter = { key: string; value: string };
  * other backslash is itself). A quote
  * not closed runs to the query's end. Everything else is words, a word in
  * quotes too, so `"10:30"` or `"https://example.com"` searches text. A
- * filter with no value (`tag:`, `status:""`), as one half typed, is left
- * out. Linear in the query's length.
+ * filter with no value (`tag:`, `tag:#`, `status:""`), as one half typed,
+ * is left out. Linear in the query's length.
  */
 export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
   const words: string[] = [];
@@ -294,7 +295,9 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
       const quoted = readQuoted(query, at + name.length + 1);
       const end = quoted?.end ?? wordEnd(query, at + name.length + 1);
       const value = quoted?.text ?? query.slice(at + name.length + 1, end);
-      if (value.trim() !== '') filters.push({ key: name, value });
+      // `tag:#` is as half typed as `tag:`.
+      const empty = isTagKey(name) ? tagName(value) === '' : value.trim() === '';
+      if (!empty) filters.push({ key: name, value });
       at = end;
       continue;
     }
@@ -345,7 +348,7 @@ export function searchFilter(key: string, value: string): string | null {
 }
 
 /**
- * Whether `properties` pass a filter. `tag` asks for a tag (`hasTag`).
+ * Whether `properties` pass a filter. `tag` and `tags` ask for a tag (`hasTag`).
  * Another key is found as a reference finds it (`findProperty`), and passes
  * when its value, or an item of its list, is the filter's: a number as a
  * number (`4` is `4.0`), anything else as text, whatever its accents and
@@ -368,7 +371,7 @@ function filterTest({
   const trimmed = value.trim();
   if (trimmed === '') return () => false;
   const name = foldPropertyName(key);
-  if (name === 'tag') {
+  if (isTagKey(key)) {
     const tag = tagName(trimmed);
     return (properties) => tagged(properties, tag);
   }
@@ -384,6 +387,9 @@ function filterTest({
   return (properties) =>
     holds(properties.find((property) => foldPropertyName(property.key) === name)?.value, matches);
 }
+
+/** Whether a filter's key asks for a tag: `tag`, or `tags`, the key tags are in. */
+const isTagKey = (key: string) => /^tags?$/.test(foldPropertyName(key));
 
 /** Each of `filters` once, ready to try on pages. */
 function filterTests(filters: readonly SearchFilter[]) {

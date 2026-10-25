@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Outlet, redirect, useNavigate, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
-import { z } from 'zod';
 import { meQuery } from '../api';
 import { ReauthProvider } from '../auth/reauth';
 import { desktop } from '../desktop';
@@ -10,21 +9,8 @@ import { idleTooLong, useIdleLock } from '../vault/idle-lock';
 import { restoreInTab } from '../vault/open';
 import { forgetKeptUnlock, vaultStore } from '../vault/store';
 
-/**
- * Everything behind sign-in. A session that ends (sign-out, suspension)
- * returns here to sign-in. `?q=` on any of its pages opens search with that
- * query, once the vault is open (`SearchLink`), then leaves the URL.
- */
+/** Everything behind sign-in. A session that ends (sign-out, suspension) returns here to sign-in. */
 export const Route = createFileRoute('/_app')({
-  // The router reads `?q=2024` as a number, and `?q=true` as true.
-  validateSearch: z.object({
-    q: z
-      .union([z.string(), z.number(), z.boolean()])
-      .transform(String)
-      .pipe(z.string().max(1000))
-      .optional()
-      .catch(undefined),
-  }),
   beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) {
