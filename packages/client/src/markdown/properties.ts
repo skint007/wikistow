@@ -35,7 +35,8 @@ import { parseWikilink, type Wikilink } from './wikilink.ts';
 //   properties with only that change, a safer quoting is tried, and failing
 //   that the edit is refused.
 // - **Names.** A reference's name follows the template-variable rule, and
-//   matches a key whatever its case, with `_`, `-` and spaces alike. The
+//   matches a key whatever its case, with `_`, `-` and spaces alike, and
+//   accents typed apart from their letters (NFD) or with them (NFC). The
 //   first matching key wins.
 //
 // Offsets are UTF-16, into the block as `splitFrontmatter` returns it,
