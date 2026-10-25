@@ -243,8 +243,8 @@ export function searchIndexChanged(
     following = true,
   }: {
     /**
-     * False for changes the rebuild running may already hold, as those missed
-     * while a tab was hidden, which its focus refetch has just started for.
+     * False for changes a build running already holds, as those missed while
+     * a tab was hidden, which its focus refetch has just started for.
      */
     following?: boolean;
   } = {},

@@ -46,9 +46,10 @@ import {
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
- * size in memory, and the properties a few times their block's (a short
- * key takes an object of its own), which is at most 64 KiB. That is fine
- * for a family library of thousands of pages.
+ * size in memory, and the properties a few times their block's, which is
+ * at most 64 KiB: up to some 16 times for a block of one-item lists, each
+ * item an array of its own, much as a text of distinct words costs in
+ * postings. That is fine for a family library of thousands of pages.
  */
 export class SearchIndex<T> {
   readonly #pages: IndexedPage<T>[] = [];
