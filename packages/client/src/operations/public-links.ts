@@ -32,7 +32,14 @@ import type { PagePayload } from '../payload.ts';
 import { sameRegion } from '../regions.ts';
 import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
-import { loadPage, openRevisionOf, openRevisions, readAttachment, type PageRef } from './pages.ts';
+import {
+  loadPage,
+  openPublications,
+  openRevisionOf,
+  openRevisions,
+  readAttachment,
+  type PageRef,
+} from './pages.ts';
 import type { ClientContext } from './session.ts';
 import { loadTree } from './spaces.ts';
 
@@ -173,7 +180,7 @@ async function otherValues(
   const opened = new Map<string, Promise<Publication | null>>();
   const open = (pageId: string) => {
     let found = opened.get(pageId);
-    if (!found) opened.set(pageId, (found = publication(ctx, page, pageId, loaded)));
+    if (!found) opened.set(pageId, (found = publication(ctx, page, pageId, summaries)));
     return found;
   };
   const summaries = new Map<string, (typeof loaded.pages)[number]>(
@@ -217,8 +224,14 @@ async function otherValues(
         summary.draftHead !== null &&
         summary.draftChanges,
     );
-    for (let at = 0; at < changed.length; at += OPEN_AT_ONCE) {
-      await Promise.all(changed.slice(at, at + OPEN_AT_ONCE).map((summary) => open(summary.id)));
+    const batch = await openPublications(
+      ctx,
+      page.spaceId,
+      changed.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
+    );
+    for (const { id } of changed) {
+      const payload = batch.get(id);
+      opened.set(id, Promise.resolve(payload ? publicationOf(payload) : null));
     }
     const pages: LinkablePage[] = [];
     for (const [i, found] of linkable.entries()) {
@@ -252,27 +265,27 @@ async function otherValues(
   return (link) => values.get(linkKey(link));
 }
 
-// How many pages' publications a copy opens at a time, for their titles.
-const OPEN_AT_ONCE = 8;
-
 /** A page's publication as a public copy reads it: its title and properties. */
 type Publication = { title: string; properties: readonly PropertyData[] };
+
+const publicationOf = (payload: PagePayload): Publication => {
+  const read = readProperties(splitFrontmatter(payload.markdown).frontmatter);
+  return { title: payload.title, properties: read.ok ? read.properties : [] };
+};
 
 /** `pageId`'s current publication, or null when it has none this person can open. */
 async function publication(
   ctx: ClientContext,
   page: PageRef,
   pageId: string,
-  tree: Awaited<ReturnType<typeof loadTree>>,
+  summaries: ReadonlyMap<string, { publishedHead: RevisionId | null }>,
 ): Promise<Publication | null> {
-  const head = tree.pages.find((summary) => summary.id === pageId)?.publishedHead;
+  const head = summaries.get(pageId)?.publishedHead;
   if (!head) return null;
   const target = { spaceId: page.spaceId, pageId: PageIdSchema.parse(pageId) };
   try {
     const version = (await openRevisions(ctx, target, 'published', [head])).get(head)?.opened;
-    if (version?.kind !== 'current') return null;
-    const read = readProperties(splitFrontmatter(version.payload.markdown).frontmatter);
-    return { title: version.payload.title, properties: read.ok ? read.properties : [] };
+    return version?.kind === 'current' ? publicationOf(version.payload) : null;
   } catch (error) {
     // A page whose version can't be fetched, or fails its checks, shows no value.
     if (!(error instanceof ApiError) && !(error instanceof CryptoError)) throw error;

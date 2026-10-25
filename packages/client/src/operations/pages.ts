@@ -641,6 +641,37 @@ const publicationsFor =
     return opened;
   };
 
+/**
+ * Each page's current publication, opened through the revision cache, in
+ * as few requests as `fetchRevisions` makes: those that don't open, are in
+ * a newer format, or bind another page are left out, and every one when
+ * they can't be fetched.
+ */
+export async function openPublications(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  pages: readonly { id: PageId; publishedHead: RevisionId }[],
+): Promise<Map<PageId, PagePayload>> {
+  const opened = new Map<PageId, PagePayload>();
+  if (pages.length === 0) return opened;
+  const wanted = new Map<RevisionId, Wanted>(
+    pages.map((page) => [page.publishedHead, { pageId: page.id, audience: 'published' }]),
+  );
+  let fetched: Map<RevisionId, () => OpenedRevision>;
+  try {
+    fetched = await fetchRevisions(ctx, spaceId, wanted);
+  } catch (error) {
+    if (error instanceof ApiError || error instanceof CryptoError) return opened;
+    throw error;
+  }
+  for (const page of pages) {
+    const found = fetched.get(page.publishedHead);
+    const checked = found && checkedFor(found, { spaceId, pageId: page.id, audience: 'published' });
+    if (checked?.opened.kind === 'current') opened.set(page.id, checked.opened.payload);
+  }
+  return opened;
+}
+
 // The newest version in a page's history, or null when there is none or it doesn't check out.
 async function lastPublished(ctx: ClientContext, page: PageRef): Promise<RevisionId | null> {
   try {

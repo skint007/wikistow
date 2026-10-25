@@ -58,15 +58,25 @@ function FromOtherPages({ markdown }: { markdown: string | null | undefined }) {
   );
 }
 
-/** The page's published version's Markdown, once opened; null if it has none this app can read. */
+/**
+ * The page's published version's Markdown, once opened, or null if it has
+ * none this app can read; `settled` once that is known, so nothing goes up
+ * before the dialog can say what the copy shows. A version that doesn't
+ * open can't be uploaded either.
+ */
 function usePublishedMarkdown(page: pageOperations.PageRef, head: RevisionId | null | undefined) {
   const ctx = useClient();
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     ...revisionQuery(ctx, page, 'published', head ?? ('' as RevisionId)),
     enabled: !!head,
   });
-  if (!head) return null;
-  return data?.opened.kind === 'current' ? data.opened.payload.markdown : undefined;
+  if (head === undefined) return { markdown: null, settled: false };
+  if (head === null || isError) return { markdown: null, settled: true };
+  if (!data) return { markdown: null, settled: false };
+  return {
+    markdown: data.opened.kind === 'current' ? data.opened.payload.markdown : null,
+    settled: true,
+  };
 }
 
 /** Load the space's public links again, after this person changed one. */
@@ -231,13 +241,13 @@ function LinkSteps({
           to work, the server keeps a readable copy of the published version, with the images and
           files it uses, until you turn the link off. Drafts stay private.
         </p>
-        <FromOtherPages markdown={published} />
+        <FromOtherPages markdown={published.markdown} />
         {status}
         <DialogFooter>
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={busy} onClick={() => void upload(true)}>
+          <Button disabled={busy || !published.settled} onClick={() => void upload(true)}>
             Turn on public link
           </Button>
         </DialogFooter>
@@ -268,12 +278,17 @@ function LinkSteps({
             <strong>The public page is out of date.</strong> Until it’s updated, visitors see a note
             that the page is being updated.
           </p>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void upload(false)}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !published.settled}
+            onClick={() => void upload(false)}
+          >
             Update public page
           </Button>
         </div>
       )}
-      <FromOtherPages markdown={published} />
+      <FromOtherPages markdown={published.markdown} />
       <p className="text-sm text-muted-foreground">
         Turning the link off deletes the public copy at once. Turning it on again makes a new link.
       </p>
