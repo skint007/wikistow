@@ -29,6 +29,7 @@ import {
   type Wikilink,
 } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
+import { sameRegion } from '../regions.ts';
 import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
 import { loadPage, openRevisionOf, openRevisions, readAttachment, type PageRef } from './pages.ts';
@@ -147,9 +148,12 @@ export function fromOtherPages(markdown: string): { values: boolean } {
 /**
  * The published properties of each page the body's references to other
  * pages' values name (ADR 0006, decision 9), each page as a reader of the
- * copied version finds it, among the pages of the space this person sees
- * that are published: by the version's link table first, then by
- * published title, with its folders. A draft never counts: not its value,
+ * copied version finds it: among the published pages everyone who can
+ * open that version can open, as its link table names only those (any in
+ * the owner region, else those in its share, with folders from the
+ * share's root), by the version's link table first, then by published
+ * title, with its folders. So a copy shows no page's value its page's own
+ * readers couldn't see. A draft never counts: not its value,
  * even where this person edits the page, nor its title. The tree gives a
  * page's draft title where its draft changed since it was published, so
  * those pages' publications are opened for their titles, and only when a
@@ -175,8 +179,14 @@ async function otherValues(
   const summaries = new Map<string, (typeof loaded.pages)[number]>(
     loaded.pages.map((summary) => [summary.id, summary]),
   );
+  // The copied version's region, as its key material puts it; none where it can't be told.
+  const region = summaries.get(page.pageId)?.region ?? null;
+  const reached = (pageId: string) => {
+    const there = summaries.get(pageId)?.region;
+    return region !== null && (region.kind === 'owner' || (!!there && sameRegion(there, region)));
+  };
   const published = (pageId: string) =>
-    pageId === page.pageId || !!summaries.get(pageId)?.publishedHead;
+    pageId === page.pageId || (!!summaries.get(pageId)?.publishedHead && reached(pageId));
   const table = linkTableOf(payload);
   // A link whose entry names a published page goes there, as a reader's does.
   const chosen = new Map<string, string>();
@@ -186,12 +196,24 @@ async function otherValues(
   }
   const untabled = links.filter((link) => !chosen.has(linkKey(link)));
   if (untabled.length > 0) {
-    // Every published page under its published title; this page under the copied version's.
-    const linkable = linkablePages(loaded);
+    // Every page it reaches under its published title; this page under the copied version's.
+    // A share's readers see no folder above its root.
+    const root =
+      region?.kind === 'share'
+        ? loaded.shares.find(
+            (share) => share.spaceId === region.spaceId && share.shareId === region.shareId,
+          )?.rootId
+        : undefined;
+    const linkable = linkablePages({
+      folders: loaded.folders.map((folder) =>
+        folder.id === root ? { ...folder, parentId: null } : folder,
+      ),
+      pages: loaded.pages,
+    });
     const changed = loaded.pages.filter(
       (summary) =>
         summary.id !== page.pageId &&
-        summary.publishedHead &&
+        published(summary.id) &&
         summary.draftHead !== null &&
         summary.draftChanges,
     );
@@ -204,7 +226,7 @@ async function otherValues(
       const title =
         found.id === page.pageId
           ? payload.title
-          : !summary?.publishedHead
+          : !summary || !published(summary.id)
             ? null
             : opened.has(found.id)
               ? ((await open(found.id))?.title ?? null)

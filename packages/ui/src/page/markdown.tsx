@@ -223,7 +223,9 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
   const { attachments, pages, links } = context;
   const editor = context.editing !== null;
   // Other pages' values come from the viewer's index, built only for a body that shows some.
-  const { index } = usePageIndex(attachments.ctx, { enabled: mayReferOtherPages(body) });
+  const { index } = usePageIndex(attachments.ctx, {
+    enabled: pages !== null && mayReferOtherPages(body),
+  });
   const others = useMemo(
     () =>
       otherPages(

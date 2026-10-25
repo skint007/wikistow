@@ -413,4 +413,46 @@ describe('a public page showing other pages’ values (ADR 0006, decision 9)', (
     expect(html).toContain('<code>=[[Secret soup]].x</code>');
     expect(html).toContain('<code>=[[Garlic bread]].nope</code>');
   });
+
+  it('shows a page in a share no value from a page its readers can’t open', async () => {
+    const n = randomBytes(4).toString('hex');
+    const [inside, outside] = [`PLAINTEXT-SHARED-VALUE-${n}`, `PLAINTEXT-OWNERS-ONLY-VALUE-${n}`];
+    const owner = await personWithVault(t);
+    const reader = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, {
+      name: 'Office',
+      kind: 'shared',
+    });
+    const team = await spaceOperations.createFolder(owner.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Team',
+    });
+    await shareFolder(owner.ctx, {
+      spaceId,
+      rootId: team,
+      people: [await invite(owner, reader, 'reader')],
+    });
+    const create = async (parentId: typeof team | null, title: string, markdown: string) => {
+      const ref = {
+        spaceId,
+        pageId: await pages.createPage(owner.ctx, { spaceId, parentId, title, markdown }),
+      };
+      await pages.publishPage(owner.ctx, ref);
+      return ref;
+    };
+    await create(team, 'Budget', `---\ntotal: "${inside}"\n---\n`);
+    await create(null, 'Salaries', `---\ntotal: "${outside}"\n---\n`);
+    const notes = await create(
+      team,
+      'Notes',
+      'Budget `=[[Budget]].total`, salaries `=[[Salaries]].total`.\n',
+    );
+    const id = await links.turnOn(owner.ctx, notes.pageId);
+    await links.shareCopy(owner.ctx, notes);
+
+    expect(await readable(inside, outside)).toEqual([true, false]);
+    const html = await (await visit(`/p/${id}`)).text();
+    expect(html).toContain('<code>=[[Salaries]].total</code>');
+  });
 });
