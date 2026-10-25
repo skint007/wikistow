@@ -77,7 +77,8 @@ describe('a page index', () => {
   });
 
   it('lists a space’s pages, those directly in a folder or under it, and those with a tag', () => {
-    expect(ids(index.list({ spaceId: home }))).toEqual(['readme', 'bean-soup', 'bread', 'pie']);
+    // By title, whatever order the tree lists them in.
+    expect(ids(index.list({ spaceId: home }))).toEqual(['bean-soup', 'bread', 'pie', 'readme']);
     expect(ids(index.list({ spaceId: home, folderId: null }))).toEqual(['readme']);
     expect(ids(index.list({ spaceId: home, folderId: recipes }))).toEqual(['bread', 'pie']);
     expect(ids(index.list({ spaceId: home, folderId: recipes, nested: true }))).toEqual([
@@ -105,6 +106,15 @@ describe('a page index', () => {
       'servings',
     ]);
     expect(index.keys({ spaceId: home, folderId: null })).toEqual([]);
+  });
+
+  it('lists pages with the same title by ID', () => {
+    const same = new PageIndex();
+    for (const id of ['c', 'a', 'b']) {
+      const [doc] = page(home, id, [], '');
+      same.add(doc, { title: 'Notes', markdown: '' });
+    }
+    expect(ids(same.list({ spaceId: home }))).toEqual(['a', 'b', 'c']);
   });
 
   it('lists pages added after it was read', () => {

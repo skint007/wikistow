@@ -88,9 +88,9 @@ export type PageScope = {
  * version this person sees, so a page they can't open is never listed.
  *
  * It doesn't change once built: as pages change, a newer index stands in
- * for it (`usePageIndex`, in the app). Pages are listed in the order the
- * space's tree lists them. The first read groups them, in time linear in
- * the index; after that `page` takes constant time, and `list` and `keys`
+ * for it (`usePageIndex`, in the app). Pages are listed by title, then ID,
+ * so in the same order from one index to the next. The first read groups
+ * and sorts them; after that `page` takes constant time, and `list` and `keys`
  * time linear in the space's pages, their folders' depth when `nested`,
  * and their properties when matching a `tag` or giving keys.
  */
@@ -108,7 +108,7 @@ export class PageIndex extends SearchIndex<SearchPage> {
     return this.#lookup().byPage.get(`${spaceId}/${pageId}`);
   }
 
-  /** The pages in `scope`, in the order the space's tree lists them. */
+  /** The pages in `scope`, by title, then ID. */
   list({ spaceId, folderId, nested = false, tag }: PageScope): IndexedEntry[] {
     return (this.#lookup().bySpace.get(spaceId) ?? []).filter(
       (entry) =>
@@ -146,10 +146,15 @@ export class PageIndex extends SearchIndex<SearchPage> {
         space.push(entry);
         this.#byPage.set(`${doc.spaceId}/${doc.pageId}`, entry);
       }
+      for (const space of this.#bySpace.values()) {
+        space.sort((a, b) => a.title.localeCompare(b.title) || compare(a.pageId, b.pageId));
+      }
     }
     return { bySpace: this.#bySpace, byPage: this.#byPage };
   }
 }
+
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Pages opened at a time, so progress moves while a large space is indexed. */
 const CHUNK = 100;

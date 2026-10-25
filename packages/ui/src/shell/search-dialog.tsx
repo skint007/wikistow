@@ -61,9 +61,12 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
   };
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
+  // Only when the hit chosen changes: a rebuild or progress mustn't scroll the list.
+  const shown = results[active];
+  const shownKey = `${deferred}\n${shown ? hitKey(shown) : ''}`;
   useEffect(() => {
     document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-  });
+  }, [shownKey]);
 
   function openHit({ doc }: Hit) {
     onDone();
@@ -116,11 +119,8 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
       </div>
       <p role="status" className="text-sm text-muted-foreground">
         {status}
-        {index && updating && progress && progress.total > 0 && (
-          <span className="sr-only">
-            Updating: {progress.pages} of {progress.total}
-          </span>
-        )}
+        {/* Once a rebuild, not at each step: pages others change rebuild it. */}
+        {index && updating && <span className="sr-only">Updating</span>}
       </p>
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
