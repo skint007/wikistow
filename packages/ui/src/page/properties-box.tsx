@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { propertiesText, withProperties } from './properties';
 import { propertyLabel, referable } from './property-model';
-import { PropertyRow } from './property-rows';
+import { composing, PropertyRow, type RowFocus } from './property-rows';
 import { PropertyKey, PropertyValueView, ROW, type LinkScope } from './property-value';
 
 // A page's frontmatter as rows (ADR 0006), between its status pills and its
@@ -112,8 +112,20 @@ export function PropertiesEditor({
   const [error, setError] = useState<string | null>(null);
   // The row whose value is being typed, by key.
   const [opened, setOpened] = useState<string | null>(null);
+  // Where the focus goes back to once a row is drawn, by key.
+  const [focusing, setFocusing] = useState<{ key: string; at: RowFocus } | null>(null);
   const read = useMemo(() => readProperties(frontmatter), [frontmatter]);
   if (!read.ok && asText === null) setAsText('unread');
+  // Why each value that can't change in place can't.
+  const locks = useMemo(
+    () =>
+      new Map(
+        (read.ok ? read.properties : [])
+          .filter((property) => !property.editable)
+          .map((property) => [property.key, lockOf(frontmatter, property)]),
+      ),
+    [frontmatter, read],
+  );
   const addButton = useRef<HTMLButtonElement>(null);
 
   /** Take `edit`, of the property `label`, or say why it can't be made. */
@@ -148,6 +160,7 @@ export function PropertiesEditor({
   }
   const { properties } = read;
   const label = (property: Property) => propertyLabel(property.key);
+  const focusFor = (key: string) => (at: RowFocus | null) => setFocusing(at ? { key, at } : null);
   return (
     <section aria-label="Properties" className={cn(PANEL, EDITED)}>
       {properties.length > 0 && (
@@ -158,15 +171,25 @@ export function PropertiesEditor({
               property={property}
               scope={scope}
               opened={opened === property.key}
-              onOpened={(open) => setOpened(open ? property.key : null)}
-              lock={() => lockOf(frontmatter, property)}
+              onOpened={(open, keyboard) => {
+                setOpened(open ? property.key : null);
+                if (!open && keyboard) setFocusing({ key: property.key, at: 'value' });
+              }}
+              focus={focusing?.key === property.key ? focusing.at : null}
+              onFocus={focusFor(property.key)}
+              lock={locks.get(property.key) ?? ''}
               referable={referable(property, properties)}
               onSet={(value: PropertyValue) =>
                 apply(setProperty(frontmatter, property.key, value), label(property))
               }
-              onRename={(to) =>
-                apply(renameProperty(frontmatter, property.key, to), label(property))
-              }
+              onRename={(to, keyboard) => {
+                const renamed = apply(
+                  renameProperty(frontmatter, property.key, to),
+                  label(property),
+                );
+                if (renamed && keyboard) setFocusing({ key: to, at: 'menu' });
+                return renamed;
+              }}
               onRemove={() => {
                 const removed = apply(removeProperty(frontmatter, property.key), label(property));
                 // Its row and menu have gone: the focus goes on from the rows' end.
@@ -245,7 +268,7 @@ function NewProperty({ onAdd, onCancel }: { onAdd: (key: string) => void; onCanc
         spellCheck={false}
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
+          if (composing(event)) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             add();

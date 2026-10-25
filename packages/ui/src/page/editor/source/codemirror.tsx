@@ -14,6 +14,7 @@ import {
   highlightSpecialChars,
   keymap,
 } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { textEdits } from '../../link-renames';
 import { lineBreakFor, type EditorSurfaceProps } from '../surface';
@@ -113,7 +114,28 @@ export default function CodeMirrorSurface({
       insertCode(code) {
         const editor = view.current;
         if (!editor) return;
-        editor.dispatch(editor.state.replaceSelection(`\`${code}\``), { scrollIntoView: true });
+        const { state } = editor;
+        let { from, to } = state.selection.main;
+        // A cursor in a code span puts it after the span, not inside.
+        if (from === to) {
+          for (let node = syntaxTree(state).resolveInner(to, -1); ; node = node.parent) {
+            if (node.name === 'InlineCode' && node.from < to && to < node.to) {
+              from = to = node.to;
+              break;
+            }
+            if (!node.parent) break;
+          }
+        }
+        // A backtick beside it would make one span of the two.
+        const before = state.sliceDoc(from - 1, from) === '`' ? ' ' : '';
+        const after = state.sliceDoc(to, to + 1) === '`' ? ' ' : '';
+        const insert = `${before}\`${code}\`${after}`;
+        editor.dispatch({
+          changes: { from, to, insert },
+          selection: { anchor: from + insert.length },
+          scrollIntoView: true,
+          userEvent: 'input',
+        });
         editor.focus();
       },
     }),

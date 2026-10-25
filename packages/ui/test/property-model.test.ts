@@ -44,6 +44,10 @@ describe('property rows', () => {
     // A code with a leading zero isn't a number.
     expect(typedValue('02134', null)).toBe('02134');
     expect(typedValue('0.5', 1)).toBe(0.5);
+    // Nor is a number that would be written back otherwise.
+    expect(typedValue('1234567890123456789', null)).toBe('1234567890123456789');
+    expect(typedValue('1.50', 1)).toBe('1.50');
+    expect(typedValue('+5', 1)).toBe(5);
     expect(typedValue(' true ', null)).toBe(true);
     expect(typedValue('', 'soup')).toBe(null);
     expect(typedValue('', '')).toBe('');

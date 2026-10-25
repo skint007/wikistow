@@ -227,6 +227,10 @@ describe('the draft’s property rows', () => {
     await userEvent.clear(name);
     await userEvent.type(name, 'portions{Enter}');
     expect(last()).toBe(NOTE.replace('servings: 4', 'portions: 4'));
+    // The focus stays on the row, under its new name.
+    await expect
+      .poll(() => document.activeElement?.getAttribute('aria-label'))
+      .toBe('Actions for Portions');
     await fromMenu(container, 'Portions', 'Type');
     await userEvent.click(button(document, 'Text'));
     expect(last()).toBe(NOTE.replace('servings: 4', 'portions: "4"'));
@@ -334,10 +338,43 @@ async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') 
   if (mode !== 'source') {
     await expect.poll(() => container.querySelector('#page-visual')).not.toBeNull();
   }
+  if (mode !== 'visual') {
+    await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')].some((div) =>
+          div.shadowRoot?.querySelector('.cm-editor'),
+        ),
+      )
+      .toBe(true);
+  }
   return { container, ref };
 }
 
 describe('Insert in page', () => {
+  for (const mode of ['source', 'visual'] as const) {
+    it(`keeps a reference apart from code beside it in the ${mode} editor`, async () => {
+      const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `x`\n', mode);
+      act(() => ref.current?.focus());
+      await userEvent.keyboard('{Control>}{Home}{/Control}{End}');
+      await fromMenu(container, 'Servings', 'Insert in page');
+      await expect
+        .poll(() => ref.current?.read())
+        .toBe('---\nservings: 4\n---\nUse `x` `=servings`\n');
+    });
+  }
+
+  it('puts a reference after a code span the source editor’s cursor is in', async () => {
+    const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `xy` now\n', 'source');
+    act(() => ref.current?.focus());
+    await userEvent.keyboard(
+      '{End}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}',
+    );
+    await fromMenu(container, 'Servings', 'Insert in page');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\nservings: 4\n---\nUse `xy` `=servings` now\n');
+  });
+
   it('puts a reference where the cursor is in split’s source side, when that was the side last typed in', async () => {
     const { container, ref } = await pageEditor(
       '---\nservings: 4\n---\nServes\n\nThe end.\n',

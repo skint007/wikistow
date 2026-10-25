@@ -5,7 +5,7 @@ import {
   type PropertyValue,
 } from '@wikistow/client';
 import { MoreHorizontal, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,11 +47,16 @@ const FIELD = 'h-8 bg-background';
 const SHOWN =
   'block min-h-(--row) w-full min-w-0 rounded-row px-2 py-1 -mx-2 text-left wrap-anywhere hover:bg-background/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none';
 
+/** Where in a row the focus goes next: its ⋯ button, or its value. */
+export type RowFocus = 'menu' | 'value';
+
 export function PropertyRow({
   property,
   scope,
   opened,
   onOpened,
+  focus,
+  onFocus,
   lock,
   referable,
   onSet,
@@ -64,20 +69,34 @@ export function PropertyRow({
   scope: LinkScope;
   /** Whether its value's field is open. */
   opened: boolean;
-  onOpened: (open: boolean) => void;
+  onOpened: (open: boolean, keyboard?: boolean) => void;
+  /** Where the focus goes once it's drawn, as after a field the keyboard closed; then `onFocus(null)`. */
+  focus: RowFocus | null;
+  onFocus: (at: RowFocus | null) => void;
   /** Why its value can't be edited where it is. */
-  lock: () => string;
+  lock: string;
   /** Whether `` `=key` `` would show it. */
   referable: boolean;
   /** Each returns whether the edit was made. */
   onSet: (value: PropertyValue) => boolean;
-  onRename: (to: string) => boolean;
+  /** `keyboard` when Enter renamed it, so the focus goes to its menu under the new name. */
+  onRename: (to: string, keyboard: boolean) => boolean;
   onRemove: () => boolean;
   onInsert: () => void;
   onAsText: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const label = propertyLabel(property.key);
+  const menu = useRef<HTMLButtonElement>(null);
+  const value = useRef<HTMLElement>(null);
+  // A field the keyboard closed, or one whose value now shows otherwise (a
+  // checkbox for `true` typed), leaves the focus nowhere unless put back.
+  useEffect(() => {
+    if (!focus || renaming || opened) return;
+    if (focus === 'menu') menu.current?.focus();
+    else value.current?.querySelector<HTMLElement>('button, input')?.focus();
+    onFocus(null);
+  });
   return (
     <div className={cn(ROW, 'group')}>
       {renaming ? (
@@ -85,16 +104,19 @@ export function PropertyRow({
           <OneLine
             initial={property.key}
             label={`New name for ${label}`}
-            onDone={(to) => {
+            onDone={(to, keyboard) => {
               const key = to?.trim();
-              if (key === undefined || key === '' || key === property.key || onRename(key))
-                setRenaming(false);
+              const kept = key === undefined || key === '' || key === property.key;
+              if (!kept && !onRename(key, keyboard)) return;
+              setRenaming(false);
+              if (kept && keyboard) onFocus('menu');
             }}
           />
         </dt>
       ) : (
         <PropertyKey property={property}>
           <RowMenu
+            trigger={menu}
             property={property}
             label={label}
             referable={referable}
@@ -106,7 +128,7 @@ export function PropertyRow({
           />
         </PropertyKey>
       )}
-      <dd className="min-w-0">
+      <dd ref={value} className="min-w-0">
         {property.editable ? (
           <ValueField
             property={property}
@@ -120,7 +142,7 @@ export function PropertyRow({
           <div className="grid gap-0.5 py-1">
             <PropertyValueView property={property} scope={{ ...scope, editor: true }} />
             <span className="text-xs text-muted-foreground">
-              {lock()}{' '}
+              {lock}{' '}
               <button
                 type="button"
                 onClick={onAsText}
@@ -138,6 +160,7 @@ export function PropertyRow({
 
 /** A row's ⋯ button and its menu, shown on hover and focus, and always on touch. */
 function RowMenu({
+  trigger,
   property,
   label,
   referable,
@@ -147,6 +170,7 @@ function RowMenu({
   onInsert,
   onAsText,
 }: {
+  trigger: RefObject<HTMLButtonElement | null>;
   property: Property;
   label: string;
   referable: boolean;
@@ -159,6 +183,7 @@ function RowMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        ref={trigger}
         aria-label={`Actions for ${label}`}
         className="ml-auto grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:tint focus:opacity-100 active:tint-strong pointer-coarse:opacity-100 data-[state=open]:opacity-100"
       >
@@ -169,23 +194,7 @@ function RowMenu({
         <DropdownMenuSub>
           <DropdownMenuSubTrigger disabled={!property.editable}>Type</DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuRadioGroup value={property.type}>
-              {PROPERTY_TYPES.map(({ type, label: name }) => {
-                const value = type === property.type ? null : convertValue(property.value, type);
-                return (
-                  <DropdownMenuRadioItem
-                    key={type}
-                    value={type}
-                    disabled={type !== property.type && value === null}
-                    onSelect={() => {
-                      if (value !== null) onSet(value);
-                    }}
-                  >
-                    {name}
-                  </DropdownMenuRadioItem>
-                );
-              })}
-            </DropdownMenuRadioGroup>
+            <TypeItems property={property} onSet={onSet} />
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuItem disabled={!referable} onSelect={onInsert}>
@@ -198,6 +207,39 @@ function RowMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * The types a value can be written as, each offered only if it reads as
+ * that once written so. Drawn only as the submenu opens: each is worked
+ * out by writing and reading the value.
+ */
+function TypeItems({
+  property,
+  onSet,
+}: {
+  property: Property;
+  onSet: (value: PropertyValue) => boolean;
+}) {
+  return (
+    <DropdownMenuRadioGroup value={property.type}>
+      {PROPERTY_TYPES.map(({ type, label }) => {
+        const value = type === property.type ? null : convertValue(property.value, type);
+        return (
+          <DropdownMenuRadioItem
+            key={type}
+            value={type}
+            disabled={type !== property.type && value === null}
+            onSelect={() => {
+              if (value !== null) onSet(value);
+            }}
+          >
+            {label}
+          </DropdownMenuRadioItem>
+        );
+      })}
+    </DropdownMenuRadioGroup>
   );
 }
 
@@ -214,7 +256,7 @@ function ValueField({
   label: string;
   scope: LinkScope;
   opened: boolean;
-  onOpened: (open: boolean) => void;
+  onOpened: (open: boolean, keyboard?: boolean) => void;
   onSet: (value: PropertyValue) => boolean;
 }) {
   const { type, value } = property;
@@ -259,17 +301,9 @@ function TextField({
   label: string;
   scope: LinkScope;
   opened: boolean;
-  onOpened: (open: boolean) => void;
+  onOpened: (open: boolean, keyboard?: boolean) => void;
   onSet: (value: PropertyValue) => boolean;
 }) {
-  const shown = useRef<HTMLButtonElement>(null);
-  // Focus goes back to the value once its field closes from the keyboard.
-  const [refocus, setRefocus] = useState(false);
-  useEffect(() => {
-    if (!refocus || opened) return;
-    setRefocus(false);
-    shown.current?.focus();
-  }, [refocus, opened]);
   const text = fieldText(value);
   if (opened) {
     const day = type === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(text);
@@ -281,10 +315,7 @@ function TextField({
         inputMode={type === 'number' ? 'decimal' : undefined}
         onDone={(typed, keyboard) => {
           const next = typed === undefined ? value : typedValue(typed, value);
-          if (sameValue(next, value) || onSet(next)) {
-            setRefocus(keyboard);
-            onOpened(false);
-          }
+          if (sameValue(next, value) || onSet(next)) onOpened(false, keyboard);
         }}
       />
     );
@@ -292,7 +323,6 @@ function TextField({
   const scalar = value as PropertyScalar;
   return (
     <button
-      ref={shown}
       type="button"
       aria-label={`${label}: ${text || 'empty'}. Edit`}
       onClick={() => onOpened(true)}
@@ -358,7 +388,7 @@ function ListField({
         spellCheck={false}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
+          if (composing(event)) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             add();
@@ -422,3 +452,10 @@ function OneLine({
     />
   );
 }
+
+/**
+ * Whether a key ends an IME's composition, and so is the IME's: Safari
+ * sends the Enter that does with `isComposing` false, and key code 229.
+ */
+export const composing = (event: KeyboardEvent<HTMLElement>) =>
+  event.nativeEvent.isComposing || event.keyCode === 229;

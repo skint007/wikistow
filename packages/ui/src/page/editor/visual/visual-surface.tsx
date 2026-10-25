@@ -373,8 +373,37 @@ function Surface({
           if (!(tr.selection instanceof TextSelection)) return;
         }
         // In a code block, marks don't hold: the code is text there.
-        const inCode = tr.selection.$from.parent.type.spec.code;
-        tr.replaceSelectionWith(state.schema.text(code, inCode ? [] : [mark.create()]), false);
+        const inCode = !!tr.selection.$from.parent.type.spec.code;
+        const marked = (node: Node | null | undefined) =>
+          !inCode && !!node && mark.isInSet(node.marks);
+        // A cursor in a code span puts it after the span, not inside.
+        if (tr.selection.empty) {
+          const $at = tr.selection.$from;
+          if (marked($at.nodeBefore) && marked($at.nodeAfter)) {
+            let end = $at.parentOffset;
+            let offset = 0;
+            for (let i = 0; i < $at.parent.childCount; i++) {
+              const child = $at.parent.child(i);
+              const childEnd = offset + child.nodeSize;
+              if (childEnd > $at.parentOffset) {
+                if (!marked(child)) break;
+                end = childEnd;
+              }
+              offset = childEnd;
+            }
+            tr.setSelection(TextSelection.create(tr.doc, $at.start() + end));
+          }
+        }
+        // Code beside it would join it into one span: a space keeps them apart.
+        const { from, to, $from, $to } = tr.selection;
+        const nodes = [
+          ...(marked($from.nodeBefore) ? [state.schema.text(' ')] : []),
+          state.schema.text(code, inCode ? [] : [mark.create()]),
+          ...(marked($to.nodeAfter) ? [state.schema.text(' ')] : []),
+        ];
+        tr.replaceWith(from, to, nodes);
+        const size = nodes.reduce((sum, node) => sum + node.nodeSize, 0);
+        tr.setSelection(TextSelection.create(tr.doc, from + size));
         // Typing after it isn't code.
         view.dispatch(tr.removeStoredMark(mark).scrollIntoView());
         view.focus();

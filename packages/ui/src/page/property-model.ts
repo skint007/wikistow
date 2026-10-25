@@ -47,14 +47,16 @@ export function sameValue(a: PropertyValue, b: PropertyValue): boolean {
 const NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i;
 
 /**
- * `text` as a number, if it is one written out, and not with a leading
- * zero, which a code such as `02134` has and a number would drop.
+ * `text` as a number, if it is one written out as a number writes it:
+ * not `02134`, a code a number would drop the zero of, nor `1.50`, `1e3`
+ * or a whole number past what a number holds exactly, which would be
+ * written back otherwise.
  */
 function numberIn(text: string): number | null {
   const trimmed = text.trim();
-  if (!NUMBER.test(trimmed) || /^[-+]?0\d/.test(trimmed)) return null;
+  if (!NUMBER.test(trimmed)) return null;
   const number = Number(trimmed);
-  return Number.isFinite(number) ? number : null;
+  return Number.isFinite(number) && String(number) === trimmed.replace(/^\+/, '') ? number : null;
 }
 
 const scalarText = (value: PropertyScalar) => (value === null ? '' : String(value));
