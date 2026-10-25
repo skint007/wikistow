@@ -1,5 +1,5 @@
 import type { ClientContext } from '@wikistow/client';
-import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { QueryClient, QueryObserver, type QueryKey } from '@tanstack/react-query';
 import { describe, expect, it } from 'vite-plus/test';
 import { searchIndexChanged, searchIndexQuery } from '../src/data/queries.ts';
 
@@ -7,7 +7,8 @@ import { searchIndexChanged, searchIndexQuery } from '../src/data/queries.ts';
 // when `finish` is called, and `aborted` says whether React Query gave up on it.
 function harness() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const { queryKey } = searchIndexQuery({} as ClientContext, queryClient);
+  // Untyped, so the builds can give numbers.
+  const queryKey: QueryKey = searchIndexQuery({} as ClientContext, queryClient).queryKey;
   const builds: { finish: () => void; aborted: () => boolean }[] = [];
   const queryFn = ({ signal }: { signal: AbortSignal }) =>
     new Promise<number>((resolve) => {
