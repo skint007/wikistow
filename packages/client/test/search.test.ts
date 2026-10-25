@@ -227,6 +227,7 @@ describe('matching a filter', () => {
       'made: 2026-10-01',
       'cuisine: [Italian, "Crème"]',
       'goes_with: "[[Garlic bread]]"',
+      'side: "[[Recipes/Green salad|salad]]"',
       'empty:',
       'tags: soup',
       '---',
@@ -247,6 +248,9 @@ describe('matching a filter', () => {
     expect(passes('cuisine', 'creme')).toBe(true);
     expect(passes('goes_with', 'garlic bread')).toBe(true);
     expect(passes('goes_with', '[[Garlic bread]]')).toBe(true);
+    expect(passes('side', 'green salad')).toBe(true);
+    expect(passes('side', 'Recipes/Green salad')).toBe(true);
+    expect(passes('side', 'recipes')).toBe(false);
     expect(passes('tag', 'Soup')).toBe(true);
   });
 

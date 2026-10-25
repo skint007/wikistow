@@ -365,9 +365,9 @@ export function searchFilter(key: string, value: string): string | null {
  * Another key is found as a reference finds it (`findProperty`), and passes
  * when its value, or an item of its list, is the filter's: a number as a
  * number (`4` is `4.0`), anything else as text, whatever its accents and
- * case (`foldTerm`), a wikilink as written or as its page's name
- * (`goes_with:"Garlic bread"` is `[[Garlic bread]]`). Empty values, the
- * filter's or the property's, never pass.
+ * case (`foldTerm`), a wikilink as written, as its target, or as its
+ * page's name (`goes_with:"Garlic bread"` is `[[Recipes/Garlic bread]]`).
+ * Empty values, the filter's or the property's, never pass.
  */
 export function matchesFilter(
   properties: readonly Readonly<PropertyData>[],
@@ -393,8 +393,11 @@ function filterTest({
   const matches = (scalar: string | number | boolean) => {
     if (typeof scalar === 'number') return scalar === number;
     if (foldTerm(String(scalar).trim()) === wanted) return true;
-    const link = propertyWikilink(scalar);
-    return link !== null && foldTerm(link.target.trim()) === wanted;
+    // A wikilink as its target, `Folder/Page` too, or as its page's name.
+    const target = propertyWikilink(scalar)?.target.trim();
+    if (target === undefined) return false;
+    const name = target.slice(target.lastIndexOf('/') + 1).trim();
+    return foldTerm(target) === wanted || foldTerm(name) === wanted;
   };
   // The first key a reference would take, as `findProperty` finds it.
   return (properties) =>
