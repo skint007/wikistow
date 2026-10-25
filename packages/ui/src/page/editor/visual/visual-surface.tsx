@@ -6,8 +6,8 @@ import {
   serializerCtx,
   type Editor,
 } from '@milkdown/kit/core';
-import type { Node, Slice } from '@milkdown/kit/prose/model';
-import { Plugin, Selection } from '@milkdown/kit/prose/state';
+import type { Node, ResolvedPos, Slice } from '@milkdown/kit/prose/model';
+import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { Transform } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
@@ -356,6 +356,64 @@ function Surface({
         view.focus();
       });
     },
+    /**
+     * Put `code` as inline code in place of the text selected; with a
+     * node, cells or everything selected, at the nearest cursor after it.
+     */
+    insertCode: (code: string) => {
+      editor.current?.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const { state } = view;
+        const mark = state.schema.marks['inlineCode'];
+        if (!mark) return;
+        const tr = state.tr;
+        if (!(state.selection instanceof TextSelection)) {
+          tr.setSelection(Selection.near(state.doc.resolve(state.selection.to)));
+          // A page with no text anywhere to put it in.
+          if (!(tr.selection instanceof TextSelection)) return;
+        }
+        // In a code block, marks don't hold: the code is text there.
+        const inCode = !!tr.selection.$from.parent.type.spec.code;
+        const marked = (node: Node | null | undefined) =>
+          !inCode && !!node && mark.isInSet(node.marks);
+        // Where the code span `$at` is strictly inside ends, if it is in one.
+        const spanEnd = ($at: ResolvedPos) => {
+          if (!marked($at.nodeBefore) || !marked($at.nodeAfter)) return null;
+          let end = $at.parentOffset;
+          let offset = 0;
+          for (let i = 0; i < $at.parent.childCount; i++) {
+            const child = $at.parent.child(i);
+            const childEnd = offset + child.nodeSize;
+            if (childEnd > $at.parentOffset) {
+              if (!marked(child)) break;
+              end = childEnd;
+            }
+            offset = childEnd;
+          }
+          return $at.start() + end;
+        };
+        // A cursor or a selection end in a code span puts it after the span,
+        // replacing nothing, so no span is cut.
+        const { $from: $start, $to: $end } = tr.selection;
+        const after = spanEnd($end) ?? $end.pos;
+        if (after !== $end.pos || (!tr.selection.empty && spanEnd($start) !== null)) {
+          tr.setSelection(TextSelection.create(tr.doc, after));
+        }
+        // Code beside it would join it into one span: a space keeps them apart.
+        const { from, to, $from, $to } = tr.selection;
+        const nodes = [
+          ...(marked($from.nodeBefore) ? [state.schema.text(' ')] : []),
+          state.schema.text(code, inCode ? [] : [mark.create()]),
+          ...(marked($to.nodeAfter) ? [state.schema.text(' ')] : []),
+        ];
+        tr.replaceWith(from, to, nodes);
+        const size = nodes.reduce((sum, node) => sum + node.nodeSize, 0);
+        tr.setSelection(TextSelection.create(tr.doc, from + size));
+        // Typing after it isn't code.
+        view.dispatch(tr.removeStoredMark(mark).scrollIntoView());
+        view.focus();
+      });
+    },
   }));
   const [completion] = useState(
     () =>
@@ -466,6 +524,7 @@ function Surface({
       replace: surface.show,
       caret: surface.caret,
       focus: surface.focus,
+      insertCode: surface.insertCode,
     }),
     [surface],
   );

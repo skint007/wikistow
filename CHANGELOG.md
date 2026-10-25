@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. An address ending `#search=` and a query opens search with it. (#187)
 - Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
+- A page's properties show as rows between its status pills and its body, each key in sentence case and each value as what it reads as: a list as pills, a number, a checkbox, a date in your locale, a web address, a page link or text. Readers see six, then **Show N more**. On the draft, a value is edited in place, and each row's menu renames it, changes its type, removes it or puts a reference to it in the page; **Add property** adds one. Only the edited characters of the frontmatter change, so its comments, quoting and order stay as written. A value that can't be changed that way, or a block that doesn't read as properties, opens as text. (#185)
 
 #### Desktop
 
