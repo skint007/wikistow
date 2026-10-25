@@ -2,7 +2,7 @@ import { pickedCompletion, type Completion, type CompletionSource } from '@codem
 import { syntaxTree } from '@codemirror/language';
 import type { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
-import { splitFrontmatter, type PropertyData } from '@wikistow/client';
+import { foldPropertyName, splitFrontmatter, type PropertyData } from '@wikistow/client';
 import { linkOptions, matching, TYPING, TYPING_LINK } from '../link-completions';
 import { propertyOptions, TYPING_NAME, TYPING_REFERENCE } from '../property-completions';
 import type { LinkAssist } from '../surface';
@@ -131,16 +131,21 @@ function referable(state: EditorState, from: number): boolean {
 }
 
 /**
- * Accepting a key: write it in place of the name typed, and the rest of
- * the word after the cursor too if a backtick closes it, with the closing
- * backtick unless it's there, and go on after it.
+ * Accepting a key: write it in place of the name typed, with the closing
+ * backtick unless it's there, and go on after it. A name typed into keeps
+ * none of its old rest: the rest of its word goes, if a backtick closes
+ * it, and the rest up to the backtick past spaces too if it's how the key
+ * ends (`` `=co|k time` `` with `cook_time`). Past a space, short of that,
+ * the backtick may open other code, the text before it not the name's.
  */
 function insertName(text: string) {
   return (view: EditorView, completion: Completion, from: number, to: number) => {
-    // The rest of a word typed into, spaces not: past one may be other text.
-    const rest = /^[\p{L}\p{N}_-]*/u.exec(view.state.sliceDoc(to, to + 200))?.[0] ?? '';
-    const end =
-      view.state.sliceDoc(to + rest.length, to + rest.length + 1) === '`' ? to + rest.length : to;
+    const after = view.state.sliceDoc(to, to + 200);
+    const word = /^[\p{L}\p{N}_-]*/u.exec(after)?.[0] ?? '';
+    const rest = /^[\p{L}\p{N} _-]*(?=`)/u.exec(after)?.[0];
+    const ends = (part: string) =>
+      foldPropertyName(text).endsWith(foldPropertyName(part.trimEnd()));
+    const end = rest !== undefined && (rest === word || ends(rest)) ? to + rest.length : to;
     const closed = view.state.sliceDoc(end, end + 1) === '`';
     view.dispatch({
       changes: { from, to: end, insert: closed ? text : `${text}\`` },

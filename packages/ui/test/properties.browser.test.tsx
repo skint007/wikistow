@@ -464,6 +464,31 @@ describe('completing a reference', () => {
       .toBe('---\nservings: 4\n---\nServes `=servings` people\n');
   });
 
+  it('completes a name with a space typed into, keeping no rest of it', async () => {
+    const { container, ref } = await pageEditor(
+      '---\ncook_time: 25\n---\nBake `=cok time` long\n',
+      'source',
+    );
+    act(() => ref.current?.focus());
+    // After `c`.
+    await userEvent.keyboard(
+      '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(8) + 'o',
+    );
+    await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')].flatMap((div) =>
+          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
+            (l) => l.textContent,
+          ),
+        ),
+      )
+      .toEqual(['cook_time']);
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .poll(() => ref.current?.read())
+      .toBe('---\ncook_time: 25\n---\nBake `=cook_time` long\n');
+  });
+
   it('leaves the words after a name being typed, up to a later code span', async () => {
     const { container, ref } = await pageEditor(
       '---\ncook_time: 25\n---\nBake for  minutes at `350F`.\n',
