@@ -41,6 +41,9 @@ describe('property rows', () => {
     expect(typedValue('40', 'thirty')).toBe('40');
     expect(typedValue('true', 'yes')).toBe('true');
     expect(typedValue('40', null)).toBe(40);
+    // A code with a leading zero isn't a number.
+    expect(typedValue('02134', null)).toBe('02134');
+    expect(typedValue('0.5', 1)).toBe(0.5);
     expect(typedValue(' true ', null)).toBe(true);
     expect(typedValue('', 'soup')).toBe(null);
     expect(typedValue('', '')).toBe('');

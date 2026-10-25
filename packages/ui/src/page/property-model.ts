@@ -46,10 +46,13 @@ export function sameValue(a: PropertyValue, b: PropertyValue): boolean {
 
 const NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i;
 
-/** `text` as a number, if it is one written out. */
+/**
+ * `text` as a number, if it is one written out, and not with a leading
+ * zero, which a code such as `02134` has and a number would drop.
+ */
 function numberIn(text: string): number | null {
   const trimmed = text.trim();
-  if (!NUMBER.test(trimmed)) return null;
+  if (!NUMBER.test(trimmed) || /^[-+]?0\d/.test(trimmed)) return null;
   const number = Number(trimmed);
   return Number.isFinite(number) ? number : null;
 }

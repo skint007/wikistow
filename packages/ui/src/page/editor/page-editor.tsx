@@ -132,6 +132,8 @@ export function PageEditor({
   // In split, the source's text waiting for the visual editor (`syncVisual`),
   // and how long giving it the last took.
   const syncing = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null);
+  // In split, the side the person was in last, where Insert in page puts its code.
+  const lastSide = useRef<'source' | 'visual'>('visual');
   const synced = useRef(0);
   const [attach] = useState(() => (handle: EditorSurfaceHandle | null) => {
     surface.current = handle;
@@ -326,12 +328,16 @@ export function PageEditor({
 
   /**
    * Put inline code, a property reference, where the cursor is in the
-   * editor the page reads, and turn to it; while none takes edits (the
-   * visual editor's check of given text runs), at the body's end.
+   * editor the person was in last (in split, either side), and turn to it.
+   * While neither takes edits (the visual editor's check of given text
+   * runs), at the body's end.
    */
   const insertCode = (code: string) => {
-    if (surface.current?.insertCode && given.current === null) {
-      surface.current.insertCode(code);
+    const source =
+      modeNow.current === 'split' && (lastSide.current === 'source' || given.current !== null);
+    const target = source ? mirror.current : given.current === null ? surface.current : null;
+    if (target?.insertCode) {
+      target.insertCode(code);
       return;
     }
     const text = bodyNow();
@@ -523,7 +529,14 @@ export function PageEditor({
           )}
         >
           {mode !== 'visual' && mode !== 'checking' && (
-            <div key="source" className="min-h-0 min-w-0" onFocusCapture={takeVisual}>
+            <div
+              key="source"
+              className="min-h-0 min-w-0"
+              onFocusCapture={() => {
+                lastSide.current = 'source';
+                takeVisual();
+              }}
+            >
               <SourceEditor {...(mode === 'source' ? surfaceProps : mirrorProps)} />
             </div>
           )}
@@ -532,7 +545,10 @@ export function PageEditor({
               key="visual"
               // As the pointer comes, before a click, so a key typed there isn't left out.
               onPointerEnter={syncNow}
-              onFocusCapture={syncNow}
+              onFocusCapture={() => {
+                lastSide.current = 'visual';
+                syncNow();
+              }}
               className={cn('min-h-0 min-w-0', mode === 'split' && note && 'opacity-60')}
             >
               {checking ? (

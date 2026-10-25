@@ -358,6 +358,7 @@ function ListField({
         spellCheck={false}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             add();
@@ -407,7 +408,9 @@ function OneLine({
         setText(event.target.value);
       }}
       onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== 'Escape') return;
+        // Enter that ends an IME's composition is the IME's.
+        if ((event.key !== 'Enter' && event.key !== 'Escape') || event.nativeEvent.isComposing)
+          return;
         event.preventDefault();
         done.current = true;
         onDone(event.key === 'Enter' ? text : undefined, true);

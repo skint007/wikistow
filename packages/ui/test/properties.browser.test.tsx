@@ -271,11 +271,28 @@ describe('the draft’s property rows', () => {
     expect(rows(container)).toHaveLength(9);
   });
 
-  it('shows a block that doesn’t read as properties as text, saying why, with no rows to go back to', async () => {
-    const { container } = await editor('---\nkey: [unclosed\n---\n');
-    expect(container.querySelector('textarea')?.value).toBe('key: [unclosed');
+  it('shows a block that doesn’t read as properties as text, saying why, until asked for rows once it does', async () => {
+    const { container, last } = await editor('---\nkey: [unclosed\n---\n');
+    const text = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(text.value).toBe('key: [unclosed');
     expect(container.textContent).toContain('Shown as text:');
     expect(() => button(container, 'Show as rows')).toThrow();
+    // Typing on once it reads stays in the text.
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+    await userEvent.keyboard(']\nmore: 1');
+    expect(last()).toBe('---\nkey: [unclosed]\nmore: 1\n---\n');
+    expect(document.activeElement).toBe(text);
+    await userEvent.click(button(container, 'Show as rows'));
+    expect(rows(container)).toEqual(['Key', 'More']);
+  });
+
+  it('turns the focus to the text asked for from a row’s menu, and on from a row removed', async () => {
+    const { container } = await editor(NOTE);
+    await fromMenu(container, 'Servings', 'Remove');
+    await expect.poll(() => document.activeElement?.textContent).toBe('Add property');
+    await fromMenu(container, 'Title', 'Edit as text');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Properties as text');
   });
 
   it('shows a page link as a chip, which a click edits rather than follows', async () => {
@@ -300,7 +317,67 @@ const links: LinkAssist = {
   choose: () => {},
 };
 
+async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') {
+  window.localStorage.setItem('wikistow.editor', mode);
+  const ref = createRef<EditorSurfaceHandle>();
+  const container = await render(
+    <PageEditor
+      ref={ref}
+      initial={initial}
+      onChange={() => {}}
+      status={null}
+      links={links}
+      attachments={{ list: [], url: async () => null }}
+      onFiles={() => {}}
+    />,
+  );
+  if (mode !== 'source') {
+    await expect.poll(() => container.querySelector('#page-visual')).not.toBeNull();
+  }
+  return { container, ref };
+}
+
 describe('Insert in page', () => {
+  it('puts a reference where the cursor is in split’s source side, when that was the side last typed in', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nServes\n\nThe end.\n',
+      'split',
+    );
+    const content = await expect
+      .poll(() =>
+        [...container.querySelectorAll('div')]
+          .map((div) => div.shadowRoot?.querySelector<HTMLElement>('.cm-content'))
+          .find(Boolean),
+      )
+      .toBeTruthy()
+      .then(() =>
+        [...container.querySelectorAll('div')]
+          .map((div) => div.shadowRoot?.querySelector<HTMLElement>('.cm-content'))
+          .find(Boolean)!,
+      );
+    content.focus();
+    await userEvent.keyboard('{Control>}{End}{/Control} More');
+    await fromMenu(container, 'Servings', 'Insert in page');
+    await expect
+      .poll(() => ref.current?.read())
+      // At the end, past the last line break.
+      .toBe('---\nservings: 4\n---\nServes\n\nThe end.\n More`=servings`');
+  });
+
+  it('puts a reference after a block selected in the visual editor, which typing then leaves', async () => {
+    const { container, ref } = await pageEditor(
+      '---\nservings: 4\n---\nBefore\n\n---\n\nAfter\n',
+      'visual',
+    );
+    await expect.poll(() => container.querySelector('#page-visual hr')).not.toBeNull();
+    await userEvent.click(container.querySelector('#page-visual hr')!);
+    await fromMenu(container, 'Servings', 'Insert in page');
+    await userEvent.keyboard('x');
+    await expect
+      .poll(() => ref.current?.read())
+      .toMatch(/^---\nservings: 4\n---\nBefore\n\n(\*\*\*|---)\n\n`=servings`xAfter\n$/);
+  });
+
   for (const mode of ['source', 'visual'] as const) {
     it(`puts a reference where the cursor is in the ${mode} editor, typing going on after it`, async () => {
       window.localStorage.setItem('wikistow.editor', mode);

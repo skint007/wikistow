@@ -356,23 +356,25 @@ function Surface({
         view.focus();
       });
     },
-    /** Put `code` as inline code in place of the selection, or after a node selected. */
+    /**
+     * Put `code` as inline code in place of the text selected; with a
+     * node, cells or everything selected, at the nearest cursor after it.
+     */
     insertCode: (code: string) => {
       editor.current?.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const { state } = view;
         const mark = state.schema.marks['inlineCode'];
         if (!mark) return;
-        const { selection } = state;
+        const tr = state.tr;
+        if (!(state.selection instanceof TextSelection)) {
+          tr.setSelection(Selection.near(state.doc.resolve(state.selection.to)));
+          // A page with no text anywhere to put it in.
+          if (!(tr.selection instanceof TextSelection)) return;
+        }
         // In a code block, marks don't hold: the code is text there.
-        const text = state.schema.text(
-          code,
-          selection.$from.parent.type.spec.code ? [] : [mark.create()],
-        );
-        const tr =
-          selection instanceof TextSelection || selection.empty
-            ? state.tr.replaceSelectionWith(text, false)
-            : state.tr.insert(selection.to, text);
+        const inCode = tr.selection.$from.parent.type.spec.code;
+        tr.replaceSelectionWith(state.schema.text(code, inCode ? [] : [mark.create()]), false);
         // Typing after it isn't code.
         view.dispatch(tr.removeStoredMark(mark).scrollIntoView());
         view.focus();

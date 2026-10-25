@@ -8,7 +8,7 @@ import {
   type PropertyValue,
 } from '@wikistow/client';
 import { Plus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -105,12 +105,16 @@ export function PropertiesEditor({
   /** Put a reference to a property, `` `=key` ``, where the page's cursor is. */
   onInsert: (code: string) => void;
 }) {
-  const [asText, setAsText] = useState(false);
+  // Shown as text: as the person chose, or as a block that didn't read,
+  // which stays text until they go back to rows, not as soon as it reads.
+  const [asText, setAsText] = useState<'chosen' | 'unread' | null>(null);
   const [adding, setAdding] = useState(addingFirst);
   const [error, setError] = useState<string | null>(null);
   // The row whose value is being typed, by key.
   const [opened, setOpened] = useState<string | null>(null);
   const read = useMemo(() => readProperties(frontmatter), [frontmatter]);
+  if (!read.ok && asText === null) setAsText('unread');
+  const addButton = useRef<HTMLButtonElement>(null);
 
   /** Take `edit`, of the property `label`, or say why it can't be made. */
   const apply = (edit: PropertyEdit, label: string): boolean => {
@@ -127,6 +131,7 @@ export function PropertiesEditor({
     return (
       <PropertiesText
         frontmatter={frontmatter}
+        focus={asText === 'chosen'}
         reason={read.ok ? null : read.reason}
         onChange={onChange}
         onRemove={onRemove}
@@ -134,7 +139,7 @@ export function PropertiesEditor({
           read.ok
             ? () => {
                 setError(null);
-                setAsText(false);
+                setAsText(null);
               }
             : null
         }
@@ -162,9 +167,14 @@ export function PropertiesEditor({
               onRename={(to) =>
                 apply(renameProperty(frontmatter, property.key, to), label(property))
               }
-              onRemove={() => apply(removeProperty(frontmatter, property.key), label(property))}
+              onRemove={() => {
+                const removed = apply(removeProperty(frontmatter, property.key), label(property));
+                // Its row and menu have gone: the focus goes on from the rows' end.
+                if (removed) requestAnimationFrame(() => addButton.current?.focus());
+                return removed;
+              }}
               onInsert={() => onInsert(`=${property.key.trim()}`)}
-              onAsText={() => setAsText(true)}
+              onAsText={() => setAsText('chosen')}
             />
           ))}
         </dl>
@@ -190,6 +200,7 @@ export function PropertiesEditor({
       )}
       <div className="flex flex-wrap gap-1">
         <Button
+          ref={addButton}
           size="sm"
           variant="ghost"
           className="-ml-2"
@@ -201,7 +212,7 @@ export function PropertiesEditor({
           <Plus className="size-4" strokeWidth={1.75} />
           Add property
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setAsText(true)}>
+        <Button size="sm" variant="ghost" onClick={() => setAsText('chosen')}>
           Edit as text
         </Button>
       </div>
@@ -234,6 +245,7 @@ function NewProperty({ onAdd, onCancel }: { onAdd: (key: string) => void; onCanc
         spellCheck={false}
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
           if (event.key === 'Enter') {
             event.preventDefault();
             add();
@@ -259,12 +271,15 @@ function NewProperty({ onAdd, onCancel }: { onAdd: (key: string) => void; onCanc
  */
 function PropertiesText({
   frontmatter,
+  focus,
   reason,
   onChange,
   onRemove,
   onRows,
 }: {
   frontmatter: string;
+  /** Focus the text as it opens, as when the person asked for it. */
+  focus: boolean;
   reason: string | null;
   onChange: (frontmatter: string) => void;
   onRemove: () => void;
@@ -275,6 +290,7 @@ function PropertiesText({
   return (
     <section aria-label="Properties" className={PANEL}>
       <textarea
+        autoFocus={focus}
         aria-label="Properties as text"
         value={text}
         rows={Math.max(3, text.split('\n').length + 1)}
