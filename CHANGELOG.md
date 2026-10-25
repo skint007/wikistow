@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
+
 #### Desktop
 
 - A link's hint, saying where it goes, shows above the link instead of below it, where the pointer covered it. Near the top of the window it still shows below. (#179)
@@ -17,6 +21,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Development
 
 - The client reads a page's frontmatter as typed properties, with the `yaml` package, and edits one value, key or property's lines without rewriting the rest of the block. The property rows, references to values, and property search will build on it. (#181)
+- The search index keeps each page's properties beside its text, and lists pages by space, folder and tag, with the keys they use, for query tables, the folder view and references to other pages' values. The desktop app reads every page once more after updating. (#184)
 
 ## 0.16.1 - 2026-10-23
 
