@@ -1,4 +1,10 @@
-import type { ClientContext, PageId, SpaceId } from '@wikistow/client';
+import {
+  readProperties,
+  splitFrontmatter,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -10,6 +16,8 @@ import {
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
+import type { LinkAssist } from '../src/page/editor/surface.ts';
+import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { Markdown } from '../src/page/markdown.tsx';
 
 // References to the page's values in its body, as the reader draws them:
@@ -130,5 +138,68 @@ describe('a reference to one of the page’s values', () => {
     const container = await render('---\n- a list\n---\nServes `=servings`.\n', false);
     expect(paragraphs(container)).toEqual(['Serves =servings.']);
     expect(container.querySelector('.page-body code')?.textContent).toBe('=servings');
+  });
+});
+
+describe('a reference beside a link’s edge', () => {
+  // The visual editor drawing `body` of a page whose frontmatter is `frontmatter`.
+  async function visual(frontmatter: string, body: string) {
+    const read = readProperties(splitFrontmatter(frontmatter).frontmatter);
+    const links: LinkAssist = {
+      pages: [],
+      targets: () => null,
+      selfId: 'p-self',
+      table: new Map(),
+      headings: async () => [],
+      ownHeadings: async () => [],
+      create: () => {},
+      pick: () => {},
+      choose: () => {},
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <VisualSurface
+          initial={body}
+          onChange={() => {}}
+          links={links}
+          attachments={{ list: [], url: async () => '' }}
+          onFiles={() => {}}
+          properties={read.ok ? read.properties : null}
+        />,
+      ),
+    );
+    unmounts.push(() => {
+      act(() => root.unmount());
+      container.remove();
+    });
+    await expect.poll(() => container.querySelector('#page-visual p')).not.toBeNull();
+    return container;
+  }
+  // The references shown, each its hint and its text: a value, or a name no property has.
+  const shown = (within: Element | null) =>
+    [...(within?.querySelectorAll<HTMLElement>('[data-hint]') ?? [])].map((element) => [
+      element.dataset['hint'],
+      element.textContent,
+    ]);
+
+  // Code that ends a link's text and code just after it are two code spans.
+  it.each([
+    ['[`=nope`](https://example.com)`_x`', [['No property has this name', '=nope']]],
+    [
+      '[`=a `](https://example.com)`=servings`',
+      [
+        ['No property has this name', '=a '],
+        ['servings · property', '4'],
+      ],
+    ],
+  ])('reads %s in the visual editor as the reader does', async (body, references) => {
+    const frontmatter = '---\nservings: 4\n---\n';
+    const reader = await render(`${frontmatter}${body}\n`, true);
+    expect(shown(reader.querySelector('.page-body'))).toEqual(references);
+    const editor = await visual(frontmatter, `${body}\n`);
+    await expect.poll(() => shown(editor.querySelector('#page-visual'))).toEqual(references);
   });
 });

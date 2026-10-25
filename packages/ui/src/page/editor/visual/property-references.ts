@@ -51,8 +51,10 @@ function decorations(
   others: OtherPages | null,
 ): DecorationSet {
   const found: Decoration[] = [];
-  // A run of inline code, which may be several text nodes as other marks change.
-  let run: { from: number; to: number; text: string; inLink: boolean } | null = null;
+  // A run of inline code, which may be several text nodes as other marks
+  // change, but not its link: code across a link's edge is two code spans,
+  // as the reader reads it.
+  let run: { from: number; to: number; text: string; link: Mark | undefined } | null = null;
   // `after` holds the marks of what follows the run, which its chip is drawn in.
   const flush = (after: readonly Mark[] = []) => {
     const reference = run && parsePropertyReference(run.text);
@@ -82,7 +84,7 @@ function decorations(
           Decoration.inline(run.from, run.to, {
             class: UNKNOWN,
             'data-hint': hint,
-            ...(run.inLink ? { 'data-hint-side': 'top' } : {}),
+            ...(run.link ? { 'data-hint-side': 'top' } : {}),
             'aria-description': hint,
           }),
         );
@@ -97,14 +99,14 @@ function decorations(
         const at = pos + 1 + offset;
         const code = child.isText && child.marks.some((mark) => mark.type.name === 'inlineCode');
         if (!code) return flush(child.marks);
-        const inLink = child.marks.some((mark) => mark.type.name === 'link');
-        if (run && run.to === at) {
+        const link = child.marks.find((mark) => mark.type.name === 'link');
+        const sameLink = run && (run.link && link ? run.link.eq(link) : run.link === link);
+        if (run && run.to === at && sameLink) {
           run.to += child.nodeSize;
           run.text += child.text ?? '';
-          run.inLink ||= inLink;
         } else {
-          flush();
-          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', inLink };
+          flush(child.marks);
+          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', link };
         }
       });
       flush();
