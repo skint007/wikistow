@@ -26,13 +26,17 @@ const UNKNOWN = 'underline decoration-border decoration-dashed underline-offset-
 const UNKNOWN_HINT = 'No property has this name';
 const NO_PAGE_HINT = 'No page has this title';
 
-/** The value a reference shows, as a chip drawn after the code, its hint `hint`. */
-function chip(property: PropertyData, hint: string) {
+/**
+ * The value a reference shows, as a chip drawn after the code, its hint
+ * `hint`, above it in a link's text, as a link's hint is (`linkHint`).
+ */
+function chip(property: PropertyData, hint: string, inLink: boolean) {
   return () => {
     const dom = document.createElement('span');
     dom.className = CHIP;
     dom.contentEditable = 'false';
     dom.dataset['hint'] = hint;
+    if (inLink) dom.dataset['hintSide'] = 'top';
     dom.setAttribute('aria-label', hint);
     dom.textContent = propertyText(property) || '–';
     return dom;
@@ -47,7 +51,7 @@ function decorations(
 ): DecorationSet {
   const found: Decoration[] = [];
   // A run of inline code, which may be several text nodes as other marks change.
-  let run: { from: number; to: number; text: string } | null = null;
+  let run: { from: number; to: number; text: string; inLink: boolean } | null = null;
   const flush = () => {
     const reference = run && parsePropertyReference(run.text);
     const other = reference?.page ? others?.(reference.page) : undefined;
@@ -63,10 +67,10 @@ function decorations(
         const value = propertyText(property);
         const hint = referenceHint(property, other?.kind === 'page' ? other : undefined);
         found.push(
-          Decoration.widget(run.to, chip(property, hint), {
+          Decoration.widget(run.to, chip(property, hint, run.inLink), {
             side: 1,
             ignoreSelection: true,
-            key: `property:${hint}:${value}`,
+            key: `property:${hint}:${value}:${run.inLink}`,
           }),
         );
       } else {
@@ -75,6 +79,7 @@ function decorations(
           Decoration.inline(run.from, run.to, {
             class: UNKNOWN,
             'data-hint': hint,
+            ...(run.inLink ? { 'data-hint-side': 'top' } : {}),
             'aria-description': hint,
           }),
         );
@@ -89,12 +94,14 @@ function decorations(
         const at = pos + 1 + offset;
         const code = child.isText && child.marks.some((mark) => mark.type.name === 'inlineCode');
         if (!code) return flush();
+        const inLink = child.marks.some((mark) => mark.type.name === 'link');
         if (run && run.to === at) {
           run.to += child.nodeSize;
           run.text += child.text ?? '';
+          run.inLink ||= inLink;
         } else {
           flush();
-          run = { from: at, to: at + child.nodeSize, text: child.text ?? '' };
+          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', inLink };
         }
       });
       flush();

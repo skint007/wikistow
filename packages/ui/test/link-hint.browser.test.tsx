@@ -1,4 +1,10 @@
-import type { ClientContext, PageId, SpaceId } from '@wikistow/client';
+import {
+  readProperties,
+  splitFrontmatter,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -15,8 +21,9 @@ import type { LinkAssist } from '../src/page/editor/surface.ts';
 
 // A link's hint in the desktop app, placed in Chromium: above the link,
 // where the pointer resting on its line of text doesn't cover it. So is a
-// wikilink's source, its hint in the visual editor, and the hints on a
-// missing or ambiguous wikilink's text, in the reader and the editor.
+// wikilink's source, its hint in the visual editor, and any other hint on
+// a link's text, in the reader and the editor: a missing or ambiguous
+// wikilink's, a reference's in a link, a page link chip's and a tag's.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -88,6 +95,9 @@ const PAGES = [
 ];
 const MISSING_AND_AMBIGUOUS =
   'See [[Nowhere]] and [[Dal]], or [read [[Dal]]](https://example.com) first.\n';
+// References in a link's text: a value found, and a name not found.
+const REFERENCES_IN_LINK = '[Serves `=servings`, not `=nope`](https://example.com).\n';
+const FRONTMATTER = '---\ngoes_with: "[[Nowhere]]"\nservings: 4\n---\n';
 
 it('shows a link hint above the link', async () => {
   const container = await render(
@@ -135,11 +145,11 @@ it('shows a wikilink’s source above it in the visual editor', async () => {
   );
 });
 
-it('shows a missing or ambiguous wikilink’s hint, and a tag’s, above it in the reader', async () => {
+it('shows the hints on a link’s text above it in the reader', async () => {
   const node = (
     <>
       <Markdown
-        source={`---\ngoes_with: "[[Nowhere]]"\n---\n${MISSING_AND_AMBIGUOUS}\nWith \`=goes_with\`.\n`}
+        source={`${FRONTMATTER}${MISSING_AND_AMBIGUOUS}\nWith \`=goes_with\`.\n\n${REFERENCES_IN_LINK}`}
         attachments={{
           ctx: {} as ClientContext,
           page: { spaceId: 's-home' as SpaceId, pageId: 'p-self' as PageId },
@@ -153,7 +163,6 @@ it('shows a missing or ambiguous wikilink’s hint, and a tag’s, above it in t
       <p className="tags">
         <TagPill query="tag:soup">soup</TagPill>
       </p>
-      <HintLayer />
     </>
   );
   const rootRoute = createRootRoute({ component: () => node });
@@ -177,16 +186,27 @@ it('shows a missing or ambiguous wikilink’s hint, and a tag’s, above it in t
   expect(await hinted(container, '.page-body p > span[data-hint]')).toEqual(ambiguous);
   // In a Markdown link's text.
   expect(await hinted(container, '.page-body a [data-hint]')).toEqual(ambiguous);
-  // A reference's page link chip, as a property row shows one.
-  expect(await hinted(container, '.page-body p:last-child [data-hint] [data-hint]')).toEqual({
+  // A reference's page link chip, as a property row shows one. The
+  // reference's own hint is on a link's text too.
+  const chipped = '[data-hint="goes_with · property"]';
+  expect(await hinted(container, `${chipped} [data-hint]`)).toEqual({
     text: 'No page has this title',
+    side: 'top',
+  });
+  expect(container.querySelector<HTMLElement>(chipped)?.dataset['hintSide']).toBe('top');
+  expect(await hinted(container, 'a [data-hint="servings · property"]')).toEqual({
+    text: 'servings · property',
+    side: 'top',
+  });
+  expect(await hinted(container, 'a code[data-hint]')).toEqual({
+    text: 'No property has this name',
     side: 'top',
   });
   // A tag's pill, a link to its search.
   expect(await hinted(container, '.tags a')).toEqual({ text: 'Search tag:soup', side: 'top' });
 });
 
-it('shows a missing or ambiguous wikilink’s hint above it in the visual editor', async () => {
+it('shows the hints on a link’s text above it in the visual editor', async () => {
   const links: LinkAssist = {
     pages: PAGES,
     targets: () => null,
@@ -198,9 +218,11 @@ it('shows a missing or ambiguous wikilink’s hint above it in the visual editor
     pick: () => {},
     choose: () => {},
   };
+  const read = readProperties(splitFrontmatter(FRONTMATTER).frontmatter);
   const container = await render(
     <VisualSurface
-      initial={MISSING_AND_AMBIGUOUS}
+      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}`}
+      properties={read.ok ? read.properties : null}
       onChange={() => {}}
       links={links}
       attachments={{ list: [], url: async () => '' }}
@@ -222,5 +244,17 @@ it('shows a missing or ambiguous wikilink’s hint above it in the visual editor
   expect(await hinted(container, '[data-wikilink="[[Dal]]"] > button')).toEqual({
     text: 'More than one page has this title. Choose which page “Dal” means (Alt+Enter).',
     side: 'bottom',
+  });
+  // References in a link's text: the value's chip, and a name not found.
+  await expect
+    .poll(() => container.querySelector('[data-hint="servings · property"]'))
+    .not.toBeNull();
+  expect(await hinted(container, '[data-hint="servings · property"]')).toEqual({
+    text: 'servings · property',
+    side: 'top',
+  });
+  expect(await hinted(container, '[data-hint="No property has this name"]')).toEqual({
+    text: 'No property has this name',
+    side: 'top',
   });
 });
