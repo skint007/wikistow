@@ -268,7 +268,13 @@ describe('a folder’s view', () => {
   it('saves a cell against the version it read, in the page’s own key, and shows what it wrote', async () => {
     const { calls, save } = server(() => written(SOUP.markdown.replace('4 #', '6 #'), 11));
     const { container } = await mount([SOUP, BREAD, SALAD], { save });
+    // Escape puts it back, saving nothing, and the keyboard stays on the cell.
     await userEvent.click(button(container, /^Servings of Tomato soup: 4/));
+    await userEvent.keyboard('5{Escape}');
+    await expect
+      .poll(() => document.activeElement?.getAttribute('aria-label'))
+      .toBe('Servings of Tomato soup: 4. Edit');
+    await userEvent.keyboard('{Enter}');
     await userEvent.keyboard('{Control>}a{/Control}6{Enter}');
     expect(calls).toEqual([
       {

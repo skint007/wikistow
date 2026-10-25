@@ -699,7 +699,12 @@ function PageRow({
                 label={`${column.label} of ${pageTitle(entry.title)}`}
                 scope={scope}
                 opened={opened?.id === id}
-                onOpened={(open) => onOpened(open ? { id, pageId: entry.pageId, version } : null)}
+                onOpened={(open, keyboard) => {
+                  // A field the keyboard closed, unchanged, gives the focus back too.
+                  if (!open && keyboard && refocus.current?.cell !== id)
+                    refocus.current = { cell: id, label: null };
+                  onOpened(open ? { id, pageId: entry.pageId, version } : null);
+                }}
                 onSet={(next) => {
                   const focused = document.activeElement;
                   refocus.current = row.current
