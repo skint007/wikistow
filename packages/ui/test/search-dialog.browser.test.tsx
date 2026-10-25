@@ -226,12 +226,16 @@ it('gets a link’s query back as written, as the router reads its address', asy
   expect(linkedSearch('#search=%E0%A4%A')).toBeNull();
 });
 
-it('holds a link’s search in memory while signing in or unlocking, not in the address', () => {
+it('holds a link’s search in memory while unlocking, not in the address', () => {
   const href = `/s/home/p/bean-soup?view=draft#search=${encodeURIComponent('tag:"in progress"')}`;
   expect(withoutSearchHash(href)).toBe('/s/home/p/bean-soup?view=draft');
   expect(takeHeldSearch()).toBe('tag:"in progress"');
   expect(takeHeldSearch()).toBeNull();
   // Any other address, a heading's too, goes back as it was.
   expect(withoutSearchHash('/s/home/p/bean-soup#method')).toBe('/s/home/p/bean-soup#method');
+  expect(takeHeldSearch()).toBeNull();
+  // Signing in may be someone else's: nothing is held for it, and what was goes.
+  withoutSearchHash(href);
+  expect(withoutSearchHash(href, { hold: false })).toBe('/s/home/p/bean-soup?view=draft');
   expect(takeHeldSearch()).toBeNull();
 });

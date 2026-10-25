@@ -18,8 +18,11 @@ export const Route = createFileRoute('/_app')({
       // The session ended while nobody was here (revoked from another
       // device, say): the kept unlock goes with it.
       await forgetKeptUnlock();
-      // A search the address asks for waits in memory, not in the redirect.
-      throw redirect({ to: '/sign-in', search: { redirect: withoutSearchHash(location.href) } });
+      // A search the address asks for isn't kept for whoever signs in.
+      throw redirect({
+        to: '/sign-in',
+        search: { redirect: withoutSearchHash(location.href, { hold: false }) },
+      });
     }
     // After a refresh, a browser tab opens the vault it kept, whichever page
     // it is on, unless it was left idle past the lock delay. The desktop app
@@ -46,7 +49,7 @@ function AppLayout() {
     vaultStore.lock();
     void navigate({
       to: '/sign-in',
-      search: { redirect: withoutSearchHash(router.state.location.href) },
+      search: { redirect: withoutSearchHash(router.state.location.href, { hold: false }) },
     });
   }, [me, navigate, router]);
   // Locks after the delay chosen in Settings with nobody using the app.

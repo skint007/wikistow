@@ -38,8 +38,8 @@ import {
  *   also matches as a prefix (`back` finds `backup`), the others only whole.
  *   A filter with no value ending the query, as one half typed (`tag:`,
  *   `tag:#`), is left out, and elsewhere is words (`Re: dinner`); a quote
- *   left open runs to the query's end; a word in quotes is always words, so
- *   `"10:30"` searches text, where `10:30` would be a filter.
+ *   left open runs to the query's end; a word in quotes is always words,
+ *   and so are a time (`10:30`) and a web address (`https://…`).
  * - **Filters** match properties (`matchesFilter`): `tag:soup` or
  *   `tags:soup` a page tagged `soup` (`hasTag`, which reads Obsidian's
  *   older `tag` as tags too),
@@ -279,13 +279,16 @@ export type SearchFilter = { key: string; value: string };
  * spaces, with `\"` and `\\` for a quote and a backslash in them (any
  * other backslash is itself). A quote
  * not closed runs to the query's end. Everything else is words, a word in
- * quotes too, so `"10:30"` or `"https://example.com"` searches text. A
+ * quotes too, and so are a name of digits alone, as a time is (`10:30`),
+ * and a value starting `//`, as a web address's does (`https://…`). A
  * filter with no value (`tag:`, `tag:#`, `status:""`) ending the query, as
  * one half typed, is left out; elsewhere it is words (`Re: dinner`). Linear in the query's length.
  */
 export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
   const words: string[] = [];
   const filters: SearchFilter[] = [];
+  // Where the query's last word ends.
+  const last = query.trimEnd().length;
   let at = 0;
   while (at < query.length) {
     if (/\s/u.test(query.charAt(at))) {
@@ -294,13 +297,17 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
     }
     FILTER_NAME.lastIndex = at;
     const name = FILTER_NAME.exec(query)?.[1];
-    if (name !== undefined) {
-      const quoted = readQuoted(query, at + name.length + 1);
-      const end = quoted?.end ?? wordEnd(query, at + name.length + 1);
-      const value = quoted?.text ?? query.slice(at + name.length + 1, end);
-      if (!emptyFilter(name, value)) filters.push({ key: name, value });
-      // One with nothing after it but more query is words (`Re: dinner`).
-      else if (query.slice(end).trim() !== '') words.push(query.slice(at, end));
+    // A time (`10:30`) is words.
+    if (name !== undefined && !/^\d+$/u.test(name)) {
+      const from = at + name.length + 1;
+      const quoted = readQuoted(query, from);
+      const end = quoted?.end ?? wordEnd(query, from);
+      const value = quoted?.text ?? query.slice(from, end);
+      // So is a web address (`https://…`), and a filter with no value
+      // anywhere but at the end, where it is half typed (`Re: dinner`).
+      const address = quoted === null && value.startsWith('//');
+      if (!address && !emptyFilter(name, value)) filters.push({ key: name, value });
+      else if (address || end < last) words.push(query.slice(at, end));
       at = end;
       continue;
     }
@@ -343,10 +350,11 @@ function readQuoted(query: string, at: number): { text: string; end: number } | 
  */
 export function searchFilter(key: string, value: string): string | null {
   const name = key.trim().replace(/ /g, '_');
-  if (!new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) || emptyFilter(name, value)) {
+  const named = new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) && !/^\d+$/u.test(name);
+  if (!named || emptyFilter(name, value)) {
     return null;
   }
-  const plain = /^[^\s"\\]+$/u.test(value);
+  const plain = /^[^\s"\\]+$/u.test(value) && !value.startsWith('//');
   return `${name}:${plain ? value : `"${value.replace(/[\\"]/g, '\\$&')}"`}`;
 }
 

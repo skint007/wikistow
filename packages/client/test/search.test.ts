@@ -171,6 +171,14 @@ describe('filters in a query', () => {
       filters: [],
     });
     expect(parseSearch('  ').filters).toEqual([]);
+    // A time and a web address are words, unquoted too.
+    expect(parseSearch('10:30 https://example.com/recipe tag:soup')).toEqual({
+      words: '10:30 https://example.com/recipe',
+      filters: [{ key: 'tag', value: 'soup' }],
+    });
+    expect(parseSearch('url:"//example.com"').filters).toEqual([
+      { key: 'url', value: '//example.com' },
+    ]);
   });
 
   it('are read in time linear in the query', () => {
@@ -179,6 +187,9 @@ describe('filters in a query', () => {
     // 8 times the query; quadratic would be 64.
     expect(growth((q) => parseSearch(q), query(2000), query(16_000))).toBeLessThan(24);
     expect(cpuTime(() => parseSearch(`a${'_'.repeat(200_000)}`)).ms).toBeLessThan(500);
+    // Names with no value, before a long run of spaces.
+    const empty = (n: number) => `${'a: '.repeat(n)}z${' '.repeat(10 * n)}`;
+    expect(growth((q) => parseSearch(q), empty(2000), empty(16_000))).toBeLessThan(24);
   });
 
   it('can be written for a key and value, quoted where they need it', () => {
@@ -189,6 +200,9 @@ describe('filters in a query', () => {
     expect(searchFilter('a.b', 'x')).toBeNull();
     expect(searchFilter('tag', ' ')).toBeNull();
     expect(searchFilter('tags', '#')).toBeNull();
+    // A name of digits alone would read as a time, so no filter has one.
+    expect(searchFilter('2024', 'x')).toBeNull();
+    expect(searchFilter('url', '//example.com')).toBe('url:"//example.com"');
     for (const [key, value] of [
       ['status', 'in progress'],
       ['note', 'say "hi" \\ bye'],
