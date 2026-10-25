@@ -76,6 +76,21 @@ describe('reading a query block', () => {
     });
   });
 
+  it('reads a date the calendar hasn’t as text, and years before 100 as written', () => {
+    for (const text of ['2024-13-45', '2024-02-30', '2026-10-12T24:00']) {
+      expect(parsed(`where: due < ${text}`).where[0]?.value, text).toEqual({
+        kind: 'text',
+        value: text,
+      });
+    }
+    const early = new Date(0);
+    early.setUTCFullYear(50, 0, 2);
+    expect(parsed('where: due = 0050-01-02').where[0]?.value).toEqual({
+      kind: 'date',
+      value: early.getTime(),
+    });
+  });
+
   it('says in one line what doesn’t read', () => {
     const cases: [string, RegExp][] = [
       ['from Recipes', /^Line 1 isn’t one of/],
@@ -379,6 +394,18 @@ describe('a query table in a public copy', () => {
     );
     expect(copy('> ```wikistow-query\n> from: A\n> ```\n> after\n')).toBe(
       '> | Page |\n> | --- |\n> | x |\n>\n> after\n',
+    );
+  });
+
+  it('stays in its list item after a line of text, its first row indented too', () => {
+    expect(copy('- item text\n  ```wikistow-query\n  from: A\n  ```\n  more\n')).toBe(
+      '- item text\n  \n  | Page |\n  | --- |\n  | x |\n\n  more\n',
+    );
+  });
+
+  it('keeps a CRLF page’s line breaks, with the blank line after it', () => {
+    expect(copy('Intro\r\n```wikistow-query\r\nfrom: A\r\n```\r\nAfter\r\n')).toBe(
+      'Intro\r\n\r\n| Page |\r\n| --- |\r\n| x |\r\n\r\nAfter\r\n',
     );
   });
 

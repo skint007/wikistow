@@ -56,7 +56,10 @@ export function QueryTable({
   const read = useMemo(() => readQuery(source), [source]);
   const spaceId = SpaceId.parse(scope.spaceId);
   const { index, progress, error } = usePageIndex(scope.ctx, { enabled: read.ok });
-  const { data: tree } = useQuery({ ...treeQuery(scope.ctx, spaceId), enabled: read.ok });
+  const { data: tree, error: treeError } = useQuery({
+    ...treeQuery(scope.ctx, spaceId),
+    enabled: read.ok,
+  });
   const result = useMemo(() => {
     if (!read.ok || !index || !tree) return null;
     const folders = tree.folders.map((folder) => ({
@@ -85,9 +88,11 @@ export function QueryTable({
       <p role="status" className="query-table-status text-xs text-muted-foreground">
         {error && !index
           ? 'This table can’t be shown: the search index couldn’t be built.'
-          : progress && progress.total > 0
-            ? `Building the search index for this table… ${progress.pages} of ${progress.total} pages`
-            : 'Building the search index for this table…'}
+          : treeError && !tree
+            ? 'This table can’t be shown: the space’s folders couldn’t be loaded.'
+            : progress && progress.total > 0
+              ? `Building the search index for this table… ${progress.pages} of ${progress.total} pages`
+              : 'Building the search index for this table…'}
       </p>
     );
   }

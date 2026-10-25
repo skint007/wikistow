@@ -214,16 +214,16 @@ const DATE =
  * isn't a date as property types read them.
  */
 export function dateMoment(text: string): number | null {
-  const [, year, month, day, hour, minute, second, zone] = DATE.exec(text) ?? [];
+  const [, year, month, day, hour = '0', minute = '0', second = '0', zone] = DATE.exec(text) ?? [];
   if (year === undefined) return null;
-  let moment = Date.UTC(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour ?? 0),
-    Number(minute ?? 0),
-    Number(second ?? 0),
-  );
+  const date = new Date(0);
+  // Not `Date.UTC`, which reads years up to 99 as 1900 and on.
+  date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  // A day the calendar hasn't, as 2024-02-30, isn't a date.
+  if (date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) return null;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return null;
+  date.setUTCHours(Number(hour), Number(minute), Number(second));
+  let moment = date.getTime();
   if (zone !== undefined && zone !== 'Z') {
     const [, sign, hours, minutes = '0'] = /^([+-])(\d{2}):?(\d{2})?$/.exec(zone) ?? [];
     moment -= (Number(hours) * 60 + Number(minutes)) * (sign === '-' ? -1 : 1) * 60_000;
@@ -418,6 +418,9 @@ function holds(properties: readonly Readonly<PropertyData>[], condition: QueryCo
   }
 }
 
+// How text sorts, whatever its case: made once, as each `localeCompare` makes its own.
+const TEXT_ORDER = new Intl.Collator(undefined, { sensitivity: 'base' });
+
 // Kinds of value as a sort orders them, before each other.
 const RANK = { number: 0, date: 1, boolean: 2, text: 3 } as const;
 
@@ -447,9 +450,7 @@ function sortedBy<P extends QueryPage>(pages: readonly P[], sort: NonNullable<Pa
     if (rank !== 0) return rank * direction;
     const order =
       a.key.kind === 'text'
-        ? String(a.key.value).localeCompare(String(b.key.value), undefined, {
-            sensitivity: 'base',
-          })
+        ? TEXT_ORDER.compare(String(a.key.value), String(b.key.value))
         : Number(a.key.value) - Number(b.key.value);
     return order !== 0 ? order * direction : a.i - b.i;
   });

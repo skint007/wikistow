@@ -2,8 +2,15 @@
 // which the server renders and serves at `/p/<id>`. Each call here sends
 // plaintext to the server, so the app makes one only after saying so on
 // screen: from the public link dialog, or a Publish that asked first.
-import { publicLinkRoutes, type PageId, type RevisionId, type SpaceId } from '@wikistow/contracts';
+import {
+  pageRoutes,
+  publicLinkRoutes,
+  type PageId,
+  type RevisionId,
+  type SpaceId,
+} from '@wikistow/contracts';
 import { ApiError } from '../api/client.ts';
+import { utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked, writableInLink } from '../link-table.ts';
@@ -163,16 +170,22 @@ export function copyBody(
  */
 function tableIn(body: string, start: number, end: number, table: readonly string[]): string {
   const lineStart = body.lastIndexOf('\n', start - 1) + 1;
-  const prefix = body.slice(lineStart, start).replace(/[^>\s]/g, ' ');
+  const opening = body.slice(lineStart, start);
+  const prefix = opening.replace(/[^>\s]/g, ' ').replace(/\r/g, '');
   const gap = prefix.trimEnd();
+  // The page's own line breaks, CRLF or LF, as the block's are.
+  const eol =
+    body.slice(start, end).includes('\r\n') || body.slice(end).startsWith('\r\n') ? '\r\n' : '\n';
   const blank = (line: string) => line.replace(/[>\s]/g, '') === '';
   const lineBefore =
     lineStart === 0 ? '' : body.slice(body.lastIndexOf('\n', lineStart - 2) + 1, lineStart - 1);
-  const after = body.slice(end);
+  const after = body.slice(end).replace(/^\r(?=\n)/, '');
   const lineAfter = after.startsWith('\n') ? (after.slice(1).split('\n', 1)[0] ?? '') : '';
-  const before = lineStart === 0 || blank(lineBefore) || prefix.trim() !== '' ? '' : `\n${gap}`;
-  const closing = after.startsWith('\n') && !blank(lineAfter) ? `\n${gap}` : '';
-  return `${before}${table.join(`\n${prefix}`)}${closing}`;
+  // A blank line before it only where nothing but indentation starts its line.
+  const before =
+    lineStart === 0 || blank(lineBefore) || opening.trim() !== '' ? '' : `${eol}${prefix}`;
+  const closing = after.startsWith('\n') && !blank(lineAfter) ? `${eol}${gap}` : '';
+  return `${before}${table.join(`${eol}${prefix}`)}${closing}`;
 }
 
 /** The pages a body's references to other pages' values name (`` `=[[Page]].key` ``), in order. */
@@ -387,10 +400,12 @@ async function queryTables(
   const others = loaded.pages.filter(
     (summary) => summary.id !== page.pageId && published(summary.id),
   );
+  // Strict: a table missing pages that couldn't be fetched would be wrong, not empty.
   const opened = await openPublications(
     ctx,
     page.spaceId,
     others.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
+    { strict: true },
   );
   // Each folder a reader of the copy sees: under the share's root, for a share.
   const parents = new Map<string, string | null>(
@@ -591,7 +606,11 @@ export async function shareCopy(
     ),
     targets: new Map(targets.map(({ key, pageId }) => [key, pageId])),
   });
-  const { tables } = listed;
+  // Tables too large for a copy stay as written, rather than the copy failing to go up.
+  const withTables = copyBody(payload.markdown, others, listed.tables);
+  const fits = utf8(withTables).length <= pageRoutes.MAX_MARKDOWN_BYTES;
+  const markdown = fits ? withTables : copyBody(payload.markdown, others);
+  const tableTargets = fits ? listed.targets : [];
   const attachments = attachmentsUsed(body, payload.attachments);
   // Every file the copy should keep is opened before anything readable
   // goes up, so one that doesn't open sends nothing. Those left out for
@@ -612,14 +631,14 @@ export async function shareCopy(
     body: {
       revisionId,
       title: payload.title,
-      markdown: copyBody(payload.markdown, others, tables),
+      markdown,
       attachments: attachments.map(({ id, name, mediaType, size }) => ({
         id,
         name,
         mediaType,
         size,
       })),
-      targets: [...targets, ...listed.targets],
+      targets: [...targets, ...tableTargets],
     },
   });
   // Whatever the server asks for, only the files on this app's list go. One
