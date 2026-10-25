@@ -60,13 +60,55 @@ export function templatesIn<P extends Node & { title: string | null }>(
 export const VARIABLE_NAME = /[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*/u;
 
 /**
- * `{{name}}`, `{{name|default}}` or `{{name:format}}`, by `VARIABLE_NAME`,
- * so text such as `{{#each}}` or `{{ }}` is left as it is.
+ * The start of `{{name}}`, `{{name|default}}` or `{{name:format}}`, by
+ * `VARIABLE_NAME`, so text such as `{{#each}}` or `{{ }}` is left as it
+ * is: up to the closing `}}`, or the `|` or `:` a default or format
+ * follows (`variablesIn`). The name can't end on a space, which the `\s*`
+ * after it takes. A name and that `\s*` both taking spaces would try every
+ * split of a run of them.
  */
-const VARIABLE = new RegExp(
-  String.raw`\{\{\s*(${VARIABLE_NAME.source}?)\s*(?:([|:])([^}\n]*))?\}\}`,
+const OPENING = new RegExp(
+  String.raw`\{\{\s*([\p{L}\p{N}](?:[\p{L}\p{M}\p{N} _-]*[\p{L}\p{M}\p{N}_-])?)\s*(?:\}\}|([|:]))`,
   'gu',
 );
+
+/** Where a default or format can end: at the first `}` or line break. */
+const REST_END = /[}\n]/g;
+
+type Match = { index: number; text: string; name: string; mark?: string; rest?: string };
+
+/**
+ * The variables in `text`, in order, none overlapping. A default or format
+ * runs up to the first `}` or line break, and the variable ends there if a
+ * `}}` does. If none does, its braces are text, and the search goes on
+ * from its second `{`. Where a rest ends is found once for every mark
+ * before it, so a line of openings that no `}}` closes is read once, not
+ * once for each.
+ */
+function* variablesIn(text: string): Generator<Match> {
+  const opening = new RegExp(OPENING);
+  const restEnd = new RegExp(REST_END);
+  // The first `}` or line break at or after `from`, or the text's end.
+  let from = 0;
+  let end = -1;
+  for (let found; (found = opening.exec(text));) {
+    const [head, name = '', mark] = found;
+    const start = found.index + head.length;
+    if (mark === undefined) {
+      yield { index: found.index, text: head, name };
+      continue;
+    }
+    if (start < from || start > end) {
+      restEnd.lastIndex = from = start;
+      end = restEnd.exec(text)?.index ?? text.length;
+    }
+    if (text.startsWith('}}', end)) {
+      opening.lastIndex = end + 2;
+      const rest = text.slice(start, end);
+      yield { index: found.index, text: text.slice(found.index, end + 2), name, mark, rest };
+    } else opening.lastIndex = found.index + 1;
+  }
+}
 
 /** A field the person fills in: its value replaces every variable with `key`. */
 export type TemplateField = { key: string; label: string; initial: string };
@@ -98,7 +140,7 @@ function variableOf(name: string, mark: string | undefined, rest = ''): Variable
 export function templateFields(...texts: string[]): TemplateField[] {
   const fields = new Map<string, TemplateField>();
   for (const text of texts) {
-    for (const [, name = '', mark, rest] of text.matchAll(VARIABLE)) {
+    for (const { name, mark, rest } of variablesIn(text)) {
       const variable = variableOf(name, mark, rest);
       if (variable?.kind === 'asked' && !fields.has(variable.key)) {
         const { key, label, initial } = variable;
@@ -119,22 +161,30 @@ export type TemplateValues = {
 
 /** `text` with its variables filled in. An asked one with no value gets its default. */
 export function fillTemplate(text: string, values: TemplateValues): string {
-  return text.replace(VARIABLE, (match, name: string, mark?: string, rest?: string) => {
-    const variable = variableOf(name, mark, rest);
-    switch (variable?.kind) {
-      case undefined:
-        return match;
-      case 'asked':
-        return values.asked[variable.key] ?? variable.initial;
-      case 'date':
-      case 'time':
-        return formatDate(values.now, variable.format);
-      case 'title':
-        return values.title;
-      case 'me':
-        return values.me;
-    }
-  });
+  let filled = '';
+  let written = 0;
+  for (const { index, text: match, name, mark, rest } of variablesIn(text)) {
+    filled += text.slice(written, index) + fill(match, variableOf(name, mark, rest), values);
+    written = index + match.length;
+  }
+  return filled + text.slice(written);
+}
+
+// What a variable is filled in with, or `match`, as written, for one that isn't one.
+function fill(match: string, variable: Variable | null, values: TemplateValues): string {
+  switch (variable?.kind) {
+    case undefined:
+      return match;
+    case 'asked':
+      return values.asked[variable.key] ?? variable.initial;
+    case 'date':
+    case 'time':
+      return formatDate(values.now, variable.format);
+    case 'title':
+      return values.title;
+    case 'me':
+      return values.me;
+  }
 }
 
 const DATE_TOKENS =
