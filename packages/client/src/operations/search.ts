@@ -155,10 +155,11 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * itself. Neither index changes again.
    *
    * Pages a space in `spaces` no longer holds as they were are let go of
-   * at once (the new index compacts), so nothing this person may no longer
-   * open stays even in memory. Only a page given outside `spaces` may, as
-   * the version it replaced, until the index next compacts: for a change
-   * this person made, whose version before was theirs.
+   * at once: the new index compacts, in time linear in all the postings,
+   * though still without reading any text again. So nothing this person
+   * may no longer open stays even in memory. Only a page given outside
+   * `spaces` may, as the version it replaced, until the index next
+   * compacts: for a change this person made, whose version before was theirs.
    */
   with(
     pages: Iterable<readonly [SearchPage, IndexedText?]>,
@@ -389,13 +390,21 @@ export async function updateIndex(
 }
 
 /**
- * Whether `after` lacks a version of a page `before` held: the page is
- * gone, or another version stands in for it. Linear in `before`'s pages.
+ * Whether `after` holds less than `before` could have shown this person: a
+ * page gone, or one held in a version only its editors see (a draft, or a
+ * copy unpublished) now held in another kind of version, as when they are
+ * made a reader. A version moving on, as each save makes it, is neither.
+ * Linear in `before`'s pages.
  */
-export function letGo(before: PageIndex, after: PageIndex): boolean {
-  return before
-    .pages()
-    .some(({ doc }) => after.page(doc.spaceId, doc.pageId)?.revisionId !== doc.revisionId);
+export function narrowed(before: PageIndex, after: PageIndex): boolean {
+  return before.pages().some(({ doc }) => {
+    const now = after.page(doc.spaceId, doc.pageId);
+    return (
+      !now ||
+      ((doc.draft || doc.unpublished) &&
+        (now.draft !== doc.draft || now.unpublished !== doc.unpublished))
+    );
+  });
 }
 
 /** Throws `IndexAbandoned` once the revision cache is cleared, or `signal` aborts. */

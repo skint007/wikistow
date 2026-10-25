@@ -8,7 +8,7 @@ const client = vi.hoisted(() => ({
   indexSpaces: vi.fn(),
   updateIndex: vi.fn(),
   keepSearchIndex: vi.fn(),
-  letGo: vi.fn(),
+  narrowed: vi.fn(),
   index: 0,
 }));
 
@@ -20,7 +20,7 @@ vi.mock('@wikistow/client', async (actual) => {
       ...real.searchOperations,
       indexSpaces: client.indexSpaces,
       updateIndex: client.updateIndex,
-      letGo: client.letGo,
+      narrowed: client.narrowed,
       keptPages: () => new Map(),
       sealKept: () => new Uint8Array([1]),
       openKept: () => null,
@@ -62,10 +62,13 @@ const updates = () =>
 
 async function shown() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const options = searchIndexQuery({} as ClientContext, queryClient);
+  // What sealing checks of a session: its cache, cleared at a lock or access change.
+  const revisions = { generation: 0 };
+  const ctx = { revisions } as unknown as ClientContext;
+  const options = searchIndexQuery(ctx, queryClient);
   const stop = new QueryObserver(queryClient, options).subscribe(() => {});
   await vi.advanceTimersByTimeAsync(0);
-  return { queryClient, stop, data: () => queryClient.getQueryData(options.queryKey) };
+  return { queryClient, stop, revisions, data: () => queryClient.getQueryData(options.queryKey) };
 }
 
 beforeEach(() => {
@@ -74,8 +77,8 @@ beforeEach(() => {
   client.indexSpaces.mockReset().mockImplementation(async () => anIndex());
   client.updateIndex.mockReset().mockImplementation(async () => anIndex());
   client.keepSearchIndex.mockReset().mockResolvedValue(undefined);
-  // Updates that only add, unless a test says otherwise.
-  client.letGo.mockReset().mockReturnValue(false);
+  // Updates that lose nothing, as a save's, unless a test says otherwise.
+  client.narrowed.mockReset().mockReturnValue(false);
 });
 afterEach(() => void vi.useRealTimers());
 
@@ -157,14 +160,14 @@ describe('the app’s search index', () => {
     stop();
   });
 
-  it('is kept at once when an update lets a version go, as from memory', async () => {
+  it('is kept at once when an update holds less than before, as from memory', async () => {
     const { queryClient, stop } = await shown();
     await vi.advanceTimersByTimeAsync(0);
     searchIndexChanged(queryClient, { spaceIds: [home] });
     await vi.advanceTimersByTimeAsync(GATHER_MS);
     expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
     // Access lost, say: the page leaves the file with the next update.
-    client.letGo.mockReturnValue(true);
+    client.narrowed.mockReturnValue(true);
     searchIndexChanged(queryClient, { spaceIds: [home] });
     await vi.advanceTimersByTimeAsync(GATHER_MS + 1);
     expect(client.keepSearchIndex).toHaveBeenCalledTimes(2);
@@ -184,5 +187,17 @@ describe('the app’s search index', () => {
     queryClient.clear();
     await vi.advanceTimersByTimeAsync(KEEP_AT_MOST_MS);
     expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it('isn’t kept by the session before an access change', async () => {
+    const { queryClient, stop, revisions } = await shown();
+    await vi.advanceTimersByTimeAsync(0);
+    searchIndexChanged(queryClient, { spaceIds: [home] });
+    await vi.advanceTimersByTimeAsync(GATHER_MS);
+    // `refreshAccess` clears the cache; its fresh build is kept on its own.
+    revisions.generation += 1;
+    await vi.advanceTimersByTimeAsync(KEEP_AT_MOST_MS);
+    expect(client.keepSearchIndex).toHaveBeenCalledTimes(1);
+    stop();
   });
 });

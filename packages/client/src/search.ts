@@ -82,8 +82,9 @@ import {
  * Deriving an index takes time linear in the text of the pages added, plus
  * the postings of the pages added since it compacted, up to `2√n` pages'
  * (and the first time an index is derived from, linear in its pages, to
- * find those removed). A compaction takes time linear in all the postings,
- * so spread over the changes before it, each pays for some `√n` pages'.
+ * find those removed). A compaction takes time linear in all the postings:
+ * one past `2√n` is spread over the changes before it, so each pays for
+ * some `√n` pages', and one asked for is paid by the change that asks.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's

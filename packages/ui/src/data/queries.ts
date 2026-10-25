@@ -201,7 +201,7 @@ declare const __APP_VERSION__: string;
  * nothing changed leaves the same index. Locking drops it with everything
  * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
  * grant. The desktop app keeps it once changes pause, or at once when
- * it lets a version go (`keepLater`).
+ * it holds less than before (`keepLater`).
  *
  * Not built again when the window is focused: coming back into view tells
  * it what it may have missed (`useTreeChanges`), and one update follows.
@@ -235,9 +235,9 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         throw error;
       }
       if (device && index !== shown) {
-        // What the file held of a version let go goes at once, as from memory.
-        const now = !shown || searchOperations.letGo(shown, index);
-        keepLater(queryClient, ctx, device, index, now);
+        // What the file held of a page lost goes at once, as from memory.
+        const now = !shown || searchOperations.narrowed(shown, index);
+        keepLater(queryClient, ctx, device, now);
       }
       return index;
     },
@@ -332,25 +332,29 @@ function follow(queryClient: QueryClient) {
  * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
  * after it first changed, the desktop app keeps it, sealed for this person
  * and build: once for a burst of changes, not once each. With `now`, as
- * for an index built afresh or one that let a version go, at once, so the
- * file holds nothing longer than memory does. Failing to keep it only
- * means reading more pages at the next launch. An index locked away or
- * built afresh meanwhile isn't kept.
+ * for an index built afresh or one that holds less than before
+ * (`narrowed`), at once, so the file holds nothing longer than memory
+ * does. Failing to keep it only means reading more pages at the next
+ * launch. It keeps the index then shown, if `ctx` still built it: the
+ * vault locked or access changed meanwhile, nothing is kept, and nothing
+ * here holds on to the index till then.
  */
 function keepLater(
   queryClient: QueryClient,
   ctx: ClientContext,
   device: DesktopBridge,
-  index: searchOperations.PageIndex,
   now: boolean,
 ) {
   const state = followingOf(queryClient);
   const at = Date.now();
   const since = state.keeping?.since ?? at;
   if (state.keeping) clearTimeout(state.keeping.timer);
+  // Locking, or `refreshAccess`, clears the cache, which moves this on.
+  const { generation } = ctx.revisions;
   const keep = () => {
     state.keeping = null;
-    if (queryClient.getQueryData(searchIndexKey) !== index) return;
+    const index = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
+    if (!index || ctx.revisions.generation !== generation) return;
     try {
       const sealed = searchOperations.sealKept(
         ctx,
