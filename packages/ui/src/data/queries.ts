@@ -267,7 +267,7 @@ type Following = {
   /** This person's own drafts saved since, in order. */
   saved: searchOperations.SavedVersion[];
   gathering: ReturnType<typeof setTimeout> | null;
-  keeping: { since: number; timer: ReturnType<typeof setTimeout> } | null;
+  keeping: { since: number; now: boolean; timer: ReturnType<typeof setTimeout> } | null;
 };
 const following = new WeakMap<QueryClient, Following>();
 
@@ -318,6 +318,22 @@ function changed(queryClient: QueryClient, spaces: Iterable<SpaceId> | 'all') {
   else state.spaces = new Set([...(state.spaces ?? []), ...spaces]);
 }
 
+/**
+ * Note a save. One over a save still waiting stands in for it, over what
+ * that was saved over, so a page's autosaves wait as one.
+ */
+function noteSave(state: Following, saved: searchOperations.SavedVersion) {
+  const at = state.saved.findIndex(
+    (before) =>
+      before.spaceId === saved.spaceId &&
+      before.pageId === saved.pageId &&
+      before.revisionId === saved.basedOn,
+  );
+  const before = state.saved[at];
+  if (before) state.saved.splice(at, 1, { ...saved, basedOn: before.basedOn });
+  else state.saved.push(saved);
+}
+
 /** Whether anything changed that the index hasn't taken. */
 const noted = (state: Following) => state.spaces !== null || state.saved.length > 0;
 
@@ -363,7 +379,7 @@ export function searchIndexChanged(
   const state = followingOf(queryClient);
   const shown = queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive();
   if (change && 'saved' in change) {
-    if (shown) state.saved.push(change.saved);
+    if (shown) noteSave(state, change.saved);
     else changed(queryClient, [change.saved.spaceId]);
   } else changed(queryClient, change ? change.spaceIds : 'all');
   if (!shown) {
@@ -416,6 +432,8 @@ function keepLater(
   now: boolean,
 ) {
   const state = followingOf(queryClient);
+  // A write due at once stays so: it keeps the index then shown, this one.
+  if (state.keeping?.now) return;
   const at = Date.now();
   const since = state.keeping?.since ?? at;
   if (state.keeping) clearTimeout(state.keeping.timer);
@@ -438,7 +456,7 @@ function keepLater(
   };
   // Even at once, after React Query takes it as the index shown.
   const wait = now ? 0 : Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - at));
-  state.keeping = { since: now ? at : since, timer: setTimeout(keep, wait) };
+  state.keeping = { since: now ? at : since, now, timer: setTimeout(keep, wait) };
 }
 
 /**

@@ -210,10 +210,12 @@ describe('the app’s search index', () => {
       saved: { ...later, basedOn: soup.revisionId, title: 'soup', markdown: 'more words' },
     });
     await vi.advanceTimersByTimeAsync(GATHER_MS);
+    // The second save waits as one with the first, over what it was saved over.
     expect(updates()).toEqual([
       [[work], ['own-1']],
-      [[work], ['own-1', 'own-2']],
+      [[work], ['own-2']],
     ]);
+    expect((client.updates as Changes[])[1]?.saved?.[0]?.basedOn).toBe('r1');
     const index = data() as searchOperations.PageIndex | undefined;
     expect(index?.page(home, PageId.parse('soup'))?.revisionId).toBe('own-2');
     stop();
