@@ -426,6 +426,89 @@ async function tamper(table: 'revisions' | 'metadata_revisions', change: () => P
   }
 }
 
+describe('a property set in a draft, as a folder table’s cell sets it', () => {
+  // An Obsidian note's block, with comments and quoting of its own.
+  const NOTE =
+    '---\r\n# From Obsidian\r\nservings: 4 # people\r\ntags: [soup, "winter"]\r\n---\r\nSimmer.';
+
+  async function opened(person: Person, page: PageRef, revisionId: RevisionId) {
+    const revision = await pages.openRevisionOf(person.ctx, page, 'draft', revisionId);
+    if (revision.opened.kind !== 'current') throw new Error('expected a current payload');
+    return revision.opened.payload.markdown;
+  }
+
+  it('changes only that value’s characters, against the version it read, and refuses on a conflict', async () => {
+    const alice = await personWithVault(t);
+    const page = await pageOf(alice, NOTE);
+    const read = await draftHead(alice, page);
+
+    const set = await pages.setDraftProperty(alice.ctx, {
+      page,
+      basedOn: read,
+      key: 'servings',
+      value: 6,
+    });
+    if (!set.ok || !set.written) throw new Error('expected a write');
+    expect(await opened(alice, page, set.written.revisionId)).toBe(NOTE.replace('4 #', '6 #'));
+    expect(await draftHead(alice, page)).toBe(set.written.revisionId);
+
+    // Another edit made from the version read first finds the draft moved on.
+    expect(
+      await rejection(
+        pages.setDraftProperty(alice.ctx, { page, basedOn: read, key: 'servings', value: 8 }),
+      ),
+    ).toBe('stale-head');
+    expect(await draftHead(alice, page)).toBe(set.written.revisionId);
+
+    // A key the page hasn't is a line at the block's end, in its line breaks.
+    const added = await pages.setDraftProperty(alice.ctx, {
+      page,
+      basedOn: set.written.revisionId,
+      key: 'cook_time',
+      value: 40,
+    });
+    if (!added.ok || !added.written) throw new Error('expected a write');
+    expect(await opened(alice, page, added.written.revisionId)).toBe(
+      NOTE.replace('4 #', '6 #').replace('"winter"]\r\n', '"winter"]\r\ncook_time: 40\r\n'),
+    );
+  });
+
+  it('gives a page without frontmatter a block, writes nothing for no change, and refuses what can’t change in place', async () => {
+    const alice = await personWithVault(t);
+    const plain = await pageOf(alice, 'Just text.');
+    const set = await pages.setDraftProperty(alice.ctx, {
+      page: plain,
+      basedOn: await draftHead(alice, plain),
+      key: 'status',
+      value: 'draft',
+    });
+    if (!set.ok || !set.written) throw new Error('expected a write');
+    expect(await opened(alice, plain, set.written.revisionId)).toBe(
+      '---\nstatus: draft\n---\nJust text.',
+    );
+    expect(
+      await pages.setDraftProperty(alice.ctx, {
+        page: plain,
+        basedOn: set.written.revisionId,
+        key: 'status',
+        value: 'draft',
+      }),
+    ).toEqual({ ok: true, written: null });
+
+    const folded = await pageOf(alice, '---\nnotes: |\n  Two\n  lines.\n---\n');
+    const head = await draftHead(alice, folded);
+    expect(
+      await pages.setDraftProperty(alice.ctx, {
+        page: folded,
+        basedOn: head,
+        key: 'notes',
+        value: 'one line',
+      }),
+    ).toMatchObject({ ok: false });
+    expect(await draftHead(alice, folded)).toBe(head);
+  });
+});
+
 describe('stored revisions', () => {
   it('that today’s schemas refuse are left out of listings and logged, never failing them', async () => {
     const alice = await personWithVault(t);

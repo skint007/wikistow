@@ -38,6 +38,7 @@ import { Route as AppVaultSSpaceIdRouteImport } from './routes/_app/_vault/s/$sp
 import { Route as AppVaultPluginPluginIdViewIdRouteImport } from './routes/_app/_vault/plugin/$pluginId/$viewId'
 import { Route as AppVaultSSpaceIdIndexRouteImport } from './routes/_app/_vault/s/$spaceId/index'
 import { Route as AppVaultSSpaceIdMembersRouteImport } from './routes/_app/_vault/s/$spaceId/members'
+import { Route as AppVaultSSpaceIdFFolderIdRouteImport } from './routes/_app/_vault/s/$spaceId/f/$folderId'
 import { Route as AppVaultSSpaceIdGroupsIndexRouteImport } from './routes/_app/_vault/s/$spaceId/groups/index'
 import { Route as AppVaultSSpaceIdGroupsGroupIdRouteImport } from './routes/_app/_vault/s/$spaceId/groups/$groupId'
 import { Route as AppVaultSSpaceIdPPageIdRouteImport } from './routes/_app/_vault/s/$spaceId/p/$pageId'
@@ -186,6 +187,12 @@ const AppVaultSSpaceIdMembersRoute = AppVaultSSpaceIdMembersRouteImport.update({
   path: '/members',
   getParentRoute: () => AppVaultSSpaceIdRoute,
 } as any)
+const AppVaultSSpaceIdFFolderIdRoute =
+  AppVaultSSpaceIdFFolderIdRouteImport.update({
+    id: '/f/$folderId',
+    path: '/f/$folderId',
+    getParentRoute: () => AppVaultSSpaceIdRoute,
+  } as any)
 const AppVaultSSpaceIdGroupsIndexRoute =
   AppVaultSSpaceIdGroupsIndexRouteImport.update({
     id: '/groups/',
@@ -232,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
+  '/s/$spaceId/f/$folderId': typeof AppVaultSSpaceIdFFolderIdRoute
   '/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
   '/s/$spaceId/groups/': typeof AppVaultSSpaceIdGroupsIndexRoute
@@ -262,6 +270,7 @@ export interface FileRoutesByTo {
   '/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/s/$spaceId': typeof AppVaultSSpaceIdIndexRoute
+  '/s/$spaceId/f/$folderId': typeof AppVaultSSpaceIdFFolderIdRoute
   '/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
   '/s/$spaceId/groups': typeof AppVaultSSpaceIdGroupsIndexRoute
@@ -297,6 +306,7 @@ export interface FileRoutesById {
   '/_app/_vault/plugin/$pluginId/$viewId': typeof AppVaultPluginPluginIdViewIdRoute
   '/_app/_vault/s/$spaceId/members': typeof AppVaultSSpaceIdMembersRoute
   '/_app/_vault/s/$spaceId/': typeof AppVaultSSpaceIdIndexRoute
+  '/_app/_vault/s/$spaceId/f/$folderId': typeof AppVaultSSpaceIdFFolderIdRoute
   '/_app/_vault/s/$spaceId/groups/$groupId': typeof AppVaultSSpaceIdGroupsGroupIdRoute
   '/_app/_vault/s/$spaceId/p/$pageId': typeof AppVaultSSpaceIdPPageIdRoute
   '/_app/_vault/s/$spaceId/groups/': typeof AppVaultSSpaceIdGroupsIndexRoute
@@ -331,6 +341,7 @@ export interface FileRouteTypes {
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId/'
+    | '/s/$spaceId/f/$folderId'
     | '/s/$spaceId/groups/$groupId'
     | '/s/$spaceId/p/$pageId'
     | '/s/$spaceId/groups/'
@@ -361,6 +372,7 @@ export interface FileRouteTypes {
     | '/plugin/$pluginId/$viewId'
     | '/s/$spaceId/members'
     | '/s/$spaceId'
+    | '/s/$spaceId/f/$folderId'
     | '/s/$spaceId/groups/$groupId'
     | '/s/$spaceId/p/$pageId'
     | '/s/$spaceId/groups'
@@ -395,6 +407,7 @@ export interface FileRouteTypes {
     | '/_app/_vault/plugin/$pluginId/$viewId'
     | '/_app/_vault/s/$spaceId/members'
     | '/_app/_vault/s/$spaceId/'
+    | '/_app/_vault/s/$spaceId/f/$folderId'
     | '/_app/_vault/s/$spaceId/groups/$groupId'
     | '/_app/_vault/s/$spaceId/p/$pageId'
     | '/_app/_vault/s/$spaceId/groups/'
@@ -616,6 +629,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppVaultSSpaceIdMembersRouteImport
       parentRoute: typeof AppVaultSSpaceIdRoute
     }
+    '/_app/_vault/s/$spaceId/f/$folderId': {
+      id: '/_app/_vault/s/$spaceId/f/$folderId'
+      path: '/f/$folderId'
+      fullPath: '/s/$spaceId/f/$folderId'
+      preLoaderRoute: typeof AppVaultSSpaceIdFFolderIdRouteImport
+      parentRoute: typeof AppVaultSSpaceIdRoute
+    }
     '/_app/_vault/s/$spaceId/groups/': {
       id: '/_app/_vault/s/$spaceId/groups/'
       path: '/groups'
@@ -643,6 +663,7 @@ declare module '@tanstack/react-router' {
 interface AppVaultSSpaceIdRouteChildren {
   AppVaultSSpaceIdMembersRoute: typeof AppVaultSSpaceIdMembersRoute
   AppVaultSSpaceIdIndexRoute: typeof AppVaultSSpaceIdIndexRoute
+  AppVaultSSpaceIdFFolderIdRoute: typeof AppVaultSSpaceIdFFolderIdRoute
   AppVaultSSpaceIdGroupsGroupIdRoute: typeof AppVaultSSpaceIdGroupsGroupIdRoute
   AppVaultSSpaceIdPPageIdRoute: typeof AppVaultSSpaceIdPPageIdRoute
   AppVaultSSpaceIdGroupsIndexRoute: typeof AppVaultSSpaceIdGroupsIndexRoute
@@ -651,6 +672,7 @@ interface AppVaultSSpaceIdRouteChildren {
 const AppVaultSSpaceIdRouteChildren: AppVaultSSpaceIdRouteChildren = {
   AppVaultSSpaceIdMembersRoute: AppVaultSSpaceIdMembersRoute,
   AppVaultSSpaceIdIndexRoute: AppVaultSSpaceIdIndexRoute,
+  AppVaultSSpaceIdFFolderIdRoute: AppVaultSSpaceIdFFolderIdRoute,
   AppVaultSSpaceIdGroupsGroupIdRoute: AppVaultSSpaceIdGroupsGroupIdRoute,
   AppVaultSSpaceIdPPageIdRoute: AppVaultSSpaceIdPPageIdRoute,
   AppVaultSSpaceIdGroupsIndexRoute: AppVaultSSpaceIdGroupsIndexRoute,

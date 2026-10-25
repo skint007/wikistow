@@ -644,6 +644,110 @@ test('capture property references: in the reader, the visual editor and its comp
   await shoot('reader-phone', page, true);
 });
 
+/** A page in `folder` whose draft holds `properties`, then `body`; published if asked. */
+async function recipeIn(
+  page: Page,
+  folder: string,
+  title: string,
+  properties: string | null,
+  body: string,
+  publish = true,
+) {
+  await folderMenu(page, folder, 'New page here');
+  await page.getByRole('dialog').getByLabel('Title').fill(title);
+  await page.getByRole('button', { name: 'Create page' }).click();
+  await expect(page.locator('#page-title')).toHaveValue(title);
+  if (properties !== null) {
+    await page.getByRole('button', { name: 'Add properties' }).click();
+    await page.getByLabel('New property’s name').press('Escape');
+    await page.getByRole('button', { name: 'Edit as text' }).click();
+    await page.getByLabel('Properties as text').fill(properties);
+    await page.getByRole('button', { name: 'Show as rows' }).click();
+  }
+  await fillSource(page, body);
+  await waitForSave(page);
+  if (!publish) return;
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+}
+
+test('capture a folder as a table and a list, a cell edited, a conflict, and on a phone', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'folder-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newFolder(page, 'Recipes');
+  await recipeIn(
+    page,
+    'Recipes',
+    'Tomato soup',
+    'servings: 4\ncook_time: 60\ntags: [soup, winter]\nvegetarian: true\ngoes_with: "[[Garlic bread]]"',
+    'Simmer for an hour.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Garlic bread',
+    'servings: 6\ncook_time: 25\ntags: [bread]\nvegetarian: true\nnotes: |\n  Use fresh garlic.',
+    'Slice, butter, bake.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Chili',
+    'servings: 8\ncook_time: 90\ntags: [stew, spicy]\nvegetarian: false\nsource: https://example.com/chili',
+    'Brown, then simmer.',
+    false,
+  );
+  await recipeIn(page, 'Recipes', 'Weeknight pasta', null, 'Boil, toss, serve.');
+
+  await page.getByRole('treeitem', { name: /Recipes/ }).click();
+  const table = page.getByRole('table');
+  await expect(table.getByRole('row')).toHaveCount(5);
+  await shoot('table', page);
+
+  await page.getByRole('button', { name: 'Servings of Weeknight pasta: empty. Edit' }).click();
+  await page.keyboard.type('2');
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Servings of Weeknight pasta: 2. Edit' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Cook time of Chili: 90. Edit' }).click();
+  await shoot('editing', table);
+  await page.keyboard.press('Escape');
+
+  // The server finds the draft moved on since the table read it.
+  await page.route('**/api/pages/*/drafts', (route) =>
+    route.fulfill({
+      status: 409,
+      json: { error: { code: 'stale-head', message: 'Someone saved since you loaded the page' } },
+    }),
+  );
+  await page.getByRole('button', { name: 'Servings of Chili: 8. Edit' }).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('10');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('This page changed since the table read it.')).toBeVisible();
+  await shoot('conflict', table);
+  await page.unroute('**/api/pages/*/drafts');
+
+  await page.getByRole('button', { name: /^Columns/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Goes with' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Source' }).click();
+  await shoot('columns', page);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await shoot('list', page);
+  await shoot('list-phone', page, true);
+  await page.getByRole('button', { name: 'Table', exact: true }).click();
+  await shoot('table-phone', page, true);
+});
+
 test('capture tag pills, which open tag search, on the draft and the published view', async ({
   page,
   freshPage,

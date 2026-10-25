@@ -5,6 +5,7 @@ export * as agentTools from './agent-tools.ts';
 export * as workshopTools from './workshop-tools.ts';
 export * from './api/client.ts';
 export * from './cover.ts';
+export { deviceTag } from './device-seal.ts';
 export * from './encoding.ts';
 export * from './enrollment.ts';
 export * from './envelope.ts';
