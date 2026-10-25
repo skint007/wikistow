@@ -225,7 +225,7 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
   const read = readProperties(splitFrontmatter(FRONTMATTER).frontmatter);
   const container = await render(
     <VisualSurface
-      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[read more](https://example.com), and [ending one \`=goes_with\`](https://example.com) here.\n`}
+      initial={`${MISSING_AND_AMBIGUOUS}\n${REFERENCES_IN_LINK}\nJust before one, \`=with\`[\`x\` more](https://example.com), and [ending one \`=goes_with\`](https://example.com) here.\n`}
       properties={read.ok ? read.properties : null}
       onChange={() => {}}
       links={links}
@@ -262,7 +262,8 @@ it('shows the hints on a link’s text above it in the visual editor', async () 
     side: 'top',
   });
   // The chip is drawn in what follows its code: in a link just after it, so
-  // its hint is above, and after a link it ends, where it keeps its side.
+  // its hint is above, even where the link starts with code, and after a
+  // link it ends, where it keeps its side.
   expect(await hinted(container, 'a [data-hint="with · property"]')).toEqual({
     text: 'with · property',
     side: 'top',

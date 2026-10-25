@@ -4,7 +4,7 @@ import {
   propertyText,
   type PropertyData,
 } from '@wikistow/client';
-import type { Mark, Node } from '@milkdown/kit/prose/model';
+import { Mark, type Node } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -51,10 +51,10 @@ function decorations(
   others: OtherPages | null,
 ): DecorationSet {
   const found: Decoration[] = [];
-  // A run of inline code, which may be several text nodes as other marks
-  // change, but not its link: code across a link's edge is two code spans,
-  // as the reader reads it.
-  let run: { from: number; to: number; text: string; link: Mark | undefined } | null = null;
+  // A run of inline code in one set of marks. Where its marks change, as at
+  // a link's edge or where italic starts, Markdown has two code spans, as
+  // the reader reads them.
+  let run: { from: number; to: number; text: string; marks: readonly Mark[] } | null = null;
   // `after` holds the marks of what follows the run, which its chip is drawn in.
   const flush = (after: readonly Mark[] = []) => {
     const reference = run && parsePropertyReference(run.text);
@@ -84,7 +84,9 @@ function decorations(
           Decoration.inline(run.from, run.to, {
             class: UNKNOWN,
             'data-hint': hint,
-            ...(run.link ? { 'data-hint-side': 'top' } : {}),
+            ...(run.marks.some((mark) => mark.type.name === 'link')
+              ? { 'data-hint-side': 'top' }
+              : {}),
             'aria-description': hint,
           }),
         );
@@ -99,14 +101,12 @@ function decorations(
         const at = pos + 1 + offset;
         const code = child.isText && child.marks.some((mark) => mark.type.name === 'inlineCode');
         if (!code) return flush(child.marks);
-        const link = child.marks.find((mark) => mark.type.name === 'link');
-        const sameLink = run && (run.link && link ? run.link.eq(link) : run.link === link);
-        if (run && run.to === at && sameLink) {
+        if (run && run.to === at && Mark.sameSet(run.marks, child.marks)) {
           run.to += child.nodeSize;
           run.text += child.text ?? '';
         } else {
           flush(child.marks);
-          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', link };
+          run = { from: at, to: at + child.nodeSize, text: child.text ?? '', marks: child.marks };
         }
       });
       flush();

@@ -141,7 +141,7 @@ describe('a reference to one of the page’s values', () => {
   });
 });
 
-describe('a reference beside a link’s edge', () => {
+describe('a reference beside a link’s edge, or another mark’s', () => {
   // The visual editor drawing `body` of a page whose frontmatter is `frontmatter`.
   async function visual(frontmatter: string, body: string) {
     const read = readProperties(splitFrontmatter(frontmatter).frontmatter);
@@ -185,8 +185,16 @@ describe('a reference beside a link’s edge', () => {
       element.textContent,
     ]);
 
-  // Code that ends a link's text and code just after it are two code spans.
+  // Code that ends a link's text and code just after it are two code spans,
+  // as are code before italic and code in it.
   it.each([
+    [
+      '`=nope`*`=servings`*',
+      [
+        ['No property has this name', '=nope'],
+        ['servings · property', '4'],
+      ],
+    ],
     ['[`=nope`](https://example.com)`_x`', [['No property has this name', '=nope']]],
     [
       '[`=a `](https://example.com)`=servings`',
