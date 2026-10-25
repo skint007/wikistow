@@ -15,6 +15,7 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import type { DesktopBridge } from '@wikistow/contracts';
 import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
 
@@ -189,63 +190,174 @@ export const searchIndexKey = [PLAIN, 'search-index'] as const;
 declare const __APP_VERSION__: string;
 
 /**
- * Every page this person can read, indexed for search on this device. Built
- * afresh from the trees when it is stale, opening only the pages whose
- * version changed since the index before it: the one in memory, or at the
- * first search after an unlock the one the desktop app kept, sealed for this
- * person and build (`sealKept`). Locking drops it with everything else, and
- * `refreshAccess` rebuilds it, so nothing outlives a lost grant. This
- * person's own changes, and those the server tells of, mark it stale
- * (`searchIndexChanged`).
+ * Every page this person can read, indexed for search on this device. The
+ * first time, built from the trees, opening only the pages whose version
+ * changed since the index the desktop app kept, sealed for this person and
+ * build (`sealKept`). After that, each change this person makes, or the
+ * server tells of (`searchIndexChanged`), updates the one in memory
+ * (`updateIndex`): only the spaces named are listed again, and every one
+ * if none are, as when it is shown again a minute old. Only pages whose
+ * version changed are opened and indexed again, and an update that finds
+ * nothing changed leaves the same index. Locking drops it with everything
+ * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
+ * grant. The desktop app keeps it once changes pause (`keepLater`).
+ *
+ * Not built again when the window is focused: coming back into view tells
+ * it what it may have missed (`useTreeChanges`), and one update follows.
  */
 export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =>
   queryOptions({
     queryKey: searchIndexKey,
     queryFn: async ({ signal }) => {
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
+      const onProgress = (progress: searchOperations.IndexProgress) =>
+        queryClient.setQueryData(searchProgressKey, progress);
       // The desktop app keeps one between launches only with a trusted keyring.
       const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
-      const sealed = shown ? null : await device?.searchIndex().catch(() => null);
-      const index = await searchOperations.indexSpaces(ctx, {
-        kept: shown
-          ? searchOperations.keptPages(shown)
-          : sealed
-            ? searchOperations.openKept(ctx, sealed, __APP_VERSION__)
-            : null,
-        signal,
-        onProgress: (progress) => queryClient.setQueryData(searchProgressKey, progress),
-      });
-      // Failing to keep it only means reading every page at the next launch.
-      if (device) {
-        const pages = searchOperations.keptPages(index);
-        void device
-          .keepSearchIndex(searchOperations.sealKept(ctx, pages, __APP_VERSION__))
-          .catch(() => {});
+      const changes = takeChanges(queryClient);
+      let index: searchOperations.PageIndex;
+      try {
+        if (shown) {
+          index = await searchOperations.updateIndex(ctx, shown, changes, { signal, onProgress });
+        } else {
+          const sealed = await device?.searchIndex().catch(() => null);
+          index = await searchOperations.indexSpaces(ctx, {
+            kept: sealed ? searchOperations.openKept(ctx, sealed, __APP_VERSION__) : null,
+            signal,
+            onProgress,
+          });
+        }
+      } catch (error) {
+        // Followed by the next update instead.
+        changed(queryClient, changes.spaces);
+        throw error;
       }
+      if (device && index !== shown) keepLater(queryClient, ctx, device, index);
       return index;
     },
-    // Reopening search within a minute keeps the index; after that it rebuilds behind it.
+    // Shown again within a minute, it is kept; after that it updates behind it.
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
+
+/** How long changes gather, while something shows the index, before it follows them together. */
+export const GATHER_MS = 300;
+
+/** How long the desktop app waits for changes to pause before keeping the index, and at most. */
+export const KEEP_MS = 5_000;
+export const KEEP_AT_MOST_MS = 60_000;
+
+/** For each query client: what changed since the index was last updated, and what waits. */
+type Following = {
+  /** The spaces changed since, or every one; null for none. */
+  spaces: Set<SpaceId> | 'all' | null;
+  gathering: ReturnType<typeof setTimeout> | null;
+  keeping: { since: number; timer: ReturnType<typeof setTimeout> } | null;
+};
+const following = new WeakMap<QueryClient, Following>();
+
+function followingOf(queryClient: QueryClient): Following {
+  let state = following.get(queryClient);
+  if (!state)
+    following.set(queryClient, (state = { spaces: null, gathering: null, keeping: null }));
+  return state;
+}
+
+/** Note `spaces` changed (every one for 'all'). */
+function changed(queryClient: QueryClient, spaces: Iterable<SpaceId> | 'all') {
+  const state = followingOf(queryClient);
+  if (spaces === 'all' || state.spaces === 'all') state.spaces = 'all';
+  else state.spaces = new Set([...(state.spaces ?? []), ...spaces]);
+}
+
+/** What changed since the last update, for the next; with nothing noted, every space. */
+function takeChanges(queryClient: QueryClient): searchOperations.IndexChanges {
+  const state = followingOf(queryClient);
+  const { spaces } = state;
+  state.spaces = null;
+  return { spaces: spaces === null || spaces === 'all' ? 'all' : [...spaces] };
+}
 
 /**
  * After a change to a page or folder: this person's own (a save, publish,
  * restore, creation, deletion, detach or unpublish), wherever its tree is
- * refetched or patched, and one the server tells of (`useTreeChanges`).
- * The index is rebuilt now if something shows it (`usePageIndex`), or else
- * when next shown, so search finds what was just written. A rebuild already
- * running may have started before the change, so another follows it, and
- * changes meanwhile share that one: autosaves don't keep cancelling it.
+ * refetched or patched, and one the server tells of (`useTreeChanges`),
+ * naming the spaces it changed in (`spaceIds`), or else in any. The index
+ * is updated if something shows it (`usePageIndex`), with the other changes
+ * in the next `GATHER_MS`, or else when next shown, so search and what
+ * lists pages find what was just written.
+ *
+ * An update already running may have started before the change, so another
+ * follows it if so, and changes meanwhile share that one: a stream of
+ * autosaves can't keep putting it off.
  */
-export function searchIndexChanged(queryClient: QueryClient) {
-  const changed = () =>
+export function searchIndexChanged(
+  queryClient: QueryClient,
+  change?: { spaceIds: readonly SpaceId[] },
+) {
+  changed(queryClient, change ? change.spaceIds : 'all');
+  const state = followingOf(queryClient);
+  if (!queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.isActive()) {
+    follow(queryClient);
+    return;
+  }
+  state.gathering ??= setTimeout(() => {
+    state.gathering = null;
+    follow(queryClient);
+  }, GATHER_MS);
+}
+
+// Marks the index stale, which updates it now if something shows it. One
+// already updating finishes first, then the changes it didn't take, if
+// any, mark it stale again: its success would mark it fresh.
+function follow(queryClient: QueryClient) {
+  const stale = () =>
     queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
-  // Followed once it settles, whether anything shows it or not: its success
-  // would mark it fresh again.
-  const running = queryClient.getQueryCache().find({ queryKey: searchIndexKey })?.promise;
-  void changed();
-  if (running) void running.then(changed, changed);
+  const query = queryClient.getQueryCache().find({ queryKey: searchIndexKey });
+  const running = query?.state.fetchStatus === 'fetching' ? query.promise : undefined;
+  void stale();
+  const untaken = () => {
+    if (followingOf(queryClient).spaces !== null) void stale();
+  };
+  if (running) void running.then(untaken, untaken);
+}
+
+/**
+ * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
+ * after it first changed, the desktop app keeps it, sealed for this person
+ * and build: once for a burst of changes, not once each. Failing to keep
+ * it only means reading more pages at the next launch. An index locked
+ * away or built afresh meanwhile isn't kept.
+ */
+function keepLater(
+  queryClient: QueryClient,
+  ctx: ClientContext,
+  device: DesktopBridge,
+  index: searchOperations.PageIndex,
+) {
+  const state = followingOf(queryClient);
+  const now = Date.now();
+  const since = state.keeping?.since ?? now;
+  if (state.keeping) clearTimeout(state.keeping.timer);
+  const timer = setTimeout(
+    () => {
+      state.keeping = null;
+      if (queryClient.getQueryData(searchIndexKey) !== index) return;
+      try {
+        const sealed = searchOperations.sealKept(
+          ctx,
+          searchOperations.keptPages(index),
+          __APP_VERSION__,
+        );
+        void device.keepSearchIndex(sealed).catch(() => {});
+      } catch {
+        // Locked meanwhile: nothing to keep.
+      }
+    },
+    Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - now)),
+  );
+  state.keeping = { since, timer };
 }
 
 /**

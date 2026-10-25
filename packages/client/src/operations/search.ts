@@ -12,7 +12,13 @@ import { openOnDevice, sealOnDevice } from '../device-seal.ts';
 import { canonical, decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { foldPropertyName, type PropertyData } from '../markdown/properties.ts';
-import { hasTag, indexedContent, SearchIndex, type IndexedText } from '../search.ts';
+import {
+  hasTag,
+  indexedContent,
+  SearchIndex,
+  type IndexedPage,
+  type IndexedText,
+} from '../search.ts';
 import { shownVersions } from './pages.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import type { ClientContext } from './session.ts';
@@ -88,24 +94,26 @@ export type PageScope = {
  * version this person sees, so a page they can't open is never listed.
  *
  * It doesn't change once built: as pages change, a newer index stands in
- * for it (`usePageIndex`, in the app). Pages are listed by title, then ID,
- * so in the same order from one index to the next. The first read groups
- * and sorts them; after that `page` takes constant time, and `list` and `keys`
- * time linear in the space's pages, their folders' depth when `nested`,
- * and their properties when matching a `tag` or giving keys.
+ * for it (`with`, `updateIndex`; `usePageIndex`, in the app). Pages are
+ * listed by title, then ID, so in the same order from one index to the
+ * next, and hits with the same score and title by space, then ID. The
+ * first read groups and sorts them; after that `page` takes constant time,
+ * and `list` and `keys` time linear in the space's pages, their folders'
+ * depth when `nested`, and their properties when matching a `tag` or
+ * giving keys. An index derived from one already read is read from it,
+ * sorting only the pages that changed.
  */
 export class PageIndex extends SearchIndex<SearchPage> {
-  #bySpace: Map<SpaceId, IndexedEntry[]> | null = null;
-  #byPage: Map<string, IndexedEntry> | null = null;
+  #read: Lookup | null = null;
 
   override addText(doc: SearchPage, page: IndexedText): void {
     super.addText(doc, page);
-    this.#bySpace = this.#byPage = null;
+    this.#read = null;
   }
 
   /** The page `pageId` in `spaceId`, or undefined if this person can't open it. */
   page(spaceId: SpaceId, pageId: PageId): IndexedEntry | undefined {
-    return this.#lookup().byPage.get(`${spaceId}/${pageId}`);
+    return this.#lookup().byPage.get(pageKey(spaceId, pageId))?.entry;
   }
 
   /** The pages in `scope`, by title, then ID. */
@@ -135,26 +143,158 @@ export class PageIndex extends SearchIndex<SearchPage> {
     return [...keys.values()];
   }
 
-  #lookup() {
-    if (this.#bySpace === null || this.#byPage === null) {
-      this.#bySpace = new Map();
-      this.#byPage = new Map();
-      for (const { doc, title, properties } of this.pages()) {
-        const entry: IndexedEntry = { ...doc, title, properties };
-        let space = this.#bySpace.get(doc.spaceId);
-        if (!space) this.#bySpace.set(doc.spaceId, (space = []));
-        space.push(entry);
-        this.#byPage.set(`${doc.spaceId}/${doc.pageId}`, entry);
-      }
-      for (const space of this.#bySpace.values()) {
-        space.sort((a, b) => a.title.localeCompare(b.title) || compare(a.pageId, b.pageId));
-      }
+  /**
+   * An index like this one, but holding `pages`, each in place of the page
+   * with its space and page ID, and in each of `spaces` (every one for
+   * `'all'`) no page `pages` leaves out. A page's content can be left out
+   * if this index holds that version of it. A page as this index holds it
+   * (the same version, in the same place) is kept as indexed: only the
+   * text of pages that changed is read again (`SearchIndex`), and its
+   * lookups are copied, in time linear in the pages it holds, then sorted
+   * only where pages changed. If nothing did, this index is returned
+   * itself. Neither index changes again.
+   *
+   * Pages a space in `spaces` no longer holds as they were are let go of
+   * at once (the new index compacts), so nothing this person may no longer
+   * open stays even in memory. Only a page given outside `spaces` may, as
+   * the version it replaced, until the index next compacts: for a change
+   * this person made, whose version before was theirs.
+   */
+  with(
+    pages: Iterable<readonly [SearchPage, IndexedText?]>,
+    { spaces = [] }: { spaces?: Iterable<SpaceId> | 'all' } = {},
+  ): PageIndex {
+    const { byPage, bySpace } = this.#lookup();
+    const given = new Map<string, readonly [SearchPage, IndexedText?]>();
+    for (const page of pages) given.set(pageKey(page[0].spaceId, page[0].pageId), page);
+    const removed = new Map<string, Held>();
+    const added: Held[] = [];
+    for (const [key, [doc, content]] of given) {
+      const held = byPage.get(key);
+      if (held && sameDoc(held.entry, doc)) continue;
+      if (held) removed.set(key, held);
+      const text = content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined);
+      if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
+      const page = { doc, title: text.title, text: text.text, properties: text.properties ?? [] };
+      added.push({ page, entry: { ...doc, title: page.title, properties: page.properties } });
     }
-    return { bySpace: this.#bySpace, byPage: this.#byPage };
+    const relisted = spaces === 'all' ? [...bySpace.keys()] : spaces;
+    let relisting = false;
+    for (const spaceId of relisted) {
+      for (const entry of bySpace.get(spaceId) ?? []) {
+        const key = pageKey(entry.spaceId, entry.pageId);
+        const held = byPage.get(key);
+        if (!given.has(key) && held) removed.set(key, held);
+      }
+      relisting = true;
+    }
+    if (removed.size === 0 && added.length === 0) return this;
+    const next = this.derive(
+      [...removed.values()].map(({ page }) => page),
+      added.map(({ page }) => page),
+      { compact: relisting && removed.size > 0 },
+    );
+    next.#read = followed({ byPage, bySpace }, removed, added);
+    return next;
+  }
+
+  protected override order(a: SearchPage, b: SearchPage): number {
+    return compare(a.spaceId, b.spaceId) || compare(a.pageId, b.pageId);
+  }
+
+  #lookup(): Lookup {
+    if (this.#read === null) {
+      const read: Lookup = { bySpace: new Map(), byPage: new Map() };
+      for (const page of this.pages()) {
+        const { doc, title, properties } = page;
+        const entry: IndexedEntry = { ...doc, title, properties };
+        let space = read.bySpace.get(doc.spaceId);
+        if (!space) read.bySpace.set(doc.spaceId, (space = []));
+        space.push(entry);
+        read.byPage.set(pageKey(doc.spaceId, doc.pageId), { entry, page });
+      }
+      for (const space of read.bySpace.values()) space.sort(byTitle);
+      this.#read = read;
+    }
+    return this.#read;
   }
 }
 
+/** A page an index holds: as it lists it, and as it indexed it. */
+type Held = { entry: IndexedEntry; page: Readonly<IndexedPage<SearchPage>> };
+
+/** What a `PageIndex` holds, grouped to read: each space's pages by title, and each page. */
+type Lookup = { bySpace: Map<SpaceId, IndexedEntry[]>; byPage: Map<string, Held> };
+
+const pageKey = (spaceId: SpaceId, pageId: PageId) => `${spaceId}/${pageId}`;
+
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+const byTitle = (a: IndexedEntry, b: IndexedEntry) =>
+  a.title.localeCompare(b.title) || compare(a.pageId, b.pageId);
+
+/** Whether a page is where `held` is, as the same version, and labelled the same. */
+function sameDoc(held: IndexedEntry, doc: SearchPage): boolean {
+  const same = (a: readonly unknown[], b: readonly unknown[]) =>
+    a.length === b.length && a.every((value, i) => value === b[i]);
+  return (
+    held.revisionId === doc.revisionId &&
+    held.parentId === doc.parentId &&
+    held.draft === doc.draft &&
+    held.unpublished === doc.unpublished &&
+    same(held.folderIds, doc.folderIds) &&
+    same(held.path, doc.path)
+  );
+}
+
+/**
+ * `read` without the pages `removed` and with `added`: only the spaces
+ * they're in are sorted again, and a few pages are put in their place
+ * rather than sorting the space again.
+ */
+function followed(
+  read: Lookup,
+  removed: ReadonlyMap<string, Held>,
+  added: readonly Held[],
+): Lookup {
+  const byPage = new Map(read.byPage);
+  const bySpace = new Map(read.bySpace);
+  const changed = new Set<SpaceId>();
+  for (const [key, held] of removed) {
+    byPage.delete(key);
+    changed.add(held.entry.spaceId);
+  }
+  for (const held of added) {
+    byPage.set(pageKey(held.entry.spaceId, held.entry.pageId), held);
+    changed.add(held.entry.spaceId);
+  }
+  const gone = new Set([...removed.values()].map(({ entry }) => entry));
+  for (const spaceId of changed) {
+    const entries = (bySpace.get(spaceId) ?? []).filter((entry) => !gone.has(entry));
+    const more = added.filter(({ entry }) => entry.spaceId === spaceId).map(({ entry }) => entry);
+    if (more.length > 8) {
+      entries.push(...more);
+      entries.sort(byTitle);
+    } else {
+      for (const entry of more) entries.splice(sortedAt(entries, entry), 0, entry);
+    }
+    if (entries.length > 0) bySpace.set(spaceId, entries);
+    else bySpace.delete(spaceId);
+  }
+  return { byPage, bySpace };
+}
+
+/** Where `entry` goes in `entries`, sorted `byTitle`. */
+function sortedAt(entries: readonly IndexedEntry[], entry: IndexedEntry): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (byTitle(entries[mid] as IndexedEntry, entry) < 0) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
 
 /** Pages opened at a time, so progress moves while a large space is indexed. */
 const CHUNK = 100;
@@ -192,56 +332,134 @@ export async function indexSpaces(
     signal?: AbortSignal;
   } = {},
 ): Promise<PageIndex> {
-  const generation = ctx.revisions.generation;
-  const live = () => {
-    if (signal?.aborted || ctx.revisions.generation !== generation) throw new IndexAbandoned();
-  };
+  const live = liveness(ctx, signal);
   const listed = spaceIds === undefined;
   const ids = spaceIds ?? (await readableSpaces(ctx));
   live();
-  const spaces = (
-    await Promise.all(
-      ids.map(async (spaceId) => {
-        try {
-          return { spaceId, ...(await loadStructure(ctx, spaceId)) };
-        } catch (error) {
-          if (listed && (error instanceof CryptoError || unreachable(error))) return null;
-          throw error;
-        }
-      }),
-    )
-  ).filter((space) => space !== null);
+  const index = new PageIndex();
+  await readPages(ctx, await loadSpaces(ctx, ids, listed), {
+    reuse: (spaceId, page, head) => {
+      const found = kept?.get(head);
+      return found?.spaceId === spaceId && found.pageId === page ? found : undefined;
+    },
+    live,
+    onProgress,
+    each: (doc, content) => content && index.addText(doc, content),
+  });
+  return index;
+}
+
+/** What changed since an index was built, for `updateIndex` to follow. */
+export type IndexChanges = {
+  /** The spaces whose trees may have changed, or every one. */
+  spaces: 'all' | readonly SpaceId[];
+};
+
+/**
+ * `index`, following `changes`: each space they name is listed again, as
+ * `indexSpaces` lists it, and what it holds now stands in for what `index`
+ * held of it (`PageIndex.with`). A space gone, or failing its checks, is
+ * dropped; with `'all'`, so is one no longer listed as held or shared.
+ * Only the versions `index` doesn't hold are opened, and only the pages
+ * that changed are indexed again, so if nothing did, `index` is returned
+ * itself. Stops with `IndexAbandoned` as `indexSpaces` does.
+ */
+export async function updateIndex(
+  ctx: ClientContext,
+  index: PageIndex,
+  changes: IndexChanges,
+  {
+    onProgress,
+    signal,
+  }: { onProgress?: (progress: IndexProgress) => void; signal?: AbortSignal } = {},
+): Promise<PageIndex> {
+  const live = liveness(ctx, signal);
+  const ids = changes.spaces === 'all' ? await readableSpaces(ctx) : [...new Set(changes.spaces)];
+  live();
+  const pages: [SearchPage, IndexedText?][] = [];
+  await readPages(ctx, await loadSpaces(ctx, ids, true), {
+    reuse: (spaceId, page, head) =>
+      index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
+    live,
+    onProgress,
+    each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
+  });
+  live();
+  return index.with(pages, { spaces: changes.spaces === 'all' ? 'all' : ids });
+}
+
+/** Throws `IndexAbandoned` once the revision cache is cleared, or `signal` aborts. */
+function liveness(ctx: ClientContext, signal: AbortSignal | undefined) {
+  const generation = ctx.revisions.generation;
+  return () => {
+    if (signal?.aborted || ctx.revisions.generation !== generation) throw new IndexAbandoned();
+  };
+}
+
+/**
+ * The trees of the spaces `ids`. With `skipGone`, one gone by the time it
+ * is loaded, closed to this person, or failing its checks is left out.
+ */
+async function loadSpaces(ctx: ClientContext, ids: readonly SpaceId[], skipGone: boolean) {
+  const spaces = await Promise.all(
+    ids.map(async (spaceId) => {
+      try {
+        return { spaceId, ...(await loadStructure(ctx, spaceId)) };
+      } catch (error) {
+        if (skipGone && (error instanceof CryptoError || unreachable(error))) return null;
+        throw error;
+      }
+    }),
+  );
+  return spaces.filter((space) => space !== null);
+}
+
+/**
+ * Each page of `spaces` as search lists it (`each`), with what its version
+ * gives the index: `reuse`'s, or nothing if `reuse` says the index being
+ * updated holds it (`'held'`), else opened. A page whose version can't be
+ * opened is left out. Progress goes by the pages read.
+ */
+async function readPages(
+  ctx: ClientContext,
+  spaces: Awaited<ReturnType<typeof loadSpaces>>,
+  {
+    reuse,
+    live,
+    onProgress,
+    each,
+  }: {
+    reuse: (spaceId: SpaceId, pageId: PageId, head: RevisionId) => IndexedText | 'held' | undefined;
+    live: () => void;
+    onProgress: ((progress: IndexProgress) => void) | undefined;
+    each: (doc: SearchPage, content: IndexedText | null) => void;
+  },
+): Promise<void> {
   live();
   const total = spaces.reduce((sum, space) => sum + space.pages.length, 0);
   let done = 0;
   onProgress?.({ pages: done, total });
-  const index = new PageIndex();
   for (const { spaceId, space, folders, pages } of spaces) {
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     const top = space ? [nameOf(space.metadata)] : [];
     for (let at = 0; at < pages.length; at += CHUNK) {
       const chunk = pages.slice(at, at + CHUNK);
-      // Each page's version as kept; a copy unpublished where it is lists no
-      // head, so it is always opened.
-      const reused = new Map<PageId, IndexedContent>();
+      // Each page's version as reused; a copy unpublished where it is lists
+      // no head, so it is always opened.
+      const reused = new Map<PageId, { revisionId: RevisionId; content: IndexedText | null }>();
       for (const page of chunk) {
         const head = page.draftHead ?? page.publishedHead;
-        const found = head === null ? undefined : kept?.get(head);
-        if (head !== null && found?.spaceId === spaceId && found.pageId === page.id) {
-          reused.set(page.id, {
-            revisionId: head,
-            title: found.title,
-            text: found.text,
-            properties: found.properties,
-          });
+        const found = head === null ? undefined : reuse(spaceId, page.id, head);
+        if (head !== null && found !== undefined) {
+          reused.set(page.id, { revisionId: head, content: found === 'held' ? null : found });
         }
       }
       const unkept = chunk.filter((page) => !reused.has(page.id));
       const versions = unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept) : null;
       live();
       for (const page of chunk) {
-        const content = reused.get(page.id) ?? contentOf(versions?.get(page.id));
-        if (!content) continue;
+        const version = reused.get(page.id) ?? contentOf(versions?.get(page.id));
+        if (!version) continue;
         const path: (string | null)[] = [];
         const folderIds: FolderId[] = [];
         const seen = new Set<string>();
@@ -253,33 +471,25 @@ export async function indexSpaces(
           folderIds.unshift(id);
           id = folder.parentId;
         }
-        index.addText(
+        each(
           {
             spaceId,
             pageId: page.id,
-            revisionId: content.revisionId,
+            revisionId: version.revisionId,
             parentId: page.parentId,
             folderIds,
             path: [...top, ...path],
             draft: page.draftHead !== null && (page.publishedHead === null || page.draftChanges),
             unpublished: page.draftHead === null && page.publishedHead === null,
           },
-          content,
+          version.content,
         );
       }
       done += chunk.length;
       onProgress?.({ pages: done, total });
     }
   }
-  return index;
 }
-
-type IndexedContent = {
-  revisionId: RevisionId;
-  title: string;
-  text: string;
-  properties: readonly Readonly<PropertyData>[];
-};
 
 /**
  * What an index read from each version it holds, by that version, so a
@@ -357,10 +567,12 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
 }
 
 /** What a version gives the index, when it opens. */
-function contentOf(version: OpenedRevision | null | undefined): IndexedContent | null {
+function contentOf(
+  version: OpenedRevision | null | undefined,
+): { revisionId: RevisionId; content: IndexedText } | null {
   if (version?.opened.kind !== 'current') return null;
   const { title, markdown } = version.opened.payload;
-  return { revisionId: version.record.revisionId, title, ...indexedContent(markdown) };
+  return { revisionId: version.record.revisionId, content: { title, ...indexedContent(markdown) } };
 }
 
 /**
