@@ -309,6 +309,20 @@ flow_lines: [a,
     },
   );
 
+  it('refuses an edit that would make the block too long, saying so', () => {
+    // At the limit, `*big` fits only plain, where it would read as an alias.
+    const head = 'a: &big [1, 2, 3]\nb: old\n# ';
+    const yaml = `${head}${'x'.repeat(65_535 - head.length - 1)}\n`;
+    expect(yaml.length).toBe(65_535);
+    const block = `---\n${yaml}---\n`;
+    expect(byKey(block, 'b')?.value).toBe('old');
+    const tooLong = { ok: false, reason: 'It would be too long to read as properties.' };
+    expect(setProperty(block, 'b', '*big')).toEqual(tooLong);
+    expect(setProperty(block, 'b', '{x: 1}')).toEqual(tooLong);
+    expect(setProperty(block, 'b', 'longer')).toEqual(tooLong);
+    expect(edited(setProperty(block, 'b', 'new'))).toContain('\nb: new\n');
+  });
+
   it('refuses keys twice in any map, and an alias without its anchor', () => {
     expect(readProperties('---\nm:\n  x: 1\n  x: 2\n---\n')).toEqual({
       ok: false,

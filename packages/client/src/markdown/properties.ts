@@ -107,31 +107,27 @@ export function setProperty(
   const read = readBlock(block);
   if (!read.ok) return read;
   if (read.flow) return refused(FLOW_MAP);
-  const before = read.entries.map(({ property }) => property);
+  const before = read.entries.map(asRead);
   const entry = read.entries.find(({ property }) => property.key === key);
   if (!entry) {
     if (key === '') return refused('A property needs a name.');
-    const expected = [...before, { key, value }];
     const at = read.closeStart;
-    for (const keyText of keyTexts(key, 'PLAIN')) {
-      for (const valueText of valueTexts(value, null)) {
+    const candidates = keyTexts(key, 'PLAIN').flatMap((keyText) =>
+      valueTexts(value, null).map((valueText) => {
         const line = `${read.indent}${keyText}:${valueText === '' ? '' : ` ${valueText}`}${read.lineBreak}`;
-        const result = verified(block.slice(0, at) + line + block.slice(at), expected);
-        if (result) return result;
-      }
-    }
-    return refused(UNSAFE);
+        return block.slice(0, at) + line + block.slice(at);
+      }),
+    );
+    return firstRead(candidates, [...before, { key, value, source: false }]);
   }
   const { property } = entry;
   // A value shown as its source isn't that text, so no value is the one it has.
   if (!entry.source && sameValue(property.value, value)) return { ok: true, frontmatter: block };
   if (!property.editable) return refused(entry.lock ?? UNSAFE);
-  const expected = before.map((old) => (old === property ? { key, value } : old));
-  for (const candidate of valueEdits(block, read.base, entry, value)) {
-    const result = verified(candidate, expected);
-    if (result) return result;
-  }
-  return refused(UNSAFE);
+  const expected = before.map((old, i) =>
+    read.entries[i] === entry ? { key, value, source: false } : old,
+  );
+  return firstRead(valueEdits(block, read.base, entry, value), expected);
 }
 
 /** `frontmatter` with the key `key` (exactly as written) renamed `to`, in the key's own quoting where it can. */
@@ -153,14 +149,13 @@ export function renameProperty(frontmatter: string, key: string, to: string): Pr
     return refused('The key is on more than one line.');
   }
   const { start, end } = entry.property.keySpan;
-  const expected = read.entries.map(({ property }) =>
-    property === entry.property ? { key: to, value: property.value } : property,
+  const expected = read.entries.map((other) =>
+    other === entry ? { ...asRead(other), key: to } : asRead(other),
   );
-  for (const text of keyTexts(to, style)) {
-    const result = verified(frontmatter.slice(0, start) + text + frontmatter.slice(end), expected);
-    if (result) return result;
-  }
-  return refused(UNSAFE);
+  const candidates = keyTexts(to, style).map(
+    (text) => frontmatter.slice(0, start) + text + frontmatter.slice(end),
+  );
+  return firstRead(candidates, expected);
 }
 
 /**
@@ -202,14 +197,13 @@ export function removeProperty(frontmatter: string, key: string): PropertyEdit {
     `^(?:[ \\t]{${(/^[ \t]*/.exec(frontmatter.slice(start))?.[0].length ?? 0) + 1},}#[^\\n]*\\n)*`,
   );
   const withComments = end + (under.exec(frontmatter.slice(end, read.closeStart))?.[0].length ?? 0);
-  const expected = read.entries.flatMap(({ property }) =>
-    property === entry.property ? [] : [property],
+  const candidates = [...new Set([withComments, end])].map(
+    (to) => frontmatter.slice(0, start) + frontmatter.slice(to),
   );
-  for (const to of new Set([withComments, end])) {
-    const result = verified(frontmatter.slice(0, start) + frontmatter.slice(to), expected);
-    if (result) return result;
-  }
-  return refused(UNSAFE);
+  return firstRead(
+    candidates,
+    read.entries.flatMap((other) => (other === entry ? [] : [asRead(other)])),
+  );
 }
 
 /** A name as names match keys: case folded, and `_`, `-` and spaces alike. */
@@ -250,6 +244,7 @@ export function propertyWikilink(value: PropertyValue): Wikilink | null {
 const FLOW_MAP = 'The properties are written as one flow map, { … }.';
 const UNSAFE = 'That can’t be written there without changing other text.';
 const COMMENT = 'It has a comment inside it.';
+const TOO_LONG = 'It is too long to read as properties.';
 const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.';
 
 // Just after the colon that follows a key ending at `from`, past spaces,
@@ -305,7 +300,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
   const base = open.length;
   const closeStart = base + rest.replace(/\n$/, '').lastIndexOf('\n') + 1;
   const yaml = frontmatter.slice(base, closeStart);
-  if (yaml.length > MAX_YAML) return refused('It is too long to read as properties.');
+  if (yaml.length > MAX_YAML) return refused(TOO_LONG);
   const doc = parseDocument(yaml, PARSING);
   const [error] = doc.errors;
   if (error)
@@ -541,19 +536,34 @@ function sameValue(a: PropertyValue, b: PropertyValue): boolean {
   return a.length === b.length && a.every((item, i) => sameValue(item, b[i] as PropertyValue));
 }
 
-// `block`, when it still splits off a page whole and reads back as `expected`.
-function verified(
-  block: string,
-  expected: readonly { key: string; value: PropertyValue }[],
-): PropertyEdit | null {
-  if (splitFrontmatter(block).frontmatter !== block) return null;
-  const read = readBlock(block);
-  if (!read.ok || read.entries.length !== expected.length) return null;
-  const same = read.entries.every(({ property }, i) => {
-    const want = expected[i];
-    return want !== undefined && property.key === want.key && sameValue(property.value, want.value);
-  });
-  return same ? { ok: true, frontmatter: block } : null;
+// A property as an edit expects to read it back: its key, its value, and
+// whether that is its source, so text can't pass for a map, an alias or
+// a number written out in the same characters.
+type Expected = { key: string; value: PropertyValue; source: boolean };
+
+const asRead = ({ property: { key, value }, source }: Entry): Expected => ({ key, value, source });
+
+// The first of `candidates` that still splits off a page whole and reads
+// back as `expected`, or why none can be.
+function firstRead(candidates: Iterable<string>, expected: readonly Expected[]): PropertyEdit {
+  let long = false;
+  for (const block of candidates) {
+    if (splitFrontmatter(block).frontmatter !== block) continue;
+    const read = readBlock(block);
+    long ||= !read.ok && read.reason === TOO_LONG;
+    if (!read.ok || read.entries.length !== expected.length) continue;
+    const same = read.entries.every(({ property, source }, i) => {
+      const want = expected[i];
+      return (
+        want !== undefined &&
+        property.key === want.key &&
+        source === want.source &&
+        sameValue(property.value, want.value)
+      );
+    });
+    if (same) return { ok: true, frontmatter: block };
+  }
+  return refused(long ? 'It would be too long to read as properties.' : UNSAFE);
 }
 
 type Style = 'PLAIN' | 'QUOTE_DOUBLE' | 'QUOTE_SINGLE';
