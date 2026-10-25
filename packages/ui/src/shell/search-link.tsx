@@ -51,14 +51,18 @@ const PREFIX = 'search=';
 /** The fragment, `#` left out, of an address that opens search with `query`. */
 export const searchHash = (query: string) => PREFIX + encodeURIComponent(query);
 
-/** The query an address's fragment (`#` or not) opens search with, or null for any other. */
+/**
+ * The query an address's fragment (`#` or not) opens search with, or null
+ * for any other fragment. One that doesn't decode, as typed by hand, opens
+ * search empty, so it still leaves the address.
+ */
 export function linkedSearch(hash: string): string | null {
   const fragment = hash.replace(/^#/, '');
   if (!fragment.startsWith(PREFIX)) return null;
   try {
     return decodeURIComponent(fragment.slice(PREFIX.length)).slice(0, 1000);
   } catch {
-    return null;
+    return '';
   }
 }
 

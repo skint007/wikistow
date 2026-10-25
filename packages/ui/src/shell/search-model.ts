@@ -1,4 +1,4 @@
-import type { Marked, searchOperations } from '@wikistow/client';
+import { parseSearch, searchTerms, type Marked, type searchOperations } from '@wikistow/client';
 
 /** Marked text cut into runs, each marked or not, in order. */
 export function markedParts({ text, highlights }: Marked): { text: string; mark: boolean }[] {
@@ -43,7 +43,9 @@ export function searchStatus({
       : 'Finding your pages…';
   }
   if (index.size === 0) return 'There are no pages to search yet.';
-  if (!query.trim()) return SEARCH_HELP;
+  // Nothing to look for yet, as a filter half typed (`tag:`).
+  const { words, filters } = parseSearch(query);
+  if (filters.length === 0 && searchTerms(words).length === 0) return SEARCH_HELP;
   if (results === 0) return 'No pages match.';
   return `${results} page${results === 1 ? '' : 's'}`;
 }

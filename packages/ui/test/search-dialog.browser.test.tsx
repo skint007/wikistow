@@ -139,6 +139,9 @@ const active = () =>
 it('says how to filter, and finds pages by tag and property, alone and with words', async () => {
   await mount();
   expect(status()).toBe(SEARCH_HELP);
+  // A filter half typed has nothing to look for yet.
+  await type('tag:');
+  expect(status()).toBe(SEARCH_HELP);
   await type('tag:soup');
   await expect.poll(titles).toEqual(['Bean soup', 'Pea soup']);
   expect(status()).toBe('2 pages');
@@ -223,7 +226,10 @@ it('gets a link’s query back as written, as the router reads its address', asy
   expect(read).toEqual(queries);
   expect(linkedSearch('#ingredients')).toBeNull();
   expect(linkedSearch('')).toBeNull();
-  expect(linkedSearch('#search=%E0%A4%A')).toBeNull();
+  expect(linkedSearch('#search=%E0%A4%A')).toBe('');
+  // Nor does it stay in an address to return to.
+  expect(withoutSearchHash('/s/home/p/x#search=discount:50%')).toBe('/s/home/p/x');
+  takeHeldSearch();
 });
 
 it('holds a link’s search in memory while unlocking, not in the address', () => {
