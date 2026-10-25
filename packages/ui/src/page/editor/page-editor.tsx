@@ -13,7 +13,7 @@ import { flushSync } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { emptyProperties, joinPage } from '../properties';
-import { PropertiesEditor } from '../properties-box';
+import { PropertiesEditor, type PropertyKeys } from '../properties-box';
 import { pastedFiles } from './pasted-files';
 import { preloadSourceEditor, SourceEditor } from './source-editor';
 import { lineBreakOf, type EditorSurfaceHandle, type EditorSurfaceProps } from './surface';
@@ -102,9 +102,14 @@ export function PageEditor({
   initial,
   onChange,
   status,
+  propertyKeys,
   ref,
   ...assist
-}: EditorSurfaceProps & { status: ReactNode }) {
+}: EditorSurfaceProps & {
+  status: ReactNode;
+  /** The keys pages in this page's folder use, which Add property suggests. */
+  propertyKeys?: PropertyKeys | undefined;
+}) {
   const [first] = useState(() => splitFrontmatter(initial));
   const frontmatter = useRef(first.frontmatter);
   const [properties, setProperties] = useState(first.frontmatter);
@@ -508,6 +513,7 @@ export function PageEditor({
             changed();
           }}
           onInsert={insertCode}
+          propertyKeys={propertyKeys}
         />
       )}
       {/* The editor fills the space the page leaves it, at least two fifths of

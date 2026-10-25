@@ -12,7 +12,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
-import { PropertiesBox, PropertiesEditor } from '../src/page/properties-box.tsx';
+import { PropertiesBox, PropertiesEditor, type PropertyKeys } from '../src/page/properties-box.tsx';
 import type { LinkScope } from '../src/page/property-value.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 
@@ -77,7 +77,7 @@ function routed(node: ReactNode) {
 }
 
 /** The draft's rows over `initial`, keeping each block they hand back. */
-async function editor(initial: string) {
+async function editor(initial: string, propertyKeys?: PropertyKeys) {
   const blocks: string[] = [];
   function Draft() {
     const [block, setBlock] = useState(initial);
@@ -91,6 +91,7 @@ async function editor(initial: string) {
         }}
         onRemove={() => {}}
         onInsert={() => {}}
+        propertyKeys={propertyKeys}
       />
     );
   }
@@ -276,6 +277,22 @@ describe('the draft’s property rows', () => {
     expect(value.textContent).toContain('line one\nline two');
     expect(value.textContent).toContain('It has a line break');
     expect(value.querySelectorAll('button')).toHaveLength(1);
+  });
+
+  it('suggests the keys pages near it use that it hasn’t, loading them only once asked', async () => {
+    let loads = 0;
+    const { container, last } = await editor(NOTE, {
+      keys: ['servings', 'cuisine', 'Cook Time'],
+      load: () => (loads += 1),
+    });
+    expect(loads).toBe(0);
+    await userEvent.click(button(container, 'Add property'));
+    expect(loads).toBe(1);
+    const options = () =>
+      [...container.querySelectorAll('[role=option]')].map((o) => o.textContent);
+    await expect.poll(options).toEqual(['cuisine']);
+    await userEvent.click(container.querySelector('[role=option]')!);
+    expect(last()).toBe(NOTE.replace('Use fresh garlic.\n', 'Use fresh garlic.\ncuisine:\n'));
   });
 
   it('says why an edit can’t be made, and refuses a key the block has', async () => {
