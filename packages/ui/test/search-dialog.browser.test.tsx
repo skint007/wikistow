@@ -26,6 +26,7 @@ import { SearchDialog } from '../src/shell/search-dialog.tsx';
 import {
   filterQuery,
   linkedSearch,
+  searchHash,
   SearchLink,
   SearchOpener,
   takeHeldSearch,
@@ -227,6 +228,8 @@ it('gets a link’s query back as written, as the router reads its address', asy
   expect(linkedSearch('#ingredients')).toBeNull();
   expect(linkedSearch('')).toBeNull();
   expect(linkedSearch('#search=%E0%A4%A')).toBe('');
+  // A lone surrogate, as a property's escapes can make, is encoded as U+FFFD.
+  expect(linkedSearch(searchHash('tag:\uD800soup'))).toBe('tag:\uFFFDsoup');
   // Nor does it stay in an address to return to.
   expect(withoutSearchHash('/s/home/p/x#search=discount:50%')).toBe('/s/home/p/x');
   takeHeldSearch();

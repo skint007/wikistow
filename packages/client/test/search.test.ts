@@ -155,6 +155,12 @@ describe('filters in a query', () => {
     expect(parseSearch('path:"C:\\Users\\n"').filters).toEqual([
       { key: 'path', value: 'C:\\Users\\n' },
     ]);
+    // As a phone's keyboard writes quotes.
+    expect(parseSearch('status:“in progress” note:„a b“ x:“c d"').filters).toEqual([
+      { key: 'status', value: 'in progress' },
+      { key: 'note', value: 'a b' },
+      { key: 'x', value: 'c d' },
+    ]);
     // A quote not closed runs to the end, as one being typed does.
     expect(parseSearch('status:"in prog').filters).toEqual([{ key: 'status', value: 'in prog' }]);
   });
@@ -206,6 +212,10 @@ describe('filters in a query', () => {
     expect(searchFilter('2024', 'x')).toBeNull();
     expect(searchFilter('２０２４', 'x')).toBeNull();
     expect(searchFilter('url', '//example.com')).toBe('url:"//example.com"');
+    expect(searchFilter('tag', '“odd')).toBe('tag:"“odd"');
+    expect(parseSearch(searchFilter('tag', '“odd') ?? '').filters).toEqual([
+      { key: 'tag', value: '“odd' },
+    ]);
     for (const [key, value] of [
       ['status', 'in progress'],
       ['note', 'say "hi" \\ bye'],

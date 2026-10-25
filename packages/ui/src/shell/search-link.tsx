@@ -48,8 +48,12 @@ export function SearchLink({
 
 const PREFIX = 'search=';
 
-/** The fragment, `#` left out, of an address that opens search with `query`. */
-export const searchHash = (query: string) => PREFIX + encodeURIComponent(query);
+/**
+ * The fragment, `#` left out, of an address that opens search with `query`.
+ * A lone surrogate, which a property's escapes can make, can't be encoded,
+ * so it becomes U+FFFD.
+ */
+export const searchHash = (query: string) => PREFIX + encodeURIComponent(query.toWellFormed());
 
 /**
  * The query an address's fragment (`#` or not) opens search with, or null

@@ -273,8 +273,8 @@ export type SearchFilter = { key: string; value: string };
 
 /**
  * A query's words and filters, read a word at a time: up to a space, or
- * a word or value in double quotes up to its closing quote, after which
- * the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
+ * a word or value in double quotes (`"…"`, or as a phone may write them,
+ * `“…”` or `„…“`) up to its closing quote, after which the next starts. Quotes allow spaces, with `\"` and `\\` for a quote and
  * a backslash in them (any other backslash is itself), and one not closed
  * runs to the query's end. A filter is a name, as a property reference's
  * (letters, digits, `_` and `-`; for a key with spaces, `_` stands in, as
@@ -319,6 +319,12 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
   return { words: words.join(' '), filters };
 }
 
+/**
+ * The double quotes that open a word or value, each with those that close
+ * it: a phone's keyboard may make `"` into `“` and `”`, or `„` and `“`.
+ */
+const QUOTES: Record<string, string> = { '"': '"', '“': '”"', '„': '“"' };
+
 /** A filter's name and its colon, at a word's start. */
 const FILTER_NAME = /([\p{L}\p{N}][\p{L}\p{N}_-]*):/uy;
 
@@ -331,11 +337,12 @@ function wordEnd(query: string, at: number): number {
 
 /** The text in double quotes from `at`, unescaped, and where it ends, or null if none starts there. */
 function readQuoted(query: string, at: number): { text: string; end: number } | null {
-  if (query.charAt(at) !== '"') return null;
+  const closers = QUOTES[query.charAt(at)];
+  if (closers === undefined) return null;
   let text = '';
   for (let end = at + 1; end < query.length; end++) {
     const char = query.charAt(end);
-    if (char === '"') return { text, end: end + 1 };
+    if (closers.includes(char)) return { text, end: end + 1 };
     const next = query.charAt(end + 1);
     if (char === '\\' && (next === '"' || next === '\\')) text += query.charAt(++end);
     else text += char;
@@ -356,7 +363,8 @@ export function searchFilter(key: string, value: string): string | null {
   if (!named || emptyFilter(name, value)) {
     return null;
   }
-  const plain = /^[^\s"\\]+$/u.test(value) && !value.startsWith('//');
+  // Not a value that would read as quoted, or as a web address.
+  const plain = /^[^\s"\\]+$/u.test(value) && !/^(?:\/\/|[“„])/u.test(value);
   return `${name}:${plain ? value : `"${value.replace(/[\\"]/g, '\\$&')}"`}`;
 }
 
