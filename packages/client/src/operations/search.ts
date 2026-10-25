@@ -1,10 +1,18 @@
-import { PageId, RevisionId, sharingRoutes, SpaceId, structureRoutes } from '@wikistow/contracts';
+import {
+  FolderId,
+  PageId,
+  RevisionId,
+  sharingRoutes,
+  SpaceId,
+  structureRoutes,
+} from '@wikistow/contracts';
 import { z } from 'zod';
 import { ApiError } from '../api/client.ts';
 import { openOnDevice, sealOnDevice } from '../device-seal.ts';
 import { canonical, decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
-import { SearchIndex, searchText } from '../search.ts';
+import { foldPropertyName, type PropertyData } from '../markdown/properties.ts';
+import { hasTag, indexedContent, SearchIndex, type IndexedText } from '../search.ts';
 import { shownVersions } from './pages.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import type { ClientContext } from './session.ts';
@@ -14,8 +22,15 @@ import { loadStructure } from './spaces.ts';
 export type SearchPage = {
   spaceId: SpaceId;
   pageId: PageId;
-  /** The version whose title and text are indexed. */
+  /** The version whose title, text and properties are indexed. */
   revisionId: RevisionId;
+  /** The folder it is directly in, or null at the space's top. */
+  parentId: FolderId | null;
+  /**
+   * The folders it is in, outermost first, as far up as this person's tree
+   * goes: those `path` names.
+   */
+  folderIds: FolderId[];
   /**
    * Where it is: the space's name, when this person holds the space, then
    * each folder's down to the page's, null where a name can't be opened.
@@ -40,6 +55,96 @@ export class IndexAbandoned extends Error {
   constructor() {
     super('Indexing stopped');
     this.name = 'IndexAbandoned';
+  }
+}
+
+/** A page as the index holds it, for what reads its properties (`PageIndex`). */
+export type IndexedEntry = Readonly<SearchPage> & {
+  readonly title: string;
+  readonly properties: readonly PropertyData[];
+};
+
+/** Which pages of the index to list (`PageIndex.list`). */
+export type PageScope = {
+  spaceId: SpaceId;
+  /**
+   * Only the pages directly in this folder, or at the space's top for null.
+   * With `nested`, those in the folders under it too. Left out, the whole
+   * space.
+   */
+  folderId?: FolderId | null;
+  nested?: boolean;
+  /** Only the pages tagged so (`hasTag`): what `tag:` search finds. */
+  tag?: string;
+};
+
+/**
+ * A search index of the pages this person can open (`indexSpaces`), which
+ * also lists what it holds of them, for whatever reads their properties:
+ * query tables, a folder's table, a reference to another page's value,
+ * **Add property**'s suggestions. Each page is as search holds it, in the
+ * version this person sees, so a page they can't open is never listed.
+ *
+ * It doesn't change once built: as pages change, a newer index stands in
+ * for it (`usePageIndex`, in the app). Pages are listed in the order the
+ * space's tree lists them. The first read groups them, in time linear in
+ * the index; after that `page` takes constant time, `list` time linear in
+ * the space's pages, and `keys` in their properties too.
+ */
+export class PageIndex extends SearchIndex<SearchPage> {
+  #bySpace: Map<SpaceId, IndexedEntry[]> | null = null;
+  #byPage: Map<string, IndexedEntry> | null = null;
+
+  override addText(doc: SearchPage, page: IndexedText): void {
+    super.addText(doc, page);
+    this.#bySpace = this.#byPage = null;
+  }
+
+  /** The page `pageId` in `spaceId`, or undefined if this person can't open it. */
+  page(spaceId: SpaceId, pageId: PageId): IndexedEntry | undefined {
+    return this.#lookup().byPage.get(`${spaceId}/${pageId}`);
+  }
+
+  /** The pages in `scope`, in the order the space's tree lists them. */
+  list({ spaceId, folderId, nested = false, tag }: PageScope): IndexedEntry[] {
+    return (this.#lookup().bySpace.get(spaceId) ?? []).filter(
+      (entry) =>
+        (folderId === undefined ||
+          entry.parentId === folderId ||
+          (nested && (folderId === null || entry.folderIds.includes(folderId)))) &&
+        (tag === undefined || hasTag(entry.properties, tag)),
+    );
+  }
+
+  /**
+   * The keys the pages in `scope` use, each once, as first written, in the
+   * order they first appear (`list`'s, then each block's). Keys are the
+   * same when a reference would take one for the other (`foldPropertyName`).
+   */
+  keys(scope: PageScope): string[] {
+    const keys = new Map<string, string>();
+    for (const { properties } of this.list(scope)) {
+      for (const { key } of properties) {
+        const folded = foldPropertyName(key);
+        if (!keys.has(folded)) keys.set(folded, key);
+      }
+    }
+    return [...keys.values()];
+  }
+
+  #lookup() {
+    if (this.#bySpace === null || this.#byPage === null) {
+      this.#bySpace = new Map();
+      this.#byPage = new Map();
+      for (const { doc, title, properties } of this.pages()) {
+        const entry: IndexedEntry = { ...doc, title, properties };
+        let space = this.#bySpace.get(doc.spaceId);
+        if (!space) this.#bySpace.set(doc.spaceId, (space = []));
+        space.push(entry);
+        this.#byPage.set(`${doc.spaceId}/${doc.pageId}`, entry);
+      }
+    }
+    return { bySpace: this.#bySpace, byPage: this.#byPage };
   }
 }
 
@@ -78,7 +183,7 @@ export async function indexSpaces(
     onProgress?: (progress: IndexProgress) => void;
     signal?: AbortSignal;
   } = {},
-): Promise<SearchIndex<SearchPage>> {
+): Promise<PageIndex> {
   const generation = ctx.revisions.generation;
   const live = () => {
     if (signal?.aborted || ctx.revisions.generation !== generation) throw new IndexAbandoned();
@@ -102,7 +207,7 @@ export async function indexSpaces(
   const total = spaces.reduce((sum, space) => sum + space.pages.length, 0);
   let done = 0;
   onProgress?.({ pages: done, total });
-  const index = new SearchIndex<SearchPage>();
+  const index = new PageIndex();
   for (const { spaceId, space, folders, pages } of spaces) {
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     const top = space ? [nameOf(space.metadata)] : [];
@@ -115,7 +220,12 @@ export async function indexSpaces(
         const head = page.draftHead ?? page.publishedHead;
         const found = head === null ? undefined : kept?.get(head);
         if (head !== null && found?.spaceId === spaceId && found.pageId === page.id) {
-          reused.set(page.id, { revisionId: head, title: found.title, text: found.text });
+          reused.set(page.id, {
+            revisionId: head,
+            title: found.title,
+            text: found.text,
+            properties: found.properties,
+          });
         }
       }
       const unkept = chunk.filter((page) => !reused.has(page.id));
@@ -125,12 +235,14 @@ export async function indexSpaces(
         const content = reused.get(page.id) ?? contentOf(versions?.get(page.id));
         if (!content) continue;
         const path: (string | null)[] = [];
+        const folderIds: FolderId[] = [];
         const seen = new Set<string>();
         for (let id = page.parentId; id !== null && !seen.has(id);) {
           seen.add(id);
           const folder = byId.get(id);
           if (!folder) break;
           path.unshift(nameOf(folder.metadata));
+          folderIds.unshift(id);
           id = folder.parentId;
         }
         index.addText(
@@ -138,6 +250,8 @@ export async function indexSpaces(
             spaceId,
             pageId: page.id,
             revisionId: content.revisionId,
+            parentId: page.parentId,
+            folderIds,
             path: [...top, ...path],
             draft: page.draftHead !== null && (page.publishedHead === null || page.draftChanges),
             unpublished: page.draftHead === null && page.publishedHead === null,
@@ -152,7 +266,12 @@ export async function indexSpaces(
   return index;
 }
 
-type IndexedContent = { revisionId: RevisionId; title: string; text: string };
+type IndexedContent = {
+  revisionId: RevisionId;
+  title: string;
+  text: string;
+  properties: readonly PropertyData[];
+};
 
 /**
  * What an index read from each version it holds, by that version, so a
@@ -160,26 +279,41 @@ type IndexedContent = { revisionId: RevisionId; title: string; text: string };
  */
 export type KeptPages = ReadonlyMap<
   RevisionId,
-  { spaceId: SpaceId; pageId: PageId; title: string; text: string }
+  {
+    spaceId: SpaceId;
+    pageId: PageId;
+    title: string;
+    text: string;
+    properties: readonly PropertyData[];
+  }
 >;
 
 export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
     index
       .pages()
-      .map(({ doc, title, text }) => [
+      .map(({ doc, title, text, properties }) => [
         doc.revisionId,
-        { spaceId: doc.spaceId, pageId: doc.pageId, title, text },
+        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties },
       ]),
   );
 
-const KeptJson = z.array(z.tuple([RevisionId, SpaceId, PageId, z.string(), z.string()]));
+const KeptScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const KeptProperty = z.object({
+  key: z.string(),
+  type: z.enum(['list', 'number', 'boolean', 'date', 'url', 'wikilink', 'text']),
+  value: z.union([KeptScalar, z.array(z.union([KeptScalar, z.array(KeptScalar)]))]),
+}) satisfies z.ZodType<PropertyData>;
+const KeptJson = z.array(
+  z.tuple([RevisionId, SpaceId, PageId, z.string(), z.string(), z.array(KeptProperty)]),
+);
 
 // The desktop app keeps the index between launches as these bytes (#3),
 // sealed for this person (`sealOnDevice`), so the file can't be taken for
 // another account or server's. They are bound to the app's `build` too:
 // another build may reduce pages differently (`searchText`), so its file
-// opens as nothing and every page is read again.
+// opens as nothing and every page is read again. So does one kept before
+// properties were (its rows have a field fewer), whatever its build.
 const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
@@ -192,6 +326,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.pageId,
     page.title,
     page.text,
+    page.properties,
   ]);
   return sealOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), utf8(JSON.stringify(json)));
 }
@@ -203,7 +338,10 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   try {
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
-      json.map(([id, spaceId, pageId, title, text]) => [id, { spaceId, pageId, title, text }]),
+      json.map(([id, spaceId, pageId, title, text, properties]) => [
+        id,
+        { spaceId, pageId, title, text, properties },
+      ]),
     );
   } catch {
     return null;
@@ -214,7 +352,7 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
 function contentOf(version: OpenedRevision | null | undefined): IndexedContent | null {
   if (version?.opened.kind !== 'current') return null;
   const { title, markdown } = version.opened.payload;
-  return { revisionId: version.record.revisionId, title, text: searchText(markdown) };
+  return { revisionId: version.record.revisionId, title, ...indexedContent(markdown) };
 }
 
 /**

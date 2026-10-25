@@ -1,5 +1,4 @@
 import type { ClientContext, Marked, SearchHit, searchOperations } from '@wikistow/client';
-import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Search } from 'lucide-react';
 import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
@@ -8,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { notCredential } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { searchIndexQuery, searchProgressKey } from '../data/queries';
+import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
 import { breadcrumb, markedParts, searchStatus } from './search-model';
 
@@ -16,7 +15,7 @@ type Hit = SearchHit<searchOperations.SearchPage>;
 
 /**
  * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple). The index is built
- * on this device from the pages this person can read (`searchIndexQuery`),
+ * on this device from the pages this person can read (`usePageIndex`),
  * with its progress shown until it is ready. Up and down move through the
  * results, Enter or a click opens one: its draft, for a draft hit. A copy
  * unpublished where it is opens as its page does, at its last publication.
@@ -44,19 +43,11 @@ export function SearchDialog({
 }
 
 function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void }) {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const index = useQuery(searchIndexQuery(ctx, queryClient));
-  const { data: progress } = useQuery<searchOperations.IndexProgress>({
-    queryKey: searchProgressKey,
-    queryFn: skipToken,
-  });
+  const { index, progress, error, updating, retry } = usePageIndex(ctx);
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);
-  const results = useMemo(
-    () => index.data?.search(deferred, { limit: 50 }) ?? [],
-    [index.data, deferred],
-  );
+  const results = useMemo(() => index?.search(deferred, { limit: 50 }) ?? [], [index, deferred]);
   const [active, setActive] = useState(0);
   useEffect(() => setActive(0), [results]);
   const ids = useId();
@@ -74,9 +65,9 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
     });
   }
 
-  const status = index.isError
+  const status = error
     ? null
-    : searchStatus({ index: index.data, progress, query: deferred, results: results.length });
+    : searchStatus({ index, progress, query: deferred, results: results.length });
   return (
     <>
       <div className="relative mr-8">
@@ -116,16 +107,16 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
       </div>
       <p role="status" className="text-sm text-muted-foreground">
         {status}
-        {index.data && index.isFetching && progress && progress.total > 0 && (
+        {index && updating && progress && progress.total > 0 && (
           <span className="sr-only">
             Updating: {progress.pages} of {progress.total}
           </span>
         )}
       </p>
-      {index.isError && (
+      {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
-          <span className="flex-1">Couldn’t index your pages: {errorMessage(index.error)}</span>
-          <Button variant="outline" size="sm" onClick={() => void index.refetch()}>
+          <span className="flex-1">Couldn’t index your pages: {errorMessage(error)}</span>
+          <Button variant="outline" size="sm" onClick={retry}>
             Try again
           </Button>
         </div>

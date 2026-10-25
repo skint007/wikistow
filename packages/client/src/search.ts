@@ -1,3 +1,11 @@
+import { splitFrontmatter } from './markdown/frontmatter.ts';
+import {
+  findProperty,
+  propertyData,
+  type PropertyData,
+  type PropertyValue,
+} from './markdown/properties.ts';
+
 // Local full-text search over the pages a person can decrypt. Nothing here
 // leaves memory: the index is built from opened pages, and from what an
 // earlier index read from them (`pages`, `addText`).
@@ -12,6 +20,11 @@
  *   `TEXT_LIMIT` characters of it are kept, read from lines cut at
  *   `LINE_LIMIT`, and paragraphs in pieces of at most that: whatever a page
  *   holds, indexing it takes bounded time.
+ * - **Properties.** Beside its text, each page keeps its frontmatter's
+ *   properties as plain data (`propertyData`), the block split off the
+ *   page's Markdown, not read from its text. Reading a block is linear in
+ *   its size, and one over 64 KiB, or that doesn't read as a map, gives
+ *   none, so this is bounded too.
  * - **Terms** (`searchTerms`) are runs of letters and digits, folded: NFKD,
  *   combining marks dropped, recomposed (NFC, so Hangul stays whole),
  *   lower-cased, `ß` as `ss`. So `Café` matches
@@ -31,9 +44,10 @@
  *   hit builds its snippet when asked, so only the rows shown pay for one.
  *   Highlights are UTF-16 offsets into the snippet's (or title's) own text.
  *
- * Each page keeps its title, its reduced text, and one posting of two
- * small integers per distinct term: a few times the text's size in memory,
- * fine for a family library of thousands of pages.
+ * Each page keeps its title, its reduced text, its properties, and one
+ * posting of two small integers per distinct term: a few times the text's
+ * size in memory, and the properties at most about their block's size, so
+ * under 64 KiB, fine for a family library of thousands of pages.
  */
 export class SearchIndex<T> {
   readonly #pages: IndexedPage<T>[] = [];
@@ -47,13 +61,16 @@ export class SearchIndex<T> {
 
   /** Index a page's title and Markdown; `doc` is what its hits return. */
   add(doc: T, page: { title: string; markdown: string }): void {
-    this.addText(doc, { title: page.title, text: searchText(page.markdown) });
+    this.addText(doc, { title: page.title, ...indexedContent(page.markdown) });
   }
 
-  /** Index a page as another index read it (`pages`): its title and text, already reduced. */
-  addText(doc: T, { title, text }: { title: string; text: string }): void {
+  /**
+   * Index a page as another index read it (`pages`): its title, its text
+   * already reduced, and its properties, none if left out.
+   */
+  addText(doc: T, { title, text, properties = [] }: IndexedText): void {
     const id = this.#pages.length;
-    this.#pages.push({ doc, title, text });
+    this.#pages.push({ doc, title, text, properties });
     // Each term's count in the text, doubled, plus one if the title has it.
     const counts = new Map<string, number>();
     eachTerm(title, (term) => counts.set(term, (counts.get(term) ?? 0) | 1));
@@ -66,7 +83,7 @@ export class SearchIndex<T> {
     this.#sorted = null;
   }
 
-  /** Each page indexed, in the order added, with its text as reduced for search. */
+  /** Each page indexed, in the order added, with its text as reduced for search and its properties. */
   pages(): readonly Readonly<IndexedPage<T>>[] {
     return this.#pages;
   }
@@ -142,8 +159,58 @@ export class SearchIndex<T> {
   }
 }
 
-/** A page as an index holds it: what its hits return, its title, and its reduced text. */
-export type IndexedPage<T> = { doc: T; title: string; text: string };
+/** A page as an index holds it: what its hits return, its title, its reduced text and its properties. */
+export type IndexedPage<T> = {
+  doc: T;
+  title: string;
+  text: string;
+  properties: readonly PropertyData[];
+};
+
+/** A page as `addText` takes it. */
+export type IndexedText = { title: string; text: string; properties?: readonly PropertyData[] };
+
+/** What the index keeps of a page's Markdown: its text for search, and its properties. */
+export function indexedContent(markdown: string): {
+  text: string;
+  properties: PropertyData[];
+} {
+  return {
+    text: searchText(markdown),
+    properties: propertyData(splitFrontmatter(markdown).frontmatter),
+  };
+}
+
+/**
+ * Whether `properties` are tagged `tag`: their `tags` (named as a
+ * reference names it, `findProperty`) is a list holding it, or is it. Tags
+ * compare as search terms do, whatever their accents and case, and without
+ * a `#` before them, so `#Soup` is `soup`.
+ */
+export function hasTag(properties: readonly PropertyData[], tag: string): boolean {
+  const wanted = tagName(tag);
+  return (
+    wanted !== '' &&
+    holds(findProperty(properties, 'tags')?.value, (value) => tagName(String(value)) === wanted)
+  );
+}
+
+const tagName = (tag: string) => foldTerm(tag.trim().replace(/^#/, ''));
+
+/**
+ * Whether a property's value is a scalar `matches` takes, or a list holding
+ * one, in a list of its own too. Empty values match nothing.
+ */
+function holds(
+  value: PropertyValue | undefined,
+  matches: (scalar: string | number | boolean) => boolean,
+): boolean {
+  const items = isList(value) ? value.flatMap((item) => (isList(item) ? item : [item])) : [value];
+  return items.some((item) => item !== null && item !== undefined && matches(item));
+}
+
+// `Array.isArray` doesn't narrow a readonly array.
+const isList = <T>(value: T | readonly T[]): value is readonly T[] => Array.isArray(value);
 
 /** Text with the parts a query matched, as UTF-16 offsets into `text`. */
 export type Marked = { text: string; highlights: { start: number; end: number }[] };

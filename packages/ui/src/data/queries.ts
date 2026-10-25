@@ -12,7 +12,6 @@ import {
   type ClientContext,
   type PageId,
   type RevisionId,
-  type SearchIndex,
   type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
@@ -204,8 +203,7 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       // The desktop app keeps one between launches only with a trusted keyring.
       const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
-      const shown =
-        queryClient.getQueryData<SearchIndex<searchOperations.SearchPage>>(searchIndexKey);
+      const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
       const sealed = shown ? null : await device?.searchIndex().catch(() => null);
       const index = await searchOperations.indexSpaces(ctx, {
         kept: shown
@@ -230,13 +228,20 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
   });
 
 /**
- * After this person's own change to a page or folder (a save, publish,
+ * After a change to a page or folder: this person's own (a save, publish,
  * restore, creation, deletion, detach or unpublish), wherever its tree is
- * refetched or patched: search rebuilds its index when next opened, so it
- * finds what they just wrote. Others' changes show once it is stale.
+ * refetched or patched, and one the server tells of (`useTreeChanges`).
+ * The index is rebuilt now if something shows it (`usePageIndex`), or else
+ * when next shown, so search finds what was just written. A rebuild already
+ * running may have started before the change, so another follows it, and
+ * changes meanwhile share that one: autosaves don't keep cancelling it.
  */
-export const searchIndexChanged = (queryClient: QueryClient) =>
-  void queryClient.invalidateQueries({ queryKey: searchIndexKey });
+export function searchIndexChanged(queryClient: QueryClient) {
+  const running = queryClient.isFetching({ queryKey: searchIndexKey }) > 0;
+  const changed = () =>
+    queryClient.invalidateQueries({ queryKey: searchIndexKey }, { cancelRefetch: false });
+  void changed().then(() => (running ? changed() : undefined));
+}
 
 /**
  * Refetch everything an owner action can change: who has access, the
