@@ -23,7 +23,14 @@ import { afterEach, expect, it } from 'vite-plus/test';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { searchIndexQuery } from '../src/data/queries.ts';
 import { SearchDialog } from '../src/shell/search-dialog.tsx';
-import { filterQuery, linkedSearch, SearchLink, SearchOpener } from '../src/shell/search-link.tsx';
+import {
+  filterQuery,
+  linkedSearch,
+  SearchLink,
+  SearchOpener,
+  takeHeldSearch,
+  withoutSearchHash,
+} from '../src/shell/search-link.tsx';
 import { SEARCH_HELP } from '../src/shell/search-model.ts';
 import { vaultStore } from '../src/vault/store.ts';
 
@@ -217,4 +224,14 @@ it('gets a link’s query back as written, as the router reads its address', asy
   expect(linkedSearch('#ingredients')).toBeNull();
   expect(linkedSearch('')).toBeNull();
   expect(linkedSearch('#search=%E0%A4%A')).toBeNull();
+});
+
+it('holds a link’s search in memory while signing in or unlocking, not in the address', () => {
+  const href = `/s/home/p/bean-soup?view=draft#search=${encodeURIComponent('tag:"in progress"')}`;
+  expect(withoutSearchHash(href)).toBe('/s/home/p/bean-soup?view=draft');
+  expect(takeHeldSearch()).toBe('tag:"in progress"');
+  expect(takeHeldSearch()).toBeNull();
+  // Any other address, a heading's too, goes back as it was.
+  expect(withoutSearchHash('/s/home/p/bean-soup#method')).toBe('/s/home/p/bean-soup#method');
+  expect(takeHeldSearch()).toBeNull();
 });

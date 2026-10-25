@@ -11,9 +11,10 @@ export const SearchOpener = createContext<((query: string) => void) | null>(null
  * asked about. Its address is the page's own with `#search=` and the query
  * (`searchHash`), which `AppShell` opens search from, then takes out of the
  * address, so opening it in another tab, or copying it, opens search there
- * too. The query stays in the fragment, which the browser never sends: it
- * comes from pages the server can't read. `filterQuery` writes a filter's
- * query.
+ * too, after signing in or unlocking if those come first
+ * (`withoutSearchHash`). The query stays in the fragment, which the browser
+ * never sends: it comes from pages the server can't read. `filterQuery`
+ * writes a filter's query.
  */
 export function SearchLink({
   query,
@@ -60,6 +61,30 @@ export function linkedSearch(hash: string): string | null {
   } catch {
     return null;
   }
+}
+
+// A search an address asked for, held while signing in or unlocking comes
+// first: in memory only, never in the address those pages return to, which
+// the browser sends, nor in the browser's storage.
+let held: string | null = null;
+
+/**
+ * `href` without a search fragment, for an address to return to after
+ * signing in or unlocking. The query is held instead, for `takeHeldSearch`.
+ */
+export function withoutSearchHash(href: string): string {
+  const at = href.indexOf('#');
+  const query = at < 0 ? null : linkedSearch(href.slice(at));
+  if (query === null) return href;
+  held = query;
+  return href.slice(0, at);
+}
+
+/** The search `withoutSearchHash` held, once, or null. */
+export function takeHeldSearch(): string | null {
+  const query = held;
+  held = null;
+  return query;
 }
 
 /**

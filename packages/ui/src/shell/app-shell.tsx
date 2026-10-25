@@ -21,7 +21,7 @@ import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
-import { linkedSearch, SearchOpener } from './search-link';
+import { linkedSearch, SearchOpener, takeHeldSearch } from './search-link';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
 
@@ -68,13 +68,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
   // An address with a query (`SearchLink`'s, opened in a new tab) opens
   // search on its page, and lets the query go, so reloading or going back
-  // doesn't open it again.
+  // doesn't open it again; so does one held while the vault was unlocked.
   const navigate = useNavigate();
   const linked = linkedSearch(useLocation({ select: (location) => location.hash }));
   useEffect(() => {
-    if (linked === null || vault.status !== 'unlocked') return;
-    void navigate({ to: '.', search: true, hash: '', replace: true });
-    search(linked);
+    if (vault.status !== 'unlocked') return;
+    const held = takeHeldSearch();
+    if (linked !== null) void navigate({ to: '.', search: true, hash: '', replace: true });
+    const query = linked ?? held;
+    if (query !== null) search(query);
   }, [linked, vault.status, navigate, search]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

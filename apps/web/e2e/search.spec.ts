@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures';
-import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './vault';
+import { adminTab, fillSource, memberWithVault, newPage, PASSPHRASE, waitForSave } from './vault';
 
 /**
  * Pages with properties are found by `tag:` and `key:value` filters typed in
@@ -56,5 +56,22 @@ test('search finds pages by tag and property, typed or from a link', async ({
     await page.keyboard.press('Enter');
     await expect(search).toBeHidden();
     await expect(page.locator('#page-title')).toHaveValue('Bean soup');
+  });
+
+  await test.step('a link opened while locked opens search after unlocking', async () => {
+    const url = new URL(page.url());
+    url.hash = `search=${encodeURIComponent('status:"in progress"')}`;
+    await page.getByRole('button', { name: 'Account' }).click();
+    await page.getByRole('menuitem', { name: 'Lock vault' }).click();
+    await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+    await page.goto('about:blank');
+    await page.goto(url.href);
+    await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+    // The page to return to is in the address, the query isn't.
+    expect(decodeURIComponent(page.url())).not.toContain('in progress');
+    await page.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await page.getByRole('button', { name: 'Unlock' }).click();
+    await expect(box).toHaveValue('status:"in progress"');
+    await expect(titles).toHaveText(['Bean soup'], { timeout: 30_000 });
   });
 });

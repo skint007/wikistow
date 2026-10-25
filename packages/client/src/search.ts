@@ -36,7 +36,8 @@ import {
  * - **Queries** are words and filters (`parseSearch`), and match pages
  *   holding every term of the words and passing every filter. The last term
  *   also matches as a prefix (`back` finds `backup`), the others only whole.
- *   A filter with no value, as one half typed (`tag:`, `tag:#`), is left out; a quote
+ *   A filter with no value ending the query, as one half typed (`tag:`,
+ *   `tag:#`), is left out, and elsewhere is words (`Re: dinner`); a quote
  *   left open runs to the query's end; a word in quotes is always words, so
  *   `"10:30"` searches text, where `10:30` would be a filter.
  * - **Filters** match properties (`matchesFilter`): `tag:soup` or
@@ -61,8 +62,10 @@ import {
  * Searching takes time linear in the query, in the postings of its terms,
  * and with filters, in the properties of the pages they're tried on, times
  * the number of different filters: the pages holding the words, or with
- * filters alone, every page. Then the pages found are sorted, in time
- * `n log n` in their number.
+ * filters alone, every page. The last term also reads each indexed term it
+ * starts, found in the terms sorted, which the first search after pages are
+ * added sorts again. Then the pages found are sorted, in time `n log n` in
+ * their number.
  *
  * Each page keeps its title, its reduced text, its properties, and one
  * posting of two small integers per distinct term: a few times the text's
@@ -277,8 +280,8 @@ export type SearchFilter = { key: string; value: string };
  * other backslash is itself). A quote
  * not closed runs to the query's end. Everything else is words, a word in
  * quotes too, so `"10:30"` or `"https://example.com"` searches text. A
- * filter with no value (`tag:`, `tag:#`, `status:""`), as one half typed,
- * is left out. Linear in the query's length.
+ * filter with no value (`tag:`, `tag:#`, `status:""`) ending the query, as
+ * one half typed, is left out; elsewhere it is words (`Re: dinner`). Linear in the query's length.
  */
 export function parseSearch(query: string): { words: string; filters: SearchFilter[] } {
   const words: string[] = [];
@@ -295,9 +298,9 @@ export function parseSearch(query: string): { words: string; filters: SearchFilt
       const quoted = readQuoted(query, at + name.length + 1);
       const end = quoted?.end ?? wordEnd(query, at + name.length + 1);
       const value = quoted?.text ?? query.slice(at + name.length + 1, end);
-      // `tag:#` is as half typed as `tag:`.
-      const empty = isTagKey(name) ? tagName(value) === '' : value.trim() === '';
-      if (!empty) filters.push({ key: name, value });
+      if (!emptyFilter(name, value)) filters.push({ key: name, value });
+      // One with nothing after it but more query is words (`Re: dinner`).
+      else if (query.slice(end).trim() !== '') words.push(query.slice(at, end));
       at = end;
       continue;
     }
@@ -336,11 +339,11 @@ function readQuoted(query: string, at: number): { text: string; end: number } | 
  * A filter's text, for a query or a link to search (`parseSearch`):
  * `tag:soup`, or `status:"in progress"` when the value needs quotes. A
  * key's spaces become `_`, which finds it all the same. Null for a key no
- * filter can name, or an empty value.
+ * filter can name, or an empty value (for a tag, nothing past a `#`).
  */
 export function searchFilter(key: string, value: string): string | null {
   const name = key.trim().replace(/ /g, '_');
-  if (!new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) || value.trim() === '') {
+  if (!new RegExp(`^${FILTER_NAME.source}$`, 'u').test(`${name}:`) || emptyFilter(name, value)) {
     return null;
   }
   const plain = /^[^\s"\\]+$/u.test(value);
@@ -387,6 +390,10 @@ function filterTest({
   return (properties) =>
     holds(properties.find((property) => foldPropertyName(property.key) === name)?.value, matches);
 }
+
+/** Whether a filter has no value: none, or for a tag, none past its `#`. */
+const emptyFilter = (key: string, value: string) =>
+  isTagKey(key) ? tagName(value) === '' : value.trim() === '';
 
 /** Whether a filter's key asks for a tag: `tag`, or `tags`, the key tags are in. */
 const isTagKey = (key: string) => /^tags?$/.test(foldPropertyName(key));

@@ -161,8 +161,11 @@ describe('filters in a query', () => {
 
   it('leave words, quoted words and half-typed filters be', () => {
     expect(parseSearch('tag:')).toEqual({ words: '', filters: [] });
-    expect(parseSearch('tag:# tags:"#"')).toEqual({ words: '', filters: [] });
-    expect(parseSearch('status:"" soup')).toEqual({ words: 'soup', filters: [] });
+    expect(parseSearch('tag:#')).toEqual({ words: '', filters: [] });
+    expect(parseSearch('tags:"#"')).toEqual({ words: '', filters: [] });
+    // Only at the end: elsewhere, a name and a colon are words.
+    expect(parseSearch('Re: dinner tag:')).toEqual({ words: 'Re: dinner', filters: [] });
+    expect(parseSearch('soup status:""')).toEqual({ words: 'soup', filters: [] });
     expect(parseSearch('"10:30" "https://example.com" (tag:soup) :x')).toEqual({
       words: '"10:30" "https://example.com" (tag:soup) :x',
       filters: [],
@@ -185,6 +188,7 @@ describe('filters in a query', () => {
     expect(searchFilter('note', 'say "hi" \\ bye')).toBe('note:"say \\"hi\\" \\\\ bye"');
     expect(searchFilter('a.b', 'x')).toBeNull();
     expect(searchFilter('tag', ' ')).toBeNull();
+    expect(searchFilter('tags', '#')).toBeNull();
     for (const [key, value] of [
       ['status', 'in progress'],
       ['note', 'say "hi" \\ bye'],
