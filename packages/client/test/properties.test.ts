@@ -525,6 +525,13 @@ describe('setting a value', () => {
     );
   });
 
+  it('edits a value ending in a space that isn’t YAML’s, keeping it its own', () => {
+    const block = '---\na: pasted\u{a0}\nb: こんにちは\u{3000}\n---\n';
+    expect(byKey(block, 'a')?.value).toBe('pasted\u{a0}');
+    expect(edited(setProperty(block, 'a', 'x'))).toBe('---\na: x\nb: こんにちは\u{3000}\n---\n');
+    expect(edited(setProperty(block, 'b', ['x']))).toBe('---\na: pasted\u{a0}\nb: [x]\n---\n');
+  });
+
   it('returns the block as it was for the value it already has', () => {
     const block = '---\nn: 0x23\nnotes: |\n  text\n---\n';
     expect(setProperty(block, 'n', 35)).toEqual({ ok: true, frontmatter: block });

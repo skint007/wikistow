@@ -70,6 +70,8 @@ const VALUES = [
   ' 2026-10-12',
   ' https://example.com/a?b=c',
   ' é 😀',
+  ' pasted\u{a0}',
+  ' こんにちは\u{3000}',
   ' "tab\\there"',
   ' [a, "b", \'c\']',
   ' [ soup ,winter ]',

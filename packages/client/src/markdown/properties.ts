@@ -250,6 +250,10 @@ const COMMENT = 'It has a comment inside it.';
 const TOO_LONG = 'It is too long to read as properties.';
 const UNREADABLE = 'It isn’t text, a number, true or false, or a list of them.';
 
+// `text` without the spaces, tabs and line breaks it ends with: YAML's
+// blanks, not all Unicode spaces, which a plain scalar may end with.
+const trimBlanks = (text: string) => text.replace(/[ \t\r\n]+$/, '');
+
 // Where the text after `from` goes on past spaces, line breaks and comments.
 function pastBlanks(yaml: string, from: number): number {
   for (let at = from; at < yaml.length; at++) {
@@ -330,7 +334,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
   }
   const sourceOf = (node: Node) => {
     const [start, end] = node.range ?? [0, 0];
-    return yaml.slice(start, end).trimEnd();
+    return trimBlanks(yaml.slice(start, end));
   };
   const entries: Entry[] = [];
   // Keys as written and as a YAML reader's object has them: `1` and
@@ -349,7 +353,7 @@ function readBlock(frontmatter: string | null): ReadBlock {
     const [from = 0, to = 0] = value?.range ?? [];
     const first =
       (value?.anchor || value?.tag) && colon >= 0 ? Math.min(pastBlanks(yaml, colon), from) : from;
-    const source = yaml.slice(first, to).trimEnd();
+    const source = trimBlanks(yaml.slice(first, to));
     const valueSpan =
       value?.range && !empty
         ? { start: base + first, end: base + first + source.length }
@@ -494,7 +498,7 @@ function lockOf(node: Node, yaml: string, item = false): string | null {
   // An item's comment is inside its list.
   if (item && node.comment) return COMMENT;
   const [start, end] = node.range ?? [0, 0];
-  const multiLine = yaml.slice(start, end).trimEnd().includes('\n');
+  const multiLine = trimBlanks(yaml.slice(start, end)).includes('\n');
   if (isScalar(node)) {
     if (node.type === 'BLOCK_LITERAL' || node.type === 'BLOCK_FOLDED')
       return 'It is a block of lines.';
