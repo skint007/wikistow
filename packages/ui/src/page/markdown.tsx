@@ -1,9 +1,24 @@
-import { splitFrontmatter } from '@wikistow/client';
+import {
+  mayReferOtherPages,
+  parsePropertyReference,
+  QUERY_LANGUAGE,
+  readProperties,
+  splitFrontmatter,
+} from '@wikistow/client';
 import { pageHtml, SYNTAX } from '@wikistow/client/reader';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
-import type { Root, RootContent } from 'mdast';
-import { Component, use, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import type { InlineCode, Root, RootContent } from 'mdast';
+import {
+  Component,
+  use,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
 import { claimedBlock } from '@wikistow/plugin-sdk';
 import { Check, Copy } from 'lucide-react';
@@ -20,11 +35,16 @@ import {
   attachmentId,
   type AttachmentContext,
 } from './attachments';
-import { PageBody, type PageBodyContext } from './body-context';
+import { usePageIndex } from '../data/page-index';
+import { OtherPagesContext, PageBody, PageProperties, type PageBodyContext } from './body-context';
 import { BodyLink } from './body-link';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
+import { otherPages } from './other-pages';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
+import { PropertyReferenceView } from './property-reference';
+import { QueryTable } from './query-table';
+import { bodyLinkScope } from './property-value';
 
 export { ATTACHMENT_SCHEME, type AttachmentContext };
 
@@ -53,6 +73,34 @@ const syntaxHandlers = (held: ReactElement[]): Handlers =>
       return [type, handler];
     }),
   );
+
+/**
+ * Inline code that is a reference to a value (`` `=servings` ``,
+ * `` `=[[Page]].key` ``) becomes a marked span, as a syntax does, which the
+ * `span` component draws as `PropertyReferenceView`; other code is code.
+ */
+const referenceHandler =
+  (held: ReactElement[]): NonNullable<Handlers[keyof Handlers]> =>
+  (state, node: InlineCode) => {
+    const reference = parsePropertyReference(node.value);
+    if (reference) {
+      held.push(
+        <PropertyReferenceView name={reference.name} page={reference.page} source={node.value} />,
+      );
+      return {
+        type: 'element',
+        tagName: 'span',
+        properties: { [SYNTAX]: held.length - 1 },
+        children: [],
+      };
+    }
+    // As mdast-util-to-hast writes it.
+    const text = { type: 'text' as const, value: node.value.replace(/\r?\n|\r/g, ' ') };
+    state.patch(node, text);
+    const code = { type: 'element' as const, tagName: 'code', properties: {}, children: [text] };
+    state.patch(node, code);
+    return state.applyData(node, code);
+  };
 
 // The components below hold page content, plugin blocks among them, so each
 // is the same on every render: a new one would draw everything in it afresh.
@@ -97,11 +145,48 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
         .find((name) => name.startsWith('language-'))
         ?.slice('language-'.length)
     : undefined;
+  // A query block is its table; one that doesn't read, its code and why.
+  if (language === QUERY_LANGUAGE && body) {
+    const { attachments, pages, editing } = body;
+    return (
+      <QueryTable
+        source={textOf(code)}
+        scope={{
+          ctx: attachments.ctx,
+          spaceId: attachments.page.spaceId,
+          pageId: attachments.page.pageId,
+          pages,
+          editor: editing !== null,
+        }}
+        failed={(error) => (
+          <>
+            <WrittenCode language={language} text={textOf(code)} pre={props} />
+            <p role="note" className="query-table-error mb-4 text-xs text-muted-foreground">
+              {error}
+            </p>
+          </>
+        )}
+      />
+    );
+  }
   // A fence a running plugin claims is its view; without the plugin, its text.
   const block = language ? blocks.get(language) : undefined;
   if (block && body) {
     return <ReaderBlock block={block} source={textOf(code)} page={body.attachments.page} />;
   }
+  return <WrittenCode language={language} text={textOf(code)} pre={props} />;
+};
+
+/** A code block as written, under its language and a button that copies it. */
+function WrittenCode({
+  language,
+  text,
+  pre,
+}: {
+  language: string | undefined;
+  text: string;
+  pre: ComponentProps<'pre'>;
+}) {
   const claimed = language ? claimedBlock(language) : null;
   return (
     <div className="code-block">
@@ -111,12 +196,12 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
           {language || 'text'}
           {claimed && ` · shown as written, without the ${claimed.pluginId} plugin`}
         </span>
-        <CopyCode text={textOf(code)} />
+        <CopyCode text={text} />
       </div>
-      <pre {...props} />
+      <pre {...pre} />
     </div>
   );
-};
+}
 
 /** Copies a code block's text, as written, showing a check for a moment once it's copied. */
 function CopyCode({ text }: { text: string }) {
@@ -165,13 +250,37 @@ const TOO_SLOW = 'This page took too long to format, so here it is as written.';
 /**
  * A page body: GitHub-flavoured Markdown, the HTML in it (`pageHtml`) and
  * the registered syntaxes, with nothing that can run or reach out.
- * Frontmatter is shown above it in a collapsed Properties box, as written.
+ * Frontmatter is shown above it as property rows (`PropertiesBox`).
  * The body is read in a worker, off the page's thread (`READ_BUDGET_MS`),
  * and only turned into HTML here.
  */
 export function Markdown({ source, ...context }: { source: string } & PageBodyContext) {
   const { frontmatter, body } = splitFrontmatter(source);
-  const { attachments } = context;
+  const properties = useMemo(() => {
+    const read = readProperties(frontmatter);
+    return read.ok ? read.properties : null;
+  }, [frontmatter]);
+  const { attachments, pages, links } = context;
+  const editor = context.editing !== null;
+  // Other pages' values come from the viewer's index, built only for a body that shows some.
+  const { index } = usePageIndex(attachments.ctx, {
+    enabled: pages !== null && mayReferOtherPages(body),
+  });
+  const others = useMemo(
+    () =>
+      otherPages(
+        index,
+        {
+          spaceId: attachments.page.spaceId,
+          selfId: attachments.page.pageId,
+          pages,
+          links,
+          editor,
+        },
+        properties,
+      ),
+    [index, attachments.page.spaceId, attachments.page.pageId, pages, links, editor, properties],
+  );
   const read = useQuery(readQuery(body));
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read.
@@ -210,27 +319,35 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
   };
   return (
     <PageBody value={context}>
-      {frontmatter !== null && <PropertiesBox frontmatter={frontmatter} />}
-      {read.isPending ? (
-        <StillReading />
-      ) : read.isSuccess ? (
-        <AsWritten source={body}>
-          <div className="page-body">
-            <ReactMarkdown
-              remarkPlugins={[[readTree, read.data]]}
-              remarkRehypeOptions={{ handlers: syntaxHandlers(held) }}
-              rehypePlugins={[pageHtml]}
-              urlTransform={urlTransform}
-              components={components}
+      <PageProperties value={properties}>
+        <OtherPagesContext value={others}>
+          {frontmatter !== null && (
+            <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
+          )}
+          {read.isPending ? (
+            <StillReading />
+          ) : read.isSuccess ? (
+            <AsWritten source={body}>
+              <div className="page-body">
+                <ReactMarkdown
+                  remarkPlugins={[[readTree, read.data]]}
+                  remarkRehypeOptions={{
+                    handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                  }}
+                  rehypePlugins={[pageHtml]}
+                  urlTransform={urlTransform}
+                  components={components}
+                />
+              </div>
+            </AsWritten>
+          ) : (
+            <Written
+              source={body}
+              note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
             />
-          </div>
-        </AsWritten>
-      ) : (
-        <Written
-          source={body}
-          note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
-        />
-      )}
+          )}
+        </OtherPagesContext>
+      </PageProperties>
     </PageBody>
   );
 }

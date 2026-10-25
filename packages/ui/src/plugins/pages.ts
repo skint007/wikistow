@@ -328,8 +328,9 @@ export function pagesFor(caller: EditingCaller): Pages {
       if (spaceIds.length === 0 || caller.access === 'none') return [];
       const limit = options?.limit ?? 20;
       const index = await searchOperations.indexSpaces(ctx, { spaceIds });
-      // Pages outside its folders are left out after ranking, so ask for more.
-      const hits = index.search(text, { limit: 200 });
+      // Pages outside its folders are left out after ranking, so rank them
+      // all: with filters alone, every page ranks the same, by title.
+      const hits = index.search(text, { limit: index.size });
       const trees = new Map<SpaceId, ReturnType<typeof parentsIn>>();
       const found = [];
       for (const { doc, title } of hits) {

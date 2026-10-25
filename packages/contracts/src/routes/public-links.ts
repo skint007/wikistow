@@ -23,6 +23,9 @@ export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 /** A copy's files together are at most this. Past it, the rest are left out. */
 export const MAX_COPY_BYTES = 100 * 1024 * 1024;
 
+/** The longest wikilink target key a copy may name (`targets`). */
+export const MAX_TARGET_KEY = 4096;
+
 const PageParams = z.object({ pageId: PageId });
 
 /**
@@ -76,7 +79,7 @@ export const stage = {
         }),
       )
       .max(MAX_ATTACHMENTS),
-    targets: z.array(z.object({ key: z.string().max(4096), pageId: PageId })).max(10_000),
+    targets: z.array(z.object({ key: z.string().max(MAX_TARGET_KEY), pageId: PageId })).max(10_000),
   }),
   response: z.strictObject({ copyId: CopyId, files: z.array(AttachmentId) }),
   status: 201,

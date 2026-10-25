@@ -11,6 +11,8 @@ import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
 import { COVER_NAMESPACE, coverLeftBehind, coverOf, reviseCover } from '../cover.ts';
 import { CryptoError } from '../errors.ts';
+import { setProperty, type PropertyValue } from '../markdown/properties.ts';
+import { splitFrontmatter } from '../markdown/frontmatter.ts';
 import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '../ids.ts';
 import { agentIdentityId } from '../identity.ts';
 import { repairText } from '../json.ts';
@@ -639,6 +641,38 @@ const publicationsFor =
     return opened;
   };
 
+/**
+ * Each page's current publication, opened through the revision cache, in
+ * as few requests as `fetchRevisions` makes: those that don't open, are in
+ * a newer format, or bind another page are left out, and every one when
+ * they can't be fetched, unless `strict`, which throws then instead.
+ */
+export async function openPublications(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  pages: readonly { id: PageId; publishedHead: RevisionId }[],
+  { strict = false }: { strict?: boolean } = {},
+): Promise<Map<PageId, PagePayload>> {
+  const opened = new Map<PageId, PagePayload>();
+  if (pages.length === 0) return opened;
+  const wanted = new Map<RevisionId, Wanted>(
+    pages.map((page) => [page.publishedHead, { pageId: page.id, audience: 'published' }]),
+  );
+  let fetched: Map<RevisionId, () => OpenedRevision>;
+  try {
+    fetched = await fetchRevisions(ctx, spaceId, wanted);
+  } catch (error) {
+    if (!strict && (error instanceof ApiError || error instanceof CryptoError)) return opened;
+    throw error;
+  }
+  for (const page of pages) {
+    const found = fetched.get(page.publishedHead);
+    const checked = found && checkedFor(found, { spaceId, pageId: page.id, audience: 'published' });
+    if (checked?.opened.kind === 'current') opened.set(page.id, checked.opened.payload);
+  }
+  return opened;
+}
+
 // The newest version in a page's history, or null when there is none or it doesn't check out.
 async function lastPublished(ctx: ClientContext, page: PageRef): Promise<RevisionId | null> {
   try {
@@ -696,7 +730,7 @@ function current(revision: OpenedRevision): PagePayload {
  * write's region: `tableRegion`, by default `basedOnRegion` or the region
  * `basedOn` opens in. If the tree is needed and can't be loaded, the draft
  * is still saved, with its table carried and no link renamed (`linksKept`).
- * Its links are read with `read`, by default here (`placedWikilinks`); the
+ * Its links are read with `read`, by default here (`tableWikilinks`); the
  * web app reads them in a worker with a time limit. If that fails, the
  * draft is saved the same way. It is saved in the region of `basedOn` as
  * this app opens it (section 6.1): pass `basedOnRegion` if it was just
@@ -840,6 +874,60 @@ export async function editDraft(
     basedOnRegion: draft.region,
     payload: revisePayload(draft.opened, changes),
   });
+}
+
+/** A property set in a draft (`setDraftProperty`): the version written, or why it wasn't. */
+export type PropertySet = { ok: true; written: Written | null } | { ok: false; reason: string };
+
+/**
+ * The draft `basedOn` with its property `key` (exactly as written) set to
+ * `value`, saved on top of it, as a folder's table cell saves one (ADR
+ * 0006, decisions 3 and 8): only that value's characters change in the
+ * block, or a line is added for a key it hasn't, and a page with no block
+ * gets one. If someone saved since, the server answers `stale-head` and
+ * nothing is overwritten. A value that can't be changed in place, or a
+ * block that doesn't read as properties, is refused with why, and nothing
+ * is saved; so is nothing when `value` is the one the draft has
+ * (`written: null`).
+ */
+export async function setDraftProperty(
+  ctx: ClientContext,
+  {
+    page,
+    basedOn,
+    key,
+    value,
+    read,
+  }: {
+    page: PageRef;
+    basedOn: RevisionId;
+    key: string;
+    value: PropertyValue;
+    read?: ReadWikilinks;
+  },
+): Promise<PropertySet> {
+  const draft = await openRevisionOf(ctx, page, 'draft', basedOn);
+  const previous = current(draft);
+  const { frontmatter, body } = splitFrontmatter(previous.markdown);
+  const edit = setProperty(frontmatter, key, value, lineBreakOf(previous.markdown));
+  if (!edit.ok) return edit;
+  if (edit.frontmatter === frontmatter) return { ok: true, written: null };
+  // A closing line with no line break needs one before any body.
+  const end = body !== '' && !edit.frontmatter.endsWith('\n') ? lineBreakOf(edit.frontmatter) : '';
+  const written = await saveDraft(ctx, {
+    page,
+    basedOn,
+    basedOnRegion: draft.region,
+    payload: { ...previous, markdown: `${edit.frontmatter}${end}${body}` },
+    ...(read ? { read } : {}),
+  });
+  return { ok: true, written };
+}
+
+// The line break most of `text`'s lines end with, as the editor reads a page's.
+function lineBreakOf(text: string): '\n' | '\r\n' {
+  const crlf = text.split('\r\n').length - 1;
+  return crlf > text.split('\n').length - 1 - crlf ? '\r\n' : '\n';
 }
 
 export async function uploadBlob(

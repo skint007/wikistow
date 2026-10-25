@@ -6,12 +6,21 @@ import {
   serializerCtx,
   type Editor,
 } from '@milkdown/kit/core';
-import type { Node, Slice } from '@milkdown/kit/prose/model';
-import { Plugin, Selection } from '@milkdown/kit/prose/state';
+import type { Node, ResolvedPos, Slice } from '@milkdown/kit/prose/model';
+import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { Transform } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
-import { use, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import {
+  use,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { createPortal } from 'react-dom';
 import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
@@ -20,8 +29,10 @@ import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { formatKeys } from './formatting';
 import { codeHighlights } from './highlight';
+import { propertiesChanged, propertyReferences } from './property-references';
 import { usePluginRuntime } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
+import { QueryResults } from './query-results';
 import {
   cellLinks,
   EXTERNAL,
@@ -169,6 +180,8 @@ export default function VisualSurface(props: VisualSurfaceProps) {
   );
 }
 
+const noQueries = new QueryResults();
+
 function Surface({
   initial,
   onChange,
@@ -180,6 +193,9 @@ function Surface({
   onUnfaithful,
   holding,
   page,
+  properties,
+  otherPages,
+  queryTable,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -194,6 +210,8 @@ function Surface({
     onUnfaithful,
     holding,
     page,
+    properties,
+    otherPages,
   });
   useLayoutEffect(() => {
     latest.current = {
@@ -206,8 +224,17 @@ function Surface({
       onUnfaithful,
       holding,
       page,
+      properties,
+      otherPages,
     };
   });
+  // References show the values the frontmatter, and the index for other pages', have now.
+  useEffect(() => {
+    editor.current?.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(propertiesChanged(view.state.tr));
+    });
+  }, [properties, otherPages]);
   // The runtime of the place it is drawn in, for the editor's whole life.
   const plugins = usePluginRuntime();
   const [host] = useState<VisualHost>(() => ({
@@ -216,7 +243,13 @@ function Surface({
     live: new Set(),
     page: () => latest.current.page ?? null,
     plugins: () => plugins,
+    queries: new QueryResults(),
   }));
+  // Each query block's result, drawn under its code where the editor put a place for it.
+  const queries = useSyncExternalStore(
+    host.queries?.subscribe ?? noQueries.subscribe,
+    host.queries?.list ?? noQueries.list,
+  );
   const text = useRef(initial);
   // The editor once it's made, its writer, and the text it was last given,
   // with the document it made of it: an unchanged document gives it back.
@@ -356,12 +389,72 @@ function Surface({
         view.focus();
       });
     },
+    /**
+     * Put `code` as inline code in place of the text selected; with a
+     * node, cells or everything selected, at the nearest cursor after it.
+     */
+    insertCode: (code: string) => {
+      editor.current?.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const { state } = view;
+        const mark = state.schema.marks['inlineCode'];
+        if (!mark) return;
+        const tr = state.tr;
+        if (!(state.selection instanceof TextSelection)) {
+          tr.setSelection(Selection.near(state.doc.resolve(state.selection.to)));
+          // A page with no text anywhere to put it in.
+          if (!(tr.selection instanceof TextSelection)) return;
+        }
+        // In a code block, marks don't hold: the code is text there.
+        const inCode = !!tr.selection.$from.parent.type.spec.code;
+        const marked = (node: Node | null | undefined) =>
+          !inCode && !!node && mark.isInSet(node.marks);
+        // Where the code span `$at` is strictly inside ends, if it is in one.
+        const spanEnd = ($at: ResolvedPos) => {
+          if (!marked($at.nodeBefore) || !marked($at.nodeAfter)) return null;
+          let end = $at.parentOffset;
+          let offset = 0;
+          for (let i = 0; i < $at.parent.childCount; i++) {
+            const child = $at.parent.child(i);
+            const childEnd = offset + child.nodeSize;
+            if (childEnd > $at.parentOffset) {
+              if (!marked(child)) break;
+              end = childEnd;
+            }
+            offset = childEnd;
+          }
+          return $at.start() + end;
+        };
+        // A cursor or a selection end in a code span puts it after the span,
+        // replacing nothing, so no span is cut.
+        const { $from: $start, $to: $end } = tr.selection;
+        const after = spanEnd($end) ?? $end.pos;
+        if (after !== $end.pos || (!tr.selection.empty && spanEnd($start) !== null)) {
+          tr.setSelection(TextSelection.create(tr.doc, after));
+        }
+        // Code beside it would join it into one span: a space keeps them apart.
+        const { from, to, $from, $to } = tr.selection;
+        const nodes = [
+          ...(marked($from.nodeBefore) ? [state.schema.text(' ')] : []),
+          state.schema.text(code, inCode ? [] : [mark.create()]),
+          ...(marked($to.nodeAfter) ? [state.schema.text(' ')] : []),
+        ];
+        tr.replaceWith(from, to, nodes);
+        const size = nodes.reduce((sum, node) => sum + node.nodeSize, 0);
+        tr.setSelection(TextSelection.create(tr.doc, from + size));
+        // Typing after it isn't code.
+        view.dispatch(tr.removeStoredMark(mark).scrollIntoView());
+        view.focus();
+      });
+    },
   }));
   const [completion] = useState(
     () =>
       new LinkCompletion(
         () => latest.current.links,
         () => surface.read(),
+        () => latest.current.properties ?? null,
+        () => latest.current.otherPages ?? null,
       ),
   );
   const [format] = useState(() => new FormatWatch());
@@ -390,6 +483,10 @@ function Surface({
         unshownFootnotes,
         tableHeaders,
         codeHighlights,
+        propertyReferences(
+          () => latest.current.properties ?? null,
+          () => latest.current.otherPages ?? null,
+        ),
         alerts,
         linkKeys(host),
         format.plugin,
@@ -466,6 +563,7 @@ function Surface({
       replace: surface.show,
       caret: surface.caret,
       focus: surface.focus,
+      insertCode: surface.insertCode,
     }),
     [surface],
   );
@@ -479,6 +577,10 @@ function Surface({
       <div className="min-h-0 flex-1 overflow-y-auto [&_.milkdown]:h-full [&>[data-milkdown-root]]:h-full">
         <Milkdown />
         <CompletionListbox completion={completion} />
+        {queryTable &&
+          queries.map(({ key, element, source }) =>
+            createPortal(queryTable(source), element, String(key)),
+          )}
       </div>
     </div>
   );

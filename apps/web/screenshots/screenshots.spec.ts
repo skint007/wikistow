@@ -549,3 +549,375 @@ test('capture public links: the dialog, the markers, the Publish prompt and the 
   await expect(visitor.getByRole('link', { name: 'Watering' })).toBeVisible();
   await visitor.screenshot({ path: 'screenshots/public-link-page.png', fullPage: true });
 });
+
+const RECIPE_PROPERTIES = `# From Obsidian
+title: Garlic bread
+tags: [recipe, bread, sides]
+cook_time: 25 # minutes
+servings: 4
+vegetarian: true
+created: 2026-10-12
+source: https://example.com/garlic-bread
+goes_with: "[[Tomato soup]]"
+notes: |
+  Use fresh garlic.`;
+
+test('capture the property rows, on the published and the draft view, wide and on a phone', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'properties-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newPage(page, 'Tomato soup');
+  await fillSource(page, 'Simmer for an hour.');
+  await waitForSave(page);
+  await newPage(page, 'Garlic bread');
+  await page.getByRole('button', { name: 'Add properties' }).click();
+  await page.getByLabel('New property’s name').press('Escape');
+  await page.getByRole('button', { name: 'Edit as text' }).click();
+  await page.getByLabel('Properties as text').fill(RECIPE_PROPERTIES);
+  await page.getByRole('button', { name: 'Show as rows' }).click();
+  await fillSource(page, 'Slice the loaf, butter it, and bake.');
+  await waitForSave(page);
+  const rows = page.getByRole('region', { name: 'Properties' });
+  await rows.getByRole('button', { name: /^Cook time/ }).hover();
+  await shoot('draft', rows);
+  await shoot('draft-phone', page, true);
+  await rows.getByRole('button', { name: 'Actions for Servings' }).click();
+  await page.getByRole('menuitem', { name: 'Type' }).click();
+  await shoot('menu', page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await page.getByRole('button', { name: 'Show 3 more' }).waitFor();
+  await shoot('reader', rows);
+  await shoot('reader-phone', page, true);
+  await page.getByRole('button', { name: 'Show 3 more' }).click();
+  await shoot('reader-all', rows);
+});
+
+test('capture property references: in the reader, the visual editor and its completion', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'references-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newPage(page, 'Tomato soup');
+  await fillSource(page, 'Simmer for an hour.');
+  await waitForSave(page);
+  await newPage(page, 'Garlic bread');
+  await page.getByRole('button', { name: 'Add properties' }).click();
+  await page.getByLabel('New property’s name').press('Escape');
+  await page.getByRole('button', { name: 'Edit as text' }).click();
+  await page.getByLabel('Properties as text').fill(RECIPE_PROPERTIES);
+  await page.getByRole('button', { name: 'Show as rows' }).click();
+  await fillSource(
+    page,
+    'Serves `=servings`, ready in `=cook time` minutes. Tagged `= this.tags`, written `=created`, and best with `=goes_with`.\n\nNot a property: `=oven`.',
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('[data-hint="servings · property"]')).toHaveText('4');
+  await shoot('visual', visual);
+  await typeAtEnd(page, ' Bake at `=se');
+  await expect(page.getByRole('listbox', { name: 'Property' })).toBeVisible();
+  await shoot('completion', page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+z');
+  await waitForSave(page);
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  const body = page.locator('.page-body').first();
+  await expect(body.getByText('4', { exact: true })).toBeVisible();
+  await body.getByText('4', { exact: true }).hover();
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+});
+
+/** A page in `folder` whose draft holds `properties`, then `body`; published if asked. */
+async function recipeIn(
+  page: Page,
+  folder: string,
+  title: string,
+  properties: string | null,
+  body: string,
+  publish = true,
+) {
+  await folderMenu(page, folder, 'New page here');
+  await page.getByRole('dialog').getByLabel('Title').fill(title);
+  await page.getByRole('button', { name: 'Create page' }).click();
+  await expect(page.locator('#page-title')).toHaveValue(title);
+  if (properties !== null) {
+    await page.getByRole('button', { name: 'Add properties' }).click();
+    await page.getByLabel('New property’s name').press('Escape');
+    await page.getByRole('button', { name: 'Edit as text' }).click();
+    await page.getByLabel('Properties as text').fill(properties);
+    await page.getByRole('button', { name: 'Show as rows' }).click();
+  }
+  await fillSource(page, body);
+  await waitForSave(page);
+  if (!publish) return;
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+}
+
+test('capture a folder as a table and a list, a cell edited, a conflict, and on a phone', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'folder-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newFolder(page, 'Recipes');
+  await recipeIn(
+    page,
+    'Recipes',
+    'Tomato soup',
+    'servings: 4\ncook_time: 60\ntags: [soup, winter]\nvegetarian: true\ngoes_with: "[[Garlic bread]]"',
+    'Simmer for an hour.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Garlic bread',
+    'servings: 6\ncook_time: 25\ntags: [bread]\nvegetarian: true\nnotes: |\n  Use fresh garlic.',
+    'Slice, butter, bake.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Chili',
+    'servings: 8\ncook_time: 90\ntags: [stew, spicy]\nvegetarian: false\nsource: https://example.com/chili',
+    'Brown, then simmer.',
+    false,
+  );
+  await recipeIn(page, 'Recipes', 'Weeknight pasta', null, 'Boil, toss, serve.');
+
+  await page.getByRole('treeitem', { name: /Recipes/ }).click();
+  const table = page.getByRole('table');
+  await expect(table.getByRole('row')).toHaveCount(5);
+  await shoot('table', page);
+
+  await page.getByRole('button', { name: 'Servings of Weeknight pasta: empty. Edit' }).click();
+  await page.keyboard.type('2');
+  await page.keyboard.press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Servings of Weeknight pasta: 2. Edit' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Cook time of Chili: 90. Edit' }).click();
+  await shoot('editing', table);
+  await page.keyboard.press('Escape');
+
+  // The server finds the draft moved on since the table read it.
+  await page.route('**/api/pages/*/drafts', (route) =>
+    route.fulfill({
+      status: 409,
+      json: { error: { code: 'stale-head', message: 'Someone saved since you loaded the page' } },
+    }),
+  );
+  await page.getByRole('button', { name: 'Servings of Chili: 8. Edit' }).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('10');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('This page changed since the table read it.')).toBeVisible();
+  await shoot('conflict', table);
+  await page.unroute('**/api/pages/*/drafts');
+
+  await page.getByRole('button', { name: /^Columns/ }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Goes with' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Source' }).click();
+  await shoot('columns', page);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'List', exact: true }).click();
+  await shoot('list', page);
+  await shoot('list-phone', page, true);
+  await page.getByRole('button', { name: 'Table', exact: true }).click();
+  await shoot('table-phone', page, true);
+});
+
+test('capture tag pills, which open tag search, on the draft and the published view', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const shoot = bothPalettes(page, 'tag-pills-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  for (const [title, block] of [
+    ['Pea soup', 'tags: soup\nservings: 4'],
+    ['Bean soup', 'tags: [soup, winter]\nservings: 6'],
+  ] as const) {
+    await newPage(page, title);
+    await page.getByRole('button', { name: 'Add properties' }).click();
+    await page.getByLabel('New property’s name').press('Escape');
+    await page.getByRole('button', { name: 'Edit as text' }).click();
+    await page.getByLabel('Properties as text').fill(block);
+    await page.getByRole('button', { name: 'Show as rows' }).click();
+    await fillSource(page, `${title}, simmered.`);
+    await waitForSave(page);
+  }
+  const rows = page.getByRole('region', { name: 'Properties' });
+  await rows.getByRole('link', { name: 'soup' }).hover();
+  await shoot('draft', rows);
+  await rows.getByRole('link', { name: 'soup' }).click();
+  await expect(page.getByLabel('Search pages')).toHaveValue('tag:soup');
+  await expect(page.getByRole('option')).toHaveCount(2);
+  await shoot('search', page);
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await rows.getByRole('link', { name: 'winter' }).hover();
+  await shoot('reader', rows);
+
+  await page.getByRole('treeitem', { name: /Pea soup/ }).click();
+  const tag = rows.getByRole('link', { name: 'soup' });
+  await tag.waitFor();
+  const box = await tag.boundingBox();
+  if (!box) throw new Error('No pill');
+  // Beside the pill, the value's own field opens.
+  await page.mouse.move(box.x + box.width + 120, box.y + box.height / 2);
+  await shoot('alone-draft', rows);
+  await page.mouse.click(box.x + box.width + 120, box.y + box.height / 2);
+  await expect(rows.getByLabel('Tags', { exact: true })).toHaveValue('soup');
+});
+
+test('capture other pages’ values: in the reader, the visual editor, its completion and the public link dialog', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'other-values-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newPage(page, 'Tomato soup');
+  await fillSource(page, 'Simmer for an hour.');
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await newPage(page, 'Garlic bread');
+  await page.getByRole('button', { name: 'Add properties' }).click();
+  await page.getByLabel('New property’s name').press('Escape');
+  await page.getByRole('button', { name: 'Edit as text' }).click();
+  await page.getByLabel('Properties as text').fill(RECIPE_PROPERTIES);
+  await page.getByRole('button', { name: 'Show as rows' }).click();
+  await fillSource(page, 'Slice the loaf, butter it, and bake.');
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+
+  await newPage(page, 'Friday dinner');
+  await fillSource(
+    page,
+    'Start the soup first. The garlic bread takes `=[[Garlic bread]].cook_time` minutes and serves `=[[Garlic bread]].servings`, and goes with `=[[Garlic bread]].goes_with`.\n\nDessert: `=[[Lemon tart]].cook_time` minutes.',
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('[data-hint="cook_time · Garlic bread"]')).toHaveText('25');
+  await shoot('visual', visual);
+  await typeAtEnd(page, ' Rest it `=[[Garl');
+  await expect(page.getByRole('listbox', { name: 'Link to' })).toBeVisible();
+  await shoot('completion-page', page);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('.se');
+  await expect(page.getByRole('listbox', { name: 'Property' })).toBeVisible();
+  await shoot('completion-key', page);
+  await page.keyboard.press('Escape');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Control+z');
+  await expect(visual).not.toContainText('Rest it');
+  await waitForSave(page);
+
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  const body = page.locator('.page-body').first();
+  await expect(body.getByText('25', { exact: true })).toBeVisible();
+  await body.getByText('25', { exact: true }).hover();
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+
+  await openLinkDialog(page, 'Friday dinner');
+  const dialog = page.getByRole('dialog', { name: 'Share “Friday dinner” with a public link?' });
+  await expect(dialog.getByText('This page shows values from other pages.')).toBeVisible();
+  await shoot('dialog', page);
+});
+
+test('capture query tables: in the reader, the visual editor, a block that doesn’t read, and the public page', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(300_000);
+  const shoot = bothPalettes(page, 'query-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newSpace(page, 'Kitchen');
+  await newFolder(page, 'Recipes');
+  await recipeIn(
+    page,
+    'Recipes',
+    'Garlic bread',
+    'tried: true\nservings: 4\ncook_time: 25\nlast_made: 2026-10-12\ntags: [bread, sides]',
+    'Slice, butter and bake.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Tomato soup',
+    'tried: true\nservings: 6\ncook_time: 60\nlast_made: 2026-09-01\ntags: [soup]\ngoes_with: "[[Garlic bread]]"',
+    'Simmer for an hour.',
+  );
+  await recipeIn(
+    page,
+    'Recipes',
+    'Lemon tart',
+    'tried: false\nservings: 8\ncook_time: 90\ntags: [dessert]',
+    'Not made yet.',
+  );
+  await newPage(page, 'Tried recipes');
+  await fillSource(
+    page,
+    'What we make again:\n\n```wikistow-query\nfrom: Recipes\nwhere: tried = true, servings >= 2\nshow: servings, cook_time, last_made, goes_with\nsort: last_made desc\n```\n\nAnd one that doesn’t read:\n\n```wikistow-query\nfrom: Recipes\nwhere: servings\n```\n',
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('.query-result tr')).toHaveCount(3);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await shoot('visual', visual);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  const body = page.locator('.page-body').first();
+  await expect(body.locator('.query-table tr')).toHaveCount(3);
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+
+  await openLinkDialog(page, 'Tried recipes');
+  let dialog = page.getByRole('dialog', { name: 'Share “Tried recipes” with a public link?' });
+  await expect(dialog.getByText('This page lists other pages.')).toBeVisible();
+  await shoot('dialog', page);
+  await dialog.getByRole('button', { name: 'Turn on public link' }).click();
+  dialog = page.getByRole('dialog', { name: 'Public link for “Tried recipes”' });
+  await expect(dialog.getByLabel('Public link')).toHaveValue(/\/p\/[\w-]{22}$/);
+  const url = await dialog.getByLabel('Public link').inputValue();
+  const visitor = await freshPage();
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  await visitor.goto(url);
+  await expect(visitor.getByRole('table')).toBeVisible();
+  await visitor.screenshot({ path: 'screenshots/query-public-page.png', fullPage: true });
+});

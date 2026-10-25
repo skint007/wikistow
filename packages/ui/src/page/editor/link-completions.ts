@@ -16,7 +16,8 @@ export type LinkOption = {
   label: string;
   displayLabel: string;
   detail: string | null;
-  type: 'page' | 'heading' | 'create';
+  /** A property's key is offered as a reference (`` `=key` ``) is typed. */
+  type: 'page' | 'heading' | 'create' | 'property';
   /** What goes in the link from `start` on: a target, or a heading. */
   text: string;
   /** Done once the option is written: a pick recorded, a page made. */

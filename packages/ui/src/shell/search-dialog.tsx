@@ -1,5 +1,4 @@
 import type { ClientContext, Marked, SearchHit, searchOperations } from '@wikistow/client';
-import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Search } from 'lucide-react';
 import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
@@ -8,26 +7,34 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { notCredential } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { searchIndexQuery, searchProgressKey } from '../data/queries';
+import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
 import { breadcrumb, markedParts, searchStatus } from './search-model';
 
 type Hit = SearchHit<searchOperations.SearchPage>;
 
+const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
+
 /**
- * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple). The index is built
- * on this device from the pages this person can read (`searchIndexQuery`),
- * with its progress shown until it is ready. Up and down move through the
- * results, Enter or a click opens one: its draft, for a draft hit. A copy
- * unpublished where it is opens as its page does, at its last publication.
+ * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple), or
+ * opened with `query` from a link (`SearchLink`). Words search titles and
+ * text, and filters properties: `tag:soup`, `status:"in progress"`
+ * (`parseSearch`). The index is built on this device from the pages this
+ * person can read (`usePageIndex`), with its progress shown until it is
+ * ready. Up and down move through the results, Enter or a click opens one:
+ * its draft, for a draft hit. A copy unpublished where it is opens as its
+ * page does, at its last publication.
  */
 export function SearchDialog({
   ctx,
   open,
+  query = '',
   onOpenChange,
 }: {
   ctx: ClientContext;
   open: boolean;
+  /** What it opens with. */
+  query?: string;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
@@ -35,35 +42,46 @@ export function SearchDialog({
       <DialogContent dialogClassName="sm:max-w-xl" className="grid gap-3 p-4 pt-5">
         <DialogTitle className="sr-only">Search</DialogTitle>
         <DialogDescription className="sr-only">
-          Titles and text of the pages you can read, searched on this device.
+          Titles, text and properties of the pages you can read, searched on this device.
         </DialogDescription>
-        <SearchBody ctx={ctx} onDone={() => onOpenChange(false)} />
+        {/* Opened again with another query, as by a link, it starts over with it. */}
+        <SearchBody key={query} ctx={ctx} initial={query} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void }) {
-  const queryClient = useQueryClient();
+function SearchBody({
+  ctx,
+  initial,
+  onDone,
+}: {
+  ctx: ClientContext;
+  initial: string;
+  onDone: () => void;
+}) {
   const navigate = useNavigate();
-  const index = useQuery(searchIndexQuery(ctx, queryClient));
-  const { data: progress } = useQuery<searchOperations.IndexProgress>({
-    queryKey: searchProgressKey,
-    queryFn: skipToken,
-  });
-  const [query, setQuery] = useState('');
+  const { index, progress, error, updating, retry } = usePageIndex(ctx);
+  const [query, setQuery] = useState(initial);
   const deferred = useDeferredValue(query);
-  const results = useMemo(
-    () => index.data?.search(deferred, { limit: 50 }) ?? [],
-    [index.data, deferred],
-  );
-  const [active, setActive] = useState(0);
-  useEffect(() => setActive(0), [results]);
+  const results = useMemo(() => index?.search(deferred, { limit: 50 }) ?? [], [index, deferred]);
+  // The hit chosen for a query, by its page, so the index rebuilding as
+  // pages change doesn't move it; a new query starts at its first hit.
+  const [chosen, setChosen] = useState<{ query: string; key: string } | null>(null);
+  const found =
+    chosen?.query === deferred ? results.findIndex((hit) => hitKey(hit) === chosen.key) : -1;
+  const active = Math.max(found, 0);
+  const choose = (hit: Hit | undefined) => {
+    if (hit) setChosen({ query: deferred, key: hitKey(hit) });
+  };
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
+  // Only when the hit chosen changes: a rebuild or progress mustn't scroll the list.
+  const shown = results[active];
+  const shownKey = `${deferred}\n${shown ? hitKey(shown) : ''}`;
   useEffect(() => {
     document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-  });
+  }, [shownKey]);
 
   function openHit({ doc }: Hit) {
     onDone();
@@ -74,9 +92,9 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
     });
   }
 
-  const status = index.isError
+  const status = error
     ? null
-    : searchStatus({ index: index.data, progress, query: deferred, results: results.length });
+    : searchStatus({ index, progress, query: deferred, results: results.length });
   return (
     <>
       <div className="relative mr-8">
@@ -95,6 +113,7 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
           autoFocus
           {...notCredential}
           spellCheck={false}
+          maxLength={1000}
           placeholder="Search pages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -102,7 +121,7 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
               const step = event.key === 'ArrowDown' ? 1 : -1;
-              setActive((at) => Math.min(Math.max(at + step, 0), results.length - 1));
+              choose(results[Math.min(Math.max(active + step, 0), results.length - 1)]);
             } else if (event.key === 'Enter') {
               const hit = results[active];
               if (hit) {
@@ -116,16 +135,13 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
       </div>
       <p role="status" className="text-sm text-muted-foreground">
         {status}
-        {index.data && index.isFetching && progress && progress.total > 0 && (
-          <span className="sr-only">
-            Updating: {progress.pages} of {progress.total}
-          </span>
-        )}
+        {/* Once a rebuild, not at each step: pages others change rebuild it. */}
+        {index && updating && <span className="sr-only">Updating</span>}
       </p>
-      {index.isError && (
+      {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
-          <span className="flex-1">Couldn’t index your pages: {errorMessage(index.error)}</span>
-          <Button variant="outline" size="sm" onClick={() => void index.refetch()}>
+          <span className="flex-1">Couldn’t index your pages: {errorMessage(error)}</span>
+          <Button variant="outline" size="sm" onClick={retry}>
             Try again
           </Button>
         </div>
@@ -139,12 +155,12 @@ function SearchBody({ ctx, onDone }: { ctx: ClientContext; onDone: () => void })
         >
           {results.map((hit, i) => (
             <ResultRow
-              key={`${hit.doc.spaceId}/${hit.doc.pageId}`}
+              key={hitKey(hit)}
               hit={hit}
               id={optionId(i)}
               active={i === active}
               onOpen={() => openHit(hit)}
-              onHover={() => setActive(i)}
+              onHover={() => choose(hit)}
             />
           ))}
         </ul>

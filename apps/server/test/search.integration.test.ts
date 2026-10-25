@@ -56,7 +56,10 @@ describe('a search index', () => {
         spaceId: lib.spaceId,
         pageId: lib.page.pageId,
         revisionId: expect.any(String),
-        // Bob holds a folder, not the space: its name isn't his to read.
+        parentId: lib.shared,
+        // Bob holds a folder, not the space: its name isn't his to read,
+        // nor the folder above it.
+        folderIds: [lib.shared],
         path: ['Shared'],
         draft: false,
         unpublished: false,
@@ -71,6 +74,28 @@ describe('a search index', () => {
     expect(await hits(ed.ctx, DRAFT_ONLY)).toMatchObject([
       { pageId: lib.page.pageId, draft: true },
     ]);
+  });
+
+  it('keeps each page’s properties from the version it holds, a draft only for its editors', async () => {
+    const { bob, ed, lib } = await shared();
+    await pages.editDraft(ed.ctx, lib.page, {
+      markdown: `---\nstatus: in progress\ntags: [plan]\n---\n${DRAFT_ONLY}`,
+    });
+    const read = await search.indexSpaces(bob.ctx);
+    expect(read.page(lib.spaceId, lib.page.pageId)?.properties).toEqual([]);
+    expect(read.list({ spaceId: lib.spaceId, tag: 'plan' })).toEqual([]);
+    expect(read.page(lib.spaceId, lib.beside.pageId)).toBeUndefined();
+    const edited = await search.indexSpaces(ed.ctx);
+    expect(edited.page(lib.spaceId, lib.page.pageId)).toMatchObject({
+      draft: true,
+      properties: [
+        { key: 'status', type: 'text', value: 'in progress' },
+        { key: 'tags', type: 'list', value: ['plan'] },
+      ],
+    });
+    expect(
+      edited.list({ spaceId: lib.spaceId, folderId: lib.shared, tag: 'plan' }).map((p) => p.pageId),
+    ).toEqual([lib.page.pageId]);
   });
 
   it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {

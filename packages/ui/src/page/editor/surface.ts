@@ -1,5 +1,6 @@
-import type { AttachmentRef, LinkablePage } from '@wikistow/client';
-import type { Ref } from 'react';
+import type { AttachmentRef, LinkablePage, PropertyData } from '@wikistow/client';
+import type { ReactNode, Ref } from 'react';
+import type { OtherPages } from '../other-pages';
 
 // An editor surface is one way of editing a page's Markdown body: the
 // source editor or the visual one. The draft session around it owns
@@ -93,6 +94,22 @@ export type EditorSurfaceProps = {
   onFiles: (files: File[], place: (markdown: string) => boolean) => void;
   /** The page's line break, its frontmatter's, for text with none of its own yet; LF if not given. */
   lineBreak?: LineBreak;
+  /**
+   * The page's properties, as its frontmatter has them now, which its
+   * references (`` `=key` ``) show and `` `= `` completes; null for none.
+   */
+  properties?: readonly PropertyData[] | null | undefined;
+  /**
+   * The other pages references name (`` `=[[Page]].key` ``), as the
+   * editor's search index holds them, which they show and `` `=[[Page]]. ``
+   * completes; none until it is built.
+   */
+  otherPages?: OtherPages | null | undefined;
+  /**
+   * A query block's result (`wikistow-query`), drawn under its code in the
+   * visual editor, for the block's text now; none where nobody sees it.
+   */
+  queryTable?: ((source: string) => ReactNode) | undefined;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
   ref?: Ref<EditorSurfaceHandle>;
@@ -107,4 +124,9 @@ export type EditorSurfaceHandle = {
   focus(at?: number): void;
   /** Where the cursor is, as an offset in `read()`'s text; null if it can't tell. */
   caret?(): number | null;
+  /**
+   * Put `code` as inline code where the cursor is, in place of what's
+   * selected, and focus there, the cursor after it. Reported as an edit.
+   */
+  insertCode?(code: string): void;
 };

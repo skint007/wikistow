@@ -4,7 +4,26 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- List pages by their properties with a `wikistow-query` block: say where they are, which must hold, which values to show and how to sort them, and the page shows a table that keeps up as pages change.
+- Open a folder to see its pages as a table of their properties, and change a value right in its cell.
+- A page's properties show as rows above its body, each value as what it is: tags as pills, a checkbox, a date, a link. On a draft you edit them in place, and only the characters you change move in the frontmatter, so notes from Obsidian keep their comments and layout. Write `=servings` in inline code to show a value in the page.
+
 ### Changes
+
+#### App
+
+- A fenced code block labelled `wikistow-query` lists pages as a table: `from` a folder or `#tag`, `where` conditions (`=`, `!=`, `<`, `<=`, `>`, `>=`, `has`; numbers and dates compare as such), `show` columns, `sort` a key or `title`, and `limit`. The table runs over your own search index, so it lists only pages you can open, and updates as they change. A block that doesn't read shows as code with a line saying why. The visual editor keeps the block as code and shows the table under it. Dataview blocks stay code. A public link's copy holds the table as it stood at publish, from published versions only, linking only pages with a public link of their own, and the public link dialog says the page lists other pages. (#193)
+- A folder opens to its pages, as a list or a table of their properties: click its name in the sidebar, or **Open** in its menu, and its chevron still just opens or closes it there. The table's columns are the keys the pages use, which you can hide, and the list or table choice is kept per folder on this device. Readers see published values, and editors their drafts, labelled. Editors change a value in its cell, which saves that page's draft changing only that value; if someone saved the page since, the cell says so and nothing is overwritten. On phones the list comes first, and the table scrolls sideways. (#192)
+- Clicking a tag in a page's properties opens search for that tag, on the published page and the draft, without leaving the page. On the draft, a tag's × still removes it. (#191)
+- Search finds pages by their properties: `tag:soup` for a tag, and `key:value` for any property, quoted when the value has spaces (`status:"in progress"`), alone or with words. An address ending `#search=` and a query opens search with it. (#187)
+- Inline code `=[[Garlic bread]].cook_time` shows another page's `cook_time`, from the version of that page you see, with a hint naming the property and the page. The link follows a rename like any wikilink, and a property whose value is one page link, such as `goes_with: "[[Tomato soup]]"`, now does too: the next save writes the new title in, changing only that value's characters. Anyone who can't open the page sees the reference as written, the same as for a page or key that doesn't exist. Both editors complete the page after `` `=[[ `` and its keys after the dot. A public link's copy writes in values from those pages' published versions only, and the public link dialog and the Publish confirmation say the page shows them. (#190)
+- Inline code `=servings` in a page's body, or Dataview's `= this.servings`, shows the page's `servings` value, with a dotted underline and a hint naming the property: a list comma-separated, a date in your locale, a page link as a link. A name the page has no property for shows as written. The visual editor shows the value beside the code, and typing `` `= `` completes the page's keys in both editors. **Add property** suggests the keys that pages in the same folder use. A public link's copy has the values written in as plain text, its frontmatter still left out. (#188)
+- Open search follows pages others change, and those changed on your other devices, without being closed and opened again. A save while the index rebuilds now waits for it, rather than starting it over. (#184)
+- A page's properties show as rows between its status pills and its body, each key in sentence case and each value as what it reads as: a list as pills, a number, a checkbox, a date in your locale, a web address, a page link or text. Readers see six, then **Show N more**. On the draft, a value is edited in place, and each row's menu renames it, changes its type, removes it or puts a reference to it in the page; **Add property** adds one. Only the edited characters of the frontmatter change, so its comments, quoting and order stay as written. A value that can't be changed that way, or a block that doesn't read as properties, opens as text. (#185)
 
 #### Desktop
 
@@ -12,11 +31,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
+- `wikistow search` takes the same filters as the app's search, `tag:soup` and `key:value`, and so do agents' and plugins' searches. (#187)
 - `wikistow folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]` makes a folder where the agent may edit, at the top of its share unless `--parent` names one, so an agent can rebuild a set of notes' folders before creating their pages. It takes `--idempotency-key` like the other changes, and the skill says to use it when moving notes in. (#171)
 
 #### Development
 
 - The client reads a page's frontmatter as typed properties, with the `yaml` package, and edits one value, key or property's lines without rewriting the rest of the block. The property rows, references to values, and property search will build on it. (#181)
+- The search index keeps each page's properties beside its text, and lists pages by space, folder and tag, with the keys they use, for query tables, the folder view and references to other pages' values. The desktop app reads every page once more after updating. (#184)
 
 ## 0.16.1 - 2026-10-23
 

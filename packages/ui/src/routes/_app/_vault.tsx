@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, redirect, useNavigate, useRouter } from '@tans
 import { useEffect } from 'react';
 import { meQuery } from '../../api';
 import { PendingOwnerWork } from '../../sharing/pending-owner-work';
+import { withoutSearchHash } from '../../shell/search-link';
 import { useVault, vaultStore } from '../../vault/store';
 
 /** Everything that needs the vault open: spaces and pages. */
@@ -10,7 +11,11 @@ export const Route = createFileRoute('/_app/_vault')({
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me?.identity) throw redirect({ to: '/vault/setup' });
     if (vaultStore.get().status === 'locked') {
-      throw redirect({ to: '/vault/unlock', search: { redirect: location.href } });
+      // A search the address asks for waits in memory, not in the redirect.
+      throw redirect({
+        to: '/vault/unlock',
+        search: { redirect: withoutSearchHash(location.href) },
+      });
     }
   },
   component: VaultLayout,
@@ -25,7 +30,10 @@ function VaultLayout() {
   // it left is read once, not tracked, so the redirect never nests itself.
   useEffect(() => {
     if (vault.status !== 'locked') return;
-    void navigate({ to: '/vault/unlock', search: { redirect: router.state.location.href } });
+    void navigate({
+      to: '/vault/unlock',
+      search: { redirect: withoutSearchHash(router.state.location.href) },
+    });
   }, [vault.status, navigate, router]);
   // Ownership work left unfinished, in this session or an earlier one, is
   // listed once the vault opens (protocol section 7.6).

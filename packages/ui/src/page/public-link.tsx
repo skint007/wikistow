@@ -2,11 +2,11 @@
 // the Publish confirmation for a page with one, and the marker that shows
 // which pages are public. A readable copy goes up only from a button in
 // one of these dialogs, never in the background.
-import { publicLinkOperations, type pageOperations } from '@wikistow/client';
+import { publicLinkOperations, type pageOperations, type RevisionId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Globe } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { installationQuery } from '../api';
 import { errorMessage } from '../errors';
-import { publicLinksQuery, treeQuery } from '../data/queries';
+import { publicLinksQuery, revisionQuery, treeQuery } from '../data/queries';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { useClient } from '../vault/store';
 import { publicLinkMessage } from './messages';
@@ -36,6 +36,71 @@ export function usePublicLink(page: pageOperations.PageRef) {
   const ctx = useClient();
   const { data } = useQuery(publicLinksQuery(ctx, page.spaceId));
   return data?.find((link) => link.pageId === page.pageId) ?? null;
+}
+
+/** Said, rather than uploading, when a version shows values from other pages the dialog hadn't noted. */
+const UNNOTED =
+  'This page shows other pages’ titles or values, which the public page would show too. Read the note, then try again.';
+
+const fromOthers = (markdown: string | null | undefined) =>
+  markdown == null ? null : publicLinkOperations.fromOtherPages(markdown);
+
+/** Whether a copy of `markdown` shows anything of other pages. */
+const showsOthers = (markdown: string | null | undefined) => {
+  const shows = fromOthers(markdown);
+  return !!shows && (shows.values || shows.lists);
+};
+
+/** Whether a copy of `markdown` shows something of other pages a note for `noted` doesn't say. */
+const unnoted = (markdown: string, noted: string | null | undefined) => {
+  const [shows, said] = [fromOthers(markdown), fromOthers(noted)];
+  return !!shows && ((shows.values && !said?.values) || (shows.lists && !said?.lists));
+};
+
+/**
+ * What a public copy of `markdown` shows of other pages, said where a copy
+ * is made: anyone with the link can read it too, as it was at the publish.
+ * Nothing while `markdown` isn't known, or shows nothing of them.
+ */
+function FromOtherPages({ markdown }: { markdown: string | null | undefined }) {
+  const shows = useMemo(() => fromOthers(markdown), [markdown]);
+  if (!shows || (!shows.values && !shows.lists)) return null;
+  const what =
+    shows.values && shows.lists
+      ? 'This page shows values from other pages, and lists other pages.'
+      : shows.values
+        ? 'This page shows values from other pages.'
+        : 'This page lists other pages.';
+  const read = shows.lists
+    ? 'Anyone with the link can read those pages’ titles and the values shown too.'
+    : 'Anyone with the link can read them too.';
+  return (
+    <p role="note" className="rounded-control bg-muted p-3 text-sm">
+      <strong>{what}</strong> {read} They’re taken from those pages’ published versions, as they are
+      when this page is published, and stay so until it’s published again.
+    </p>
+  );
+}
+
+/**
+ * The page's published version's Markdown, once opened, or null if it has
+ * none this app can read; `settled` once that is known, so nothing goes up
+ * before the dialog can say what the copy shows. A version that doesn't
+ * open can't be uploaded either.
+ */
+function usePublishedMarkdown(page: pageOperations.PageRef, head: RevisionId | null | undefined) {
+  const ctx = useClient();
+  const { data, isError } = useQuery({
+    ...revisionQuery(ctx, page, 'published', head ?? ('' as RevisionId)),
+    enabled: !!head,
+  });
+  if (head === undefined) return { markdown: null, settled: false };
+  if (head === null || isError) return { markdown: null, settled: true };
+  if (!data) return { markdown: null, settled: false };
+  return {
+    markdown: data.opened.kind === 'current' ? data.opened.payload.markdown : null,
+    settled: true,
+  };
 }
 
 /** Load the space's public links again, after this person changed one. */
@@ -98,7 +163,18 @@ function LinkSteps({
   const links = useQuery(publicLinksQuery(ctx, page.spaceId));
   // Unpublished while the dialog is open: it can have no link now.
   const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
-  const unpublished = tree?.pages.find((p) => p.id === page.pageId)?.publishedHead === null;
+  const publishedHead = tree?.pages.find((p) => p.id === page.pageId)?.publishedHead;
+  const unpublished = publishedHead === null;
+  const opened = usePublishedMarkdown(page, publishedHead);
+  // A version opened to upload that the note hadn't been worked out from, once shown.
+  const [seen, setSeen] = useState<{ revisionId: RevisionId; markdown: string } | null>(null);
+  const published =
+    seen && (seen.revisionId !== publishedHead || opened.markdown === null)
+      ? { markdown: seen.markdown, settled: true }
+      : opened;
+  // The note was worked out from this version: the one opened, or one refused before.
+  const noted = (revisionId: RevisionId) =>
+    seen?.revisionId === revisionId || (revisionId === publishedHead && opened.markdown !== null);
   const refresh = useRefreshLinks(page);
   const { busy, error, run } = useAction(publicLinkMessage);
   // What's running, said as it goes.
@@ -111,6 +187,12 @@ function LinkSteps({
       try {
         // Opened first, so a version this app can't read turns no link on.
         const published = await publicLinkOperations.openPublished(ctx, page);
+        // The version the note was worked out from may not be this one.
+        const { markdown } = published.payload;
+        if (showsOthers(markdown) && !noted(published.revisionId)) {
+          setSeen({ revisionId: published.revisionId, markdown });
+          throw new Error(UNNOTED);
+        }
         if (turnOn) {
           setStep('Turning on the link…');
           await publicLinkOperations.turnOn(ctx, page.pageId);
@@ -198,12 +280,13 @@ function LinkSteps({
           to work, the server keeps a readable copy of the published version, with the images and
           files it uses, until you turn the link off. Drafts stay private.
         </p>
+        <FromOtherPages markdown={published.markdown} />
         {status}
         <DialogFooter>
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={busy} onClick={() => void upload(true)}>
+          <Button disabled={busy || !published.settled} onClick={() => void upload(true)}>
             Turn on public link
           </Button>
         </DialogFooter>
@@ -234,11 +317,17 @@ function LinkSteps({
             <strong>The public page is out of date.</strong> Until it’s updated, visitors see a note
             that the page is being updated.
           </p>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void upload(false)}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || !published.settled}
+            onClick={() => void upload(false)}
+          >
             Update public page
           </Button>
         </div>
       )}
+      <FromOtherPages markdown={published.markdown} />
       <p className="text-sm text-muted-foreground">
         Turning the link off deletes the public copy at once. Turning it on again makes a new link.
       </p>
@@ -292,6 +381,7 @@ function LinkField({ id }: { id: string }) {
 export function PublishWithLinkDialog({
   page,
   title,
+  markdown,
   open,
   onOpenChange,
   publish,
@@ -299,6 +389,8 @@ export function PublishWithLinkDialog({
 }: {
   page: pageOperations.PageRef;
   title: string;
+  /** The draft as it is when Publish is clicked, for what the copy will show; the version published once it is. */
+  markdown?: string | null | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Publish the draft, answering the version published. */
@@ -322,6 +414,7 @@ export function PublishWithLinkDialog({
           <PublishSteps
             page={page}
             title={title}
+            markdown={published?.payload.markdown ?? markdown}
             published={published}
             publish={async () => {
               const version = await publish();
@@ -343,6 +436,7 @@ export function PublishWithLinkDialog({
 function PublishSteps({
   page,
   title,
+  markdown,
   published,
   publish,
   onUploaded,
@@ -350,6 +444,7 @@ function PublishSteps({
 }: {
   page: pageOperations.PageRef;
   title: string;
+  markdown: string | null | undefined;
   published: Published | null;
   publish: () => Promise<Published>;
   onUploaded: () => void;
@@ -371,6 +466,10 @@ function PublishSteps({
           version = await publish();
         } finally {
           setStep(null);
+        }
+        // Published, but its copy waits until the note is on screen for it.
+        if (unnoted(version.payload.markdown, markdown)) {
+          throw new Error(`Published. ${UNNOTED}`);
         }
       }
       setStep('Updating the public page…');
@@ -403,6 +502,7 @@ function PublishSteps({
           This page has a public link. Publishing updates the public page too.
         </DialogDescription>
       </DialogHeader>
+      <FromOtherPages markdown={markdown} />
       {step && (
         <p aria-live="polite" className="text-sm text-muted-foreground">
           {step}

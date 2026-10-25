@@ -14,10 +14,11 @@ import {
   highlightSpecialChars,
   keymap,
 } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { textEdits } from '../../link-renames';
 import { lineBreakFor, type EditorSurfaceProps } from '../surface';
-import { wikilinkCompletions } from './completion';
+import { referenceCompletions, wikilinkCompletions } from './completion';
 import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
@@ -44,14 +45,16 @@ export default function CodeMirrorSurface({
   links,
   onFiles,
   lineBreak,
+  properties,
+  otherPages,
   ref,
 }: EditorSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The editor is built once; it reads the latest of these when it needs them.
-  const latest = useRef({ onChange, links, onFiles });
+  const latest = useRef({ onChange, links, onFiles, properties, otherPages });
   useLayoutEffect(() => {
-    latest.current = { onChange, links, onFiles };
+    latest.current = { onChange, links, onFiles, properties, otherPages };
   });
   const text = useRef(initial);
 
@@ -110,6 +113,34 @@ export default function CodeMirrorSurface({
         const anchor = Math.min(at - breaks * (lineBreak.length - 1), editor.state.doc.length);
         editor.dispatch({ selection: { anchor }, scrollIntoView: true });
       },
+      insertCode(code) {
+        const editor = view.current;
+        if (!editor) return;
+        const { state } = editor;
+        let { from, to } = state.selection.main;
+        // Where the code span `at` is strictly inside ends, if it is in one.
+        const spanEnd = (at: number) => {
+          for (let node = syntaxTree(state).resolveInner(at, -1); ; node = node.parent) {
+            if (node.name === 'InlineCode' && node.from < at && at < node.to) return node.to;
+            if (!node.parent) return null;
+          }
+        };
+        // A cursor or a selection end in a code span puts it after the span,
+        // replacing nothing, so no span is cut or left a backtick short.
+        const end = spanEnd(to) ?? to;
+        if (end !== to || (from !== to && spanEnd(from) !== null)) from = to = end;
+        // A backtick beside it would make one span of the two.
+        const before = state.sliceDoc(from - 1, from) === '`' ? ' ' : '';
+        const after = state.sliceDoc(to, to + 1) === '`' ? ' ' : '';
+        const insert = `${before}\`${code}\`${after}`;
+        editor.dispatch({
+          changes: { from, to, insert },
+          selection: { anchor: from + insert.length },
+          scrollIntoView: true,
+          userEvent: 'input',
+        });
+        editor.focus();
+      },
     }),
     [],
   );
@@ -128,7 +159,7 @@ function extensions({
   changed,
 }: {
   lineBreak: string;
-  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles'>;
+  latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties' | 'otherPages'>;
   changed: (markdown: string) => void;
 }): Extension {
   const assist = () => latest().links;
@@ -143,9 +174,15 @@ function extensions({
     sourceLanguage,
     sourceTheme,
     autocompletion({
-      override: [wikilinkCompletions(assist)],
+      override: [
+        wikilinkCompletions(assist),
+        referenceCompletions(
+          () => latest().properties,
+          () => latest().otherPages,
+        ),
+      ],
       icons: false,
-      // The list only opens inside `[[`, where Enter means to accept.
+      // The list only opens inside `[[` or after `` `= ``, where Enter means to accept.
       interactionDelay: 0,
     }),
     linkMarks(assist),
