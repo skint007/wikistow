@@ -456,6 +456,7 @@ async function queryTables(
       row.pageId !== page.pageId &&
       linkOn.has(row.pageId) &&
       writableInLink(row.title) &&
+      key.length <= publicLinkRoutes.MAX_TARGET_KEY &&
       titled.get(key)?.size === 1 &&
       (body.targets.get(key) ?? row.pageId) === row.pageId &&
       (!body.keys.has(key) || body.targets.get(key) === row.pageId);
