@@ -295,6 +295,14 @@ describe('the draft’s property rows', () => {
     expect(last()).toBe(NOTE.replace('Use fresh garlic.\n', 'Use fresh garlic.\ncuisine:\n'));
   });
 
+  it('closes the name field with one Escape when there are no keys to suggest', async () => {
+    const { container, blocks } = await editor(NOTE, { keys: undefined, load: () => {} });
+    await userEvent.click(button(container, 'Add property'));
+    await userEvent.type(field(container, 'New property’s name'), 'abc{Escape}');
+    expect(container.querySelector('input[aria-label="New property’s name"]')).toBeNull();
+    expect(blocks).toEqual([]);
+  });
+
   it('says why an edit can’t be made, and refuses a key the block has', async () => {
     const { container, blocks } = await editor('---\nname: x\n---\n');
     await userEvent.click(button(container, 'Add property'));

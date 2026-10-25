@@ -117,7 +117,7 @@ export function Combobox({
               event.preventDefault();
               pick(option);
             }
-          } else if (event.key === 'Escape' && open) {
+          } else if (event.key === 'Escape' && open && options) {
             event.preventDefault();
             setOpen(false);
           }
