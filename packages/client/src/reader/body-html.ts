@@ -87,9 +87,10 @@ export function attachmentsShown(tree: HastRoot): string[] {
 export type ChosenFile = { id: string; leftOut: boolean };
 
 /**
- * Which of the attachments the body uses (`used`, in order) a public copy
- * keeps: each up to `fileBytes`, until together they would pass
- * `copyBytes`. The server chooses so, and the app opens only those.
+ * Which of the attachments a copy uses (`used`, in order: the cover's, then
+ * the body's) a public copy keeps: each once, up to `fileBytes`, until
+ * together they would pass `copyBytes`. The server chooses so, and the app
+ * opens only those.
  */
 export function chooseFiles(
   used: readonly string[],
@@ -98,7 +99,7 @@ export function chooseFiles(
 ): ChosenFile[] {
   const listed = new Map(attachments.map((a) => [a.id, a]));
   let total = 0;
-  return used.flatMap((id) => {
+  return [...new Set(used)].flatMap((id) => {
     const file = listed.get(id);
     if (!file) return [];
     const leftOut = file.size > fileBytes || total + file.size > copyBytes;

@@ -39,11 +39,12 @@ import { ContentError } from '../content/errors.ts';
 import { currentIdentity, humanActor, requireCaller, type Caller } from '../content/identities.ts';
 import { requirePage, requirePageAccess } from '../content/pages.ts';
 import { charge } from '../content/quota.ts';
+import { acceptCover, coverFiles, NO_COVER, PublicCover } from './cover.ts';
 import { endCopies, endLinkFor, endLinksAndCopies, recordEnded } from './endings.ts';
 import { escapeHtml } from './page.ts';
 import type { ListedFile } from './render.ts';
 import type { Renderer } from './renderer.ts';
-import { pageOfKey, READER_VERSION, Segment } from './segments.ts';
+import { Outline, pageOfKey, READER_VERSION, Segment } from './segments.ts';
 
 const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
 
@@ -216,6 +217,7 @@ type StageInput = {
   markdown: string;
   attachments: readonly ListedFile[];
   targets: readonly { key: string; pageId: string }[];
+  cover?: publicLinkRoutes.CopyCover | undefined;
   uploadBytes: number;
 };
 
@@ -225,7 +227,8 @@ type StageInput = {
  * body with none held, then check again under the locks and store the copy
  * with its files still to come, and a target row for each gap that leads
  * to a page whose link is on and the uploader can publish. Which files it
- * needs: the attachments its body uses, but those left out for size.
+ * needs: the attachments its cover and body use, but those left out for
+ * size.
  */
 export async function stageCopy(db: Database, renderer: Renderer, input: StageInput) {
   const { accountId, pageId, revisionId } = input;
@@ -236,10 +239,12 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
   if (!access.canPublish) throw new ContentError('forbidden');
   const [link] = await db.select().from(publicLinks).where(eq(publicLinks.pageId, pageId));
   if (!link) throw noLink();
+  const cover = acceptCover(input.cover, input.attachments);
   const rendered = await renderer.render(accountId, {
     markdown: input.markdown,
     linkId: link.id,
     attachments: input.attachments,
+    coverFiles: coverFiles(cover),
     limits: {
       fileBytes: fileLimit(input.uploadBytes),
       copyBytes: publicLinkRoutes.MAX_COPY_BYTES,
@@ -316,7 +321,9 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
         title: input.title,
         markdown: input.markdown,
         rendering: rendered.segments,
+        outline: rendered.outline,
         readerVersion: READER_VERSION,
+        cover,
         uploadedBy: accountId,
       })
       .returning({ id: publicCopies.id });
@@ -681,9 +688,20 @@ export async function sweepPublicLinks(db: Database) {
 
 const Rendering = z.array(Segment);
 
-/** What `/p/<id>` shows: a page, a note that it is being updated, or nothing. */
+/**
+ * What `/p/<id>` shows: a page, a note that it is being updated, or
+ * nothing. A page's cover shows only the images its copy has.
+ */
 export type PublicPage =
-  | { kind: 'page'; title: string; body: string }
+  | {
+      kind: 'page';
+      id: string;
+      title: string;
+      body: string;
+      cover: PublicCover;
+      outline: Outline;
+      updated: Date;
+    }
   | { kind: 'updating' }
   | { kind: 'not-found' };
 
@@ -699,7 +717,10 @@ async function liveCopyOf(db: Database, id: string) {
           id: publicCopies.id,
           title: publicCopies.title,
           rendering: publicCopies.rendering,
+          outline: publicCopies.outline,
           readerVersion: publicCopies.readerVersion,
+          cover: publicCopies.cover,
+          createdAt: publicCopies.createdAt,
           uploadedBy: publicCopies.uploadedBy,
         },
       })
@@ -731,7 +752,8 @@ export async function openPublicPage(db: Database, id: string): Promise<PublicPa
   if (!found) return { kind: 'not-found' };
   const { copy } = found;
   const rendering = Rendering.safeParse(copy?.rendering);
-  if (!copy || copy.readerVersion !== READER_VERSION || !rendering.success) {
+  const outline = Outline.safeParse(copy?.outline);
+  if (!copy || copy.readerVersion !== READER_VERSION || !rendering.success || !outline.success) {
     return { kind: 'updating' };
   }
   const targets = new Map(
@@ -763,7 +785,45 @@ export async function openPublicPage(db: Database, id: string): Promise<PublicPa
         : text,
     );
   }
-  return { kind: 'page', title: copy.title, body: parts.join('') };
+  return {
+    kind: 'page',
+    id,
+    title: copy.title,
+    body: parts.join(''),
+    cover: await coverShown(db, copy.id, copy.cover),
+    outline: outline.data,
+    updated: copy.createdAt,
+  };
+}
+
+/** A copy's cover as its page shows it: an image it left out for size isn't there. */
+async function coverShown(db: Database, copyId: string, stored: unknown): Promise<PublicCover> {
+  const parsed = PublicCover.safeParse(stored);
+  const cover = parsed.success ? parsed.data : NO_COVER;
+  const wanted = coverFiles(cover);
+  if (wanted.length === 0) return cover;
+  const kept = new Set(
+    (
+      await db
+        .select({ id: publicFiles.attachmentId })
+        .from(publicFiles)
+        .where(
+          and(
+            eq(publicFiles.copyId, copyId),
+            sql`${publicFiles.attachmentId} = any(${sql.param(wanted)}::text[])`,
+            isNotNull(publicFiles.bytes),
+          ),
+        )
+    ).map((file) => file.id),
+  );
+  return {
+    ...cover,
+    banner:
+      cover.banner.kind === 'image' && !kept.has(cover.banner.attachmentId)
+        ? { kind: 'theme' }
+        : cover.banner,
+    icon: cover.icon && kept.has(cover.icon) ? cover.icon : null,
+  };
 }
 
 /**
@@ -849,11 +909,11 @@ export async function rerenderCopies(db: Database, renderer: Renderer) {
       limits: { fileBytes: 0, copyBytes: 0 },
       files: files.map(({ id, leftOut }) => ({ id, leftOut })),
     };
-    const { segments } = await renderWhenFree(renderer, input);
+    const { segments, outline } = await renderWhenFree(renderer, input);
     // A copy that went meanwhile, or was rendered by another server, stays as it is.
     const updated = await db
       .update(publicCopies)
-      .set({ rendering: segments, readerVersion: READER_VERSION })
+      .set({ rendering: segments, outline, readerVersion: READER_VERSION })
       .where(and(eq(publicCopies.id, copy.id), eq(publicCopies.readerVersion, copy.readerVersion)))
       .returning({ id: publicCopies.id });
     rendered += updated.length;

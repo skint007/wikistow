@@ -253,6 +253,13 @@
       "when": 1792609206133,
       "tag": "0035_public_links",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793128456252,
+      "tag": "0036_public_copy_cover",
+      "breakpoints": true
     }
   ]
 }

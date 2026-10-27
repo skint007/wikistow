@@ -7,6 +7,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
 import { REACT_FILES } from '../../packages/ui/src/workshop/library.ts';
 
 const ui = (path: string) => fileURLToPath(new URL(`../../packages/ui/${path}`, import.meta.url));
@@ -78,6 +79,25 @@ const library = {
     id === `\0${LIBRARY}` ? `export default ${JSON.stringify(await workshopLibrary())};` : null,
 };
 
+/**
+ * The fonts a public page loads, which the server serves from this build
+ * (`PAGE_FONTS`), written under `/fonts/` by names that don't change, as
+ * the page's one stylesheet names them.
+ */
+const publicPageFonts = {
+  name: 'public-page-fonts',
+  apply: 'build' as const,
+  async generateBundle(this: {
+    emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array }) => string;
+  }) {
+    const resolve = createRequire(ui('package.json')).resolve;
+    for (const { file } of PAGE_FONTS) {
+      const source = await readFile(resolve(`@fontsource-variable/nunito/files/${file}`));
+      this.emitFile({ type: 'asset', fileName: `fonts/${file}`, source });
+    }
+  },
+};
+
 // A plain object: the router plugin's Vite types differ from Vite+'s, so
 // defineConfig's checking can't compare them.
 export default {
@@ -93,6 +113,7 @@ export default {
     tailwindcss(),
     // For the dev server; a build bundles workers with `worker.plugins`.
     library,
+    publicPageFonts,
   ],
   define: { __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`) },
   resolve: { alias: { '@': ui('src'), 'decode-named-character-reference': entities } },

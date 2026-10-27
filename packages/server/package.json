@@ -19,6 +19,7 @@
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.3",
     "hast-util-to-html": "9.0.5",
+    "lucide": "1.50.0",
     "postgres": "3.4.9",
     "zod": "^4.6.5"
   },

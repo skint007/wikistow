@@ -22,7 +22,15 @@ export type Segment = z.infer<typeof Segment>;
  * rendered again after the server starts, and say they are being updated
  * until then.
  */
-export const READER_VERSION = 1;
+export const READER_VERSION = 2;
+
+/** A heading a public page lists under "On this page": its anchor, its text, and whether it's an h3. */
+export const Heading = z.strictObject({ id: z.string(), text: z.string(), sub: z.boolean() });
+export type Heading = z.infer<typeof Heading>;
+
+/** What a rendering says of its body beside the HTML: its h2 and h3 headings, and its words. */
+export const Outline = z.strictObject({ headings: z.array(Heading), words: z.number() });
+export type Outline = z.infer<typeof Outline>;
 
 /** The key of a gap for a link to a page's address (`/s/<space>/p/<page>`): no wikilink's key has a `#`. */
 export const pageKey = (pageId: string) => `#page:${pageId}`;

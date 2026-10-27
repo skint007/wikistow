@@ -4,6 +4,22 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### UI polish
+
+- A page shared with a public link looks like it does in the app: its colours, light or dark as the reader’s system is, its font, and its banner and emoji, image or icon. Wide screens list its headings beside it.
+
+### Changes
+
+#### App
+
+- A public page’s copy goes up with the page’s cover: its emoji, its icon from the set, its banner preset or image with its focal point, and its image, those images ahead of the body’s. (#205)
+
+#### Server
+
+- Public pages use the app’s light palette, and slate where the reader’s system is dark, Nunito, and the reader’s styles, with the page in a card under its cover and badge. Under the title they say when the copy went up and how long it takes to read, and from 960px wide they list the page’s h2 and h3 headings beside the card. Their policy allows fonts from the server, which the web build writes under `/fonts/`. Existing copies are rendered again when the server starts, and show the theme’s banner and no badge until the page is published again or **Update public page** is used. (#205)
+
 ## 0.17.0 - 2026-10-25
 
 ### Highlights

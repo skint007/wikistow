@@ -21,7 +21,14 @@ import type { Element, ElementContent } from 'hast';
 import { toHtml } from 'hast-util-to-html';
 import type { WikilinkNode } from 'mdast';
 import { randomBytes } from 'node:crypto';
-import { pageKey, RASTER_TYPES, type Gap, type Segment } from './segments.ts';
+import {
+  pageKey,
+  RASTER_TYPES,
+  type Gap,
+  type Heading,
+  type Outline,
+  type Segment,
+} from './segments.ts';
 
 /** An attachment the app listed for a copy. */
 export type ListedFile = { id: string; name: string; mediaType: string; size: number };
@@ -33,12 +40,14 @@ export type RenderInput = {
   /** The link's id, which the copy's files are served under. */
   linkId: string;
   attachments: readonly ListedFile[];
+  /** The attachments the copy's cover shows, which it keeps ahead of the body's. */
+  coverFiles?: readonly string[];
   limits: { fileBytes: number; copyBytes: number };
   /** The files a copy already has, when rendering it again; otherwise chosen here. */
   files?: ChosenFile[];
 };
 
-export type Rendered = { segments: Segment[]; files: ChosenFile[] };
+export type Rendered = { segments: Segment[]; files: ChosenFile[]; outline: Outline };
 
 const text = (value: string): ElementContent => ({ type: 'text', value });
 const element = (
@@ -105,7 +114,13 @@ export function renderBody(input: RenderInput): Rendered {
     return element('a', { href: `#${mark}-${wikilinks.length - 1}` }, [text(link.value)]);
   };
   const tree = bodyHtml(highlightCode(readBody(input.markdown)), wikilink);
-  const files = input.files ?? chooseFiles(attachmentsShown(tree), input.attachments, input.limits);
+  const files =
+    input.files ??
+    chooseFiles(
+      [...(input.coverFiles ?? []), ...attachmentsShown(tree)],
+      input.attachments,
+      input.limits,
+    );
   const listed = new Map(input.attachments.map((a) => [a.id, a]));
   const kept = new Map(files.map((file) => [file.id, file.leftOut]));
   const fileUrl = (id: string) =>
@@ -196,8 +211,29 @@ export function renderBody(input: RenderInput): Rendered {
 
   // Sanitizing leaves no doctype.
   const body = tree.children.filter((node): node is ElementContent => node.type !== 'doctype');
-  const html = toHtml({ type: 'root', children: walk(body, false) });
-  return { segments: split(html, mark, gaps), files };
+  const shown = walk(body, false);
+  const html = toHtml({ type: 'root', children: shown });
+  return { segments: split(html, mark, gaps), files, outline: outlineOf(shown, mark, gaps) };
+}
+
+/**
+ * The body's h2 and h3 headings, with an anchor, outside any other element
+ * as Markdown writes them, and how many words it has, as a reader reads it.
+ */
+function outlineOf(body: readonly ElementContent[], mark: string, gaps: readonly Gap[]): Outline {
+  // A link to another page reads as its text.
+  const marks = new RegExp(`\uE000${mark}(\\d+)\uE000`, 'g');
+  const read = (node: ElementContent) =>
+    textOf(node).replace(marks, (_, n: string) => gaps[Number(n)]?.text ?? '');
+  const headings: Heading[] = [];
+  for (const node of body) {
+    if (node.type !== 'element' || (node.tagName !== 'h2' && node.tagName !== 'h3')) continue;
+    const id = node.properties['id'];
+    const text = read(node).trim();
+    if (typeof id === 'string' && text) headings.push({ id, text, sub: node.tagName === 'h3' });
+  }
+  const words = body.map(read).join(' ').split(/\s+/).filter(Boolean).length;
+  return { headings, words };
 }
 
 /** The alert a `div` is (`remarkAlerts`), by its class, or null. */

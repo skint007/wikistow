@@ -12,7 +12,8 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { Segment } from '../../public-links/segments.ts';
+import type { PublicCover } from '../../public-links/cover.ts';
+import type { Outline, Segment } from '../../public-links/segments.ts';
 import { bytea, timestamptz } from './helpers.ts';
 import { nodes } from './spaces.ts';
 import { users } from './users.ts';
@@ -50,7 +51,9 @@ export const publicLinks = pgTable(
  * arrive and then live. At most one is live per page. It hangs off the
  * page's link, which hangs off the page, so it never outlives either.
  * `rendering` is the body as the server's reader rendered it, at
- * `readerVersion`; `touchedAt` is its last request, for the sweep.
+ * `readerVersion`, and `outline` its headings and words; `cover` is what
+ * its banner and badge show, null for none; `touchedAt` is its last
+ * request, for the sweep.
  */
 export const publicCopies = pgTable(
   'public_copies',
@@ -63,7 +66,9 @@ export const publicCopies = pgTable(
     title: text().notNull(),
     markdown: text().notNull(),
     rendering: jsonb().$type<Segment[]>().notNull(),
+    outline: jsonb().$type<Outline>(),
     readerVersion: integer().notNull(),
+    cover: jsonb().$type<PublicCover>(),
     uploadedBy: uuid()
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),

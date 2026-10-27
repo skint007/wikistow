@@ -132,8 +132,7 @@ export function mountPublicLinkRoutes(
     async (c) => {
       const page = await openPublicPage(db, c.req.param('id') ?? '');
       if (page.kind === 'not-found') return notFound(c);
-      const html =
-        page.kind === 'page' ? publicPageHtml(page.title, page.body) : updatingPageHtml();
+      const html = page.kind === 'page' ? publicPageHtml(page) : updatingPageHtml();
       return c.html(html, 200, PAGE_HEADERS);
     },
     { rateLimit: PAGE_LIMIT },
