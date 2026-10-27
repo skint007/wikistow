@@ -48,12 +48,35 @@ export const turnOff = {
 } as const satisfies RouteDef;
 
 /**
+ * A copy's cover as its published version shows it (`coverOf`): its emoji,
+ * the name of its icon from the icon set, its banner, and the image shown
+ * in place of the emoji. A banner image or the image names one of the
+ * copy's `attachments`. Loose, so a newer app's kind of banner reaches an
+ * older server: the server shows what it accepts of a cover, as the app
+ * does, and the theme's gradient, or no badge, for the rest.
+ */
+export const CopyCover = z.object({
+  emoji: z.string().max(64).optional(),
+  symbol: z.string().max(64).optional(),
+  banner: z
+    .object({
+      kind: z.string().max(32),
+      name: z.string().max(64).optional(),
+      attachmentId: AttachmentId.optional(),
+      focal: z.number().int().min(0).max(100).optional(),
+    })
+    .optional(),
+  icon: AttachmentId.optional(),
+});
+export type CopyCover = z.infer<typeof CopyCover>;
+
+/**
  * Stage a copy of the page's published version `revisionId`, which must be
  * its published head, while its link is on: its title, its Markdown without
- * the frontmatter, the attachments the body shows or links to, and its
- * wikilinks' targets (`linkKey` → page) that name, by published title
- * alone, a page whose link is on. The server renders it and answers which
- * of the attachments it needs (`files`), each to upload at
+ * the frontmatter, its `cover`, the attachments the cover and body show or
+ * link to, and its wikilinks' targets (`linkKey` → page) that name, by
+ * published title alone, a page whose link is on. The server renders it and
+ * answers which of the attachments it needs (`files`), each to upload at
  * `FILE_UPLOAD_PATH`, before `commit` makes the copy live.
  */
 export const stage = {
@@ -80,6 +103,7 @@ export const stage = {
       )
       .max(MAX_ATTACHMENTS),
     targets: z.array(z.object({ key: z.string().max(MAX_TARGET_KEY), pageId: PageId })).max(10_000),
+    cover: CopyCover.optional(),
   }),
   response: z.strictObject({ copyId: CopyId, files: z.array(AttachmentId) }),
   status: 201,

@@ -463,6 +463,37 @@ async function gardenPicture(page: Page) {
   return Buffer.from(base64, 'base64');
 }
 
+/** A small drawing of a seedling, as a PNG, for a page's image in place of its emoji. */
+async function seedlingPicture(page: Page) {
+  const base64 = await page.evaluate(async () => {
+    const canvas = new OffscreenCanvas(144, 144);
+    const draw = canvas.getContext('2d');
+    if (!draw) throw new Error('No 2D context');
+    draw.fillStyle = '#fff4d6';
+    draw.fillRect(0, 0, 144, 144);
+    draw.fillStyle = '#8b5a2b';
+    draw.fillRect(0, 104, 144, 40);
+    draw.strokeStyle = '#3f8f3a';
+    draw.lineWidth = 8;
+    draw.beginPath();
+    draw.moveTo(72, 108);
+    draw.lineTo(72, 56);
+    draw.stroke();
+    draw.fillStyle = '#5bb450';
+    for (const [x, turn] of [
+      [50, -0.5],
+      [94, 0.5],
+    ] as const) {
+      draw.beginPath();
+      draw.ellipse(x, 58, 24, 12, turn, 0, Math.PI * 2);
+      draw.fill();
+    }
+    const bytes = new Uint8Array(await (await canvas.convertToBlob()).arrayBuffer());
+    return btoa(String.fromCharCode(...bytes));
+  });
+  return Buffer.from(base64, 'base64');
+}
+
 /** Open a page's public link dialog from its right-click menu in the tree. */
 async function openLinkDialog(page: Page, title: string) {
   await page.getByRole('treeitem', { name: new RegExp(title) }).click({ button: 'right' });
@@ -481,9 +512,21 @@ test('capture public links: the dialog, the markers, the Publish prompt and the 
   await memberWithVault(page, await adminTab(freshPage, admin.email));
   await newSpace(page, 'Garden club');
 
-  // A page to link to, with a link of its own.
+  // A page to link to, with a link of its own, a preset banner and an icon from the set.
   await newPage(page, 'Watering');
   await fillSource(page, '## Mornings\n\nWater before nine, at the roots.');
+  await waitForSave(page);
+  await page.getByRole('button', { name: 'Banner' }).click();
+  await page.getByRole('dialog', { name: 'Banner' }).getByRole('button', { name: 'Ocean' }).click();
+  await waitForSave(page);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Add emoji' }).click();
+  await page.getByRole('button', { name: 'Icons', exact: true }).click();
+  await page.getByLabel('Search icons').fill('droplets');
+  await page
+    .getByRole('button', { name: /^droplets/i })
+    .first()
+    .click();
   await waitForSave(page);
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByText('Published v1')).toBeVisible();
@@ -505,6 +548,24 @@ test('capture public links: the dialog, the markers, the Publish prompt and the 
   await expectSource(page, /attachment:/);
   const image = (await sourceOf(page)).trim();
   await fillSource(page, PLANTING(image));
+  await waitForSave(page);
+  // Its cover: the garden as its banner, and a seedling in place of its emoji.
+  await page.getByRole('button', { name: 'Banner' }).click();
+  await page
+    .getByRole('dialog', { name: 'Banner' })
+    .locator('input[type=file]')
+    .setInputFiles({ name: 'garden.png', mimeType: 'image/png', buffer: picture });
+  await expect(page.locator('[data-region="page.cover"]')).toHaveAttribute('data-banner', 'image');
+  await waitForSave(page);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Add emoji' }).click();
+  await page.getByRole('button', { name: 'Image', exact: true }).click();
+  await page.locator('input[type=file][accept*="svg"]').setInputFiles({
+    name: 'seedling.png',
+    mimeType: 'image/png',
+    buffer: await seedlingPicture(page),
+  });
+  await expect(page.getByRole('button', { name: 'Change image' })).toBeVisible();
   await waitForSave(page);
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByText('Published v1')).toBeVisible();
@@ -541,13 +602,30 @@ test('capture public links: the dialog, the markers, the Publish prompt and the 
   await asking.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Published v2')).toBeVisible();
 
-  // The public page, as anyone with the link sees it.
+  // The public page, as anyone with the link sees it: wide in both palettes, and on a phone.
   const visitor = await freshPage();
   await visitor.setViewportSize({ width: 1280, height: 800 });
-  await visitor.goto(url);
-  await expect(visitor.getByText('Sow the second row of peas in April.')).toBeVisible();
-  await expect(visitor.getByRole('link', { name: 'Watering' })).toBeVisible();
+  // The new version's copy goes up after Publish, with its files.
+  await expect(async () => {
+    await visitor.goto(url);
+    await expect(visitor.getByText('Sow the second row of peas in April.')).toBeVisible({
+      timeout: 1000,
+    });
+  }).toPass();
+  await expect(visitor.getByRole('img', { name: 'Page image' })).toBeVisible();
+  await expect(visitor.getByRole('navigation', { name: 'On this page' })).toBeVisible();
+  await visitor.evaluate(() => document.fonts.ready);
   await visitor.screenshot({ path: 'screenshots/public-link-page.png', fullPage: true });
+  await visitor.emulateMedia({ colorScheme: 'dark' });
+  await visitor.screenshot({ path: 'screenshots/public-link-page-dark.png', fullPage: true });
+  await visitor.emulateMedia({ colorScheme: 'light' });
+  await visitor.setViewportSize({ width: 390, height: 844 });
+  await visitor.screenshot({ path: 'screenshots/public-link-page-phone.png' });
+  // The page it links to, with its preset banner and icon.
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  await visitor.getByRole('link', { name: 'Watering' }).click();
+  await expect(visitor.getByRole('img', { name: 'Page icon droplets' })).toBeVisible();
+  await visitor.screenshot({ path: 'screenshots/public-link-page-linked.png' });
 });
 
 const RECIPE_PROPERTIES = `# From Obsidian

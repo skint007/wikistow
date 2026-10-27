@@ -5,6 +5,7 @@ import {
   moveOperations as moves,
   pageOperations as pages,
   publicLinkOperations as links,
+  reviseCover,
   sharingOperations as sharing,
   spaceOperations,
   utf8,
@@ -39,6 +40,10 @@ function markers() {
     body: `Router admin is on vlan 20. PLAINTEXT-PUBLIC-BODY-${n}`,
     usedName: `router PLAINTEXT-USED-NAME-${n}.png`,
     usedBytes: `PNG bytes PLAINTEXT-USED-BYTES-${n}`,
+    bannerName: `PLAINTEXT-BANNER-NAME-${n}.webp`,
+    bannerBytes: `WebP bytes PLAINTEXT-BANNER-BYTES-${n}`,
+    iconName: `PLAINTEXT-ICON-NAME-${n}.png`,
+    iconBytes: `PNG bytes PLAINTEXT-ICON-BYTES-${n}`,
     // Never readable.
     frontmatter: `PLAINTEXT-FRONTMATTER-${n}`,
     draft: `The wifi password is hunter2. PLAINTEXT-DRAFT-${n}`,
@@ -55,8 +60,9 @@ const TARGET_TITLE = 'Target page';
 /**
  * A page in a folder the owner shares with a sharer and an uploader, both
  * editors who publish, with an older publication that had a public copy,
- * then a published version with frontmatter, an attachment its body shows
- * and one it doesn't, and a wikilink to another public page, which links
+ * then a published version with frontmatter, a cover with a banner image
+ * and an image, an attachment its body shows and one it doesn't, and a
+ * wikilink to another public page, which links
  * back to it by address; and a draft after it, and a private page beside
  * it. Both pages' links are on, each with a copy the owner uploaded; the
  * sharer turned the first page's on.
@@ -100,10 +106,28 @@ async function world() {
     mediaType: 'image/png',
     bytes: utf8(m.unusedBytes),
   });
+  const banner = await pages.uploadAttachment(owner.ctx, page, {
+    name: m.bannerName,
+    mediaType: 'image/webp',
+    bytes: utf8(m.bannerBytes),
+  });
+  const icon = await pages.uploadAttachment(owner.ctx, page, {
+    name: m.iconName,
+    mediaType: 'image/png',
+    bytes: utf8(m.iconBytes),
+  });
   await pages.editDraft(owner.ctx, page, {
     title: m.title,
     markdown: `---\nsecret: ${m.frontmatter}\n---\n${m.body}\n\n![](attachment:${used.id})\n\nSee [[${TARGET_TITLE}]].\n`,
-    attachments: [used, unused],
+    attachments: [used, unused, banner, icon],
+    extensions: reviseCover(
+      {},
+      {
+        emoji: '🏕️',
+        banner: { kind: 'image', attachmentId: banner.id, focal: 37 },
+        icon: { attachmentId: icon.id },
+      },
+    ),
   });
   await pages.publishPage(owner.ctx, page);
   await pages.editDraft(owner.ctx, page, { markdown: m.draft });
@@ -126,7 +150,21 @@ async function world() {
   const targetLink = await links.turnOn(owner.ctx, targetId);
   await links.shareCopy(owner.ctx, page);
   await links.shareCopy(owner.ctx, target);
-  return { m, owner, sharer, uploader, shareId, page, folderId, target, id, targetLink, used };
+  return {
+    m,
+    owner,
+    sharer,
+    uploader,
+    shareId,
+    page,
+    folderId,
+    target,
+    id,
+    targetLink,
+    used,
+    banner,
+    icon,
+  };
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -150,14 +188,26 @@ async function readable(...texts: string[]) {
 const rowsNaming = (pageId: PageId) =>
   t.db.select().from(schema.publicTargets).where(eq(schema.publicTargets.targetPageId, pageId));
 
-/** The copy's title, body and the attachment it shows, as `world` made them. */
-const copied = (m: World['m']) => [m.title, m.body, m.usedName, m.usedBytes];
+/** The copy's title, body and the attachments its body and cover show, as `world` made them. */
+const copied = (m: World['m']) => [
+  m.title,
+  m.body,
+  m.usedName,
+  m.usedBytes,
+  m.bannerName,
+  m.bannerBytes,
+  m.iconName,
+  m.iconBytes,
+];
+
+/** That none of `copied` is readable. */
+const noneCopied = (m: World['m']) => copied(m).map(() => false);
 
 describe('a page with a public link', () => {
-  it('has only its published title, body and the attachment it shows readable', async () => {
+  it('has only its published title, body and the attachments it shows readable', async () => {
     const w = await world();
     const { m } = w;
-    expect(await readable(...copied(m))).toEqual([true, true, true, true]);
+    expect(await readable(...copied(m))).toEqual(copied(m).map(() => true));
     const never = [
       m.frontmatter,
       m.draft,
@@ -196,6 +246,13 @@ describe('a page with a public link', () => {
     expect(file.status).toBe(200);
     expect(file.headers.get('content-type')).toBe('image/png');
     expect(new TextDecoder().decode(await file.arrayBuffer())).toBe(m.usedBytes);
+    // Its cover: the banner image at its focal point, to 5%, and the image in the badge.
+    expect(html).toContain(
+      `<img class="banner-img focal-35" src="/p/${w.id}/files/${w.banner.id}" alt="">`,
+    );
+    expect(html).toContain(`<img src="/p/${w.id}/files/${w.icon.id}" alt="Page image">`);
+    const icon = await visit(`/p/${w.id}/files/${w.icon.id}`);
+    expect(new TextDecoder().decode(await icon.arrayBuffer())).toBe(m.iconBytes);
     const back = await (await visit(`/p/${w.targetLink}`)).text();
     expect(back).toContain(`<a href="/p/${w.id}">the notes</a>`);
 
@@ -276,13 +333,14 @@ describe('a page with a public link', () => {
       expect(await rowsNaming(w.page.pageId)).toHaveLength(1);
       await end(w);
       // At once, with no sweep.
-      expect(await readable(...copied(w.m))).toEqual([false, false, false, false]);
+      expect(await readable(...copied(w.m))).toEqual(noneCopied(w.m));
       expect(await rowsNaming(w.page.pageId)).toEqual([]);
       const dead = await visit(`/p/${w.id}`);
       expect(dead.status).toBe(404);
       const unknown = await visit(`/p/${randomBytes(16).toString('base64url')}`);
       expect(await dead.text()).toBe(await unknown.text());
       expect((await visit(`/p/${w.id}/files/${w.used.id}`)).status).toBe(404);
+      expect((await visit(`/p/${w.id}/files/${w.banner.id}`)).status).toBe(404);
     });
   }
 
@@ -310,7 +368,7 @@ describe('a page with a public link', () => {
       shareId: w.shareId,
       identityId: identityOf(w.uploader),
     });
-    expect(await readable(...copied(w.m), kept)).toEqual([false, false, false, false, true]);
+    expect(await readable(...copied(w.m), kept)).toEqual([...noneCopied(w.m), true]);
     // The sharer's link stays on, and the target's copy still leads to it.
     expect(await rowsNaming(w.page.pageId)).toHaveLength(1);
     const res = await visit(`/p/${w.id}`);
@@ -338,7 +396,7 @@ describe('a page with a public link', () => {
       .set({ live: false, touchedAt: new Date(Date.now() - 60 * 60 * 1000) })
       .where(eq(schema.publicCopies.pageId, w.target.pageId));
     await sweepPublicLinks(t.db);
-    expect(await readable(...copied(w.m))).toEqual([false, false, false, false]);
+    expect(await readable(...copied(w.m))).toEqual(noneCopied(w.m));
     expect((await visit(`/p/${w.id}`)).status).toBe(404);
     const copies = t.db
       .select()
@@ -353,7 +411,7 @@ describe('a page with a public link', () => {
     const w = await world();
     await pages.editDraft(w.owner.ctx, w.page, { markdown: 'A new version' });
     await pages.publishPage(w.owner.ctx, w.page);
-    expect(await readable(...copied(w.m))).toEqual([false, false, false, false]);
+    expect(await readable(...copied(w.m))).toEqual(noneCopied(w.m));
     const res = await visit(`/p/${w.id}`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('This page is being updated');

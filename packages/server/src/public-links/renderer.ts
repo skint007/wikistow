@@ -51,6 +51,7 @@ export function createRenderer({ limitMs = RENDER_LIMIT_MS, maxWaiting = MAX_WAI
   const written = (input: RenderInput, note: string): Rendered => ({
     segments: [writtenHtml(input.markdown, note)],
     files: [],
+    outline: { headings: [], words: input.markdown.split(/\s+/).filter(Boolean).length },
   });
 
   function start(): Worker {

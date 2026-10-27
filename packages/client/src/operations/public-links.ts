@@ -10,6 +10,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import { ApiError } from '../api/client.ts';
+import { coverOf, type ShownCover } from '../cover.ts';
 import { utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { PageId as PageIdSchema } from '../ids.ts';
@@ -522,6 +523,28 @@ export function attachmentsUsed(body: string, attachments: PagePayload['attachme
 }
 
 /**
+ * The cover a copy shows (`publicLinkRoutes.CopyCover`), from its version's
+ * (`coverOf`): the theme's gradient, and no emoji, image or icon, go as
+ * nothing.
+ */
+function copyCover({ emoji, banner, icon, symbol }: ShownCover) {
+  return {
+    ...(emoji && { emoji }),
+    ...(symbol && { symbol: symbol.name }),
+    ...(banner.kind !== 'theme' && { banner }),
+    ...(icon && { icon: icon.attachmentId }),
+  } satisfies publicLinkRoutes.CopyCover;
+}
+
+/** The attachments a cover shows: its banner image, then its image. */
+const coverFiles = (cover: publicLinkRoutes.CopyCover) => [
+  ...(cover.banner?.kind === 'image' && cover.banner.attachmentId
+    ? [cover.banner.attachmentId]
+    : []),
+  ...(cover.icon ? [cover.icon] : []),
+];
+
+/**
  * Which of the page's wikilinks may lead to another public page, by key:
  * those that name, by its current published title alone, a page of the
  * space whose link is on. Each is resolved against this person's tree, as
@@ -578,13 +601,13 @@ async function wikilinkTargets(
 /**
  * Upload a readable copy of the page's published version and make it the
  * one its public link shows (ADR 0005, decision 5), while its link is on:
- * staged with its title, its Markdown without the frontmatter, the
- * attachments its body shows or links to and the wikilink targets that may
- * lead to other public pages (`wikilinkTargets`), then each file the server
- * asks for, of those only, then committed. Pass `published`, the version
- * just published and its decrypted payload, right after publishing it;
- * otherwise the published head the server names is opened, as a reader
- * opens it.
+ * staged with its title, its Markdown without the frontmatter, its cover,
+ * the attachments its cover and body show or link to, and the wikilink
+ * targets that may lead to other public pages (`wikilinkTargets`), then
+ * each file the server asks for, of those only, then committed. Pass
+ * `published`, the version just published and its decrypted payload, right
+ * after publishing it; otherwise the published head the server names is
+ * opened, as a reader opens it.
  */
 export async function shareCopy(
   ctx: ClientContext,
@@ -612,7 +635,16 @@ export async function shareCopy(
   const fits = utf8(withTables).length <= pageRoutes.MAX_MARKDOWN_BYTES;
   const markdown = fits ? withTables : copyBody(payload.markdown, others);
   const tableTargets = fits ? listed.targets : [];
-  const attachments = attachmentsUsed(body, payload.attachments);
+  const cover = copyCover(coverOf(payload));
+  // The cover's images come first, as the server chooses them, so a long
+  // body can't leave them out.
+  const byId = new Map(payload.attachments.map((ref) => [ref.id, ref]));
+  const attachments = [
+    ...new Set([
+      ...coverFiles(cover).flatMap((id) => byId.get(id) ?? []),
+      ...attachmentsUsed(body, payload.attachments),
+    ]),
+  ];
   // Every file the copy should keep is opened before anything readable
   // goes up, so one that doesn't open sends nothing. Those left out for
   // size, as the server leaves them out, aren't opened yet.
@@ -640,6 +672,7 @@ export async function shareCopy(
         size,
       })),
       targets: [...targets, ...tableTargets],
+      cover,
     },
   });
   // Whatever the server asks for, only the files on this app's list go. One
