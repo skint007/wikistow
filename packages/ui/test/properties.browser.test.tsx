@@ -6,7 +6,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { act, createRef, useState, type ReactNode } from 'react';
+import { act, createRef, useState, type ReactNode, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
@@ -406,6 +406,17 @@ async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') 
   return { container, ref };
 }
 
+/**
+ * Focus the editor, ready for keys. ProseMirror checks the caret 20 ms after
+ * a focus, and puts its own selection back over any keys whose caret moves
+ * it hasn't read yet: on a busy runner, arrows typed then are lost (#202).
+ * Timers of the same delay run in the order they're set, so this waits it out.
+ */
+async function focusEditor(ref: RefObject<EditorSurfaceHandle | null>) {
+  act(() => ref.current?.focus());
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
 describe('a reference in the visual editor', () => {
   it('shows the value beside the code, follows the properties, and leaves the text as written', async () => {
     const page = '---\nservings: 4\n---\nServes `=servings` and `= this.nope`.\n';
@@ -428,7 +439,7 @@ describe('completing a reference', () => {
 
   it('offers the page’s keys after `= in the source editor, writing the closing backtick', async () => {
     const { container, ref } = await pageEditor(page, 'source');
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     await userEvent.keyboard('{Control>}{End}{/Control}{ArrowUp}{End}`=se');
     const labels = () =>
       [...container.querySelectorAll('div')].flatMap((div) =>
@@ -448,7 +459,7 @@ describe('completing a reference', () => {
       '---\nservings: 4\n---\nServes `=servngs` people\n',
       'source',
     );
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     // After `serv`.
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(13) + 'i',
@@ -471,7 +482,7 @@ describe('completing a reference', () => {
       '---\ncook_time: 25\n---\nBake `=cok time` long\n',
       'source',
     );
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     // After `c`.
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(8) + 'o',
@@ -496,7 +507,7 @@ describe('completing a reference', () => {
       '---\ncook_time: 25\n---\nBake for  minutes at `350F`.\n',
       'source',
     );
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(9) + '`=co',
     );
@@ -527,7 +538,7 @@ describe('completing a reference', () => {
   it('matches a name as references do, `_`, `-` and spaces alike, in both editors', async () => {
     for (const mode of ['source', 'visual'] as const) {
       const { container, ref } = await pageEditor(page, mode);
-      act(() => ref.current?.focus());
+      await focusEditor(ref);
       await userEvent.keyboard(
         mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=cook t' : '{End} `=cook t',
       );
@@ -554,7 +565,7 @@ describe('completing a reference', () => {
     const marked = '---\nमूल्य: 40\n---\nServes \n';
     for (const mode of ['source', 'visual'] as const) {
       const { container, ref } = await pageEditor(marked, mode);
-      act(() => ref.current?.focus());
+      await focusEditor(ref);
       // Up to its virama, a combining mark.
       await userEvent.keyboard(
         mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=मूल्' : '{End} `=मूल्',
@@ -598,7 +609,7 @@ describe('Insert in page', () => {
   for (const mode of ['source', 'visual'] as const) {
     it(`keeps a reference apart from code beside it in the ${mode} editor`, async () => {
       const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `x`\n', mode);
-      act(() => ref.current?.focus());
+      await focusEditor(ref);
       await userEvent.keyboard('{Control>}{Home}{/Control}{End}');
       await fromMenu(container, 'Servings', 'Insert in page');
       await expect
@@ -612,7 +623,7 @@ describe('Insert in page', () => {
       '---\nservings: 4\n---\nUse `abcd` now\n',
       'source',
     );
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     // `bc` selected.
     await userEvent.keyboard(
       '{Control>}{Home}{/Control}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{Shift>}{ArrowRight}{ArrowRight}{/Shift}',
@@ -628,7 +639,7 @@ describe('Insert in page', () => {
       '---\nservings: 4\n---\nUse `abcd` now\n',
       'visual',
     );
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     // `bc` selected: in the editor's text, "Use abcd now".
     await userEvent.keyboard(
       '{Control>}{Home}{/Control}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{Shift>}{ArrowRight}{ArrowRight}{/Shift}',
@@ -641,7 +652,7 @@ describe('Insert in page', () => {
 
   it('puts a reference after a code span the source editor’s cursor is in', async () => {
     const { container, ref } = await pageEditor('---\nservings: 4\n---\nUse `xy` now\n', 'source');
-    act(() => ref.current?.focus());
+    await focusEditor(ref);
     await userEvent.keyboard(
       '{End}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}',
     );
@@ -719,7 +730,7 @@ describe('Insert in page', () => {
           .toBe(true);
       }
       // The cursor at the first line's end.
-      act(() => ref.current?.focus());
+      await focusEditor(ref);
       await userEvent.keyboard('{End}');
       await fromMenu(container, 'Servings', 'Insert in page');
       const page = '---\nservings: 4\n---\nServes`=servings`\n\nThe end.\n';
