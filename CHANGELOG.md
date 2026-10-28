@@ -4,7 +4,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.18.0 - 2026-10-28
+
 ### Highlights
+
+#### Upgrade notes
+
+- A page shared with a public link before this version shows its banner and its emoji, image or icon there once it’s published again. Until then, its public page shows the theme’s banner and no badge.
 
 #### UI polish
 
@@ -24,6 +30,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - The property tests wait out ProseMirror’s caret check after focusing the editor before they type, which fixes a flaky **Insert in page** test. (#206)
 - The deep-folder timing test in `query.test.ts` takes the fastest of 15 rounds and allows 24 times as long for 8 times the folders, as the other timing tests do, which fixes a flaky failure on busy runners. (#207)
+
+#### Releases and packaging
+
+- Electron 44.10.0, from 44.9.3. (#208)
 
 ## 0.17.0 - 2026-10-25
 
