@@ -33,7 +33,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Releases and packaging
 
-- Electron 44.10.0, from 44.9.3. (#PRNUM)
+- Electron 44.10.0, from 44.9.3. (#208)
 
 ## 0.17.0 - 2026-10-25
 
