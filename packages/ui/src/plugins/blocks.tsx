@@ -1,9 +1,15 @@
 import { foldPropertyName } from '@wikistow/client';
-import type { BlockProps, PageRef, PropertyValue } from '@wikistow/plugin-sdk';
+import {
+  PluginError,
+  type BlockProps,
+  type PageRef,
+  type PropertyValue,
+} from '@wikistow/plugin-sdk';
 import type { Element, ElementContent } from 'hast';
 import { use, useMemo, useRef } from 'react';
 import { PageProperties } from '../page/body-context';
 import { ReadingChanges } from '../page/reading-changes';
+import { applyChange, type ReadingChange } from '../page/reading-changes-model';
 import {
   blockProperties,
   checkedProperty,
@@ -28,7 +34,9 @@ export function textOf(code: Element): string {
  * A plugin block in the reader: the plugin's view of the fence's text, and
  * of the page's properties as shown. Where the page can change while it's
  * read (`ReadingChanges`), `setProperty` queues a property's change, as a
- * tick is; elsewhere it is null, and values entered stay in the view. The
+ * tick is, once it is known to apply to the page as shown; one that can't
+ * is refused as the visual editor refuses it, and nothing is queued.
+ * Elsewhere it is null, and values entered stay in the view. The
  * view is drawn again as the properties change, but not for its own
  * change (`stillShown`).
  */
@@ -49,6 +57,9 @@ export function ReaderBlock({
   const properties = useMemo(() => blockProperties(read), [read]);
   const reading = use(ReadingChanges);
   const change = reading?.rights.allowed ? reading.change : null;
+  // The page as shown when a change comes, which it must apply to.
+  const shownNow = useRef(reading?.markdown ?? '');
+  shownNow.current = reading?.markdown ?? '';
   // The props the view was drawn with, kept while they still stand for
   // the page: the same for the same text, page and rights, and properties
   // changed by none but the view. The same every render that keeps them.
@@ -70,8 +81,11 @@ export function ReaderBlock({
           const checked = checkedProperty(key, value);
           // A view drawn over since changes nothing.
           if (drawn.current?.properties !== shown) return;
+          const made: ReadingChange = { kind: 'property', ...checked };
+          const applies = applyChange(shownNow.current, made);
+          if (!applies.ok) throw new PluginError('invalid', applies.reason);
           shown.own.set(foldPropertyName(checked.key), checked.value);
-          change({ kind: 'property', ...checked });
+          change(made);
         }
       : null;
     drawn.current = {
