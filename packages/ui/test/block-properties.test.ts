@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   blockProperties,
   checkedProperty,
+  pageBlockProperties,
   propertyNamed,
   stillShown,
 } from '../src/plugins/block-properties.ts';
@@ -26,6 +27,14 @@ describe('a block’s view of the page’s properties', () => {
     });
     expect(blockProperties(read(null))).toEqual({});
     expect(blockProperties(read('---\n- a list\n---\n'))).toBeNull();
+  });
+
+  it('is read from a page’s whole Markdown as the previews read it', () => {
+    expect(pageBlockProperties(`${PAGE}Body with \`=servings\`.\n`)).toEqual(
+      blockProperties(read(PAGE)),
+    );
+    expect(pageBlockProperties('No frontmatter.\n')).toEqual({});
+    expect(pageBlockProperties('---\n- a list\n---\n')).toBeNull();
   });
 
   it('finds a value by its name as a reference does', () => {

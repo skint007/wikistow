@@ -1,4 +1,10 @@
-import { foldPropertyName, isPropertyName, type PropertyData } from '@wikistow/client';
+import {
+  foldPropertyName,
+  isPropertyName,
+  readProperties,
+  splitFrontmatter,
+  type PropertyData,
+} from '@wikistow/client';
 import { PluginError, type PropertyValue } from '@wikistow/plugin-sdk';
 
 // A page's properties as a plugin block sees and sets them (#212): its
@@ -18,6 +24,12 @@ export function blockProperties(properties: readonly PropertyData[] | null): Blo
   // The first of two keys alike wins, as references find them.
   for (const { key, value } of properties) if (!Object.hasOwn(record, key)) record[key] = value;
   return record;
+}
+
+/** A page's properties as a block on it sees them, from its whole Markdown, as the previews read them. */
+export function pageBlockProperties(markdown: string): BlockProperties {
+  const read = readProperties(splitFrontmatter(markdown).frontmatter);
+  return blockProperties(read.ok ? read.properties : null);
 }
 
 /** The value of the first key of `properties` whose name matches `name`, as `` `=name` `` finds it. */
