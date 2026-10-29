@@ -4,6 +4,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-29
+
 ### Highlights
 
 #### Features
@@ -15,11 +17,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- A published page’s task checkboxes tick for an editor who can publish it. Ticks wait for a pause of about three seconds, at most fifteen, or for leaving the page, then go into the draft and are published together as one version. Each changes only the character in its box, found again by its text if the page changed meanwhile; one that no longer applies is left out, and the page says so. If the draft has unpublished changes, or the page has a public link (whose copy every publish ends), the boxes stay disabled, with a hint saying why, and a tick that meets either goes into the draft only. Readers’ boxes stay read-only. (#212)
+- A published page’s task checkboxes tick for an editor who can publish it. Ticks wait for a pause of about three seconds, at most fifteen, or for leaving the page, then go into the draft and are published together as one version. Each changes only the character in its box, found again by its text if the page changed meanwhile; one that no longer applies is left out, and the page says so. If the draft has unpublished changes, or the page has a public link (whose copy every publish ends), the boxes stay disabled, with a hint saying why, and a tick that meets either goes into the draft only. Readers’ boxes stay read-only. (#214)
 
 #### Plugins
 
-- A plugin block’s view gets the page’s properties, and `setProperty(key, value)`, which changes only that value in the frontmatter: as the person’s edit in the visual editor, and in the reader through the same queue as ticks, under the same rules, else null. The view is drawn again as the properties change, but not for its own change. A script block’s number or text field can name a `property`: it shows the page’s value, and sets it when a valid value is committed, on blur or Enter, without writing its fence line. The calculator example gains a recipe block that scales an amount to the page’s servings. The plugin API stays version 1. (#212)
+- A plugin block’s view gets the page’s properties, and `setProperty(key, value)`, which changes only that value in the frontmatter: as the person’s edit in the visual editor, and in the reader through the same queue as ticks, under the same rules, else null. An app plugin’s view is drawn again as the properties change, but not for its own change; a script’s form takes them in place, keeping the field being typed in. A script block’s number or text field can name a `property`: it shows the page’s value, and sets it once a valid value typed into it is committed, on blur or Enter, without writing its fence line. A field tied to a list shows it read-only. The calculator example gains a recipe block that scales an amount to the page’s servings. The plugin API stays version 1, and plugins built with this SDK still load in older apps. (#215)
 
 ## 0.18.1 - 2026-10-29
 
