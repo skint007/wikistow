@@ -18,7 +18,15 @@ import { QUOTE_KINDS } from '../../alert-title';
 import { attachmentId } from '../../attachments';
 import { alertIn } from './alerts';
 import { setKind, type QuoteKind } from './formatting';
-import { claimedBlock } from '@wikistow/plugin-sdk';
+import { claimedBlock, PluginError, type BlockProps } from '@wikistow/plugin-sdk';
+import {
+  blockProperties,
+  checkedProperty,
+  setOwn,
+  stillShown,
+  type DrawnProperties,
+} from '../../../plugins/block-properties';
+import { takesPropsInPlace, updateInPlace } from '../../../plugins/in-place';
 import type { PluginBlock } from '../../../plugins/runtime';
 import { attachmentById, type VisualHost } from './host';
 import type { QueryResults } from './query-results';
@@ -140,8 +148,21 @@ export const tableView = $view(tableSchema.node, () => () => new TableView());
  * plugin it is this ordinary code block, and turns back into the view as
  * the plugin starts.
  */
-/** A plugin's view drawn for a block, the text it was drawn for or last set, and what undoes it. */
-type DrawnBlock = { block: PluginBlock; source: string; undo: (() => void) | void };
+/**
+ * A plugin's view drawn for a block: the text it was drawn for or last
+ * set, the properties it was drawn with and those it set, whether it could
+ * set them, the element and props it was drawn with, for one that takes
+ * new props in place, and what undoes it.
+ */
+type DrawnBlock = {
+  block: PluginBlock;
+  source: string;
+  properties: DrawnProperties;
+  settable: boolean;
+  element: HTMLElement;
+  props: BlockProps | null;
+  undo: (() => void) | void;
+};
 
 /** The plugin block a code block is drawn as: a running plugin claims it, in an editor someone sees. */
 const drawnAs = (node: Node, host: VisualHost): PluginBlock | undefined =>
@@ -234,6 +255,12 @@ class CodeBlockView implements NodeView {
     this.dom.append(this.#header, this.#block, this.#pre);
     this.#show();
     this.#unsubscribe = host.plugins()?.subscribe(() => this.#drawBlock()) ?? (() => {});
+    host.propertyViews.add(this);
+  }
+
+  /** The page's properties changed: a block drawn for others is drawn again. */
+  propertiesChanged() {
+    this.#drawBlock();
   }
 
   #relabel(language: string) {
@@ -275,23 +302,66 @@ class CodeBlockView implements NodeView {
       this.#renderHeader();
     }
     const source = this.#node.textContent;
-    // The same view, for the same text: the runtime rebuilds its list on every change.
-    if (this.#drawn?.block.view === block?.view && this.#drawn?.source === source) return;
+    const properties = blockProperties(this.#host.properties());
+    const settable = this.#host.setProperty() !== null;
+    // The same view, for the same text and properties, but for those it set
+    // itself: the runtime rebuilds its list on every change. One the app
+    // draws, a script's form, takes new properties in place instead, so it
+    // and the field being typed in it stay.
+    const kept = this.#drawn;
+    const inPlace = kept !== null && takesPropsInPlace(kept.block.view);
+    if (
+      kept?.block.view === block?.view &&
+      (!kept ||
+        (kept.source === source &&
+          kept.settable === settable &&
+          (inPlace || stillShown(kept.properties, properties))))
+    ) {
+      // Drawn again with the same values, as for another page's, it takes nothing.
+      const changed = JSON.stringify(kept?.properties.shown) !== JSON.stringify(properties);
+      if (kept && inPlace && kept.props && changed) {
+        kept.properties = { shown: properties, own: new Map() };
+        kept.props = { ...kept.props, properties };
+        updateInPlace(kept.element, kept.props);
+      }
+      return;
+    }
     this.#undraw();
     this.#pre.classList.toggle('hidden', block !== undefined);
     if (!block || !page) return;
     const element = document.createElement('div');
     this.#block.append(element);
-    const drawn: DrawnBlock = { block, source, undo: undefined };
+    const drawn: DrawnBlock = {
+      block,
+      source,
+      properties: { shown: properties, own: new Map() },
+      settable,
+      element,
+      props: null,
+      undo: undefined,
+    };
     this.#drawn = drawn;
     try {
-      drawn.undo = block.view(element, {
+      drawn.props = {
         source,
         page: { ...page },
         setSource: (text) => {
           if (this.#drawn === drawn) this.#setSource(text);
         },
-      });
+        properties,
+        setProperty: settable
+          ? (key, value) => {
+              const checked = checkedProperty(key, value);
+              const set = this.#host.setProperty();
+              if (this.#drawn !== drawn || !set) return;
+              setOwn(drawn.properties, checked.key, checked.value, () => {
+                const made = set(checked.key, checked.value);
+                if (!made.ok) throw new PluginError('invalid', made.reason);
+              });
+            }
+          : null,
+      };
+      drawn.undo = block.view(element, drawn.props);
     } catch (error) {
       element.textContent = 'This plugin block failed. Switch to source to edit it as text.';
       this.#host.plugins()?.viewFailed(block.pluginId, error);
@@ -374,6 +444,7 @@ class CodeBlockView implements NodeView {
   // Not while React may be rendering, as the editor can update then.
   destroy() {
     this.#unsubscribe();
+    this.#host.propertyViews.delete(this);
     this.#undraw();
     this.#query?.remove();
     queueMicrotask(() => this.#picker.unmount());

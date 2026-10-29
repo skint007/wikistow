@@ -29,6 +29,7 @@ import { PLAIN, vaultStore } from '../vault/store';
 import { pagesFor, pluginError, writeLimit, type Caller } from './pages';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { formView, readFields, type ReadField } from './block-form';
+import type { BlockProperties } from './block-properties';
 import { editorDrafts } from './drafts';
 import { desktopSource } from './desktop-source';
 import { librarySource } from './library';
@@ -664,13 +665,15 @@ export function createRuntime(source: RuntimeSource) {
     },
     /**
      * What a script's block shows for `source` on `page`: its fields as its
-     * form reads them, and its outputs or why they failed. Null when no
-     * running script fills in blocks of that `language`.
+     * form reads them, bound ones from the page's `properties`, and its
+     * outputs or why they failed. Null when no running script fills in
+     * blocks of that `language`.
      */
     async blockResults(
       language: string,
       page: PageRef,
       source: string,
+      properties: BlockProperties = null,
     ): Promise<{
       fields: Record<string, ReadField>;
       outputs: Record<string, OutputResult> | { error: string };
@@ -680,7 +683,7 @@ export function createRuntime(source: RuntimeSource) {
         if (!worker) continue;
         for (const [type, { spec }] of active.scriptBlocks) {
           if (blockLanguage(plugin.manifest.id, type) !== language) continue;
-          const fields = readFields(spec, source);
+          const fields = readFields(spec, source, properties);
           const values = Object.fromEntries(
             Object.entries(fields).flatMap(([id, { value }]) =>
               value === null ? [] : [[id, value]],

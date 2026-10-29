@@ -159,6 +159,14 @@ export function claimedBlock(language: string): { pluginId: string; type: string
   return match?.[1] && match[2] ? { pluginId: match[1], type: match[2] } : null;
 }
 
+/** A scalar in a page's properties: text, a number, `true` or `false`, or `null` for an empty value. */
+export type PropertyScalar = string | number | boolean | null;
+
+/** A property's value: a scalar, or a list of scalars and lists of scalars. */
+export type PropertyValue =
+  | PropertyScalar
+  | readonly (PropertyScalar | readonly PropertyScalar[])[];
+
 /** What a block's view is given. */
 export type BlockProps = {
   /** The fence's text, as the page holds it: the block's settings and saved values. */
@@ -171,6 +179,37 @@ export type BlockProps = {
    * the reader, where values the person enters stay in the view.
    */
   setSource: ((source: string) => void) | null;
+  /**
+   * The page's properties, as the page shows them now: each top-level key
+   * of its frontmatter, as written, with its value. A value that is
+   * neither a scalar nor a list of them, such as a nested map, is its
+   * source text. Empty for a page without frontmatter, and null for one
+   * whose frontmatter doesn't read as properties. The view is drawn again
+   * when they change, except for a change it made itself (`setProperty`).
+   * Missing (undefined) in an app older than it: treat that as unknown.
+   */
+  properties?: Readonly<Record<string, PropertyValue>> | null | undefined;
+  /**
+   * Set one of the page's properties, changing only that value's
+   * characters in its frontmatter: the key as written, else the first key
+   * whose name matches it as `` `=key` `` does (case, `_`, `-` and spaces
+   * alike), else a new key at the block's end. `key` follows the
+   * template-variable rule (a letter or digit, then letters, digits,
+   * spaces, `_` and `-`). Each `=key` on the page, and on others as
+   * `` `=[[Page]].key` ``, follows it.
+   *
+   * In the visual editor it is the person's own edit to the draft. In the
+   * reader it is for an editor who can publish the page, on its latest
+   * publication, while the draft has no changes: shown at once, and
+   * published with the page's other changes once they pause (as a task
+   * ticked there is), or left out with a note if it no longer applies by
+   * then. Null anywhere else. Throws `PluginError` with `invalid` for a key
+   * or value that can't be set, or, in the editor, a value that can't be
+   * changed in place, such as one on several lines. Call it as a value is
+   * committed, on blur or Enter, not on each key. Missing (undefined) in
+   * an app older than it, which can't set properties.
+   */
+  setProperty?: ((key: string, value: PropertyValue) => void) | null | undefined;
 };
 
 /**
@@ -195,10 +234,28 @@ export type NumberField = {
   default?: number | undefined;
   min?: number | undefined;
   max?: number | undefined;
+  /** A property the field shows and sets (`BoundField`). */
+  property?: string | undefined;
 };
 
 /** One line of text. */
-export type TextField = { type: 'text'; label: string; default?: string | undefined };
+export type TextField = {
+  type: 'text';
+  label: string;
+  default?: string | undefined;
+  /** A property the field shows and sets (`BoundField`). */
+  property?: string | undefined;
+};
+
+/*
+ * A field with `property` is bound to that page property, named by the
+ * template-variable rule, as `setProperty` takes it: it shows the
+ * property's value when the page has one, else its fence line or default,
+ * and sets the property, never its fence line, once a valid value is
+ * committed (blur or Enter), as a number for a number field. Where the
+ * page can't change (`setProperty` is null), a value entered stays in the
+ * form.
+ */
 
 export type BlockField = NumberField | TextField;
 

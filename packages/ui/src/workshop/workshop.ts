@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
+import { pageBlockProperties } from '../plugins/block-properties';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
 import { tabSafeMode } from '../plugins/safe-mode';
 import { SCRIPT_BUDGET_MS } from '../plugins/script-worker';
@@ -581,8 +582,10 @@ export class Workshop {
     for (const sample of this.samples.flushed()) {
       const page = { spaceId: SAMPLE_SPACE, pageId: sample.pageId };
       const blocks = [];
+      // Fields bound to a property show the sample's value, as its previews do.
+      const properties = pageBlockProperties(sample.markdown);
       for (const { language, source } of pluginFences(sample.markdown)) {
-        const results = await this.preview.blockResults(language, page, source);
+        const results = await this.preview.blockResults(language, page, source, properties);
         blocks.push(
           results
             ? { block: language, fields: results.fields, outputs: results.outputs }

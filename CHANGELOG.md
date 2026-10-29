@@ -9,12 +9,17 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - Tick a page’s task list while reading it, without opening the draft. A few seconds after the last tick, the page is published with them, all as one new version. Only people who can publish the page can tick it, and only while its draft has no unpublished changes and the page has no public link.
+- Plugin blocks can change a page’s properties, and every `=key` showing them follows. A calculator’s Servings field can be tied to `servings`, in the visual editor and, for people who can publish the page, while reading it, published as ticks are.
 
 ### Changes
 
 #### App
 
 - A published page’s task checkboxes tick for an editor who can publish it. Ticks wait for a pause of about three seconds, at most fifteen, or for leaving the page, then go into the draft and are published together as one version. Each changes only the character in its box, found again by its text if the page changed meanwhile; one that no longer applies is left out, and the page says so. If the draft has unpublished changes, or the page has a public link (whose copy every publish ends), the boxes stay disabled, with a hint saying why, and a tick that meets either goes into the draft only. Readers’ boxes stay read-only. (#212)
+
+#### Plugins
+
+- A plugin block’s view gets the page’s properties, and `setProperty(key, value)`, which changes only that value in the frontmatter: as the person’s edit in the visual editor, and in the reader through the same queue as ticks, under the same rules, else null. The view is drawn again as the properties change, but not for its own change. A script block’s number or text field can name a `property`: it shows the page’s value, and sets it when a valid value is committed, on blur or Enter, without writing its fence line. The calculator example gains a recipe block that scales an amount to the page’s servings. The plugin API stays version 1. (#212)
 
 ## 0.18.1 - 2026-10-29
 

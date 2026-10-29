@@ -8,8 +8,13 @@ import {
 } from '@wikistow/plugin-sdk';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { drawnByApp, updatedBy } from './in-place';
 import { createRoot } from 'react-dom/client';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import type { PropertyValue } from '@wikistow/plugin-sdk';
+import { typedValue } from '../page/property-model';
+import { propertyNamed, type BlockProperties } from './block-properties';
 
 /*
  * A block a script fills in (#260): the host draws its fields from the
@@ -17,6 +22,11 @@ import { Input } from '@/components/ui/input';
  * calculation of the valid ones. In the visual editor a changed field
  * rewrites its own line, as the person's edit; in the reader it stays here.
  * Outputs are only shown, never written.
+ *
+ * A field bound to a property (`property`, #212) shows the page's value
+ * instead, where it has one, and sets it, never its line, once a valid
+ * value is committed: on blur or Enter, so a half-typed number is never
+ * saved. Where the page can't change, it stays here too.
  */
 
 export type Calculate = (
@@ -64,13 +74,62 @@ function check(field: BlockField, text: string): Checked {
 /** A field as the form reads it from a fence: its text, and its value or what's wrong with it. */
 export type ReadField = { text: string } & Checked;
 
-/** Each declared field of `spec` as read from `source`, a missing line taking its default. */
-export function readFields(spec: BlockSpec, source: string): Record<string, ReadField> {
+/**
+ * What a text field bound to a property sets for `text`: in the type of
+ * the value it replaces when the text reads as one, as the Properties rows
+ * type it (`typedValue`): a number for a number, `true` or `false` for
+ * either, so `rating: 4` stays a number; for an empty value (`note:`),
+ * whatever the text reads as, nothing staying empty, and so for a key the
+ * page hasn't, as the rows type a key they add; else the text. Emptied, the
+ * field sets an empty value (`note:`), unless the value was empty text (`""`).
+ */
+export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
+  // Emptied, it's an empty value, as in the rows, unless it was empty text.
+  if (text === '') return was === '' ? '' : null;
+  if (typeof was === 'number' || was === null || was === undefined)
+    return typedValue(text, was ?? null);
+  if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
+  return text;
+}
+
+/** What a field bound to a list shows under it: it can't stand for one, so it only shows it. */
+export const LIST_NOTE = 'A list: change it in the page’s properties';
+
+/**
+ * What a field bound to a property shows for the page's value, if it has
+ * one: a scalar's text, or a list's items, which the field can't change.
+ */
+function boundText(
+  field: BlockField,
+  properties: BlockProperties,
+): { text: string; list: boolean } | undefined {
+  if (field.property === undefined) return undefined;
+  const value = propertyNamed(properties, field.property);
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) return { text: value.flat().map(String).join(', '), list: true };
+  return { text: value === null ? '' : String(value), list: false };
+}
+
+/**
+ * Each declared field of `spec` as read from `source`, and for a field
+ * bound to a property the page has, from `properties`; a missing line
+ * takes its default. A field bound to a list shows its items, with no
+ * value, as it can't be one.
+ */
+export function readFields(
+  spec: BlockSpec,
+  source: string,
+  properties: BlockProperties = null,
+): Record<string, ReadField> {
   const written = fieldTexts(source);
   return Object.fromEntries(
     Object.entries(spec.fields).map(([field, declared]) => {
+      const bound = boundText(declared, properties);
+      if (bound?.list) return [field, { text: bound.text, value: null, problem: LIST_NOTE }];
       const text =
-        written.get(field) ?? (declared.default === undefined ? '' : String(declared.default));
+        bound?.text ??
+        written.get(field) ??
+        (declared.default === undefined ? '' : String(declared.default));
       return [field, { text, ...check(declared, text) }];
     }),
   );
@@ -128,24 +187,80 @@ function BlockForm({
   source,
   page,
   setSource,
+  // Missing in props from an app older than them, as a view of ours never is.
+  properties = null,
+  setProperty = null,
 }: BlockProps & { spec: BlockSpec; calculate: Calculate }) {
   const id = useId();
+  const [first] = useState(() => readFields(spec, source, properties));
   const [texts, setTexts] = useState(() =>
+    Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
+  );
+  // Why the page refused a bound field's value, if it did.
+  const [refused, setRefused] = useState<Record<string, string>>({});
+  // Each bound field's value on the page, as drawn or as it last set it,
+  // undefined while the page has none; and the fields typed in since they
+  // were drawn or last set. Only a field typed in is set as it's committed,
+  // and only to a value the page hasn't, a missing key counting as one:
+  // visiting a field never changes the page, the default it shows included.
+  const onPage = useRef(
     Object.fromEntries(
-      Object.entries(readFields(spec, source)).map(([field, { text }]) => [field, text]),
+      Object.entries(spec.fields).map(([field, { property }]) => [
+        field,
+        property === undefined ? undefined : propertyNamed(properties, property),
+      ]),
     ),
   );
+  const typed = useRef(new Set<string>());
+  // New properties come in place (`updateInPlace`): a bound field not typed
+  // in shows what it reads now (`readFields`), the page's value, or its
+  // fence line or default where the page no longer has the key; one typed
+  // in keeps its text; and each commits against the value the page has now.
+  const [drawnWith] = useState(properties);
+  useEffect(() => {
+    if (properties === drawnWith) return;
+    const read = readFields(spec, source, properties);
+    const now: Record<string, string> = {};
+    for (const [field, { property }] of Object.entries(spec.fields)) {
+      if (property === undefined) continue;
+      onPage.current[field] = propertyNamed(properties, property);
+      const shown = read[field];
+      if (!typed.current.has(field) && shown) now[field] = shown.text;
+    }
+    // Unchanged, the form keeps its texts, and its outputs aren't worked out again.
+    setTexts((before) =>
+      Object.entries(now).every(([field, text]) => before[field] === text)
+        ? before
+        : { ...before, ...now },
+    );
+  }, [properties, drawnWith, spec, source]);
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
+  // A field bound to a list only shows it, as read: told by the properties
+  // drawn, so a value turning into a list, or back, shows at once.
+  const lists = useMemo(
+    () =>
+      new Set(
+        Object.entries(spec.fields).flatMap(([field, { property }]) =>
+          property !== undefined && Array.isArray(propertyNamed(properties, property))
+            ? [field]
+            : [],
+        ),
+      ),
+    [spec, properties],
+  );
+  const list = (field: string) => lists.has(field);
   const checked = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(spec.fields).map(([field, declared]) => [
           field,
-          check(declared, texts[field] ?? ''),
+          lists.has(field)
+            ? { value: null, problem: LIST_NOTE }
+            : check(declared, texts[field] ?? ''),
         ]),
       ),
-    [spec, texts],
+    [spec, texts, lists],
   );
   const values = useMemo(
     () =>
@@ -159,29 +274,64 @@ function BlockForm({
   const results = useCalculation(calculate, page, values);
 
   const change = (field: string, text: string) => {
+    typed.current.add(field);
     setTexts((now) => ({ ...now, [field]: text }));
-    if (!setSource) return;
+    setRefused(({ [field]: _gone, ...others }) => others);
+    // A bound field writes no line: its value goes to the page as it's committed.
+    if (!setSource || spec.fields[field]?.property !== undefined) return;
     written.current = withField(written.current, field, text);
     setSource(written.current);
+  };
+
+  /** A bound field's valid value, set on the page as it's committed. */
+  const commit = (field: string) => {
+    const key = spec.fields[field]?.property;
+    const { value } = checked[field] ?? { value: null };
+    if (key === undefined || !setProperty || value === null || !typed.current.has(field)) return;
+    const was = onPage.current[field];
+    const set = spec.fields[field]?.type === 'text' ? boundValue(String(value), was) : value;
+    if (was !== undefined && JSON.stringify(was) === JSON.stringify(set)) {
+      typed.current.delete(field);
+      return;
+    }
+    try {
+      setProperty(key, set);
+      onPage.current[field] = set;
+      typed.current.delete(field);
+    } catch (error) {
+      const reason = error instanceof PluginError ? error.message : 'It couldn’t be set';
+      setRefused((now) => ({ ...now, [field]: reason }));
+    }
   };
 
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-control border bg-background p-3">
       {Object.entries(spec.fields).map(([field, declared]) => {
-        const { problem } = checked[field] ?? { problem: null };
+        const problem = (checked[field]?.problem ?? null) || (refused[field] ?? null);
         return (
           <label key={field} className="grid w-36 gap-1 text-sm text-muted-foreground">
             {declared.label}
             <Input
               inputMode={declared.type === 'number' ? 'decimal' : 'text'}
               value={texts[field] ?? ''}
-              aria-invalid={problem !== null}
+              readOnly={list(field)}
+              aria-invalid={problem !== null && !list(field)}
               aria-describedby={problem ? `${id}-${field}` : undefined}
               onChange={(event) => change(field, event.target.value)}
+              onBlur={() => commit(field)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commit(field);
+              }}
               className="h-8 bg-background text-foreground"
             />
             {problem && (
-              <span id={`${id}-${field}`} className="text-xs text-destructive">
+              <span
+                id={`${id}-${field}`}
+                className={cn(
+                  'text-xs',
+                  list(field) ? 'text-muted-foreground' : 'text-destructive',
+                )}
+              >
                 {problem}
               </span>
             )}
@@ -222,14 +372,23 @@ function BlockForm({
   );
 }
 
-/** The view of a script's block: its form, in a React root of its own. */
-export const formView =
-  (spec: BlockSpec, calculate: Calculate): View<BlockProps> =>
-  (element, props) => {
+/**
+ * The view of a script's block: its form, in a React root of its own. The
+ * app draws it, so it takes new props in place (`drawnByApp`), drawn
+ * again only for new text or another page.
+ */
+export const formView = (spec: BlockSpec, calculate: Calculate): View<BlockProps> =>
+  drawnByApp((element: HTMLElement, props: BlockProps) => {
     const box = document.createElement('div');
     element.append(box);
     const root = createRoot(box);
-    root.render(<BlockForm spec={spec} calculate={calculate} {...props} />);
+    const draw = (next: BlockProps) =>
+      root.render(<BlockForm spec={spec} calculate={calculate} {...next} />);
+    draw(props);
+    const ends = updatedBy(element, draw);
     // Not while the host is rendering, which may be what removes the view.
-    return () => queueMicrotask(() => root.unmount());
-  };
+    return () => {
+      ends();
+      queueMicrotask(() => root.unmount());
+    };
+  });

@@ -102,7 +102,7 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
           block: {
             type: block.type,
             fields: Object.fromEntries(
-              Object.entries(block.fields).map(([id, f]) => [id, field(f)]),
+              Object.entries(block.fields).map(([id, f]) => [id, declaredField(f)]),
             ),
             outputs: Object.fromEntries(
               Object.entries(block.outputs).map(([id, { label }]) => [id, { label }]),
@@ -176,17 +176,29 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
   );
 }
 
-/** A field's declaration as the host takes it: only the keys it knows. */
-const field = (declared: BlockField): BlockField =>
-  declared.type === 'number'
-    ? {
-        type: 'number',
-        label: declared.label,
-        default: declared.default,
-        min: declared.min,
-        max: declared.max,
-      }
-    : { type: 'text', label: declared.label, default: declared.default };
+/**
+ * A field's declaration as the host takes it: only the keys it knows, and
+ * only those set. An app older than a key checks fields strictly and
+ * would refuse it, even unset, so a field without `property` never
+ * sends one.
+ */
+export function declaredField(declared: BlockField): BlockField {
+  const { label, property } = declared;
+  const fields: BlockField =
+    declared.type === 'number'
+      ? {
+          type: 'number',
+          label,
+          default: declared.default,
+          min: declared.min,
+          max: declared.max,
+          property,
+        }
+      : { type: 'text', label, default: declared.default, property };
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  ) as BlockField;
+}
 
 /** An output read before it was calculated: its reader waits for another round. */
 class Waiting {}

@@ -1,4 +1,12 @@
-import { PageId, SpaceId } from '@wikistow/client';
+import {
+  PageId,
+  propertyKeyFor,
+  readProperties,
+  setProperty,
+  SpaceId,
+  splitFrontmatter,
+  type PropertyValue,
+} from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
 import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
@@ -11,10 +19,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
-import type { EditorSurfaceHandle } from '../page/editor/surface';
+import { lineBreakOf, type EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
+import { joinPage } from '../page/properties';
 import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
@@ -342,22 +351,43 @@ const INERT = inertHost();
 
 /**
  * A sample page with the plugin's places, in its editor (a draft view,
- * where blocks change the sample's text and commands may edit it) or as a
- * reader sees it. It is the workshop's own text: nothing is saved anywhere.
+ * where blocks change the sample's text and its properties, and commands
+ * may edit it) or as a reader sees it. The editor holds the body, its
+ * frontmatter split off as the draft editor splits it. It is the
+ * workshop's own text: nothing is saved anywhere.
  */
 function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }) {
   const ctx = useClient();
   const [mode, setMode] = useState<'editor' | 'reader'>('editor');
   const editor = useRef<EditorSurfaceHandle>(null);
+  const { frontmatter, body } = splitFrontmatter(sample.markdown);
+  // The frontmatter now, for what's typed and set before the sample shows it.
+  const frontmatterNow = useRef(frontmatter);
+  frontmatterNow.current = frontmatter;
+  const properties = useMemo(() => {
+    const read = readProperties(frontmatter);
+    return read.ok ? read.properties : null;
+  }, [frontmatter]);
   // What is typed reaches the sample before the plugin reads or edits it.
   useEffect(
     () =>
       workshop.samples.editing(sample.pageId, () => {
         const text = editor.current?.read();
-        if (text !== undefined) workshop.typed(sample.pageId, text, sample.outside);
+        if (text !== undefined)
+          workshop.typed(sample.pageId, joinPage(frontmatterNow.current, text), sample.outside);
       }),
     [workshop, sample.pageId, sample.outside],
   );
+  // A block's property set as the draft editor sets one: only that value changes.
+  const setOne = (key: string, value: PropertyValue) => {
+    const block = frontmatterNow.current;
+    const text = editor.current?.read() ?? body;
+    const edit = setProperty(block, propertyKeyFor(block, key), value, lineBreakOf(block ?? text));
+    if (!edit.ok) return edit;
+    frontmatterNow.current = edit.frontmatter;
+    workshop.typed(sample.pageId, joinPage(edit.frontmatter, text), sample.outside);
+    return { ok: true } as const;
+  };
   const { regions } = usePlugins();
   const shown = useMemo<ShownPage>(
     () => ({
@@ -416,10 +446,18 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
                 // Changes from outside the editor show afresh; typing doesn't redraw it.
                 key={`${sample.pageId}:${sample.outside}`}
                 ref={editor}
-                initial={sample.markdown}
+                initial={body}
                 // As it goes, an editor replaced for a change from outside reports
                 // its last text, which mustn't undo that change.
-                onChange={(markdown) => workshop.typed(sample.pageId, markdown, sample.outside)}
+                onChange={(text) =>
+                  workshop.typed(
+                    sample.pageId,
+                    joinPage(frontmatterNow.current, text),
+                    sample.outside,
+                  )
+                }
+                properties={properties}
+                setProperty={setOne}
                 links={INERT.links()}
                 attachments={INERT.attachments()}
                 onFiles={() => {}}

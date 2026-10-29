@@ -1,4 +1,10 @@
-import { readProperties, splitFrontmatter } from '@wikistow/client';
+import {
+  propertyKeyFor,
+  readProperties,
+  setProperty,
+  splitFrontmatter,
+  type PropertyValue,
+} from '@wikistow/client';
 import { Plus } from 'lucide-react';
 import {
   useEffect,
@@ -183,6 +189,26 @@ export function PageEditor({
   const setFrontmatter = (block: string | null) => {
     frontmatter.current = block;
     setProperties(block);
+  };
+  /**
+   * One property set, as a plugin block in the visual editor sets it:
+   * only its value's characters change, as in Properties, or a line is
+   * added, or a block when the page has none.
+   */
+  const setOneProperty = (key: string, value: PropertyValue) => {
+    const block = frontmatter.current;
+    const edit = setProperty(
+      block,
+      propertyKeyFor(block, key),
+      value,
+      lineBreakOf(block ?? bodyNow()),
+    );
+    if (!edit.ok) return edit;
+    if (edit.frontmatter !== block) {
+      setFrontmatter(edit.frontmatter);
+      changed();
+    }
+    return { ok: true } as const;
   };
 
   /** Show the body in `next`, the visual editor only if it keeps the body whole. */
@@ -434,6 +460,7 @@ export function PageEditor({
       assist.onFiles(files, (markdown) => given.current === null && place(markdown)),
     lineBreak,
     properties: propertyData,
+    setProperty: setOneProperty,
   };
   // The source beside the visual editor: its edits go there once typing pauses.
   const mirrorProps: EditorSurfaceProps = {

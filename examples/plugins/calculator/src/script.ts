@@ -1,10 +1,20 @@
-// A script plugin, in a worker with no network: it declares a block's
-// fields and outputs, the app draws them as a form, and `calculate` runs
-// here. A page holds the block as text the app reads and writes:
+// A script plugin, in a worker with no network: it declares blocks'
+// fields and outputs, the app draws them as forms, and `calculate` runs
+// here. A page holds each block as text the app reads and writes:
 //
 //   ```plugin:calculator/product
 //   quantity: 2
 //   price: 3.5
+//   ```
+//
+// A field can be tied to one of the page's properties instead, as the
+// recipe's Servings is to `servings`: it shows `servings: 4` from the
+// frontmatter, and changing it there changes that, so `=servings` in the
+// page follows it.
+//
+//   ```plugin:calculator/recipe
+//   serves: 4
+//   amount: 500
 //   ```
 import { blockLanguage, defineScript } from '@wikistow/plugin-sdk';
 
@@ -17,6 +27,21 @@ defineScript((host) => {
     },
     outputs: {
       total: { label: 'Total', calculate: ({ quantity, price }) => quantity * price },
+    },
+  });
+
+  host.blocks.register({
+    type: 'recipe',
+    fields: {
+      servings: { type: 'number', label: 'Servings', default: 4, min: 1, property: 'servings' },
+      serves: { type: 'number', label: 'Recipe serves', default: 4, min: 1 },
+      amount: { type: 'number', label: 'Amount', default: 100, min: 0 },
+    },
+    outputs: {
+      scaled: {
+        label: 'For your servings',
+        calculate: ({ servings, serves, amount }) => Math.round((amount * servings) / serves),
+      },
     },
   });
 
