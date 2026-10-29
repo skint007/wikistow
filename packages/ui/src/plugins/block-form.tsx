@@ -80,9 +80,12 @@ export type ReadField = { text: string } & Checked;
  * type it (`typedValue`): a number for a number, `true` or `false` for
  * either, so `rating: 4` stays a number; for an empty value (`note:`),
  * whatever the text reads as, nothing staying empty; else the text. A key
- * the page hasn't takes the text.
+ * the page hasn't takes the text. Emptied, the field sets an empty value
+ * (`note:`), as the rows do, unless the value was empty text (`""`).
  */
 export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
+  // Emptied, it's an empty value, as in the rows, unless it was empty text.
+  if (text === '') return was === '' ? '' : null;
   if (typeof was === 'number' || was === null) return typedValue(text, was);
   if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
   return text;

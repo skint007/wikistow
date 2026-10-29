@@ -270,6 +270,11 @@ describe('a text field bound to a property', () => {
     expect(boundValue('4', null)).toBe(4);
     expect(boundValue('true', null)).toBe(true);
     expect(boundValue('soon', null)).toBe('soon');
+    // Emptied, as the Properties rows empty a value.
+    expect(boundValue('', 'Italian')).toBeNull();
+    expect(boundValue('', true)).toBeNull();
+    expect(boundValue('', 4)).toBeNull();
+    expect(boundValue('', '')).toBe('');
   });
 
   it('sets a number for a number on the page, as the form commits it', async () => {
