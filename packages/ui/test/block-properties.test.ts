@@ -30,6 +30,14 @@ describe('a block’s view of the page’s properties', () => {
     expect(blockProperties(read('---\n- a list\n---\n'))).toBeNull();
   });
 
+  it('gives copies of lists, so a view changing one leaves the page’s as read', () => {
+    const page = read(PAGE);
+    const tags = blockProperties(page)?.['tags'];
+    if (!Array.isArray(tags)) throw new Error('tags should be a list');
+    tags.push('cake');
+    expect(page?.find(({ key }) => key === 'tags')?.value).toEqual(['soup', 'bread']);
+  });
+
   it('is read from a page’s whole Markdown as the previews read it', () => {
     expect(pageBlockProperties(`${PAGE}Body with \`=servings\`.\n`)).toEqual(
       blockProperties(read(PAGE)),

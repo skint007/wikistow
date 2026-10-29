@@ -17,12 +17,17 @@ import { PluginError, type PropertyValue } from '@wikistow/plugin-sdk';
 /** A block's view of the page's properties. */
 export type BlockProperties = Readonly<Record<string, PropertyValue>> | null;
 
-/** `properties`, as read from the frontmatter, as a block's view gets them; null where they don't read. */
+/**
+ * `properties`, as read from the frontmatter, as a block's view gets them;
+ * null where they don't read. Its lists are copies: the page's references
+ * read the same values, which a view sorting one mustn't change.
+ */
 export function blockProperties(properties: readonly PropertyData[] | null): BlockProperties {
   if (!properties) return null;
   const record: Record<string, PropertyValue> = {};
   // The first of two keys alike wins, as references find them.
-  for (const { key, value } of properties) if (!Object.hasOwn(record, key)) record[key] = value;
+  for (const { key, value } of properties)
+    if (!Object.hasOwn(record, key)) record[key] = structuredClone(value);
   return record;
 }
 
