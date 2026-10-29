@@ -185,8 +185,14 @@ const field = (declared: BlockField): BlockField =>
         default: declared.default,
         min: declared.min,
         max: declared.max,
+        property: declared.property,
       }
-    : { type: 'text', label: declared.label, default: declared.default };
+    : {
+        type: 'text',
+        label: declared.label,
+        default: declared.default,
+        property: declared.property,
+      };
 
 /** An output read before it was calculated: its reader waits for another round. */
 class Waiting {}

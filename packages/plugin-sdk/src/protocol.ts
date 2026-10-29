@@ -50,6 +50,14 @@ const BlockType = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 const FieldId = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,39}$/);
 const Label = z.string().min(1).max(100);
 const Value = z.union([z.number(), z.string().max(1000)]);
+/**
+ * A page property's name, by the template-variable rule the app's
+ * references follow (`isPropertyName` in the client, which a test holds
+ * this to): a letter or digit, then letters, combining marks, digits,
+ * spaces, `_` and `-`.
+ */
+export const PROPERTY_NAME = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*$/u;
+const PropertyName = z.string().max(100).regex(PROPERTY_NAME);
 
 /** A field a block declares, as the host draws it. */
 export const BlockField = z.discriminatedUnion('type', [
@@ -59,11 +67,13 @@ export const BlockField = z.discriminatedUnion('type', [
     default: z.number().optional(),
     min: z.number().optional(),
     max: z.number().optional(),
+    property: PropertyName.optional(),
   }),
   z.strictObject({
     type: z.literal('text'),
     label: Label,
     default: z.string().max(1000).optional(),
+    property: PropertyName.optional(),
   }),
 ]);
 

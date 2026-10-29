@@ -10,6 +10,7 @@ import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Input } from '@/components/ui/input';
+import { propertyNamed, type BlockProperties } from './block-properties';
 
 /*
  * A block a script fills in (#260): the host draws its fields from the
@@ -17,6 +18,11 @@ import { Input } from '@/components/ui/input';
  * calculation of the valid ones. In the visual editor a changed field
  * rewrites its own line, as the person's edit; in the reader it stays here.
  * Outputs are only shown, never written.
+ *
+ * A field bound to a property (`property`, #212) shows the page's value
+ * instead, where it has one, and sets it, never its line, once a valid
+ * value is committed: on blur or Enter, so a half-typed number is never
+ * saved. Where the page can't change, it stays here too.
  */
 
 export type Calculate = (
@@ -64,13 +70,31 @@ function check(field: BlockField, text: string): Checked {
 /** A field as the form reads it from a fence: its text, and its value or what's wrong with it. */
 export type ReadField = { text: string } & Checked;
 
-/** Each declared field of `spec` as read from `source`, a missing line taking its default. */
-export function readFields(spec: BlockSpec, source: string): Record<string, ReadField> {
+/** The text a field bound to a property shows for the page's value: a scalar's, if it has one. */
+function boundText(field: BlockField, properties: BlockProperties): string | undefined {
+  if (field.property === undefined) return undefined;
+  const value = propertyNamed(properties, field.property);
+  if (value === undefined || Array.isArray(value)) return undefined;
+  return value === null ? '' : String(value);
+}
+
+/**
+ * Each declared field of `spec` as read from `source`, and for a field
+ * bound to a property the page has, from `properties`; a missing line
+ * takes its default.
+ */
+export function readFields(
+  spec: BlockSpec,
+  source: string,
+  properties: BlockProperties = null,
+): Record<string, ReadField> {
   const written = fieldTexts(source);
   return Object.fromEntries(
     Object.entries(spec.fields).map(([field, declared]) => {
       const text =
-        written.get(field) ?? (declared.default === undefined ? '' : String(declared.default));
+        boundText(declared, properties) ??
+        written.get(field) ??
+        (declared.default === undefined ? '' : String(declared.default));
       return [field, { text, ...check(declared, text) }];
     }),
   );
@@ -128,13 +152,20 @@ function BlockForm({
   source,
   page,
   setSource,
+  properties,
+  setProperty,
 }: BlockProps & { spec: BlockSpec; calculate: Calculate }) {
   const id = useId();
+  const [first] = useState(() => readFields(spec, source, properties));
   const [texts, setTexts] = useState(() =>
-    Object.fromEntries(
-      Object.entries(readFields(spec, source)).map(([field, { text }]) => [field, text]),
-    ),
+    Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
   );
+  // Each bound field's text as last committed or drawn, so a commit that
+  // changes nothing sets nothing; and why the page refused one, if it did.
+  const committed = useRef(
+    Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
+  );
+  const [refused, setRefused] = useState<Record<string, string>>({});
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
   const checked = useMemo(
@@ -160,15 +191,33 @@ function BlockForm({
 
   const change = (field: string, text: string) => {
     setTexts((now) => ({ ...now, [field]: text }));
-    if (!setSource) return;
+    setRefused(({ [field]: _gone, ...others }) => others);
+    // A bound field writes no line: its value goes to the page as it's committed.
+    if (!setSource || spec.fields[field]?.property !== undefined) return;
     written.current = withField(written.current, field, text);
     setSource(written.current);
+  };
+
+  /** A bound field's valid value, set on the page as it's committed. */
+  const commit = (field: string) => {
+    const key = spec.fields[field]?.property;
+    const { value } = checked[field] ?? { value: null };
+    const text = texts[field] ?? '';
+    if (key === undefined || !setProperty || value === null || committed.current[field] === text)
+      return;
+    try {
+      setProperty(key, value);
+      committed.current[field] = text;
+    } catch (error) {
+      const reason = error instanceof PluginError ? error.message : 'It couldn’t be set';
+      setRefused((now) => ({ ...now, [field]: reason }));
+    }
   };
 
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-control border bg-background p-3">
       {Object.entries(spec.fields).map(([field, declared]) => {
-        const { problem } = checked[field] ?? { problem: null };
+        const problem = (checked[field]?.problem ?? null) || (refused[field] ?? null);
         return (
           <label key={field} className="grid w-36 gap-1 text-sm text-muted-foreground">
             {declared.label}
@@ -178,6 +227,10 @@ function BlockForm({
               aria-invalid={problem !== null}
               aria-describedby={problem ? `${id}-${field}` : undefined}
               onChange={(event) => change(field, event.target.value)}
+              onBlur={() => commit(field)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commit(field);
+              }}
               className="h-8 bg-background text-foreground"
             />
             {problem && (

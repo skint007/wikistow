@@ -232,10 +232,28 @@ export type NumberField = {
   default?: number | undefined;
   min?: number | undefined;
   max?: number | undefined;
+  /** A property the field shows and sets (`BoundField`). */
+  property?: string | undefined;
 };
 
 /** One line of text. */
-export type TextField = { type: 'text'; label: string; default?: string | undefined };
+export type TextField = {
+  type: 'text';
+  label: string;
+  default?: string | undefined;
+  /** A property the field shows and sets (`BoundField`). */
+  property?: string | undefined;
+};
+
+/*
+ * A field with `property` is bound to that page property, named by the
+ * template-variable rule, as `setProperty` takes it: it shows the
+ * property's value when the page has one, else its fence line or default,
+ * and sets the property, never its fence line, once a valid value is
+ * committed (blur or Enter), as a number for a number field. Where the
+ * page can't change (`setProperty` is null), a value entered stays in the
+ * form.
+ */
 
 export type BlockField = NumberField | TextField;
 
