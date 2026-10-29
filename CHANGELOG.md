@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- A long page list scrolls in the sidebar alone. Before, the window could also scroll, past the bottom of the app, because the list didn't clip its rows' screen-reader text. (#210)
+
 ## 0.18.0 - 2026-10-28
 
 ### Highlights
