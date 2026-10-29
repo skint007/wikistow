@@ -9,7 +9,13 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { createContext, useCallback, useEffect, useMemo } from 'react';
-import { pageQuery, revisionQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import {
+  pageQuery,
+  publicLinksQuery,
+  revisionQuery,
+  searchIndexChanged,
+  treeQuery,
+} from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { readWikilinks } from './page-reader';
 import {
@@ -99,6 +105,10 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         queue.published(written.revisionId, publishedHead);
         return written.revisionId;
       },
+      publicLink: async () =>
+        (await queryClient.fetchQuery({ ...publicLinksQuery(ctx, spaceId), staleTime: 0 })).some(
+          (link) => link.pageId === pageId,
+        ),
     };
     const reload = () =>
       queryClient.invalidateQueries({ queryKey: pageQuery(ctx, pageId).queryKey });

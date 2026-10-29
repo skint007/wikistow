@@ -5,6 +5,8 @@ import {
   applyChanges,
   flushChanges,
   inTurn,
+  pageFlushing,
+  PUBLIC_LINK_HINT,
   readingNotices,
   ReadingQueue,
   readingRights,
@@ -39,6 +41,7 @@ function server(markdown: string, { draftChanges = false } = {}) {
     draftChanges,
     published: [] as string[],
     saves: 0,
+    publicLink: false,
   };
   let before: (() => void) | null = null;
   const operations: FlushOperations = {
@@ -60,6 +63,7 @@ function server(markdown: string, { draftChanges = false } = {}) {
       state.draftChanges = false;
       return state.publishedHead;
     },
+    publicLink: async () => state.publicLink,
   };
   return {
     state,
@@ -84,7 +88,14 @@ describe('who may change a page while reading it', () => {
   const heads = { draftHead: 'd1', publishedHead: 'p1', publishedCount: 1, draftChanges: false };
   const editor = { role: 'editor', canPublish: true } as const;
   const rights = (over: Partial<Parameters<typeof readingRights>[0]>) =>
-    readingRights({ viewer: editor, heads, view: 'published', revision: 'p1', ...over });
+    readingRights({
+      viewer: editor,
+      heads,
+      view: 'published',
+      revision: 'p1',
+      publicLink: false,
+      ...over,
+    });
 
   it('is an editor who can publish, on the latest publication, its draft without changes', () => {
     expect(rights({})).toEqual({ allowed: true });
@@ -106,6 +117,13 @@ describe('who may change a page while reading it', () => {
       hint: 'Open the draft to tick this: it has unpublished changes',
     });
     expect(rights({ revision: 'p0' })).toMatchObject({ allowed: false, hint: /older version/ });
+    // A public link a publish would end without asking, or links not yet known.
+    expect(rights({ publicLink: true })).toEqual({ allowed: false, hint: PUBLIC_LINK_HINT });
+    expect(rights({ publicLink: null })).toEqual({ allowed: false, hint: null });
+    expect(rights({ publicLink: true, viewer: { role: 'reader', canPublish: false } })).toEqual({
+      allowed: false,
+      hint: null,
+    });
     expect(rights({ heads: { ...heads, draftHead: null } })).toMatchObject({
       allowed: false,
       hint: /copy of another page/,
@@ -258,6 +276,18 @@ describe('a flush', () => {
         ])
       ).outcome,
     ).toBe('unchanged');
+  });
+
+  it('leaves the changes in the draft, unpublished, when the page has a public link by then', async () => {
+    const page = server(LIST);
+    page.state.publicLink = true;
+    const flushed = await flushChanges(page.operations, [task(LIST, 'milk', true)]);
+    expect(flushed).toEqual({ outcome: 'in-draft', dropped: [], publicLink: true });
+    expect(page.draft()).toContain('- [x] milk');
+    expect(page.state.published).toEqual([]);
+    expect(readingNotices({ changes: [], saving: false, error: null, last: flushed })).toEqual([
+      'This page has a public link, so your change went into the draft: publish it from there.',
+    ]);
   });
 
   it('reports what it left out', async () => {
@@ -422,11 +452,17 @@ describe('a page’s flushes', () => {
     });
     const a2 = inTurn('page-a', async () => void order.push('a2 starts'));
     const b = inTurn('page-b', async () => void order.push('b starts'));
+    const running = pageFlushing('page-a');
+    expect(running).toBeDefined();
     await pass(0);
     expect(order).toEqual(['a1 starts', 'b starts']);
     first();
     await Promise.all([a1, a2, b]);
     expect(order).toEqual(['a1 starts', 'b starts', 'a1 ends', 'a2 starts']);
+    // Settled once every flush of the page has, and then none runs.
+    await running;
+    await pass(0);
+    expect(pageFlushing('page-a')).toBeUndefined();
     // One that failed holds up nothing after it.
     await expect(
       inTurn('page-a', async () => Promise.reject(new Error('offline'))),

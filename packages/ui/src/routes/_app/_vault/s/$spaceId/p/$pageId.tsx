@@ -14,7 +14,7 @@ import { ApiError } from '@wikistow/client/api';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Check, Globe, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -72,6 +72,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  pageFlushing,
   readingRights,
   type ReadingQueue,
 } from '../../../../../../page/reading-changes-model';
@@ -138,6 +139,18 @@ function PageView() {
   useEffect(() => {
     if (failedBeforeDraft) reading.discard();
   }, [failedBeforeDraft, reading]);
+  // A flush of this page still running from before, as from a queue left
+  // when the person went to another page and came back: the draft waits
+  // for it too, drawn again once it has settled.
+  const earlier = pageFlushing(pageId);
+  const [, settled] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    let live = true;
+    void earlier?.then(() => live && settled());
+    return () => {
+      live = false;
+    };
+  }, [earlier]);
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -177,7 +190,7 @@ function PageView() {
 
   if (
     model.view === 'draft' &&
-    (queued.saving || (queued.changes.length > 0 && queued.error === null))
+    (earlier !== undefined || queued.saving || (queued.changes.length > 0 && queued.error === null))
   )
     return (
       <PageCard>
@@ -305,6 +318,9 @@ function PageBody({
   const contents = model.view === 'published' && headings.length > 1;
   // The latest publication as shown, with the changes made while reading it.
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  // A page with a public link isn't changed while it's read, nor before its links are known.
+  const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
+  const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
   const rights = useMemo(
     () =>
       readingRights({
@@ -312,8 +328,9 @@ function PageBody({
         heads: info.heads,
         view: model.view,
         revision: revisionId,
+        publicLink: linked,
       }),
-    [info.role, info.canPublish, info.heads, model.view, revisionId],
+    [info.role, info.canPublish, info.heads, model.view, revisionId, linked],
   );
 
   const go = (view: 'draft' | 'published') =>

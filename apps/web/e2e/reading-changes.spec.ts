@@ -95,8 +95,12 @@ test('ticking tasks while reading publishes them together, only for those who ma
   });
 
   await test.step('a tick published keeps the reader where they were, on the same box', async () => {
-    const long = `${Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n')}\n\n- [ ] last one\n`;
+    const paragraphs = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n');
+    const long = `## Start\n\n${paragraphs}\n\n- [ ] another\n- [ ] last one\n`;
     await publishedPageIn(owner, 'Lists', 'Long list', long);
+    // From a link to its first heading, which ticks mustn't scroll back to.
+    await owner.goto(`${owner.url()}#heading-start`);
+    await expect(owner.getByText('Published v1')).toBeVisible();
     const card = owner.locator('article[data-region="page"]');
     await box(owner, 'last one').scrollIntoViewIfNeeded();
     const scrolled = await card.evaluate((element) => element.scrollTop);
@@ -109,6 +113,20 @@ test('ticking tasks while reading publishes them together, only for those who ma
     await expect(box(owner, 'last one')).toBeChecked();
     const now = await card.evaluate((element) => element.scrollTop);
     expect(Math.abs(now - scrolled)).toBeLessThan(40);
+  });
+
+  await test.step('opening the draft just after coming back waits for the flush leaving made', async () => {
+    await box(owner, 'another').check();
+    await openPage(owner, 'Shopping');
+    await openPage(owner, 'Long list');
+    await owner.getByRole('button', { name: 'Edit' }).click();
+    await expectSource(owner, /- \[x\] another\n- \[x\] last one\n$/);
+    await owner.locator('#page-source').press('ControlOrMeta+End');
+    await owner.keyboard.type('\nMore.');
+    await waitForSave(owner);
+    await expect(owner.getByText(/Someone else saved/)).toHaveCount(0);
+    await owner.getByRole('button', { name: 'Done' }).click();
+    await expect(owner.getByText('Published v3')).toBeVisible();
   });
 
   await test.step('a reader’s boxes are read-only', async () => {

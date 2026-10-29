@@ -38,22 +38,30 @@ export type Dropped = { change: ReadingChange; reason: string };
  */
 export type ReadingRights = { allowed: true } | { allowed: false; hint: string | null };
 
+/** The hint on a page with a public link, which a change made while reading would end. */
+export const PUBLIC_LINK_HINT = 'This page has a public link: open the draft to change it';
+
 /**
  * Whether `viewer` may change the page while reading the version
  * `revision` of `view`: an editor who can publish, on the latest
- * publication of a page with a draft, while the draft has no changes.
- * Readers are told nothing, as nothing would let them.
+ * publication of a page with a draft, while the draft has no changes,
+ * and the page has no public link (`publicLink`, null until that's
+ * known). Each publish ends a public page's copy, which Publish asks about
+ * first (ADR 0005), so a tick there would end it without asking. Readers
+ * are told nothing, as nothing would let them.
  */
 export function readingRights({
   viewer,
   heads,
   view,
   revision,
+  publicLink,
 }: {
   viewer: Viewer;
   heads: PageHeads;
   view: View;
   revision: string;
+  publicLink: boolean | null;
 }): ReadingRights {
   if (view !== 'published' || viewer.role === 'reader') return { allowed: false, hint: null };
   if (heads.draftHead === null)
@@ -65,6 +73,8 @@ export function readingRights({
     return { allowed: false, hint: 'This is an older version. Open the latest to tick this' };
   if (!viewer.canPublish)
     return { allowed: false, hint: 'Open the draft to tick this: you can’t publish this page' };
+  if (publicLink === null) return { allowed: false, hint: null };
+  if (publicLink) return { allowed: false, hint: PUBLIC_LINK_HINT };
   if (heads.draftChanges)
     return { allowed: false, hint: 'Open the draft to tick this: it has unpublished changes' };
   return { allowed: true };
@@ -117,6 +127,8 @@ export type FlushOperations = {
   saveDraft: (basedOn: string, markdown: string) => Promise<string>;
   /** Publish the draft `expected.draftHead`, if the page's heads are still `expected`; the revision written. */
   publish: (expected: { draftHead: string; publishedHead: string | null }) => Promise<string>;
+  /** Whether the page has a public link now, looked up afresh. */
+  publicLink: () => Promise<boolean>;
 };
 
 /**
@@ -127,6 +139,8 @@ export type FlushOperations = {
 export type Flushed = {
   outcome: 'published' | 'in-draft' | 'unchanged';
   dropped: Dropped[];
+  /** Left in the draft as the page had a public link by then, which a publish would end. */
+  publicLink?: true;
 };
 
 /** How many times a flush starts again when someone saved the draft meanwhile. */
@@ -141,7 +155,9 @@ const stale = (error: unknown) => error instanceof ApiError && error.code === 's
  * someone saved meanwhile, it all starts again from the top, up to
  * `FLUSH_TRIES` times. The draft is published only if it was the
  * publication when loaded, and only if neither head moved since
- * (`expected`); otherwise the changes stay in the draft. A draft already
+ * (`expected`), and the page has no public link by then, which the
+ * publish would end without asking; otherwise the changes stay in the
+ * draft. A draft already
  * as asked but with changes of its own, as one a flush saved and then
  * failed to publish leaves it, isn't known to be published: the changes
  * are said to be in the draft.
@@ -167,6 +183,8 @@ export async function flushChanges(
       throw error;
     }
     if (heads.draftChanges) return { outcome: 'in-draft', dropped };
+    // A link made since the page was shown: publishing would end its copy without asking.
+    if (await operations.publicLink()) return { outcome: 'in-draft', dropped, publicLink: true };
     try {
       await operations.publish({ draftHead: saved, publishedHead: heads.publishedHead });
       return { outcome: 'published', dropped };
@@ -181,6 +199,13 @@ export async function flushChanges(
 // settled, even from another queue, as one made on returning to the page
 // while the one left behind still saves.
 const flushing = new Map<string, Promise<unknown>>();
+
+/**
+ * The page's flushes under way, from any queue, settled once all are: as
+ * one the queue left behind still saves when the person turns to the
+ * draft. Undefined while none runs.
+ */
+export const pageFlushing = (pageId: string): Promise<unknown> | undefined => flushing.get(pageId);
 
 /** `flush` run after the page's flushes before it have settled. */
 export function inTurn<T>(pageId: string, flush: () => Promise<T>): Promise<T> {
@@ -365,7 +390,11 @@ export function readingNotices({ changes, saving, last, error }: ReadingState): 
   else if (saving || changes.length > 0) notices.push('Publishing your changes…');
   else if (last?.outcome === 'published') notices.push('Your changes are published.');
   if (!saving && last?.outcome === 'in-draft')
-    notices.push('Your change went into the draft: publish it to show it.');
+    notices.push(
+      last.publicLink
+        ? 'This page has a public link, so your change went into the draft: publish it from there.'
+        : 'Your change went into the draft: publish it to show it.',
+    );
   for (const { reason } of last?.dropped ?? []) notices.push(`A change was left out. ${reason}`);
   return notices;
 }
