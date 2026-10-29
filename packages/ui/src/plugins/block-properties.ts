@@ -70,19 +70,24 @@ const same = (a: PropertyValue | undefined, b: PropertyValue | undefined) =>
 
 /**
  * Whether a view drawn with `drawn` stands for the page's properties
- * `now`: they are the same, but for keys the view set itself to the
- * values they now have.
+ * `now`. A key the view set itself must have the value it set, whatever
+ * the view was drawn with: set back, or gone, the view is drawn again.
+ * Every other key must be as it was drawn. The very properties it was
+ * drawn with stand for themselves, as a change it just made hasn't come
+ * back yet.
  */
 export function stillShown(drawn: DrawnProperties, now: BlockProperties): boolean {
   if (drawn.shown === now) return true;
   if (drawn.shown === null || now === null) return false;
   const keys = new Set([...Object.keys(drawn.shown), ...Object.keys(now)]);
+  const found = new Set<string>();
   for (const key of keys) {
-    const before = drawn.shown[key];
-    const after = now[key];
-    if (same(before, after)) continue;
-    const own = drawn.own.get(foldPropertyName(key));
-    if (own === undefined || !same(own, after)) return false;
+    const folded = foldPropertyName(key);
+    if (drawn.own.has(folded)) {
+      if (!Object.hasOwn(now, key) || !same(drawn.own.get(folded), now[key])) return false;
+      found.add(folded);
+    } else if (!same(drawn.shown[key], now[key])) return false;
   }
+  for (const folded of drawn.own.keys()) if (!found.has(folded)) return false;
   return true;
 }

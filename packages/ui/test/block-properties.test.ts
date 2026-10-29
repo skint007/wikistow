@@ -76,6 +76,29 @@ describe('a view drawn with the page’s properties', () => {
     ).toBe(true);
   });
 
+  it('is drawn again when a key it set is set back to what it was drawn with', () => {
+    // Drawn at 4, the view set 6, and Properties or another block set 4 again.
+    expect(stillShown({ shown, own: new Map([['servings', 6]]) }, changed({ servings: 4 }))).toBe(
+      false,
+    );
+  });
+
+  it('is drawn again when a key it set, or added, is removed', () => {
+    const { servings: _gone, ...without } = shown ?? {};
+    expect(stillShown({ shown, own: new Map([['servings', 6]]) }, without)).toBe(false);
+    // Added by the view, then removed: in neither the drawn properties nor these.
+    expect(stillShown({ shown, own: new Map([['rating', 5]]) }, changed({}))).toBe(false);
+    expect(stillShown({ shown, own: new Map([['rating', 5]]) }, changed({ rating: 5 }))).toBe(true);
+  });
+
+  it('follows another block on the same key, and stands for the one that set it last', () => {
+    const first = { shown, own: new Map([['servings', 6]]) };
+    const second = { shown, own: new Map([['servings', 7]]) };
+    const page = changed({ servings: 7 });
+    expect(stillShown(first, page)).toBe(false);
+    expect(stillShown(second, page)).toBe(true);
+  });
+
   it('is drawn again for any other change', () => {
     expect(stillShown({ shown, own: new Map() }, changed({ servings: 6 }))).toBe(false);
     expect(stillShown({ shown, own: new Map([['servings', 6]]) }, changed({ servings: 8 }))).toBe(
