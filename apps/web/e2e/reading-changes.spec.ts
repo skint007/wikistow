@@ -90,6 +90,33 @@ test('ticking tasks while reading publishes them together, only for those who ma
     await expect(owner.getByText('Your changes are published.')).toBeVisible();
   });
 
+  await test.step('the draft of a page left, opened straight from a link, has its ticks', async () => {
+    await publishedPageIn(owner, 'Lists', 'Errands', '- [ ] post\n');
+    const errands = new URL(owner.url());
+    const published = owner.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes(`${errands.pathname.split('/p/')[1]}/publications`),
+    );
+    await box(owner, 'post').check();
+    await openPage(owner, 'Shopping');
+    await published;
+    // Settled, with nothing showing the page any more.
+    await owner.waitForTimeout(1000);
+    // In the app, as a link to the draft goes there, not a fresh load.
+    await owner.evaluate((path) => {
+      history.pushState(history.state, '', path);
+      dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+    }, `${errands.pathname}?view=draft`);
+    await expectSource(owner, '- [x] post\n');
+    await owner.waitForTimeout(2000);
+    await expect(owner.getByText(/Someone else saved/)).toHaveCount(0);
+    await expectSource(owner, '- [x] post\n');
+    await owner.getByRole('button', { name: 'Done' }).click();
+    await expect(owner.getByText('Published v2')).toBeVisible();
+    await openPage(owner, 'Chores');
+  });
+
   await test.step('opening the draft right after a tick waits for it, then opens on top of it', async () => {
     await box(owner, 'dishes').uncheck();
     await owner.getByRole('button', { name: 'Edit' }).click();

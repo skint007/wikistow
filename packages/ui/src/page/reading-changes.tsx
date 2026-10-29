@@ -131,8 +131,16 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
           (link) => link.pageId === pageId,
         ),
     };
+    // Loaded again whether or not anything shows it: a page left before its
+    // flush settled may next open straight to its draft, which mustn't open
+    // on the heads from before the flush, and then find its own save as
+    // someone else's. The page's flushes settle only once this is done, so
+    // the draft waits for it (`pageFlushing`).
     const reload = () =>
-      queryClient.invalidateQueries({ queryKey: pageQuery(ctx, pageId).queryKey });
+      queryClient.invalidateQueries({
+        queryKey: pageQuery(ctx, pageId).queryKey,
+        refetchType: 'all',
+      });
     const flush = async (changes: readonly ReadingChange[]) => {
       published = null;
       opened.clear();
@@ -154,7 +162,10 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
       searchIndexChanged(queryClient);
       await Promise.all([
         reload(),
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+        queryClient.invalidateQueries({
+          queryKey: treeQuery(ctx, spaceId).queryKey,
+          refetchType: 'all',
+        }),
       ]);
       return flushed;
     };
