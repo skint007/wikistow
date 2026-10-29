@@ -198,6 +198,15 @@ describe('a form taking new properties in place', () => {
     expect(servings()).toBe(first);
     expect(servings()?.value).toBe('3');
     await expect.poll(output).toBe('375');
+    // Turned into a list, it only shows it; and back, it can be typed in again.
+    await act(async () => updateInPlace(element, props(read('---\nservings: [4]\n---\n'))));
+    expect(servings()?.readOnly).toBe(true);
+    expect(element.textContent).toContain(LIST_NOTE);
+    await act(async () => updateInPlace(element, props(read('---\nservings: 4\n---\n'))));
+    expect(servings()?.readOnly).toBe(false);
+    expect(servings()?.value).toBe('4');
+    expect(element.textContent).not.toContain(LIST_NOTE);
+    await expect.poll(output).toBe('500');
   });
 });
 

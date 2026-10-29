@@ -236,17 +236,31 @@ function BlockForm({
   }, [properties, drawnWith, spec, source]);
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
-  // A field bound to a list only shows it, as read.
-  const list = (field: string) => Array.isArray(onPage.current[field]);
+  // A field bound to a list only shows it, as read: told by the properties
+  // drawn, so a value turning into a list, or back, shows at once.
+  const lists = useMemo(
+    () =>
+      new Set(
+        Object.entries(spec.fields).flatMap(([field, { property }]) =>
+          property !== undefined && Array.isArray(propertyNamed(properties, property))
+            ? [field]
+            : [],
+        ),
+      ),
+    [spec, properties],
+  );
+  const list = (field: string) => lists.has(field);
   const checked = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(spec.fields).map(([field, declared]) => [
           field,
-          list(field) ? { value: null, problem: LIST_NOTE } : check(declared, texts[field] ?? ''),
+          lists.has(field)
+            ? { value: null, problem: LIST_NOTE }
+            : check(declared, texts[field] ?? ''),
         ]),
       ),
-    [spec, texts],
+    [spec, texts, lists],
   );
   const values = useMemo(
     () =>
