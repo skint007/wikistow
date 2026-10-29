@@ -207,7 +207,9 @@ function PageView() {
   const key =
     model.view === 'draft'
       ? `${pageId}:draft:${opening}`
-      : `${pageId}:${model.older ? model.revision : reading.originOf(model.revision)}`;
+      : model.older
+        ? `${pageId}:rev:${model.revision}`
+        : `${pageId}:latest:${reading.originOf(model.revision)}`;
   return (
     <>
       <PageBody
