@@ -94,6 +94,26 @@ describe('a form field bound to a property', () => {
     expect(form.sources.at(-1)).toBe('base: 4\nflour: 5000');
   });
 
+  it('sets the default it shows where the page has no value, once committed as it is', async () => {
+    const form = await draw({ properties: read(null) });
+    expect(form.field('Servings').value).toBe('2');
+    form.field('Servings').focus();
+    await userEvent.keyboard('{Enter}');
+    expect(form.set).toEqual([['servings', 2]]);
+    // Now the page's value, committing it again sets nothing more.
+    await userEvent.keyboard('{Enter}');
+    await act(async () => form.field('Servings').blur());
+    expect(form.set).toEqual([['servings', 2]]);
+  });
+
+  it('sets nothing for the value the page already has', async () => {
+    const form = await draw({});
+    form.field('Servings').focus();
+    await userEvent.keyboard('{Enter}');
+    await act(async () => form.field('Servings').blur());
+    expect(form.set).toEqual([]);
+  });
+
   it('commits no value that isn’t valid', async () => {
     const form = await draw({});
     await userEvent.clear(form.field('Servings'));

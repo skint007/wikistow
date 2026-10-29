@@ -166,21 +166,21 @@ function BlockForm({
   source,
   page,
   setSource,
-  properties,
-  setProperty,
+  // Missing in props from an app older than them, as a view of ours never is.
+  properties = null,
+  setProperty = null,
 }: BlockProps & { spec: BlockSpec; calculate: Calculate }) {
   const id = useId();
   const [first] = useState(() => readFields(spec, source, properties));
   const [texts, setTexts] = useState(() =>
     Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
   );
-  // Each bound field's text as last committed or drawn, so a commit that
-  // changes nothing sets nothing; and why the page refused one, if it did.
-  const committed = useRef(
-    Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
-  );
+  // Why the page refused a bound field's value, if it did.
   const [refused, setRefused] = useState<Record<string, string>>({});
-  // Each bound field's value on the page, as drawn or as it last set it.
+  // Each bound field's value on the page, as drawn or as it last set it,
+  // undefined while the page has none: a commit of the value the page has
+  // sets nothing, and any valid one sets a missing key, the default shown
+  // included.
   const onPage = useRef(
     Object.fromEntries(
       Object.entries(spec.fields).map(([field, { property }]) => [
@@ -225,16 +225,12 @@ function BlockForm({
   const commit = (field: string) => {
     const key = spec.fields[field]?.property;
     const { value } = checked[field] ?? { value: null };
-    const text = texts[field] ?? '';
-    if (key === undefined || !setProperty || value === null || committed.current[field] === text)
-      return;
-    const set =
-      spec.fields[field]?.type === 'text'
-        ? boundValue(String(value), onPage.current[field])
-        : value;
+    if (key === undefined || !setProperty || value === null) return;
+    const was = onPage.current[field];
+    const set = spec.fields[field]?.type === 'text' ? boundValue(String(value), was) : value;
+    if (was !== undefined && JSON.stringify(was) === JSON.stringify(set)) return;
     try {
       setProperty(key, set);
-      committed.current[field] = text;
       onPage.current[field] = set;
     } catch (error) {
       const reason = error instanceof PluginError ? error.message : 'It couldn’t be set';
