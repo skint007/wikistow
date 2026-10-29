@@ -246,6 +246,20 @@ const NAME = new RegExp(`^${VARIABLE_NAME.source}$`, 'u');
 /** Whether `name` can name a property in a reference: the template-variable rule (`VARIABLE_NAME`). */
 export const isPropertyName = (name: string) => NAME.test(name);
 
+/**
+ * The key `name` sets in `frontmatter`, as a plugin block's `setProperty`
+ * names one (#212): the key exactly as written, else the first whose name
+ * matches it (`findProperty`), else `name` itself, a new key.
+ */
+export function propertyKeyFor(frontmatter: string | null, name: string): string {
+  const read = readProperties(frontmatter);
+  if (!read.ok) return name;
+  const found =
+    read.properties.find((property) => property.key === name) ??
+    findProperty(read.properties, name);
+  return found?.key ?? name;
+}
+
 /** The first of `properties` whose key matches `name`, or undefined. */
 export function findProperty<P extends { key: string }>(
   properties: readonly P[],

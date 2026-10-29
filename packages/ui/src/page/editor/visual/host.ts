@@ -1,4 +1,4 @@
-import type { AttachmentRef } from '@wikistow/client';
+import type { AttachmentRef, PropertyData, PropertyValue } from '@wikistow/client';
 import type { PluginRuntime } from '../../../plugins/runtime';
 import type { AttachmentAssist, LinkAssist } from '../surface';
 import type { QueryResults } from './query-results';
@@ -19,6 +19,14 @@ export type VisualHost = {
   plugins(): PluginRuntime | null;
   /** Where query blocks' results go, which the surface draws; none where nobody sees them. */
   queries?: QueryResults;
+  /** The page's properties, as its frontmatter has them now; null where they don't read. */
+  properties(): readonly PropertyData[] | null;
+  /** How a plugin block sets one of them as the person's edit (`EditorSurfaceProps`); null where nothing may. */
+  setProperty():
+    | ((key: string, value: PropertyValue) => { ok: true } | { ok: false; reason: string })
+    | null;
+  /** Views showing the properties, told when they change. */
+  readonly propertyViews: Set<{ propertiesChanged(): void }>;
 };
 
 /** A host for an editor nobody sees, such as the fidelity check's: no pages, no attachments. */
@@ -38,6 +46,9 @@ export const inertHost = (): VisualHost => ({
   live: new Set(),
   page: () => null,
   plugins: () => null,
+  properties: () => null,
+  setProperty: () => null,
+  propertyViews: new Set(),
 });
 
 /** The attachment `attachment:<id>` names, if the page has it. */

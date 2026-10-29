@@ -1,6 +1,5 @@
 import {
-  findProperty,
-  readProperties,
+  propertyKeyFor,
   setPageProperty,
   setTask,
   splitFrontmatter,
@@ -87,21 +86,15 @@ export function readingRights({
 /**
  * `markdown` with `change` made, or why it can't be. A property is the
  * key exactly as written, else the first whose name matches it as a
- * reference's does (`findProperty`), else a new key.
+ * reference's does, else a new key (`propertyKeyFor`).
  */
 export function applyChange(
   markdown: string,
   change: ReadingChange,
 ): { ok: true; markdown: string } | { ok: false; reason: string } {
   if (change.kind === 'task') return setTask(markdown, change);
-  const read = readProperties(splitFrontmatter(markdown).frontmatter);
-  const key = read.ok
-    ? (
-        read.properties.find((p) => p.key === change.key) ??
-        findProperty(read.properties, change.key)
-      )?.key
-    : undefined;
-  const edit = setPageProperty(markdown, key ?? change.key, change.value);
+  const key = propertyKeyFor(splitFrontmatter(markdown).frontmatter, change.key);
+  const edit = setPageProperty(markdown, key, change.value);
   return edit.ok
     ? edit
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };

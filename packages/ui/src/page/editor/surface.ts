@@ -1,4 +1,4 @@
-import type { AttachmentRef, LinkablePage, PropertyData } from '@wikistow/client';
+import type { AttachmentRef, LinkablePage, PropertyData, PropertyValue } from '@wikistow/client';
 import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
 
@@ -99,6 +99,15 @@ export type EditorSurfaceProps = {
    * references (`` `=key` ``) show and `` `= `` completes; null for none.
    */
   properties?: readonly PropertyData[] | null | undefined;
+  /**
+   * Set one of the page's properties as the person's edit, as a plugin
+   * block's `setProperty` does: the key as written, else the first whose
+   * name matches it, else a new one (`propertyKeyFor`), or why it can't be
+   * set in place. Absent where nothing may change them.
+   */
+  setProperty?:
+    | ((key: string, value: PropertyValue) => { ok: true } | { ok: false; reason: string })
+    | undefined;
   /**
    * The other pages references name (`` `=[[Page]].key` ``), as the
    * editor's search index holds them, which they show and `` `=[[Page]]. ``

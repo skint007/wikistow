@@ -194,6 +194,7 @@ function Surface({
   holding,
   page,
   properties,
+  setProperty,
   otherPages,
   queryTable,
   ref,
@@ -211,6 +212,7 @@ function Surface({
     holding,
     page,
     properties,
+    setProperty,
     otherPages,
   });
   useLayoutEffect(() => {
@@ -225,16 +227,10 @@ function Surface({
       holding,
       page,
       properties,
+      setProperty,
       otherPages,
     };
   });
-  // References show the values the frontmatter, and the index for other pages', have now.
-  useEffect(() => {
-    editor.current?.action((ctx) => {
-      const view = ctx.get(editorViewCtx);
-      view.dispatch(propertiesChanged(view.state.tr));
-    });
-  }, [properties, otherPages]);
   // The runtime of the place it is drawn in, for the editor's whole life.
   const plugins = usePluginRuntime();
   const [host] = useState<VisualHost>(() => ({
@@ -244,7 +240,19 @@ function Surface({
     page: () => latest.current.page ?? null,
     plugins: () => plugins,
     queries: new QueryResults(),
+    properties: () => latest.current.properties ?? null,
+    setProperty: () => latest.current.setProperty ?? null,
+    propertyViews: new Set(),
   }));
+  // References show the values the frontmatter, and the index for other pages', have now,
+  // and plugin blocks the properties.
+  useEffect(() => {
+    editor.current?.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(propertiesChanged(view.state.tr));
+    });
+    for (const view of host.propertyViews) view.propertiesChanged();
+  }, [properties, otherPages, host]);
   // Each query block's result, drawn under its code where the editor put a place for it.
   const queries = useSyncExternalStore(
     host.queries?.subscribe ?? noQueries.subscribe,
