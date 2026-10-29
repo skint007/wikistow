@@ -1,9 +1,10 @@
 import { taskItems } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { describe, expect, it } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   applyChanges,
   flushChanges,
+  inTurn,
   readingNotices,
   ReadingQueue,
   readingRights,
@@ -232,6 +233,33 @@ describe('a flush', () => {
     expect(page.draft()).toContain('- [x] milk');
   });
 
+  it('says a change is in the draft when a publish failed after its save, and the draft has it', async () => {
+    const page = server(LIST);
+    const publish = page.operations.publish;
+    page.operations.publish = async () => {
+      throw new Error('offline');
+    };
+    await expect(flushChanges(page.operations, [task(LIST, 'milk', true)])).rejects.toThrow(
+      'offline',
+    );
+    // The save stood: the draft now has the tick, and changes of its own.
+    page.state.draftChanges = true;
+    page.operations.publish = publish;
+    expect(await flushChanges(page.operations, [task(LIST, 'milk', true)])).toEqual({
+      outcome: 'in-draft',
+      dropped: [],
+    });
+    expect(page.state.published).toEqual([]);
+    // Left out altogether, it is unchanged.
+    expect(
+      (
+        await flushChanges(page.operations, [
+          { kind: 'task', offset: 0, line: 'jam', checked: true },
+        ])
+      ).outcome,
+    ).toBe('unchanged');
+  });
+
   it('reports what it left out', async () => {
     const page = server(LIST);
     const flushed = await flushChanges(page.operations, [
@@ -248,20 +276,25 @@ describe('a flush', () => {
   });
 });
 
-const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Each runs on fake timers, the queue at its own pace: three seconds after
+// the last change, fifteen at most after the first.
+beforeEach(() => void vi.useFakeTimers());
+afterEach(() => void vi.useRealTimers());
+
+/** Let `ms` pass, running the timers and promises due meanwhile. */
+const pass = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 
 /** A queue whose flush records what it gets, and finishes once `finish()` is called. */
-function queue(timing = { debounceMs: 30, maxWaitMs: 80 }) {
+function queue() {
   const flushes: ReadingChange[][] = [];
-  let finish: (result?: Error) => void = () => {};
+  let finish: (result?: Error | Flushed) => void = () => {};
   const reading = new ReadingQueue(async (changes) => {
     flushes.push([...changes]);
-    const result = await new Promise<Error | undefined>((resolve) => (finish = resolve));
-    if (result) throw result;
-    return { outcome: 'published', dropped: [] } satisfies Flushed;
-  }, timing);
-  return { reading, flushes, finish: (result?: Error) => finish(result) };
+    const result = await new Promise<Error | Flushed | undefined>((resolve) => (finish = resolve));
+    if (result instanceof Error) throw result;
+    return result ?? ({ outcome: 'published', dropped: [] } satisfies Flushed);
+  });
+  return { reading, flushes, finish: (result?: Error | Flushed) => finish(result) };
 }
 
 const tick = (line: string): ReadingChange => ({ kind: 'task', offset: 0, line, checked: true });
@@ -270,57 +303,65 @@ describe('a page’s queue', () => {
   it('flushes once changes pause, all of them together, keeping them shown until it is done', async () => {
     const q = queue();
     q.reading.add(tick('a'));
-    await wait(10);
+    await pass(2000);
     q.reading.add(tick('b'));
-    await wait(10);
+    await pass(2999);
     expect(q.flushes).toEqual([]);
+    expect(q.reading.busy()).toBe(true);
     expect(readingNotices(q.reading.get())).toEqual(['Publishing your changes…']);
-    await wait(40);
+    await pass(1);
     expect(q.flushes).toEqual([[tick('a'), tick('b')]]);
     expect(q.reading.get()).toMatchObject({ saving: true, changes: [{}, {}] });
     q.finish();
-    await turn();
+    await pass(0);
     expect(q.reading.get()).toMatchObject({ saving: false, changes: [] });
+    expect(q.reading.busy()).toBe(false);
     expect(readingNotices(q.reading.get())).toEqual(['Your changes are published.']);
   });
 
-  it('flushes at most a while after the first change, however often they come', async () => {
+  it('flushes at most fifteen seconds after the first change, however often they come', async () => {
     const q = queue();
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       q.reading.add(tick(String(i)));
-      await wait(20);
+      await pass(2000);
     }
-    expect(q.flushes.length).toBe(1);
-    expect(q.flushes[0]?.length).toBeGreaterThanOrEqual(3);
+    expect(q.flushes).toEqual([]);
+    q.reading.add(tick('7'));
+    await pass(1000);
+    expect(q.flushes).toHaveLength(1);
+    expect(q.flushes[0]).toHaveLength(8);
   });
 
   it('keeps changes made during a flush for the next, on their own timer', async () => {
     const q = queue();
     q.reading.add(tick('a'));
-    await wait(40);
+    await pass(3000);
     q.reading.add(tick('b'));
     // Its timer runs out while the first flush is still running: it waits.
-    await wait(50);
+    await pass(5000);
     expect(q.flushes).toEqual([[tick('a')]]);
     q.finish();
-    await wait(50);
+    await pass(0);
+    expect(q.flushes).toEqual([[tick('a')]]);
+    expect(readingNotices(q.reading.get())).toEqual(['Publishing your changes…']);
+    await pass(3000);
     expect(q.flushes).toEqual([[tick('a')], [tick('b')]]);
     q.finish();
-    await turn();
+    await pass(0);
     expect(q.reading.get().changes).toEqual([]);
   });
 
   it('flushes at once as the person leaves, then what came meanwhile', async () => {
-    const q = queue({ debounceMs: 10_000, maxWaitMs: 10_000 });
+    const q = queue();
     q.reading.add(tick('a'));
     const leaving = q.reading.flush();
-    await turn();
+    await pass(0);
     q.reading.add(tick('b'));
     q.finish();
-    await wait(0);
+    await pass(0);
+    expect(q.flushes).toEqual([[tick('a')], [tick('b')]]);
     q.finish();
     await leaving;
-    expect(q.flushes).toEqual([[tick('a')], [tick('b')]]);
     expect(q.reading.get().changes).toEqual([]);
   });
 
@@ -328,14 +369,69 @@ describe('a page’s queue', () => {
     const q = queue();
     q.reading.add(tick('a'));
     const flushing = q.reading.flush();
-    await turn();
+    await pass(0);
     q.finish(new Error('offline'));
     await flushing;
     expect(q.reading.get()).toMatchObject({ saving: false, changes: [{ change: tick('a') }] });
+    expect(q.reading.busy()).toBe(true);
     expect(readingNotices(q.reading.get())).toEqual(['Couldn’t save your change: offline']);
     q.reading.add(tick('b'));
-    await wait(40);
+    await pass(3000);
     expect(q.flushes.at(-1)).toEqual([tick('a'), tick('b')]);
+  });
+
+  it('drops what failed as the person turns to the draft, and forgets how the last flush went', async () => {
+    const q = queue();
+    q.reading.add(tick('a'));
+    const flushing = q.reading.flush();
+    await pass(0);
+    q.finish(new Error('offline'));
+    await flushing;
+    q.reading.discard();
+    expect(q.reading.get().changes).toEqual([]);
+    await pass(10_000);
+    expect(q.flushes).toHaveLength(1);
+    expect(readingNotices(q.reading.get())).toEqual(['Couldn’t save your change: offline']);
+    q.reading.forget();
+    expect(readingNotices(q.reading.get())).toEqual([]);
+  });
+
+  it('knows the publication each of its own replaced, back to the one first read', () => {
+    const q = queue();
+    q.reading.published('p2', 'p1');
+    q.reading.published('p3', 'p2');
+    q.reading.published('p9', null);
+    expect(['p3', 'p2', 'p1', 'p4', 'p9'].map((r) => q.reading.originOf(r))).toEqual([
+      'p1',
+      'p1',
+      'p1',
+      'p4',
+      'p9',
+    ]);
+  });
+});
+
+describe('a page’s flushes', () => {
+  it('run one after another, even from two queues, while other pages’ don’t wait', async () => {
+    const order: string[] = [];
+    let first: () => void = () => {};
+    const a1 = inTurn('page-a', async () => {
+      order.push('a1 starts');
+      await new Promise<void>((resolve) => (first = resolve));
+      order.push('a1 ends');
+    });
+    const a2 = inTurn('page-a', async () => void order.push('a2 starts'));
+    const b = inTurn('page-b', async () => void order.push('b starts'));
+    await pass(0);
+    expect(order).toEqual(['a1 starts', 'b starts']);
+    first();
+    await Promise.all([a1, a2, b]);
+    expect(order).toEqual(['a1 starts', 'b starts', 'a1 ends', 'a2 starts']);
+    // One that failed holds up nothing after it.
+    await expect(
+      inTurn('page-a', async () => Promise.reject(new Error('offline'))),
+    ).rejects.toThrow();
+    expect(await inTurn('page-a', async () => 'next')).toBe('next');
   });
 });
 

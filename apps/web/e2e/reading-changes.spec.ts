@@ -64,13 +64,51 @@ test('ticking tasks while reading publishes them together, only for those who ma
     await expect(owner.getByText('Published v2')).toBeVisible();
   });
 
-  await test.step('leaving the page publishes a tick at once', async () => {
+  await test.step('leaving the page publishes a tick at once, not after the pause', async () => {
     await publishedPageIn(owner, 'Lists', 'Chores', '- [ ] dishes\n');
+    const saved = owner.waitForRequest(
+      (request) =>
+        request.method() === 'POST' && /\/api\/pages\/[^/]+\/drafts$/.test(request.url()),
+    );
     await box(owner, 'dishes').check();
+    const ticked = Date.now();
     await openPage(owner, 'Shopping');
+    await saved;
+    // The pause is three seconds: a save this soon is the one leaving made.
+    expect(Date.now() - ticked).toBeLessThan(2500);
     await openPage(owner, 'Chores');
     await expect(owner.getByText('Published v2')).toBeVisible({ timeout: 15_000 });
     await expect(box(owner, 'dishes')).toBeChecked();
+  });
+
+  await test.step('opening the draft right after a tick waits for it, then opens on top of it', async () => {
+    await box(owner, 'dishes').uncheck();
+    await owner.getByRole('button', { name: 'Edit' }).click();
+    await expectSource(owner, '- [ ] dishes\n');
+    await expect(owner.getByText('Your changes are published.')).toBeVisible();
+    await owner.locator('#page-source').press('End');
+    await owner.keyboard.type(' and pans');
+    await waitForSave(owner);
+    await expect(owner.getByText(/Someone else saved/)).toHaveCount(0);
+    await owner.getByRole('button', { name: 'Done' }).click();
+    await expect(owner.getByText('Published v3')).toBeVisible();
+  });
+
+  await test.step('a tick published keeps the reader where they were, on the same box', async () => {
+    const long = `${Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1}.`).join('\n\n')}\n\n- [ ] last one\n`;
+    await publishedPageIn(owner, 'Lists', 'Long list', long);
+    const card = owner.locator('article[data-region="page"]');
+    await box(owner, 'last one').scrollIntoViewIfNeeded();
+    const scrolled = await card.evaluate((element) => element.scrollTop);
+    expect(scrolled).toBeGreaterThan(500);
+    await box(owner, 'last one').focus();
+    await owner.keyboard.press('Space');
+    await expect(box(owner, 'last one')).toBeChecked();
+    await expect(owner.getByText('Published v2')).toBeVisible({ timeout: 30_000 });
+    await expect(box(owner, 'last one')).toBeFocused();
+    await expect(box(owner, 'last one')).toBeChecked();
+    const now = await card.evaluate((element) => element.scrollTop);
+    expect(Math.abs(now - scrolled)).toBeLessThan(40);
   });
 
   await test.step('a reader’s boxes are read-only', async () => {

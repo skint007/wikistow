@@ -141,7 +141,10 @@ const stale = (error: unknown) => error instanceof ApiError && error.code === 's
  * someone saved meanwhile, it all starts again from the top, up to
  * `FLUSH_TRIES` times. The draft is published only if it was the
  * publication when loaded, and only if neither head moved since
- * (`expected`); otherwise the changes stay in the draft.
+ * (`expected`); otherwise the changes stay in the draft. A draft already
+ * as asked but with changes of its own, as one a flush saved and then
+ * failed to publish leaves it, isn't known to be published: the changes
+ * are said to be in the draft.
  */
 export async function flushChanges(
   operations: FlushOperations,
@@ -152,7 +155,10 @@ export async function flushChanges(
     if (heads.draftHead === null) throw new Error('This page has no draft to change.');
     const before = await operations.openDraft(heads.draftHead);
     const { markdown, dropped } = applyChanges(before, changes);
-    if (markdown === before) return { outcome: 'unchanged', dropped };
+    if (markdown === before) {
+      const kept = dropped.length < changes.length;
+      return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
+    }
     let saved: string;
     try {
       saved = await operations.saveDraft(heads.draftHead, markdown);
@@ -169,6 +175,25 @@ export async function flushChanges(
       throw error;
     }
   }
+}
+
+// Each page's last flush, by page: a page's next flush starts once it has
+// settled, even from another queue, as one made on returning to the page
+// while the one left behind still saves.
+const flushing = new Map<string, Promise<unknown>>();
+
+/** `flush` run after the page's flushes before it have settled. */
+export function inTurn<T>(pageId: string, flush: () => Promise<T>): Promise<T> {
+  const run = (flushing.get(pageId) ?? Promise.resolve()).then(flush);
+  const settled = run.then(
+    () => {},
+    () => {},
+  );
+  flushing.set(pageId, settled);
+  void settled.then(() => {
+    if (flushing.get(pageId) === settled) flushing.delete(pageId);
+  });
+  return run;
 }
 
 /** A change in the queue, with an id of its own so a flush takes out just those it saved. */
@@ -289,6 +314,47 @@ export class ReadingQueue {
   /** Save every change waiting now, as the person leaves; resolves once they're saved (or failed). */
   flush(): Promise<void> {
     return this.#run(true);
+  }
+
+  /** Whether a change waits, or is being saved: one leaving now would lose. */
+  busy(): boolean {
+    return this.#state.changes.length > 0 || this.#state.saving;
+  }
+
+  /** Drop the changes waiting, as the person turns to the draft after they failed to save. */
+  discard() {
+    if (this.#state.saving || this.#state.changes.length === 0) return;
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#firstAt = null;
+    this.#set({ changes: [] });
+  }
+
+  /** Forget how the last flush went, so the page says only what comes next. */
+  forget() {
+    if (this.#state.last !== null || this.#state.error !== null)
+      this.#set({ last: null, error: null });
+  }
+
+  // Each publication a flush made, by the one it replaced.
+  readonly #replaced = new Map<string, string>();
+
+  /** A flush published `revision` in place of `replaced`, the publication the person was reading. */
+  published(revision: string, replaced: string | null) {
+    if (replaced !== null) this.#replaced.set(revision, replaced);
+  }
+
+  /**
+   * The publication the person was reading when this queue's flushes
+   * replaced it, one after another, with `revision`; `revision` itself if
+   * none made it. The page keeps one view for them all, so reading goes on
+   * where it was.
+   */
+  originOf(revision: string): string {
+    let origin = revision;
+    for (let before = this.#replaced.get(origin); before; before = this.#replaced.get(origin))
+      origin = before;
+    return origin;
   }
 }
 
