@@ -78,7 +78,7 @@ function checkboxOf(item: Element): { box: Element; text: ElementContent[] } | n
 /**
  * A rehype plugin, before `pageHtml`, marking each task item's checkbox
  * with where its list item starts in the page's whole Markdown (`TASK`):
- * its offset in the body, plus `start`, where the body starts. Each is
+ * its offset in the body, plus `start`, where the body starts (`bodyStart`). Each is
  * labelled by its item's text. Raw HTML is still unparsed then, so a
  * checkbox the page's own HTML holds isn't marked; one that marks itself
  * can only name a task of the page, which is checked against the

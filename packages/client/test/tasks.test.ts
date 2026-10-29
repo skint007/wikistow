@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { setPageProperty, setTask, taskAt, taskItems, type TaskItem } from '../src/index.ts';
+import {
+  bodyStart,
+  setPageProperty,
+  setTask,
+  taskAt,
+  taskItems,
+  type TaskItem,
+} from '../src/index.ts';
 
 /** The task whose line is `line`, as `taskItems` finds it. */
 function find(markdown: string, line: string): TaskItem {
@@ -55,6 +62,17 @@ describe('task items', () => {
     expect(markdown.slice(find(markdown, 'milk').offset)).toMatch(/^- \[ \] milk/);
     expect(markdown.slice(find(markdown, 'crumbs').offset)).toMatch(/^- \[X\] crumbs/);
     expect(markdown.slice(find(markdown, 'quoted').offset)).toMatch(/^- \[ \] quoted/);
+  });
+
+  it('are found after a byte order mark, which the parser doesn’t count', () => {
+    const markdown = '\uFEFF- [ ] milk\n- [x] bread\n';
+    expect(bodyStart(markdown)).toBe(1);
+    expect(taskItems(markdown).map(({ offset, line }) => [offset, line])).toEqual([
+      [1, 'milk'],
+      [12, 'bread'],
+    ]);
+    expect(tick(markdown, 'milk', true)).toBe('\uFEFF- [x] milk\n- [x] bread\n');
+    expect(bodyStart('---\na: 1\n---\nBody\n')).toBe(13);
   });
 
   it('aren’t found where no task starts', () => {

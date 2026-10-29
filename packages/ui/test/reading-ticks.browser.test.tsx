@@ -129,6 +129,13 @@ describe('a task’s checkbox in the reader', () => {
     expect(box('crumbs fine').checked).toBe(true);
   });
 
+  it('ticks on a page that starts with a byte order mark', async () => {
+    const { box, changes } = await render('\uFEFF- [ ] milk\n', { allowed: true });
+    await act(async () => box('milk').click());
+    expect(changes).toEqual([{ kind: 'task', offset: 1, line: 'milk', checked: true }]);
+    expect(box('milk').checked).toBe(true);
+  });
+
   it('stays disabled where this person can’t change the page, with a hint when there’s a reason', async () => {
     const hinted = await render(PAGE, {
       allowed: false,

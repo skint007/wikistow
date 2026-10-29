@@ -46,13 +46,23 @@ export function taskAt(markdown: string, offset: number): TaskItem | null {
 }
 
 /**
+ * Where a page's body starts, as the offsets the body's tree has count:
+ * after its frontmatter, and after a byte order mark (U+FEFF) the body
+ * starts with, which the parser skips without counting.
+ */
+export function bodyStart(markdown: string): number {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  return (frontmatter?.length ?? 0) + (body.startsWith('\uFEFF') ? 1 : 0);
+}
+
+/**
  * Every task item in `markdown`, in order, as the reader reads them:
  * GitHub-flavoured Markdown and wikilinks, the frontmatter split off first.
  * Read without recursion, as a page may nest deep.
  */
 export function taskItems(markdown: string): TaskItem[] {
-  const { frontmatter, body } = splitFrontmatter(markdown);
-  const start = frontmatter?.length ?? 0;
+  const { body } = splitFrontmatter(markdown);
+  const start = bodyStart(markdown);
   const tree = fromMarkdown(body, {
     extensions: [gfm(), wikilinkSyntax],
     mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown],

@@ -3,6 +3,7 @@ import {
   parsePropertyReference,
   QUERY_LANGUAGE,
   readProperties,
+  bodyStart,
   splitFrontmatter,
   taskAt,
 } from '@wikistow/client';
@@ -371,7 +372,7 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
                   remarkRehypeOptions={{
                     handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
                   }}
-                  rehypePlugins={[[taskMarks, frontmatter?.length ?? 0], pageHtml]}
+                  rehypePlugins={[[taskMarks, bodyStart(source)], pageHtml]}
                   urlTransform={urlTransform}
                   components={components}
                 />
