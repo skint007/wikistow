@@ -46,7 +46,8 @@ export const PUBLIC_LINK_HINT = 'This page has a public link: open the draft to 
  * `revision` of `view`: an editor who can publish, on the latest
  * publication of a page with a draft, while the draft has no changes,
  * and the page has no public link (`publicLink`, null until that's
- * known). Each publish ends a public page's copy, which Publish asks about
+ * known). A version its address names (`?rev=`, `pinned`) isn't the latest
+ * even when it is now, as it stays that one once a tick publishes. Each publish ends a public page's copy, which Publish asks about
  * first (ADR 0005), so a tick there would end it without asking. Readers
  * are told nothing, as nothing would let them.
  */
@@ -55,12 +56,14 @@ export function readingRights({
   heads,
   view,
   revision,
+  pinned = false,
   publicLink,
 }: {
   viewer: Viewer;
   heads: PageHeads;
   view: View;
   revision: string;
+  pinned?: boolean;
   publicLink: boolean | null;
 }): ReadingRights {
   if (view !== 'published' || viewer.role === 'reader') return { allowed: false, hint: null };
@@ -71,6 +74,7 @@ export function readingRights({
     };
   if (revision !== heads.publishedHead)
     return { allowed: false, hint: 'This is an older version. Open the latest to tick this' };
+  if (pinned) return { allowed: false, hint: 'Open the latest version to tick this' };
   if (!viewer.canPublish)
     return { allowed: false, hint: 'Open the draft to tick this: you can’t publish this page' };
   if (publicLink === null) return { allowed: false, hint: null };
@@ -207,6 +211,32 @@ const flushing = new Map<string, Promise<unknown>>();
  */
 export const pageFlushing = (pageId: string): Promise<unknown> | undefined => flushing.get(pageId);
 
+// Each page's publications its flushes made, by the one each replaced:
+// kept for the page, not the queue, as one left behind may publish while
+// the person is back on the page with another.
+const replaced = new Map<string, Map<string, string>>();
+
+/** A flush of `pageId` published `revision` in place of `before`, the publication the person was reading. */
+export function notePublished(pageId: string, revision: string, before: string | null) {
+  if (before === null) return;
+  let page = replaced.get(pageId);
+  if (!page) replaced.set(pageId, (page = new Map()));
+  page.set(revision, before);
+}
+
+/**
+ * The publication the person was reading when flushes of `pageId`
+ * replaced it, one after another, with `revision`; `revision` itself if
+ * none made it. The page keeps one view for them all, so reading goes on
+ * where it was.
+ */
+export function originOf(pageId: string, revision: string): string {
+  const page = replaced.get(pageId);
+  let origin = revision;
+  for (let before = page?.get(origin); before; before = page?.get(origin)) origin = before;
+  return origin;
+}
+
 /**
  * Every page's flushes under way, settled once all are, or null while none
  * runs: closing the app or locking the vault waits for them, the pages
@@ -323,6 +353,7 @@ export class ReadingQueue {
     const taken = this.#state.changes;
     if (taken.length === 0) return;
     this.#firstAt = null;
+    this.#toldBefore = false;
     this.#set({ saving: true, error: null });
     const ids = new Set(taken.map(({ id }) => id));
     let failed = false;
@@ -365,36 +396,26 @@ export class ReadingQueue {
     this.#set({ changes: [] });
   }
 
+  // What the queue says came from a flush made before this visit (`told`),
+  // which turning to the draft or an older version doesn't forget.
+  #toldBefore = false;
+
   /** How a flush of this page from a queue left behind went, said here unless one runs. */
   told({ last, error }: Told) {
-    if (!this.#state.saving) this.#set({ last, error });
-  }
-
-  /** Forget how the last flush went, so the page says only what comes next. */
-  forget() {
-    if (this.#state.last !== null || this.#state.error !== null)
-      this.#set({ last: null, error: null });
-  }
-
-  // Each publication a flush made, by the one it replaced.
-  readonly #replaced = new Map<string, string>();
-
-  /** A flush published `revision` in place of `replaced`, the publication the person was reading. */
-  published(revision: string, replaced: string | null) {
-    if (replaced !== null) this.#replaced.set(revision, replaced);
+    if (this.#state.saving) return;
+    this.#toldBefore = true;
+    this.#set({ last, error });
   }
 
   /**
-   * The publication the person was reading when this queue's flushes
-   * replaced it, one after another, with `revision`; `revision` itself if
-   * none made it. The page keeps one view for them all, so reading goes on
-   * where it was.
+   * Forget how this visit's last flush went, so the page says only what
+   * comes next. How one before it went (`told`) stays, as the person who
+   * comes back to the page's draft at once still needs to hear it.
    */
-  originOf(revision: string): string {
-    let origin = revision;
-    for (let before = this.#replaced.get(origin); before; before = this.#replaced.get(origin))
-      origin = before;
-    return origin;
+  forget() {
+    if (this.#toldBefore) return;
+    if (this.#state.last !== null || this.#state.error !== null)
+      this.#set({ last: null, error: null });
   }
 }
 

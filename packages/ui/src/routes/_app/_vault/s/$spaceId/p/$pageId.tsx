@@ -72,6 +72,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  originOf,
   pageFlushing,
   readingRights,
   type ReadingQueue,
@@ -209,7 +210,7 @@ function PageView() {
       ? `${pageId}:draft:${opening}`
       : model.older
         ? `${pageId}:rev:${model.revision}`
-        : `${pageId}:latest:${reading.originOf(model.revision)}`;
+        : `${pageId}:latest:${originOf(pageId, model.revision)}`;
   return (
     <>
       <PageBody
@@ -320,6 +321,8 @@ function PageBody({
   const contents = model.view === 'published' && headings.length > 1;
   // The latest publication as shown, with the changes made while reading it.
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  // A version the address names stays that one, so it isn't changed while it's read.
+  const pinned = Route.useSearch({ select: (search) => search.rev !== undefined });
   // A page with a public link isn't changed while it's read, nor before its links are known.
   const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
   const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
@@ -330,9 +333,10 @@ function PageBody({
         heads: info.heads,
         view: model.view,
         revision: revisionId,
+        pinned,
         publicLink: linked,
       }),
-    [info.role, info.canPublish, info.heads, model.view, revisionId, linked],
+    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked],
   );
 
   const go = (view: 'draft' | 'published') =>

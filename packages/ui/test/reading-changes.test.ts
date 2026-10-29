@@ -7,6 +7,8 @@ import {
   flushesUnderway,
   inTurn,
   leftOutcome,
+  notePublished,
+  originOf,
   pageFlushing,
   PUBLIC_LINK_HINT,
   readingNotices,
@@ -120,6 +122,11 @@ describe('who may change a page while reading it', () => {
       hint: 'Open the draft to tick this: it has unpublished changes',
     });
     expect(rights({ revision: 'p0' })).toMatchObject({ allowed: false, hint: /older version/ });
+    // Named by the address, it stays that version once a tick publishes.
+    expect(rights({ pinned: true })).toEqual({
+      allowed: false,
+      hint: 'Open the latest version to tick this',
+    });
     // A public link a publish would end without asking, or links not yet known.
     expect(rights({ publicLink: true })).toEqual({ allowed: false, hint: PUBLIC_LINK_HINT });
     expect(rights({ publicLink: null })).toEqual({ allowed: false, hint: null });
@@ -429,18 +436,20 @@ describe('a page’s queue', () => {
     expect(readingNotices(q.reading.get())).toEqual([]);
   });
 
-  it('knows the publication each of its own replaced, back to the one first read', () => {
-    const q = queue();
-    q.reading.published('p2', 'p1');
-    q.reading.published('p3', 'p2');
-    q.reading.published('p9', null);
-    expect(['p3', 'p2', 'p1', 'p4', 'p9'].map((r) => q.reading.originOf(r))).toEqual([
+  it('knows the publication each flush of a page replaced, back to the one first read', () => {
+    // One by the queue left behind, one by the queue the person came back to.
+    notePublished('page-o', 'p2', 'p1');
+    notePublished('page-o', 'p3', 'p2');
+    notePublished('page-o', 'p9', null);
+    expect(['p3', 'p2', 'p1', 'p4', 'p9'].map((r) => originOf('page-o', r))).toEqual([
       'p1',
       'p1',
       'p1',
       'p4',
       'p9',
     ]);
+    // Another page's publications are its own.
+    expect(originOf('page-other', 'p3')).toBe('p3');
   });
 });
 
@@ -491,6 +500,28 @@ describe('flushes of pages the person left', () => {
     await pass(0);
     expect(settled).toBe(true);
     expect(flushesUnderway()).toBeNull();
+  });
+
+  it('are still told after the person turns straight to the draft, until a flush of this visit', async () => {
+    leftOutcome('page-z', {
+      last: { outcome: 'in-draft', dropped: [] },
+      error: null,
+    });
+    const back = queue();
+    const end = showing('page-z', back.reading);
+    // As the draft opens: what this visit said goes, what was told before stays.
+    back.reading.forget();
+    expect(readingNotices(back.reading.get())).toEqual([
+      'Your change went into the draft: publish it to show it.',
+    ]);
+    back.reading.add(tick('a'));
+    const flushing = back.reading.flush();
+    await pass(0);
+    back.finish();
+    await flushing;
+    back.reading.forget();
+    expect(readingNotices(back.reading.get())).toEqual([]);
+    end();
   });
 
   it('tell how they went to the page as it shows again, or at once if it shows now', () => {

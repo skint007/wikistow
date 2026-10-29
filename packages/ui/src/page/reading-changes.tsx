@@ -23,6 +23,7 @@ import {
   flushesUnderway,
   inTurn,
   leftOutcome,
+  notePublished,
   readingNotices,
   ReadingQueue,
   showing,
@@ -121,7 +122,7 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         });
         published = written.revisionId;
         // Before the page loads again, so the view reading it stays (`originOf`).
-        queue.published(written.revisionId, publishedHead);
+        notePublished(pageId, written.revisionId, publishedHead);
         return written.revisionId;
       },
       publicLink: async () =>
