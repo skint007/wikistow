@@ -11,10 +11,10 @@ import {
   type OpenedPayload,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Check, Globe, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -65,6 +65,18 @@ import {
   usePublicLink,
 } from '../../../../../../page/public-link';
 import { PublishDialog } from '../../../../../../page/publish-dialog';
+import {
+  ReadingChanges,
+  ReadingNotices,
+  useReadingQueue,
+} from '../../../../../../page/reading-changes';
+import {
+  applyChanges,
+  originOf,
+  pageFlushing,
+  readingRights,
+  type ReadingQueue,
+} from '../../../../../../page/reading-changes-model';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
@@ -109,6 +121,37 @@ function PageView() {
   const [sharingLinkFor, setSharingLinkFor] = useState<string | null>(null);
   useEffect(() => setSharingLinkFor(null), [pageId]);
   const sharingLink = sharingLinkFor === pageId;
+  // Changes made while reading, kept across the publications they make.
+  const reading = useReadingQueue(ctx, page);
+  const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  // Turning to the draft or an older version saves what waits first, at
+  // once, saying only how that went; the draft opens once it's done, on
+  // top of what it saved, not under it.
+  const leavingLatest = search.view === 'draft' || search.rev !== undefined;
+  useEffect(() => {
+    if (!leavingLatest) return;
+    reading.forget();
+    void reading.flush();
+  }, [leavingLatest, reading]);
+  // Changes that failed to save don't wait to go in under the draft the
+  // person now edits, which they would overwrite: the page said why.
+  const failedBeforeDraft =
+    search.view === 'draft' && !queued.saving && queued.error !== null && queued.changes.length > 0;
+  useEffect(() => {
+    if (failedBeforeDraft) reading.discard();
+  }, [failedBeforeDraft, reading]);
+  // A flush of this page still running from before, as from a queue left
+  // when the person went to another page and came back: the draft waits
+  // for it too, drawn again once it has settled.
+  const earlier = pageFlushing(pageId);
+  const [, settled] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    let live = true;
+    void earlier?.then(() => live && settled());
+    return () => {
+      live = false;
+    };
+  }, [earlier]);
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -146,9 +189,28 @@ function PageView() {
       ? tree.space.metadata.opened.metadata.name
       : '';
 
+  if (
+    model.view === 'draft' &&
+    (earlier !== undefined || queued.saving || (queued.changes.length > 0 && queued.error === null))
+  )
+    return (
+      <PageCard>
+        <p role="status" className="p-8 text-center text-sm text-muted-foreground">
+          Saving your changes before the draft opens…
+        </p>
+      </PageCard>
+    );
+
   // The draft view stays mounted while its own saves move the draft head;
-  // a publication is shown per revision.
-  const key = model.view === 'draft' ? `${pageId}:draft:${opening}` : `${pageId}:${model.revision}`;
+  // a publication is shown per revision, but one that changes made while
+  // reading published goes on in the view they were made in
+  // (`originOf`), where the person is reading, scrolled and focused.
+  const key =
+    model.view === 'draft'
+      ? `${pageId}:draft:${opening}`
+      : model.older
+        ? `${pageId}:rev:${model.revision}`
+        : `${pageId}:latest:${originOf(pageId, model.revision)}`;
   return (
     <>
       <PageBody
@@ -165,6 +227,7 @@ function PageView() {
           setOpening((n) => n + 1);
         }}
         onShareLink={() => setSharingLinkFor(pageId)}
+        reading={reading}
       />
       {((info.heads.publishedHead && info.canPublish) || sharingLink) && (
         <PublicLinkDialog
@@ -189,6 +252,7 @@ function PageBody({
   shareRoot,
   onReopen,
   onShareLink,
+  reading,
 }: {
   page: pageOperations.PageRef;
   info: Info;
@@ -199,15 +263,23 @@ function PageBody({
   onReopen: () => Promise<void>;
   /** Open the public link dialog, which outlasts this view. */
   onShareLink: () => void;
+  /** The page's changes made while reading, which outlast this view. */
+  reading: ReadingQueue;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
   const router = useRouter();
   const queryClient = useQueryClient();
-  // The revision opened when this view mounted. The draft head moves on with
-  // every save, but the editor already holds that text.
-  const [revisionId] = useState(() => RevisionId.parse(model.revision));
-  const { data: revision, error } = useQuery(revisionQuery(ctx, page, model.view, revisionId));
+  // The draft opened when this view mounted: the draft head moves on with
+  // every save, but the editor already holds that text. A publication is
+  // the one shown, which a change made while reading moves on in this view.
+  const [openedDraft] = useState(() => RevisionId.parse(model.revision));
+  const revisionId = model.view === 'draft' ? openedDraft : RevisionId.parse(model.revision);
+  const { data: revision, error } = useQuery({
+    ...revisionQuery(ctx, page, model.view, revisionId),
+    // Opened before the page loads again, it shows at once; else the one before stays meanwhile.
+    placeholderData: keepPreviousData,
+  });
   // Wikilinks resolve by title among the pages this person can open.
   const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
@@ -247,6 +319,25 @@ function PageBody({
   // The page's card, whose scrolling says which heading is being read.
   const [card, setCard] = useState<HTMLElement | null>(null);
   const contents = model.view === 'published' && headings.length > 1;
+  // The latest publication as shown, with the changes made while reading it.
+  const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  // A version the address names stays that one, so it isn't changed while it's read.
+  const pinned = Route.useSearch({ select: (search) => search.rev !== undefined });
+  // A page with a public link isn't changed while it's read, nor before its links are known.
+  const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
+  const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
+  const rights = useMemo(
+    () =>
+      readingRights({
+        viewer: { role: info.role, canPublish: info.canPublish },
+        heads: info.heads,
+        view: model.view,
+        revision: revisionId,
+        pinned,
+        publicLink: linked,
+      }),
+    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked],
+  );
 
   const go = (view: 'draft' | 'published') =>
     navigate({
@@ -310,6 +401,26 @@ function PageBody({
   const canEdit = info.role !== 'reader';
   const { publishedHead } = info.heads;
   const title = pageTitle(payload?.title ?? null);
+  const latest = model.view === 'published' && revisionId === publishedHead;
+  const readMarkdown = payload?.markdown ?? null;
+  const shownMarkdown = useMemo(
+    () =>
+      readMarkdown !== null && latest
+        ? applyChanges(
+            readMarkdown,
+            queued.changes.map(({ change }) => change),
+          ).markdown
+        : readMarkdown,
+    [readMarkdown, latest, queued.changes],
+  );
+  // An older version can't change, but its boxes say why to editors.
+  const readingHere = useMemo(
+    () =>
+      model.view === 'published' && shownMarkdown !== null
+        ? { markdown: shownMarkdown, rights, change: reading.add }
+        : null,
+    [model.view, shownMarkdown, reading, rights],
+  );
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.
   const provenance = payload ? publicationOperations.provenanceOf(payload) : null;
@@ -717,6 +828,7 @@ function PageBody({
               </span>
             )}
           </Pills>
+          <ReadingNotices state={queued} />
           {canEdit && provenance && info.heads.draftHead === null && !model.actions.detach && (
             <p className="text-sm text-muted-foreground">
               This page is a copy of another page, published to it from there. Someone who can
@@ -752,22 +864,24 @@ function PageBody({
                   />
                 )}
                 <div ref={setShownBody} className="contents">
-                  <Markdown
-                    source={payload.markdown}
-                    attachments={{
-                      ctx,
-                      page,
-                      audience: 'published',
-                      attachments: payload.attachments,
-                    }}
-                    pages={linkable}
-                    links={linkTableOf(payload)}
-                    editing={
-                      canEdit
-                        ? { parentId: info.parentId, create: info.parentId !== null || topOpened }
-                        : null
-                    }
-                  />
+                  <ReadingChanges value={readingHere}>
+                    <Markdown
+                      source={shownMarkdown ?? payload.markdown}
+                      attachments={{
+                        ctx,
+                        page,
+                        audience: 'published',
+                        attachments: payload.attachments,
+                      }}
+                      pages={linkable}
+                      links={linkTableOf(payload)}
+                      editing={
+                        canEdit
+                          ? { parentId: info.parentId, create: info.parentId !== null || topOpened }
+                          : null
+                      }
+                    />
+                  </ReadingChanges>
                 </div>
               </>
             ))}

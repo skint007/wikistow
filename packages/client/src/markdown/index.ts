@@ -9,6 +9,7 @@ export * from './link-spans.ts';
 export * from './properties.ts';
 export * from './property-references.ts';
 export * from './property-text.ts';
+export * from './tasks.ts';
 export * from './wikilink.ts';
 
 /**
