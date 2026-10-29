@@ -4,7 +4,7 @@ import type { BlockSpec } from '@wikistow/plugin-sdk/protocol';
 import { act } from 'react';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { formView, readFields } from '../src/plugins/block-form.tsx';
+import { boundValue, formView, readFields } from '../src/plugins/block-form.tsx';
 import { blockProperties } from '../src/plugins/block-properties.ts';
 
 // A script's block form with a field bound to a page property (#212): it
@@ -152,5 +152,49 @@ describe('a script block’s fields as read', () => {
       value: 9,
       problem: null,
     });
+  });
+});
+
+describe('a text field bound to a property', () => {
+  it('keeps the type of the value it replaces when its text reads as one', () => {
+    expect(boundValue('5', 4)).toBe(5);
+    expect(boundValue('five', 4)).toBe('five');
+    expect(boundValue('false', true)).toBe(false);
+    expect(boundValue('maybe', true)).toBe('maybe');
+    expect(boundValue('5', 'four')).toBe('5');
+    expect(boundValue('5', undefined)).toBe('5');
+    expect(boundValue('true', null)).toBe('true');
+  });
+
+  it('sets a number for a number on the page, as the form commits it', async () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const set: [string, PropertyValue][] = [];
+    const spec: BlockSpec = {
+      type: 'rated',
+      fields: { rating: { type: 'text', label: 'Rating', property: 'rating' } },
+      outputs: {},
+    };
+    await act(async () => {
+      const undo = formView(spec, async () => ({}))(element, {
+        source: '',
+        page: { spaceId: 's', pageId: 'p' },
+        setSource: null,
+        properties: read('---\nrating: 4\n---\n'),
+        setProperty: (key, value) => void set.push([key, value]),
+      });
+      if (undo) undos.push(undo);
+    });
+    const input = element.querySelector('input');
+    if (!input) throw new Error('No field');
+    expect(input.value).toBe('4');
+    await userEvent.clear(input);
+    await userEvent.type(input, '5{Enter}');
+    await userEvent.clear(input);
+    await userEvent.type(input, 'five{Enter}');
+    expect(set).toEqual([
+      ['rating', 5],
+      ['rating', 'five'],
+    ]);
   });
 });

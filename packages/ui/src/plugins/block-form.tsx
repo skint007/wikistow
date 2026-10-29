@@ -10,6 +10,8 @@ import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Input } from '@/components/ui/input';
+import type { PropertyValue } from '@wikistow/plugin-sdk';
+import { typedValue } from '../page/property-model';
 import { propertyNamed, type BlockProperties } from './block-properties';
 
 /*
@@ -69,6 +71,18 @@ function check(field: BlockField, text: string): Checked {
 
 /** A field as the form reads it from a fence: its text, and its value or what's wrong with it. */
 export type ReadField = { text: string } & Checked;
+
+/**
+ * What a text field bound to a property sets for `text`: in the type of
+ * the value it replaces when the text reads as one, a number for a number
+ * (`typedValue`, as the Properties rows type it) and `true` or `false` for
+ * either, so `rating: 4` stays a number; else the text.
+ */
+export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
+  if (typeof was === 'number') return typedValue(text, was);
+  if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
+  return text;
+}
 
 /** The text a field bound to a property shows for the page's value: a scalar's, if it has one. */
 function boundText(field: BlockField, properties: BlockProperties): string | undefined {
@@ -166,6 +180,15 @@ function BlockForm({
     Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
   );
   const [refused, setRefused] = useState<Record<string, string>>({});
+  // Each bound field's value on the page, as drawn or as it last set it.
+  const onPage = useRef(
+    Object.fromEntries(
+      Object.entries(spec.fields).map(([field, { property }]) => [
+        field,
+        property === undefined ? undefined : propertyNamed(properties, property),
+      ]),
+    ),
+  );
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
   const checked = useMemo(
@@ -205,9 +228,14 @@ function BlockForm({
     const text = texts[field] ?? '';
     if (key === undefined || !setProperty || value === null || committed.current[field] === text)
       return;
+    const set =
+      spec.fields[field]?.type === 'text'
+        ? boundValue(String(value), onPage.current[field])
+        : value;
     try {
-      setProperty(key, value);
+      setProperty(key, set);
       committed.current[field] = text;
+      onPage.current[field] = set;
     } catch (error) {
       const reason = error instanceof PluginError ? error.message : 'It couldn’t be set';
       setRefused((now) => ({ ...now, [field]: reason }));
