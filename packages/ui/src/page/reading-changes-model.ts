@@ -1,0 +1,305 @@
+import {
+  findProperty,
+  readProperties,
+  setPageProperty,
+  setTask,
+  splitFrontmatter,
+  type PropertyValue,
+} from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
+import { errorMessage } from '../errors';
+import type { PageHeads, View, Viewer } from './view-model';
+
+// Changes made while reading a page (#212): a task ticked, or a value a
+// plugin block sets in the frontmatter. Each shows at once, and joins the
+// page's queue; once changes pause, the queue is saved as one draft and
+// published together, so ticking a whole list makes one version. Only an
+// editor who can publish makes them, on the latest publication, while the
+// draft has no changes of its own: a publish never takes anyone's draft
+// edits with it.
+//
+// Each change says what to set, never what to toggle, so applying one
+// again changes nothing more. It is applied to the newest text as a
+// targeted edit, one character for a task (`setTask`) and one value for a
+// property (`setPageProperty`), so changes made meanwhile are never
+// overwritten. One that no longer applies is left out, and the page says why.
+
+/** A change made while reading: a task ticked or not, or a property set. */
+export type ReadingChange =
+  | { kind: 'task'; offset: number; line: string; checked: boolean }
+  | { kind: 'property'; key: string; value: PropertyValue };
+
+/** A change left out, as it no longer applies, and why. */
+export type Dropped = { change: ReadingChange; reason: string };
+
+/**
+ * Who may make changes while reading, or why not: `hint` says it beside a
+ * checkbox that can't be ticked, and is null where nothing needs saying.
+ */
+export type ReadingRights = { allowed: true } | { allowed: false; hint: string | null };
+
+/**
+ * Whether `viewer` may change the page while reading the version
+ * `revision` of `view`: an editor who can publish, on the latest
+ * publication of a page with a draft, while the draft has no changes.
+ * Readers are told nothing, as nothing would let them.
+ */
+export function readingRights({
+  viewer,
+  heads,
+  view,
+  revision,
+}: {
+  viewer: Viewer;
+  heads: PageHeads;
+  view: View;
+  revision: string;
+}): ReadingRights {
+  if (view !== 'published' || viewer.role === 'reader') return { allowed: false, hint: null };
+  if (heads.draftHead === null)
+    return {
+      allowed: false,
+      hint: 'This page is a copy of another page, so it can’t be changed here',
+    };
+  if (revision !== heads.publishedHead)
+    return { allowed: false, hint: 'This is an older version. Open the latest to tick this' };
+  if (!viewer.canPublish)
+    return { allowed: false, hint: 'Open the draft to tick this: you can’t publish this page' };
+  if (heads.draftChanges)
+    return { allowed: false, hint: 'Open the draft to tick this: it has unpublished changes' };
+  return { allowed: true };
+}
+
+/**
+ * `markdown` with `change` made, or why it can't be. A property is the
+ * key exactly as written, else the first whose name matches it as a
+ * reference's does (`findProperty`), else a new key.
+ */
+export function applyChange(
+  markdown: string,
+  change: ReadingChange,
+): { ok: true; markdown: string } | { ok: false; reason: string } {
+  if (change.kind === 'task') return setTask(markdown, change);
+  const read = readProperties(splitFrontmatter(markdown).frontmatter);
+  const key = read.ok
+    ? (
+        read.properties.find((p) => p.key === change.key) ??
+        findProperty(read.properties, change.key)
+      )?.key
+    : undefined;
+  const edit = setPageProperty(markdown, key ?? change.key, change.value);
+  return edit.ok
+    ? edit
+    : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
+}
+
+/** `markdown` with each of `changes` made, in order, and those that no longer apply. */
+export function applyChanges(
+  markdown: string,
+  changes: readonly ReadingChange[],
+): { markdown: string; dropped: Dropped[] } {
+  const dropped: Dropped[] = [];
+  for (const change of changes) {
+    const made = applyChange(markdown, change);
+    if (made.ok) markdown = made.markdown;
+    else dropped.push({ change, reason: made.reason });
+  }
+  return { markdown, dropped };
+}
+
+/** What a flush needs of the page, so it can be tried without a server. */
+export type FlushOperations = {
+  /** The page's heads as they are now. */
+  heads: () => Promise<Pick<PageHeads, 'draftHead' | 'publishedHead' | 'draftChanges'>>;
+  /** The Markdown of the draft `revisionId`. */
+  openDraft: (revisionId: string) => Promise<string>;
+  /** Save `markdown` as the draft on top of `basedOn`, opened before; the revision written. */
+  saveDraft: (basedOn: string, markdown: string) => Promise<string>;
+  /** Publish the draft `expected.draftHead`, if the page's heads are still `expected`; the revision written. */
+  publish: (expected: { draftHead: string; publishedHead: string | null }) => Promise<string>;
+};
+
+/**
+ * How a flush went: `published` as one version; saved `in-draft` only, as
+ * the draft had changes of its own or someone published meanwhile; or
+ * `unchanged`, the page already as asked, or every change left out.
+ */
+export type Flushed = {
+  outcome: 'published' | 'in-draft' | 'unchanged';
+  dropped: Dropped[];
+};
+
+/** How many times a flush starts again when someone saved the draft meanwhile. */
+export const FLUSH_TRIES = 3;
+
+const stale = (error: unknown) => error instanceof ApiError && error.code === 'stale-head';
+
+/**
+ * Save `changes` in the page's draft, and publish it if the draft had no
+ * changes of its own: the heads loaded afresh, the draft opened, each
+ * change made in its Markdown, and the result saved on top of it. If
+ * someone saved meanwhile, it all starts again from the top, up to
+ * `FLUSH_TRIES` times. The draft is published only if it was the
+ * publication when loaded, and only if neither head moved since
+ * (`expected`); otherwise the changes stay in the draft.
+ */
+export async function flushChanges(
+  operations: FlushOperations,
+  changes: readonly ReadingChange[],
+): Promise<Flushed> {
+  for (let tries = 1; ; tries++) {
+    const heads = await operations.heads();
+    if (heads.draftHead === null) throw new Error('This page has no draft to change.');
+    const before = await operations.openDraft(heads.draftHead);
+    const { markdown, dropped } = applyChanges(before, changes);
+    if (markdown === before) return { outcome: 'unchanged', dropped };
+    let saved: string;
+    try {
+      saved = await operations.saveDraft(heads.draftHead, markdown);
+    } catch (error) {
+      if (stale(error) && tries < FLUSH_TRIES) continue;
+      throw error;
+    }
+    if (heads.draftChanges) return { outcome: 'in-draft', dropped };
+    try {
+      await operations.publish({ draftHead: saved, publishedHead: heads.publishedHead });
+      return { outcome: 'published', dropped };
+    } catch (error) {
+      if (stale(error)) return { outcome: 'in-draft', dropped };
+      throw error;
+    }
+  }
+}
+
+/** A change in the queue, with an id of its own so a flush takes out just those it saved. */
+export type Queued = { id: number; change: ReadingChange };
+
+/**
+ * A page's queue: the changes waiting, those being saved among them;
+ * whether a flush is running; how the last one went, until the next is
+ * done; and why the last failed, until another starts.
+ */
+export type ReadingState = {
+  changes: readonly Queued[];
+  saving: boolean;
+  last: Flushed | null;
+  error: unknown;
+};
+
+/**
+ * One page's changes made while reading, and when they're saved: about
+ * three seconds after the last one, and at most fifteen after the first
+ * waiting, as autosave paces a draft's; at once with `flush()`, as the
+ * person leaves. One flush runs at a time, with the changes waiting when it
+ * starts; those made during it wait for their own timer. A change stays in
+ * the queue, and so on the page, until its flush is done, `flush` there
+ * including showing the new version; if it fails, they stay, and the next
+ * change or flush tries them again.
+ */
+export class ReadingQueue {
+  #state: ReadingState = { changes: [], saving: false, last: null, error: null };
+  #next = 0;
+  #firstAt: number | null = null;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #running: Promise<void> | null = null;
+  readonly #listeners = new Set<() => void>();
+  readonly #flush: (changes: readonly ReadingChange[]) => Promise<Flushed>;
+  readonly #timing: { debounceMs: number; maxWaitMs: number };
+
+  constructor(
+    flush: (changes: readonly ReadingChange[]) => Promise<Flushed>,
+    timing = { debounceMs: 3000, maxWaitMs: 15_000 },
+  ) {
+    this.#flush = flush;
+    this.#timing = timing;
+  }
+
+  /** The queue as it is now: the same object until it changes, for `useSyncExternalStore`. */
+  get = (): ReadingState => this.#state;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  #set(state: Partial<ReadingState>) {
+    this.#state = { ...this.#state, ...state };
+    for (const listener of this.#listeners) listener();
+  }
+
+  /** `change` made: shown at once, and saved once changes pause. */
+  add = (change: ReadingChange) => {
+    this.#set({ changes: [...this.#state.changes, { id: this.#next++, change }] });
+    this.#schedule();
+  };
+
+  #schedule() {
+    const now = Date.now();
+    this.#firstAt ??= now;
+    const wait = Math.min(this.#timing.debounceMs, this.#firstAt + this.#timing.maxWaitMs - now);
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = setTimeout(
+      () => {
+        this.#timer = null;
+        void this.#run(false);
+      },
+      Math.max(0, wait),
+    );
+  }
+
+  /** Save what waits now, and with `chain`, what waits once that's done, until none does. */
+  async #run(chain: boolean): Promise<void> {
+    if (this.#running) {
+      await this.#running;
+      // A timer that fired during a flush waits for the next, set again for what came meanwhile.
+      if (!chain) {
+        if (this.#state.changes.length > 0 && !this.#timer) this.#schedule();
+        return;
+      }
+      return this.#run(true);
+    }
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
+    const taken = this.#state.changes;
+    if (taken.length === 0) return;
+    this.#firstAt = null;
+    this.#set({ saving: true, error: null });
+    const ids = new Set(taken.map(({ id }) => id));
+    let failed = false;
+    this.#running = this.#flush(taken.map(({ change }) => change)).then(
+      (last) =>
+        this.#set({
+          changes: this.#state.changes.filter(({ id }) => !ids.has(id)),
+          saving: false,
+          last,
+        }),
+      (error: unknown) => {
+        failed = true;
+        this.#set({ saving: false, error });
+      },
+    );
+    try {
+      await this.#running;
+    } finally {
+      this.#running = null;
+    }
+    if (chain && !failed && this.#state.changes.length > 0) return this.#run(true);
+  }
+
+  /** Save every change waiting now, as the person leaves; resolves once they're saved (or failed). */
+  flush(): Promise<void> {
+    return this.#run(true);
+  }
+}
+
+/** What the queue says on the page: saving, how the last flush went, or why it failed. */
+export function readingNotices({ changes, saving, last, error }: ReadingState): string[] {
+  const notices: string[] = [];
+  if (error !== null) notices.push(`Couldn’t save your change: ${errorMessage(error)}`);
+  else if (saving || changes.length > 0) notices.push('Publishing your changes…');
+  else if (last?.outcome === 'published') notices.push('Your changes are published.');
+  if (!saving && last?.outcome === 'in-draft')
+    notices.push('Your change went into the draft: publish it to show it.');
+  for (const { reason } of last?.dropped ?? []) notices.push(`A change was left out. ${reason}`);
+  return notices;
+}
