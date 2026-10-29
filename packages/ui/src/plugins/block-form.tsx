@@ -209,23 +209,22 @@ function BlockForm({
   );
   const typed = useRef(new Set<string>());
   // New properties come in place (`updateInPlace`): a bound field not typed
-  // in shows the page's value now, one typed in keeps its text, and each
-  // commits against the value the page has now.
+  // in shows what it reads now (`readFields`), the page's value, or its
+  // fence line or default where the page no longer has the key; one typed
+  // in keeps its text; and each commits against the value the page has now.
   const [drawnWith] = useState(properties);
   useEffect(() => {
     if (properties === drawnWith) return;
-    const read = readFields(spec, '', properties);
+    const read = readFields(spec, source, properties);
     const now: Record<string, string> = {};
     for (const [field, { property }] of Object.entries(spec.fields)) {
       if (property === undefined) continue;
       onPage.current[field] = propertyNamed(properties, property);
       const shown = read[field];
-      // A key the page no longer has leaves what the field shows.
-      if (!typed.current.has(field) && shown && onPage.current[field] !== undefined)
-        now[field] = shown.text;
+      if (!typed.current.has(field) && shown) now[field] = shown.text;
     }
     setTexts((before) => ({ ...before, ...now }));
-  }, [properties, drawnWith, spec]);
+  }, [properties, drawnWith, spec, source]);
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
   // A field bound to a list only shows it, as read.

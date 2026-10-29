@@ -6,6 +6,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { boundValue, formView, LIST_NOTE, readFields } from '../src/plugins/block-form.tsx';
 import { blockProperties } from '../src/plugins/block-properties.ts';
+import { updateInPlace } from '../src/plugins/in-place.ts';
 
 // A script's block form with a field bound to a page property (#212): it
 // shows the page's value, and sets it once a valid value is committed,
@@ -163,6 +164,40 @@ describe('a form field bound to a property', () => {
     await act(async () => form.field('Servings').blur());
     expect(form.field('Servings').value).toBe('3');
     await expect.poll(form.output).toBe('375');
+  });
+});
+
+describe('a form taking new properties in place', () => {
+  it('shows the page’s value as it changes, and the fence line or default once the key is gone', async () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const props = (properties: ReturnType<typeof read>): BlockProps => ({
+      source: 'base: 4\nflour: 500\nservings: 3',
+      page: { spaceId: 's', pageId: 'p' },
+      setSource: null,
+      properties,
+      setProperty: () => {},
+    });
+    await act(async () => {
+      const undo = formView(SPEC, async (_page, values) => {
+        const { servings, base, flour } = values as Record<string, number>;
+        return { scaled: { value: ((flour ?? 0) * (servings ?? 0)) / (base ?? 1) } };
+      })(element, props(read('---\nservings: 6\n---\n')));
+      if (undo) undos.push(undo);
+    });
+    const servings = () => element.querySelector('input');
+    const output = () => element.querySelector('output[data-output="scaled"]')?.textContent;
+    expect(servings()?.value).toBe('6');
+    await expect.poll(output).toBe('750');
+    await act(async () => updateInPlace(element, props(read('---\nservings: 8\n---\n'))));
+    expect(servings()?.value).toBe('8');
+    await expect.poll(output).toBe('1,000');
+    // Removed in Properties, or a queued change that added it dropped: the fence's line again.
+    const first = servings();
+    await act(async () => updateInPlace(element, props(read('---\nother: 1\n---\n'))));
+    expect(servings()).toBe(first);
+    expect(servings()?.value).toBe('3');
+    await expect.poll(output).toBe('375');
   });
 });
 
