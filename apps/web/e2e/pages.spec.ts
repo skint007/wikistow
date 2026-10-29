@@ -247,3 +247,23 @@ test('locking, leaving or closing the page saves what was just typed, or asks fi
   await dialog.dismiss();
   expect(page.isClosed()).toBe(false);
 });
+
+test('a long page list scrolls in the sidebar, never the window', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await page.setViewportSize({ width: 1280, height: 420 });
+  // Drafts, so each row carries the unpublished dot and its sr-only text.
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8]) await newPage(page, `Draft ${n}`);
+  const overflows = await page.evaluate(() => {
+    const tree = document.querySelector('[role=tree]')!;
+    const window = document.documentElement;
+    return {
+      tree: tree.scrollHeight > tree.clientHeight,
+      window: window.scrollHeight > window.clientHeight,
+    };
+  });
+  expect(overflows).toEqual({ tree: true, window: false });
+});
