@@ -4,7 +4,7 @@ import type { BlockSpec } from '@wikistow/plugin-sdk/protocol';
 import { act } from 'react';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { boundValue, formView, readFields } from '../src/plugins/block-form.tsx';
+import { boundValue, formView, LIST_NOTE, readFields } from '../src/plugins/block-form.tsx';
 import { blockProperties } from '../src/plugins/block-properties.ts';
 
 // A script's block form with a field bound to a page property (#212): it
@@ -94,16 +94,35 @@ describe('a form field bound to a property', () => {
     expect(form.sources.at(-1)).toBe('base: 4\nflour: 5000');
   });
 
-  it('sets the default it shows where the page has no value, once committed as it is', async () => {
+  it('changes nothing when a field showing a default for a missing key is only visited', async () => {
     const form = await draw({ properties: read(null) });
     expect(form.field('Servings').value).toBe('2');
     form.field('Servings').focus();
     await userEvent.keyboard('{Enter}');
+    await act(async () => form.field('Servings').blur());
+    expect(form.set).toEqual([]);
+  });
+
+  it('sets the default it shows for a missing key once it’s typed', async () => {
+    const form = await draw({ properties: read(null) });
+    await userEvent.clear(form.field('Servings'));
+    await userEvent.type(form.field('Servings'), '2{Enter}');
     expect(form.set).toEqual([['servings', 2]]);
-    // Now the page's value, committing it again sets nothing more.
+    // Set, it's the page's value: committing it again sets nothing more.
     await userEvent.keyboard('{Enter}');
     await act(async () => form.field('Servings').blur());
     expect(form.set).toEqual([['servings', 2]]);
+  });
+
+  it('only shows a list it’s bound to, and a visit changes nothing', async () => {
+    const form = await draw({ properties: read('---\nservings: [2, 4]\n---\n') });
+    expect(form.field('Servings').value).toBe('2, 4');
+    expect(form.field('Servings').readOnly).toBe(true);
+    expect(form.element.textContent).toContain('A list: change it in the page’s properties');
+    form.field('Servings').focus();
+    await userEvent.keyboard('{Enter}');
+    await act(async () => form.field('Servings').blur());
+    expect(form.set).toEqual([]);
   });
 
   it('sets nothing for the value the page already has', async () => {
@@ -164,8 +183,8 @@ describe('a script block’s fields as read', () => {
       servings: { text: '4', value: 4, problem: null },
       cook: { text: '20', value: '20', problem: null },
       base: { text: '3', value: 3, problem: null },
-      // A list isn't a field's value: the fence's line stands.
-      tags: { text: 'own', value: 'own', problem: null },
+      // A list isn't a field's value: the field only shows it.
+      tags: { text: 'soup', value: null, problem: LIST_NOTE },
     });
     expect(readFields(spec, 'servings: 9', {}).servings).toEqual({
       text: '9',

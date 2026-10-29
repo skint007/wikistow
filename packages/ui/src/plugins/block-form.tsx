@@ -10,6 +10,7 @@ import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import type { PropertyValue } from '@wikistow/plugin-sdk';
 import { typedValue } from '../page/property-model';
 import { propertyNamed, type BlockProperties } from './block-properties';
@@ -86,18 +87,29 @@ export function boundValue(text: string, was: PropertyValue | undefined): Proper
   return text;
 }
 
-/** The text a field bound to a property shows for the page's value: a scalar's, if it has one. */
-function boundText(field: BlockField, properties: BlockProperties): string | undefined {
+/** What a field bound to a list shows under it: it can't stand for one, so it only shows it. */
+export const LIST_NOTE = 'A list: change it in the page’s properties';
+
+/**
+ * What a field bound to a property shows for the page's value, if it has
+ * one: a scalar's text, or a list's items, which the field can't change.
+ */
+function boundText(
+  field: BlockField,
+  properties: BlockProperties,
+): { text: string; list: boolean } | undefined {
   if (field.property === undefined) return undefined;
   const value = propertyNamed(properties, field.property);
-  if (value === undefined || Array.isArray(value)) return undefined;
-  return value === null ? '' : String(value);
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) return { text: value.flat().map(String).join(', '), list: true };
+  return { text: value === null ? '' : String(value), list: false };
 }
 
 /**
  * Each declared field of `spec` as read from `source`, and for a field
  * bound to a property the page has, from `properties`; a missing line
- * takes its default.
+ * takes its default. A field bound to a list shows its items, with no
+ * value, as it can't be one.
  */
 export function readFields(
   spec: BlockSpec,
@@ -107,8 +119,10 @@ export function readFields(
   const written = fieldTexts(source);
   return Object.fromEntries(
     Object.entries(spec.fields).map(([field, declared]) => {
+      const bound = boundText(declared, properties);
+      if (bound?.list) return [field, { text: bound.text, value: null, problem: LIST_NOTE }];
       const text =
-        boundText(declared, properties) ??
+        bound?.text ??
         written.get(field) ??
         (declared.default === undefined ? '' : String(declared.default));
       return [field, { text, ...check(declared, text) }];
@@ -180,9 +194,10 @@ function BlockForm({
   // Why the page refused a bound field's value, if it did.
   const [refused, setRefused] = useState<Record<string, string>>({});
   // Each bound field's value on the page, as drawn or as it last set it,
-  // undefined while the page has none: a commit of the value the page has
-  // sets nothing, and any valid one sets a missing key, the default shown
-  // included.
+  // undefined while the page has none; and the fields typed in since they
+  // were drawn or last set. Only a field typed in is set as it's committed,
+  // and only to a value the page hasn't, a missing key counting as one:
+  // visiting a field never changes the page, the default it shows included.
   const onPage = useRef(
     Object.fromEntries(
       Object.entries(spec.fields).map(([field, { property }]) => [
@@ -191,14 +206,17 @@ function BlockForm({
       ]),
     ),
   );
+  const typed = useRef(new Set<string>());
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
+  // A field bound to a list only shows it, as read.
+  const list = (field: string) => Array.isArray(onPage.current[field]);
   const checked = useMemo(
     () =>
       Object.fromEntries(
         Object.entries(spec.fields).map(([field, declared]) => [
           field,
-          check(declared, texts[field] ?? ''),
+          list(field) ? { value: null, problem: LIST_NOTE } : check(declared, texts[field] ?? ''),
         ]),
       ),
     [spec, texts],
@@ -215,6 +233,7 @@ function BlockForm({
   const results = useCalculation(calculate, page, values);
 
   const change = (field: string, text: string) => {
+    typed.current.add(field);
     setTexts((now) => ({ ...now, [field]: text }));
     setRefused(({ [field]: _gone, ...others }) => others);
     // A bound field writes no line: its value goes to the page as it's committed.
@@ -227,13 +246,17 @@ function BlockForm({
   const commit = (field: string) => {
     const key = spec.fields[field]?.property;
     const { value } = checked[field] ?? { value: null };
-    if (key === undefined || !setProperty || value === null) return;
+    if (key === undefined || !setProperty || value === null || !typed.current.has(field)) return;
     const was = onPage.current[field];
     const set = spec.fields[field]?.type === 'text' ? boundValue(String(value), was) : value;
-    if (was !== undefined && JSON.stringify(was) === JSON.stringify(set)) return;
+    if (was !== undefined && JSON.stringify(was) === JSON.stringify(set)) {
+      typed.current.delete(field);
+      return;
+    }
     try {
       setProperty(key, set);
       onPage.current[field] = set;
+      typed.current.delete(field);
     } catch (error) {
       const reason = error instanceof PluginError ? error.message : 'It couldn’t be set';
       setRefused((now) => ({ ...now, [field]: reason }));
@@ -250,7 +273,8 @@ function BlockForm({
             <Input
               inputMode={declared.type === 'number' ? 'decimal' : 'text'}
               value={texts[field] ?? ''}
-              aria-invalid={problem !== null}
+              readOnly={list(field)}
+              aria-invalid={problem !== null && !list(field)}
               aria-describedby={problem ? `${id}-${field}` : undefined}
               onChange={(event) => change(field, event.target.value)}
               onBlur={() => commit(field)}
@@ -260,7 +284,13 @@ function BlockForm({
               className="h-8 bg-background text-foreground"
             />
             {problem && (
-              <span id={`${id}-${field}`} className="text-xs text-destructive">
+              <span
+                id={`${id}-${field}`}
+                className={cn(
+                  'text-xs',
+                  list(field) ? 'text-muted-foreground' : 'text-destructive',
+                )}
+              >
                 {problem}
               </span>
             )}
