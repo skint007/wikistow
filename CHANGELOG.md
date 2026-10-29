@@ -8,13 +8,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Features
 
-- Tick a page’s task list while reading it, without opening the draft. A few seconds after the last tick, the page is published with them, all as one new version. Only people who can publish the page can tick it, and only while its draft has no unpublished changes.
+- Tick a page’s task list while reading it, without opening the draft. A few seconds after the last tick, the page is published with them, all as one new version. Only people who can publish the page can tick it, and only while its draft has no unpublished changes and the page has no public link.
 
 ### Changes
 
 #### App
 
-- A published page’s task checkboxes tick for an editor who can publish it. Ticks wait for a pause of about three seconds, at most fifteen, or for leaving the page, then go into the draft and are published together as one version. Each changes only the character in its box, found again by its text if the page changed meanwhile; one that no longer applies is left out, and the page says so. If the draft has unpublished changes, the boxes stay disabled, with a hint saying why, and a tick that meets such changes goes into the draft only. Readers’ boxes stay read-only. (#212)
+- A published page’s task checkboxes tick for an editor who can publish it. Ticks wait for a pause of about three seconds, at most fifteen, or for leaving the page, then go into the draft and are published together as one version. Each changes only the character in its box, found again by its text if the page changed meanwhile; one that no longer applies is left out, and the page says so. If the draft has unpublished changes, or the page has a public link (whose copy every publish ends), the boxes stay disabled, with a hint saying why, and a tick that meets either goes into the draft only. Readers’ boxes stay read-only. (#212)
 
 ## 0.18.1 - 2026-10-29
 
