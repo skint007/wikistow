@@ -4,6 +4,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.18.1 - 2026-10-29
+
+### Highlights
+
+#### Fixes
+
+- A space with a long list of pages no longer lets the whole window scroll past the bottom of the app. Only the page list scrolls.
+
 ### Changes
 
 #### App
