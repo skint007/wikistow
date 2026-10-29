@@ -317,7 +317,9 @@ class CodeBlockView implements NodeView {
           kept.settable === settable &&
           (inPlace || stillShown(kept.properties, properties))))
     ) {
-      if (kept && inPlace && kept.props && kept.properties.shown !== properties) {
+      // Drawn again with the same values, as for another page's, it takes nothing.
+      const changed = JSON.stringify(kept?.properties.shown) !== JSON.stringify(properties);
+      if (kept && inPlace && kept.props && changed) {
         kept.properties = { shown: properties, own: new Map() };
         kept.props = { ...kept.props, properties };
         updateInPlace(kept.element, kept.props);

@@ -264,7 +264,10 @@ describe('a text field bound to a property', () => {
     expect(boundValue('false', true)).toBe(false);
     expect(boundValue('maybe', true)).toBe('maybe');
     expect(boundValue('5', 'four')).toBe('5');
-    expect(boundValue('5', undefined)).toBe('5');
+    // A key the page hasn't is typed as the rows type a key they add.
+    expect(boundValue('5', undefined)).toBe(5);
+    expect(boundValue('true', undefined)).toBe(true);
+    expect(boundValue('soon', undefined)).toBe('soon');
     // An empty value takes what the text reads as, as Properties types it.
     expect(boundValue('', null)).toBeNull();
     expect(boundValue('4', null)).toBe(4);

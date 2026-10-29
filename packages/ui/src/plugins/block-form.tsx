@@ -79,14 +79,15 @@ export type ReadField = { text: string } & Checked;
  * the value it replaces when the text reads as one, as the Properties rows
  * type it (`typedValue`): a number for a number, `true` or `false` for
  * either, so `rating: 4` stays a number; for an empty value (`note:`),
- * whatever the text reads as, nothing staying empty; else the text. A key
- * the page hasn't takes the text. Emptied, the field sets an empty value
- * (`note:`), as the rows do, unless the value was empty text (`""`).
+ * whatever the text reads as, nothing staying empty, and so for a key the
+ * page hasn't, as the rows type a key they add; else the text. Emptied, the
+ * field sets an empty value (`note:`), unless the value was empty text (`""`).
  */
 export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
   // Emptied, it's an empty value, as in the rows, unless it was empty text.
   if (text === '') return was === '' ? '' : null;
-  if (typeof was === 'number' || was === null) return typedValue(text, was);
+  if (typeof was === 'number' || was === null || was === undefined)
+    return typedValue(text, was ?? null);
   if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
   return text;
 }
@@ -226,7 +227,12 @@ function BlockForm({
       const shown = read[field];
       if (!typed.current.has(field) && shown) now[field] = shown.text;
     }
-    setTexts((before) => ({ ...before, ...now }));
+    // Unchanged, the form keeps its texts, and its outputs aren't worked out again.
+    setTexts((before) =>
+      Object.entries(now).every(([field, text]) => before[field] === text)
+        ? before
+        : { ...before, ...now },
+    );
   }, [properties, drawnWith, spec, source]);
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
