@@ -207,6 +207,16 @@ const flushing = new Map<string, Promise<unknown>>();
  */
 export const pageFlushing = (pageId: string): Promise<unknown> | undefined => flushing.get(pageId);
 
+/**
+ * Every page's flushes under way, settled once all are, or null while none
+ * runs: closing the app or locking the vault waits for them, the pages
+ * left included, whose own guards went with them.
+ */
+export function flushesUnderway(): Promise<void> | null {
+  if (flushing.size === 0) return null;
+  return Promise.all(flushing.values()).then(() => {});
+}
+
 /** `flush` run after the page's flushes before it have settled. */
 export function inTurn<T>(pageId: string, flush: () => Promise<T>): Promise<T> {
   const run = (flushing.get(pageId) ?? Promise.resolve()).then(flush);
@@ -355,6 +365,11 @@ export class ReadingQueue {
     this.#set({ changes: [] });
   }
 
+  /** How a flush of this page from a queue left behind went, said here unless one runs. */
+  told({ last, error }: Told) {
+    if (!this.#state.saving) this.#set({ last, error });
+  }
+
   /** Forget how the last flush went, so the page says only what comes next. */
   forget() {
     if (this.#state.last !== null || this.#state.error !== null)
@@ -381,6 +396,40 @@ export class ReadingQueue {
       origin = before;
     return origin;
   }
+}
+
+/** How a flush went, as a queue says it: its outcome, or why it failed. */
+export type Told = { last: Flushed | null; error: unknown };
+
+// The queue showing each page now, and how a flush of a page nobody shows
+// went, kept until the page shows again.
+const showingQueues = new Map<string, ReadingQueue>();
+const leftWith = new Map<string, Told>();
+
+/**
+ * `queue` shows the page `pageId`: it is told how a flush made after the
+ * page was left went, now if that's known, or as it settles. Returns what
+ * ends it, as the page goes.
+ */
+export function showing(pageId: string, queue: ReadingQueue): () => void {
+  showingQueues.set(pageId, queue);
+  const kept = leftWith.get(pageId);
+  leftWith.delete(pageId);
+  if (kept) queue.told(kept);
+  return () => {
+    if (showingQueues.get(pageId) === queue) showingQueues.delete(pageId);
+  };
+}
+
+/**
+ * How a flush made by a queue whose page was left went: told to the queue
+ * showing the page now, or kept until one does, so the page still says
+ * so, a failure included.
+ */
+export function leftOutcome(pageId: string, told: Told) {
+  const queue = showingQueues.get(pageId);
+  if (queue) queue.told(told);
+  else leftWith.set(pageId, told);
 }
 
 /** What the queue says on the page: saving, how the last flush went, or why it failed. */

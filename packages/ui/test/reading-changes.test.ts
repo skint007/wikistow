@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   applyChanges,
   flushChanges,
+  flushesUnderway,
   inTurn,
+  leftOutcome,
   pageFlushing,
   PUBLIC_LINK_HINT,
   readingNotices,
   ReadingQueue,
   readingRights,
+  showing,
   type FlushOperations,
   type Flushed,
   type ReadingChange,
@@ -468,6 +471,50 @@ describe('a page’s flushes', () => {
       inTurn('page-a', async () => Promise.reject(new Error('offline'))),
     ).rejects.toThrow();
     expect(await inTurn('page-a', async () => 'next')).toBe('next');
+  });
+});
+
+describe('flushes of pages the person left', () => {
+  it('are waited for, every page’s, until none runs', async () => {
+    expect(flushesUnderway()).toBeNull();
+    let done: () => void = () => {};
+    const left = inTurn('page-left', () => new Promise<void>((resolve) => (done = resolve)));
+    const other = inTurn('page-other', async () => {});
+    const underway = flushesUnderway();
+    expect(underway).not.toBeNull();
+    let settled = false;
+    void underway?.then(() => (settled = true));
+    await pass(0);
+    expect(settled).toBe(false);
+    done();
+    await Promise.all([left, other, underway]);
+    await pass(0);
+    expect(settled).toBe(true);
+    expect(flushesUnderway()).toBeNull();
+  });
+
+  it('tell how they went to the page as it shows again, or at once if it shows now', () => {
+    const failed = { last: null, error: new Error('offline') };
+    leftOutcome('page-x', failed);
+    const back = queue();
+    const ended = showing('page-x', back.reading);
+    expect(readingNotices(back.reading.get())).toEqual(['Couldn’t save your change: offline']);
+    // Told once: showing the page again later says nothing of it.
+    ended();
+    const later = queue();
+    showing('page-x', later.reading)();
+    expect(readingNotices(later.reading.get())).toEqual([]);
+
+    const shown = queue();
+    const end = showing('page-y', shown.reading);
+    leftOutcome('page-y', {
+      last: { outcome: 'in-draft', dropped: [], publicLink: true },
+      error: null,
+    });
+    expect(readingNotices(shown.reading.get())).toEqual([
+      'This page has a public link, so your change went into the draft: publish it from there.',
+    ]);
+    end();
   });
 });
 

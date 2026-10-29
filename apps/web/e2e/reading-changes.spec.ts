@@ -50,7 +50,14 @@ test('ticking tasks while reading publishes them together, only for those who ma
     const sheet = owner.getByRole('dialog', { name: 'History' });
     await expect(sheet.getByText('Version 2')).toBeVisible();
     await expect(sheet.getByText('Version 3')).toHaveCount(0);
-    await owner.keyboard.press('Escape');
+    // The version the ticks replaced, from history: as it was, with nothing to tick.
+    await sheet.getByRole('button', { name: 'View' }).click();
+    await expect(owner.getByRole('button', { name: /Latest version/ })).toBeVisible();
+    await expect(box(owner, 'milk')).not.toBeChecked();
+    await expect(box(owner, 'milk')).toBeDisabled();
+    await expect(box(owner, 'milk')).toHaveAttribute('data-hint', /older version/);
+    await owner.getByRole('button', { name: /Latest version/ }).click();
+    await expect(box(owner, 'milk')).toBeChecked();
   });
 
   await test.step('the published Markdown holds them', async () => {
@@ -79,6 +86,8 @@ test('ticking tasks while reading publishes them together, only for those who ma
     await openPage(owner, 'Chores');
     await expect(owner.getByText('Published v2')).toBeVisible({ timeout: 15_000 });
     await expect(box(owner, 'dishes')).toBeChecked();
+    // Back on the page, it says how the flush made on leaving it went.
+    await expect(owner.getByText('Your changes are published.')).toBeVisible();
   });
 
   await test.step('opening the draft right after a tick waits for it, then opens on top of it', async () => {

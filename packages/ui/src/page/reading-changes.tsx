@@ -20,9 +20,12 @@ import { vaultStore } from '../vault/store';
 import { readWikilinks } from './page-reader';
 import {
   flushChanges,
+  flushesUnderway,
   inTurn,
+  leftOutcome,
   readingNotices,
   ReadingQueue,
+  showing,
   type Flushed,
   type FlushOperations,
   type ReadingChange,
@@ -46,6 +49,20 @@ export type ReadingChangesHere = {
 
 export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 
+// A flush outlives the page it was made on: leaving starts one, and its
+// queue's guards go with the page. So closing the app or locking the vault
+// waits for every page's, the pages left included.
+vaultStore.guardLock(async () => {
+  await flushesUnderway();
+  return true;
+});
+window.addEventListener('beforeunload', (event) => {
+  if (flushesUnderway() === null) return;
+  event.preventDefault();
+  // Older browsers ask only when this is set.
+  event.returnValue = '';
+});
+
 /**
  * The queue of changes made while reading `page`, kept across the
  * publications it makes. A flush, in turn with the page's others
@@ -61,8 +78,10 @@ export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef): ReadingQueue {
   const queryClient = useQueryClient();
   const { spaceId, pageId } = page;
-  const queue = useMemo(() => {
+  const { queue, shownHere } = useMemo(() => {
     const page = { spaceId, pageId };
+    // Once the page is left, how its flushes went is told to the page when it shows again.
+    let left = false;
     // The drafts a flush opened, by revision, for saving on top of one.
     const opened = new Map<string, { payload: PagePayload; region: Region }>();
     let published: RevisionId | null = null;
@@ -137,9 +156,33 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
       ]);
       return flushed;
     };
-    const queue = new ReadingQueue((changes) => inTurn(pageId, () => flush(changes)));
-    return queue;
+    const queue = new ReadingQueue((changes) =>
+      inTurn(pageId, () => flush(changes)).then(
+        (last) => {
+          if (left) leftOutcome(pageId, { last, error: null });
+          return last;
+        },
+        (error: unknown) => {
+          if (left) leftOutcome(pageId, { last: null, error });
+          throw error;
+        },
+      ),
+    );
+    return {
+      queue,
+      shownHere: (shown: boolean) => {
+        left = !shown;
+      },
+    };
   }, [ctx, queryClient, spaceId, pageId]);
+  useEffect(() => {
+    shownHere(true);
+    const shown = showing(pageId, queue);
+    return () => {
+      shown();
+      shownHere(false);
+    };
+  }, [pageId, queue, shownHere]);
   useEffect(() => {
     const leave = () => void queue.flush();
     const hidden = () => {
