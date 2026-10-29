@@ -11,8 +11,7 @@ import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
 import { COVER_NAMESPACE, coverLeftBehind, coverOf, reviseCover } from '../cover.ts';
 import { CryptoError } from '../errors.ts';
-import { setProperty, type PropertyValue } from '../markdown/properties.ts';
-import { splitFrontmatter } from '../markdown/frontmatter.ts';
+import { setPageProperty, type PropertyValue } from '../markdown/properties.ts';
 import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '../ids.ts';
 import { agentIdentityId } from '../identity.ts';
 import { repairText } from '../json.ts';
@@ -908,26 +907,17 @@ export async function setDraftProperty(
 ): Promise<PropertySet> {
   const draft = await openRevisionOf(ctx, page, 'draft', basedOn);
   const previous = current(draft);
-  const { frontmatter, body } = splitFrontmatter(previous.markdown);
-  const edit = setProperty(frontmatter, key, value, lineBreakOf(previous.markdown));
+  const edit = setPageProperty(previous.markdown, key, value);
   if (!edit.ok) return edit;
-  if (edit.frontmatter === frontmatter) return { ok: true, written: null };
-  // A closing line with no line break needs one before any body.
-  const end = body !== '' && !edit.frontmatter.endsWith('\n') ? lineBreakOf(edit.frontmatter) : '';
+  if (edit.markdown === previous.markdown) return { ok: true, written: null };
   const written = await saveDraft(ctx, {
     page,
     basedOn,
     basedOnRegion: draft.region,
-    payload: { ...previous, markdown: `${edit.frontmatter}${end}${body}` },
+    payload: { ...previous, markdown: edit.markdown },
     ...(read ? { read } : {}),
   });
   return { ok: true, written };
-}
-
-// The line break most of `text`'s lines end with, as the editor reads a page's.
-function lineBreakOf(text: string): '\n' | '\r\n' {
-  const crlf = text.split('\r\n').length - 1;
-  return crlf > text.split('\n').length - 1 - crlf ? '\r\n' : '\n';
 }
 
 export async function uploadBlob(

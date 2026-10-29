@@ -133,6 +133,34 @@ export function setProperty(
   return firstRead(valueEdits(block, read.base, entry, value), expected);
 }
 
+/** A property set in a page's whole Markdown (`setPageProperty`), or why it couldn't be. */
+export type PagePropertyEdit = { ok: true; markdown: string } | { ok: false; reason: string };
+
+/**
+ * `markdown`, a page's whole Markdown, with its property `key` (exactly as
+ * written) set to `value` as `setProperty` sets it, the body as it was. A
+ * page with no block gets one, in its line breaks.
+ */
+export function setPageProperty(
+  markdown: string,
+  key: string,
+  value: PropertyValue,
+): PagePropertyEdit {
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  const edit = setProperty(frontmatter, key, value, lineBreakOf(markdown));
+  if (!edit.ok) return edit;
+  if (edit.frontmatter === frontmatter) return { ok: true, markdown };
+  // A closing line with no line break needs one before any body.
+  const end = body !== '' && !edit.frontmatter.endsWith('\n') ? lineBreakOf(edit.frontmatter) : '';
+  return { ok: true, markdown: `${edit.frontmatter}${end}${body}` };
+}
+
+// The line break most of `text`'s lines end with, as the editor reads a page's.
+function lineBreakOf(text: string): '\n' | '\r\n' {
+  const crlf = text.split('\r\n').length - 1;
+  return crlf > text.split('\n').length - 1 - crlf ? '\r\n' : '\n';
+}
+
 /** `frontmatter` with the key `key` (exactly as written) renamed `to`, in the key's own quoting where it can. */
 export function renameProperty(frontmatter: string, key: string, to: string): PropertyEdit {
   const read = readBlock(frontmatter);
