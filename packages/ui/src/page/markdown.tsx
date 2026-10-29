@@ -320,10 +320,13 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
   );
   const read = useQuery(readQuery(body));
   const hash = useLocation({ select: (location) => location.hash });
-  // A link to a heading of this page arrives before its body is read.
+  // A link to a heading of this page arrives before its body is read: it
+  // goes there once the body first shows, and as the hash changes, but not
+  // as the body changes where it's shown, as a task ticked there changes it.
+  const shown = read.status !== 'pending';
   useEffect(() => {
-    if (hash) document.getElementById(hash)?.scrollIntoView();
-  }, [hash, body, read.status]);
+    if (hash && shown) document.getElementById(hash)?.scrollIntoView();
+  }, [hash, shown]);
   const held: ReactElement[] = [];
   const components: Components = {
     span: ({ node, ...props }) => {
