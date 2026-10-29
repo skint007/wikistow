@@ -176,6 +176,34 @@ describe('a script block’s fields as read', () => {
 });
 
 describe('a text field bound to a property', () => {
+  it('leaves an empty value alone when only focused and left, and types what’s entered there', async () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const set: [string, PropertyValue][] = [];
+    const spec: BlockSpec = {
+      type: 'noted',
+      fields: { note: { type: 'text', label: 'Note', property: 'note' } },
+      outputs: {},
+    };
+    await act(async () => {
+      const undo = formView(spec, async () => ({}))(element, {
+        source: '',
+        page: { spaceId: 's', pageId: 'p' },
+        setSource: null,
+        properties: read('---\nnote:\n---\n'),
+        setProperty: (key, value) => void set.push([key, value]),
+      });
+      if (undo) undos.push(undo);
+    });
+    const input = element.querySelector('input');
+    if (!input) throw new Error('No field');
+    expect(input.value).toBe('');
+    input.focus();
+    await act(async () => input.blur());
+    await userEvent.type(input, '4{Enter}');
+    expect(set).toEqual([['note', 4]]);
+  });
+
   it('keeps the type of the value it replaces when its text reads as one', () => {
     expect(boundValue('5', 4)).toBe(5);
     expect(boundValue('five', 4)).toBe('five');
@@ -183,7 +211,11 @@ describe('a text field bound to a property', () => {
     expect(boundValue('maybe', true)).toBe('maybe');
     expect(boundValue('5', 'four')).toBe('5');
     expect(boundValue('5', undefined)).toBe('5');
-    expect(boundValue('true', null)).toBe('true');
+    // An empty value takes what the text reads as, as Properties types it.
+    expect(boundValue('', null)).toBeNull();
+    expect(boundValue('4', null)).toBe(4);
+    expect(boundValue('true', null)).toBe(true);
+    expect(boundValue('soon', null)).toBe('soon');
   });
 
   it('sets a number for a number on the page, as the form commits it', async () => {

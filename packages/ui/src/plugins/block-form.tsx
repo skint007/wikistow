@@ -74,12 +74,14 @@ export type ReadField = { text: string } & Checked;
 
 /**
  * What a text field bound to a property sets for `text`: in the type of
- * the value it replaces when the text reads as one, a number for a number
- * (`typedValue`, as the Properties rows type it) and `true` or `false` for
- * either, so `rating: 4` stays a number; else the text.
+ * the value it replaces when the text reads as one, as the Properties rows
+ * type it (`typedValue`): a number for a number, `true` or `false` for
+ * either, so `rating: 4` stays a number; for an empty value (`note:`),
+ * whatever the text reads as, nothing staying empty; else the text. A key
+ * the page hasn't takes the text.
  */
 export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
-  if (typeof was === 'number') return typedValue(text, was);
+  if (typeof was === 'number' || was === null) return typedValue(text, was);
   if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
   return text;
 }
