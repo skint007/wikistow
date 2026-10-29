@@ -483,7 +483,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         }}
         onDragEnd={() => setDragging(null)}
         className={cn(
-          '-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
+          // `relative` keeps the rows' sr-only text inside the scroller: placed
+          // by the page instead, it stretched the window to the hidden rows.
+          'relative -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
           dragging?.over?.parentId === null && 'bg-primary-soft/60 ring-2 ring-primary ring-inset',
         )}
       >
