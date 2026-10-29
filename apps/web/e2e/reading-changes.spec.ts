@@ -1,4 +1,9 @@
+import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
+import { showIn, visual } from './editor';
 import { expect, test } from './fixtures';
 import { newFolder, openShared, publishedPageIn, shareFolder } from './sharing';
 import { adminTab, expectSource, fillSource, memberWithVault, waitForSave } from './vault';
@@ -193,5 +198,110 @@ test('ticking tasks while reading publishes them together, only for those who ma
       'Open the draft to tick this: it has unpublished changes',
     );
     await expect(owner.getByText('Published v2')).toBeVisible();
+  });
+});
+
+const CALCULATOR = fileURLToPath(new URL('../../../examples/plugins/calculator', import.meta.url));
+
+// A plugin ID belongs to the account that first uploads it, and the run
+// shares one server: the workshop's own test publishes `calculator`.
+const PLUGIN_ID = 'recipe-scaler';
+
+const RECIPE = [
+  '---',
+  'servings: 4',
+  '---',
+  'Serves `=servings`.',
+  '',
+  `\`\`\`plugin:${PLUGIN_ID}/recipe`,
+  'serves: 4',
+  'amount: 500',
+  '```',
+  '',
+].join('\n');
+
+/**
+ * Install the calculator example, as `PLUGIN_ID`, from a copy of its
+ * folder through the plugin workshop, as `workshop.spec.ts` does, which
+ * needs only the server to say AI is set up.
+ */
+async function installCalculator(page: Page) {
+  const folder = await mkdtemp(join(tmpdir(), 'recipe-scaler-'));
+  await cp(join(CALCULATOR, 'src'), join(folder, 'src'), { recursive: true });
+  const manifest = JSON.parse(await readFile(join(CALCULATOR, 'wikistow-plugin.json'), 'utf8'));
+  await writeFile(
+    join(folder, 'wikistow-plugin.json'),
+    JSON.stringify({ ...manifest, id: PLUGIN_ID }),
+  );
+  await page.route('**/api/ai', (route) =>
+    route.fulfill({
+      json: {
+        enabled: true,
+        style: 'openai',
+        host: 'ai.example.com',
+        model: 'model',
+        maxOutputTokens: 1000,
+      },
+    }),
+  );
+  const status = page.getByRole('status', { name: 'Preview status' });
+  await page.goto('/workshop');
+  await page.getByLabel('Project folder').setInputFiles(folder);
+  await expect(status).toContainText('Previewing v1', { timeout: 60_000 });
+  await status.getByRole('button', { name: 'Publish…' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish' }).click();
+  await expect(status).toContainText('installed it on all your devices.');
+  await page.goto('/');
+}
+
+/**
+ * A plugin block's field tied to a property (#212): in the reader it sets
+ * the frontmatter through the same queue as ticks, making one version, and
+ * in the visual editor it changes the draft's frontmatter, with `=servings`
+ * following it both times.
+ */
+test('a block field tied to a property changes the frontmatter in the reader and the editor', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await installCalculator(page);
+  await newFolder(page, 'Recipes');
+  await publishedPageIn(page, 'Recipes', 'Bread', RECIPE);
+  const block = page.locator('[data-plugin-block="recipe"]');
+  const servings = block.getByLabel('Servings');
+
+  await test.step('in the reader, one new version', async () => {
+    await expect(servings).toHaveValue('4');
+    await expect(page.getByText('Serves 4.')).toBeVisible();
+    await expect(block.locator('output[data-output="scaled"]')).toHaveText('500');
+    await servings.fill('6');
+    // Not set until it's committed.
+    await expect(page.getByText('Serves 4.')).toBeVisible();
+    await servings.press('Enter');
+    await expect(page.getByText('Serves 6.')).toBeVisible();
+    await expect(block.locator('output[data-output="scaled"]')).toHaveText('750');
+    await expect(page.getByText('Published v2')).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(4000);
+    await expect(page.getByText('Published v2')).toBeVisible();
+    await page.reload();
+    await expect(page.getByText('Serves 6.')).toBeVisible();
+    await expect(servings).toHaveValue('6');
+  });
+
+  await test.step('in the visual editor, the draft’s frontmatter', async () => {
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await showIn(page, 'Visual');
+    const field = visual(page).locator('.plugin-block').getByLabel('Servings');
+    await expect(field).toHaveValue('6');
+    await field.fill('8');
+    await field.press('Enter');
+    await waitForSave(page);
+    await page.getByRole('button', { name: 'Publish', exact: true }).click();
+    await expect(page.getByText('Published v3')).toBeVisible();
+    await expect(page.getByText('Serves 8.')).toBeVisible();
+    await expect(servings).toHaveValue('8');
   });
 });

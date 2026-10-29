@@ -3,8 +3,8 @@
   "name": "Calculator",
   "version": "0.1.0",
   "api": 1,
-  "description": "A product block: Quantity and Unit price fields, and their Total.",
+  "description": "A product block: Quantity and Unit price fields, and their Total. A recipe block scales an amount to the page's servings.",
   "script": "script.js",
   "access": "none",
-  "blocks": ["product"]
+  "blocks": ["product", "recipe"]
 }
