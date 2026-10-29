@@ -1,8 +1,10 @@
-import type { Element, ElementContent, Nodes, Root } from 'hast';
+import type { Element, Nodes, Root } from 'hast';
+import type { Nodes as MarkdownNodes, Root as MarkdownRoot } from 'mdast';
 import type {} from 'mdast-util-to-hast';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize';
 import { unified } from 'unified';
+import { markdownText } from '../markdown/index.ts';
 
 /** The property marking a registered syntax's placeholder span (`data-syntax`), which `pageHtml` keeps. */
 export const SYNTAX = 'dataSyntax';
@@ -47,61 +49,68 @@ const schema: Schema = {
   tagNames: tagNames.filter((name) => name !== 'picture' && name !== 'source'),
 };
 
-/** The text a reader sees in `nodes`, nested lists left out. Read without recursion. */
-function itemText(nodes: readonly ElementContent[]): string {
-  let text = '';
-  const stack = [...nodes].reverse();
+/**
+ * Each task item's label in a body's Markdown tree, by where its list item
+ * starts in the body: the text of its first paragraph, or of the item
+ * without its nested lists, as written, a wikilink as its text
+ * (`markdownText`) and a property reference as its code (`=servings`), so
+ * two tasks that are each one link don't both read "Done". The page's own
+ * HTML counts as nothing. Read without recursion, as a page may nest deep.
+ */
+export function taskLabels(tree: MarkdownRoot): Map<number, string> {
+  const labels = new Map<number, string>();
+  const stack: MarkdownNodes[] = [tree];
   for (let node = stack.pop(); node; node = stack.pop()) {
-    if (node.type === 'text') text += node.value;
-    else if (node.type === 'element' && node.tagName !== 'ul' && node.tagName !== 'ol')
-      for (let i = node.children.length - 1; i >= 0; i--) {
-        const child = node.children[i];
-        if (child) stack.push(child);
-      }
+    const at = node.position?.start.offset;
+    if (node.type === 'listItem' && typeof node.checked === 'boolean' && at !== undefined) {
+      const [first] = node.children;
+      const parts =
+        first?.type === 'paragraph'
+          ? [first]
+          : node.children.filter((child) => child.type !== 'list');
+      const label = parts.map(markdownText).join(' ').replace(/\s+/g, ' ').trim();
+      if (label) labels.set(at, label);
+    }
+    if ('children' in node) for (const child of node.children) stack.push(child);
   }
-  return text.replace(/\s+/g, ' ').trim();
+  return labels;
 }
 
-/**
- * A task item's checkbox (`li.task-list-item`), first in it or in its first
- * paragraph, and what it ticks: that paragraph, or the item's own text.
- */
-function checkboxOf(item: Element): { box: Element; text: ElementContent[] } | null {
+/** A task item's checkbox (`li.task-list-item`), first in it or in its first paragraph. */
+function checkboxOf(item: Element): Element | null {
   const first = item.children.find((child) => child.type === 'element');
   const paragraph = first?.type === 'element' && first.tagName === 'p' ? first : null;
   const box = paragraph ? paragraph.children.find((child) => child.type === 'element') : first;
-  return box?.type === 'element' && box.tagName === 'input'
-    ? { box, text: paragraph?.children ?? item.children }
-    : null;
+  return box?.type === 'element' && box.tagName === 'input' ? box : null;
 }
 
 /**
  * A rehype plugin, before `pageHtml`, marking each task item's checkbox
  * with where its list item starts in the page's whole Markdown (`TASK`):
  * its offset in the body, plus `start`, where the body starts (`bodyStart`). Each is
- * labelled by its item's text. Raw HTML is still unparsed then, so a
+ * labelled as `labels`, from the body's Markdown tree, says (`taskLabels`). Raw HTML is still unparsed then, so a
  * checkbox the page's own HTML holds isn't marked; one that marks itself
  * can only name a task of the page, which is checked against the
  * Markdown there before it is ticked (`taskAt`). Read without recursion,
  * as a page may nest deep.
  */
-export function taskMarks(start: number) {
+export function taskMarks(start: number, labels: ReadonlyMap<number, string>) {
   return (tree: Root) => {
     const stack: Nodes[] = [tree];
     for (let node = stack.pop(); node; node = stack.pop()) {
       if (node.type === 'element' && node.tagName === 'li') {
         const { className } = node.properties;
         const offset = node.position?.start.offset;
-        const task = checkboxOf(node);
+        const box = checkboxOf(node);
         if (
           Array.isArray(className) &&
           className.includes('task-list-item') &&
-          task &&
+          box &&
           offset !== undefined
         ) {
-          task.box.properties[TASK] = start + offset;
-          const label = itemText(task.text);
-          if (label) task.box.properties['ariaLabel'] = label;
+          box.properties[TASK] = start + offset;
+          const label = labels.get(offset);
+          if (label) box.properties['ariaLabel'] = label;
         }
       }
       if ('children' in node) for (const child of node.children) stack.push(child);

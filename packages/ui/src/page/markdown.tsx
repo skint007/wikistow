@@ -7,7 +7,7 @@ import {
   splitFrontmatter,
   taskAt,
 } from '@wikistow/client';
-import { pageHtml, SYNTAX, TASK, taskMarks } from '@wikistow/client/reader';
+import { pageHtml, SYNTAX, TASK, taskLabels, taskMarks } from '@wikistow/client/reader';
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
 import type { InlineCode, Root, RootContent } from 'mdast';
@@ -319,6 +319,8 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
     [index, attachments.page.spaceId, attachments.page.pageId, pages, links, editor, properties],
   );
   const read = useQuery(readQuery(body));
+  // Each task's label, from the tree as read: links and references are only placeholders in the HTML.
+  const labels = useMemo(() => (read.data ? taskLabels(read.data) : new Map()), [read.data]);
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read: it
   // goes there once the body first shows, and as the hash changes, but not
@@ -375,7 +377,7 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
                   remarkRehypeOptions={{
                     handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
                   }}
-                  rehypePlugins={[[taskMarks, bodyStart(source)], pageHtml]}
+                  rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
                   urlTransform={urlTransform}
                   components={components}
                 />

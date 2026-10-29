@@ -1,5 +1,5 @@
 import { taskItems } from '@wikistow/client';
-import { pageHtml, sanitizedPage, taskMarks } from '@wikistow/client/reader';
+import { pageHtml, sanitizedPage, taskLabels, taskMarks } from '@wikistow/client/reader';
 import { toHtml } from 'hast-util-to-html';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
@@ -11,11 +11,12 @@ import { markdownJobs } from '../src/page/markdown-jobs.ts';
  * its tasks marked as starting `start` into the page, then `pageHtml`.
  */
 function render(body: string, start = 0): string {
+  const tree = markdownJobs.body(body);
   const processor = unified()
     .use(remarkRehype, { allowDangerousHtml: true })
-    .use(taskMarks, start)
+    .use(taskMarks, start, taskLabels(tree))
     .use(pageHtml);
-  return toHtml(processor.runSync(markdownJobs.body(body)));
+  return toHtml(processor.runSync(tree));
 }
 
 describe('a page’s HTML', () => {
@@ -77,6 +78,15 @@ describe('a page’s tasks', () => {
       );
       expect(out).toContain(`data-task="${offsets[2]}" aria-label="loose">`);
     }
+  });
+
+  it('are labelled by their links’ text and their references as written', () => {
+    const out = render(
+      '- [ ] [[Dentist]]\n- [ ] [[Car service|the car]]\n- [ ] Call [[Mum]] about `=servings` <b>now</b>\n',
+    );
+    expect(out).toContain('aria-label="Dentist"');
+    expect(out).toContain('aria-label="the car"');
+    expect(out).toContain('aria-label="Call Mum about =servings now"');
   });
 
   it('leave a checkbox the page’s HTML holds unmarked, and a public page’s too', () => {
