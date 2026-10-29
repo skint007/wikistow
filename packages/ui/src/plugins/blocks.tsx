@@ -1,4 +1,3 @@
-import { foldPropertyName } from '@wikistow/client';
 import {
   PluginError,
   type BlockProps,
@@ -13,10 +12,12 @@ import { applyChange, type ReadingChange } from '../page/reading-changes-model';
 import {
   blockProperties,
   checkedProperty,
+  setOwn,
   stillShown,
   type DrawnProperties,
 } from './block-properties';
-import { usePlugins, type PluginBlock } from './runtime';
+import { takesPropsInPlace } from './in-place';
+import { usePluginRuntime, usePlugins, type PluginBlock } from './runtime';
 import { PluginView } from './views';
 
 /** A fence's text from the reader's tree: its code, without the final line break the tree adds. */
@@ -36,9 +37,11 @@ export function textOf(code: Element): string {
  * read (`ReadingChanges`), `setProperty` queues a property's change, as a
  * tick is, once it is known to apply to the page as shown; one that can't
  * is refused as the visual editor refuses it, and nothing is queued.
- * Elsewhere it is null, and values entered stay in the view. The
- * view is drawn again as the properties change, but not for its own
- * change (`stillShown`).
+ * Elsewhere it is null, and values entered stay in the view. A view the
+ * app draws, a script's form, takes new properties in place; a plugin's
+ * own is drawn again as they change, but not for its own change
+ * (`stillShown`). Drawn again for another view or runtime, it gets the
+ * properties as they are then.
  */
 export function ReaderBlock({
   block,
@@ -60,20 +63,23 @@ export function ReaderBlock({
   // The page as shown when a change comes, which it must apply to.
   const shownNow = useRef(reading?.markdown ?? '');
   shownNow.current = reading?.markdown ?? '';
+  const runtime = usePluginRuntime();
+  const inPlace = takesPropsInPlace(block.view);
   // The props the view was drawn with, kept while they still stand for
-  // the page: the same for the same text, page and rights, and properties
-  // changed by none but the view. The same every render that keeps them.
+  // the page: the same for the same text, page, rights, view and runtime,
+  // and properties changed by none but the view, or any for one that
+  // takes them in place. The same every render that keeps them.
   const drawn = useRef<{
     props: BlockProps;
     properties: DrawnProperties;
     with: readonly unknown[];
   } | null>(null);
-  const made = [source, spaceId, pageId, change];
+  const made = [source, spaceId, pageId, change, block.view, runtime];
   const kept = drawn.current;
   if (
     !kept ||
     kept.with.some((part, i) => part !== made[i]) ||
-    !stillShown(kept.properties, properties)
+    (!inPlace && !stillShown(kept.properties, properties))
   ) {
     const shown: DrawnProperties = { shown: properties, own: new Map() };
     const setProperty = change
@@ -82,10 +88,11 @@ export function ReaderBlock({
           // A view drawn over since changes nothing.
           if (drawn.current?.properties !== shown) return;
           const made: ReadingChange = { kind: 'property', ...checked };
-          const applies = applyChange(shownNow.current, made);
-          if (!applies.ok) throw new PluginError('invalid', applies.reason);
-          shown.own.set(foldPropertyName(checked.key), checked.value);
-          change(made);
+          setOwn(shown, checked.key, checked.value, () => {
+            const applies = applyChange(shownNow.current, made);
+            if (!applies.ok) throw new PluginError('invalid', applies.reason);
+            change(made);
+          });
         }
       : null;
     drawn.current = {
@@ -95,6 +102,11 @@ export function ReaderBlock({
     };
   }
   const props = drawn.current?.props;
+  // What a view the app draws takes in place: the props with the properties now.
+  const live = useMemo(
+    () => (inPlace && props ? { ...props, properties } : undefined),
+    [inPlace, props, properties],
+  );
   return (
     <div className="plugin-block" data-plugin-block={block.type}>
       {props && (
@@ -103,6 +115,7 @@ export function ReaderBlock({
           name={name ?? block.pluginId}
           view={block.view}
           props={props}
+          live={live}
         />
       )}
     </div>

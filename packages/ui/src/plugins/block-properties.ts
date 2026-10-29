@@ -74,6 +74,25 @@ export function checkedProperty(
   return { key, value: structuredClone(value as PropertyValue) };
 }
 
+/**
+ * Note that the view drawn with `drawn` set `key` to `value`, then `set`
+ * it; if that fails, the view's last value for the key stands again, as
+ * the page still has it.
+ */
+export function setOwn(drawn: DrawnProperties, key: string, value: PropertyValue, set: () => void) {
+  const folded = foldPropertyName(key);
+  const had = drawn.own.has(folded);
+  const before = drawn.own.get(folded);
+  drawn.own.set(folded, value);
+  try {
+    set();
+  } catch (error) {
+    if (had) drawn.own.set(folded, before as PropertyValue);
+    else drawn.own.delete(folded);
+    throw error;
+  }
+}
+
 /** The properties a view was drawn with, and the values it set itself since, by folded name. */
 export type DrawnProperties = { shown: BlockProperties; own: Map<string, PropertyValue> };
 

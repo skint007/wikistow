@@ -6,6 +6,7 @@ import {
   blockProperties,
   checkedProperty,
   pageBlockProperties,
+  setOwn,
   propertyNamed,
   stillShown,
 } from '../src/plugins/block-properties.ts';
@@ -117,6 +118,22 @@ describe('a view drawn with the page’s properties', () => {
       false,
     );
     expect(stillShown({ shown, own: new Map() }, null)).toBe(false);
+  });
+});
+
+describe('a change a view makes itself', () => {
+  it('is noted, and a refused one leaves the value it set before', () => {
+    const drawn = { shown: blockProperties(read(PAGE)), own: new Map() };
+    setOwn(drawn, 'servings', 5, () => {});
+    expect(drawn.own.get('servings')).toBe(5);
+    const refused = () => {
+      throw new PluginError('invalid', 'servings can’t be changed here');
+    };
+    expect(() => setOwn(drawn, 'Servings', 'a', refused)).toThrow(PluginError);
+    expect(drawn.own.get('servings')).toBe(5);
+    // A key it never set is forgotten again.
+    expect(() => setOwn(drawn, 'rating', 3, refused)).toThrow(PluginError);
+    expect(drawn.own.has('rating')).toBe(false);
   });
 });
 

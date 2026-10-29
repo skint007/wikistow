@@ -1,4 +1,4 @@
-import { foldPropertyName, QUERY_LANGUAGE, type AttachmentRef } from '@wikistow/client';
+import { QUERY_LANGUAGE, type AttachmentRef } from '@wikistow/client';
 import { CODE_LANGUAGES, type AlertType } from '@wikistow/client/reader';
 import { Fragment, type Node } from '@milkdown/kit/prose/model';
 import { NodeSelection, Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
@@ -18,13 +18,15 @@ import { QUOTE_KINDS } from '../../alert-title';
 import { attachmentId } from '../../attachments';
 import { alertIn } from './alerts';
 import { setKind, type QuoteKind } from './formatting';
-import { claimedBlock, PluginError } from '@wikistow/plugin-sdk';
+import { claimedBlock, PluginError, type BlockProps } from '@wikistow/plugin-sdk';
 import {
   blockProperties,
   checkedProperty,
+  setOwn,
   stillShown,
   type DrawnProperties,
 } from '../../../plugins/block-properties';
+import { takesPropsInPlace, updateInPlace } from '../../../plugins/in-place';
 import type { PluginBlock } from '../../../plugins/runtime';
 import { attachmentById, type VisualHost } from './host';
 import type { QueryResults } from './query-results';
@@ -149,13 +151,16 @@ export const tableView = $view(tableSchema.node, () => () => new TableView());
 /**
  * A plugin's view drawn for a block: the text it was drawn for or last
  * set, the properties it was drawn with and those it set, whether it could
- * set them, and what undoes it.
+ * set them, the element and props it was drawn with, for one that takes
+ * new props in place, and what undoes it.
  */
 type DrawnBlock = {
   block: PluginBlock;
   source: string;
   properties: DrawnProperties;
   settable: boolean;
+  element: HTMLElement;
+  props: BlockProps | null;
   undo: (() => void) | void;
 };
 
@@ -300,16 +305,25 @@ class CodeBlockView implements NodeView {
     const properties = blockProperties(this.#host.properties());
     const settable = this.#host.setProperty() !== null;
     // The same view, for the same text and properties, but for those it set
-    // itself: the runtime rebuilds its list on every change.
+    // itself: the runtime rebuilds its list on every change. One the app
+    // draws, a script's form, takes new properties in place instead, so it
+    // and the field being typed in it stay.
     const kept = this.#drawn;
+    const inPlace = kept !== null && takesPropsInPlace(kept.block.view);
     if (
       kept?.block.view === block?.view &&
       (!kept ||
         (kept.source === source &&
           kept.settable === settable &&
-          stillShown(kept.properties, properties)))
-    )
+          (inPlace || stillShown(kept.properties, properties))))
+    ) {
+      if (kept && inPlace && kept.props && kept.properties.shown !== properties) {
+        kept.properties = { shown: properties, own: new Map() };
+        kept.props = { ...kept.props, properties };
+        updateInPlace(kept.element, kept.props);
+      }
       return;
+    }
     this.#undraw();
     this.#pre.classList.toggle('hidden', block !== undefined);
     if (!block || !page) return;
@@ -320,11 +334,13 @@ class CodeBlockView implements NodeView {
       source,
       properties: { shown: properties, own: new Map() },
       settable,
+      element,
+      props: null,
       undo: undefined,
     };
     this.#drawn = drawn;
     try {
-      drawn.undo = block.view(element, {
+      drawn.props = {
         source,
         page: { ...page },
         setSource: (text) => {
@@ -336,15 +352,14 @@ class CodeBlockView implements NodeView {
               const checked = checkedProperty(key, value);
               const set = this.#host.setProperty();
               if (this.#drawn !== drawn || !set) return;
-              const folded = foldPropertyName(checked.key);
-              drawn.properties.own.set(folded, checked.value);
-              const made = set(checked.key, checked.value);
-              if (made.ok) return;
-              drawn.properties.own.delete(folded);
-              throw new PluginError('invalid', made.reason);
+              setOwn(drawn.properties, checked.key, checked.value, () => {
+                const made = set(checked.key, checked.value);
+                if (!made.ok) throw new PluginError('invalid', made.reason);
+              });
             }
           : null,
-      });
+      };
+      drawn.undo = block.view(element, drawn.props);
     } catch (error) {
       element.textContent = 'This plugin block failed. Switch to source to edit it as text.';
       this.#host.plugins()?.viewFailed(block.pluginId, error);

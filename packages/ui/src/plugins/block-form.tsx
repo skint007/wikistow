@@ -8,6 +8,7 @@ import {
 } from '@wikistow/plugin-sdk';
 import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { drawnByApp, updatedBy } from './in-place';
 import { createRoot } from 'react-dom/client';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -207,6 +208,24 @@ function BlockForm({
     ),
   );
   const typed = useRef(new Set<string>());
+  // New properties come in place (`updateInPlace`): a bound field not typed
+  // in shows the page's value now, one typed in keeps its text, and each
+  // commits against the value the page has now.
+  const [drawnWith] = useState(properties);
+  useEffect(() => {
+    if (properties === drawnWith) return;
+    const read = readFields(spec, '', properties);
+    const now: Record<string, string> = {};
+    for (const [field, { property }] of Object.entries(spec.fields)) {
+      if (property === undefined) continue;
+      onPage.current[field] = propertyNamed(properties, property);
+      const shown = read[field];
+      // A key the page no longer has leaves what the field shows.
+      if (!typed.current.has(field) && shown && onPage.current[field] !== undefined)
+        now[field] = shown.text;
+    }
+    setTexts((before) => ({ ...before, ...now }));
+  }, [properties, drawnWith, spec]);
   // The fence as this form last wrote it: the editor doesn't draw it again for that.
   const written = useRef(source);
   // A field bound to a list only shows it, as read.
@@ -331,14 +350,23 @@ function BlockForm({
   );
 }
 
-/** The view of a script's block: its form, in a React root of its own. */
-export const formView =
-  (spec: BlockSpec, calculate: Calculate): View<BlockProps> =>
-  (element, props) => {
+/**
+ * The view of a script's block: its form, in a React root of its own. The
+ * app draws it, so it takes new props in place (`drawnByApp`), drawn
+ * again only for new text or another page.
+ */
+export const formView = (spec: BlockSpec, calculate: Calculate): View<BlockProps> =>
+  drawnByApp((element: HTMLElement, props: BlockProps) => {
     const box = document.createElement('div');
     element.append(box);
     const root = createRoot(box);
-    root.render(<BlockForm spec={spec} calculate={calculate} {...props} />);
+    const draw = (next: BlockProps) =>
+      root.render(<BlockForm spec={spec} calculate={calculate} {...next} />);
+    draw(props);
+    const ends = updatedBy(element, draw);
     // Not while the host is rendering, which may be what removes the view.
-    return () => queueMicrotask(() => root.unmount());
-  };
+    return () => {
+      ends();
+      queueMicrotask(() => root.unmount());
+    };
+  });

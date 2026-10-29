@@ -1,9 +1,12 @@
 import { PluginError, type BlockProps } from '@wikistow/plugin-sdk';
+import type { BlockSpec } from '@wikistow/plugin-sdk/protocol';
 import { act, createRef } from 'react';
+import { userEvent } from 'vite-plus/test/browser/context';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
+import { formView } from '../src/plugins/block-form.tsx';
 import {
   PluginsContext,
   type PluginBlock,
@@ -130,5 +133,71 @@ describe('a plugin block in the visual editor', () => {
     expect(() => set?.('servings', { a: 1 } as never)).toThrow(PluginError);
     expect(m.changes).toEqual([]);
     expect(m.handle.read()).toBe(PAGE);
+  });
+});
+
+/** Two script blocks' forms, the first with a field bound to `servings`, as a runtime draws them. */
+function forms() {
+  const recipe: BlockSpec = {
+    type: 'recipe',
+    fields: { servings: { type: 'number', label: 'Servings', property: 'servings' } },
+    outputs: {},
+  };
+  const product: BlockSpec = {
+    type: 'product',
+    fields: { quantity: { type: 'number', label: 'Quantity', default: 1 } },
+    outputs: {},
+  };
+  const blocks = new Map<string, PluginBlock>([
+    [
+      'plugin:test/recipe',
+      { pluginId: 'test', type: 'recipe', view: formView(recipe, async () => ({})) },
+    ],
+    [
+      'plugin:test/product',
+      { pluginId: 'test', type: 'product', view: formView(product, async () => ({})) },
+    ],
+  ]);
+  const snapshot: Pick<PluginsSnapshot, 'blocks'> = { blocks };
+  return {
+    get: () => snapshot,
+    subscribe: () => () => {},
+    viewFailed: () => {},
+  } as unknown as PluginRuntime;
+}
+
+/** The input labelled `label` in `container`. */
+function field(container: HTMLElement, label: string): HTMLInputElement {
+  const input = [...container.querySelectorAll('label')]
+    .find((found) => found.textContent?.startsWith(label))
+    ?.querySelector('input');
+  if (!input) throw new Error(`No field ${label}`);
+  return input;
+}
+
+describe('a script block’s form in the visual editor', () => {
+  it('stays as it is, focus and text, when another block’s bound field sets a property', async () => {
+    const m = mount(
+      '---\nservings: 4\n---\n```plugin:test/recipe\n```\n\n```plugin:test/product\nquantity: 1\n```\n',
+      forms(),
+    );
+    await expect.poll(() => m.container.querySelectorAll('.plugin-block input').length).toBe(2);
+    const quantity = field(m.container, 'Quantity');
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, '3');
+    const servings = field(m.container, 'Servings');
+    expect(servings.value).toBe('4');
+    await userEvent.clear(servings);
+    await userEvent.type(servings, '6');
+    // Clicking the other block's field commits this one, on blur.
+    await userEvent.click(quantity);
+    await expect.poll(() => m.handle.read()).toContain('servings: 6');
+    await act(async () => {});
+    expect(m.container.contains(quantity)).toBe(true);
+    expect(document.activeElement).toBe(quantity);
+    expect(quantity.value).toBe('3');
+    // The bound field's own form took the page's value in place.
+    expect(field(m.container, 'Servings')).toBe(servings);
+    expect(servings.value).toBe('6');
   });
 });
