@@ -278,7 +278,8 @@ test('a block field tied to a property changes the frontmatter in the reader and
     await expect(page.getByText('Serves 4.')).toBeVisible();
     await expect(block.locator('output[data-output="scaled"]')).toHaveText('500');
     await servings.fill('6');
-    // Not set until it's committed.
+    // Calculated with what's typed, but not set until it's committed.
+    await expect(block.locator('output[data-output="scaled"]')).toHaveText('750');
     await expect(page.getByText('Serves 4.')).toBeVisible();
     await servings.press('Enter');
     await expect(page.getByText('Serves 6.')).toBeVisible();
