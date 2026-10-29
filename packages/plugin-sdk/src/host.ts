@@ -186,8 +186,9 @@ export type BlockProps = {
    * source text. Empty for a page without frontmatter, and null for one
    * whose frontmatter doesn't read as properties. The view is drawn again
    * when they change, except for a change it made itself (`setProperty`).
+   * Missing (undefined) in an app older than it: treat that as unknown.
    */
-  properties: Readonly<Record<string, PropertyValue>> | null;
+  properties?: Readonly<Record<string, PropertyValue>> | null | undefined;
   /**
    * Set one of the page's properties, changing only that value's
    * characters in its frontmatter: the key as written, else the first key
@@ -205,9 +206,10 @@ export type BlockProps = {
    * then. Null anywhere else. Throws `PluginError` with `invalid` for a key
    * or value that can't be set, or, in the editor, a value that can't be
    * changed in place, such as one on several lines. Call it as a value is
-   * committed, on blur or Enter, not on each key.
+   * committed, on blur or Enter, not on each key. Missing (undefined) in
+   * an app older than it, which can't set properties.
    */
-  setProperty: ((key: string, value: PropertyValue) => void) | null;
+  setProperty?: ((key: string, value: PropertyValue) => void) | null | undefined;
 };
 
 /**
