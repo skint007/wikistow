@@ -237,14 +237,32 @@ export function originOf(pageId: string, revision: string): string {
   return origin;
 }
 
+// The flushes started as pages were left, each until every batch it
+// chains, the ones that start only once the one before has settled, is done.
+const leaving = new Set<Promise<unknown>>();
+
+/** `work`, a queue's flush as its page is left, held among those `flushesUnderway` waits for until it settles. */
+export function holding<T>(work: Promise<T>): Promise<T> {
+  leaving.add(work);
+  const done = () => void leaving.delete(work);
+  work.then(done, done);
+  return work;
+}
+
 /**
- * Every page's flushes under way, settled once all are, or null while none
+ * Every page's flushes under way, settled once none is, or null while none
  * runs: closing the app or locking the vault waits for them, the pages
- * left included, whose own guards went with them.
+ * left included, whose own guards went with them. A batch a flush chains
+ * behind itself counts, as do flushes started meanwhile.
  */
 export function flushesUnderway(): Promise<void> | null {
-  if (flushing.size === 0) return null;
-  return Promise.all(flushing.values()).then(() => {});
+  if (flushing.size === 0 && leaving.size === 0) return null;
+  return (async () => {
+    for (let all = [...flushing.values(), ...leaving]; all.length > 0;) {
+      await Promise.allSettled(all);
+      all = [...flushing.values(), ...leaving];
+    }
+  })();
 }
 
 /** `flush` run after the page's flushes before it have settled. */
@@ -267,13 +285,15 @@ export type Queued = { id: number; change: ReadingChange };
 /**
  * A page's queue: the changes waiting, those being saved among them;
  * whether a flush is running; how the last one went, until the next is
- * done; and why the last failed, until another starts.
+ * done; why the last failed, until another starts; and how a flush made
+ * before this visit went (`told`), until one of this visit starts.
  */
 export type ReadingState = {
   changes: readonly Queued[];
   saving: boolean;
   last: Flushed | null;
   error: unknown;
+  before: Told | null;
 };
 
 /**
@@ -287,7 +307,7 @@ export type ReadingState = {
  * change or flush tries them again.
  */
 export class ReadingQueue {
-  #state: ReadingState = { changes: [], saving: false, last: null, error: null };
+  #state: ReadingState = { changes: [], saving: false, last: null, error: null, before: null };
   #next = 0;
   #firstAt: number | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -353,8 +373,7 @@ export class ReadingQueue {
     const taken = this.#state.changes;
     if (taken.length === 0) return;
     this.#firstAt = null;
-    this.#toldBefore = false;
-    this.#set({ saving: true, error: null });
+    this.#set({ saving: true, error: null, before: null });
     const ids = new Set(taken.map(({ id }) => id));
     let failed = false;
     this.#running = this.#flush(taken.map(({ change }) => change)).then(
@@ -396,15 +415,13 @@ export class ReadingQueue {
     this.#set({ changes: [] });
   }
 
-  // What the queue says came from a flush made before this visit (`told`),
-  // which turning to the draft or an older version doesn't forget.
-  #toldBefore = false;
-
-  /** How a flush of this page from a queue left behind went, said here unless one runs. */
-  told({ last, error }: Told) {
-    if (this.#state.saving) return;
-    this.#toldBefore = true;
-    this.#set({ last, error });
+  /**
+   * How a flush of this page from a queue left behind went: said beside
+   * what this queue says, even while it saves, until a flush of its own
+   * starts after it.
+   */
+  told(told: Told) {
+    this.#set({ before: told });
   }
 
   /**
@@ -413,7 +430,6 @@ export class ReadingQueue {
    * comes back to the page's draft at once still needs to hear it.
    */
   forget() {
-    if (this.#toldBefore) return;
     if (this.#state.last !== null || this.#state.error !== null)
       this.#set({ last: null, error: null });
   }
@@ -454,12 +470,27 @@ export function leftOutcome(pageId: string, told: Told) {
 }
 
 /** What the queue says on the page: saving, how the last flush went, or why it failed. */
-export function readingNotices({ changes, saving, last, error }: ReadingState): string[] {
+export function readingNotices({ changes, saving, last, error, before }: ReadingState): string[] {
   const notices: string[] = [];
-  if (error !== null) notices.push(`Couldn’t save your change: ${errorMessage(error)}`);
+  if (error !== null) notices.push(failed(error));
   else if (saving || changes.length > 0) notices.push('Publishing your changes…');
   else if (last?.outcome === 'published') notices.push('Your changes are published.');
-  if (!saving && last?.outcome === 'in-draft')
+  if (!saving) notices.push(...settled(last));
+  // A flush from before this visit's, after what this visit's says, each thing once.
+  if (before) {
+    if (before.error !== null) notices.push(failed(before.error));
+    else if (before.last?.outcome === 'published') notices.push('Your changes are published.');
+    notices.push(...settled(before.last));
+  }
+  return [...new Set(notices)];
+}
+
+const failed = (error: unknown) => `Couldn’t save your change: ${errorMessage(error)}`;
+
+/** What a settled flush says beyond whether it published: into the draft, and what it left out. */
+function settled(last: Flushed | null): string[] {
+  const notices: string[] = [];
+  if (last?.outcome === 'in-draft')
     notices.push(
       last.publicLink
         ? 'This page has a public link, so your change went into the draft: publish it from there.'

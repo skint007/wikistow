@@ -5,6 +5,7 @@ import {
   applyChanges,
   flushChanges,
   flushesUnderway,
+  holding,
   inTurn,
   leftOutcome,
   notePublished,
@@ -295,7 +296,9 @@ describe('a flush', () => {
     expect(flushed).toEqual({ outcome: 'in-draft', dropped: [], publicLink: true });
     expect(page.draft()).toContain('- [x] milk');
     expect(page.state.published).toEqual([]);
-    expect(readingNotices({ changes: [], saving: false, error: null, last: flushed })).toEqual([
+    expect(
+      readingNotices({ changes: [], saving: false, error: null, last: flushed, before: null }),
+    ).toEqual([
       'This page has a public link, so your change went into the draft: publish it from there.',
     ]);
   });
@@ -524,6 +527,52 @@ describe('flushes of pages the person left', () => {
     end();
   });
 
+  it('wait for a batch a flush chains behind itself, which starts only once that one settles', async () => {
+    const q = queue();
+    q.reading.add(tick('a'));
+    await pass(3000);
+    q.reading.add(tick('b'));
+    // Leaving while the first runs: the second waits for it, then runs.
+    const left = holding(q.reading.flush());
+    const underway = flushesUnderway();
+    let settled = false;
+    void underway?.then(() => (settled = true));
+    q.finish();
+    await pass(0);
+    expect(q.flushes).toEqual([[tick('a')], [tick('b')]]);
+    expect(settled).toBe(false);
+    q.finish();
+    await left;
+    await pass(0);
+    expect(settled).toBe(true);
+    expect(flushesUnderway()).toBeNull();
+  });
+
+  it('are told while the queue showing the page saves, and still once its flush is done', async () => {
+    const q = queue();
+    q.reading.add(tick('a'));
+    const flushing = q.reading.flush();
+    await pass(0);
+    q.reading.told({ last: null, error: new Error('offline') });
+    expect(readingNotices(q.reading.get())).toEqual([
+      'Publishing your changes…',
+      'Couldn’t save your change: offline',
+    ]);
+    q.finish();
+    await flushing;
+    expect(readingNotices(q.reading.get())).toEqual([
+      'Your changes are published.',
+      'Couldn’t save your change: offline',
+    ]);
+    // Until a flush of this visit starts after it.
+    q.reading.add(tick('b'));
+    const next = q.reading.flush();
+    await pass(0);
+    q.finish();
+    await next;
+    expect(readingNotices(q.reading.get())).toEqual(['Your changes are published.']);
+  });
+
   it('tell how they went to the page as it shows again, or at once if it shows now', () => {
     const failed = { last: null, error: new Error('offline') };
     leftOutcome('page-x', failed);
@@ -550,7 +599,7 @@ describe('flushes of pages the person left', () => {
 });
 
 describe('what the queue says', () => {
-  const state = { changes: [], saving: false, error: null };
+  const state = { changes: [], saving: false, error: null, before: null };
   it('tells of changes that went into the draft, and of those left out', () => {
     expect(
       readingNotices({

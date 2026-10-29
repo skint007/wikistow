@@ -21,6 +21,7 @@ import { readWikilinks } from './page-reader';
 import {
   flushChanges,
   flushesUnderway,
+  holding,
   inTurn,
   leftOutcome,
   notePublished,
@@ -185,7 +186,8 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
     };
   }, [pageId, queue, shownHere]);
   useEffect(() => {
-    const leave = () => void queue.flush();
+    // Held until every batch it chains is done, as the page's guards go with it.
+    const leave = () => void holding(queue.flush());
     const hidden = () => {
       if (document.visibilityState === 'hidden') leave();
     };
