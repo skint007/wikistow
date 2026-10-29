@@ -14,7 +14,7 @@ import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate, useRouter } from '@tanstack/react-router';
 import { Check, Globe, Image, MoreHorizontal, Pencil, Share, Unlink } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -65,6 +65,16 @@ import {
   usePublicLink,
 } from '../../../../../../page/public-link';
 import { PublishDialog } from '../../../../../../page/publish-dialog';
+import {
+  ReadingChanges,
+  ReadingNotices,
+  useReadingQueue,
+} from '../../../../../../page/reading-changes';
+import {
+  applyChanges,
+  readingRights,
+  type ReadingQueue,
+} from '../../../../../../page/reading-changes-model';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
@@ -109,6 +119,9 @@ function PageView() {
   const [sharingLinkFor, setSharingLinkFor] = useState<string | null>(null);
   useEffect(() => setSharingLinkFor(null), [pageId]);
   const sharingLink = sharingLinkFor === pageId;
+  // Changes made while reading, kept across the publications they make,
+  // each of which mounts the published view afresh.
+  const reading = useReadingQueue(ctx, page);
   // A copy unpublished here is shown to editors by its last publication.
   const unpublishedCopy =
     info !== undefined &&
@@ -165,6 +178,7 @@ function PageView() {
           setOpening((n) => n + 1);
         }}
         onShareLink={() => setSharingLinkFor(pageId)}
+        reading={reading}
       />
       {((info.heads.publishedHead && info.canPublish) || sharingLink) && (
         <PublicLinkDialog
@@ -189,6 +203,7 @@ function PageBody({
   shareRoot,
   onReopen,
   onShareLink,
+  reading,
 }: {
   page: pageOperations.PageRef;
   info: Info;
@@ -199,6 +214,8 @@ function PageBody({
   onReopen: () => Promise<void>;
   /** Open the public link dialog, which outlasts this view. */
   onShareLink: () => void;
+  /** The page's changes made while reading, which outlast this view. */
+  reading: ReadingQueue;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -247,6 +264,18 @@ function PageBody({
   // The page's card, whose scrolling says which heading is being read.
   const [card, setCard] = useState<HTMLElement | null>(null);
   const contents = model.view === 'published' && headings.length > 1;
+  // The latest publication as shown, with the changes made while reading it.
+  const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  const rights = useMemo(
+    () =>
+      readingRights({
+        viewer: { role: info.role, canPublish: info.canPublish },
+        heads: info.heads,
+        view: model.view,
+        revision: revisionId,
+      }),
+    [info.role, info.canPublish, info.heads, model.view, revisionId],
+  );
 
   const go = (view: 'draft' | 'published') =>
     navigate({
@@ -310,6 +339,25 @@ function PageBody({
   const canEdit = info.role !== 'reader';
   const { publishedHead } = info.heads;
   const title = pageTitle(payload?.title ?? null);
+  const latest = model.view === 'published' && revisionId === publishedHead;
+  const readMarkdown = payload?.markdown ?? null;
+  const shownMarkdown = useMemo(
+    () =>
+      readMarkdown !== null && latest
+        ? applyChanges(
+            readMarkdown,
+            queued.changes.map(({ change }) => change),
+          ).markdown
+        : readMarkdown,
+    [readMarkdown, latest, queued.changes],
+  );
+  const readingHere = useMemo(
+    () =>
+      latest && shownMarkdown !== null
+        ? { markdown: shownMarkdown, rights, change: reading.add }
+        : null,
+    [latest, shownMarkdown, reading, rights],
+  );
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.
   const provenance = payload ? publicationOperations.provenanceOf(payload) : null;
@@ -717,6 +765,7 @@ function PageBody({
               </span>
             )}
           </Pills>
+          {model.view === 'published' && <ReadingNotices state={queued} />}
           {canEdit && provenance && info.heads.draftHead === null && !model.actions.detach && (
             <p className="text-sm text-muted-foreground">
               This page is a copy of another page, published to it from there. Someone who can
@@ -752,22 +801,24 @@ function PageBody({
                   />
                 )}
                 <div ref={setShownBody} className="contents">
-                  <Markdown
-                    source={payload.markdown}
-                    attachments={{
-                      ctx,
-                      page,
-                      audience: 'published',
-                      attachments: payload.attachments,
-                    }}
-                    pages={linkable}
-                    links={linkTableOf(payload)}
-                    editing={
-                      canEdit
-                        ? { parentId: info.parentId, create: info.parentId !== null || topOpened }
-                        : null
-                    }
-                  />
+                  <ReadingChanges value={readingHere}>
+                    <Markdown
+                      source={shownMarkdown ?? payload.markdown}
+                      attachments={{
+                        ctx,
+                        page,
+                        audience: 'published',
+                        attachments: payload.attachments,
+                      }}
+                      pages={linkable}
+                      links={linkTableOf(payload)}
+                      editing={
+                        canEdit
+                          ? { parentId: info.parentId, create: info.parentId !== null || topOpened }
+                          : null
+                      }
+                    />
+                  </ReadingChanges>
                 </div>
               </>
             ))}

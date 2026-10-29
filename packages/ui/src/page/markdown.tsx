@@ -4,9 +4,10 @@ import {
   QUERY_LANGUAGE,
   readProperties,
   splitFrontmatter,
+  taskAt,
 } from '@wikistow/client';
-import { pageHtml, SYNTAX } from '@wikistow/client/reader';
-import { queryOptions, useQuery } from '@tanstack/react-query';
+import { pageHtml, SYNTAX, TASK, taskMarks } from '@wikistow/client/reader';
+import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
 import type { InlineCode, Root, RootContent } from 'mdast';
 import {
@@ -45,6 +46,7 @@ import { PropertiesBox } from './properties-box';
 import { PropertyReferenceView } from './property-reference';
 import { QueryTable } from './query-table';
 import { bodyLinkScope } from './property-value';
+import { ReadingChanges } from './reading-changes';
 
 export { ATTACHMENT_SCHEME, type AttachmentContext };
 
@@ -177,6 +179,37 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
   return <WrittenCode language={language} text={textOf(code)} pre={props} />;
 };
 
+/**
+ * A task's checkbox (`taskMarks`). Where the page can change while it's
+ * read (`ReadingChanges`), it shows the task as the Markdown shown has
+ * it, queued changes made, and ticking it queues the change; it is
+ * disabled, with a hint saying why when there's a reason to give, where
+ * this person can't. Anywhere else, and for a checkbox the page's own HTML
+ * holds, it is the reader's disabled box, as written.
+ */
+const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
+  const here = use(ReadingChanges);
+  const at = node?.properties[TASK];
+  const offset = at === undefined ? null : Number(at);
+  const task = here && offset !== null ? taskAt(here.markdown, offset) : null;
+  if (!here || !task || offset === null) return <input {...props} />;
+  const { rights, change } = here;
+  const hint = rights.allowed ? undefined : (rights.hint ?? undefined);
+  return (
+    <input
+      type="checkbox"
+      checked={task.checked}
+      disabled={!rights.allowed}
+      aria-label={props['aria-label'] ?? 'Done'}
+      aria-description={hint}
+      data-hint={hint}
+      onChange={(event) =>
+        change({ kind: 'task', offset, line: task.line, checked: event.target.checked })
+      }
+    />
+  );
+};
+
 /** A code block as written, under its language and a button that copies it. */
 function WrittenCode({
   language,
@@ -242,6 +275,9 @@ const readQuery = (body: string) =>
     staleTime: 'static',
     networkMode: 'always',
     retry: false,
+    // A body that changes where it's shown, as a task ticked there does,
+    // shows as it was until it is read again, not blank meanwhile.
+    placeholderData: keepPreviousData,
   });
 
 const UNREADABLE = 'This page couldn’t be shown formatted, so here it is as written.';
@@ -296,6 +332,7 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
     div: Division,
     pre: CodeBlock,
     table: Table,
+    input: TaskBox,
     img: ({ src, alt, width }) => (
       <AttachmentImage
         attachments={attachments}
@@ -334,7 +371,7 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
                   remarkRehypeOptions={{
                     handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
                   }}
-                  rehypePlugins={[pageHtml]}
+                  rehypePlugins={[[taskMarks, frontmatter?.length ?? 0], pageHtml]}
                   urlTransform={urlTransform}
                   components={components}
                 />
