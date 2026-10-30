@@ -77,6 +77,20 @@ const DETAILS = {
     toShare: z.string().nullable(),
     records: z.number().int(),
   }),
+  // A page or folder copied, or moved into another space, with everything
+  // under it (section 10): where to, the new top node, and how many nodes.
+  'node.copied': z.strictObject({
+    spaceId: z.string(),
+    toSpaceId: z.string(),
+    nodeId: z.string(),
+    nodes: z.number().int(),
+  }),
+  'node.moved-between-spaces': z.strictObject({
+    spaceId: z.string(),
+    toSpaceId: z.string(),
+    nodeId: z.string(),
+    nodes: z.number().int(),
+  }),
   // A page's public link (ADR 0005), never its id: who turned it on is the
   // actor, and how it ended. One that lapsed names who turned it on, and
   // has as its actor whoever's change took their rights, or none when

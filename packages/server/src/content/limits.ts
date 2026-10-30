@@ -19,6 +19,8 @@ export async function requireCapacity(
   accountId: string,
   kind: 'space' | 'folder' | 'page',
   maximum: number,
+  /** How many are about to be made at once. */
+  adding = 1,
 ) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`wikistow:items:${accountId}`}))`);
   const [total] =
@@ -28,7 +30,7 @@ export async function requireCapacity(
           .select({ count: count() })
           .from(nodes)
           .where(and(eq(nodes.createdBy, accountId), eq(nodes.kind, kind)));
-  if ((total?.count ?? 0) >= maximum) {
+  if ((total?.count ?? 0) + adding > maximum) {
     throw new ContentError(`${kind}-limit`, `Your account has reached its ${kind} limit`);
   }
 }

@@ -1,5 +1,6 @@
 import {
   contactsRoutes,
+  copyRoutes,
   groupRoutes,
   ownerRoutes,
   PageId,
@@ -48,6 +49,11 @@ import {
   makeShare,
   checkMover,
   moveNode,
+  cancelCopy,
+  checkCopyOpener,
+  finishCopy,
+  openCopy,
+  sendCopyRecords,
   removeOwner,
   addGroupAgent,
   addGroupMember,
@@ -159,6 +165,8 @@ const ROTATION_BODY = 4 * 1024 * 1024;
 // A move that changes no keys: the destination and a few versions.
 const MOVE_BODY = 16 * 1024;
 const OWNER_REMOVAL_BODY = 16 * 1024 * 1024;
+// A copy's opening lists every node of what it copies, some 150 bytes each.
+const COPY_OPEN_BODY = 16 * 1024 * 1024;
 
 export function mountContentRoutes(
   routes: Routes,
@@ -775,6 +783,65 @@ export function mountContentRoutes(
         once,
       }).catch(toApiError),
     { rateLimit: WRITE_LIMIT, idempotent: true },
+  );
+
+  // Copies, and moves between spaces (section 10). Agents copy within their
+  // picks and their person's access; moves are for people (section 9.5).
+  routes.content(
+    copyRoutes.open,
+    async ({ body }, { actor, once }) =>
+      openCopy(db, {
+        actor,
+        maxPages: contentLimits.pages,
+        maxFolders: contentLimits.folders,
+        ...body,
+        once,
+      }).catch(toApiError),
+    { rateLimit: WRITE_LIMIT, idempotent: true, bodyLimit: COPY_OPEN_BODY },
+  );
+
+  // Only the copy's opener sends a large body here.
+  const copyOpenerFirst = async (
+    params: Record<string, string>,
+    { accountId, agentId = null }: EarlyCaller,
+  ) => {
+    await checkCopyOpener(db, { accountId, agentId }, params['copyId'] ?? '').catch(toApiError);
+  };
+
+  routes.content(
+    copyRoutes.records,
+    async ({ params, body }, { actor }) => {
+      await sendCopyRecords(db, {
+        actor,
+        copyId: params.copyId,
+        nodes: body.nodes,
+        storageBytes: limits.storageBytes,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    {
+      rateLimit: WRITE_LIMIT,
+      bodyLimit: copyRoutes.MAX_RECORDS_BODY,
+      beforeBody: copyOpenerFirst,
+    },
+  );
+
+  routes.content(
+    copyRoutes.finish,
+    async ({ params }, { actor }) => {
+      await finishCopy(db, blobs, { actor, copyId: params.copyId }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.content(
+    copyRoutes.cancel,
+    async ({ params }, { actor }) => {
+      await cancelCopy(db, blobs, { actor, copyId: params.copyId }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
   );
 
   routes.content(pageRoutes.history, async ({ params }, { actor }) => ({

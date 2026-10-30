@@ -1,0 +1,865 @@
+// Copying a page or folder, with everything under it, as new nodes under a
+// folder of any space, and moving one into another space: a copy that
+// deletes its source when it finishes (protocol section 10, "Copies, and
+// moves between spaces"; ADR 0007).
+//
+// A copy is made in three steps, as a publication into another space is.
+// Opening makes the new nodes, hidden: nobody has access to them
+// (`isHidden`), no tree lists them, and they count for nothing outside
+// their copy. Only the opener uploads attachments to them and sends their
+// records, each node's in one entry that replaces what it sent before. The
+// finish checks everything again under locks on both spaces, taken in ID
+// order, shows the new nodes and, for a move, deletes the source as
+// deleting it would. A source head that moved on is `stale-head`, naming
+// the nodes to seal again; any other refusal at the finish deletes the copy.
+//
+// Locks, in order: the spaces (key share, by ID), the copy's row, the
+// destination's share, then nodes; a move's finish then holds the source's
+// shares and subtree as a delete does (`holdSubtree`).
+import type { copyRoutes } from '@wikistow/contracts';
+import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
+import type { z } from 'zod';
+import { audit } from '../admin/audit.ts';
+import type { BlobStore } from '../blobs/store.ts';
+import type { Database } from '../db/client.ts';
+import { transactOnce, type Once } from '../idempotency.ts';
+import {
+  copies,
+  copyNodes,
+  keyEnvelopes,
+  metadataRevisions,
+  metadataWraps,
+  nodes,
+  pageHeads,
+  publications,
+  revisions,
+  revisionWraps,
+  spaces,
+} from '../db/schema/index.ts';
+import {
+  accessTo,
+  accessToPagesIn,
+  canEdit,
+  isOwner,
+  lockShare,
+  lockSpace,
+  pathUp,
+  requireRoom,
+  subtreeOf,
+  type Holder,
+  type ShareRow,
+} from './access.ts';
+import { ContentError } from './errors.ts';
+import { requireCaller, type Actor, type Caller } from './identities.ts';
+import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
+import {
+  deleteUnlistedFile,
+  holdSubtree,
+  removeSubtree,
+  storeRevision,
+  verifyRevisionCommit,
+} from './pages.ts';
+import { insertChunked } from './sharing.ts';
+import { storeMetadata, verifyMetadataCommit } from './structure.ts';
+
+type CopyRow = typeof copies.$inferSelect;
+type Open = z.output<typeof copyRoutes.open.body>;
+type Entry = z.output<typeof copyRoutes.CopiedRecords>;
+
+/**
+ * A node of a source subtree as trees list it, with the heads a copy of it
+ * is sealed from. A publication opening nobody finished isn't listed: it has
+ * no heads yet. A copy's hidden nodes aren't either (`subtreeOf`).
+ */
+type Listed = {
+  id: string;
+  parentId: string | null;
+  kind: 'folder' | 'page';
+  depth: number;
+  permissionVersion: number;
+  metadataHead: string | null;
+  draftHead: string | null;
+  publishedHead: string | null;
+};
+
+async function listedSubtree(tx: Database, spaceId: string, nodeId: string): Promise<Listed[]> {
+  const rows = await tx.execute<{
+    id: string;
+    parent_id: string | null;
+    kind: 'folder' | 'page';
+    depth: number;
+    permission_version: string | number;
+    metadata_head: string | null;
+    draft_head: string | null;
+    published_head: string | null;
+  }>(sql`
+    ${subtreeOf(spaceId, nodeId)}
+    select n.id, n.parent_id, n.kind, s.depth, n.permission_version, n.metadata_head,
+      h.draft_head, h.published_head
+    from subtree s join nodes n on n.id = s.id
+    left join page_heads h on h.page_id = n.id
+    where n.copy_id is null and (n.kind = 'folder' or h.page_id is not null)
+    order by s.depth, n.id`);
+  return [...rows].map((row) => ({
+    id: row.id,
+    parentId: row.parent_id,
+    kind: row.kind,
+    depth: Number(row.depth),
+    permissionVersion: Number(row.permission_version),
+    metadataHead: row.metadata_head,
+    draftHead: row.draft_head,
+    publishedHead: row.published_head,
+  }));
+}
+
+// Both spaces, in the database's order of their IDs, so two copies between
+// them, either way round, never wait on each other.
+async function lockSpaces(tx: Database, ...spaceIds: string[]) {
+  for (const spaceId of [...new Set(spaceIds)].sort()) await lockSpace(tx, spaceId);
+}
+
+/** A folder's or the space's permission version, or not-found. */
+async function parentVersion(tx: Database, spaceId: string, parentId: string | null) {
+  const [parent] =
+    parentId === null
+      ? await tx
+          .select({ permissionVersion: spaces.permissionVersion })
+          .from(spaces)
+          .where(eq(spaces.id, spaceId))
+      : await tx
+          .select({ permissionVersion: nodes.permissionVersion })
+          .from(nodes)
+          .where(
+            and(
+              eq(nodes.id, parentId),
+              eq(nodes.spaceId, spaceId),
+              eq(nodes.kind, 'folder'),
+              isNull(nodes.copyId),
+            ),
+          );
+  if (!parent) throw new ContentError('not-found');
+  return parent.permissionVersion;
+}
+
+const requireVersion = (actual: number, given: number) => {
+  if (actual !== given) {
+    throw new ContentError('permission-version', 'Access changed; reload and try again');
+  }
+};
+
+/**
+ * Who may copy (section 10, **Who**), checked at the opening and again at
+ * the finish: for a move, an owner of the source space, a person; for a
+ * copy, someone who can edit every listed node of the source (`sourceIds`),
+ * which an agent may within its picks; and for both, someone who can make
+ * pages at the destination parent. Their access there, and its share.
+ */
+async function requireCopier(
+  tx: Database,
+  caller: Caller,
+  copy: Pick<
+    CopyRow,
+    'kind' | 'sourceSpaceId' | 'sourceNodeId' | 'destinationSpaceId' | 'destinationParentId'
+  >,
+  sourceIds: readonly string[],
+): Promise<{ share: ShareRow | null; canPublish: boolean }> {
+  const holder: Holder = caller;
+  if (copy.kind === 'move') {
+    // Moves are for people, as sharing is (section 9.5).
+    if (caller.personId !== null || !(await isOwner(tx, caller.identity.id, copy.sourceSpaceId))) {
+      const access = await accessTo(tx, holder, {
+        spaceId: copy.sourceSpaceId,
+        nodeId: copy.sourceNodeId,
+      });
+      throw new ContentError(
+        access ? 'forbidden' : 'not-found',
+        'Only an owner of its space moves a page or folder into another space',
+      );
+    }
+  } else {
+    const access = await accessToPagesIn(tx, holder, copy.sourceSpaceId, sourceIds);
+    if (!access.get(copy.sourceNodeId)) throw new ContentError('not-found');
+    if (![...access.values()].every(canEdit)) {
+      throw new ContentError('forbidden', 'Only someone who can edit all of it copies it');
+    }
+  }
+  const at = await accessTo(tx, holder, {
+    spaceId: copy.destinationSpaceId,
+    nodeId: copy.destinationParentId,
+  });
+  if (!at) throw new ContentError('not-found');
+  if (!canEdit(at)) throw new ContentError('forbidden');
+  return { share: at.share, canPublish: at.canPublish };
+}
+
+/**
+ * Open a copy (section 10, step 1): check who may make it, that both
+ * permission versions are those the preview was made at, that it isn't
+ * refused, and that `nodes` mirror the source subtree's listed nodes as they
+ * are now, under the same parents; then make them, hidden, in the
+ * destination parent's region, under its permission version. Asked again
+ * with the same `Idempotency-Key`, it is answered as before.
+ */
+export async function openCopy(
+  db: Database,
+  input: {
+    actor: Actor;
+    maxPages?: number;
+    maxFolders?: number;
+    once?: Once | undefined;
+  } & Open,
+) {
+  return transactOnce(db, input.once, async (tx) => {
+    const caller = await requireCaller(tx, input.actor);
+    if (input.kind === 'move' && input.sourceSpaceId === input.destinationSpaceId) {
+      throw new ContentError('forbidden', 'A move within one space is an ordinary move');
+    }
+    await lockSpaces(tx, input.sourceSpaceId, input.destinationSpaceId);
+    const listed = await listedSubtree(tx, input.sourceSpaceId, input.sourceNodeId);
+    const [top] = listed;
+    if (top?.id !== input.sourceNodeId) throw new ContentError('not-found');
+    const copy = {
+      kind: input.kind,
+      sourceSpaceId: input.sourceSpaceId,
+      sourceNodeId: input.sourceNodeId,
+      destinationSpaceId: input.destinationSpaceId,
+      destinationParentId: input.parentId,
+    };
+    const who = await requireCopier(
+      tx,
+      caller,
+      copy,
+      listed.map((node) => node.id),
+    );
+    if (input.bringsPublished && !who.canPublish) {
+      throw new ContentError('forbidden', 'Published versions go only where you can publish');
+    }
+    requireVersion(top.permissionVersion, input.sourcePermissionVersion);
+    const permissionVersion = await parentVersion(tx, input.destinationSpaceId, input.parentId);
+    requireVersion(permissionVersion, input.permissionVersion);
+
+    const path = await pathUp(tx, input.destinationSpaceId, input.parentId);
+    if (input.sourceSpaceId === input.destinationSpaceId && path?.includes(input.sourceNodeId)) {
+      throw new ContentError('binding-mismatch', 'Nothing copies into itself');
+    }
+    requireRoom(path, Math.max(...listed.map((node) => node.depth)) + 1);
+    await requireNoPublication(
+      tx,
+      listed.flatMap((node) => (node.kind === 'page' ? [node.id] : [])),
+    );
+    const mirrored = mirror(input, listed);
+
+    for (const kind of ['folder', 'page'] as const) {
+      const adding = listed.filter((node) => node.kind === kind).length;
+      if (adding === 0) continue;
+      const maximum =
+        kind === 'folder'
+          ? (input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders)
+          : (input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
+      await requireCapacity(tx, caller.accountId, kind, maximum, adding);
+    }
+    const opened = await tx
+      .insert(copies)
+      .values({
+        id: input.copyId,
+        kind: input.kind,
+        bringsPublished: input.bringsPublished,
+        openedBy: caller.accountId,
+        openerId: caller.identity.id,
+        sourceSpaceId: input.sourceSpaceId,
+        sourceNodeId: input.sourceNodeId,
+        sourcePermissionVersion: input.sourcePermissionVersion,
+        destinationSpaceId: input.destinationSpaceId,
+        destinationParentId: input.parentId,
+        permissionVersion,
+      })
+      .onConflictDoNothing()
+      .returning({ id: copies.id });
+    if (opened.length === 0) throw new ContentError('duplicate', 'That copy ID is taken');
+    // Parents first: `listed` is in order of depth.
+    let made = 0;
+    await insertChunked(mirrored, async (chunk) => {
+      const rows = await tx
+        .insert(nodes)
+        .values(
+          chunk.map(({ node }) => ({
+            id: node.nodeId,
+            spaceId: input.destinationSpaceId,
+            parentId: node.parentId,
+            kind: node.kind,
+            createdBy: caller.accountId,
+            permissionVersion,
+            copyId: input.copyId,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ id: nodes.id });
+      made += rows.length;
+    });
+    if (made !== mirrored.length) throw new ContentError('duplicate', 'A node ID is taken');
+    await insertChunked(mirrored, (chunk) =>
+      tx.insert(copyNodes).values(
+        chunk.map(({ node, source }) => ({
+          nodeId: node.nodeId,
+          copyId: input.copyId,
+          sourceId: source.id,
+          sourceParentId: source.id === input.sourceNodeId ? null : source.parentId,
+        })),
+      ),
+    );
+    return { copyId: input.copyId };
+  });
+}
+
+/**
+ * The new nodes paired with the listed source nodes they copy, in the
+ * order of `listed`, if they mirror them exactly: one each, of its kind,
+ * under the copy of its parent, the top one under the destination parent.
+ * Otherwise the source changed since the preview (`stale-head`).
+ */
+function mirror(input: Open, listed: readonly Listed[]) {
+  const bySource = new Map(input.nodes.map((node) => [node.sourceId, node]));
+  const newIds = new Set(input.nodes.map((node) => node.nodeId));
+  const stale = () =>
+    new ContentError('stale-head', 'What you are copying changed since you looked');
+  if (bySource.size !== input.nodes.length || newIds.size !== input.nodes.length) {
+    throw new ContentError('binding-mismatch', 'A node is listed twice');
+  }
+  if (input.nodes.length !== listed.length) throw stale();
+  return listed.map((source) => {
+    const node = bySource.get(source.id);
+    const parentId =
+      source.id === input.sourceNodeId
+        ? input.parentId
+        : (bySource.get(source.parentId ?? '')?.nodeId ?? null);
+    if (!node || node.kind !== source.kind || node.parentId !== parentId) throw stale();
+    return { node, source };
+  });
+}
+
+/**
+ * Refuse a source holding a live publication from another page (section
+ * 13): one with a version, not detached. Its publishers detach it first.
+ * An opening nobody finished has no version, and isn't listed anyway.
+ */
+async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
+  if (pageIds.length === 0) return;
+  const [live] = await tx
+    .select({ pageId: publications.destinationPageId })
+    .from(publications)
+    .innerJoin(pageHeads, eq(pageHeads.pageId, publications.destinationPageId))
+    .where(
+      and(
+        isNull(publications.detachedAt),
+        sql`${publications.destinationPageId} = any(${sql.param([...pageIds])}::text[])`,
+      ),
+    )
+    .limit(1);
+  if (live) {
+    throw new ContentError(
+      'forbidden',
+      'A page published from another page is detached before it is copied',
+    );
+  }
+}
+
+/** The copy, for its opener; not-found for anyone else. Held for the change when `lock` is set. */
+async function requireOpener(tx: Database, caller: Caller, copyId: string, { lock = false } = {}) {
+  const query = tx.select().from(copies).where(eq(copies.id, copyId));
+  const [copy] = lock ? await query.for('update') : await query;
+  if (!copy || copy.openerId !== caller.identity.id) throw new ContentError('not-found');
+  return copy;
+}
+
+/**
+ * For records' large body, before it is read: the caller opened the copy,
+ * or is refused as sending would refuse them. Sending checks it again.
+ */
+export async function checkCopyOpener(db: Database, actor: Actor, copyId: string) {
+  await requireOpener(db, await requireCaller(db, actor), copyId);
+}
+
+/**
+ * A hidden page's access for an upload (`uploadBlob`): only its copy's
+ * opener uploads to it, as they could make pages at the copy's destination,
+ * and published attachments only where they can publish. Every upload
+ * counts as a request, so the sweep leaves the copy a day more.
+ */
+export async function copyUploadAccess(db: Database, caller: Caller, copyId: string) {
+  const [copy] = await db.select().from(copies).where(eq(copies.id, copyId));
+  if (!copy || copy.openerId !== caller.identity.id) throw new ContentError('not-found');
+  const access = await accessTo(db, caller, {
+    spaceId: copy.destinationSpaceId,
+    nodeId: copy.destinationParentId,
+  });
+  await db
+    .update(copies)
+    .set({ touchedAt: sql`now()` })
+    .where(eq(copies.id, copyId));
+  return access;
+}
+
+/**
+ * Store records for the copy's new nodes (section 10, step 2), for its
+ * opener, as the hidden nodes' own versions at once, so the attachments
+ * they list are committed as any write's are: each entry replaces the
+ * records sent for its node before, and is checked as any write is in the
+ * destination parent's region, under its current key version, apart from
+ * the head check: every record is a first version (`basedOn` null),
+ * written by the caller. Each names a version of its node's source it was
+ * sealed from. A published version goes only in a copy that brings them,
+ * where the caller can still publish.
+ */
+export async function sendCopyRecords(
+  db: Database,
+  input: { actor: Actor; copyId: string; nodes: Entry[]; storageBytes: number },
+) {
+  await db.transaction(async (tx) => {
+    const caller = await requireCaller(tx, input.actor);
+    const found = await requireOpener(tx, caller, input.copyId);
+    await lockSpace(tx, found.destinationSpaceId);
+    const copy = await requireOpener(tx, caller, input.copyId, { lock: true });
+    const access = await accessTo(tx, caller, {
+      spaceId: copy.destinationSpaceId,
+      nodeId: copy.destinationParentId,
+    });
+    if (!access) throw new ContentError('not-found');
+    if (!canEdit(access)) throw new ContentError('forbidden');
+    const share = await lockShare(tx, access.share);
+    await tx
+      .update(copies)
+      .set({ touchedAt: sql`now()` })
+      .where(eq(copies.id, copy.id));
+    for (const entry of input.nodes) {
+      const [node] = await tx
+        .select({ kind: nodes.kind, sourceId: copyNodes.sourceId })
+        .from(copyNodes)
+        .innerJoin(nodes, eq(nodes.id, copyNodes.nodeId))
+        .where(and(eq(copyNodes.nodeId, entry.nodeId), eq(copyNodes.copyId, copy.id)))
+        .for('update', { of: nodes });
+      if (!node) throw new ContentError('not-found');
+      if (node.kind !== entry.kind) {
+        throw new ContentError('binding-mismatch', 'Those records are for another kind of node');
+      }
+      const target = {
+        copy,
+        share,
+        caller,
+        sourceId: node.sourceId,
+        storageBytes: input.storageBytes,
+      };
+      if (entry.kind === 'page') {
+        if (entry.published && !(copy.bringsPublished && access.canPublish)) {
+          throw new ContentError('forbidden', 'This copy brings no published versions');
+        }
+        await clearPage(tx, entry.nodeId);
+        await storePage(tx, entry, target);
+      } else {
+        await clearFolder(tx, entry.nodeId);
+        await storeFolder(tx, entry, target);
+      }
+    }
+  });
+}
+
+type Target = {
+  copy: CopyRow;
+  share: ShareRow | null;
+  caller: Caller;
+  sourceId: string;
+  storageBytes: number;
+};
+
+/**
+ * Remove what was sent for a hidden page before: its versions with their
+ * key material, and its heads. Attachments only they listed are left for
+ * the sweep of attachments nothing lists (`sweepBlobs`).
+ */
+async function clearPage(tx: Database, pageId: string) {
+  const sent = tx.select({ id: revisions.id }).from(revisions).where(eq(revisions.pageId, pageId));
+  await tx
+    .delete(keyEnvelopes)
+    .where(and(eq(keyEnvelopes.subjectKind, 'revision'), inArray(keyEnvelopes.subjectId, sent)));
+  // Their wraps and attachment lists go with them.
+  await tx.delete(revisions).where(eq(revisions.pageId, pageId));
+  await tx.delete(pageHeads).where(eq(pageHeads.pageId, pageId));
+}
+
+/** Remove what was sent for a hidden folder before: its metadata and key material. */
+async function clearFolder(tx: Database, folderId: string) {
+  const named = and(
+    eq(metadataRevisions.subjectKind, 'folder'),
+    eq(metadataRevisions.subjectId, folderId),
+  );
+  await tx
+    .delete(keyEnvelopes)
+    .where(
+      and(
+        eq(keyEnvelopes.subjectKind, 'metadata'),
+        inArray(
+          keyEnvelopes.subjectId,
+          tx.select({ id: metadataRevisions.id }).from(metadataRevisions).where(named),
+        ),
+      ),
+    );
+  await tx.update(nodes).set({ metadataHead: null }).where(eq(nodes.id, folderId));
+  await tx.delete(metadataRevisions).where(named);
+}
+
+// The source version a record names must be one of its source's, of its audience.
+async function requireSourceRevision(
+  tx: Database,
+  { sourceId, revisionId, audience }: { sourceId: string; revisionId: string; audience: string },
+) {
+  const [version] = await tx
+    .select({ id: revisions.id })
+    .from(revisions)
+    .where(
+      and(
+        eq(revisions.id, revisionId),
+        eq(revisions.pageId, sourceId),
+        sql`${revisions.audience} = ${audience}`,
+      ),
+    );
+  if (!version) throw new ContentError('not-found', 'That version of the source isn’t there');
+}
+
+async function storePage(
+  tx: Database,
+  entry: Extract<Entry, { kind: 'page' }>,
+  { copy, share, caller, sourceId, storageBytes }: Target,
+) {
+  const versions = [
+    { audience: 'draft' as const, version: entry.draft },
+    ...(entry.published ? [{ audience: 'published' as const, version: entry.published }] : []),
+  ];
+  for (const { audience, version } of versions) {
+    await requireSourceRevision(tx, { sourceId, revisionId: version.sourceRevisionId, audience });
+    const commit = { ...version, permissionVersion: copy.permissionVersion };
+    await verifyRevisionCommit(tx, commit, {
+      author: caller.identity,
+      spaceId: copy.destinationSpaceId,
+      pageId: entry.nodeId,
+      audience,
+      basedOn: null,
+      share,
+      heads: null,
+    });
+    await storeRevision(tx, commit, {
+      accountId: caller.accountId,
+      storageBytes,
+      draftSeq: audience === 'draft' ? 1 : null,
+      publishedSeq: audience === 'published' ? 1 : null,
+      restoredFrom: null,
+      sourceRevisionId: version.sourceRevisionId,
+    });
+  }
+  await tx.insert(pageHeads).values({
+    pageId: entry.nodeId,
+    draftHead: entry.draft.revision.record.revisionId,
+    draftCount: 1,
+    publishedHead: entry.published?.revision.record.revisionId ?? null,
+    publishedCount: entry.published ? 1 : 0,
+  });
+  await tx
+    .update(copyNodes)
+    .set({
+      draftFrom: entry.draft.sourceRevisionId,
+      publishedFrom: entry.published?.sourceRevisionId ?? null,
+    })
+    .where(eq(copyNodes.nodeId, entry.nodeId));
+}
+
+async function storeFolder(
+  tx: Database,
+  entry: Extract<Entry, { kind: 'folder' }>,
+  { copy, share, caller, sourceId, storageBytes }: Target,
+) {
+  const [source] = await tx
+    .select({ id: metadataRevisions.id })
+    .from(metadataRevisions)
+    .where(
+      and(
+        eq(metadataRevisions.id, entry.sourceMetadataRevisionId),
+        eq(metadataRevisions.subjectKind, 'folder'),
+        eq(metadataRevisions.subjectId, sourceId),
+      ),
+    );
+  if (!source) throw new ContentError('not-found', 'That name of the source isn’t there');
+  await verifyMetadataCommit(tx, entry, {
+    author: caller.identity,
+    spaceId: copy.destinationSpaceId,
+    subjectKind: 'folder',
+    subjectId: entry.nodeId,
+    basedOn: null,
+    share,
+  });
+  await storeMetadata(tx, entry, { accountId: caller.accountId, storageBytes });
+  await tx
+    .update(nodes)
+    .set({ metadataHead: entry.metadata.record.metadataRevisionId })
+    .where(eq(nodes.id, entry.nodeId));
+  await tx
+    .update(copyNodes)
+    .set({ metadataFrom: entry.sourceMetadataRevisionId })
+    .where(eq(copyNodes.nodeId, entry.nodeId));
+}
+
+/**
+ * Finish a copy (section 10, step 3), for its opener: check again who may
+ * make it, that every new node has its records, that the destination
+ * parent's permission version, region and current key version are those
+ * the records were written at, and for a move, that the source node's
+ * permission version is the one sent at the opening, its listed subtree is
+ * still the one mirrored, and every source head an entry named is still
+ * current. Then, at once, show the new nodes and, for a move, delete the
+ * source as deleting it would. A head that moved on is `stale-head`,
+ * naming the new nodes to seal again (`detail.nodeIds`), and the copy
+ * stays; any other refusal deletes it, as does `stale-head` for a changed
+ * subtree, which names none. Busy is only tried again.
+ */
+export async function finishCopy(
+  db: Database,
+  store: BlobStore,
+  input: { actor: Actor; copyId: string },
+) {
+  let opener: Caller | null = null;
+  try {
+    const hashes = await db.transaction(async (tx) => {
+      const caller = await requireCaller(tx, input.actor);
+      const found = await requireOpener(tx, caller, input.copyId);
+      opener = caller;
+      await lockSpaces(tx, found.sourceSpaceId, found.destinationSpaceId);
+      const copy = await requireOpener(tx, caller, input.copyId, { lock: true });
+      return finishHeld(tx, caller, copy);
+    });
+    for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
+  } catch (error) {
+    const retry =
+      error instanceof ContentError &&
+      ((error.code === 'stale-head' && error.detail.nodeIds !== undefined) ||
+        error.code === 'busy');
+    if (opener && error instanceof ContentError && !retry) {
+      await dropCopy(db, store, opener, input.copyId).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<string[]> {
+  const made = await tx
+    .select({
+      nodeId: copyNodes.nodeId,
+      sourceId: copyNodes.sourceId,
+      sourceParentId: copyNodes.sourceParentId,
+      kind: nodes.kind,
+      draftFrom: copyNodes.draftFrom,
+      publishedFrom: copyNodes.publishedFrom,
+      metadataFrom: copyNodes.metadataFrom,
+    })
+    .from(copyNodes)
+    .innerJoin(nodes, eq(nodes.id, copyNodes.nodeId))
+    .where(eq(copyNodes.copyId, copy.id));
+  const who = await requireCopier(
+    tx,
+    caller,
+    copy,
+    made.map((node) => node.sourceId),
+  );
+  if (!who.canPublish && (copy.bringsPublished || made.some((n) => n.publishedFrom !== null))) {
+    throw new ContentError('forbidden', 'You can no longer publish there');
+  }
+  requireVersion(
+    await parentVersion(tx, copy.destinationSpaceId, copy.destinationParentId),
+    copy.permissionVersion,
+  );
+  const share = await lockShare(tx, who.share);
+  // The nodes made at the opening, every one with its records.
+  const [hidden] = await tx.select({ count: count() }).from(nodes).where(eq(nodes.copyId, copy.id));
+  const missing = made.some((node) =>
+    node.kind === 'page' ? node.draftFrom === null : node.metadataFrom === null,
+  );
+  const top = made.find((node) => node.sourceParentId === null);
+  if (missing || !top || hidden?.count !== made.length) {
+    throw new ContentError('not-found', 'Some of what you are copying has no records yet');
+  }
+  await requireRegion(tx, copy, share);
+
+  let removed: string[] = [];
+  if (copy.kind === 'move') {
+    const held = await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId });
+    const listed = await listedSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId);
+    requireVersion(listed[0]?.permissionVersion ?? -1, copy.sourcePermissionVersion);
+    const stale = staleNodes(made, listed, copy);
+    if (stale.length > 0) {
+      throw new ContentError('stale-head', 'Some of what you are moving changed since', {
+        nodeIds: stale,
+      });
+    }
+    removed = await removeSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId, held);
+  }
+  await tx.update(nodes).set({ copyId: null }).where(eq(nodes.copyId, copy.id));
+  await tx.delete(copies).where(eq(copies.id, copy.id));
+  await audit(tx, {
+    actor: copy.openedBy,
+    action: copy.kind === 'move' ? 'node.moved-between-spaces' : 'node.copied',
+    target: { kind: 'node', id: copy.sourceNodeId },
+    details: {
+      spaceId: copy.sourceSpaceId,
+      toSpaceId: copy.destinationSpaceId,
+      nodeId: top.nodeId,
+      nodes: made.length,
+    },
+  });
+  return removed;
+}
+
+/**
+ * The records of the copy's nodes are all in the destination parent's
+ * region (`share`, or the owner region) under its current key version.
+ * Owners changing moves the parent's permission version on, which the
+ * finish checks first.
+ */
+async function requireRegion(tx: Database, copy: CopyRow, share: ShareRow | null) {
+  const hidden = tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.copyId, copy.id));
+  const pageWraps = await tx
+    .select({ shareId: revisionWraps.shareId, keyVersion: revisionWraps.keyVersion })
+    .from(revisions)
+    .leftJoin(revisionWraps, eq(revisionWraps.revisionId, revisions.id))
+    .where(inArray(revisions.pageId, hidden));
+  const nameWraps = await tx
+    .select({ shareId: metadataWraps.shareId, keyVersion: metadataWraps.keyVersion })
+    .from(metadataRevisions)
+    .leftJoin(metadataWraps, eq(metadataWraps.metadataRevisionId, metadataRevisions.id))
+    .where(
+      and(
+        eq(metadataRevisions.subjectKind, 'folder'),
+        inArray(metadataRevisions.subjectId, hidden),
+      ),
+    );
+  for (const wrap of [...pageWraps, ...nameWraps]) {
+    if ((wrap.shareId ?? null) !== (share?.id ?? null)) {
+      throw new ContentError('region-mismatch', 'Where you are copying to changed since');
+    }
+    if (share && wrap.keyVersion !== share.currentKeyVersion) {
+      throw new ContentError('key-version', 'The share has another key version', {
+        shareId: share.id,
+        keyVersion: share.currentKeyVersion,
+      });
+    }
+  }
+}
+
+/**
+ * For a move, the new nodes whose source heads moved on since they were
+ * sealed: a page's draft, and when the copy brings published versions, its
+ * published head, none for a page not published; a folder's metadata head. If the listed source subtree isn't the one
+ * mirrored, under the same parents, the move can't go on: `stale-head`
+ * naming no nodes.
+ */
+function staleNodes(
+  made: readonly {
+    nodeId: string;
+    sourceId: string;
+    sourceParentId: string | null;
+    kind: 'folder' | 'page';
+    draftFrom: string | null;
+    publishedFrom: string | null;
+    metadataFrom: string | null;
+  }[],
+  listed: readonly Listed[],
+  copy: CopyRow,
+): string[] {
+  const now = new Map(listed.map((node) => [node.id, node]));
+  const same =
+    listed.length === made.length &&
+    made.every((node) => {
+      const source = now.get(node.sourceId);
+      return (
+        source !== undefined &&
+        source.kind === node.kind &&
+        (node.sourceId === copy.sourceNodeId ? null : source.parentId) === node.sourceParentId
+      );
+    });
+  if (!same) {
+    throw new ContentError('stale-head', 'What you are moving changed since; move it again');
+  }
+  return made.flatMap((node) => {
+    const source = now.get(node.sourceId);
+    if (!source) return [];
+    const stale =
+      node.kind === 'folder'
+        ? source.metadataHead !== node.metadataFrom
+        : source.draftHead !== node.draftFrom ||
+          (copy.bringsPublished && source.publishedHead !== node.publishedFrom);
+    return stale ? [node.nodeId] : [];
+  });
+}
+
+/**
+ * Delete the copy and its hidden nodes, with whatever was sent for them, as
+ * deleting a node would; the hashes of their attachments, whose files go
+ * once the transaction commits. The caller holds the destination space.
+ */
+async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
+  const [top] = await tx
+    .select({ nodeId: copyNodes.nodeId })
+    .from(copyNodes)
+    .where(and(eq(copyNodes.copyId, copy.id), isNull(copyNodes.sourceParentId)));
+  let removed: string[] = [];
+  // Gone already if a delete at the destination took it.
+  if (top) {
+    const at = { spaceId: copy.destinationSpaceId, nodeId: top.nodeId };
+    removed = await removeSubtree(tx, at.spaceId, at.nodeId, await holdSubtree(tx, at));
+  }
+  await tx.delete(copies).where(eq(copies.id, copy.id));
+  return removed;
+}
+
+async function dropCopy(db: Database, store: BlobStore, caller: Caller, copyId: string) {
+  const hashes = await db.transaction(async (tx) => {
+    const found = await requireOpener(tx, caller, copyId);
+    await lockSpace(tx, found.destinationSpaceId);
+    return dropHeld(tx, await requireOpener(tx, caller, copyId, { lock: true }));
+  });
+  for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
+}
+
+/** Delete an unfinished copy and its hidden nodes at once, for its opener. */
+export async function cancelCopy(
+  db: Database,
+  store: BlobStore,
+  input: { actor: Actor; copyId: string },
+) {
+  await dropCopy(db, store, await requireCaller(db, input.actor), input.copyId);
+}
+
+/**
+ * Delete copies nobody sent anything to since `cutoff`, with their nodes
+ * and attachments, as cancelling one does. Each is checked again under the
+ * locks sending takes, so one sent to meanwhile stays. How many went.
+ */
+export async function sweepCopies(db: Database, store: BlobStore, cutoff: Date): Promise<number> {
+  const old = await db
+    .select({ id: copies.id, spaceId: copies.destinationSpaceId })
+    .from(copies)
+    .where(sql`${copies.touchedAt} < ${cutoff.toISOString()}`);
+  let removed = 0;
+  for (const { id, spaceId } of old) {
+    const hashes = await db.transaction(async (tx) => {
+      const [space] = await tx
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(eq(spaces.id, spaceId))
+        .for('key share');
+      if (!space) return null;
+      const [copy] = await tx.select().from(copies).where(eq(copies.id, id)).for('update');
+      if (!copy || copy.touchedAt >= cutoff) return null;
+      return dropHeld(tx, copy);
+    });
+    if (!hashes) continue;
+    removed += 1;
+    for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
+  }
+  return removed;
+}

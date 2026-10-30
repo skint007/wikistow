@@ -44,6 +44,7 @@ import {
   accessTo,
   accessToPages,
   canEdit,
+  isHidden,
   isOwner,
   lockShare,
   lockSpace,
@@ -61,6 +62,7 @@ import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { charge, usedBytes } from './quota.ts';
+import { copyUploadAccess, sweepCopies } from './copies.ts';
 import { endPublicationsFrom } from './publications.ts';
 import { endCopies, endLinkFor, endLinks } from '../public-links/endings.ts';
 import { revisionKeyMaterial } from './serving.ts';
@@ -1099,8 +1101,11 @@ export async function uploadBlob(
   const caller = await requireCaller(db, input.actor);
   const { accountId } = caller;
   const page = await requirePage(db, input.pageId);
-  const access = await requirePageAccess(db, caller, page);
-  if (!canEdit(access)) throw new ContentError('not-found');
+  // A copy's hidden page takes uploads from its opener only (section 10).
+  const access = page.copyId
+    ? await copyUploadAccess(db, caller, page.copyId)
+    : await requirePageAccess(db, caller, page);
+  if (!access || !canEdit(access)) throw new ContentError('not-found');
   if (input.audience === 'published' && !access.canPublish) throw new ContentError('forbidden');
   if (input.declaredSize > input.limits.uploadBytes) {
     throw new ContentError('too-large', 'Attachment is too large');
@@ -1325,13 +1330,12 @@ async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): P
 
 /**
  * Delete a folder or page and everything beneath it, for space owners, with
- * the shares rooted in it, which are locked before its nodes, as saves and
- * rotations lock them. It holds the space against a share being made
- * meanwhile. Its pages' publications into other spaces end with them
- * (`endPublicationsFrom`), and so do their public links and copies. Its blob files, and those of any opening that
+ * the shares rooted in it (`removeSubtree`). It holds the space against a
+ * share being made meanwhile. Its blob files, and those of any opening that
  * goes, are removed after the transaction commits, each kept if an upload
  * of the same bytes has stored it again by then. Any left by a failure
- * here go in the sweep's pass over files without rows.
+ * here go in the sweep's pass over files without rows. A copy's hidden
+ * nodes are its own to remove (section 10).
  */
 export async function deleteNode(
   db: Database,
@@ -1345,49 +1349,79 @@ export async function deleteNode(
       const access = await accessTo(tx, { identity, personId: null }, input);
       throw new ContentError(access ? 'forbidden' : 'not-found');
     }
-    await lockSharesUnder(tx, input.spaceId, input.nodeId);
-    const ids = await lockSubtree(tx, input.spaceId, input.nodeId);
-    if (ids.length === 0) throw new ContentError('not-found');
-    const openingFiles = await endPublicationsFrom(tx, ids);
-    // Its pages' public links, copies and the target rows naming them, in
-    // their lock order, rather than by the cascade (ADR 0005, decision 5).
-    await endLinks(tx, ids);
-    const doomed = await tx
-      .select({ hash: blobs.hash })
-      .from(blobs)
-      .where(inArray(blobs.pageId, ids));
-    // Envelopes and folder metadata point at their subject by ID, not by
-    // foreign key, so they are removed explicitly.
-    const pageRevisions = tx
-      .select({ id: revisions.id })
-      .from(revisions)
-      .where(inArray(revisions.pageId, ids));
-    const folderMetadata = and(
-      eq(metadataRevisions.subjectKind, 'folder'),
-      inArray(metadataRevisions.subjectId, ids),
-    );
-    await tx
-      .delete(keyEnvelopes)
-      .where(
-        or(
-          and(
-            eq(keyEnvelopes.subjectKind, 'revision'),
-            inArray(keyEnvelopes.subjectId, pageRevisions),
-          ),
-          and(
-            eq(keyEnvelopes.subjectKind, 'metadata'),
-            inArray(
-              keyEnvelopes.subjectId,
-              tx.select({ id: metadataRevisions.id }).from(metadataRevisions).where(folderMetadata),
-            ),
-          ),
-        ),
-      );
-    await tx.delete(metadataRevisions).where(folderMetadata);
-    await tx.delete(nodes).where(and(eq(nodes.id, input.nodeId), eq(nodes.spaceId, input.spaceId)));
-    return [...doomed.map((b) => b.hash), ...openingFiles];
+    if (await isHidden(tx, input.nodeId)) throw new ContentError('not-found');
+    return removeSubtree(tx, input.spaceId, input.nodeId, await holdSubtree(tx, input));
   });
   for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
+}
+
+/**
+ * Hold a node and everything beneath it for `removeSubtree`, a copy's
+ * hidden nodes inside it included: first the shares rooted there, as saves
+ * and rotations lock them, then the nodes. The caller holds the space
+ * against a share being made meanwhile. The nodes held; not-found if none.
+ */
+export async function holdSubtree(
+  tx: Database,
+  { spaceId, nodeId }: { spaceId: string; nodeId: string },
+): Promise<string[]> {
+  await lockSharesUnder(tx, spaceId, nodeId);
+  const ids = await lockSubtree(tx, spaceId, nodeId);
+  if (ids.length === 0) throw new ContentError('not-found');
+  return ids;
+}
+
+/**
+ * Delete a node and everything beneath it (`ids`, held by `holdSubtree`),
+ * with the shares rooted in it. Its pages' publications into other spaces
+ * end with them (`endPublicationsFrom`), and so do their public links and
+ * copies. The hashes of the blobs that went, whose files the caller
+ * removes once the transaction commits (`deleteUnlistedFile`).
+ */
+export async function removeSubtree(
+  tx: Database,
+  spaceId: string,
+  nodeId: string,
+  ids: readonly string[],
+): Promise<string[]> {
+  const openingFiles = await endPublicationsFrom(tx, ids);
+  // Its pages' public links, copies and the target rows naming them, in
+  // their lock order, rather than by the cascade (ADR 0005, decision 5).
+  await endLinks(tx, ids);
+  const doomed = await tx
+    .select({ hash: blobs.hash })
+    .from(blobs)
+    .where(inArray(blobs.pageId, [...ids]));
+  // Envelopes and folder metadata point at their subject by ID, not by
+  // foreign key, so they are removed explicitly.
+  const pageRevisions = tx
+    .select({ id: revisions.id })
+    .from(revisions)
+    .where(inArray(revisions.pageId, [...ids]));
+  const folderMetadata = and(
+    eq(metadataRevisions.subjectKind, 'folder'),
+    inArray(metadataRevisions.subjectId, [...ids]),
+  );
+  await tx
+    .delete(keyEnvelopes)
+    .where(
+      or(
+        and(
+          eq(keyEnvelopes.subjectKind, 'revision'),
+          inArray(keyEnvelopes.subjectId, pageRevisions),
+        ),
+        and(
+          eq(keyEnvelopes.subjectKind, 'metadata'),
+          inArray(
+            keyEnvelopes.subjectId,
+            tx.select({ id: metadataRevisions.id }).from(metadataRevisions).where(folderMetadata),
+          ),
+        ),
+      ),
+    );
+  await tx.delete(metadataRevisions).where(folderMetadata);
+  await tx.delete(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.spaceId, spaceId)));
+  return [...doomed.map((b) => b.hash), ...openingFiles];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1404,11 +1438,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  *
  * First, publications into another space opened more than a day ago that
  * never got a version, with nothing uploaded for them within the day
- * either (`sweepOpenings`): their uploads then go with them.
+ * either (`sweepOpenings`): their uploads then go with them. And copies
+ * nobody sent anything to for a day (`sweepCopies`), with their nodes.
  */
 export async function sweepBlobs(db: Database, store: BlobStore, { graceMs = DAY_MS } = {}) {
   const cutoff = new Date(Date.now() - graceMs);
   const openings = await sweepOpenings(db, cutoff);
+  const copies = await sweepCopies(db, store, cutoff);
   const unlisted = and(
     lt(blobs.createdAt, cutoff),
     sql`not exists (select 1 from revision_blobs ref where ref.blob_hash = ${blobs.hash})`,
@@ -1434,7 +1470,7 @@ export async function sweepBlobs(db: Database, store: BlobStore, { graceMs = DAY
     if (file.writtenAt < cutoff) await deleteUnlistedFile(db, store, file.hash);
   }
   await store.clearStaging(graceMs);
-  return { staged, openings };
+  return { staged, openings, copies };
 }
 
 /**
