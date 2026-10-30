@@ -1314,7 +1314,7 @@ A **copy** seals a node and its subtree again as new nodes under a destination f
 - A `copy`: someone with edit rights at every node of the source subtree. Readers can't copy, as they can't publish into another space (section 13). An agent may copy, never move (section 9.5): its pick and its person must both allow editing at the source, and making pages at the destination.
 - Both: someone who can make pages at the destination parent. A published version goes only where they can also publish there; otherwise its page arrives with its draft alone, and the preview names it.
 
-**What is sealed.** For each folder, one metadata record v2 holding the source folder's current name and look. For each page, its current draft, and its current published version when the page is published now, each as a revision record v2. Nothing else: no earlier version, publication, public link, share or agent pick. Every record:
+**What is sealed.** For each folder, one metadata record v2 holding the source folder's current name and look. For each page, its current draft, and its current published version when the page is published now, each as a revision record v2. A page with no draft, such as a publication ended without being detached (section 13), gets its published version as its draft too, which shows the destination's editors only what its readers can read. Nothing else: no earlier version, publication, public link, share or agent pick. Every record:
 - names the new node in the destination space, has `basedOn: null`, and is written and signed by the person copying, as a new page's first draft is, and a published version as a publication's are (section 13);
 - is in the region of its new parent's name record (section 6.1, **A new node's region**), and wraps or seals its content key as section 6.8 requires there;
 - reseals every attachment its version lists under a fresh key, with the destination AD `attachment/v1 [installationId, T, D, audience, attachmentId]` and a new `plainHash`, as section 13 step 3 does. It never reuses a source copy;
@@ -1328,7 +1328,7 @@ A **copy** seals a node and its subtree again as new nodes under a destination f
 - A `move` whose destination is in the source space.
 
 **Preview.** Every copy shows:
-- who can read, and who can edit, at the destination region. An owner of the destination space works this out as for a move between regions, from the verified envelopes of its current key version, as "at least these people" (A10). Anyone else can fetch only their own envelopes (section 6.4), so their app names the destination share and shows the members the server lists, marked as the server's list; they are adding pages to a folder they can already write in;
+- who can read, and who can edit, at the destination region. An owner of the destination space works this out as for a move between regions, from the verified envelopes of its current key version, as "at least these people" (A10). Anyone else can fetch only their own envelopes (section 6.4), and isn't shown a share's members, so their app names only the destination folder and its share: they are adding pages to a folder they can already write in;
 - the pages that will arrive unpublished;
 - links that won't work afterwards (**Links**, above).
 
@@ -1344,7 +1344,7 @@ A `move` also shows who loses access from the source regions, links into moved p
    - the destination parent's permission version, and its region and that region's current key version, are those the records were written at;
    - for a `move`, the source node's permission version is the one sent at step 1, the source subtree's listed nodes and their parents are still those the copy mirrors, and every source head an entry named is still the current one. A page's published head is compared only when the copy brings published versions: then a page published now, whose entry named none, is stale too.
 
-   A head that moved on is `stale-head`, naming the new nodes whose sources changed: the app seals those again, sends them, and finishes again. Any other failure ends the copy: the server deletes it, and the app opens a new one from a new preview. In one transaction the server then shows the new nodes and, for a `move`, deletes the source subtree as deleting a node does: its shares and their members, its publications into other spaces, its public links, any hidden or unfinished nodes inside it, and its history go.
+   A head that moved on is `stale-head`, naming the new nodes whose sources changed: the app seals those again, sends them, and finishes again. `rate-limited`, which is also the answer while publications a delete ends are being written, keeps the copy too: the app finishes again shortly. Any other failure ends the copy: the server deletes it, and the app opens a new one from a new preview. In one transaction the server then shows the new nodes and, for a `move`, deletes the source subtree as deleting a node does: its shares and their members, its publications into other spaces, its public links, any hidden or unfinished nodes inside it, and its history go.
 
 A copy not finished a day after its last request is deleted with its nodes and attachments, as an unfinished publication opening is. Its opener can delete it sooner.
 

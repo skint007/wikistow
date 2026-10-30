@@ -26,7 +26,7 @@ In short:
 ### 1. What comes along
 
 For each page in the subtree:
-- **Its current draft**, as the new page's first draft.
+- **Its current draft**, as the new page's first draft. A page with no draft, such as a publication ended without being detached, gets its published version as its draft too.
 - **Its current published version**, when the page is published, as the new page's first published version. A page that was unpublished, or never published, arrives with its draft alone.
 - **Every attachment those two versions list**, resealed under a fresh key with the destination AD (`attachment/v1 [installationId, T, D, audience, attachmentId]`) and a new `plainHash`, as section 13 step 3 does. Unlike a publication, nothing is left out: covers, icons and banners keep their images.
 
@@ -68,7 +68,7 @@ Every new node takes the region of its parent's name record (section 6.1), as an
 ### 6. The preview
 
 Before anything is sealed, the app shows:
-- who can read and who can edit at the destination: for an owner of the destination space, worked out as section 10's preview is, from the verified envelopes of the destination's current key version, as "at least these people". Others can't fetch those envelopes, so they see the destination share's members as the server lists them, marked so. They can already write there;
+- who can read and who can edit at the destination: for an owner of the destination space, worked out as section 10's preview is, from the verified envelopes of the destination's current key version, as "at least these people". Others can't fetch those envelopes, and aren't shown a share's members, so they see only the destination folder and its share. They can already write there;
 - for a move, who loses access, the same way for the source;
 - pages that will arrive unpublished (decision 2);
 - links that won't work afterwards, wikilinks and address links (decision 5);
@@ -87,7 +87,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
    - the destination parent's permission version, region and key version are those the records were written at;
    - for a move, the source node's permission version is the one sent at opening, the source subtree still holds exactly the nodes the copy mirrors, under the same parents, and every source page's heads and folder's metadata head are still the versions sealed.
 
-   It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A source head that moved on is `stale-head`, naming the nodes: the app seals those again, sends them, and finishes again. Any other failure deletes the copy, and the app starts again from a new preview. Without the subtree check, a page someone added to a moved folder meanwhile would be deleted without being copied.
+   It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A source head that moved on is `stale-head`, naming the nodes: the app seals those again, sends them, and finishes again. `rate-limited`, which is also the answer while a publication the delete ends is being written, keeps the copy, and the app finishes again shortly. Any other failure deletes the copy, and the app starts again from a new preview. Without the subtree check, a page someone added to a moved folder meanwhile would be deleted without being copied.
 
 **Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share or a move between regions must cover. Deleting or moving one of their ancestors still takes them along. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
 
