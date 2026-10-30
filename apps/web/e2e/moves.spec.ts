@@ -56,9 +56,9 @@ test('moving a folder between shares changes who can read it', async ({
   });
 
   await test.step('the owner moves Beans from Garden to Kitchen', async () => {
-    await folderMenu(owner, 'Beans', 'Move…');
+    await folderMenu(owner, 'Beans', 'Move to…');
     const dialog = owner.getByRole('dialog', { name: 'Move “Beans”' });
-    await pick(dialog.getByLabel('Move to'), 'Kitchen');
+    await pick(dialog.getByLabel('Folder'), 'Kitchen');
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Move', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 30_000 });

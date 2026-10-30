@@ -44,6 +44,7 @@ export function folderActions({
     onRename: () => void;
     onRestyle: () => void;
     onMove: () => void;
+    onCopy: () => void;
     onShare: (() => void) | undefined;
     onDelete: (() => void) | undefined;
   } | null;
@@ -56,7 +57,8 @@ export function folderActions({
     action('New folder here', editing?.onNewFolder),
     action('Rename…', editing?.onRename),
     action('Emoji and colour…', editing?.onRestyle),
-    action('Move…', editing?.onMove),
+    action('Move to…', editing?.onMove),
+    action('Copy to…', editing?.onCopy),
     action('Share…', editing?.onShare),
     action('Export…', onExport),
     action('Delete folder', editing?.onDelete, true),
@@ -80,11 +82,11 @@ export function shownVersion(
 }
 
 /** What a page's menu does besides Open, given the page's info. */
-export type PageAction = 'move' | 'publish' | 'public-link' | 'unpublish' | 'delete';
+export type PageAction = 'move' | 'copy' | 'publish' | 'public-link' | 'unpublish' | 'delete';
 
 /**
- * A page's actions after Open, by the rules of its own page's menu: Move
- * and Publish for editors, Publish only with publish rights, Share public
+ * A page's actions after Open, by the rules of its own page's menu: Move,
+ * Copy and Publish for editors, Publish only with publish rights, Share public
  * link and Unpublish with those and a publication, Delete for owners who
  * can share.
  */
@@ -97,7 +99,8 @@ function pageActions(
   const when = (allowed: boolean, which: PageAction) =>
     allowed ? () => onAction(which, info) : undefined;
   return [
-    action('Move…', when(canEdit, 'move')),
+    action('Move to…', when(canEdit, 'move')),
+    action('Copy to…', when(canEdit, 'copy')),
     action(
       'Publish to another space…',
       when(canEdit && info.canPublish && shownVersion(info) !== null, 'publish'),

@@ -44,6 +44,121 @@ export function moveMessage(error: unknown, kind: 'folder' | 'page'): string {
   return sharingMessage(error);
 }
 
+/**
+ * The pages a copy's refusal names, by source ID, or null for any other
+ * failure: pages published here from other pages, which their publishers
+ * detach first (ADR 0007, decision 3), or pages with neither a draft nor a
+ * published version, which have nothing to copy. Both are `forbidden`;
+ * the source's tree tells them apart (`PagesRefused`).
+ */
+export function namedPages(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.code !== 'forbidden') return null;
+  const nodeIds = error.detail?.nodeIds;
+  return nodeIds && nodeIds.length > 0 ? nodeIds : null;
+}
+
+/** A copy refused for the pages it names (`namedPages`), and why. */
+export class PagesRefused extends Error {
+  readonly reason: 'published-elsewhere' | 'nothing-to-copy';
+  readonly pageIds: string[];
+  constructor(reason: PagesRefused['reason'], pageIds: string[]) {
+    super(reason);
+    this.name = 'PagesRefused';
+    this.reason = reason;
+    this.pageIds = pageIds;
+  }
+}
+
+/**
+ * A copy whose finish may have made it: its answer was lost, or the server
+ * stayed too busy and keeps it for a later finish. It isn't cancelled.
+ */
+export class FinishUnknown extends Error {
+  constructor() {
+    super('It may have finished');
+    this.name = 'FinishUnknown';
+  }
+}
+
+// A copy or move between spaces that fails is undone in full, the server,
+// or the app, deleting what it made, unless it may have finished
+// (`FinishUnknown`). The words differ only in what came of it: nothing, or
+// before it was tried, as a preview fails, that it can't go there. A failed
+// copy is never sent again unseen, so the way on is Look again.
+const copyRefused = (
+  nothing: string,
+): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
+  'stale-head': `Something in it changed while it was going, so ${nothing}. Look at it again.`,
+  'permission-version': `Who has access changed while you were looking, so ${nothing}. Look at it again.`,
+  'key-version': `The keys where it was going changed meanwhile, so ${nothing}. Look at it again.`,
+  'not-found': `That page or folder, or where it was going, isn’t there any more, so ${nothing}.`,
+  'binding-mismatch': `It can’t go inside itself, so ${nothing}.`,
+  'too-deep': `That would put something more than 256 folders deep, so ${nothing}.`,
+  'page-limit': `That would make more pages than your account may have, so ${nothing}.`,
+  'folder-limit': `That would make more folders than your account may have, so ${nothing}.`,
+  'storage-full': `Your storage is full, so ${nothing}. Free up some space, or ask your administrator for more.`,
+  'missing-blob': `An attachment didn’t arrive, so ${nothing}. Look at it again.`,
+  'rate-limited': `The server is busy, so ${nothing}. Wait a moment, then look at it again.`,
+  'region-mismatch': `The server says that place is somewhere other than where this app found it, so ${nothing}. This could be an attack.`,
+  'missing-key': `This app can’t open something in it, so ${nothing}.`,
+  'unsupported-format': `Something in it was saved by a newer version of WikiStow, so ${nothing}. Update the app to copy it.`,
+});
+const COPY_REFUSED = copyRefused('nothing was copied');
+const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
+const previewRefused = (cant: string) => ({
+  ...copyRefused(cant),
+  'rate-limited': 'The server is busy. Wait a moment, then look at it again.',
+});
+const COPY_PREVIEW_REFUSED = previewRefused('it can’t be copied there');
+const MOVE_PREVIEW_REFUSED = previewRefused('it can’t be moved there');
+
+/**
+ * A short message for a failed copy, or move into another space (`copy`
+ * false): this app's own words, never the server's. A refusal for the
+ * pages it names (`PagesRefused`) is said here; the dialog lists them.
+ * `tried` is false for a preview that failed, before anything was sent.
+ */
+export function copyMessage(error: unknown, copy: boolean, tried = true): string {
+  const nothing = copy ? 'nothing was copied' : 'nothing moved';
+  if (error instanceof FinishUnknown) {
+    return copy
+      ? 'This app couldn’t tell whether the copy finished, so it may already be there. Check where it was going before you copy it again.'
+      : 'This app couldn’t tell whether the move finished, so it may already be there, and gone from here. Check where it was going before you move it again.';
+  }
+  if (error instanceof PagesRefused) {
+    return error.reason === 'published-elsewhere'
+      ? `Some pages in it were published here from other pages, so ${nothing}. Someone who can publish each one detaches it first, with Detach to edit…`
+      : `Some pages in it have neither a draft nor a published version, so ${nothing}. Someone who can publish each one publishes or restores a version of it first.`;
+  }
+  if (error instanceof ApiError && error.code === 'forbidden') {
+    const so = tried ? `, so ${nothing}` : '';
+    return copy
+      ? `You can’t copy it there${so}. You need to be able to edit everything in it, and to make pages where it goes.`
+      : `You can’t move it there${so}. Only an owner of this space moves things into another space, and they need to be able to make pages where it goes.`;
+  }
+  if (error instanceof PageTooLarge) {
+    const after = tried
+      ? copy
+        ? 'Nothing was copied.'
+        : 'Nothing moved.'
+      : copy
+        ? 'It can’t be copied.'
+        : 'It can’t be moved.';
+    return `${error.message} ${after}`;
+  }
+  const refused = tried
+    ? copy
+      ? COPY_REFUSED
+      : MOVE_ACROSS_REFUSED
+    : copy
+      ? COPY_PREVIEW_REFUSED
+      : MOVE_PREVIEW_REFUSED;
+  if (error instanceof ApiError || error instanceof CryptoError) {
+    return refused[error.code] ?? sharingMessage(error);
+  }
+  return sharingMessage(error);
+}
+
 const UNPUBLISH_REFUSED: Partial<Record<ApiError['code'], string>> = {
   'stale-head':
     'Someone published or unpublished this page since you opened it, so nothing changed. Look again.',

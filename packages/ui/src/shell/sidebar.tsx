@@ -220,7 +220,7 @@ type Creating = { kind: 'page' | 'folder'; parentId: FolderId | null } | null;
  * chosen in its row's menu, with the page's info loaded then. Kept while its dialog closes.
  */
 type PageDialog = {
-  action: Exclude<PageAction, 'move'>;
+  action: Exclude<PageAction, 'move' | 'copy'>;
   pageId: PageId;
   title: string;
   info: PageInfo;
@@ -374,9 +374,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   }
 
   // Drag and drop moves, for a mouse: a drop opens the move preview on the
-  // place dropped on, as Move… does once that place is chosen, or moves at
+  // place dropped on, as Move to… does once that place is chosen, or moves at
   // once if the person turned asking before moves off. Keyboard
-  // users have Move… in the menus. A drop on a page is a drop beside it,
+  // users have Move to… in the menus. A drop on a page is a drop beside it,
   // and one below the rows is at the top of the space.
   // A drag whose row went away meanwhile, moved or deleted elsewhere, is
   // over: the row's dragend never reaches the tree.
@@ -389,7 +389,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   };
   const pointAt = (over: Destination<FolderId> | null) =>
     setDragging((current) => (current && current.over !== over ? { ...current, over } : current));
-  // Only a drag from this tree, and only where Move… would offer: not onto
+  // Only a drag from this tree, and only where Move to… would offer: not onto
   // itself, inside itself, or where it is.
   const placeAt = (event: DragEvent, parentId: FolderId | null) =>
     event.dataTransfer.types.includes(DRAG_TYPE) ? (dragging?.to.get(parentId) ?? null) : null;
@@ -518,6 +518,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                     onRename: () => setRenaming(row.id),
                     onRestyle: () => setRestyling(row.id),
                     onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
+                    onCopy: () =>
+                      setMoving({ id: row.id, kind: 'folder', name: row.name, action: 'copy' }),
                     onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
                     onDelete: sharer ? () => setDeleting(row.id) : undefined,
                   }
@@ -593,8 +595,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   sharer={sharer}
                   onOpen={() => openPage(row.id)}
                   onAction={(action, info) =>
-                    action === 'move'
-                      ? setMoving({ id: row.id, kind: 'page', name: row.title })
+                    action === 'move' || action === 'copy'
+                      ? setMoving({ id: row.id, kind: 'page', name: row.title, action })
                       : setPageDialog({
                           action,
                           pageId: row.id,

@@ -292,7 +292,7 @@ function PageBody({
   const pickerFocus = useReturnFocus();
   const [panel, setPanel] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [moving, setMoving] = useState(false);
+  const [moving, setMoving] = useState<'move' | 'copy' | null>(null);
   const [unpublishing, setUnpublishing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [detaching, setDetaching] = useState(false);
@@ -634,7 +634,14 @@ function PageBody({
                       </>
                     )}
                     {canEdit && (
-                      <DropdownMenuItem onSelect={() => setMoving(true)}>Move…</DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setMoving('move')}>
+                        Move to…
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <DropdownMenuItem onSelect={() => setMoving('copy')}>
+                        Copy to…
+                      </DropdownMenuItem>
                     )}
                     {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
                     {canEdit && info.canPublish && (
@@ -942,8 +949,8 @@ function PageBody({
       )}
       <MoveDialog
         spaceId={page.spaceId}
-        moving={moving ? { id: page.pageId, kind: 'page', name: title } : null}
-        onOpenChange={setMoving}
+        moving={moving && { id: page.pageId, kind: 'page', name: title, action: moving }}
+        onOpenChange={(open) => !open && setMoving(null)}
       />
       <PublishDialog
         page={page}
