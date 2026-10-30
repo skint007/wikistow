@@ -51,7 +51,7 @@ Moves are for people, with a session, as sharing is. An agent may copy where bot
 
 ### 3. What is refused
 
-- **A live publication**: a page the server's publication rows name as a destination not yet detached (section 13), or a folder that holds one. Its publishers detach it first. The dialog lists the pages.
+- **A live publication**: a page the server's publication rows name as a destination, with a version, not yet detached (section 13), or a folder that holds one. An unfinished opening doesn't count. Its publishers detach it first. The dialog lists the pages.
 - **A move into the subtree itself**, as today.
 - **A move within one space.** That is the existing move of section 10, and the dialog sends it there.
 
@@ -80,8 +80,8 @@ A move always asks, even on a device where the person turned off confirming move
 
 The protocol calls the whole operation a **copy**, of kind `copy` or `move`, since a move between spaces is a copy that deletes its source. ("Transfer" already means handing a space to another owner.)
 
-1. **Open.** `POST /api/copies` names the kind, the source node and its space, the destination parent and space, the permission versions of both the preview was made at, and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, and that the new nodes mirror the source, and makes them, hidden.
-2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Each entry holds every record of one node, and names the source version each was sealed from. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check (`basedOn: null`, decision 1).
+1. **Open.** `POST /api/copies` names the kind, the source node and its space, the destination parent and space, the permission versions of both the preview was made at, and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, that both permission versions are current, and that the new nodes mirror the source, and makes them, hidden.
+2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Only the opener sends them. Each entry holds every record of one node, and names the source heads it was sealed from; a page whose published version stays behind (decision 2) names no published head, so the finish doesn't compare it. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check (`basedOn: null`, decision 1).
 3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
    - every new node has its records;
    - the destination parent's permission version, region and key version are those the records were written at;
@@ -89,7 +89,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 
    It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A source head that moved on is `stale-head`, naming the nodes: the app seals those again, sends them, and finishes again. Any other failure deletes the copy, and the app starts again from a new preview. Without the subtree check, a page someone added to a moved folder meanwhile would be deleted without being copied.
 
-**Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share or a move between regions must cover. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
+**Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share or a move between regions must cover. Deleting or moving one of their ancestors still takes them along. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
 
 A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
 
