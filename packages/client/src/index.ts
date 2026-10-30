@@ -58,6 +58,7 @@ export * as sharingOperations from './operations/sharing.ts';
 export * as groupOperations from './operations/groups.ts';
 export * as moveOperations from './operations/moves.ts';
 export * as publicationOperations from './operations/publications.ts';
+export * as copyOperations from './operations/copies.ts';
 export * as publicLinkOperations from './operations/public-links.ts';
 export * as ownerOperations from './operations/owners.ts';
 export * as searchOperations from './operations/search.ts';

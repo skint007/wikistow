@@ -601,7 +601,7 @@ export async function pageLabels(
  * that doesn't open, or binds another page, is left out, as is every one
  * when they can't be fetched: a link then gets no entry, or keeps its text.
  */
-const publicationsFor =
+export const publicationsFor =
   (ctx: ClientContext, spaceId: SpaceId): LinkWrite['published'] =>
   async (pages) => {
     const open = async (asked: typeof pages, fresh: boolean) => {
