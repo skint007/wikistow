@@ -41,7 +41,23 @@ export function nodeIo(): Io {
     askSecret: (prompt) => askSecret(prompt),
     sleep: (ms) => delay(ms),
     now: () => new Date(),
+    stopOnSignal,
   };
+}
+
+function stopOnSignal() {
+  const controller = new AbortController();
+  const release = () => {
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+  };
+  const stop = () => {
+    release();
+    controller.abort();
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  return { signal: controller.signal, release };
 }
 
 /**

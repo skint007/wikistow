@@ -52,6 +52,15 @@ on their version.
 Give each change a new \`--idempotency-key\`, and reuse a key only to retry
 its own change.
 
+## Copy, never move
+
+\`page copy\` and \`folder copy\` copy a page or folder, with what is in it,
+into another folder or space, and leave the original as it is. Copy only
+what the person asked you to: where this agent may publish, pages
+published now arrive published. This agent can't move anything into
+another space. When the person asks for that, tell them: they can use
+Move to... in WikiStow, or you copy it and they delete the original.
+
 ## Hand these to the person
 
 - Exit 8: stop using the wiki and tell the person. It may be an attack.

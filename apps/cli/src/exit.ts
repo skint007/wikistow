@@ -48,6 +48,9 @@ export type CliErrorCode =
   | 'state-unreadable'
   | 'not-in-record'
   | 'published-elsewhere'
+  | 'forbidden'
+  | 'unfinished'
+  | 'busy'
   | 'failed';
 
 const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
@@ -67,6 +70,12 @@ const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
   'state-unreadable': EXIT.trust,
   'not-in-record': EXIT.revoked,
   'published-elsewhere': EXIT.failed,
+  // The server's refusal, in the CLI's words for the command (`page copy`).
+  forbidden: EXIT.failed,
+  // A keyed copy whose first run left its copy open: the key can't make it.
+  unfinished: EXIT.failed,
+  // The server stayed too busy to finish a copy, which was cancelled.
+  busy: EXIT.failed,
   failed: EXIT.failed,
 };
 
@@ -220,7 +229,15 @@ export function classify(error: unknown): Failure {
   }
   if (error instanceof CliError) {
     const { code, message, detail } = error;
-    return { exit: CLI_EXIT[code], code, message, ...(detail ? { detail } : {}) };
+    // A refusal put in the CLI's words keeps the server's as its reason.
+    const reason = error.cause instanceof ApiError ? error.cause.message : undefined;
+    return {
+      exit: CLI_EXIT[code],
+      code,
+      message,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(detail ? { detail } : {}),
+    };
   }
   if (error instanceof ApiError) {
     const exit =

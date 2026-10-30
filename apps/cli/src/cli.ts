@@ -20,6 +20,7 @@ import {
   type AttachmentPick,
   type ContentArgs,
 } from './commands/content.ts';
+import { copyNode } from './commands/copy.ts';
 import { exportMarkdown } from './commands/export.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
@@ -64,6 +65,10 @@ const COMMANDS = {
   'folder create': {
     options: { space: { type: 'string' }, parent: { type: 'string' }, name: { type: 'string' } },
     positionals: 0,
+  },
+  'folder copy': {
+    options: { space: { type: 'string' }, folder: { type: 'string' } },
+    positionals: 1,
   },
   'page read': {
     options: { draft: { type: 'boolean' }, revision: { type: 'string' } },
@@ -111,6 +116,10 @@ const COMMANDS = {
       'media-type': { type: 'string' },
       base: { type: 'string' },
     },
+    positionals: 1,
+  },
+  'page copy': {
+    options: { space: { type: 'string' }, folder: { type: 'string' } },
     positionals: 1,
   },
   'page history': { options: {}, positionals: 1 },
@@ -280,9 +289,20 @@ function parse(argv: readonly string[]) {
     );
   }
   const key = optional(values, 'idempotency-key');
-  const changes = ['folder create', 'page create', 'page draft', 'page publish', 'page attach'];
+  const changes = [
+    'folder create',
+    'folder copy',
+    'page create',
+    'page draft',
+    'page publish',
+    'page attach',
+    'page copy',
+  ];
   if (key !== null && !changes.includes(name)) {
-    throw new CliError('usage', '--idempotency-key is only for create, draft, publish and attach');
+    throw new CliError(
+      'usage',
+      '--idempotency-key is only for create, draft, publish, attach and copy',
+    );
   }
   const unlock = unlockOf(values);
   if (unlock.passphraseFd === 0) {
@@ -449,6 +469,27 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
           parentId: parent === null ? null : id(FolderId, parent, 'folder'),
           name,
         },
+        deps,
+      );
+    }
+    case 'folder copy':
+    case 'page copy': {
+      const space = optional(values, 'space');
+      const folder = optional(values, 'folder');
+      if (space === null && folder === null) {
+        throw new CliError('usage', `${name} takes --space, --folder or both`);
+      }
+      const where = {
+        ...content,
+        spaceId: space === null ? null : id(SpaceId, space, 'space'),
+        folderId: folder === null ? null : id(FolderId, folder, 'folder'),
+      };
+      return copyNode(
+        io,
+        out,
+        name === 'page copy'
+          ? { ...where, kind: 'page', nodeId: id(PageId, first, 'page') }
+          : { ...where, kind: 'folder', nodeId: id(FolderId, first, 'folder') },
         deps,
       );
     }

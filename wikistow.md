@@ -333,6 +333,8 @@ wikistow page publish PAGE_ID --revision REVISION_ID --base-published PUBLISHED_
 wikistow page unpublish PAGE_ID --base-published PUBLISHED_ID --json
 wikistow page publish-to PAGE_ID --space SPACE_ID --revision REVISION_ID --preview --json
 wikistow page publish-to PAGE_ID --space SPACE_ID --revision REVISION_ID --base-copy none --attachments all --permission-version N --json
+wikistow page copy PAGE_ID --space SPACE_ID --folder FOLDER_ID --idempotency-key KEY --json
+wikistow folder copy FOLDER_ID --space SPACE_ID --idempotency-key KEY --json
 ```
 
 Reads return stable page and revision IDs. Commands support machine-readable output, distinguish an unpublished page from missing permission without exposing private existence, and report stale revision, locked vault, revoked credentials, and missing keys separately where the caller is authorized to know them. Mutations support idempotency keys, or name the state they change, so a retry finds the change done or refuses it as stale (unpublish, publishing into another space). Agent output is plaintext by intent; the user controls what their model receives.

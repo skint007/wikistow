@@ -27,6 +27,11 @@ export interface Io {
   /** Wait between polls. */
   sleep(ms: number): Promise<void>;
   now(): Date;
+  /**
+   * A signal aborted by the first SIGINT or SIGTERM until `release`, for a
+   * change that cleans up when it stops; a second one stops the CLI as usual.
+   */
+  stopOnSignal(): { signal: AbortSignal; release(): void };
 }
 
 /**
