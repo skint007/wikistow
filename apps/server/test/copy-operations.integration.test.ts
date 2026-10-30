@@ -527,6 +527,26 @@ describe('a busy server, or a lost answer', () => {
     expect((await current(w.dave.ctx, ref(w.board, made.nodeId))).payload.title).toBe('Plan');
   });
 
+  it('keeps a copy whose finish stays busy, for a later finish', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    // Busy for longer than the copy waits.
+    const busy: Answer = async () => {
+      throw new ApiError(429, 'rate-limited', 'Busy', {}, { retryAfterSeconds: 600 });
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, busy]]));
+    expect(await rejection(copies.makeCopy(ctx, preview))).toBe('rate-limited');
+    expect(sent).not.toContain(copyRoutes.cancel);
+    // The server still has it, and a later finish makes it.
+    await w.alice.ctx.api.call(copyRoutes.finish, { params: { copyId: preview.copyId } });
+    const plan = ref(w.board, preview.nodes[0]?.nodeId ?? '');
+    expect((await current(w.dave.ctx, plan)).payload.title).toBe('Plan');
+  }, 30_000);
+
   it('finishes again when the finish’s answer is lost, and cancels nothing', async () => {
     const w = await world();
     const preview = await copies.previewCopy(w.alice.ctx, {

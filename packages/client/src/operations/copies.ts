@@ -597,7 +597,9 @@ const FINISH_TRIES = 5;
  * for every request (`patient`). A finish whose answer was lost is sent
  * again, which the server answers as it answered the first; if no answer
  * comes, it is thrown without cancelling, since the copy may have been
- * made. Anything else ends the copy, which the server or this deletes, and
+ * made. A finish still busy after all that is thrown without cancelling too:
+ * the server keeps the copy, and sweeps it if nobody finishes it. Anything
+ * else ends the copy, which the server or this deletes, and
  * is thrown: preview again. That includes a batch of records refused for
  * `permission-version`; one refused for a newer key version is sealed again
  * and sent again. A broken character from a Milestone 1 client is written
@@ -648,8 +650,9 @@ export async function makeCopy(
     },
     { idempotencyKey: preview.copyId },
   );
-  // Whether the last finish sent may have made the copy, its answer lost.
-  let maybeMade = false;
+  // Whether to leave the copy: the last finish sent may have made it, its
+  // answer lost, or the server was still too busy to finish it.
+  let keep = false;
   try {
     let sent = 0;
     await sendNodes(sending, preview, preview.nodes, {
@@ -666,13 +669,14 @@ export async function makeCopy(
         await ctx.api.call(copyRoutes.finish, { params });
         break;
       } catch (error) {
-        maybeMade = outcomeUnknown(error);
+        keep =
+          outcomeUnknown(error) || (error instanceof ApiError && error.code === 'rate-limited');
         if (!(error instanceof ApiError) || tries >= FINISH_TRIES) throw error;
         const stale = error.code === 'stale-head' ? error.detail?.nodeIds : undefined;
         if (stale && stale.length > 0) {
           const again = preview.nodes.filter((node) => stale.includes(node.nodeId));
           await sendNodes(ctx, preview, again);
-        } else if (maybeMade) {
+        } else if (keep) {
           await pause(1000 * tries);
         } else {
           throw error;
@@ -681,8 +685,9 @@ export async function makeCopy(
     }
   } catch (error) {
     // A finish the server refused has deleted it already. One that may have
-    // made it is left: a cancel would answer as its finish did anyway.
-    if (!maybeMade) await cancelCopy(ctx, preview.copyId).catch(() => undefined);
+    // made it is left, as a cancel would answer as its finish did anyway, and
+    // so is one still busy, which the server keeps for a later finish.
+    if (!keep) await cancelCopy(ctx, preview.copyId).catch(() => undefined);
     throw error;
   }
   const top = preview.nodes[0];
