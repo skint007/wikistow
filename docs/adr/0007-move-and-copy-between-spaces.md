@@ -61,27 +61,27 @@ Every new node takes the region of its parent's name record (section 6.1), as an
 
 ### 5. Links
 
-- **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page of the same copy to that page's new ID. In a published version, the page counts as published only when its own published version comes along.
-- **To any other page**, an entry is worked out again by the usual rule for the destination (section 5.5). An entry for a page in the source space never survives: those links resolve by title in the destination, or show as unresolved. Property references (ADR 0006) follow their links.
+- **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page of the same copy to that page's new ID, and each Markdown link to such a page's address (`/s/<space>/p/<page>`) to its new address. In a published version, the page counts as published only when its own published version comes along.
+- **To any other page**, an entry is worked out again by the usual rule for the destination (section 5.5). In a copy into another space, an entry for a page of the source space never survives: those links resolve by title in the destination, or show as unresolved. Within one space, the usual rule decides. Property references (ADR 0006) follow their links.
 - **Into a moved page**, links from pages left in the source space stop working. The preview lists the linking pages the person can open.
 
 ### 6. The preview
 
 Before anything is sealed, the app shows:
-- who can read and who can edit at the destination, worked out as section 10's preview is, from the verified envelopes of the destination's current key version, as "at least these people";
+- who can read and who can edit at the destination: for an owner of the destination space, worked out as section 10's preview is, from the verified envelopes of the destination's current key version, as "at least these people". Others can't fetch those envelopes, so they see the destination share's members as the server lists them, marked so. They can already write there;
 - for a move, who loses access, the same way for the source;
 - pages that will arrive unpublished (decision 2);
-- links that won't work afterwards (decision 5);
+- links that won't work afterwards, wikilinks and address links (decision 5);
 - for a move, what ends: public links, publications into other spaces, shares and their members, and the pages' earlier history.
 
-A move always asks, even on a device where the person turned off confirming moves, because it deletes. A copy's preview shows the destination audience and the links.
+A move always asks, even on a device where the person turned off confirming moves, because it deletes. A copy shows all but the items for a move. An agent's copy has no preview.
 
 ### 7. Three steps, like a publication
 
 The protocol calls the whole operation a **copy**, of kind `copy` or `move`, since a move between spaces is a copy that deletes its source. ("Transfer" already means handing a space to another owner.)
 
-1. **Open.** `POST /api/copies` names the kind, the source node and its space, the destination parent and space, the permission versions of both the preview was made at, and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, that both permission versions are current, and that the new nodes mirror the source, and makes them, hidden.
-2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Only the opener sends them. Each entry holds every record of one node, and names the source heads it was sealed from; a page whose published version stays behind (decision 2) names no published head, so the finish doesn't compare it. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check (`basedOn: null`, decision 1).
+1. **Open.** `POST /api/copies` names the kind, whether it brings published versions (which needs publish rights at the destination), the source node and its space, the destination parent and space, the permission versions of both the preview was made at, and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, that both permission versions are current, and that the new nodes mirror the source, and makes them, hidden.
+2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Only the opener sends them. Each entry holds every record of one node, and names the source heads it was sealed from; a copy that doesn't bring published versions names no published heads, and the finish doesn't compare them. Records are stored as the hidden nodes' versions at once, so their attachments are committed and the attachment sweep leaves them alone. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check (`basedOn: null`, decision 1).
 3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
    - every new node has its records;
    - the destination parent's permission version, region and key version are those the records were written at;
@@ -98,7 +98,7 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 ### 8. Where it shows
 
 - **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. Dragging between spaces in the rail stays out.
-- **CLI:** `wikistow page copy` and `wikistow folder copy`, for people and agents (decision 2). Moves stay in the app.
+- **CLI:** `wikistow page copy` and `wikistow folder copy`. The CLI acts as its agent (decision 2), so it copies within its picks and never moves; moves stay in the app.
 - **The live tree** reports the finish in both spaces.
 - **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only.
 
