@@ -49,6 +49,7 @@ export type CliErrorCode =
   | 'not-in-record'
   | 'published-elsewhere'
   | 'forbidden'
+  | 'unfinished'
   | 'failed';
 
 const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
@@ -70,6 +71,8 @@ const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
   'published-elsewhere': EXIT.failed,
   // The server's refusal, in the CLI's words for the command (`page copy`).
   forbidden: EXIT.failed,
+  // A keyed copy whose first run left its copy open: the key can't make it.
+  unfinished: EXIT.failed,
   failed: EXIT.failed,
 };
 

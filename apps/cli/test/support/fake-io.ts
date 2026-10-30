@@ -31,6 +31,7 @@ export function fakeIo({
     },
     sleep: async () => {},
     now: () => new Date(),
+    stopOnSignal: () => ({ signal: new AbortController().signal, release: () => {} }),
   };
   return { io, written, asked };
 }

@@ -20,6 +20,7 @@ import {
   fakeSecretTool,
   listen,
   PASSPHRASE,
+  start,
   type Listening,
 } from './support/cli.ts';
 
@@ -741,6 +742,7 @@ describe('copying', () => {
     const copied = page.json();
     expect(copied).toEqual({
       kind: 'page',
+      earlier: false,
       source: { spaceId: w.lib.spaceId, nodeId: plan },
       spaceId: w.board,
       nodeId: expect.any(String),
@@ -774,6 +776,7 @@ describe('copying', () => {
     const trip = folder.json();
     expect(trip).toEqual({
       kind: 'folder',
+      earlier: false,
       source: { spaceId: w.lib.spaceId, nodeId: w.trip },
       spaceId: w.board,
       nodeId: expect.any(String),
@@ -844,13 +847,17 @@ describe('copying', () => {
     let finishes = 0;
     // How many finishes from now land, but whose answers never come back.
     let lose = 0;
+    // Whether finishes never reach the server.
+    let drop = false;
     server.hooks.intercept = async (request, forward) => {
       const { pathname } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/copies') {
         opened.push(JSON.parse(await request.clone().text()).nodes[0].nodeId);
       }
+      const finish = request.method === 'POST' && pathname.endsWith('/finish');
+      if (finish && drop) return new Response('gone', { status: 502 });
       const res = await forward();
-      if (request.method === 'POST' && pathname.endsWith('/finish')) {
+      if (finish) {
         finishes += 1;
         if (lose > 0) {
           lose -= 1;
@@ -882,22 +889,100 @@ describe('copying', () => {
       expect(opened).toHaveLength(2);
       expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan']);
 
+      // No finish ever reaches the server: the copy stays open, hidden, and
+      // its nodes' IDs taken, so the same key can't copy until it is gone.
+      const unfinished = ['--idempotency-key', 'copy-retry-3'];
+      drop = true;
+      const dropped = await w.run([...to, ...unfinished]);
+      drop = false;
+      expect(dropped.code, dropped.stdout).toBe(1);
+      expect(dropped.json().error).toMatchObject({ outcomeUnknown: true });
+      const refused = await w.run([...to, ...unfinished]);
+      expect(refused.code, refused.stdout).toBe(1);
+      expect(refused.json().error).toMatchObject({ code: 'unfinished' });
+      expect(refused.json().error.message).toContain('new --idempotency-key');
+      expect(opened).toHaveLength(4);
+      expect(opened[3]).toBe(opened[2]);
+      // A new key copies.
+      const fresh = await w.run([...to, '--idempotency-key', 'copy-retry-4']);
+      expect(fresh.code, fresh.stdout).toBe(0);
+      expect(fresh.json().nodeId).toBe(opened[4]);
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan', 'Plan']);
+
       // Every node of a keyed copy is made from the key, so a retry reports the copy's own IDs.
       const trip = ['folder', 'copy', w.trip, '--folder', w.drafts];
       const first = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(first.code, first.stdout).toBe(0);
+      // Only where the earlier copy is: what is in the source now needn't be what it copied.
+      const earlier = {
+        kind: 'folder',
+        earlier: true,
+        spaceId: w.board,
+        nodeId: first.json().nodeId,
+        parentId: w.drafts,
+      };
       const retried = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
-      expect(retried.json()).toEqual(first.json());
-      expect(opened).toHaveLength(3);
+      expect(retried.code, retried.stdout).toBe(0);
+      expect(retried.json()).toEqual(earlier);
+      expect(opened).toHaveLength(6);
       const [packing] = first.json().unpublished as { pageId: string }[];
       expect(await titlesIn(w.alice, w.board, String(first.json().nodeId))).toEqual(
         expect.arrayContaining(['Packing', 'Route']),
       );
       const { heads } = await pages.loadPage(w.alice.ctx, packing?.pageId as PageId);
       expect(heads.publishedHead).toBeNull();
+
+      // It is found even once the original is gone.
+      await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.trip });
+      const gone = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
+      expect(gone.code, gone.stdout).toBe(0);
+      expect(gone.json()).toEqual(earlier);
+      expect(opened).toHaveLength(6);
     } finally {
       server.hooks.intercept = null;
     }
+  }, 120_000);
+
+  it('cancels the copy on Ctrl-C before the finish', async () => {
+    const w = await copyWorld();
+    const nodes = async () =>
+      (await t.db.select({ id: schema.nodes.id }).from(schema.nodes)).map((n) => n.id).sort();
+    const before = await nodes();
+    let arrived = () => {};
+    const sending = new Promise<void>((resolve) => (arrived = resolve));
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    server.hooks.intercept = async (request, forward) => {
+      if (
+        request.method === 'POST' &&
+        /^\/api\/copies\/[^/]+\/records$/.test(new URL(request.url).pathname)
+      ) {
+        arrived();
+        await held;
+      }
+      return forward();
+    };
+    const key = ['--idempotency-key', 'copy-stopped'];
+    const to = ['folder', 'copy', w.trip, '--folder', w.drafts, ...key, '--json'];
+    try {
+      const run = start(w.home, to, { passphrase: PASSPHRASE });
+      run.child.stdin?.end();
+      await sending;
+      run.child.kill('SIGINT');
+      // The batch being sent is answered; the next step stops.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      release();
+      const stopped = await run.done;
+      expect(stopped.code, stopped.stdout).toBe(1);
+      expect(stopped.json().error).toMatchObject({ code: 'cancelled' });
+      expect(await nodes()).toEqual(before);
+    } finally {
+      server.hooks.intercept = null;
+    }
+    // Cancelled, so the same key copies.
+    const again = await w.run(to.slice(0, -1));
+    expect(again.code, again.stdout).toBe(0);
+    expect(again.json()).toMatchObject({ earlier: false, pages: 2, folders: 1 });
   }, 120_000);
 });
 

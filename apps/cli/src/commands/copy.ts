@@ -32,11 +32,13 @@ export type CopyArgs = ContentArgs &
 /**
  * Each new node's ID, by the node it copies, derived from
  * `--idempotency-key` and what the command was asked, under the local
- * state's key: so a retry makes the same nodes, finds the top one once the
- * first run's copy has finished, and reports that copy's IDs. Nobody
- * without the key file can tell which keys were used. The copy's own ID
- * stays new each run: a run that failed cancelled its copy, so a retry
- * opens another.
+ * state's key: so a retry makes the same nodes, and finds the top one once
+ * the first run's copy has finished. Nobody without the key file can tell
+ * which keys were used. The copy's own ID stays new each run: a run that
+ * failed cancelled its copy, so a retry opens another, where one made from
+ * the key would get the first open's answer again, which the server keeps
+ * for a day. A copy left open, whose cancel never reached the server, holds
+ * these IDs until the server deletes it, within a day (`unfinished`).
  */
 function keyedIds(agent: OpenedAgent, key: string, input: string) {
   const { stateKey } = agent.secrets;
@@ -56,7 +58,7 @@ function refusal(error: unknown): unknown {
   if (nodeIds && nodeIds.length > 0) {
     return new CliError(
       'forbidden',
-      'Some pages in it are published there from other pages, which are detached first, ' +
+      'Some pages in it are publications from other pages, to be detached first, ' +
         'or have no version to copy: detail.nodeIds names them',
       { cause: error, detail: { nodeIds } },
     );
@@ -69,10 +71,11 @@ function refusal(error: unknown): unknown {
   );
 }
 
-/** Whether `spaceId`'s tree, as this agent sees it, lists `nodeId`: a copy's top shows once it finished. */
+/** `nodeId` in `spaceId`'s tree, as this agent sees it, if listed: a copy's top shows once it finished. */
 async function listed(ctx: ClientContext, spaceId: SpaceId, nodeId: string) {
   const { folders, pages: listedPages } = await spaceOperations.loadTree(ctx, spaceId);
-  return [...folders, ...listedPages].some((node) => node.id === nodeId);
+  const node = [...folders, ...listedPages].find((n) => n.id === nodeId);
+  return node && { spaceId, nodeId, parentId: node.parentId };
 }
 
 /**
@@ -81,8 +84,10 @@ async function listed(ctx: ClientContext, spaceId: SpaceId, nodeId: string) {
  * `--space`. Pages arrive published where they are published now only if
  * the agent may publish there; else with their drafts alone. With
  * `--idempotency-key`, a first run's copy is looked for in the
- * destination's tree (`keyedIds`). A finish whose answer was lost is sent
- * again by `makeCopy`; one never answered may have made the copy.
+ * destination's tree (`keyedIds`), and if there, is reported by what the
+ * tree says of it. A finish whose answer was lost is sent again by
+ * `makeCopy`; one never answered may have made the copy. SIGINT or SIGTERM
+ * before the finish stops at the next batch and cancels the copy.
  */
 export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps) {
   const command = `${args.kind} copy`;
@@ -94,10 +99,6 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
     deps,
     async (agent) => {
       const { ctx } = agent;
-      const from =
-        args.kind === 'page'
-          ? (await pages.loadPage(ctx, args.nodeId)).spaceId
-          : await spaceOfFolder(ctx, args.nodeId);
       let { spaceId, folderId: parentId } = args;
       if (spaceId === null) {
         if (parentId === null) throw new CliError('usage', 'Give --space, --folder or both');
@@ -106,13 +107,21 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         parentId = await shareStart(ctx, spaceId, '--folder');
       }
       const key = args.idempotencyKey;
+      const ids = key === null ? undefined : keyedIds(agent, key, input);
+      // Looked for before the source, so it is found even once that is gone.
+      const earlier = ids && (await listed(ctx, spaceId, ids(args.nodeId)));
+      if (earlier) return { earlier };
+      const from =
+        args.kind === 'page'
+          ? (await pages.loadPage(ctx, args.nodeId)).spaceId
+          : await spaceOfFolder(ctx, args.nodeId);
       let preview: copies.CopyPreview;
       try {
         preview = await copies.previewCopy(ctx, {
           kind: 'copy',
           source: { spaceId: from, nodeId: args.nodeId },
           destination: { spaceId, parentId },
-          ...(key !== null && { ids: keyedIds(agent, key, input) }),
+          ...(ids && { ids }),
         });
       } catch (error) {
         if (error instanceof ApiError && error.code === 'binding-mismatch') {
@@ -120,11 +129,11 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         }
         throw refusal(error);
       }
-      const top = preview.nodes[0]?.nodeId ?? args.nodeId;
-      if (key !== null && (await listed(ctx, spaceId, top))) return { preview, earlier: true };
       let finishing = false;
+      const stop = io.stopOnSignal();
       try {
         await copies.makeCopy(ctx, preview, {
+          signal: stop.signal,
           onProgress: ({ stage }) => {
             finishing ||= stage === 'finishing';
           },
@@ -135,13 +144,41 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         if (finishing && outcomeUnknown(error)) {
           throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
         }
+        if (error instanceof copies.CopyStopped) {
+          throw new CliError('cancelled', 'Stopped before the copy finished; nothing was made');
+        }
+        // Not listed, so an earlier run's copy of these IDs is still open.
+        if (ids && error instanceof ApiError && error.code === 'duplicate') {
+          throw new CliError(
+            'unfinished',
+            'An earlier run with this --idempotency-key left its copy unfinished. It isn’t ' +
+              'in the tree, and the server deletes it within a day: copy with a new ' +
+              '--idempotency-key',
+            { cause: error },
+          );
+        }
         throw refusal(error);
+      } finally {
+        stop.release();
       }
-      return { preview, earlier: false };
+      return { preview };
     },
     input,
   );
-  const { preview, earlier } = done;
+  const where = ({ spaceId, parentId }: { spaceId: string; parentId: string | null }) =>
+    parentId ? `folder ${parentId} of space ${spaceId}` : `the top of space ${spaceId}`;
+  if ('earlier' in done) {
+    // What a fresh preview says of the source now needn't be what was copied then.
+    const result = { kind: args.kind, earlier: true, ...done.earlier };
+    out.result(result, () =>
+      out.line(
+        `Found ${result.kind} ${result.nodeId} in ${where(result)}, ` +
+          'copied by an earlier run with this --idempotency-key',
+      ),
+    );
+    return;
+  }
+  const { preview } = done;
   const { source, destination, nodes } = preview;
   const newIds = new Map(nodes.map((node) => [node.sourceId, node.nodeId]));
   const top = nodes[0];
@@ -152,6 +189,7 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
   }));
   const result = {
     kind: source.kind,
+    earlier: false,
     source: { spaceId: source.spaceId, nodeId: source.nodeId },
     spaceId: destination.spaceId,
     nodeId: top?.nodeId ?? null,
@@ -162,15 +200,11 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
     links: preview.links,
   };
   out.result(result, () => {
-    const where = destination.parentId
-      ? `folder ${destination.parentId} of space ${destination.spaceId}`
-      : `the top of space ${destination.spaceId}`;
     const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
     out.line(
-      `Copied ${result.kind} ${source.nodeId} to ${where}, as ${result.kind} ${result.nodeId}: ` +
+      `Copied ${result.kind} ${source.nodeId} to ${where(destination)}, as ${result.kind} ${result.nodeId}: ` +
         `${count(result.pages, 'page')} and ${count(result.folders, 'folder')}`,
     );
-    if (earlier) out.line('  copied by an earlier run with this --idempotency-key');
     if (unpublished.length > 0) {
       out.line('  published here, but unpublished there, where this agent can’t publish:');
     }

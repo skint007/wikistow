@@ -54,26 +54,27 @@ PowerShell 5.1, so accents become ?, and its > writes UTF-16). cmd's < and
   : '';
 
 const RETRYING = `Retrying a change:
-  Give create, draft, attach, publish and copy --idempotency-key KEY, a new
-  KEY for each new change. Running the same command again with the same KEY and the
-  same input never makes the change twice: if the first run's answer came
-  back, it is reported again and nothing is sent; if not, the first run's
-  exact request is sent again. So retrying with the same KEY is safe after
-  any failure, and is the thing to do when --json says "outcomeUnknown":
-  true: no answer came back, or the server failed, so the change may have
-  happened. After any other failure nothing changed, and the key is free
-  again. The same KEY with other input (another file, title or revision) is
-  refused while the first run's change may still land, or has landed.
+  Give create, draft, attach, publish and copy --idempotency-key KEY, a
+  new KEY for each new change. Running the same command again with the
+  same KEY and the same input never makes the change twice: if the first
+  run's answer came back, it is reported again and nothing is sent; if
+  not, the first run's exact request is sent again. So retrying with the
+  same KEY is safe after any failure, and is the thing to do when --json
+  says "outcomeUnknown": true: no answer came back, or the server failed,
+  so the change may have happened. After any other failure nothing
+  changed, and the key is free again. The same KEY with other input
+  (another file, title or revision) is refused while the first run's
+  change may still land, or has landed.
   The server keeps KEY for a day. A change first sent over a day ago and
   refused now may have been made by the first run, and be what is in the
-  way. That is reported with "outcomeUnknown": true and exit 1, and the key
-  stays taken: check (tree, page read --draft) before trying again with a
-  new KEY.
+  way. That is reported with "outcomeUnknown": true and exit 1, and the
+  key stays taken: check (tree, page read --draft) before trying again
+  with a new KEY.
   Without a KEY, check (tree, page read) before running a change again.
   page unpublish and page publish-to take no KEY: each names what it
   changes, so run it again as it was (see their --help). page copy and
   folder copy keep no journal: a KEY names the copy they make, which a
-  retry finds (see their --help).
+  retry finds once it finished (see their --help).
   The CLI keeps each keyed change, encrypted, in ${DIR}${SEP}journal${SEP},
   until a day after its answer came back, as long as the server keeps KEY.
 `;
@@ -218,8 +219,8 @@ title there, or none: "links" lists them.
 
 Prints the new ${noun}'s ID, and how many pages and folders were copied.
 With --json:
-  {"kind":"${noun}","source":{"spaceId":"...","nodeId":"..."},"spaceId":"...",
-   "nodeId":"...","parentId":"...","pages":N,"folders":N,
+  {"kind":"${noun}","earlier":false,"source":{"spaceId":"...","nodeId":"..."},
+   "spaceId":"...","nodeId":"...","parentId":"...","pages":N,"folders":N,
    "unpublished":[{"pageId":"...","sourceId":"...","title":"..."}],
    "links":[{"kind":"wikilink","page":"...","text":"...","count":N}]}
 nodeId is the copy, and parentId the folder it went in (null for the top
@@ -232,15 +233,22 @@ Nothing is made unless the copy finishes. If what it copies, or who has
 access where it goes, changes while it is sent, it is refused (exit 3):
 run it again. Refused as "forbidden" (exit 1), the agent or its person
 may not edit what it copies, or make pages where it goes; or, when
-detail.nodeIds names pages, those are published there from other pages,
-which are detached first, or have no version to copy. If the finish's
-answer is lost, the CLI sends the finish again, which is answered as the
-first was; if no answer comes at all, the copy may have been made.
+detail.nodeIds names pages, some pages in it are publications from other
+pages, to be detached first, or have no version to copy. Ctrl-C or
+SIGTERM before the finish cancels the copy (exit 1, code "cancelled"). If
+the finish's answer is lost, the CLI sends the finish again, which is
+answered as the first was; if no answer comes at all, the copy may have
+been made.
 
 Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
 Every page and folder it makes gets an ID made from KEY, so running the
 same command again with the same KEY finds the first run's copy if it
-finished, and reports it ("copied by an earlier run"), or else copies.
+finished, and reports only where it is, even if the original is gone:
+  {"kind":"${noun}","earlier":true,"spaceId":"...","nodeId":"...",
+   "parentId":"..."}
+If it didn't finish, and the server hasn't deleted it yet (it does within
+a day), it is refused with code "unfinished" (exit 1): the copy isn't in
+the tree, so copy with a new KEY. Otherwise it copies again.
 The same KEY with another ${noun}, --space or --folder makes another copy.
 Without a KEY, look in tree before running a copy again whose outcome is
 unknown.

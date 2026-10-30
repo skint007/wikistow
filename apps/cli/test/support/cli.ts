@@ -101,7 +101,7 @@ type RunOptions = {
 };
 
 /** Start the built CLI as `home`'s user. */
-function start(home: CliHome, args: readonly string[], options: RunOptions = {}) {
+export function start(home: CliHome, args: readonly string[], options: RunOptions = {}) {
   const withFd = options.passphrase === undefined ? args : [...args, '--passphrase-fd', '3'];
   const child = spawn(process.execPath, [BIN, ...withFd], {
     env: {
