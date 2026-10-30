@@ -144,7 +144,13 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         if (error instanceof copies.CopyKept) {
           await copies.cancelCopy(ctx, preview.copyId).catch(() => undefined);
           const top = preview.nodes[0];
-          const made = top && (await listed(ctx, spaceId, top.nodeId).catch(() => undefined));
+          let made;
+          try {
+            made = top && (await listed(ctx, spaceId, top.nodeId));
+          } catch {
+            // Unread, the tree can't say an earlier finish didn't make it.
+            throw new ChangeMayHaveHappened(error.cause, key === null ? 'unkeyed' : 'resend');
+          }
           if (made) return { preview };
           throw new CliError(
             'busy',
@@ -156,13 +162,14 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         if (error instanceof copies.CopyStopped) {
           throw new CliError('cancelled', 'Stopped before the copy finished; nothing was made');
         }
-        // Not listed, so an earlier run's copy of these IDs is still open.
+        // Not listed, so an earlier run's copy of these IDs is still open,
+        // or finished where this agent no longer sees it.
         if (ids && error instanceof ApiError && error.code === 'duplicate') {
           throw new CliError(
             'unfinished',
-            'An earlier run with this --idempotency-key left its copy unfinished. It isn’t ' +
-              'in the tree, and the server deletes it within a day: copy with a new ' +
-              '--idempotency-key',
+            'An earlier run with this --idempotency-key holds these IDs, though its copy ' +
+              'isn’t in the tree: it was left unfinished, which the server deletes within a ' +
+              'day, or this agent no longer sees it. Copy with a new --idempotency-key',
             { cause: error },
           );
         }

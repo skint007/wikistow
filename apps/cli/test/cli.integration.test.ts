@@ -853,6 +853,8 @@ describe('copying', () => {
     let drop = false;
     // Whether the server is too busy to finish, for longer than the CLI waits.
     let busy = false;
+    // Whether a finish whose answer is lost leaves the server busy after it.
+    let thenBusy = false;
     server.hooks.intercept = async (request, forward) => {
       const { pathname } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/copies') {
@@ -871,6 +873,7 @@ describe('copying', () => {
         finishes += 1;
         if (lose > 0) {
           lose -= 1;
+          if (thenBusy) busy = true;
           return new Response('gone', { status: 502 });
         }
       }
@@ -933,8 +936,20 @@ describe('copying', () => {
       expect(later.json().nodeId).toBe(opened[5]);
       expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan', 'Plan', 'Plan']);
 
+      // A finish made it, its answer lost, and the next stays busy: the cancel
+      // leaves a finished copy be, and the tree shows it made.
+      lose = 1;
+      thenBusy = true;
+      const landed = await w.run(to);
+      busy = false;
+      thenBusy = false;
+      expect(landed.code, landed.stdout).toBe(0);
+      expect(landed.json()).toMatchObject({ earlier: false, nodeId: opened.at(-1) });
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toHaveLength(5);
+
       // Every node of a keyed copy is made from the key, so a retry reports the copy's own IDs.
       const trip = ['folder', 'copy', w.trip, '--folder', w.drafts];
+      const openings = opened.length + 1;
       const first = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(first.code, first.stdout).toBe(0);
       // Only where the earlier copy is: what is in the source now needn't be what it copied.
@@ -948,7 +963,7 @@ describe('copying', () => {
       const retried = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(retried.code, retried.stdout).toBe(0);
       expect(retried.json()).toEqual(earlier);
-      expect(opened).toHaveLength(8);
+      expect(opened).toHaveLength(openings);
       const [packing] = first.json().unpublished as { pageId: string }[];
       expect(await titlesIn(w.alice, w.board, String(first.json().nodeId))).toEqual(
         expect.arrayContaining(['Packing', 'Route']),
@@ -961,7 +976,7 @@ describe('copying', () => {
       const gone = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(gone.code, gone.stdout).toBe(0);
       expect(gone.json()).toEqual(earlier);
-      expect(opened).toHaveLength(8);
+      expect(opened).toHaveLength(openings);
     } finally {
       server.hooks.intercept = null;
     }

@@ -242,7 +242,8 @@ answer is lost, the CLI sends the finish again, which is answered as the
 first was; if no answer comes at all, the copy may have been made
 (outcomeUnknown). If the server stays too busy to finish it, the copy is
 cancelled and nothing is made (exit 1, code "busy"): copy again later,
-with the same --idempotency-key if it had one.
+with the same --idempotency-key if it had one, or a new one if that is
+refused as "unfinished".
 
 Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
 Every page and folder it makes gets an ID made from KEY, so running the
@@ -251,8 +252,9 @@ finished, and reports only where it is, even if the original is gone:
   {"kind":"${noun}","earlier":true,"spaceId":"...","nodeId":"...",
    "parentId":"..."}
 If it didn't finish, and the server hasn't deleted it yet (it does within
-a day), it is refused with code "unfinished" (exit 1): the copy isn't in
-the tree, so copy with a new KEY. Otherwise it copies again.
+a day), or it finished where this agent no longer sees it, it is refused
+with code "unfinished" (exit 1): copy with a new KEY. Otherwise it copies
+again.
 The same KEY with another ${noun}, --space or --folder makes another copy.
 Without a KEY, look in tree before running a copy again whose outcome is
 unknown.
