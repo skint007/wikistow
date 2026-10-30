@@ -31,9 +31,10 @@ import {
 } from '@wikistow/contracts';
 import { z } from 'zod';
 import { schema } from '@wikistow/server';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
+import { openCopy } from './support/copies.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { addToGroup, makeGroup, removeFromGroup, shareWithGroup } from './support/groups.ts';
@@ -622,6 +623,59 @@ describe('a reader of a page published from another space', () => {
     // Nor does the copy name anything around the source.
     const plain = JSON.stringify(opened.opened);
     for (const marker of Object.values(OUTSIDE)) expect(plain).not.toContain(marker);
+  });
+});
+
+describe('a copy not finished yet', () => {
+  it('is sent to nobody, its opener included, by any route', async () => {
+    const m = await memberWorld();
+    // The owner copies the shared folder into a folder of the Board that
+    // the reader edits there, and sends everything but the finish.
+    const board = await spaceOperations.createSpace(m.owner.ctx, { name: 'Board' });
+    const pinned = await spaceOperations.createFolder(m.owner.ctx, {
+      spaceId: board,
+      parentId: null,
+      name: 'Pinned',
+    });
+    const found = await sharingOperations.findPerson(m.owner.ctx, m.reader.email);
+    if (!found) throw new Error('expected to find the reader');
+    await shareFolder(m.owner.ctx, {
+      spaceId: board,
+      rootId: pinned,
+      people: [{ person: found, role: 'editor', canPublish: true }],
+    });
+    const copy = await openCopy(m.owner.ctx, {
+      from: m.spaceId,
+      nodeId: m.shared,
+      to: board,
+      parentId: pinned,
+    });
+    await copy.open();
+    await copy.send();
+    const hidden = copy.sourceIds.map((id) => copy.newIdOf(id));
+    const sent = (await allRevisions()).filter((r) => hidden.includes(r.pageId));
+    expect(sent.length).toBeGreaterThan(0);
+
+    const at = { spaceId: board, ownerId: m.owner.vault.identity.public.id };
+    for (const asker of [asPerson(m.reader), asPerson(m.owner)]) {
+      const { text, statuses } = await everyAnswer(t, asker, at);
+      expect(statuses['tree']).toBe(200);
+      for (const id of hidden) {
+        expect(text).not.toContain(id);
+        expect(statuses[`target:${id}`], id).toBe(404);
+      }
+      for (const { pageId } of sent) {
+        expect(statuses[`page:${pageId}`], pageId).toBe(404);
+        expect(statuses[`history:${pageId}`], pageId).toBe(404);
+      }
+      for (const { id } of sent) expect(text).not.toContain(id);
+      const files = await t.db
+        .select({ hash: schema.blobs.hash })
+        .from(schema.blobs)
+        .where(inArray(schema.blobs.pageId, hidden));
+      for (const { hash } of files) expect(statuses[`blob:${hash}`], hash).toBe(404);
+    }
+    await copy.cancel();
   });
 });
 
