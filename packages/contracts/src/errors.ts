@@ -76,7 +76,8 @@ export const ErrorCode = z.custom<ErrorCode>(isErrorCode, 'Unknown error code');
  * for an editor's `stale-head` on a page, its current heads, for a
  * move's `stale-head` because the node moved, where it is now, for a
  * copy's `stale-head` at its finish, the new nodes whose sources changed,
- * or for a copy refused at its opening for a live publication, its pages.
+ * or for a copy refused at its opening for a live publication or a page
+ * with nothing to copy, those pages.
  */
 export const ErrorDetail = z.object({
   keyVersion: z.number().int().optional(),

@@ -271,6 +271,16 @@ export async function openCopy(
       tx,
       listed.flatMap((node) => (node.kind === 'page' ? [node.id] : [])),
     );
+    // A page with neither a draft nor a publication, as one whose publication
+    // ended and was then unpublished, has nothing to copy.
+    const empty = listed.filter(
+      (node) => node.kind === 'page' && node.draftHead === null && node.publishedHead === null,
+    );
+    if (empty.length > 0) {
+      throw new ContentError('forbidden', 'A page with no version is published again first', {
+        nodeIds: empty.map((node) => node.id),
+      });
+    }
     const mirrored = mirror(input, listed);
 
     for (const kind of ['folder', 'page'] as const) {

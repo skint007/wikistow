@@ -550,6 +550,38 @@ describe('what a copy refuses', () => {
     expect(await rejection(pageCopy.open())).toBe('permission-version');
   });
 
+  it('refuses a page with nothing to copy, naming it', async () => {
+    const w = await world();
+    // A publication ended without being detached, then unpublished: no draft, no publication.
+    const { revisionId } = await pages.publishPage(w.alice.ctx, w.page);
+    const preview = await pubs.previewPublication(w.alice.ctx, {
+      source: w.page,
+      revisionId,
+      audience: 'published',
+      spaceId: w.board,
+      parentId: w.pinned,
+    });
+    const published = await pubs.publishToSpace(w.alice.ctx, { preview, attachmentIds: new Set() });
+    await pubs.endPublication(w.alice.ctx, { source: w.page, spaceId: w.board });
+    const empty = { spaceId: w.board, pageId: published.pageId };
+    const { heads, permissionVersion } = await pages.loadPage(w.alice.ctx, empty.pageId);
+    if (!heads.publishedHead || heads.draftHead) throw new Error('expected a publication alone');
+    await pages.unpublishPage(w.alice.ctx, empty, {
+      publishedHead: heads.publishedHead,
+      permissionVersion,
+    });
+    const copy = await openCopy(w.alice.ctx, {
+      from: w.board,
+      nodeId: w.pinned,
+      to: w.lib.spaceId,
+      parentId: null,
+    });
+    expect(copy.sourceIds).toContain(published.pageId);
+    const refused = await refusal(copy.open());
+    expect(refused?.code).toBe('forbidden');
+    expect(refused?.detail?.nodeIds).toEqual([published.pageId]);
+  });
+
   it('refuses records for a node twice, and published versions in a copy that doesn’t bring them', async () => {
     const w = await world();
     // Bob edits the shared folder but can't publish there. His own page,
