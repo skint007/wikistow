@@ -8,7 +8,6 @@ import {
   canonical,
   copyOperations as copies,
   hashBytes,
-  outcomeUnknown,
   pageOperations as pages,
   spaceOperations,
   toBase64,
@@ -129,26 +128,20 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         }
         throw refusal(error);
       }
-      let finishing = false;
       const stop = io.stopOnSignal();
       try {
-        await copies.makeCopy(ctx, preview, {
-          signal: stop.signal,
-          onProgress: ({ stage }) => {
-            finishing ||= stage === 'finishing';
-          },
-        });
+        await copies.makeCopy(ctx, preview, { signal: stop.signal });
       } catch (error) {
-        // Before the finish, a failure ends the copy unseen: nothing was made.
-        // A finish never answered, though sent again, may have made it.
-        if (finishing && outcomeUnknown(error)) {
-          throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
+        // Anything but `CopyKept` cancelled the copy: nothing was made. A
+        // finish never answered, though sent again, may have made it.
+        if (error instanceof copies.CopyKept && !error.busy) {
+          throw new ChangeMayHaveHappened(error.cause, key === null ? 'unkeyed' : 'resend');
         }
         // The server keeps a finish it was too busy for, for a later one, but
         // no later run sends it: each run opens its own copy. So it is
         // cancelled here, which leaves it be if an unanswered finish before
         // made it; then the tree says which.
-        if (finishing && error instanceof ApiError && error.code === 'rate-limited') {
+        if (error instanceof copies.CopyKept) {
           await copies.cancelCopy(ctx, preview.copyId).catch(() => undefined);
           const top = preview.nodes[0];
           const made = top && (await listed(ctx, spaceId, top.nodeId).catch(() => undefined));
@@ -157,7 +150,7 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
             'busy',
             'The server was too busy to finish the copy, so nothing was made: wait a little ' +
               'and copy again',
-            { cause: error },
+            { cause: error.cause },
           );
         }
         if (error instanceof copies.CopyStopped) {
