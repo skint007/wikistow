@@ -155,6 +155,10 @@ const requireVersion = (actual: number, given: number) => {
  * copy, someone who can edit every listed node of the source (`sourceIds`),
  * which an agent may within its picks; and for both, someone who can make
  * pages at the destination parent. Their access there, and its share.
+ *
+ * At the finish (`finishing`), a copy's source nodes deleted meanwhile are
+ * left out, its top one too: what was sealed from them still arrives. A
+ * move's finish checks its source subtree itself.
  */
 async function requireCopier(
   tx: Database,
@@ -164,6 +168,7 @@ async function requireCopier(
     'kind' | 'sourceSpaceId' | 'sourceNodeId' | 'destinationSpaceId' | 'destinationParentId'
   >,
   sourceIds: readonly string[],
+  { finishing = false } = {},
 ): Promise<{ share: ShareRow | null; canPublish: boolean }> {
   const holder: Holder = caller;
   if (copy.kind === 'move') {
@@ -179,8 +184,9 @@ async function requireCopier(
       );
     }
   } else {
-    const access = await accessToPagesIn(tx, holder, copy.sourceSpaceId, sourceIds);
-    if (!access.get(copy.sourceNodeId)) throw new ContentError('not-found');
+    const there = finishing ? await stillThere(tx, copy.sourceSpaceId, sourceIds) : sourceIds;
+    const access = await accessToPagesIn(tx, holder, copy.sourceSpaceId, there);
+    if (!finishing && !access.get(copy.sourceNodeId)) throw new ContentError('not-found');
     if (![...access.values()].every(canEdit)) {
       throw new ContentError('forbidden', 'Only someone who can edit all of it copies it');
     }
@@ -192,6 +198,22 @@ async function requireCopier(
   if (!at) throw new ContentError('not-found');
   if (!canEdit(at)) throw new ContentError('forbidden');
   return { share: at.share, canPublish: at.canPublish };
+}
+
+/** Those of `nodeIds` still listed in the space: neither deleted nor hidden. */
+async function stillThere(tx: Database, spaceId: string, nodeIds: readonly string[]) {
+  if (nodeIds.length === 0) return [];
+  const rows = await tx
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(
+      and(
+        eq(nodes.spaceId, spaceId),
+        isNull(nodes.copyId),
+        sql`${nodes.id} = any(${sql.param([...nodeIds])}::text[])`,
+      ),
+    );
+  return rows.map((row) => row.id);
 }
 
 /**
@@ -695,6 +717,7 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
     caller,
     copy,
     made.map((node) => node.sourceId),
+    { finishing: true },
   );
   if (!who.canPublish && (copy.bringsPublished || made.some((n) => n.publishedFrom !== null))) {
     throw new ContentError('forbidden', 'You can no longer publish there');
