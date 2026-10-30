@@ -1303,7 +1303,41 @@ The app opens it as the agent's own session (section 9.3): its keys, its token i
 - **Rewrap.** For every retained revision and metadata version in the moved subtree, the client opens the content key and checks it against the record. It then writes a key wrap under the destination share's current version, which must count for writing (section 6.5, **Writing**) and pass the check of section 6.8 (**No going back**), or, into the owner region, v2 envelopes to every sealing owner.
 - **Upload.** The client sends the move, the expected old parent, and the new wraps or envelopes in one request. Under a lock on the space, the server checks the nesting rule, the destination's current key version, and that every record in the subtree is covered. It then moves the subtree, replaces its wraps or envelopes, and bumps permission versions, all at once. If anything fails, it deletes what was uploaded.
 - **Losers** keep what they had (A3). No rotation is needed: later saves of the moved content are wrapped under the destination's keys, which the losers don't hold.
-- A move into another space isn't a move; it is a copy or a publication (section 13).
+- A move into another space can't rewrap: records and attachments are bound to their space (sections 5.1, 5.3 and 5.7). It is a transfer, below.
+
+### Between spaces: transfers
+
+A **transfer** seals a node and its subtree again as new nodes under a destination folder, or the top of a destination space ([ADR 0007](../docs/adr/0007-move-and-copy-between-spaces.md)). A **copy** leaves the source as it is, and may go to any space, its own included. A **move** goes to another space and deletes the source when it finishes. A move within one space is the move above, never a transfer.
+
+**Who.**
+- A move: an owner of the source space, a person with a session.
+- A copy: someone with edit rights at every node of the source subtree. Readers can't copy, as they can't publish into another space (section 13). An agent copies where both its pick and its person allow editing at the source, and making pages at the destination (section 9.5).
+- Both: someone who can make pages at the destination parent. Published versions go only where they can also publish (below).
+
+**What is sealed.** For each folder, one metadata record v2 holding the source folder's current name and look. For each page, its current draft, and its current published version when the page is published now, each as a revision record v2. Nothing else: no earlier version, publication, public link, share or agent pick. Every record:
+- names the new node in the destination space, has `basedOn: null`, and is written and signed by the person transferring, as a new page's first draft is, and a published version as a publication's are (section 13);
+- is in the region of its new parent's name record (section 6.1, **A new node's region**), and wraps or seals its content key as section 6.8 requires there;
+- reseals every attachment its version lists under a fresh key, with the destination AD `attachment/v1 [installationId, T, D, audience, attachmentId]` and a new `plainHash`, as section 13 step 3 does. It never reuses a source copy.
+
+If the person can't publish at the destination parent, pages arrive with their drafts alone. The preview names them.
+
+**Links.** A transferred version's link table came from the source region, so section 5.5 drops every entry the writer can't check, and works the table out again. Before that, the writer's app rewrites each entry that names a page in the same transfer to that page's new ID, and counts that page as placed at its new node, in its new node's region. An entry for any other source page doesn't survive a transfer between spaces. Within one space, the usual rule decides.
+
+**Refused.**
+- A source subtree with a page that is a live publication copy (section 13). Its publishers detach it first.
+- A destination parent inside the source subtree.
+- A move whose destination is in the source space.
+
+**Preview.** As for a move between regions: who can read, and who can edit, at the destination region, as "at least these people" (A10 applies once the person confirms). For a move, also who loses access from the source regions; the pages that will arrive unpublished; links that won't work afterwards (above, and links into moved pages from pages that stay); and what a move ends: public links, publications into other spaces, shares inside the subtree and their members, agent picks, and every earlier version. A move always asks, whatever the device's move confirmation setting.
+
+**Steps.** The server keeps the transfer, its new nodes and what they were sealed from:
+1. **Open** (`POST /api/transfers`): the kind, the source node and space, the destination parent and space, and a new ID, kind and parent for every node of the source subtree. The server checks **Who** and **Refused**, and that the new nodes mirror the source subtree as it is now, then makes them **hidden**. A hidden node is listed in no tree, served by no page route, and named by nothing outside its transfer. Only the transfer's opener uploads attachments to it.
+2. **Records** (`POST /api/transfers/:transferId/records`), in as many batches as the body limit needs: each record, its key material, and the source version or metadata version it was sealed from. Each is checked as any write is (sections 5.1 and 6.8), at its new node's region.
+3. **Finish** (`POST /api/transfers/:transferId/finish`), by the opener. Under locks on both spaces, taken in ID order, the server checks that every new node has its records, that the destination's key version and parent's permission version are those the records were written at, and, for a move, that every source page's draft and published heads, and every source folder's metadata head, are still the versions sealed, and the source's permission versions are those the preview was made at. A stale head is `stale-head`, naming the nodes. The client seals those again, sends them, and finishes again. In one transaction the server then shows the new nodes and, for a move, deletes the source subtree as deleting a node does: its shares and their members, its publications into other spaces, its public links and its history go.
+
+A transfer not finished a day after its last request is deleted with its nodes and attachments, as an unfinished publication opening is. Its opener can delete it sooner.
+
+**What changes hands.** A transfer gives the destination's audience what the person transferring could read: for a copy by an editor, a share's drafts. This is the same exposure as pasting the text. A move's losers keep what they had (A3).
 
 ---
 

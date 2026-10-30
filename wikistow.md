@@ -18,6 +18,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Markdown is the canonical page source. People can switch between visual editing and source editing. The application supplies the theme.
 - Drafts autosave. Readers see published versions; editors see drafts. Publishing is a separate permission. Published history records the person or agent responsible and supports restoration.
 - A page can publish selected versions into another space without exposing its private working draft.
+- Pages and folders can be moved or copied into another space. They bring their current draft and published version, sealed again for the destination; earlier history stays behind ([ADR 0007](docs/adr/0007-move-and-copy-between-spaces.md)).
 - Existing agents use a CLI with their own identity and limited grants. Publishing is an additional grant, not implied by editing permission.
 - Browser and Linux desktop clients come first. Search runs on the client over content the user can decrypt.
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
@@ -97,6 +98,7 @@ Proposed default: the common library is an ordinary shared space with owner-mana
 | Manage sharing and ownership | No | No | No | Yes |
 | Give a page a public link, or turn it off | No | No | Yes | Yes |
 | Move or delete content across permission boundaries | No | No | No | Yes |
+| Copy content they can edit to a folder where they can make pages | No | Yes | Yes | Yes |
 
 Groups come in [Milestone 5](#milestone-5-groups): built for people, with agents in groups not built yet. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
 
@@ -106,7 +108,7 @@ Sharing a folder does not reveal its ancestors. The recipient sees it under Shar
 
 An agent's effective permissions are the intersection of its own grants and its owner's current permissions. Agents cannot administer accounts, create invitations, alter sharing, or manage ownership in the first version. Space owners authorize shares; users authorize their agents within the access they already hold.
 
-Moving a subtree previews the resulting audience change and requires space ownership. The move updates the tree and re-wraps the moved content's keys for its new share as one logical operation. Treat a move into another space as an explicit copy or publication, not an ordinary rename.
+Moving a subtree previews the resulting audience change and requires space ownership. The move updates the tree and re-wraps the moved content's keys for its new share as one logical operation. A move into another space can't keep its records, which are bound to their space, so it is a copy that deletes its source: each page's current draft and published version, and each folder's name and look, are sealed again for the destination by the person moving them, and earlier history goes with the source. Only an owner of the source space moves content into another space. Copying does the same without the delete, into another space or the same one, for anyone who can read the content's drafts and make pages at the destination. A moved or copied page is a new page with a new address, and it brings no public link, publications, shares or agent picks. The preview shows the destination's audience, who loses access, pages that will arrive unpublished, links that won't work afterwards, and what a move ends ([ADR 0007](docs/adr/0007-move-and-copy-between-spaces.md)).
 
 ## Accounts and invitations
 
