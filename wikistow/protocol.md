@@ -1263,7 +1263,7 @@ The token is sent as `Authorization: Bearer <token>`. To accept it, the server:
 3. checks, on every request, that the credential isn't revoked, that it was created after `users.credentials_revoked_at` for the person's account (or that timestamp is null), that the account isn't suspended or deleted, and that the agent identity isn't revoked;
 4. **refuses a request that also carries a `Cookie`, or an `Origin` other than the server's own**, so a token is never mixed with a person's session or used from another site. The server's own origin is allowed for the agents a person's app runs (section 9.8), whose requests a browser sends with it. A browser never attaches a token by itself, so another site can't use one.
 
-Agents may use the content routes of section 9.5 (moves and copies of kind `copy` among them, section 10), `GET /api/me/contacts` (their person's record), their own folder key envelopes, and directory lookups of the authors of records they can read. Everything else is for humans only.
+Agents may use the content routes of section 9.5 (moves, and the copy routes for copies of kind `copy`, cancelling their own included, among them, section 10), `GET /api/me/contacts` (their person's record), their own folder key envelopes, and directory lookups of the authors of records they can read. Everything else is for humans only.
 
 ### 9.7 Revocation
 
@@ -1347,7 +1347,7 @@ A `move` also shows who loses access from the source regions, links into moved p
 
    A head that moved on is `stale-head`, naming the new nodes whose sources changed: the app seals those again, sends them, and finishes again. `rate-limited`, which is also the answer while publications a delete ends are being written, keeps the copy too: the app finishes again shortly. Any other failure ends the copy: the server deletes it, and the app opens a new one from a new preview. In one transaction the server then shows the new nodes and, for a `move`, deletes the source subtree as deleting a node does: its shares and their members, its publications into other spaces, its public links, any hidden or unfinished nodes inside it, and its history go.
 
-A finished copy is kept for a day, so a finish sent again, after its answer was lost, gets the same answer rather than starting the copy over. Its nodes are no longer hidden or tied to it: deleting it, at the end of that day, leaves them, and its opener can't delete it (a cancel answers as the finish did). A copy not finished a day after its last request is deleted with its nodes, their records (removed as deleting a node removes them, envelopes and metadata versions included) and attachments. Its opener can delete it sooner.
+A finished copy is kept for a day, so a finish sent again, after its answer was lost, gets the same answer rather than starting the copy over. Its nodes are no longer hidden or tied to it: deleting it, at the end of that day, leaves them, and its opener can't delete it (a cancel answers as the finish did). A copy not finished a day after its last request is deleted with its nodes, their records (removed as deleting a node removes them, envelopes and metadata versions included) and attachments. Its opener, person or agent, can delete it sooner (`DELETE /api/copies/:copyId`).
 
 **What changes hands.** A copy gives the destination's audience what the person copying could read: for a copy by an editor, a share's drafts. This is the same exposure as pasting the text. A move's losers keep what they had (A3).
 
