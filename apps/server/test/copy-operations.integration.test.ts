@@ -539,7 +539,9 @@ describe('a busy server, or a lost answer', () => {
       throw new ApiError(429, 'rate-limited', 'Busy', {}, { retryAfterSeconds: 600 });
     };
     const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, busy]]));
-    expect(await rejection(copies.makeCopy(ctx, preview))).toBe('rate-limited');
+    const kept = await copies.makeCopy(ctx, preview).catch((e: unknown) => e);
+    expect(kept).toBeInstanceOf(copies.CopyKept);
+    expect(kept).toMatchObject({ busy: true, cause: { code: 'rate-limited' } });
     // Asked once: its wait was already as long as the copy waits.
     expect(sent.filter((route) => route === copyRoutes.finish)).toHaveLength(1);
     expect(sent).not.toContain(copyRoutes.cancel);
@@ -572,6 +574,58 @@ describe('a busy server, or a lost answer', () => {
     const plan = ref(w.board, made.copies.get(w.plan) ?? '');
     expect((await current(w.dave.ctx, plan)).payload.title).toBe('Plan');
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
+  });
+
+  it('keeps a copy whose finish is never answered, and says so', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const silent: Answer = async (input, send) => {
+      await send(input);
+      throw new ApiError(0, 'network', 'No answer from the finish');
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, silent]]));
+    const kept = await copies.makeCopy(ctx, preview).catch((e: unknown) => e);
+    expect(kept).toBeInstanceOf(copies.CopyKept);
+    expect(kept).toMatchObject({ busy: false, cause: { code: 'network' } });
+    expect(sent).not.toContain(copyRoutes.cancel);
+  });
+
+  it('cancels a copy whose resend after a stale finish fails, and keeps nothing', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const top = preview.nodes[0]?.nodeId ?? '';
+    // The finish names a node as stale; sending it again then gets no answer.
+    const stale: Answer = async () => {
+      throw new ApiError(409, 'stale-head', 'Changed', { nodeIds: [top] });
+    };
+    let records = 0;
+    const dropping: Answer = async (input, send) => {
+      records += 1;
+      if (records > 1) throw new ApiError(0, 'network', 'No answer');
+      return send(input);
+    };
+    const { ctx, sent } = lyingServer(
+      w.alice.ctx,
+      new Map<RouteDef, Answer>([
+        [copyRoutes.finish, stale],
+        [copyRoutes.records, dropping],
+      ]),
+    );
+    const caught = await copies.makeCopy(ctx, preview).catch((e: unknown) => e);
+    expect(caught).not.toBeInstanceOf(copies.CopyKept);
+    expect(caught).toMatchObject({ code: 'network' });
+    expect(sent).toContain(copyRoutes.cancel);
+    expect(
+      await t.db.select().from(schema.copies).where(eq(schema.copies.id, preview.copyId)),
+    ).toEqual([]);
   });
 });
 

@@ -157,6 +157,23 @@ export class CopyStopped extends Error {
   }
 }
 
+/**
+ * A copy `makeCopy` left, not cancelled, because its finish may have made it:
+ * the finish's answer never came (`busy` false), or the server stayed too
+ * busy to finish it (`busy` true) and keeps it for a later finish. `cause`
+ * is the finish's error. Anything else `makeCopy` throws cancelled the copy.
+ */
+export class CopyKept extends Error {
+  readonly busy: boolean;
+  constructor(cause: unknown, busy: boolean) {
+    super(busy ? 'The server was too busy to finish the copy' : 'The copy may have finished', {
+      cause,
+    });
+    this.name = 'CopyKept';
+    this.busy = busy;
+  }
+}
+
 type ReadLinks = (markdown: string) => Promise<FoundLinks>;
 
 /** How long one request waits out the server's rate limits, in all, before giving up. */
@@ -596,11 +613,10 @@ const FINISH_TRIES = 5;
  * busy server (`rate-limited`) is waited for, as its `Retry-After` says,
  * for every request (`patient`). A finish whose answer was lost is sent
  * again, which the server answers as it answered the first; if no answer
- * comes, it is thrown without cancelling, since the copy may have been
- * made. A finish still busy after all that is thrown without cancelling too:
- * the server keeps the copy, and sweeps it if nobody finishes it. Anything
- * else ends the copy, which the server or this deletes, and
- * is thrown: preview again. That includes a batch of records refused for
+ * comes, it throws `CopyKept` without cancelling, since the copy may have
+ * been made. So does a finish still busy after all that: the server keeps
+ * the copy, and sweeps it if nobody finishes it. Anything else ends the
+ * copy, which the server or this deletes, and is thrown: preview again. That includes a batch of records refused for
  * `permission-version`; one refused for a newer key version is sealed again
  * and sent again. A broken character from a Milestone 1 client is written
  * as U+FFFD.
@@ -689,8 +705,11 @@ export async function makeCopy(
     // A finish the server refused has deleted it already. One that may have
     // made it is left, as a cancel would answer as its finish did anyway, and
     // so is one still busy, which the server keeps for a later finish.
-    if (!keep) await cancelCopy(ctx, preview.copyId).catch(() => undefined);
-    throw error;
+    if (!keep) {
+      await cancelCopy(ctx, preview.copyId).catch(() => undefined);
+      throw error;
+    }
+    throw new CopyKept(error, error instanceof ApiError && error.code === 'rate-limited');
   }
   const top = preview.nodes[0];
   if (!top) throw new ApiError(404, 'not-found', 'Nothing was copied');
