@@ -38,7 +38,7 @@ import {
   type LinkWrite,
   type OpenedPublication,
 } from '../link-table.ts';
-import { findLinks, foldTitle, rewritePageLinks, type FoundLinks } from '../links.ts';
+import { findLinks, foldTitle, rewriteAddressLinks, type FoundLinks } from '../links.ts';
 import { sealMetadataV2 } from '../metadata.ts';
 import { revisePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { sameRegion, type Region } from '../regions.ts';
@@ -132,10 +132,15 @@ export type CopyPreview = {
   /**
    * Pages a copied version links to that won't be the same page afterwards:
    * in a copy into another space, wikilinks to pages of the source space
-   * that don't come along. Null when some Markdown couldn't be read for links.
+   * that don't come along, and for a move, address links to pages and
+   * folders it deletes that are written with escapes, so they aren't
+   * pointed at the copies. Null when some Markdown couldn't be read for links.
    */
   links: ClosedLink[] | null;
-  /** For a move, pages staying behind, that this person can open, which link to what moves. */
+  /**
+   * For a move, pages staying behind, that this person can open, which link
+   * to a page or folder that moves.
+   */
   inbound: { pageId: PageId; title: string | null }[];
   /** For a move, what it ends. */
   ends: MoveEnds | null;
@@ -328,7 +333,14 @@ export async function previewCopy(
     unpublished,
     links: sameSpace
       ? []
-      : await closedLinks(ctx, { tree, pages, inside, spaceId: source.spaceId, read }),
+      : await closedLinks(ctx, {
+          tree,
+          pages,
+          inside,
+          spaceId: source.spaceId,
+          read,
+          moving: isMove,
+        }),
     inbound: isMove ? await linkingIn(ctx, { tree, inside, spaceId: source.spaceId, read }) : [],
     ends: isMove ? await endsOf(ctx, source.spaceId, { tree, inside, pages }) : null,
   };
@@ -417,7 +429,9 @@ const titled = (tree: Tree, target: string) =>
 /**
  * Wikilinks of the copied pages that name a page of the source space that
  * doesn't come along: by their table's entry, or by title. In another space
- * they resolve by title among its pages, or not at all. Each page once.
+ * they resolve by title among its pages, or not at all. For a move
+ * (`moving`), also address links to a page or folder it deletes that the
+ * copy can't point at its copy, written with escapes. Each page or folder once.
  */
 async function closedLinks(
   ctx: ClientContext,
@@ -427,15 +441,23 @@ async function closedLinks(
     inside,
     spaceId,
     read,
+    moving,
   }: {
     tree: Tree;
     pages: readonly TreePage[];
     inside: ReadonlySet<string>;
     spaceId: SpaceId;
     read: ReadLinks;
+    moving: boolean;
   },
 ): Promise<ClosedLink[] | null> {
   const closed = new Map<string, ClosedLink>();
+  const add = (link: Omit<ClosedLink, 'count'>) => {
+    const key = `${link.kind} ${link.page}`;
+    const seen = closed.get(key);
+    if (seen) seen.count += 1;
+    else closed.set(key, { ...link, count: 1 });
+  };
   for await (const { payload } of currentVersions(ctx, spaceId, pages)) {
     if (!payload) continue;
     const found = await read(payload.markdown).catch(() => null);
@@ -447,9 +469,20 @@ async function closedLinks(
       const named = table.get(key);
       const target = named ?? titled(tree, link.target)[0]?.id;
       if (target === undefined || inside.has(target)) continue;
-      const seen = closed.get(key);
-      if (seen) seen.count += 1;
-      else closed.set(key, { kind: 'wikilink', page: key, text: link.target, count: 1 });
+      add({ kind: 'wikilink', page: key, text: link.target });
+    }
+    if (!moving) continue;
+    const addresses = [
+      ...found.pageLinks.map((link) => ({ ...link, kind: 'page-link' as const, id: link.pageId })),
+      ...found.folderLinks.map((link) => ({
+        ...link,
+        kind: 'folder-link' as const,
+        id: link.folderId,
+      })),
+    ];
+    for (const link of addresses) {
+      if (link.plain || link.spaceId !== spaceId || !inside.has(link.id)) continue;
+      add({ kind: link.kind, page: `${link.spaceId}/${link.id}`, text: link.text || link.source });
     }
   }
   return [...closed.values()];
@@ -457,8 +490,9 @@ async function closedLinks(
 
 /**
  * Pages staying in the source space, that this person can open, which link
- * to a page that moves: by a table entry, an address, or a title only that
- * page has. Those links won't find it once it has moved.
+ * to a page that moves, by a table entry, an address, or a title only that
+ * page has, or to a folder that moves, by its address. Those links won't
+ * find it once it has moved.
  */
 async function linkingIn(
   ctx: ClientContext,
@@ -484,7 +518,8 @@ async function linkingIn(
     };
     const links =
       found.wikilinks.some((link) => !link.embed && link.target !== '' && named(link.target)) ||
-      found.pageLinks.some((link) => link.spaceId === spaceId && inside.has(link.pageId));
+      found.pageLinks.some((link) => link.spaceId === spaceId && inside.has(link.pageId)) ||
+      found.folderLinks.some((link) => link.spaceId === spaceId && inside.has(link.folderId));
     if (links) linking.push({ pageId: page.id, title: page.title });
   }
   return linking;
@@ -824,9 +859,9 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
   ): Promise<PagePayload> => {
     const { value: payload } = repairText(revisePayload(opened.opened, {}));
     const { [PUBLICATION_NAMESPACE]: _source, ...extensions } = payload.extensions;
-    const markdown = rewritePageLinks(payload.markdown, (link) => {
-      const copy = link.spaceId === source.spaceId ? copies.get(link.pageId) : undefined;
-      return copy ? { spaceId: destination.spaceId, pageId: copy } : null;
+    const markdown = rewriteAddressLinks(payload.markdown, (link) => {
+      const copy = link.spaceId === source.spaceId ? copies.get(link.nodeId) : undefined;
+      return copy ? { spaceId: destination.spaceId, nodeId: copy } : null;
     });
     // Entries naming a page of the copy name its copy.
     const table = LinkTable.safeParse(extensions[LINKS_NAMESPACE]);

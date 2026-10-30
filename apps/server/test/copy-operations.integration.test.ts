@@ -1,7 +1,8 @@
 // The app's copy and move between spaces (protocol section 10), against the
-// real server: the preview, links between copied pages, a move that finds
-// its source changed at the finish and seals that page again, and a copy
-// that waits out a busy server or a lost answer, is stopped, or is given its IDs.
+// real server: the preview, links between copied pages and folders, a move
+// that finds its source changed at the finish and seals that page again,
+// and a copy that waits out a busy server or a lost answer, is stopped, or
+// is given its IDs.
 import {
   ApiError,
   copyOperations as copies,
@@ -607,6 +608,36 @@ describe('moving into another space', () => {
     const plan = ref(w.board, made.copies.get(w.plan) ?? '');
     expect((await current(w.dave.ctx, plan)).payload.markdown).toBe('edited at the last moment');
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
+  });
+
+  it('points links to the folder it moves at its copy, and lists those it can’t', async () => {
+    const w = await world();
+    const notes = `/s/${w.lib}/f/${w.notes}`;
+    // The same address, with its first letter escaped, which reads the same.
+    const escaped = `/s/${w.lib}/f/&#${w.notes.charCodeAt(0)};${w.notes.slice(1)}`;
+    await pages.editDraft(w.alice.ctx, ref(w.lib, w.budget), {
+      markdown: `Back to [Notes](${notes}), or [the old way](${escaped}).`,
+    });
+    await pages.createPage(w.alice.ctx, {
+      spaceId: w.lib,
+      parentId: null,
+      title: 'Index',
+      markdown: `All in [Notes](${notes}).`,
+    });
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    expect(new Set(preview.inbound.map((p) => p.title))).toEqual(new Set(['Index', 'Stay']));
+    expect(preview.links?.filter((l) => l.kind === 'folder-link')).toEqual([
+      { kind: 'folder-link', page: `${w.lib}/${w.notes}`, text: 'the old way', count: 1 },
+    ]);
+    const made = await copies.makeCopy(w.alice.ctx, preview);
+    const budget = ref(w.board, made.copies.get(w.budget) ?? '');
+    expect((await current(w.dave.ctx, budget)).payload.markdown).toBe(
+      `Back to [Notes](/s/${w.board}/f/${made.nodeId}), or [the old way](${escaped}).`,
+    );
   });
 
   it('ends, and leaves nothing behind, when what moves gains a page meanwhile', async () => {

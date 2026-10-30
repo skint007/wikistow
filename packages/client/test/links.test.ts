@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  findLinks,
   findWikilinks,
   placedWikilinks,
   resolveWikilinks,
-  rewritePageLinks,
+  rewriteAddressLinks,
   tableWikilinks,
 } from '../src/index.ts';
 
@@ -98,9 +99,15 @@ describe('the wikilinks a link table holds', () => {
   });
 });
 
-describe('rewriting links to page addresses', () => {
-  const copied = (page: { spaceId: string; pageId: string }) =>
-    page.spaceId === 'lib' && page.pageId === 'plan' ? { spaceId: 'board', pageId: 'copy' } : null;
+describe('rewriting links to page and folder addresses', () => {
+  const copies = new Map([
+    ['plan', 'copy'],
+    ['notes', 'notes-copy'],
+  ]);
+  const copied = (node: { spaceId: string; nodeId: string }) => {
+    const copy = node.spaceId === 'lib' ? copies.get(node.nodeId) : undefined;
+    return copy ? { spaceId: 'board', nodeId: copy } : null;
+  };
 
   it('points each link to a copied page at its copy, keeping the rest as written', () => {
     const markdown = [
@@ -112,7 +119,7 @@ describe('rewriting links to page addresses', () => {
       '',
       '[ref]: /s/lib/p/plan',
     ].join('\n');
-    expect(rewritePageLinks(markdown, copied)).toBe(
+    expect(rewriteAddressLinks(markdown, copied)).toBe(
       [
         '---',
         'link: /s/lib/p/plan',
@@ -123,5 +130,30 @@ describe('rewriting links to page addresses', () => {
         '[ref]: /s/board/p/copy',
       ].join('\n'),
     );
+  });
+
+  it('points a link to a copied folder at its copy, and says which it can’t', () => {
+    const markdown = [
+      '[Notes](/s/lib/f/notes) and [its page](/s/lib/p/notes), [other](/s/lib/f/other)',
+      '[escaped](/s/lib/f/not&#101;s) [by reference][notes]',
+      '',
+      '[notes]: https://wiki.example/s/lib/f/notes#top',
+    ].join('\n');
+    expect(rewriteAddressLinks(markdown, copied)).toBe(
+      [
+        '[Notes](/s/board/f/notes-copy) and [its page](/s/board/p/notes-copy), [other](/s/lib/f/other)',
+        '[escaped](/s/lib/f/not&#101;s) [by reference][notes]',
+        '',
+        '[notes]: https://wiki.example/s/board/f/notes-copy#top',
+      ].join('\n'),
+    );
+    const { pageLinks, folderLinks } = findLinks(markdown);
+    expect(pageLinks.map((link) => [link.pageId, link.plain])).toEqual([['notes', true]]);
+    expect(folderLinks.map((link) => [link.text, link.folderId, link.plain])).toEqual([
+      ['Notes', 'notes', true],
+      ['other', 'other', true],
+      ['escaped', 'notes', false],
+      ['by reference', 'notes', true],
+    ]);
   });
 });
