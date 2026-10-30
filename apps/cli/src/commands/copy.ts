@@ -66,7 +66,7 @@ function refusal(error: unknown): unknown {
   return new CliError(
     'forbidden',
     'This agent or its person may not copy that there: both must be allowed to edit it, ' +
-      'and to make pages where it goes',
+      'and to make pages where it goes; the reason says what the server refused',
     { cause: error },
   );
 }
@@ -140,8 +140,10 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         });
       } catch (error) {
         // Before the finish, a failure ends the copy unseen: nothing was made.
-        // A finish never answered, though sent again, may have made it.
-        if (finishing && outcomeUnknown(error)) {
+        // A finish never answered, though sent again, may have made it, and
+        // one still busy is kept for a later finish, so may have too.
+        const busy = error instanceof ApiError && error.code === 'rate-limited';
+        if (finishing && (outcomeUnknown(error) || busy)) {
           throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
         }
         if (error instanceof copies.CopyStopped) {

@@ -231,15 +231,16 @@ links couldn't be read.
 
 Nothing is made unless the copy finishes. If who has access where it
 goes changes while it is sent, it is refused (exit 3): run it again. It
-copies each page as it was when sealed; later edits there don't stop it. Refused as "forbidden" (exit 1), the agent or its person
-may not edit what it copies, or make pages where it goes; or, when
-detail.nodeIds names pages, some pages in it are publications from other
-pages, to be detached first, or have no version to copy. Once the copy
-is being sent, Ctrl-C or SIGTERM before the finish cancels it (exit 1,
-code "cancelled"). If
-the finish's answer is lost, the CLI sends the finish again, which is
-answered as the first was; if no answer comes at all, the copy may have
-been made.
+copies each page as it was when sealed; later edits there don't stop it.
+Refused as "forbidden" (exit 1), the agent or its person may not edit
+what it copies, make pages where it goes, or publish there for pages
+that arrive published; or, when detail.nodeIds names pages, some pages
+in it are publications from other pages, to be detached first, or have
+no version to copy. Once the copy is being sent, Ctrl-C or SIGTERM
+before the finish cancels it (exit 1, code "cancelled"). If the finish's
+answer is lost, the CLI sends the finish again, which is answered as the
+first was; if no answer comes at all, or the server stays too busy to
+finish it, the copy may have been made (outcomeUnknown).
 
 Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
 Every page and folder it makes gets an ID made from KEY, so running the

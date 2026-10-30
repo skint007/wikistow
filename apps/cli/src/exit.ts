@@ -226,7 +226,15 @@ export function classify(error: unknown): Failure {
   }
   if (error instanceof CliError) {
     const { code, message, detail } = error;
-    return { exit: CLI_EXIT[code], code, message, ...(detail ? { detail } : {}) };
+    // A refusal put in the CLI's words keeps the server's as its reason.
+    const reason = error.cause instanceof ApiError ? error.cause.message : undefined;
+    return {
+      exit: CLI_EXIT[code],
+      code,
+      message,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(detail ? { detail } : {}),
+    };
   }
   if (error instanceof ApiError) {
     const exit =
