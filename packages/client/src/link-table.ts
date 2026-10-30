@@ -184,6 +184,12 @@ export type LinkWrite = {
    * limit. If the read fails, the table is kept as it was (`writeLinks`).
    */
   read?: ReadWikilinks;
+  /**
+   * False for a copy, whose text stays the source's (section 10): a draft
+   * then renames no link (`writeLinks`), though its entries are worked out
+   * as for any draft.
+   */
+  renames?: boolean;
 };
 
 /** Reads a page's wikilinks as `tableWikilinks` does, maybe somewhere it can end. */
@@ -249,7 +255,7 @@ type Decision = { link: PlacedWikilink; pageId: PageId | null; renamed: string |
  *   page's published title in the source (`[[Old]]` becomes `[[New]]`,
  *   in a property's value through `setProperty`, changing only its
  *   characters), when that publication is in this write's region
- *   (`renameTo`). The
+ *   (`renameTo`), unless `renames` is false. The
  *   entry keeps its old key too, for this version, so text from before
  *   the rename still names the page, unless the old text is the title of
  *   another page this version could name.
@@ -450,6 +456,7 @@ async function decide(
 ): Promise<Decision[]> {
   const pages = [...targets.values()];
   const self = (target: Target) => target.id === write.page.id;
+  const renames = write.audience === 'draft' && write.renames !== false;
   const chosen = links.map((link) => {
     const [resolved] = resolveWikilinks([link], { pages, selfId: write.page.id });
     const byTitle = (resolved?.targets ?? []).flatMap((id) => targets.get(id) ?? []);
@@ -472,7 +479,7 @@ async function decide(
   // Only a page in this write's region may lend its title; and only when it
   // isn't already the link's text, as far as the writer's tree shows.
   const mayRename = (link: PlacedWikilink, target: Target) =>
-    write.audience === 'draft' &&
+    renames &&
     link.shown === null &&
     !self(target) &&
     target.region !== null &&
@@ -494,7 +501,7 @@ async function decide(
         ? opened.get(target.id)?.title
         : undefined;
     const renamed =
-      write.audience === 'draft' && link.shown === null && title
+      renames && link.shown === null && title
         ? renameTo(link, { ...target, title }, pages, write.page.id)
         : null;
     return { link, pageId: target.id, renamed };

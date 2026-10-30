@@ -371,7 +371,7 @@ const BATCH = 200;
 const IN_FLIGHT = 3;
 
 /** What a fetched revision must be: a version of this page, for this audience. */
-type Wanted = { pageId: PageId; audience: Audience };
+export type Wanted = { pageId: PageId; audience: Audience };
 
 /** Open now, but throw only to whoever asks for this one. */
 function openedNow(open: () => OpenedRevision): () => OpenedRevision {
@@ -393,7 +393,7 @@ function openedNow(open: () => OpenedRevision): () => OpenedRevision {
  * than trusted. Ones the server deferred to keep its answer small are asked
  * for again, for as long as each answer brings something new.
  */
-async function fetchRevisions(
+export async function fetchRevisions(
   ctx: ClientContext,
   spaceId: SpaceId,
   wanted: ReadonlyMap<RevisionId, Wanted>,
@@ -601,7 +601,7 @@ export async function pageLabels(
  * that doesn't open, or binds another page, is left out, as is every one
  * when they can't be fetched: a link then gets no entry, or keeps its text.
  */
-const publicationsFor =
+export const publicationsFor =
   (ctx: ClientContext, spaceId: SpaceId): LinkWrite['published'] =>
   async (pages) => {
     const open = async (asked: typeof pages, fresh: boolean) => {

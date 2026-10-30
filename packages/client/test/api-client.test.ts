@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vite-plus/test';
-import { createApiClient } from '../src/index.ts';
+import { ApiError, createApiClient } from '../src/index.ts';
 
 const route = {
   method: 'POST',
@@ -31,5 +31,29 @@ describe('the API client', () => {
       'idempotency-key': 'make-x',
     });
     expect(calls[1]?.init.headers).toEqual({ 'content-type': 'application/json' });
+  });
+
+  it('keeps the wait a rate limit asks for, from its Retry-After', async () => {
+    const limited = (headers: Record<string, string>) =>
+      createApiClient({
+        fetch: async () =>
+          new Response(
+            JSON.stringify({ error: { code: 'rate-limited', message: 'Too many requests' } }),
+            { status: 429, headers: { 'content-type': 'application/json', ...headers } },
+          ),
+      });
+    const input = { params: { id: 'x' }, query: { limit: 1 }, body: { name: 'x' } };
+    const caught = await limited({ 'retry-after': '7' })
+      .call(route, input)
+      .catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({ status: 429, code: 'rate-limited', retryAfterSeconds: 7 });
+    // None asked, or a date, which the server never sends: no wait is known.
+    for (const headers of [{}, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }]) {
+      const error = await limited(headers)
+        .call(route, input)
+        .catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: 'rate-limited', retryAfterSeconds: null });
+    }
   });
 });

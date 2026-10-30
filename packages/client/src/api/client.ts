@@ -12,19 +12,22 @@ export class ApiError extends Error {
   readonly code: ErrorCode | 'unreadable-response' | 'network';
   /** What the refusal names besides its code, such as the share's current key version. */
   readonly detail: ErrorDetail;
+  /** How many seconds the server asked to be left before trying again (`Retry-After`), if it said. */
+  readonly retryAfterSeconds: number | null;
 
   constructor(
     status: number,
     code: ErrorCode | 'unreadable-response' | 'network',
     message: string,
     detail: ErrorDetail = {},
-    options?: ErrorOptions,
+    options?: ErrorOptions & { retryAfterSeconds?: number | null },
   ) {
     super(message, options);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.retryAfterSeconds = options?.retryAfterSeconds ?? null;
   }
 }
 
@@ -117,7 +120,7 @@ export function createApiClient({
       ...(hasBody ? { body: JSON.stringify(input.body) } : {}),
     });
     const { json, defective } = await readJson(res);
-    if (!res.ok) throw toError(res.status, json);
+    if (!res.ok) throw toError(res, json);
     const parsed = route.response.safeParse(json);
     if (defective || !parsed.success)
       throw new ApiError(
@@ -143,7 +146,7 @@ export function createApiClient({
       body: new Uint8Array(bytes),
     });
     const { json, defective } = await readJson(res);
-    if (!res.ok) throw toError(res.status, json);
+    if (!res.ok) throw toError(res, json);
     const parsed = response.safeParse(json);
     if (defective || !parsed.success)
       throw new ApiError(res.status, 'unreadable-response', `Unexpected response from ${path}`);
@@ -153,7 +156,7 @@ export function createApiClient({
   /** Fetch raw bytes (an encrypted blob). */
   async function download(path: string): Promise<Uint8Array> {
     const res = await fetch(path, { method: 'GET', credentials: 'same-origin' });
-    if (!res.ok) throw toError(res.status, await res.json().catch(() => undefined));
+    if (!res.ok) throw toError(res, await res.json().catch(() => undefined));
     return new Uint8Array(await res.arrayBuffer());
   }
 
@@ -198,10 +201,16 @@ async function readJson(res: Response): Promise<{ json: unknown; defective: bool
   }
 }
 
-function toError(status: number, json: unknown): ApiError {
+function toError(res: Response, json: unknown): ApiError {
+  const { status } = res;
   const body = ApiErrorBody.safeParse(json);
+  // Only the seconds form: the server never sends a date.
+  const after = Number(res.headers.get('retry-after') ?? Number.NaN);
+  const retryAfterSeconds = Number.isFinite(after) && after >= 0 ? after : null;
   return body.success
-    ? new ApiError(status, body.data.error.code, body.data.error.message, body.data.error.detail)
+    ? new ApiError(status, body.data.error.code, body.data.error.message, body.data.error.detail, {
+        retryAfterSeconds,
+      })
     : new ApiError(status, 'unreadable-response', `Request failed with status ${status}`);
 }
 

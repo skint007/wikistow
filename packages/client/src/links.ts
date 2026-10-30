@@ -229,62 +229,159 @@ function pagesFor(target: string, pages: readonly LinkablePage[], index?: PageIn
     .map((page) => page.id);
 }
 
-/** A Markdown link to a page of a WikiStow app, as written. */
-export type PageLink = { source: string; text: string; spaceId: string; pageId: string };
+/**
+ * A Markdown link to a page or folder of a WikiStow app, as written. `plain`
+ * says whether its address is written as it reads, so `rewriteAddressLinks`
+ * can point it elsewhere; one written with escapes is left as it is.
+ */
+type AddressLink = { source: string; text: string; spaceId: string; plain: boolean };
 
-const PAGE_URL =
-  /^(?:https?:\/\/[^/?#\s]+)?\/s\/([A-Za-z0-9_-]{1,64})\/p\/([A-Za-z0-9_-]{1,64})(?=$|[/?#])/;
+/** A Markdown link to a page of a WikiStow app, as written. */
+export type PageLink = AddressLink & { pageId: string };
+
+/** A Markdown link to a folder of a WikiStow app, as written. */
+export type FolderLink = AddressLink & { folderId: string };
+
+const ADDRESS =
+  /^(?:https?:\/\/[^/?#\s]+)?\/s\/([A-Za-z0-9_-]{1,64})\/([pf])\/([A-Za-z0-9_-]{1,64})(?=$|[/?#])/;
+
+/** The page or folder an address names: `/s/<space>/p/<page>` or `/s/<space>/f/<folder>`, on any host. */
+function addressOf(url: string) {
+  const [, spaceId = '', letter, nodeId = ''] = ADDRESS.exec(url) ?? [];
+  if (!spaceId) return null;
+  const kind: 'page' | 'folder' = letter === 'p' ? 'page' : 'folder';
+  return { kind, spaceId, nodeId, path: `/s/${spaceId}/${letter}/${nodeId}` };
+}
 
 /**
- * Every link in `markdown` to a page's address in a WikiStow app
- * (`/s/<space>/p/<page>`, on any host), in order: inline links, autolinks,
- * and reference links (`[text][label]`, `[text][]`, `[text]`), each named by
- * its own text. A reference goes where its label's first definition points.
- * A definition alone shows readers nothing, so it isn't listed. Code and
- * frontmatter hold none, as for `findWikilinks`. Addresses in raw HTML
- * aren't found, so callers say links "may" not open rather than listing
- * every one.
+ * Every link in `markdown` to a page's or folder's address in a WikiStow
+ * app, in order: inline links, autolinks, and reference links (`[text][label]`,
+ * `[text][]`, `[text]`), each named by its own text. A reference goes where
+ * its label's first definition points. A definition alone shows readers
+ * nothing, so it isn't listed. Code and frontmatter hold none, as for
+ * `findWikilinks`. Addresses in raw HTML aren't found, so callers say links
+ * "may" not open rather than listing every one.
  */
-export function findPageLinks(markdown: string): PageLink[] {
+function findAddressLinks(markdown: string) {
   const { body } = splitFrontmatter(markdown);
   const nodes = [...markdownNodes(parseMarkdown(body))];
+  const written = (node: (typeof nodes)[number]) =>
+    body.slice(node.position?.start.offset, node.position?.end.offset);
   // A label defined twice goes where it was first defined, as CommonMark has it.
-  const defined = new Map<string, string>();
+  const defined = new Map<string, { url: string; source: string }>();
   for (const node of nodes) {
     if (node.type === 'definition' && !defined.has(node.identifier)) {
-      defined.set(node.identifier, node.url);
+      defined.set(node.identifier, { url: node.url, source: written(node) });
     }
   }
-  const links: PageLink[] = [];
+  const links: (AddressLink & { kind: 'page' | 'folder'; nodeId: string })[] = [];
   for (const node of nodes) {
-    const url =
+    const at =
       node.type === 'link'
-        ? node.url
+        ? { url: node.url, source: written(node) }
         : node.type === 'linkReference'
           ? defined.get(node.identifier)
           : undefined;
-    if (url === undefined) continue;
-    const [, spaceId = '', pageId = ''] = PAGE_URL.exec(url) ?? [];
-    if (!spaceId) continue;
+    const address = at && addressOf(at.url);
+    if (!at || !address) continue;
     links.push({
-      source: body.slice(node.position?.start.offset, node.position?.end.offset),
+      source: written(node),
       text: markdownText(node),
-      spaceId,
-      pageId,
+      kind: address.kind,
+      spaceId: address.spaceId,
+      nodeId: address.nodeId,
+      plain: at.source.includes(address.path),
     });
   }
   return links;
 }
 
-/** A page's wikilinks and links to WikiStow pages (`findWikilinks`, `findPageLinks`). */
-export type FoundLinks = { wikilinks: Wikilink[]; pageLinks: PageLink[] };
+const pageLinksOf = (links: ReturnType<typeof findAddressLinks>): PageLink[] =>
+  links.flatMap(({ kind, nodeId, ...link }) =>
+    kind === 'page' ? [{ ...link, pageId: nodeId }] : [],
+  );
+
+const folderLinksOf = (links: ReturnType<typeof findAddressLinks>): FolderLink[] =>
+  links.flatMap(({ kind, nodeId, ...link }) =>
+    kind === 'folder' ? [{ ...link, folderId: nodeId }] : [],
+  );
 
 /**
- * `markdown`'s wikilinks and links to WikiStow pages. Some text takes this
- * far longer than its size suggests (#47), so the web app runs it in a
- * worker it can end.
+ * Every link in `markdown` to a page's address in a WikiStow app
+ * (`/s/<space>/p/<page>`, on any host), in order, as `findAddressLinks`
+ * finds them.
  */
-export const findLinks = (markdown: string): FoundLinks => ({
-  wikilinks: findWikilinks(markdown),
-  pageLinks: findPageLinks(markdown),
-});
+export const findPageLinks = (markdown: string): PageLink[] =>
+  pageLinksOf(findAddressLinks(markdown));
+
+/** Every link in `markdown` to a folder's address (`/s/<space>/f/<folder>`), as `findPageLinks`. */
+export const findFolderLinks = (markdown: string): FolderLink[] =>
+  folderLinksOf(findAddressLinks(markdown));
+
+/**
+ * `markdown` with each link to a page's or folder's address (`/s/<space>/p/<page>`,
+ * `/s/<space>/f/<folder>`, as `findAddressLinks` finds them, and the
+ * reference definitions they point through) that `to` gives another node
+ * of the same kind for pointing at that node instead: a copy's links between
+ * its own pages and folders (protocol section 10). Only the address's path
+ * changes, so a host, a `#heading` or the link's text stay. An address
+ * written with escapes is left as it is.
+ */
+export function rewriteAddressLinks(
+  markdown: string,
+  to: (node: {
+    kind: 'page' | 'folder';
+    spaceId: string;
+    nodeId: string;
+  }) => { spaceId: string; nodeId: string } | null,
+): string {
+  const { body } = splitFrontmatter(markdown);
+  const offset = markdown.length - body.length;
+  const edits: { at: number; length: number; text: string }[] = [];
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type !== 'link' && node.type !== 'definition') continue;
+    const address = addressOf(node.url);
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (!address || start === undefined || end === undefined) continue;
+    const target = to(address);
+    if (!target) continue;
+    // The address comes after the text, which may hold it too.
+    const at = body.slice(start, end).lastIndexOf(address.path);
+    if (at < 0) continue;
+    edits.push({
+      at: offset + start + at,
+      length: address.path.length,
+      text: `/s/${target.spaceId}/${address.kind === 'page' ? 'p' : 'f'}/${target.nodeId}`,
+    });
+  }
+  let out = markdown;
+  for (const edit of edits.sort((a, b) => b.at - a.at)) {
+    out = out.slice(0, edit.at) + edit.text + out.slice(edit.at + edit.length);
+  }
+  return out;
+}
+
+/**
+ * A page's wikilinks and links to WikiStow pages and folders (`findWikilinks`,
+ * `findPageLinks`, `findFolderLinks`).
+ */
+export type FoundLinks = {
+  wikilinks: Wikilink[];
+  pageLinks: PageLink[];
+  folderLinks: FolderLink[];
+};
+
+/**
+ * `markdown`'s wikilinks and links to WikiStow pages and folders. Some text
+ * takes this far longer than its size suggests (#47), so the web app runs
+ * it in a worker it can end.
+ */
+export const findLinks = (markdown: string): FoundLinks => {
+  const addresses = findAddressLinks(markdown);
+  return {
+    wikilinks: findWikilinks(markdown),
+    pageLinks: pageLinksOf(addresses),
+    folderLinks: folderLinksOf(addresses),
+  };
+};

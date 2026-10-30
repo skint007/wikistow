@@ -27,6 +27,9 @@ export const MAX_RECORDS_BODY = 8 * 1024 * 1024;
 /** How much an app puts in one `records` request before starting the next. */
 export const RECORDS_BATCH_BYTES = 4 * 1024 * 1024;
 
+/** The most nodes one `records` request carries, whatever their size. */
+export const MAX_RECORDS_NODES = 1000;
+
 /**
  * One node of the source subtree and the new node that copies it: `parentId`
  * is the new node's parent, the new ID of its source's parent, or for the
@@ -127,7 +130,7 @@ export const records = {
   method: 'POST',
   path: '/api/copies/:copyId/records',
   params: CopyParams,
-  body: z.object({ nodes: z.array(CopiedRecords).min(1).max(1000) }),
+  body: z.object({ nodes: z.array(CopiedRecords).min(1).max(MAX_RECORDS_NODES) }),
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 

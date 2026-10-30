@@ -98,10 +98,11 @@ export type DestinationAudience = {
  * A page the copy links to that readers at the destination may not be able
  * to open, listed once however many links (`count`) point at it. `page`
  * names it among links of its kind: a wikilink's target as titles match, a
- * page link's space and page ID.
+ * page link's space and page ID, or a folder link's space and folder ID (a
+ * move's copy, `copyOperations.previewCopy`, alone lists those).
  */
 export type ClosedLink = {
-  kind: 'wikilink' | 'page-link';
+  kind: 'wikilink' | 'page-link' | 'folder-link';
   page: string;
   text: string;
   count: number;
