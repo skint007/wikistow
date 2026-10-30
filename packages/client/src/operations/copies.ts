@@ -720,7 +720,8 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
         page: { id: node.nodeId as PageId, parentId: node.parentId },
         audience,
         region,
-        tableRegion: opened.region,
+        // A copy is a new page, so its table is never carried, even within
+        // one region: only entries the writer can check stay (section 10).
         tree: () => linkTree,
         published: publicationsOf,
       },
