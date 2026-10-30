@@ -82,8 +82,9 @@ export class FinishUnknown extends Error {
 
 // A copy or move between spaces that fails is undone in full, the server,
 // or the app, deleting what it made, unless it may have finished
-// (`FinishUnknown`). The words differ only in the verb. A failed copy is
-// never sent again unseen, so the way on is Look again.
+// (`FinishUnknown`). The words differ only in what came of it: nothing, or
+// before it was tried, as a preview fails, that it can't go there. A failed
+// copy is never sent again unseen, so the way on is Look again.
 const copyRefused = (
   nothing: string,
 ): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
@@ -104,13 +105,20 @@ const copyRefused = (
 });
 const COPY_REFUSED = copyRefused('nothing was copied');
 const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
+const previewRefused = (cant: string) => ({
+  ...copyRefused(cant),
+  'rate-limited': 'The server is busy. Wait a moment, then look at it again.',
+});
+const COPY_PREVIEW_REFUSED = previewRefused('it can’t be copied there');
+const MOVE_PREVIEW_REFUSED = previewRefused('it can’t be moved there');
 
 /**
  * A short message for a failed copy, or move into another space (`copy`
  * false): this app's own words, never the server's. A refusal for the
  * pages it names (`PagesRefused`) is said here; the dialog lists them.
+ * `tried` is false for a preview that failed, before anything was sent.
  */
-export function copyMessage(error: unknown, copy: boolean): string {
+export function copyMessage(error: unknown, copy: boolean, tried = true): string {
   const nothing = copy ? 'nothing was copied' : 'nothing moved';
   if (error instanceof FinishUnknown) {
     return copy
@@ -123,14 +131,28 @@ export function copyMessage(error: unknown, copy: boolean): string {
       : `Some pages in it have neither a draft nor a published version, so ${nothing}. Someone who can publish each one publishes or restores a version of it first.`;
   }
   if (error instanceof ApiError && error.code === 'forbidden') {
+    const so = tried ? `, so ${nothing}` : '';
     return copy
-      ? 'You can’t copy it there, so nothing was copied. You need to be able to edit everything in it, and to make pages where it goes.'
-      : 'You can’t move it there, so nothing moved. Only an owner of this space moves things into another space, and they need to be able to make pages where it goes.';
+      ? `You can’t copy it there${so}. You need to be able to edit everything in it, and to make pages where it goes.`
+      : `You can’t move it there${so}. Only an owner of this space moves things into another space, and they need to be able to make pages where it goes.`;
   }
   if (error instanceof PageTooLarge) {
-    return `${error.message} ${copy ? 'Nothing was copied.' : 'Nothing moved.'}`;
+    const after = tried
+      ? copy
+        ? 'Nothing was copied.'
+        : 'Nothing moved.'
+      : copy
+        ? 'It can’t be copied.'
+        : 'It can’t be moved.';
+    return `${error.message} ${after}`;
   }
-  const refused = copy ? COPY_REFUSED : MOVE_ACROSS_REFUSED;
+  const refused = tried
+    ? copy
+      ? COPY_REFUSED
+      : MOVE_ACROSS_REFUSED
+    : copy
+      ? COPY_PREVIEW_REFUSED
+      : MOVE_PREVIEW_REFUSED;
   if (error instanceof ApiError || error instanceof CryptoError) {
     return refused[error.code] ?? sharingMessage(error);
   }

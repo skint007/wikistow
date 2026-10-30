@@ -262,6 +262,28 @@ it('says a finish that went unanswered or stayed busy may have made it, and offe
   expect(() => button('Look again')).toThrow();
 });
 
+it('offers Look again when the preview itself fails, without saying nothing was copied', async () => {
+  fake.preview = () => {
+    throw new ApiError(429, 'rate-limited', 'Slow down');
+  };
+  await confirmInWork('copy');
+  expect(document.body.textContent).toContain(
+    'The server is busy. Wait a moment, then look at it again.',
+  );
+  expect(document.body.textContent).not.toContain('nothing was copied');
+  expect(button('Copy').disabled).toBe(true);
+
+  fake.preview = (copyId) => previewOf(copyId);
+  await act(async () => {
+    button('Look again').focus();
+    button('Look again').click();
+  });
+  await settle();
+  expect(() => button('Look again')).toThrow();
+  expect(document.activeElement).toBe(button('Copy'));
+  expect(button('Copy').disabled).toBe(false);
+});
+
 it('says wikilinks find a page by title there, and address links in a move stop working', async () => {
   const wikilink = { kind: 'wikilink', page: 'pantry', text: 'Pantry', count: 1 } as const;
   const address = { kind: 'page-link', page: `${PERSONAL}/x`, text: 'Soup', count: 2 } as const;

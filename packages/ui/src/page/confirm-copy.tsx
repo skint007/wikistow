@@ -228,25 +228,31 @@ export function ConfirmCopy({
     void preview.refetch();
   };
   const confirmable = shown !== undefined && !preview.isError && shown.copyId !== spent;
-  // Once tried, unless it may have been made.
-  const offerLookAgain = !busy && !unsure && shown !== undefined && shown.copyId === spent;
+  // Once tried, unless it may have been made, or when the preview failed
+  // other than for a change meanwhile, which goes back to choose again.
+  const offerLookAgain =
+    !busy &&
+    !unsure &&
+    ((shown !== undefined && shown.copyId === spent) ||
+      (preview.isError && !isStale(preview.error)));
   // Focus moves on from a button that goes: from Stop, once it has run, to
-  // Look again or Back; from Look again, once looked at again, to Copy or Move.
+  // Look again or Back; from Look again, once looked at again, to Copy or
+  // Move. After a failed preview, Look again goes before Copy can be pressed.
   const footer = useRef<HTMLDivElement>(null);
   const backButton = useRef<HTMLButtonElement>(null);
   const againButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const was = useRef({ busy, offerLookAgain });
+  const toConfirm = useRef(false);
   useEffect(() => {
     if (was.current.busy && !busy) (againButton.current ?? backButton.current)?.focus();
-    else if (
-      was.current.offerLookAgain &&
-      !offerLookAgain &&
-      !footer.current?.contains(document.activeElement)
-    )
-      confirmButton.current?.focus();
+    else if (was.current.offerLookAgain && !offerLookAgain) toConfirm.current = true;
+    if (toConfirm.current && confirmable) {
+      toConfirm.current = false;
+      if (!footer.current?.contains(document.activeElement)) confirmButton.current?.focus();
+    }
     was.current = { busy, offerLookAgain };
-  }, [busy, offerLookAgain]);
+  }, [busy, offerLookAgain, confirmable]);
 
   return (
     <div className="grid gap-4">
@@ -269,7 +275,7 @@ export function ConfirmCopy({
           error={
             isStale(preview.error)
               ? 'Something changed since you chose where it goes. Go back and check again.'
-              : copyMessage(preview.error, copy)
+              : copyMessage(preview.error, copy, false)
           }
         />
       )}
