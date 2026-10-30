@@ -41,13 +41,16 @@ export const ancestorsOf = (spaceId: string, nodeId: string) => sql`
   )`;
 
 // A node and everything beneath it, but a copy's hidden nodes, which count
-// for nothing outside their copy (section 10).
+// for nothing outside their copy (section 10). The space is carried through
+// the walk rather than compared with a constant: for a space Postgres has
+// no statistics on yet, that estimates one row a step, and plans a scan of
+// the space's nodes for every node walked.
 export const subtreeOf = (spaceId: string, nodeId: string) => sql`
-  with recursive subtree(id, depth) as (
-    select id, 0 from nodes where id = ${nodeId} and space_id = ${spaceId}
+  with recursive subtree(id, space_id, depth) as (
+    select id, space_id, 0 from nodes where id = ${nodeId} and space_id = ${spaceId}
     union all
-    select n.id, s.depth + 1 from nodes n
-      join subtree s on n.parent_id = s.id and n.space_id = ${spaceId}
+    select n.id, n.space_id, s.depth + 1 from nodes n
+      join subtree s on n.space_id = s.space_id and n.parent_id = s.id
     where s.depth < ${MAX_DEPTH} and n.copy_id is null
   )`;
 

@@ -1291,11 +1291,13 @@ async function readerMayRead(db: Database, blob: { hash: string; pageId: string 
 async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promise<string[]> {
   let locked = new Set<string>();
   for (;;) {
+    // The space is carried through the walk, as in `subtreeOf`.
     const subtree = await tx.execute<{ id: string }>(sql`
-      with recursive subtree(id) as (
-        select id from nodes where id = ${nodeId} and space_id = ${spaceId}
+      with recursive subtree(id, space_id) as (
+        select id, space_id from nodes where id = ${nodeId} and space_id = ${spaceId}
         union all
-        select n.id from nodes n join subtree s on n.parent_id = s.id and n.space_id = ${spaceId}
+        select n.id, n.space_id from nodes n
+          join subtree s on n.space_id = s.space_id and n.parent_id = s.id
       )
       select id from subtree`);
     const ids = [...subtree].map((row) => row.id);
@@ -1318,10 +1320,11 @@ async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promi
  */
 async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): Promise<void> {
   await tx.execute(sql`
-    with recursive subtree(id) as (
-      select id from nodes where id = ${nodeId} and space_id = ${spaceId}
+    with recursive subtree(id, space_id) as (
+      select id, space_id from nodes where id = ${nodeId} and space_id = ${spaceId}
       union all
-      select n.id from nodes n join subtree s on n.parent_id = s.id and n.space_id = ${spaceId}
+      select n.id, n.space_id from nodes n
+        join subtree s on n.space_id = s.space_id and n.parent_id = s.id
     )
     select sh.id from shares sh join subtree on sh.root_id = subtree.id
     where sh.space_id = ${spaceId}

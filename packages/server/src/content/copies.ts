@@ -885,6 +885,8 @@ function staleNodes(
  * Delete the copy and its hidden nodes, with whatever was sent for them, as
  * deleting a node would; the hashes of their attachments, whose files go
  * once the transaction commits. The caller holds the destination space.
+ * Its nodes are held by their copy, not by a walk: nothing but its own
+ * nodes is ever under one of them, and no share is rooted in one.
  */
 async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
   const [top] = await tx
@@ -894,8 +896,14 @@ async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
   let removed: string[] = [];
   // Gone already if a delete at the destination took it.
   if (top) {
-    const at = { spaceId: copy.destinationSpaceId, nodeId: top.nodeId };
-    removed = await removeSubtree(tx, at.spaceId, at.nodeId, await holdSubtree(tx, at));
+    const held = await tx
+      .select({ id: nodes.id })
+      .from(nodes)
+      .where(and(eq(nodes.copyId, copy.id), eq(nodes.spaceId, copy.destinationSpaceId)))
+      .for('update');
+    const ids = held.map((node) => node.id);
+    if (!ids.includes(top.nodeId)) throw new ContentError('not-found');
+    removed = await removeSubtree(tx, copy.destinationSpaceId, top.nodeId, ids);
   }
   await tx.delete(copies).where(eq(copies.id, copy.id));
   return removed;
