@@ -884,6 +884,8 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
         // one region: only entries the writer can check stay (section 10).
         tree: () => linkTree,
         published: publicationsOf,
+        // Its text is the source's, apart from address links: no link is renamed.
+        renames: false,
       },
     );
     return linked;

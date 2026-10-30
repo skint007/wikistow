@@ -378,6 +378,50 @@ describe('a copy’s link table', () => {
     expect(table.has('elsewhere')).toBe(false);
     expect(table.get('budget')).toBe(w.budget);
   });
+
+  it('renames no link, so its draft and publication keep the source’s text', async () => {
+    const alice = await personWithVault(t);
+    const space = await spaceOperations.createSpace(alice.ctx, { name: 'Notes' });
+    const plan = await pages.createPage(alice.ctx, {
+      spaceId: space,
+      parentId: null,
+      title: 'Plan',
+    });
+    await pages.publishPage(alice.ctx, ref(space, plan));
+    const agenda = ref(
+      space,
+      await pages.createPage(alice.ctx, {
+        spaceId: space,
+        parentId: null,
+        title: 'Agenda',
+        markdown: 'See [[Plan]].',
+      }),
+    );
+    await pages.publishPage(alice.ctx, agenda);
+    // Plan is published under a new title since: a save of Agenda would rename its link.
+    await pages.editDraft(alice.ctx, ref(space, plan), { title: 'Roadmap' });
+    await pages.publishPage(alice.ctx, ref(space, plan));
+
+    const preview = await copies.previewCopy(alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: space, nodeId: agenda.pageId },
+      destination: { spaceId: space, parentId: null },
+    });
+    const made = await copies.makeCopy(alice.ctx, preview);
+    const copied = ref(space, made.nodeId);
+    const { heads, payload } = await current(alice.ctx, copied);
+    expect(payload.markdown).toBe('See [[Plan]].');
+    expect(linkTableOf(payload).get('plan')).toBe(plan);
+    expect(heads.draftChanges).toBe(false);
+    const { opened } = await pages.openRevisionOf(
+      alice.ctx,
+      copied,
+      'published',
+      heads.publishedHead ?? ('' as never),
+    );
+    if (opened.kind !== 'current') throw new Error('expected a publication');
+    expect(opened.payload.markdown).toBe('See [[Plan]].');
+  });
 });
 
 describe('a busy server, or a lost answer', () => {
