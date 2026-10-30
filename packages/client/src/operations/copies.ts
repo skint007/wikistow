@@ -643,7 +643,9 @@ export async function makeCopy(
     if (signal?.aborted) throw new CopyStopped();
   };
   live();
-  await sending.api.call(
+  // An opening whose answer was lost may have opened the copy: cancelled,
+  // which is not-found if it didn't.
+  const opening = sending.api.call(
     copyRoutes.open,
     {
       body: {
@@ -666,6 +668,10 @@ export async function makeCopy(
     },
     { idempotencyKey: preview.copyId },
   );
+  await opening.catch(async (error: unknown) => {
+    if (outcomeUnknown(error)) await cancelCopy(ctx, preview.copyId).catch(() => undefined);
+    throw error;
+  });
   // Whether to leave the copy: the last finish sent may have made it, its
   // answer lost, or the server was still too busy to finish it.
   let keep = false;

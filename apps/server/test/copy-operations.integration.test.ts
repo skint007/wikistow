@@ -576,6 +576,26 @@ describe('a busy server, or a lost answer', () => {
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
   });
 
+  it('cancels a copy whose opening is never answered', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const silent: Answer = async (input, send) => {
+      await send(input);
+      throw new ApiError(0, 'network', 'No answer from the opening');
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.open, silent]]));
+    const caught = await copies.makeCopy(ctx, preview).catch((e: unknown) => e);
+    expect(caught).not.toBeInstanceOf(copies.CopyKept);
+    expect(sent).toContain(copyRoutes.cancel);
+    expect(
+      await t.db.select().from(schema.copies).where(eq(schema.copies.id, preview.copyId)),
+    ).toEqual([]);
+  });
+
   it('keeps a copy whose finish is never answered, and says so', async () => {
     const w = await world();
     const preview = await copies.previewCopy(w.alice.ctx, {
