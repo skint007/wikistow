@@ -305,7 +305,7 @@ describe('copying', () => {
     expect(heads.draftHead).not.toBeNull();
   });
 
-  it('finishes when its source is deleted meanwhile, unlike a move', async () => {
+  it('shows a page whose source was deleted meanwhile, and ends once its source node is gone', async () => {
     const w = await world();
     const options = {
       from: w.lib.spaceId,
@@ -313,20 +313,34 @@ describe('copying', () => {
       to: w.board,
       parentId: w.pinned as FolderId | null,
     };
-    const copy = await openCopy(w.alice.ctx, options);
-    await copy.open();
-    await copy.send();
-    const move = await openCopy(w.alice.ctx, { ...options, kind: 'move', parentId: null });
-    await move.open();
-    await move.send();
-    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.lib.shared });
-    // What was sealed from it still arrives.
-    await copy.finish();
-    const made = at(w.board, copy.newIdOf(w.page.pageId));
+    const [kept, ended] = [
+      await openCopy(w.alice.ctx, options),
+      await openCopy(w.alice.ctx, options),
+    ];
+    const move = await openCopy(w.alice.ctx, {
+      ...options,
+      kind: 'move',
+      nodeId: w.lib.above,
+      parentId: null,
+    });
+    for (const copy of [kept, ended, move]) {
+      await copy.open();
+      await copy.send();
+    }
+    // A page under the source goes: the copy shows what was sealed from it.
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.page.pageId });
+    await kept.finish();
+    const made = at(w.board, kept.newIdOf(w.page.pageId));
+    expect((await nodeRow(made.pageId))?.copyId).toBeNull();
     expect((await textOf(w.carol.ctx, made, 'published'))?.markdown).toBe('published words');
-    // A move has nothing left to delete, and ends.
-    expect(await rejection(move.finish())).toBe('not-found');
-    expect(await nodeRow(move.newIdOf(w.lib.shared))).toBeNull();
+    // A move whose source changed ends.
+    expect(await rejection(move.finish())).toBe('stale-head');
+    expect(await nodeRow(move.newIdOf(w.lib.above))).toBeNull();
+    // Once the source node itself is gone, so does a copy.
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.lib.shared });
+    expect(await rejection(ended.finish())).toBe('not-found');
+    expect(await nodeRow(ended.newIdOf(w.lib.shared))).toBeNull();
+    expect(await copyRow(ended.copyId)).toBeNull();
   });
 
   it('leaves the drafts it was sealed from to draft retention', async () => {

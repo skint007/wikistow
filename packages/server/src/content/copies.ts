@@ -40,7 +40,6 @@ import {
 } from '../db/schema/index.ts';
 import {
   accessTo,
-  accessToPagesIn,
   canEdit,
   isOwner,
   lockShare,
@@ -152,13 +151,12 @@ const requireVersion = (actual: number, given: number) => {
 /**
  * Who may copy (section 10, **Who**), checked at the opening and again at
  * the finish: for a move, an owner of the source space, a person; for a
- * copy, someone who can edit every listed node of the source (`sourceIds`),
- * which an agent may within its picks; and for both, someone who can make
- * pages at the destination parent. Their access there, and its share.
- *
- * At the finish (`finishing`), a copy's source nodes deleted meanwhile are
- * left out, its top one too: what was sealed from them still arrives. A
- * move's finish checks its source subtree itself.
+ * copy, someone who can edit at the source node, which an agent may within
+ * its picks, and which covers everything under it, since shares don't
+ * nest; and for both, someone who can make pages at the destination
+ * parent. Their access there, and its share. A source node deleted
+ * meanwhile is not-found; nodes under it deleted meanwhile don't matter to
+ * a copy, which shows what was sealed from them.
  */
 async function requireCopier(
   tx: Database,
@@ -167,8 +165,6 @@ async function requireCopier(
     CopyRow,
     'kind' | 'sourceSpaceId' | 'sourceNodeId' | 'destinationSpaceId' | 'destinationParentId'
   >,
-  sourceIds: readonly string[],
-  { finishing = false } = {},
 ): Promise<{ share: ShareRow | null; canPublish: boolean }> {
   const holder: Holder = caller;
   if (copy.kind === 'move') {
@@ -184,11 +180,22 @@ async function requireCopier(
       );
     }
   } else {
-    const there = finishing ? await stillThere(tx, copy.sourceSpaceId, sourceIds) : sourceIds;
-    const access = await accessToPagesIn(tx, holder, copy.sourceSpaceId, there);
-    if (!finishing && !access.get(copy.sourceNodeId)) throw new ContentError('not-found');
-    if (![...access.values()].every(canEdit)) {
-      throw new ContentError('forbidden', 'Only someone who can edit all of it copies it');
+    // Owners have access anywhere in their space, so the node is looked for first.
+    const [there] = await tx
+      .select({ id: nodes.id })
+      .from(nodes)
+      .where(
+        and(
+          eq(nodes.id, copy.sourceNodeId),
+          eq(nodes.spaceId, copy.sourceSpaceId),
+          isNull(nodes.copyId),
+        ),
+      );
+    const access =
+      there && (await accessTo(tx, holder, { spaceId: copy.sourceSpaceId, nodeId: there.id }));
+    if (!access) throw new ContentError('not-found');
+    if (!canEdit(access)) {
+      throw new ContentError('forbidden', 'Only someone who can edit it copies it');
     }
   }
   const at = await accessTo(tx, holder, {
@@ -198,22 +205,6 @@ async function requireCopier(
   if (!at) throw new ContentError('not-found');
   if (!canEdit(at)) throw new ContentError('forbidden');
   return { share: at.share, canPublish: at.canPublish };
-}
-
-/** Those of `nodeIds` still listed in the space: neither deleted nor hidden. */
-async function stillThere(tx: Database, spaceId: string, nodeIds: readonly string[]) {
-  if (nodeIds.length === 0) return [];
-  const rows = await tx
-    .select({ id: nodes.id })
-    .from(nodes)
-    .where(
-      and(
-        eq(nodes.spaceId, spaceId),
-        isNull(nodes.copyId),
-        sql`${nodes.id} = any(${sql.param([...nodeIds])}::text[])`,
-      ),
-    );
-  return rows.map((row) => row.id);
 }
 
 /**
@@ -249,12 +240,7 @@ export async function openCopy(
       destinationSpaceId: input.destinationSpaceId,
       destinationParentId: input.parentId,
     };
-    const who = await requireCopier(
-      tx,
-      caller,
-      copy,
-      listed.map((node) => node.id),
-    );
+    const who = await requireCopier(tx, caller, copy);
     if (input.bringsPublished && !who.canPublish) {
       throw new ContentError('forbidden', 'Published versions go only where you can publish');
     }
@@ -739,13 +725,8 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
     .from(copyNodes)
     .innerJoin(nodes, eq(nodes.id, copyNodes.nodeId))
     .where(eq(copyNodes.copyId, copy.id));
-  const who = await requireCopier(
-    tx,
-    caller,
-    copy,
-    made.map((node) => node.sourceId),
-    { finishing: true },
-  );
+  // Every new node is shown, those whose source is gone with what was sealed from it.
+  const who = await requireCopier(tx, caller, copy);
   if (!who.canPublish && (copy.bringsPublished || made.some((n) => n.publishedFrom !== null))) {
     throw new ContentError('forbidden', 'You can no longer publish there');
   }

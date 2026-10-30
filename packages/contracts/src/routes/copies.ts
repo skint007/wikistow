@@ -45,8 +45,9 @@ export const CopiedNode = z.object({
  * subtree the caller's tree lists, under the same parents, are made hidden,
  * so their attachments can be uploaded. `kind: 'move'` deletes the source
  * when the copy finishes, and goes only into another space; only an owner
- * of the source space, with a session, moves. Anyone who can edit every
- * node of the source copies; and both need to make pages under `parentId`,
+ * of the source space, with a session, moves. Anyone who can edit at the
+ * source node, which covers everything under it, copies; and both need to
+ * make pages under `parentId`,
  * and to publish there when the copy `bringsPublished`.
  * `sourcePermissionVersion` and `permissionVersion` are the source node's
  * and the destination parent's (or space's), as the preview was made at.
