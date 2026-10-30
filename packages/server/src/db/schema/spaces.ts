@@ -46,6 +46,11 @@ export const nodes = pgTable(
     createdBy: uuid().references(() => users.id, { onDelete: 'set null' }),
     permissionVersion: bigint({ mode: 'number' }).notNull().default(1),
     metadataHead: text(),
+    /**
+     * Set while the node is one of a copy's new nodes, not shown yet: it is
+     * in no tree and counts for nothing outside its copy (`copies`).
+     */
+    copyId: text(),
     createdAt: timestamptz().notNull().defaultNow(),
   },
   (table) => [
@@ -61,5 +66,8 @@ export const nodes = pgTable(
     }).onDelete('cascade'),
     index('nodes_space_parent_idx').on(table.spaceId, table.parentId),
     index('nodes_created_by_kind_idx').on(table.createdBy, table.kind),
+    index('nodes_copy_idx')
+      .on(table.copyId)
+      .where(sql`${table.copyId} is not null`),
   ],
 );
