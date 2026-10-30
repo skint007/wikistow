@@ -83,7 +83,7 @@ Request flow and deployment:
 
 ## Content and permissions
 
-Every page and folder has a stable ID and one parent within one space. A page path is a human-friendly client view derived from decrypted names. Renaming a page does not change its identity or break internal links.
+Every page and folder has a stable ID and one parent within one space. A move between spaces is a copy, so the moved pages and folders get new IDs. A page path is a human-friendly client view derived from decrypted names. Renaming a page does not change its identity or break internal links.
 
 Personal spaces start with one owner. Shared spaces have at least one owner and may have multiple owners. Space owners can access all content in their space, including drafts. Installation administrators have no implicit space ownership or decryption access.
 

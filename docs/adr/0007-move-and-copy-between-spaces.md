@@ -7,9 +7,9 @@ status: accepted
 People want to move a page or folder into another space, and to copy one, into another space or the same one. The spec rules this out: "Treat a move into another space as an explicit copy or publication, not an ordinary rename" (`wikistow.md`, Sharing), and protocol section 10 ends "A move into another space isn't a move; it is a copy or a publication". This ADR replaces both rules. A move between spaces becomes a copy that deletes its source in the same transaction. The same machinery, without the delete, gives **Copy to…**.
 
 In short:
-- **Move to…** and **Copy to…** take a page or folder, with everything under it, to any folder or the top of any space where the person can make pages. Copy also works within one space. Moves within one space stay as they are (section 10).
+- **Move to…** and **Copy to…** take a page or folder, with everything under it, to any folder or the top of any space where the person can make pages. Copy also works within one space. Moves within one space stay as they are (protocol section 10).
 - Each page brings its current draft and current published version, sealed again for the destination by the person moving it. Folders bring their current name and look. Earlier history doesn't come: a move deletes it with the source.
-- The app makes the destination nodes hidden, uploads their records and attachments in as many requests as it needs, then finishes in one request. For a move, the finish deletes the source in the same transaction. If the source changed in the meantime, the finish is refused and the app seals the pages that changed again.
+- The app makes the destination nodes hidden, uploads their records and attachments in as many requests as it needs, then finishes in one request. For a move, the finish deletes the source in the same transaction. If a source page changed in the meantime, the finish is refused and the app seals the pages that changed again. If anything else changed, such as a page added to a moved folder, the app starts again from a new preview.
 - A move ends what deleting the source ends: its public links, its publications into other spaces, and the shares, members and agent picks inside it. A copy changes nothing at the source.
 
 ## What the code supports today
@@ -34,7 +34,7 @@ For each folder, its current name and look (one metadata version). The space's o
 
 Nothing else comes: no earlier drafts or published versions, no publications, no public link, no agent picks, no shares. A move deletes the source's history with the source. This was chosen over sealing every published version again as the mover, which would show one person as the author of all of history and make large pages slow.
 
-The new records are ordinary v2 records in the destination space, written and signed by the person moving or copying. The published version is written as section 13 writes a publication's version, with `basedOn: null`, and the draft also with `basedOn: null`, so neither names a version that isn't in the destination. Nothing inside the page records where it came from. The audit log does.
+The new records are ordinary v2 records in the destination space, written and signed by the person moving or copying. The published version is written as section 13 writes a publication's version, with `basedOn: null`, and the draft also with `basedOn: null`, so neither names a version that isn't in the destination. Nothing inside the page records where it came from: a copy leaves out `wikistow.publication`, which a detached publication's versions can still hold. The audit log records the copy.
 
 ### 2. Who can do it
 
@@ -51,7 +51,7 @@ Moves are for people, with a session, as sharing is. An agent may copy where bot
 
 ### 3. What is refused
 
-- **A publication copy** (a page with a live `wikistow.publication`, section 13), or a folder that holds one. Its publishers detach it first. The dialog lists the pages.
+- **A live publication**: a page the server's publication rows name as a destination not yet detached (section 13), or a folder that holds one. Its publishers detach it first. The dialog lists the pages.
 - **A move into the subtree itself**, as today.
 - **A move within one space.** That is the existing move of section 10, and the dialog sends it there.
 
@@ -61,7 +61,7 @@ Every new node takes the region of its parent's name record (section 6.1), as an
 
 ### 5. Links
 
-- **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page in the transfer to that page's new ID.
+- **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page of the same copy to that page's new ID. In a published version, the page counts as published only when its own published version comes along.
 - **To any other page**, an entry is worked out again by the usual rule for the destination (section 5.5). An entry for a page in the source space never survives: those links resolve by title in the destination, or show as unresolved. Property references (ADR 0006) follow their links.
 - **Into a moved page**, links from pages left in the source space stop working. The preview lists the linking pages the person can open.
 
@@ -78,16 +78,20 @@ A move always asks, even on a device where the person turned off confirming move
 
 ### 7. Three steps, like a publication
 
-1. **Open.** `POST /api/transfers` names the kind (`move` or `copy`), the source node and its space, the destination parent and space, and the new IDs of every node in the subtree with their kinds and parents. The server checks decision 2 and decision 3, and makes the destination nodes, hidden. Nobody's tree lists a hidden node, and nothing outside the transfer can name one.
-2. **Upload.** The app uploads each page's attachments to its new node, then sends each node's records with their key material, in batches that fit the body limit: `POST /api/transfers/:transferId/records`. Each record names the source version it was sealed from. A record is checked as any write is, apart from `basedOn: null` (decision 1).
-3. **Finish.** `POST /api/transfers/:transferId/finish` sends, for a move, the source permission versions the preview was made at. Under a lock on both spaces, taken in ID order, the server checks:
-   - every hidden node has its records;
-   - each record's source version is still its page's current draft or published head, and each folder's metadata head is still the one sealed, for a move;
-   - the destination's key version and permission version are still those the records were wrapped under.
+The protocol calls the whole operation a **copy**, of kind `copy` or `move`, since a move between spaces is a copy that deletes its source. ("Transfer" already means handing a space to another owner.)
 
-   It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A stale source is `stale-head` with the pages that changed. The app seals those again, sends them, and finishes again.
+1. **Open.** `POST /api/copies` names the kind, the source node and its space, the destination parent and space, the permission versions of both the preview was made at, and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, and that the new nodes mirror the source, and makes them, hidden.
+2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Each entry holds every record of one node, and names the source version each was sealed from. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check (`basedOn: null`, decision 1).
+3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
+   - every new node has its records;
+   - the destination parent's permission version, region and key version are those the records were written at;
+   - for a move, the source node's permission version is the one sent at opening, the source subtree still holds exactly the nodes the copy mirrors, under the same parents, and every source page's heads and folder's metadata head are still the versions sealed.
 
-A transfer nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
+   It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A source head that moved on is `stale-head`, naming the nodes: the app seals those again, sends them, and finishes again. Any other failure deletes the copy, and the app starts again from a new preview. Without the subtree check, a page someone added to a moved folder meanwhile would be deleted without being copied.
+
+**Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share or a move between regions must cover. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
+
+A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
 
 So a folder of any size moves or copies, which also avoids the one-request limit that section 10's moves still have.
 
@@ -111,11 +115,11 @@ Earlier history; moving a whole space; keeping a page's ID or address across a m
 
 ## Consequences
 
-- `wikistow.md` changes in Sharing (the cross-space move rule) and the capability table (copy). Protocol section 10 gains **Between spaces: transfers** in place of its last bullet. `CONTEXT.md` gains **Copy** and **Transfer**.
-- The server gains a `transfers` table, a hidden state for nodes, three routes, a sweep, and changes to the tree reads so hidden nodes stay out.
-- The client gains a transfer operation built from the publication sealing and the move preview.
+- `wikistow.md` changes in Sharing (the cross-space move rule) and the capability table (copy). Protocol section 10 gains **Copies, and moves between spaces** in place of its last bullet; A10, sections 5.5, 9.5, 9.6 and 13 mention copies. `CONTEXT.md` gains **Copy**.
+- The server gains a `copies` table, a hidden state for nodes, three routes and a cancel, a sweep, and changes to the tree reads and coverage checks so hidden nodes stay out.
+- The client gains a copy operation built from the publication sealing and the move preview.
 - Readers in the destination see new pages appear in one step. Readers at the source of a move see them go in the same step.
-- An app that fails part-way leaves a hidden transfer until the sweep. Nobody sees it.
+- An app that fails part-way leaves a hidden copy until the sweep. Nobody sees it.
 
 ## Decided (2026-10-30)
 
@@ -124,13 +128,13 @@ Scott chose, on #217:
 - pages and folders both;
 - moves for owners of the source space who can make pages at the destination, with published versions arriving published only where they can publish;
 - refusing publication copies until they are detached;
-- **Copy to…** alongside **Move to…**, the same transfer without the delete;
+- **Copy to…** alongside **Move to…**, the same operation without the delete;
 - readers can't copy, and the CLI copies but doesn't move.
 
 ## Implementation, in pull requests
 
 1. **This ADR, the spec and the protocol.**
-2. **The server:** `transfers`, hidden nodes, the three routes and the sweep, with integration tests, including the content-leak sweep for a transfer's hidden nodes.
+2. **The server:** `copies`, hidden nodes, the routes and the sweep, with integration tests, including the content-leak sweep for a copy's hidden nodes.
 3. **The client operation:** planning, preview, sealing, upload, finish and stale retries, with integration tests against the real server.
 4. **The dialog and menus,** with e2e tests for a move and a copy across spaces.
 5. **The CLI copy commands.**

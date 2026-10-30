@@ -111,13 +111,9 @@ A page in another space that receives explicitly published versions from a sourc
 **Publication source**
 The page and version a publication was copied from. It is recorded only inside the publication's encrypted content.
 
-**Transfer**
-Moving or copying a page or folder, with everything under it, by sealing it again as new pages and folders at the destination. A page brings only its current draft and published version, and gets a new address. A move between spaces is a transfer that deletes its source; a move within a space only changes keys and keeps everything.
-_Avoid_: Migration, export.
-
 **Copy**
-A transfer that leaves its source as it is. The copy has no tie to its source, unlike a publication.
-_Avoid_: Duplicate, clone.
+A page or folder, with everything under it, sealed again as new pages and folders at a destination, into any space. A page brings only its current draft and published version, and the copy has no tie to its source, unlike a publication. A move between spaces is a copy that deletes its source; a move within a space only changes keys, and keeps the page's history and address.
+_Avoid_: Transfer (that is handing a space to another owner), duplicate, clone.
 
 **Attachment**
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
