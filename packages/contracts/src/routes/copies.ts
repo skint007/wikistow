@@ -52,7 +52,7 @@ export const CopiedNode = z.object({
  * `sourcePermissionVersion` and `permissionVersion` are the source node's
  * and the destination parent's (or space's), as the preview was made at.
  * Refused: a source holding a live publication from another page
- * (`forbidden`, naming those pages in `detail.nodeIds`), and a page with
+ * (`forbidden`, naming the first hundred in `detail.nodeIds`), and a page with
  * neither a draft nor a published version, so nothing to copy (`forbidden`,
  * named the same way), a destination
  * inside the source (`binding-mismatch`),

@@ -264,7 +264,7 @@ export async function openCopy(
     );
     if (empty.length > 0) {
       throw new ContentError('forbidden', 'A page with no version is published again first', {
-        nodeIds: empty.map((node) => node.id),
+        nodeIds: empty.slice(0, NAMED).map((node) => node.id),
       });
     }
     const mirrored = mirror(input, listed);
@@ -357,16 +357,19 @@ function mirror(input: Open, listed: readonly Listed[]) {
   });
 }
 
+/** How many pages a refusal of the opening names, at most (`detail.nodeIds`). */
+const NAMED = 100;
+
 /**
  * Refuse a source holding a live publication from another page (section
- * 13): one with a version, not detached, named in `detail.nodeIds` so the
- * dialog lists them. Its publishers detach them first. An opening nobody
+ * 13): one with a version, not detached, the first hundred named in
+ * `detail.nodeIds` so the dialog lists them. Its publishers detach them first. An opening nobody
  * finished has no version, and isn't listed anyway.
  */
 async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
   if (pageIds.length === 0) return;
   const live = await tx
-    .select({ pageId: publications.destinationPageId })
+    .selectDistinct({ pageId: publications.destinationPageId })
     .from(publications)
     .innerJoin(pageHeads, eq(pageHeads.pageId, publications.destinationPageId))
     .where(
@@ -375,7 +378,8 @@ async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
         sql`${publications.destinationPageId} = any(${sql.param([...pageIds])}::text[])`,
       ),
     )
-    .orderBy(publications.destinationPageId);
+    .orderBy(publications.destinationPageId)
+    .limit(NAMED);
   if (live.length > 0) {
     throw new ContentError(
       'forbidden',
