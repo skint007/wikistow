@@ -630,7 +630,8 @@ describe('a copy not finished yet', () => {
   it('is sent to nobody, its opener included, by any route', async () => {
     const m = await memberWorld();
     // The owner copies the shared folder into a folder of the Board that
-    // the reader edits there, and sends everything but the finish.
+    // the reader edits there, and into the Board's owner region, and sends
+    // everything but the finishes.
     const board = await spaceOperations.createSpace(m.owner.ctx, { name: 'Board' });
     const pinned = await spaceOperations.createFolder(m.owner.ctx, {
       spaceId: board,
@@ -650,9 +651,17 @@ describe('a copy not finished yet', () => {
       to: board,
       parentId: pinned,
     });
-    await copy.open();
-    await copy.send();
-    const hidden = copy.sourceIds.map((id) => copy.newIdOf(id));
+    const owned = await openCopy(m.owner.ctx, {
+      from: m.spaceId,
+      nodeId: m.shared,
+      to: board,
+      parentId: null,
+    });
+    for (const each of [copy, owned]) {
+      await each.open();
+      await each.send();
+    }
+    const hidden = [copy, owned].flatMap((each) => each.sourceIds.map((id) => each.newIdOf(id)));
     const sent = (await allRevisions()).filter((r) => hidden.includes(r.pageId));
     expect(sent.length).toBeGreaterThan(0);
 
@@ -660,6 +669,8 @@ describe('a copy not finished yet', () => {
     for (const asker of [asPerson(m.reader), asPerson(m.owner)]) {
       const { text, statuses } = await everyAnswer(t, asker, at);
       expect(statuses['tree']).toBe(200);
+      // The owner's scan of the owner region, for a new co-owner, too.
+      if (asker.api === m.owner.api) expect(statuses['records']).toBe(200);
       for (const id of hidden) {
         expect(text).not.toContain(id);
         expect(statuses[`target:${id}`], id).toBe(404);
@@ -676,6 +687,7 @@ describe('a copy not finished yet', () => {
       for (const { hash } of files) expect(statuses[`blob:${hash}`], hash).toBe(404);
     }
     await copy.cancel();
+    await owned.cancel();
   });
 });
 
