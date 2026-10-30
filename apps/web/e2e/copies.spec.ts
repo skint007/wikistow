@@ -155,7 +155,10 @@ test('an editor who isn’t an owner can’t move into another space', async ({
     await dialog.getByRole('button', { name: 'Copy instead' }).click();
     await expect(eda.getByRole('dialog', { name: 'Copy “Agenda”' })).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    await eda.getByRole('dialog').getByLabel(/^Space:/).click();
+    await eda
+      .getByRole('dialog')
+      .getByLabel(/^Space:/)
+      .click();
     await expect(eda.getByRole('menuitemradio')).toHaveCount(2);
   });
 });
