@@ -2,6 +2,7 @@
 // an agent runs it, against the real server app with a real database. Its
 // person works through the client library, as their web app would.
 import { pageOperations as pages, spaceOperations, utf8 } from '@wikistow/client';
+import type { PageId, SpaceId } from '@wikistow/contracts';
 import { bumpPermissions, schema } from '@wikistow/server';
 import { personWithVault } from '@wikistow/server-app/testing/content';
 import { createTestApp, type TestApp } from '@wikistow/server-app/testing/harness';
@@ -668,6 +669,234 @@ describe('publishing into another space', () => {
       sameVersion: true,
     });
     expect(await pages.loadHistory(alice.ctx, copy)).toHaveLength(1);
+  }, 120_000);
+});
+
+/**
+ * Alice's library, with a folder Trip in Shared holding a published page
+ * that links to Plan and Route, and Route, a draft alone; and a folder
+ * Recipes she shares with Bob to read, with Soup published in it. And her board, with Pinned, where
+ * Bob's agent may publish, and Drafts, where Bob publishes but his agent
+ * may only edit. His agent has all four.
+ */
+async function copyWorld() {
+  const alice = await personWithVault(t);
+  const bob = await personWithVault(t);
+  const lib = await library(alice);
+  const { spaceId } = lib;
+  const folder = (space: typeof spaceId, parentId: typeof lib.shared | null, name: string) =>
+    spaceOperations.createFolder(alice.ctx, { spaceId: space, parentId, name });
+  const page = (parentId: typeof lib.shared, title: string, markdown: string) =>
+    pages.createPage(alice.ctx, { spaceId, parentId, title, markdown });
+  const trip = await folder(spaceId, lib.shared, 'Trip');
+  const packing = await page(trip, 'Packing', 'see [[Route]] and [[Plan]]');
+  await pages.publishPage(alice.ctx, { spaceId, pageId: packing });
+  const route = await page(trip, 'Route', 'north');
+  const recipes = await folder(spaceId, null, 'Recipes');
+  const soup = await page(recipes, 'Soup', 'leeks');
+  await pages.publishPage(alice.ctx, { spaceId, pageId: soup });
+  const board = await spaceOperations.createSpace(alice.ctx, { name: 'Board' });
+  const pinned = await folder(board, null, 'Pinned');
+  const drafts = await folder(board, null, 'Drafts');
+  for (const [space, rootId, role] of [
+    [spaceId, lib.shared, 'editor'],
+    [spaceId, recipes, 'reader'],
+    [board, pinned, 'editor'],
+    [board, drafts, 'editor'],
+  ] as const) {
+    const people = [await invite(alice, bob, role, role === 'editor')];
+    await shareFolder(alice.ctx, { spaceId: space, rootId, people });
+  }
+  const home = await cliHome();
+  const { agentId } = await enroll(server, home, bob, {
+    picks: [
+      { spaceId, folderId: lib.shared, role: 'editor', canPublish: true },
+      { spaceId, folderId: recipes, role: 'reader' },
+      { spaceId: board, folderId: pinned, role: 'editor', canPublish: true },
+      { spaceId: board, folderId: drafts, role: 'editor' },
+    ],
+  });
+  const run = (args: readonly string[]) =>
+    cli(home, [...args, '--json'], { passphrase: PASSPHRASE });
+  return { alice, lib, trip, packing, route, soup, board, pinned, drafts, home, agentId, run };
+}
+
+/** The pages Alice sees in `folderId` of `spaceId`, by title. */
+async function titlesIn(
+  alice: Awaited<ReturnType<typeof personWithVault>>,
+  spaceId: SpaceId,
+  folderId: string,
+) {
+  const tree = await spaceOperations.loadTree(alice.ctx, spaceId);
+  return tree.pages.filter((p) => p.parentId === folderId).map((p) => p.title);
+}
+
+describe('copying', () => {
+  it('copies a page and a folder into another space within its picks', async () => {
+    const w = await copyWorld();
+    const plan = w.lib.page.pageId;
+
+    const page = await w.run(['page', 'copy', plan, '--space', w.board, '--folder', w.pinned]);
+    expect(page.code, page.stdout).toBe(0);
+    const copied = page.json();
+    expect(copied).toEqual({
+      kind: 'page',
+      source: { spaceId: w.lib.spaceId, nodeId: plan },
+      spaceId: w.board,
+      nodeId: expect.any(String),
+      parentId: w.pinned,
+      pages: 1,
+      folders: 0,
+      unpublished: [],
+      links: [],
+    });
+    // Where the agent may publish, the copy has both versions, written by the agent.
+    const at = { spaceId: w.board, pageId: copied.nodeId as PageId };
+    const { heads } = await pages.loadPage(w.alice.ctx, at.pageId);
+    const open = async (audience: 'draft' | 'published', head: unknown) => {
+      const opened = await pages.openRevisionOf(w.alice.ctx, at, audience, head as never);
+      const payload = opened.opened.kind === 'current' ? opened.opened.payload : null;
+      return { author: opened.record.authorId, markdown: payload?.markdown };
+    };
+    expect(await open('draft', heads.draftHead)).toEqual({
+      author: w.agentId,
+      markdown: 'draft words',
+    });
+    expect(await open('published', heads.publishedHead)).toEqual({
+      author: w.agentId,
+      markdown: 'published words',
+    });
+
+    // Where it may only edit, a published page arrives with its draft
+    // alone, and is named. With only --folder, the space is looked up.
+    const folder = await w.run(['folder', 'copy', w.trip, '--folder', w.drafts]);
+    expect(folder.code, folder.stdout).toBe(0);
+    const trip = folder.json();
+    expect(trip).toEqual({
+      kind: 'folder',
+      source: { spaceId: w.lib.spaceId, nodeId: w.trip },
+      spaceId: w.board,
+      nodeId: expect.any(String),
+      parentId: w.drafts,
+      pages: 2,
+      folders: 1,
+      unpublished: [{ pageId: expect.any(String), sourceId: w.packing, title: 'Packing' }],
+      // Route comes along; Plan stays behind.
+      links: [{ kind: 'wikilink', page: 'plan', text: 'Plan', count: 1 }],
+    });
+    const tree = (await w.run(['tree', '--space', w.board])).json();
+    expect(tree.folders).toContainEqual({ id: trip.nodeId, parentId: w.drafts, name: 'Trip' });
+    const inTrip = (tree.pages as Record<string, unknown>[])
+      .filter((p) => p.parentId === trip.nodeId)
+      .map(({ id, title, publishedHead }) => ({ id, title, publishedHead }));
+    const [packing] = trip.unpublished as { pageId: string }[];
+    expect(inTrip).toEqual(
+      expect.arrayContaining([
+        { id: packing?.pageId, title: 'Packing', publishedHead: null },
+        { id: expect.any(String), title: 'Route', publishedHead: null },
+      ]),
+    );
+
+    // Without --json, where it went.
+    const text = await cli(w.home, ['page', 'copy', w.route, '--folder', w.pinned], {
+      passphrase: PASSPHRASE,
+    });
+    expect(text.code, text.stderr).toBe(0);
+    expect(text.stdout).toMatch(
+      new RegExp(
+        `^Copied page ${w.route} to folder ${w.pinned} of space ${w.board}, as page [\\w-]{22}: 1 page and 0 folders\\n$`,
+      ),
+    );
+  }, 120_000);
+
+  it('is refused outside its picks, and where it only reads', async () => {
+    const w = await copyWorld();
+    const nodes = async () =>
+      (await t.db.select({ id: schema.nodes.id }).from(schema.nodes)).map((n) => n.id).sort();
+    const before = await nodes();
+
+    const beside = await w.run(['page', 'copy', w.lib.beside.pageId, '--folder', w.pinned]);
+    expect(beside.code, beside.stdout).toBe(4);
+    const above = ['--space', w.lib.spaceId, '--folder', w.lib.above];
+    const into = await w.run(['page', 'copy', w.lib.page.pageId, ...above]);
+    expect(into.code, into.stdout).toBe(4);
+    // It reads Soup, but only an editor copies.
+    const read = await w.run(['page', 'copy', w.soup, '--folder', w.pinned]);
+    expect(read.code, read.stdout).toBe(1);
+    expect(read.json().error.code).toBe('forbidden');
+    // Two shares in that space, so it must be told which.
+    const two = await w.run(['page', 'copy', w.lib.page.pageId, '--space', w.lib.spaceId]);
+    expect(two.code, two.stdout).toBe(2);
+    expect(two.json().error.message).toContain('give --folder');
+    const self = await w.run(['folder', 'copy', w.lib.shared, '--folder', w.trip]);
+    expect(self.code, self.stdout).toBe(2);
+
+    // Nothing was made, hidden or not.
+    expect(await nodes()).toEqual(before);
+  }, 120_000);
+
+  it('finds a copy whose finish’s answer was lost, and makes a keyed copy once', async () => {
+    const w = await copyWorld();
+    const to = ['page', 'copy', w.lib.page.pageId, '--space', w.board, '--folder', w.pinned];
+    const opened: string[] = [];
+    // Which finish's answer is lost, and whether the tree read after it fails too.
+    let lose: 'answer' | 'answer and look' | null = null;
+    let blind = false;
+    server.hooks.intercept = async (request, forward) => {
+      const { pathname } = new URL(request.url);
+      if (request.method === 'POST' && pathname === '/api/copies') {
+        opened.push(JSON.parse(await request.clone().text()).nodes[0].nodeId);
+      }
+      if (blind && request.method === 'GET' && pathname === `/api/spaces/${w.board}/tree`) {
+        blind = false;
+        return new Response('gone', { status: 502 });
+      }
+      const res = await forward();
+      if (lose && request.method === 'POST' && pathname.endsWith('/finish')) {
+        // The copy finishes, but its answer never comes back.
+        blind = lose === 'answer and look';
+        lose = null;
+        return new Response('gone', { status: 502 });
+      }
+      return res;
+    };
+    try {
+      // The CLI looks, and finds it there.
+      lose = 'answer';
+      const found = await w.run(to);
+      expect(found.code, found.stdout).toBe(0);
+      expect(found.json().nodeId).toBe(opened[0]);
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan']);
+
+      // Nor can it look: with a key, running it again is safe.
+      const key = ['--idempotency-key', 'copy-retry-1'];
+      lose = 'answer and look';
+      const lost = await w.run([...to, ...key]);
+      expect(lost.code, lost.stdout).toBe(1);
+      expect(lost.json().error).toMatchObject({ outcomeUnknown: true });
+      expect(lost.json().error.message).toContain('same --idempotency-key');
+      const again = await w.run([...to, ...key]);
+      expect(again.code, again.stdout).toBe(0);
+      expect(again.json().nodeId).toBe(opened[1]);
+      expect(opened).toHaveLength(2);
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan']);
+
+      // Every node of a keyed copy is made from the key, so a retry reports the copy's own IDs.
+      const trip = ['folder', 'copy', w.trip, '--folder', w.drafts];
+      const first = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
+      expect(first.code, first.stdout).toBe(0);
+      const retried = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
+      expect(retried.json()).toEqual(first.json());
+      expect(opened).toHaveLength(3);
+      const [packing] = first.json().unpublished as { pageId: string }[];
+      expect(await titlesIn(w.alice, w.board, String(first.json().nodeId))).toEqual(
+        expect.arrayContaining(['Packing', 'Route']),
+      );
+      const { heads } = await pages.loadPage(w.alice.ctx, packing?.pageId as PageId);
+      expect(heads.publishedHead).toBeNull();
+    } finally {
+      server.hooks.intercept = null;
+    }
   }, 120_000);
 });
 

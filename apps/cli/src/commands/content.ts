@@ -534,7 +534,11 @@ export async function spaceOfFolder(ctx: ClientContext, folderId: FolderId): Pro
  * Where a folder goes with no `--parent`: the top of the space, if this
  * agent was given all of it, else the folder its one share there starts at.
  */
-async function shareStart(ctx: ClientContext, spaceId: SpaceId): Promise<FolderId | null> {
+export async function shareStart(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  option = '--parent',
+): Promise<FolderId | null> {
   const starts = (await sharingOperations.sharedWithMe(ctx))
     .filter((item) => item.share.spaceId === spaceId)
     .map((item) => item.folderId);
@@ -544,7 +548,7 @@ async function shareStart(ctx: ClientContext, spaceId: SpaceId): Promise<FolderI
   if (starts.length > 1) {
     throw new CliError(
       'usage',
-      'This agent has more than one share in that space: give --parent, a folder from spaces list or tree',
+      `This agent has more than one share in that space: give ${option}, a folder from spaces list or tree`,
     );
   }
   return start;

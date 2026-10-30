@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Copies and moves between spaces (ADR 0007). `POST /api/copies` opens a copy of a page or folder, with everything under it, as hidden nodes under a destination folder or the top of a space. `POST /api/copies/:copyId/records` takes each node's records, sealed again for the destination, in batches. `POST /api/copies/:copyId/finish` shows them, and for a move, deletes the source in the same transaction, if its pages and folders haven't changed since they were sealed. `DELETE /api/copies/:copyId` cancels. Moves are for people who own the source space; copies are for anyone who can edit it, agents included. A finished copy answers a repeated finish or cancel as the first did for a day, and one left unfinished is deleted a day after its last request. Hidden nodes are in no tree, read or search. The audit log records `node.moved-between-spaces` and `node.copied`. (#219)
 
+#### CLI
+
+- `wikistow page copy PAGE_ID` and `wikistow folder copy FOLDER_ID`, with `--space SPACE_ID`, `--folder FOLDER_ID` or both, copy a page, or a folder with everything in it, as new ones into a folder of any space the agent may make pages in, or the top of its share there. Each page brings its current draft and published version and their files. Pages arrive published only where the agent and its person may publish, and the output names the rest. It prints the new page's or folder's ID and space, and how many pages and folders were copied. An agent copies and never moves. With `--idempotency-key`, a retry finds the first run's copy rather than making a second, and the skill says to copy only what the person asks for. (#217)
+
 ## 0.19.0 - 2026-10-29
 
 ### Highlights

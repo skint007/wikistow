@@ -54,8 +54,8 @@ PowerShell 5.1, so accents become ?, and its > writes UTF-16). cmd's < and
   : '';
 
 const RETRYING = `Retrying a change:
-  Give create, draft, attach and publish --idempotency-key KEY, a new KEY for
-  each new change. Running the same command again with the same KEY and the
+  Give create, draft, attach, publish and copy --idempotency-key KEY, a new
+  KEY for each new change. Running the same command again with the same KEY and the
   same input never makes the change twice: if the first run's answer came
   back, it is reported again and nothing is sent; if not, the first run's
   exact request is sent again. So retrying with the same KEY is safe after
@@ -71,7 +71,9 @@ const RETRYING = `Retrying a change:
   new KEY.
   Without a KEY, check (tree, page read) before running a change again.
   page unpublish and page publish-to take no KEY: each names what it
-  changes, so run it again as it was (see their --help).
+  changes, so run it again as it was (see their --help). page copy and
+  folder copy keep no journal: a KEY names the copy they make, which a
+  retry finds (see their --help).
   The CLI keeps each keyed change, encrypted, in ${DIR}${SEP}journal${SEP},
   until a day after its answer came back, as long as the server keeps KEY.
 `;
@@ -90,6 +92,7 @@ Commands:
   search QUERY [--space SPACE_ID]
   export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
   folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
+  folder copy FOLDER_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page read PAGE_ID [--draft] [--revision REVISION_ID]
   page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
   page draft PAGE_ID --base REVISION_ID --file PATH|- [--title TITLE]
@@ -100,6 +103,7 @@ Commands:
   page publish-to PAGE_ID --space SPACE_ID [--folder FOLDER_ID] --revision REVISION_ID [--draft]
                   (--preview | --base-copy PUBLISHED_ID|none --attachments all|none|ID,...
                                [--permission-version N])
+  page copy PAGE_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page history PAGE_ID
   page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
 
@@ -138,7 +142,7 @@ ${
                             command (3<<<..., echo ... |): shell history keeps it`
 }
   --use-passphrase          ask for the passphrase even if a secret store is configured
-  --idempotency-key KEY     for create, draft, attach and publish (see below)
+  --idempotency-key KEY     for create, draft, attach, publish and copy (see below)
   --help                    more about the command
 
 ${RETRYING}
@@ -174,6 +178,69 @@ title.`;
 const FILE = `--file PATH reads the Markdown from PATH, or from standard input for -.
 It must be UTF-8, and is kept byte for byte, line ends included. A page holds
 at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} of it: more exits 2 (too-large), and nothing changes.${PIPES}`;
+
+/** `page copy` and `folder copy`'s help, for `page` or `folder`. */
+const copyHelp = (noun: 'page' | 'folder') => {
+  const ID = `${noun.toUpperCase()}_ID`;
+  const what =
+    noun === 'page'
+      ? `Copy the page as a new page, into a folder of this space or another.
+The original stays as it is.`
+      : `Copy the folder, with every folder and page in it this agent can see,
+as new ones, into a folder of this space or another. The original stays
+as it is.`;
+  return `Usage: wikistow ${noun} copy ${ID} [--space SPACE_ID] [--folder FOLDER_ID]
+
+${what}
+
+Each page brings its current draft, and its current published version if
+it has one, with every file those list, encrypted afresh; each folder its
+name and look. Nothing else comes: no earlier versions, shares,
+publications or public link. Every copy is new, with a new ID, written by
+this agent.
+
+--folder is where the copy goes. Without it, it goes at the top of the
+agent's share in --space: the space's top level if the share is the whole
+space, else the folder the share starts at. With more than one share in
+the space, give --folder. --space saves looking up which space --folder
+is in.
+
+The agent must be able to edit what it copies, and to make pages where it
+goes: its share and its person both. A page published now arrives
+published only where both may also publish there, else with its draft
+alone, listed in "unpublished". So a copy where the agent may publish
+publishes the copies there. This agent never moves anything into another
+space: moves are for its person, in WikiStow.
+
+Links between pages copied together lead to each other's copies. In
+another space, a wikilink to a page left behind finds a page of that
+title there, or none: "links" lists them.
+
+Prints the new ${noun}'s ID, and how many pages and folders were copied.
+With --json:
+  {"kind":"${noun}","source":{"spaceId":"...","nodeId":"..."},"spaceId":"...",
+   "nodeId":"...","parentId":"...","pages":N,"folders":N,
+   "unpublished":[{"pageId":"...","sourceId":"...","title":"..."}],
+   "links":[{"kind":"wikilink","page":"...","text":"...","count":N}]}
+nodeId is the copy, and parentId the folder it went in (null for the top
+of the space). unpublished lists each page published where it is now
+that arrives with its draft alone: pageId its copy, sourceId the original,
+and title null where it couldn't be read. links is null when some page's
+links couldn't be read.
+
+Nothing is made unless the copy finishes. If what it copies, or who has
+access where it goes, changes while it is sent, it is refused (exit 3):
+run it again. If the finish's answer is lost, the CLI looks for the copy
+there, and reports it if it landed.
+
+Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
+Every page and folder it makes gets an ID made from KEY, so running the
+same command again with the same KEY finds the first run's copy if it
+finished, and reports it ("copied by an earlier run"), or else copies. The same KEY with another
+${noun}, --space or --folder makes another copy. Without a KEY, look in tree
+before running a copy again whose outcome is unknown.
+`;
+};
 
 /** Each command's own help. */
 export const COMMAND_HELP = {
@@ -317,6 +384,7 @@ A left-out attachment's path is where it would have been: its page's
 links still name it there. A lost connection, an expired session or a
 server error fails the export instead.
 `,
+  'folder copy': copyHelp('folder'),
   'page read': `Usage: wikistow page read PAGE_ID [--draft] [--revision REVISION_ID]
 
 One version's title, Markdown and attachments. Without --draft, the
@@ -484,6 +552,7 @@ exist yet, or to standard output for - (not a terminal, and not with
 the draft with --draft, or --revision. Attachment IDs are listed under
 attachments by page read --json.${PIPES}
 `,
+  'page copy': copyHelp('page'),
   'page history': `Usage: wikistow page history PAGE_ID
 
 The published versions, newest first, and who published each.
