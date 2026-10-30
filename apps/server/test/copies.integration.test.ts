@@ -963,6 +963,37 @@ describe('a copy’s hidden nodes', () => {
     expect(await nodeRow(other.newIdOf(w.page.pageId))).toBeNull();
   });
 
+  it('stay their copy’s when its source is deleted, to cancel or sweep', async () => {
+    const w = await world();
+    const options = {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned as FolderId | null,
+    };
+    const cancelled = await openCopy(w.alice.ctx, options);
+    const abandoned = await openCopy(w.alice.ctx, { ...options, kind: 'move' });
+    for (const copy of [cancelled, abandoned]) {
+      await copy.open();
+      await copy.send();
+    }
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.lib.shared });
+    // The source's delete took neither copy.
+    for (const copy of [cancelled, abandoned]) {
+      expect(await copyRow(copy.copyId)).not.toBeNull();
+      expect((await nodeRow(copy.newIdOf(w.page.pageId)))?.copyId).toBe(copy.copyId);
+    }
+    expect(await cancelled.cancel()).toEqual({ ok: true });
+    expect(await nodeRow(cancelled.newIdOf(w.lib.shared))).toBeNull();
+    await t.db
+      .update(schema.copies)
+      .set({ touchedAt: DAYS_AGO_2() })
+      .where(eq(schema.copies.id, abandoned.copyId));
+    expect((await sweepBlobs(t.db, fileBlobStore(t.blobDir))).copies).toBe(1);
+    expect(await copyRow(abandoned.copyId)).toBeNull();
+    expect(await nodeRow(abandoned.newIdOf(w.page.pageId))).toBeNull();
+  });
+
   it('leave a share, a new co-owner and a move between regions nothing to cover', async () => {
     const w = await world();
     const folder = (name: string) =>
@@ -1016,7 +1047,10 @@ describe('a finished copy', () => {
     });
     const made = at(w.board, move.newIdOf(w.page.pageId));
     // Its answer lost, the app finishes again, or gives up and cancels:
-    // nothing changes, and the source is gone already.
+    // nothing changes, and the source is gone already. Deleting it didn't
+    // take the copy's row, whose references to it don't cascade.
+    expect(await nodeRow(w.lib.shared)).toBeNull();
+    expect((await copyRow(move.copyId))?.finishedAt).not.toBeNull();
     expect(await move.finish()).toEqual({ ok: true });
     expect(await move.cancel()).toEqual({ ok: true });
     expect(await move.finish()).toEqual({ ok: true });
