@@ -183,3 +183,50 @@ it('tells both spaces when a move between them finishes', async () => {
     stop.abort();
   }
 });
+
+it('tells nobody of a copy opened, sent and cancelled while they listen', async () => {
+  const [owner, toMember] = await Promise.all([personWithVault(t), personWithVault(t)]);
+  const lib = await library(owner);
+  const board = await spaceOperations.createSpace(owner.ctx, { name: 'Board' });
+  const pinned = await spaceOperations.createFolder(owner.ctx, {
+    spaceId: board,
+    parentId: null,
+    name: 'Pinned',
+  });
+  await shareFolder(owner.ctx, {
+    spaceId: board,
+    rootId: pinned,
+    people: [await invite(owner, toMember, 'reader')],
+  });
+  const scratch = await spaceOperations.createSpace(owner.ctx, { name: 'Scratch' });
+  const theirs = await spaceOperations.createSpace(toMember.ctx, { name: 'Theirs' });
+  const stop = new AbortController();
+  try {
+    const [byOwner, byTo] = await Promise.all([
+      hearing(owner, stop.signal),
+      hearing(toMember, stop.signal),
+    ]);
+    const copy = await openCopy(owner.ctx, {
+      from: lib.spaceId,
+      nodeId: lib.shared,
+      to: board,
+      parentId: pinned,
+    });
+    await copy.open();
+    await copy.send();
+    await copy.cancel();
+    // A change each hears afterwards, in order, so anything the copy told them came first.
+    await spaceOperations.createFolder(owner.ctx, { spaceId: scratch, parentId: null, name: 'A' });
+    await spaceOperations.createFolder(toMember.ctx, {
+      spaceId: theirs,
+      parentId: null,
+      name: 'B',
+    });
+    await expect.poll(() => byOwner, SOON).toContain(scratch);
+    await expect.poll(() => byTo, SOON).toContain(theirs);
+    expect(byOwner).not.toContain(board);
+    expect(byTo).not.toContain(board);
+  } finally {
+    stop.abort();
+  }
+});
