@@ -19,6 +19,7 @@ import {
   spacesQuery,
   treeQuery,
 } from '../src/data/queries.ts';
+import { MoveDialog } from '../src/page/move-dialog.tsx';
 import { PublishDialog } from '../src/page/publish-dialog.tsx';
 import type { Tree } from '../src/sharing/names.ts';
 import { vaultStore } from '../src/vault/store.ts';
@@ -39,24 +40,29 @@ vaultStore.unlock(ctx, {} as UnlockedVault);
 type Spaces = Awaited<ReturnType<typeof spaceOperations.loadSpaces>>;
 
 const named = (name: string) => ({ opened: { kind: 'current', metadata: { name } } });
-// A space as `loadSpaces` lists it, owned by this person.
-const space = (id: SpaceId, name: string) =>
+// A space as `loadSpaces` lists it, owned by this person unless `role` says otherwise.
+const space = (id: SpaceId, name: string, role = 'owner') =>
   ({
     id,
     kind: 'shared',
-    role: 'owner',
+    role,
     canPublish: true,
     permissionVersion: 1,
     metadata: named(name),
   }) as unknown as Spaces[number];
-// A space's tree as `loadTree` gives it, with only what the pickers read.
-const treeOf = (name: string, folders: Record<string, FolderId>) =>
+// A space's tree as `loadTree` gives it, with only what the pickers read:
+// its folders at the top, unless `under` puts one in another.
+const treeOf = (
+  name: string,
+  folders: Record<string, FolderId>,
+  { role = 'owner', under = {} }: { role?: string; under?: Record<string, FolderId> } = {},
+) =>
   ({
-    space: { role: 'owner', canPublish: true, metadata: named(name) },
+    space: { role, canPublish: true, metadata: named(name) },
     shares: [],
     folders: Object.entries(folders).map(([folder, id]) => ({
       id,
-      parentId: null,
+      parentId: under[folder] ?? null,
       metadata: named(folder),
     })),
     pages: [{ id: BEANS, parentId: null }],
@@ -222,4 +228,88 @@ it('keeps the space picked to publish to, and asks again when it goes', async ()
   expect(alerts()).toEqual([]);
   expect(shown('Folder')).toBe('Top of Archive');
   expect(button('Next').disabled).toBe(false);
+});
+
+// The options a picker offers, by its label.
+const options = async (label: string) => {
+  await act(async () => {
+    field(label).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  });
+  const listed = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map(
+    (o) => o.textContent,
+  );
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+  });
+  return listed;
+};
+const title = () => document.querySelector('[data-slot="dialog-title"]')?.textContent;
+
+it('moves within the space, or for its owner into another, from one dialog', async () => {
+  await mount(
+    <MoveDialog
+      spaceId={PERSONAL}
+      moving={{ id: BEANS, kind: 'page', name: 'Bean plan' }}
+      onOpenChange={() => {}}
+    />,
+    [space(PERSONAL, 'Personal'), space(WORK, 'Work')],
+    {
+      [PERSONAL]: treeOf('Personal', { Kitchen: KITCHEN, Garden: GARDEN }),
+      [WORK]: treeOf('Work', {}),
+    },
+  );
+  expect(title()).toBe('Move “Bean plan”');
+  expect(shown('Space')).toBe('Personal (this space)');
+  // Not where it is already.
+  expect(await options('Folder')).toEqual(['Garden', 'Kitchen']);
+
+  await choose('Space', 'Work');
+  expect(await options('Folder')).toEqual(['Top of Work']);
+  expect(button('Next').disabled).toBe(false);
+});
+
+it('tells an editor who isn’t an owner that only owners move into another space', async () => {
+  await mount(
+    <MoveDialog
+      spaceId={PERSONAL}
+      moving={{ id: BEANS, kind: 'page', name: 'Bean plan' }}
+      onOpenChange={() => {}}
+    />,
+    [space(PERSONAL, 'Family', 'editor'), space(WORK, 'Work')],
+    {
+      [PERSONAL]: treeOf('Family', { Kitchen: KITCHEN }, { role: 'editor' }),
+      [WORK]: treeOf('Work', {}),
+    },
+  );
+  expect(await options('Space')).toEqual(['Family (this space)']);
+  expect(document.body.textContent).toContain(
+    'Only an owner of this space can move things into another space. You can copy it there instead.',
+  );
+
+  await act(async () => button('Copy instead').click());
+  expect(title()).toBe('Copy “Bean plan”');
+  expect(await options('Space')).toEqual(['Family (this space)', 'Work']);
+  expect(document.body.textContent).not.toContain('Only an owner');
+});
+
+it('copies a folder anywhere in its space but inside itself, beside it included', async () => {
+  await mount(
+    <MoveDialog
+      spaceId={PERSONAL}
+      moving={{ id: KITCHEN, kind: 'folder', name: 'Kitchen', action: 'copy' }}
+      onOpenChange={() => {}}
+    />,
+    [space(PERSONAL, 'Personal')],
+    {
+      [PERSONAL]: treeOf(
+        'Personal',
+        { Kitchen: KITCHEN, Pantry: 'pantry-folder' as FolderId, Garden: GARDEN },
+        { under: { Pantry: KITCHEN } },
+      ),
+    },
+  );
+  expect(title()).toBe('Copy “Kitchen”');
+  expect(await options('Folder')).toEqual(['Top of Personal', 'Garden']);
 });

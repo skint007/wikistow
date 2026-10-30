@@ -44,6 +44,65 @@ export function moveMessage(error: unknown, kind: 'folder' | 'page'): string {
   return sharingMessage(error);
 }
 
+/**
+ * The pages a copy's refusal names as published here from other pages,
+ * which their publishers detach first (ADR 0007, decision 3), or null for
+ * any other failure.
+ */
+export function publishedFromElsewhere(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.code !== 'forbidden') return null;
+  const nodeIds = error.detail?.nodeIds;
+  return nodeIds && nodeIds.length > 0 ? nodeIds : null;
+}
+
+// A copy or move between spaces is undone in full when it fails: the
+// server, or the app, deletes what it made. The words differ only in the verb.
+const copyRefused = (
+  nothing: string,
+): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
+  'stale-head': `Something in it changed while it was going, so ${nothing}. Look at it again.`,
+  'permission-version': `Who has access changed while you were looking, so ${nothing}. Look at it again.`,
+  'key-version': `The keys where it was going changed meanwhile, so ${nothing}. Look at it again.`,
+  'not-found': `That page or folder, or where it was going, isn’t there any more, so ${nothing}.`,
+  'binding-mismatch': `It can’t go inside itself, so ${nothing}.`,
+  'too-deep': `That would put something more than 256 folders deep, so ${nothing}.`,
+  'page-limit': `That would make more pages than your account may have, so ${nothing}.`,
+  'folder-limit': `That would make more folders than your account may have, so ${nothing}.`,
+  'storage-full': `Your storage is full, so ${nothing}. Free up some space, or ask your administrator for more.`,
+  'missing-blob': `An attachment didn’t arrive, so ${nothing}. Try again.`,
+  'rate-limited': `The server is busy, so ${nothing}. Try again in a moment.`,
+  'region-mismatch': `The server says that place is somewhere other than where this app found it, so ${nothing}. This could be an attack.`,
+  'missing-key': `This app can’t open something in it, so ${nothing}.`,
+  'unsupported-format': `Something in it was saved by a newer version of WikiStow, so ${nothing}. Update the app to copy it.`,
+});
+const COPY_REFUSED = copyRefused('nothing was copied');
+const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
+
+/**
+ * A short message for a failed copy, or move into another space (`copy`
+ * false): this app's own words, never the server's. A refusal for pages
+ * published from other pages is said here; the dialog lists them.
+ */
+export function copyMessage(error: unknown, copy: boolean): string {
+  const nothing = copy ? 'nothing was copied' : 'nothing moved';
+  if (publishedFromElsewhere(error)) {
+    return `Some pages in it were published here from other pages, so ${nothing}. Someone who can publish each one detaches it first, with Detach to edit…`;
+  }
+  if (error instanceof ApiError && error.code === 'forbidden') {
+    return copy
+      ? 'You can’t copy it there, so nothing was copied. You need to be able to edit everything in it, and to make pages where it goes.'
+      : 'You can’t move it there, so nothing moved. Only an owner of this space moves things into another space, and they need to be able to make pages where it goes.';
+  }
+  if (error instanceof PageTooLarge) {
+    return `${error.message} ${copy ? 'Nothing was copied.' : 'Nothing moved.'}`;
+  }
+  const refused = copy ? COPY_REFUSED : MOVE_ACROSS_REFUSED;
+  if (error instanceof ApiError || error instanceof CryptoError) {
+    return refused[error.code] ?? sharingMessage(error);
+  }
+  return sharingMessage(error);
+}
+
 const UNPUBLISH_REFUSED: Partial<Record<ApiError['code'], string>> = {
   'stale-head':
     'Someone published or unpublished this page since you opened it, so nothing changed. Look again.',

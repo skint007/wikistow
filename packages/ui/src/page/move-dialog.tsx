@@ -1,4 +1,5 @@
 import {
+  foldersUnder,
   moveOperations,
   type ClientContext,
   type FolderId,
@@ -24,7 +25,7 @@ import { Picker } from '@/components/ui/picker';
 import { runCommand } from '../commands/command';
 import { moveNode } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { refreshAccess, spacesQuery, treeQuery } from '../data/queries';
+import { refreshAccess, sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { THIS_DEVICE } from '../settings/rows';
 import { PreviewTree } from '../sharing/first-share';
 import { isStale } from '../sharing/messages';
@@ -34,18 +35,27 @@ import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
 import { askBeforeMoves, useAskBeforeMoves } from './ask-before-moves';
+import { ConfirmCopy, type Chosen } from './confirm-copy';
 import { moveMessage } from './messages';
-import { moveDestinations, type Destination } from './move-model';
+import {
+  copyDestinations,
+  copySpaces,
+  moveDestinations,
+  type Destination,
+  type MoveTree,
+} from './move-model';
 
 /**
- * What is being moved: a page or a folder, by the name the person sees.
- * A drop in the sidebar has already chosen where it goes (`to`), so the
- * dialog opens on who gains and loses access.
+ * What is being moved or copied: a page or a folder, by the name the
+ * person sees. A drop in the sidebar has already chosen where it goes
+ * (`to`), in its own space, so the dialog opens on who gains and loses access.
  */
 export type Moving = {
   id: FolderId | PageId;
   kind: 'folder' | 'page';
   name: string;
+  /** Move to… (the default) or Copy to…. */
+  action?: 'move' | 'copy';
   to?: Destination<FolderId>;
   /**
    * Why a drop moving without asking stopped, for the dialog it opens on:
@@ -58,6 +68,13 @@ export type Moving = {
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
+// What choosing a place needs of a space's tree.
+const moveTreeOf = (tree: Tree): MoveTree<FolderId> => ({
+  space: tree.space && { role: tree.space.role, opened: tree.space.metadata !== null },
+  shares: tree.shares,
+  folders: tree.folders.map((f) => ({ id: f.id, parentId: f.parentId, name: nameOf(f.metadata) })),
+});
+
 /** Where a page or folder in `tree` can move, for the dialog's picker and the sidebar's drops. */
 export function destinationsIn(
   tree: Tree,
@@ -68,24 +85,19 @@ export function destinationsIn(
     tree.folders.find((f) => f.id === moving.id) ?? tree.pages.find((p) => p.id === moving.id);
   if (!node) return [];
   return moveDestinations(
-    {
-      space: tree.space && { role: tree.space.role, opened: tree.space.metadata !== null },
-      shares: tree.shares,
-      folders: tree.folders.map((f) => ({
-        id: f.id,
-        parentId: f.parentId,
-        name: nameOf(f.metadata),
-      })),
-    },
+    moveTreeOf(tree),
     { id: node.id, kind: moving.kind, parentId: node.parentId },
     { owner },
   );
 }
 
 /**
- * Move a page or folder (protocol section 10): choose where it goes, look
- * over who gains and who loses access when that crosses a shared folder's
- * edge, then move it. Opened from the page menu, the folder menu, and a
+ * Move or copy a page or folder: choose a space, then where in it it goes.
+ * A move within its own space is the ordinary move (protocol section 10):
+ * look over who gains and who loses access when that crosses a shared
+ * folder's edge, then move it. A copy, or a move into another space, is a
+ * copy (section 10, "Copies, and moves between spaces"; ADR 0007), which
+ * always asks first. Opened from the page menu, the sidebar's menus, and a
  * drop in the sidebar.
  */
 export function MoveDialog({
@@ -157,6 +169,17 @@ const refreshMoved = (queryClient: QueryClient, ctx: ClientContext) =>
     queryClient.invalidateQueries({ queryKey: [PLAIN, 'history'] }),
   ]);
 
+const DESCRIPTION = {
+  move: {
+    folder: 'Everything in the folder moves with it.',
+    page: 'Its draft and published versions move with it.',
+  },
+  copy: {
+    folder: 'Everything in the folder is copied: each page’s current draft and published version.',
+    page: 'Its current draft and published version are copied, not its earlier versions.',
+  },
+};
+
 // Choosing where it goes, then confirming; Back keeps the choice.
 function MoveSteps({
   spaceId,
@@ -167,41 +190,55 @@ function MoveSteps({
   moving: Moving;
   onDone: () => void;
 }) {
-  const [chosen, setChosen] = useState(moving.to ?? null);
+  const [action, setAction] = useState(moving.action ?? 'move');
+  // A drop stays in its own space, which ConfirmMove names itself.
+  const [chosen, setChosen] = useState<Chosen | null>(
+    moving.to ? { spaceId, spaceName: '', place: moving.to } : null,
+  );
   const [confirming, setConfirming] = useState(moving.to !== undefined);
   // What a drop moving without asking left, for the place dropped on only.
   const [dropped, setDropped] = useState<Pick<Moving, 'stopped' | 'preview'>>(moving);
+  const back = () => {
+    setDropped({});
+    setConfirming(false);
+  };
   return (
     <div className="grid gap-4">
       <DialogHeader>
         <DialogTitle>
-          Move “<Name>{moving.name}</Name>”
+          {action === 'copy' ? 'Copy' : 'Move'} “<Name>{moving.name}</Name>”
         </DialogTitle>
-        <DialogDescription>
-          {moving.kind === 'folder'
-            ? 'Everything in the folder moves with it.'
-            : 'Its draft and every published version move with it.'}
-        </DialogDescription>
+        <DialogDescription>{DESCRIPTION[action][moving.kind]}</DialogDescription>
       </DialogHeader>
       {chosen && confirming ? (
-        <ConfirmMove
-          spaceId={spaceId}
-          moving={moving}
-          destination={chosen}
-          dropped={dropped}
-          onBack={() => {
-            setDropped({});
-            setConfirming(false);
-          }}
-          onDone={onDone}
-        />
+        action === 'move' && chosen.spaceId === spaceId ? (
+          <ConfirmMove
+            spaceId={spaceId}
+            moving={moving}
+            destination={chosen.place}
+            dropped={dropped}
+            onBack={back}
+            onDone={onDone}
+          />
+        ) : (
+          <ConfirmCopy
+            sourceSpaceId={spaceId}
+            node={moving}
+            copy={action === 'copy'}
+            chosen={chosen}
+            onBack={back}
+            onDone={onDone}
+          />
+        )
       ) : (
         <ChooseDestination
           spaceId={spaceId}
           moving={moving}
+          action={action}
           chosen={chosen}
-          onChoose={(destination) => {
-            setChosen(destination);
+          onCopyInstead={() => setAction('copy')}
+          onChoose={(next) => {
+            setChosen(next);
             setConfirming(true);
           }}
         />
@@ -210,82 +247,171 @@ function MoveSteps({
   );
 }
 
+const SPACE_GONE = 'The space you picked is no longer available. Choose again.';
 const FOLDER_GONE = 'The folder you picked is no longer available. Choose again.';
 
-// Where it can go, as `moveDestinations` allows, from the tree as it is now.
+/**
+ * A space, its own first, then where in it: for a move within its own
+ * space, where `moveDestinations` allows, from the tree as it is now;
+ * otherwise anywhere the person can make pages, but not inside what is
+ * copied. Only an owner of the space moves it into another (ADR 0007,
+ * decision 2): anyone else is told so, and offered a copy.
+ */
 function ChooseDestination({
   spaceId,
   moving,
+  action,
   chosen,
+  onCopyInstead,
   onChoose,
 }: {
   spaceId: SpaceId;
   moving: Moving;
+  action: 'move' | 'copy';
   /** The place chosen before going back, shown chosen again. */
-  chosen: Destination<FolderId> | null;
-  onChoose: (destination: Destination<FolderId>) => void;
+  chosen: Chosen | null;
+  onCopyInstead: () => void;
+  onChoose: (chosen: Chosen) => void;
 }) {
   const ctx = useClient();
   const id = useId();
-  const treeLoad = useQuery(treeQuery(ctx, spaceId));
-  const tree = treeLoad.data;
+  const sourceLoad = useQuery(treeQuery(ctx, spaceId));
+  const source = sourceLoad.data;
   // Whether this person may move as an owner, once known: until then a
   // place picked that only an owner can reach would read as gone. Spaces
   // that fail to load leave them moving as anyone else.
-  const spaces = useQuery(spacesQuery(ctx));
+  const spacesLoad = useQuery(spacesQuery(ctx));
+  const sharedLoad = useQuery(sharedWithMeQuery(ctx));
   const standing = useOwnerStanding(spaceId);
-  const known = !spaces.isPending && standing !== 'checking';
-  const spaceName = nameOf(tree?.space?.metadata) ?? 'this space';
-  const places = useMemo(
-    () => (tree && known ? destinationsIn(tree, moving, standing === 'owner') : null),
-    [tree, known, moving, standing],
+  const known = !spacesLoad.isPending && standing !== 'checking';
+  const spaces = spacesLoad.data;
+  // Folders shared with them count too; a list that fails leaves them out.
+  const shared = sharedLoad.data ?? (sharedLoad.isError ? [] : undefined);
+  const choices = useMemo(
+    () =>
+      spaces && shared
+        ? copySpaces(
+            {
+              spaces: spaces.map((s) => ({ id: s.id, name: nameOf(s.metadata), role: s.role })),
+              shared: shared.map((item) => ({
+                spaceId: item.share.spaceId,
+                rootName: nameOf(item.root),
+                role: item.role,
+              })),
+            },
+            spaceId,
+          )
+        : null,
+    [spaces, shared, spaceId],
   );
+  const movesAcross = source?.space?.role === 'owner';
+  const offered = action === 'move' && !movesAcross ? choices?.slice(0, 1) : choices;
+  const [toSpace, setToSpace] = useState<SpaceId>(chosen?.spaceId ?? spaceId);
+  const space = offered?.find((c) => c.spaceId === toSpace);
+  const treeLoad = useQuery({ ...treeQuery(ctx, toSpace), enabled: space !== undefined });
+  const tree = treeLoad.data;
+  const within = action === 'move' && toSpace === spaceId;
+  const places = useMemo(() => {
+    if (!tree) return null;
+    if (within) return known ? destinationsIn(tree, moving, standing === 'owner') : null;
+    // A copy in its own space goes anywhere but inside itself.
+    const inside =
+      toSpace === spaceId && moving.kind === 'folder'
+        ? foldersUnder(tree.folders, moving.id)
+        : new Set<string>();
+    return copyDestinations(moveTreeOf(tree), inside);
+  }, [tree, within, known, moving, standing, toSpace, spaceId]);
   // The place picked, by its folder; until the person picks, the first.
   // If a refetch no longer offers it, nothing is picked until they pick again.
-  const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.parentId);
-  if (!places) {
-    return failedToLoad(treeLoad) ? (
-      <LoadFailed what="the folders here" queries={[treeLoad]} />
+  const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.place.parentId);
+  if (!offered) {
+    return failedToLoad(spacesLoad) ? (
+      <LoadFailed what="your spaces" queries={[spacesLoad]} />
     ) : (
       <p className="text-sm text-muted-foreground">Loading…</p>
     );
   }
-  const index = picked === undefined ? 0 : places.findIndex((d) => d.parentId === picked);
-  const place = places[index];
-  if (places.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        There’s nowhere you can move it. Inside a shared folder, you can move things only within
-        that folder; an owner of the space can move them anywhere.
-      </p>
-    );
-  }
-  const label = (d: Destination) =>
+  const index = picked === undefined ? 0 : (places?.findIndex((d) => d.parentId === picked) ?? -1);
+  const place = places?.[index];
+  const label = (d: Destination, spaceName: string) =>
     d.parentId === null ? `Top of ${plainText(spaceName)}` : d.path.map(plainText).join(' › ');
   return (
     <form
       className="grid gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (place) onChoose(place);
+        if (space && place) onChoose({ spaceId: space.spaceId, spaceName: space.name, place });
       }}
     >
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-to`}>Move to</Label>
+        <Label htmlFor={`${id}-space`}>Space</Label>
         <Picker
-          id={`${id}-to`}
-          label="Move to"
-          placeholder="Choose where it goes"
-          value={place ? String(index) : null}
-          options={places.map((d, i) => ({ value: String(i), label: label(d) }))}
+          id={`${id}-space`}
+          label="Space"
+          placeholder="Choose a space"
+          value={space?.spaceId ?? null}
+          options={offered.map((c) => ({
+            value: c.spaceId,
+            label: `${plainText(c.name)}${
+              c.spaceId === spaceId
+                ? ' (this space)'
+                : c.folderOnly
+                  ? ' (a folder shared with you)'
+                  : ''
+            }`,
+          }))}
           autoFocus
           onChange={(value) => {
-            const next = places[Number(value)];
-            if (next) setPicked(next.parentId);
+            const next = offered.find((c) => c.spaceId === value);
+            if (!next) return;
+            setToSpace(next.spaceId);
+            setPicked(undefined);
           }}
         />
-        <ErrorLine error={place ? null : FOLDER_GONE} />
+        <ErrorLine error={space ? null : SPACE_GONE} />
+        {action === 'move' && source && !movesAcross && choices && choices.length > 1 && (
+          <p className="text-sm text-muted-foreground">
+            Only an owner of this space can move things into another space. You can copy it there
+            instead.{' '}
+            <Button type="button" variant="link" className="h-auto p-0" onClick={onCopyInstead}>
+              Copy instead
+            </Button>
+          </p>
+        )}
       </div>
+      {space && (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${id}-to`}>Folder</Label>
+          {!places ? (
+            failedToLoad(treeLoad) ? (
+              <LoadFailed what="the folders in this space" queries={[treeLoad]} />
+            ) : (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            )
+          ) : places.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {within
+                ? 'There’s nowhere here you can move it. Inside a shared folder, you can move things only within that folder; an owner of the space can move them anywhere.'
+                : 'There’s nowhere here you can make pages. Choose another space.'}
+            </p>
+          ) : (
+            <>
+              <Picker
+                id={`${id}-to`}
+                label="Folder"
+                placeholder="Choose where it goes"
+                value={place ? String(index) : null}
+                options={places.map((d, i) => ({ value: String(i), label: label(d, space.name) }))}
+                onChange={(value) => {
+                  const next = places[Number(value)];
+                  if (next) setPicked(next.parentId);
+                }}
+              />
+              <ErrorLine error={place ? null : FOLDER_GONE} />
+            </>
+          )}
+        </div>
+      )}
       <DialogFooter>
         <Button type="submit" disabled={!place}>
           Next

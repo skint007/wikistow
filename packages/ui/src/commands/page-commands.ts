@@ -1,4 +1,5 @@
 import {
+  copyOperations,
   FolderId,
   moveOperations,
   pageOperations,
@@ -34,6 +35,33 @@ export const moveNode: Command<z.ZodObject<{ preview: typeof Preview }>, PageEnv
   requires: ['unlocked-vault'],
   run: async ({ preview }, { ctx, onProgress }) =>
     moveOperations.moveNode(ctx, { preview, ...(onProgress ? { onProgress } : {}) }),
+};
+
+// A copy preview from the client's own operation, which already checked it.
+const CopyPreview = z.custom<copyOperations.CopyPreview>(
+  (value) => typeof value === 'object' && value !== null && 'copyId' in value,
+);
+
+/**
+ * Copy a page or folder, with everything under it, or move one into
+ * another space, as previewed, once the person confirms it: a move always
+ * asks (ADR 0007). `onMade` hears where the copy is. Who may is the
+ * server's to enforce: an editor of all of it copies, an owner of its space
+ * moves, and both must be able to make pages where it goes.
+ */
+export const copyNode: Command<
+  z.ZodObject<{ preview: typeof CopyPreview }>,
+  CommandEnv & {
+    ctx: ClientContext;
+    onProgress?: (progress: copyOperations.CopyProgress) => void;
+    onMade: (made: copyOperations.MadeCopy) => void;
+  }
+> = {
+  id: 'node.copy',
+  input: z.object({ preview: CopyPreview }),
+  requires: ['unlocked-vault'],
+  run: async ({ preview }, { ctx, onProgress, onMade }) =>
+    onMade(await copyOperations.makeCopy(ctx, preview, onProgress ? { onProgress } : {})),
 };
 
 const PageRefInput = z.object({ spaceId: SpaceId, pageId: PageId });
