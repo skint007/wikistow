@@ -824,6 +824,8 @@ describe('copying', () => {
     const read = await w.run(['page', 'copy', w.soup, '--folder', w.pinned]);
     expect(read.code, read.stdout).toBe(1);
     expect(read.json().error.code).toBe('forbidden');
+    expect(read.json().error.message).toContain('allowed to edit');
+    expect(read.json().error.message).not.toContain('publish');
     // Two shares in that space, so it must be told which.
     const two = await w.run(['page', 'copy', w.lib.page.pageId, '--space', w.lib.spaceId]);
     expect(two.code, two.stdout).toBe(2);
@@ -835,43 +837,42 @@ describe('copying', () => {
     expect(await nodes()).toEqual(before);
   }, 120_000);
 
-  it('finds a copy whose finish’s answer was lost, and makes a keyed copy once', async () => {
+  it('finishes again when the finish’s answer was lost, and makes a keyed copy once', async () => {
     const w = await copyWorld();
     const to = ['page', 'copy', w.lib.page.pageId, '--space', w.board, '--folder', w.pinned];
     const opened: string[] = [];
-    // Which finish's answer is lost, and whether the tree read after it fails too.
-    let lose: 'answer' | 'answer and look' | null = null;
-    let blind = false;
+    let finishes = 0;
+    // How many finishes from now land, but whose answers never come back.
+    let lose = 0;
     server.hooks.intercept = async (request, forward) => {
       const { pathname } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/copies') {
         opened.push(JSON.parse(await request.clone().text()).nodes[0].nodeId);
       }
-      if (blind && request.method === 'GET' && pathname === `/api/spaces/${w.board}/tree`) {
-        blind = false;
-        return new Response('gone', { status: 502 });
-      }
       const res = await forward();
-      if (lose && request.method === 'POST' && pathname.endsWith('/finish')) {
-        // The copy finishes, but its answer never comes back.
-        blind = lose === 'answer and look';
-        lose = null;
-        return new Response('gone', { status: 502 });
+      if (request.method === 'POST' && pathname.endsWith('/finish')) {
+        finishes += 1;
+        if (lose > 0) {
+          lose -= 1;
+          return new Response('gone', { status: 502 });
+        }
       }
       return res;
     };
     try {
-      // The CLI looks, and finds it there.
-      lose = 'answer';
+      // The finish is sent again, and answered as the first was.
+      lose = 1;
       const found = await w.run(to);
       expect(found.code, found.stdout).toBe(0);
       expect(found.json().nodeId).toBe(opened[0]);
+      expect(finishes).toBe(2);
       expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan']);
 
-      // Nor can it look: with a key, running it again is safe.
+      // No finish is ever answered: with a key, running it again is safe.
       const key = ['--idempotency-key', 'copy-retry-1'];
-      lose = 'answer and look';
+      lose = Number.POSITIVE_INFINITY;
       const lost = await w.run([...to, ...key]);
+      lose = 0;
       expect(lost.code, lost.stdout).toBe(1);
       expect(lost.json().error).toMatchObject({ outcomeUnknown: true });
       expect(lost.json().error.message).toContain('same --idempotency-key');

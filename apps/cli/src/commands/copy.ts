@@ -22,8 +22,6 @@ import { inputHash } from '../journal.ts';
 import type { Deps } from './agent.ts';
 import { shareStart, spaceOfFolder, withAgent, type ContentArgs } from './content.ts';
 
-type CopyPreview = copies.CopyPreview;
-
 /** What `page copy` and `folder copy` are asked to copy, and where to. */
 export type CopyArgs = ContentArgs &
   (
@@ -32,35 +30,43 @@ export type CopyArgs = ContentArgs &
   );
 
 /**
- * `preview` with each new node's ID derived from `--idempotency-key`, what
- * the command was asked and the node it copies, under the local state's
- * key: so a retry makes the same nodes, finds the top one once the first
- * run's copy has finished, and reports that copy's IDs. Nobody without the
- * key file can tell which keys were used.
+ * Each new node's ID, by the node it copies, derived from
+ * `--idempotency-key` and what the command was asked, under the local
+ * state's key: so a retry makes the same nodes, finds the top one once the
+ * first run's copy has finished, and reports that copy's IDs. Nobody
+ * without the key file can tell which keys were used. The copy's own ID
+ * stays new each run: a run that failed cancelled its copy, so a retry
+ * opens another.
  */
-function keyedIds(
-  agent: OpenedAgent,
-  preview: CopyPreview,
-  key: string,
-  input: string,
-): CopyPreview {
+function keyedIds(agent: OpenedAgent, key: string, input: string) {
   const { stateKey } = agent.secrets;
-  const ids = new Map(
-    preview.nodes.map(({ nodeId, sourceId, kind }) => {
-      const bytes = hashBytes(canonical('cli-copy-node/v1', [stateKey, key, input, sourceId]));
-      const id = toBase64(bytes.slice(0, 16));
-      return [nodeId as string, kind === 'page' ? PageId.parse(id) : FolderId.parse(id)];
-    }),
+  return (sourceId: string) =>
+    toBase64(
+      hashBytes(canonical('cli-copy-node/v1', [stateKey, key, input, sourceId])).slice(0, 16),
+    );
+}
+
+/**
+ * A copy's `forbidden` in words for a copy, which needs editing, not
+ * publishing, with the pages a refusal names; anything else as it is.
+ */
+function refusal(error: unknown): unknown {
+  if (!(error instanceof ApiError) || error.code !== 'forbidden') return error;
+  const nodeIds = error.detail.nodeIds;
+  if (nodeIds && nodeIds.length > 0) {
+    return new CliError(
+      'forbidden',
+      'Some pages in it are published there from other pages, which are detached first, ' +
+        'or have no version to copy: detail.nodeIds names them',
+      { cause: error, detail: { nodeIds } },
+    );
+  }
+  return new CliError(
+    'forbidden',
+    'This agent or its person may not copy that there: both must be allowed to edit it, ' +
+      'and to make pages where it goes',
+    { cause: error },
   );
-  return {
-    ...preview,
-    nodes: preview.nodes.map((node) => ({
-      ...node,
-      nodeId: ids.get(node.nodeId) ?? node.nodeId,
-      // A parent is a folder; the top node's, the destination folder, stays.
-      parentId: (node.parentId && (ids.get(node.parentId) as FolderId)) ?? node.parentId,
-    })),
-  };
 }
 
 /** Whether `spaceId`'s tree, as this agent sees it, lists `nodeId`: a copy's top shows once it finished. */
@@ -73,9 +79,10 @@ async function listed(ctx: ClientContext, spaceId: SpaceId, nodeId: string) {
  * `page copy` and `folder copy`: copy the page or folder, with what this
  * agent sees under it, into `--folder` or the top of its share in
  * `--space`. Pages arrive published where they are published now only if
- * the agent may publish there; else with their drafts alone. A finish whose
- * answer was lost is looked for in the destination's tree; with
- * `--idempotency-key`, so is a first run's copy (`keyedIds`).
+ * the agent may publish there; else with their drafts alone. With
+ * `--idempotency-key`, a first run's copy is looked for in the
+ * destination's tree (`keyedIds`). A finish whose answer was lost is sent
+ * again by `makeCopy`; one never answered may have made the copy.
  */
 export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps) {
   const command = `${args.kind} copy`;
@@ -98,21 +105,21 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
       } else if (parentId === null) {
         parentId = await shareStart(ctx, spaceId, '--folder');
       }
-      let preview: CopyPreview;
+      const key = args.idempotencyKey;
+      let preview: copies.CopyPreview;
       try {
         preview = await copies.previewCopy(ctx, {
           kind: 'copy',
           source: { spaceId: from, nodeId: args.nodeId },
           destination: { spaceId, parentId },
+          ...(key !== null && { ids: keyedIds(agent, key, input) }),
         });
       } catch (error) {
         if (error instanceof ApiError && error.code === 'binding-mismatch') {
           throw new CliError('usage', 'A folder can’t be copied into itself');
         }
-        throw error;
+        throw refusal(error);
       }
-      const key = args.idempotencyKey;
-      if (key !== null) preview = keyedIds(agent, preview, key, input);
       const top = preview.nodes[0]?.nodeId ?? args.nodeId;
       if (key !== null && (await listed(ctx, spaceId, top))) return { preview, earlier: true };
       let finishing = false;
@@ -124,10 +131,11 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         });
       } catch (error) {
         // Before the finish, a failure ends the copy unseen: nothing was made.
-        if (!finishing || !outcomeUnknown(error)) throw error;
-        // The finish's answer was lost: its top node is listed if it landed.
-        if (await listed(ctx, spaceId, top).catch(() => false)) return { preview, earlier: false };
-        throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
+        // A finish never answered, though sent again, may have made it.
+        if (finishing && outcomeUnknown(error)) {
+          throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
+        }
+        throw refusal(error);
       }
       return { preview, earlier: false };
     },

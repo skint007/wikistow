@@ -48,6 +48,7 @@ export type CliErrorCode =
   | 'state-unreadable'
   | 'not-in-record'
   | 'published-elsewhere'
+  | 'forbidden'
   | 'failed';
 
 const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
@@ -67,6 +68,8 @@ const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
   'state-unreadable': EXIT.trust,
   'not-in-record': EXIT.revoked,
   'published-elsewhere': EXIT.failed,
+  // The server's refusal, in the CLI's words for the command (`page copy`).
+  forbidden: EXIT.failed,
   failed: EXIT.failed,
 };
 

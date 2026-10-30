@@ -230,15 +230,20 @@ links couldn't be read.
 
 Nothing is made unless the copy finishes. If what it copies, or who has
 access where it goes, changes while it is sent, it is refused (exit 3):
-run it again. If the finish's answer is lost, the CLI looks for the copy
-there, and reports it if it landed.
+run it again. Refused as "forbidden" (exit 1), the agent or its person
+may not edit what it copies, or make pages where it goes; or, when
+detail.nodeIds names pages, those are published there from other pages,
+which are detached first, or have no version to copy. If the finish's
+answer is lost, the CLI sends the finish again, which is answered as the
+first was; if no answer comes at all, the copy may have been made.
 
 Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
 Every page and folder it makes gets an ID made from KEY, so running the
 same command again with the same KEY finds the first run's copy if it
-finished, and reports it ("copied by an earlier run"), or else copies. The same KEY with another
-${noun}, --space or --folder makes another copy. Without a KEY, look in tree
-before running a copy again whose outcome is unknown.
+finished, and reports it ("copied by an earlier run"), or else copies.
+The same KEY with another ${noun}, --space or --folder makes another copy.
+Without a KEY, look in tree before running a copy again whose outcome is
+unknown.
 `;
 };
 
