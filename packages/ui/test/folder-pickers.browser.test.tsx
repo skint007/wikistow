@@ -79,13 +79,13 @@ let queryClient: QueryClient;
 let cleanup = () => {};
 afterEach(() => cleanup());
 
-// Mount `ui` on a cache holding these spaces and trees, each confirmed as owned.
-async function mount(ui: ReactNode, spaces: Spaces, trees: Record<SpaceId, Tree>) {
+// Mount `ui` on a cache holding these spaces, unless null, and trees, each confirmed as owned.
+async function mount(ui: ReactNode, spaces: Spaces | null, trees: Record<SpaceId, Tree>) {
   // As the app's own, it doesn't retry by itself (router.tsx).
   queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
   });
-  queryClient.setQueryData(spacesQuery(ctx).queryKey, spaces);
+  if (spaces) queryClient.setQueryData(spacesQuery(ctx).queryKey, spaces);
   queryClient.setQueryData(sharedWithMeQuery(ctx).queryKey, []);
   for (const [spaceId, tree] of Object.entries(trees)) {
     queryClient.setQueryData(treeQuery(ctx, spaceId as SpaceId).queryKey, tree);
@@ -288,8 +288,12 @@ it('tells an editor who isn’t an owner that only owners move into another spac
     'Only an owner of this space can move things into another space. You can copy it there instead.',
   );
 
-  await act(async () => button('Copy instead').click());
+  await act(async () => {
+    button('Copy instead').focus();
+    button('Copy instead').click();
+  });
   expect(title()).toBe('Copy “Bean plan”');
+  expect(document.activeElement).toBe(field('Space'));
   expect(await options('Space')).toEqual(['Family (this space)', 'Work']);
   expect(document.body.textContent).not.toContain('Only an owner');
 });
@@ -312,4 +316,36 @@ it('copies a folder anywhere in its space but inside itself, beside it included'
   );
   expect(title()).toBe('Copy “Kitchen”');
   expect(await options('Folder')).toEqual(['Top of Personal', 'Garden']);
+});
+
+it('still moves within the space when the other spaces fail to load', async () => {
+  const PANTRY = 'pantry-folder' as FolderId;
+  // An editor of a shared Kitchen, with the plan in it: without the list of
+  // spaces, they move as anyone but an owner does, within that share.
+  const family = {
+    ...treeOf(
+      'Family',
+      { Kitchen: KITCHEN, Pantry: PANTRY },
+      { role: 'editor', under: { Pantry: KITCHEN } },
+    ),
+    shares: [{ shareId: 'kitchen-share', rootId: KITCHEN, role: 'editor' }],
+    pages: [{ id: BEANS, parentId: KITCHEN }],
+  } as unknown as Tree;
+  await mount(
+    <MoveDialog
+      spaceId={PERSONAL}
+      moving={{ id: BEANS, kind: 'page', name: 'Bean plan' }}
+      onOpenChange={() => {}}
+    />,
+    null,
+    { [PERSONAL]: family },
+  );
+  // The list of spaces fails a task later.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(alerts()).toEqual([
+    'Couldn’t load your other spaces. This app couldn’t reach the server. Check your connection and try again.Try again',
+  ]);
+  expect(await options('Space')).toEqual(['Family (this space)']);
+  expect(await options('Folder')).toEqual(['Kitchen › Pantry']);
+  expect(button('Next').disabled).toBe(false);
 });

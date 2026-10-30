@@ -279,12 +279,19 @@ function ChooseDestination({
   const source = sourceLoad.data;
   // Whether this person may move as an owner, once known: until then a
   // place picked that only an owner can reach would read as gone. Spaces
-  // that fail to load leave them moving as anyone else.
+  // that fail to load leave them moving within this space, as anyone else.
   const spacesLoad = useQuery(spacesQuery(ctx));
   const sharedLoad = useQuery(sharedWithMeQuery(ctx));
   const standing = useOwnerStanding(spaceId);
   const known = !spacesLoad.isPending && standing !== 'checking';
-  const spaces = spacesLoad.data;
+  // Without them, this space alone, by its tree (named by its shared folders if they hold only those).
+  const spaces =
+    spacesLoad.data ??
+    (failedToLoad(spacesLoad) && source
+      ? source.space
+        ? [{ id: spaceId, metadata: source.space.metadata, role: source.space.role }]
+        : []
+      : undefined);
   // Folders shared with them count too; a list that fails leaves them out.
   const shared = sharedLoad.data ?? (sharedLoad.isError ? [] : undefined);
   const choices = useMemo(
@@ -325,8 +332,9 @@ function ChooseDestination({
   // If a refetch no longer offers it, nothing is picked until they pick again.
   const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.place.parentId);
   if (!offered) {
-    return failedToLoad(spacesLoad) ? (
-      <LoadFailed what="your spaces" queries={[spacesLoad]} />
+    // Without this space's tree, there is nothing to offer even within it.
+    return failedToLoad(sourceLoad) ? (
+      <LoadFailed what="your spaces" queries={[sourceLoad, spacesLoad]} />
     ) : (
       <p className="text-sm text-muted-foreground">Loading…</p>
     );
@@ -369,11 +377,22 @@ function ChooseDestination({
           }}
         />
         <ErrorLine error={space ? null : SPACE_GONE} />
+        {/* This space is offered without them, for a move or copy within it. */}
+        <LoadFailed what="your other spaces" queries={[spacesLoad]} />
         {action === 'move' && source && !movesAcross && choices && choices.length > 1 && (
           <p className="text-sm text-muted-foreground">
             Only an owner of this space can move things into another space. You can copy it there
             instead.{' '}
-            <Button type="button" variant="link" className="h-auto p-0" onClick={onCopyInstead}>
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto p-0"
+              onClick={() => {
+                onCopyInstead();
+                // The button goes; the spaces it can be copied to are next.
+                document.getElementById(`${id}-space`)?.focus();
+              }}
+            >
               Copy instead
             </Button>
           </p>
