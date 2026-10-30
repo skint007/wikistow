@@ -9,7 +9,9 @@
 // sealed again; sends them a batch at a time; and finishes. A source head
 // that moved on meanwhile is sealed again and sent, and the finish tried
 // again; anything else ends the copy, and the person starts again from a
-// new preview.
+// new preview. Versions are opened many to a request, and both steps wait
+// out the server's rate limits (`patient`), since a copy of many pages
+// reads, uploads and sends more in a minute than they allow.
 import {
   copyRoutes,
   MetadataRevisionId,
@@ -22,7 +24,8 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
-import { ApiError } from '../api/client.ts';
+import { ApiError, outcomeUnknown, type ApiClient } from '../api/client.ts';
+import { utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { FolderId as FolderIdSchema, newId, PageId as PageIdSchema } from '../ids.ts';
 import { repairText } from '../json.ts';
@@ -40,17 +43,18 @@ import { sealMetadataV2 } from '../metadata.ts';
 import { revisePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { sameRegion, type Region } from '../regions.ts';
 import { resealAttachment } from '../revision.ts';
-import { spaceKeys, type SpaceKeys } from './keys.ts';
+import { spaceKeys } from './keys.ts';
 import { audienceOf, type AccessChange, type Reach } from './moves.ts';
 import {
   attachmentTarget,
   commitFor,
   downloadBlob,
-  loadPage,
-  openRevisionOf,
+  fetchRevisions,
   publicationsFor,
+  shownVersions,
   uploadBlob,
   type OpenedRevision,
+  type Wanted,
 } from './pages.ts';
 import { PUBLICATION_NAMESPACE, type ClosedLink } from './publications.ts';
 import { keyTargetFor, newNodeTarget, treeTarget } from './records.ts';
@@ -142,6 +146,44 @@ export type CopyProgress = { stage: 'sending' | 'finishing'; sent: number; total
 
 type ReadLinks = (markdown: string) => Promise<FoundLinks>;
 
+/** How long one request waits out the server's rate limits, in all, before giving up. */
+const PATIENCE_MS = 2 * 60 * 1000;
+
+/** How many nodes are opened at a time, many to a request: fewer than a records request takes. */
+const CHUNK = 200;
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `ctx` with an API that waits out `rate-limited` and tries again, as long
+ * as the server's `Retry-After` says (a second if it doesn't), for up to
+ * `PATIENCE_MS` a request. That is also the finish's answer while
+ * publications a delete ends are being written.
+ */
+function patient(ctx: ClientContext): ClientContext {
+  const waiting = async <T>(send: () => Promise<T>): Promise<T> => {
+    const until = Date.now() + PATIENCE_MS;
+    for (;;) {
+      try {
+        return await send();
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.code !== 'rate-limited') throw error;
+        const ms = (error.retryAfterSeconds ?? 1) * 1000;
+        if (Date.now() + ms > until) throw error;
+        await pause(ms);
+      }
+    }
+  };
+  const { api } = ctx;
+  const patientApi: ApiClient = {
+    call: ((...args: Parameters<ApiClient['call']>) =>
+      waiting(() => api.call(...args))) as ApiClient['call'],
+    upload: (...args) => waiting(() => api.upload(...args)),
+    download: (...args) => waiting(() => api.download(...args)),
+  };
+  return { ...ctx, api: patientApi };
+}
+
 /**
  * The listed subtree of `nodeId` in `tree`, top first, every parent before
  * its children.
@@ -201,6 +243,7 @@ export async function previewCopy(
     read?: ReadLinks;
   },
 ): Promise<CopyPreview> {
+  ctx = patient(ctx);
   const sameSpace = source.spaceId === destination.spaceId;
   if (kind === 'move' && sameSpace) {
     throw new ApiError(403, 'forbidden', 'A move within one space is an ordinary move');
@@ -337,20 +380,19 @@ async function lossesOf(
 }
 
 /**
- * The current version this app reads of a page: its draft, or for a page
- * with none, its publication. Null when it can't be opened.
+ * The current version this app reads of each of `pages`, a part at a time,
+ * many to a request (`shownVersions`): its draft, or for a page with none,
+ * its publication. Null for one that can't be opened; any other failure is
+ * thrown, so no page is passed over unread.
  */
-async function currentOf(ctx: ClientContext, spaceId: SpaceId, page: TreePage) {
-  const [audience, head] = page.draftHead
-    ? (['draft', page.draftHead] as const)
-    : (['published', page.publishedHead] as const);
-  if (!head) return null;
-  try {
-    const opened = await openRevisionOf(ctx, { spaceId, pageId: page.id }, audience, head);
-    return opened.opened.kind === 'current' ? opened.opened.payload : null;
-  } catch (error) {
-    if (error instanceof ApiError || error instanceof CryptoError) return null;
-    throw error;
+async function* currentVersions(ctx: ClientContext, spaceId: SpaceId, pages: readonly TreePage[]) {
+  for (let i = 0; i < pages.length; i += CHUNK) {
+    const part = pages.slice(i, i + CHUNK);
+    const versions = await shownVersions(ctx, spaceId, part);
+    for (const page of part) {
+      const opened = versions.get(page.id)?.opened;
+      yield { page, payload: opened?.kind === 'current' ? opened.payload : null };
+    }
   }
 }
 
@@ -380,8 +422,7 @@ async function closedLinks(
   },
 ): Promise<ClosedLink[] | null> {
   const closed = new Map<string, ClosedLink>();
-  for (const page of pages) {
-    const payload = await currentOf(ctx, spaceId, page);
+  for await (const { payload } of currentVersions(ctx, spaceId, pages)) {
     if (!payload) continue;
     const found = await read(payload.markdown).catch(() => null);
     if (!found) return null;
@@ -415,9 +456,8 @@ async function linkingIn(
   }: { tree: Tree; inside: ReadonlySet<string>; spaceId: SpaceId; read: ReadLinks },
 ) {
   const linking = [];
-  for (const page of tree.pages) {
-    if (inside.has(page.id)) continue;
-    const payload = await currentOf(ctx, spaceId, page);
+  const staying = tree.pages.filter((page) => !inside.has(page.id));
+  for await (const { page, payload } of currentVersions(ctx, spaceId, staying)) {
     if (!payload) continue;
     const found = await read(payload.markdown).catch(() => null);
     if (!found) continue;
@@ -478,7 +518,7 @@ export type MadeCopy = {
   copies: ReadonlyMap<string, FolderId | PageId>;
 };
 
-/** How many times a finish is tried again: for source heads that moved on, or a busy server. */
+/** How many times a finish is sent: again for source heads that moved on, or an answer lost. */
 const FINISH_TRIES = 5;
 
 /**
@@ -486,17 +526,23 @@ const FINISH_TRIES = 5;
  * every node again for the destination and send them a batch at a time,
  * then finish. `onProgress` hears how far it has got. For a move, a source
  * head that moved on meanwhile is `stale-head` naming its nodes: those are
- * sealed again from the source as it is now, and the finish tried again; a
- * busy server (`rate-limited`) is waited for, and the finish tried again.
- * Anything else ends the copy, which the server or this deletes, and is
- * thrown: preview again. A broken character from a Milestone 1 client is
- * written as U+FFFD.
+ * sealed again from the source as it is now, and the finish tried again. A
+ * busy server (`rate-limited`) is waited for, as its `Retry-After` says,
+ * for every request (`patient`). A finish whose answer was lost is sent
+ * again, which the server answers as it answered the first; if no answer
+ * comes, it is thrown without cancelling, since the copy may have been
+ * made. Anything else ends the copy, which the server or this deletes, and
+ * is thrown: preview again. That includes a batch of records refused for
+ * `permission-version`; one refused for a newer key version is sealed again
+ * and sent again. A broken character from a Milestone 1 client is written
+ * as U+FFFD.
  */
 export async function makeCopy(
   ctx: ClientContext,
   preview: CopyPreview,
   { onProgress = () => {} }: { onProgress?: (progress: CopyProgress) => void } = {},
 ): Promise<MadeCopy> {
+  ctx = patient(ctx);
   const params = { copyId: preview.copyId };
   const total = preview.nodes.length;
   await ctx.api.call(
@@ -522,6 +568,8 @@ export async function makeCopy(
     },
     { idempotencyKey: preview.copyId },
   );
+  // Whether the last finish sent may have made the copy, its answer lost.
+  let maybeMade = false;
   try {
     let sent = 0;
     await sendNodes(ctx, preview, preview.nodes, () => {
@@ -534,21 +582,23 @@ export async function makeCopy(
         await ctx.api.call(copyRoutes.finish, { params });
         break;
       } catch (error) {
+        maybeMade = outcomeUnknown(error);
         if (!(error instanceof ApiError) || tries >= FINISH_TRIES) throw error;
         const stale = error.code === 'stale-head' ? error.detail?.nodeIds : undefined;
         if (stale && stale.length > 0) {
           const again = preview.nodes.filter((node) => stale.includes(node.nodeId));
           await sendNodes(ctx, preview, again, () => {});
-        } else if (error.code === 'rate-limited') {
-          await new Promise((resolve) => setTimeout(resolve, 500 * tries));
+        } else if (maybeMade) {
+          await pause(1000 * tries);
         } else {
           throw error;
         }
       }
     }
   } catch (error) {
-    // A finish the server refused has deleted it already.
-    await cancelCopy(ctx, preview.copyId).catch(() => undefined);
+    // A finish the server refused has deleted it already. One that may have
+    // made it is left: a cancel would answer as its finish did anyway.
+    if (!maybeMade) await cancelCopy(ctx, preview.copyId).catch(() => undefined);
     throw error;
   }
   const top = preview.nodes[0];
@@ -567,9 +617,10 @@ export async function cancelCopy(ctx: ClientContext, copyId: string): Promise<vo
 
 /**
  * Seal `nodes` again from the source as it is now and send them, as many a
- * request as fit, with the destination's keys, and once more with fresh ones
- * for a batch the server refused for a newer key version or other owners.
- * `sent` is called as each node goes.
+ * request as fit by bytes and by count, with the destination's keys, and
+ * once more with fresh keys and target for a batch the server refused for
+ * a newer key version or other owners. Their versions are opened a part at
+ * a time, many to a request. `sent` is called as each node goes.
  */
 async function sendNodes(
   ctx: ClientContext,
@@ -578,76 +629,118 @@ async function sendNodes(
   sent: () => void,
 ) {
   const sealing = await sealingFor(ctx, preview);
-  let batch: CopiedNode[] = [];
-  let bytes = 0;
-  const flush = async () => {
-    if (batch.length === 0) return;
-    const going = batch;
-    batch = [];
-    bytes = 0;
-    const send = async (keys: SpaceKeys) => {
-      const entries = [];
-      for (const node of going) entries.push(await sealing.seal(node, keys));
-      await ctx.api.call(copyRoutes.records, {
-        params: { copyId: preview.copyId },
-        body: { nodes: entries },
-      });
+  for (let i = 0; i < nodes.length; i += CHUNK) {
+    const part = nodes.slice(i, i + CHUNK);
+    const versions = await sealing.open(part);
+    let batch: CopiedNode[] = [];
+    let bytes = 0;
+    const flush = async () => {
+      if (batch.length === 0) return;
+      const going = batch;
+      batch = [];
+      bytes = 0;
+      const send = async () => {
+        const entries = [];
+        for (const node of going) entries.push(await sealing.seal(node, versions));
+        await ctx.api.call(copyRoutes.records, {
+          params: { copyId: preview.copyId },
+          body: { nodes: entries },
+        });
+      };
+      try {
+        await send();
+      } catch (error) {
+        const stale =
+          (error instanceof ApiError &&
+            (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
+          (error instanceof CryptoError && error.code === 'missing-key');
+        if (!stale) throw error;
+        await sealing.refresh();
+        await send();
+      }
+      for (const _ of going) sent();
     };
-    try {
-      await send(sealing.keys);
-    } catch (error) {
-      const stale =
-        (error instanceof ApiError &&
-          (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
-        (error instanceof CryptoError && error.code === 'missing-key');
-      if (!stale) throw error;
-      sealing.keys = await spaceKeys(ctx, preview.destination.spaceId, { refresh: true });
-      await send(sealing.keys);
+    for (const node of part) {
+      // Pages are counted by what they hold; a folder's name is small.
+      const size = node.kind === 'page' ? sealing.sizeOf(node, versions) : 1024;
+      const full =
+        bytes + size > copyRoutes.RECORDS_BATCH_BYTES ||
+        batch.length >= copyRoutes.MAX_RECORDS_NODES;
+      if (batch.length > 0 && full) await flush();
+      batch.push(node);
+      bytes += size;
     }
-    for (const _ of going) sent();
-  };
-  for (const node of nodes) {
-    // Pages are counted by what they hold; a folder's name is small.
-    const size = node.kind === 'page' ? await sealing.sizeOf(node) : 1024;
-    if (batch.length > 0 && bytes + size > copyRoutes.RECORDS_BATCH_BYTES) await flush();
-    batch.push(node);
-    bytes += size;
+    await flush();
   }
-  await flush();
+}
+
+type Opened = ReadonlyMap<RevisionId, () => OpenedRevision>;
+
+/** A version `open` fetched, opened, as `openRevisionOf` answers. */
+function openedIn(versions: Opened, revisionId: RevisionId): OpenedRevision {
+  const open = versions.get(revisionId);
+  if (!open) throw new ApiError(404, 'not-found', 'That version is not available');
+  return open();
 }
 
 /**
  * What sealing the copy's nodes needs, worked out once for each round of
- * sending: the source as it is now, the destination's keys and tree, and
+ * sending: the source as it is now, the destination's keys and target, and
  * the tree its link tables are worked out from, with the copied pages and
  * folders placed at their new nodes, in the destination's region (section
- * 10, **Links**).
+ * 10, **Links**). Each page is sealed from the heads the round's tree
+ * lists, which a move's finish compares.
  */
 async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
   const { source, destination } = preview;
   const sameSpace = source.spaceId === destination.spaceId;
   const tree = await loadTree(ctx, source.spaceId);
   const destTree = sameSpace ? tree : await loadTree(ctx, destination.spaceId);
-  const target = await treeTarget(ctx, destination.spaceId, destination.parentId);
+  let target = await treeTarget(ctx, destination.spaceId, destination.parentId);
+  let keys = await spaceKeys(ctx, destination.spaceId);
   const region = destination.region;
   const copies = new Map<string, string>(preview.nodes.map((n) => [n.sourceId, n.nodeId]));
   const sourcePages = new Map(tree.pages.map((page) => [page.id as string, page]));
   const sourceFolders = new Map(tree.folders.map((folder) => [folder.id as string, folder]));
 
+  /**
+   * The source versions a page's copy is sealed from: its draft (its
+   * publication, for a page with none), and its publication when it comes
+   * along. Null for a page gone from the tree.
+   */
+  const headsOf = (node: CopiedNode) => {
+    const page = sourcePages.get(node.sourceId);
+    if (node.kind !== 'page' || !page) return null;
+    const draft = page.draftHead
+      ? { audience: 'draft' as const, revisionId: page.draftHead }
+      : page.publishedHead && { audience: 'published' as const, revisionId: page.publishedHead };
+    const published = preview.bringsPublished ? page.publishedHead : null;
+    return { page, draft: draft || null, published };
+  };
+
   // A copied page counts as published there only when its publication comes along.
   const published = new Map<PageId, OpenedPublication>();
-  if (preview.bringsPublished) {
-    for (const node of preview.nodes) {
-      const page = sourcePages.get(node.sourceId);
-      if (node.kind !== 'page' || !page?.publishedHead) continue;
-      const opened = await openRevisionOf(
-        ctx,
-        { spaceId: source.spaceId, pageId: page.id },
-        'published',
-        page.publishedHead,
-      ).catch(() => null);
-      if (opened?.opened.kind === 'current') {
-        published.set(node.nodeId as PageId, { title: opened.opened.payload.title, region });
+  const publishing = preview.nodes.flatMap((node) => {
+    const revisionId = headsOf(node)?.published;
+    return revisionId ? [{ node, revisionId }] : [];
+  });
+  for (let i = 0; i < publishing.length; i += CHUNK) {
+    const part = publishing.slice(i, i + CHUNK);
+    const wanted = new Map<RevisionId, Wanted>(
+      part.map(({ node, revisionId }) => [
+        revisionId,
+        { pageId: node.sourceId as PageId, audience: 'published' },
+      ]),
+    );
+    const versions = await fetchRevisions(ctx, source.spaceId, wanted);
+    for (const { node, revisionId } of part) {
+      try {
+        const { opened } = openedIn(versions, revisionId);
+        if (opened.kind === 'current') {
+          published.set(node.nodeId as PageId, { title: opened.payload.title, region });
+        }
+      } catch {
+        // Not counted as published there; sealing it finds out why.
       }
     }
   }
@@ -729,29 +822,43 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
     return linked;
   };
 
-  const sealing = {
-    keys: await spaceKeys(ctx, destination.spaceId),
-    /** Ciphertext a page's versions take, roughly, for batching. */
-    async sizeOf(node: CopiedNode) {
-      const page = sourcePages.get(node.sourceId);
-      const heads = page ? [page.draftHead ?? page.publishedHead, page.publishedHead] : [];
+  return {
+    /** The source versions `nodes` are sealed from, fetched fresh, many to a request. */
+    async open(nodes: readonly CopiedNode[]): Promise<Opened> {
+      const wanted = new Map<RevisionId, Wanted>();
+      for (const node of nodes) {
+        const heads = headsOf(node);
+        if (!heads) continue;
+        const pageId = heads.page.id;
+        if (heads.draft)
+          wanted.set(heads.draft.revisionId, { pageId, audience: heads.draft.audience });
+        if (heads.published) wanted.set(heads.published, { pageId, audience: 'published' });
+      }
+      return fetchRevisions(ctx, source.spaceId, wanted, { fresh: true });
+    },
+    /** The destination's keys and target again, after a batch was refused for them. */
+    async refresh() {
+      keys = await spaceKeys(ctx, destination.spaceId, { refresh: true });
+      target = await treeTarget(ctx, destination.spaceId, destination.parentId);
+    },
+    /** Bytes a page's records take, roughly, for batching: its versions' UTF-8, sealed and encoded. */
+    sizeOf(node: CopiedNode, versions: Opened) {
+      const heads = headsOf(node);
       let size = 4096;
-      for (const head of heads) {
-        if (!head || !page) continue;
-        const audience = head === page.draftHead ? 'draft' : 'published';
-        const opened = await openRevisionOf(
-          ctx,
-          { spaceId: source.spaceId, pageId: page.id },
-          audience,
-          head,
-        ).catch(() => null);
-        if (opened?.opened.kind === 'current') {
-          size += (JSON.stringify(opened.opened.payload).length * 4) / 3;
+      for (const revisionId of [heads?.draft?.revisionId, heads?.published]) {
+        if (!revisionId) continue;
+        try {
+          const { opened } = openedIn(versions, revisionId);
+          if (opened.kind === 'current') {
+            size += (utf8(JSON.stringify(opened.payload)).length * 4) / 3;
+          }
+        } catch {
+          // Sealing it finds out why.
         }
       }
       return size;
     },
-    async seal(node: CopiedNode, keys: SpaceKeys): Promise<Entry> {
+    async seal(node: CopiedNode, versions: Opened): Promise<Entry> {
       if (node.kind === 'folder') {
         const folder = sourceFolders.get(node.sourceId);
         const name = folder?.metadata;
@@ -781,9 +888,9 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
           sourceMetadataRevisionId: name.head,
         };
       }
-      // The source's heads as they are now, which a move's finish compares.
+      const heads = headsOf(node);
+      if (!heads) throw new ApiError(404, 'not-found', 'A page being copied is gone');
       const from = { spaceId: source.spaceId, pageId: PageIdSchema.parse(node.sourceId) };
-      const { heads } = await loadPage(ctx, from.pageId);
       const page = { spaceId: destination.spaceId, pageId: node.nodeId as PageId };
       const version = async (
         audience: 'draft' | 'published',
@@ -791,7 +898,7 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
         revisionId: RevisionId,
         baseOf: (opened: OpenedRevision) => RevisionId | null = () => null,
       ) => {
-        const opened = await openRevisionOf(ctx, from, sealedFrom, revisionId, { fresh: true });
+        const opened = openedIn(versions, revisionId);
         const payload = await forCopy(opened, node, audience);
         const attachments: AttachmentRef[] = [];
         for (const ref of payload.attachments) {
@@ -815,26 +922,23 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
       };
       // A page with no draft, as a publication ended without being
       // detached, gets its publication as its draft too.
-      const draft = heads.draftHead
-        ? await version('draft', 'draft', heads.draftHead)
-        : heads.publishedHead && (await version('draft', 'published', heads.publishedHead));
-      if (!draft) throw new ApiError(404, 'not-found', 'That page has no version to copy');
+      if (!heads.draft) throw new ApiError(404, 'not-found', 'That page has no version to copy');
+      const draft = await version('draft', heads.draft.audience, heads.draft.revisionId);
       // Its publication names the copy's draft when the source's was made
       // from its current draft, or it had none: the copy then shows no
       // unpublished changes where the source had none.
       const draftId = draft.revision.record.revisionId;
+      const { draftHead } = heads.page;
       const baseOf = (opened: OpenedRevision) =>
-        heads.draftHead === null || opened.record.basedOn === heads.draftHead ? draftId : null;
+        draftHead === null || opened.record.basedOn === draftHead ? draftId : null;
       return {
         kind: 'page',
         nodeId: node.nodeId,
         draft,
-        published:
-          preview.bringsPublished && heads.publishedHead
-            ? await version('published', 'published', heads.publishedHead, baseOf)
-            : null,
+        published: heads.published
+          ? await version('published', 'published', heads.published, baseOf)
+          : null,
       };
     },
   };
-  return sealing;
 }
