@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Server
+
+- Copies and moves between spaces (ADR 0007). `POST /api/copies` opens a copy of a page or folder, with everything under it, as hidden nodes under a destination folder or the top of a space. `POST /api/copies/:copyId/records` takes each node's records, sealed again for the destination, in batches. `POST /api/copies/:copyId/finish` shows them, and for a move, deletes the source in the same transaction, if its pages and folders haven't changed since they were sealed. `DELETE /api/copies/:copyId` cancels. Moves are for people who own the source space; copies are for anyone who can edit it, agents included. A finished copy answers a repeated finish or cancel as the first did for a day, and one left unfinished is deleted a day after its last request. Hidden nodes are in no tree, read or search. The audit log records `node.moved-between-spaces` and `node.copied`. (#219)
+
 ## 0.19.0 - 2026-10-29
 
 ### Highlights

@@ -8,7 +8,7 @@ import {
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { folderKeyEnvelopeBytes, verifySignature } from '@wikistow/client';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
@@ -114,11 +114,19 @@ export async function lockSpaceForUpdate(tx: Database, spaceId: string) {
   return space;
 }
 
-/** Every node at or under `rootId`, or every node of the space for `null`. */
+/**
+ * Every node at or under `rootId`, or every node of the space for `null`,
+ * but a copy's hidden nodes, which count for nothing outside their copy
+ * (section 10): a share or move at a copy's destination changes the region
+ * its records were written for, and the copy fails at its finish.
+ */
 export async function nodesUnder(tx: Database, spaceId: string, rootId: string | null) {
   const rows =
     rootId === null
-      ? await tx.select({ id: nodes.id }).from(nodes).where(eq(nodes.spaceId, spaceId))
+      ? await tx
+          .select({ id: nodes.id })
+          .from(nodes)
+          .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId)))
       : [
           ...(await tx.execute<{ id: string }>(
             sql`${subtreeOf(spaceId, rootId)} select id from subtree`,
@@ -148,7 +156,19 @@ export async function recordsUnder(tx: Database, spaceId: string, rootId: string
       and(
         eq(metadataRevisions.spaceId, spaceId),
         rootId === null
-          ? inArray(metadataRevisions.subjectKind, ['space', 'folder'])
+          ? or(
+              eq(metadataRevisions.subjectKind, 'space'),
+              and(
+                eq(metadataRevisions.subjectKind, 'folder'),
+                notInArray(
+                  metadataRevisions.subjectId,
+                  tx
+                    .select({ id: nodes.id })
+                    .from(nodes)
+                    .where(and(eq(nodes.spaceId, spaceId), isNotNull(nodes.copyId))),
+                ),
+              ),
+            )
           : and(
               eq(metadataRevisions.subjectKind, 'folder'),
               ids.length === 0 ? sql`false` : inArray(metadataRevisions.subjectId, ids),
@@ -185,7 +205,14 @@ export async function rootPermissionVersion(tx: Database, spaceId: string, rootI
   const [folder] = await tx
     .select({ permissionVersion: nodes.permissionVersion })
     .from(nodes)
-    .where(and(eq(nodes.id, rootId), eq(nodes.spaceId, spaceId), eq(nodes.kind, 'folder')));
+    .where(
+      and(
+        eq(nodes.id, rootId),
+        eq(nodes.spaceId, spaceId),
+        eq(nodes.kind, 'folder'),
+        isNull(nodes.copyId),
+      ),
+    );
   if (!folder) throw new ContentError('not-found');
   return folder.permissionVersion;
 }
@@ -1304,17 +1331,32 @@ export async function scanRecords(
     ids = await recordsUnder(db, input.spaceId, input.rootId);
     if (input.rootId !== null && ids.nodeIds.length === 0) throw new ContentError('not-found');
   } else {
+    // But a copy's hidden nodes', as adding an owner leaves them out.
+    const hidden = db
+      .select({ id: nodes.id })
+      .from(nodes)
+      .where(and(eq(nodes.spaceId, input.spaceId), isNotNull(nodes.copyId)));
     const pageVersions = await db
       .select({ id: revisions.id })
       .from(revisions)
       .leftJoin(revisionWraps, eq(revisionWraps.revisionId, revisions.id))
-      .where(and(eq(revisions.spaceId, input.spaceId), isNull(revisionWraps.revisionId)));
+      .where(
+        and(
+          eq(revisions.spaceId, input.spaceId),
+          isNull(revisionWraps.revisionId),
+          notInArray(revisions.pageId, hidden),
+        ),
+      );
     const names = await db
       .select({ id: metadataRevisions.id })
       .from(metadataRevisions)
       .leftJoin(metadataWraps, eq(metadataWraps.metadataRevisionId, metadataRevisions.id))
       .where(
-        and(eq(metadataRevisions.spaceId, input.spaceId), isNull(metadataWraps.metadataRevisionId)),
+        and(
+          eq(metadataRevisions.spaceId, input.spaceId),
+          isNull(metadataWraps.metadataRevisionId),
+          notInArray(metadataRevisions.subjectId, hidden),
+        ),
       );
     ids = {
       nodeIds: [],

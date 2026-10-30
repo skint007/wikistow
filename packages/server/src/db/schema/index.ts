@@ -22,6 +22,7 @@ export * from './contacts.ts';
 export * from './revisions.ts';
 export * from './agents.ts';
 export * from './publications.ts';
+export * from './copies.ts';
 export * from './public-links.ts';
 export * from './plugins.ts';
 export * from './plugin-drafts.ts';

@@ -44,6 +44,7 @@ import {
 import { readSettings } from '../settings.ts';
 import { currentOwners, isOwner } from './access.ts';
 import { endAgentGrants } from './agents.ts';
+import { dropCopiesFrom } from './copies.ts';
 import { lookupIdentities } from './identities.ts';
 import {
   applyRotation,
@@ -166,15 +167,25 @@ type RecordParts = z.output<typeof RecordParts>;
 /**
  * The signed record of every owner-region version in the space, by ID:
  * every page and metadata version with no key wrap. These are what a new
- * co-owner must get an envelope for (section 7.6, step 2).
+ * co-owner must get an envelope for (section 7.6, step 2). A copy's hidden
+ * nodes count for nothing outside it (section 10): adding an owner moves
+ * on the permission versions their records were written at, so the copy
+ * fails at its finish.
  */
 async function ownerRegionRecords(tx: Database, spaceId: string) {
   // A stored record today's schemas refuse can't be signed over, and is left out.
-  const read = async (table: 'revisions' | 'metadata_revisions', wraps: string, column: string) => {
+  const read = async (
+    table: 'revisions' | 'metadata_revisions',
+    wraps: string,
+    column: string,
+    node: string,
+  ) => {
     const rows = await tx.execute<{ id: string; record: unknown }>(sql`
       select r.id, r.sealed -> 'record' as record from ${sql.identifier(table)} r
       where r.space_id = ${spaceId}
-        and not exists (select 1 from ${sql.identifier(wraps)} w where w.${sql.identifier(column)} = r.id)`);
+        and not exists (select 1 from ${sql.identifier(wraps)} w where w.${sql.identifier(column)} = r.id)
+        and not exists (select 1 from nodes n
+          where n.id = r.${sql.identifier(node)} and n.copy_id is not null)`);
     return new Map(
       [...rows].flatMap((row) => {
         const record = RecordParts.safeParse(row.record);
@@ -183,8 +194,13 @@ async function ownerRegionRecords(tx: Database, spaceId: string) {
     );
   };
   return {
-    revision: await read('revisions', 'revision_wraps', 'revision_id'),
-    metadata: await read('metadata_revisions', 'metadata_wraps', 'metadata_revision_id'),
+    revision: await read('revisions', 'revision_wraps', 'revision_id', 'page_id'),
+    metadata: await read(
+      'metadata_revisions',
+      'metadata_wraps',
+      'metadata_revision_id',
+      'subject_id',
+    ),
   };
 }
 
@@ -629,7 +645,8 @@ export async function removeOwner(
  * members, `not-found` for anyone else). A space that is an owner's home
  * space stays (`home-space`). Everything in it goes in one transaction:
  * its folders and pages with every version, key and attachment, its names,
- * shares, groups and owners, and copies published into it. Its pages'
+ * shares, groups and owners, copies published into it, and unfinished
+ * copies of its nodes into other spaces (`dropCopiesFrom`). Its pages'
  * publications into other spaces end as a deleted page's do
  * (`endPublicationsFrom`), it drops out of everyone's saved order, and
  * its pages' public links end, with their copies.
@@ -685,6 +702,8 @@ export async function deleteSpace(
     // Its pages' public links, copies and the target rows naming them, in
     // their lock order, rather than by the cascade.
     await endLinks(tx, ids);
+    // Copies of its nodes into other spaces, unfinished, with their hidden nodes there.
+    const copied = await dropCopiesFrom(tx, spaceId);
     const doomed = await tx
       .select({ hash: blobs.hash })
       .from(blobs)
@@ -722,7 +741,7 @@ export async function deleteSpace(
       target: { kind: 'space', id: spaceId },
       details: { nodes: ids.length, shares: spaceShares.length },
     });
-    return [...doomed.map((blob) => blob.hash), ...openingFiles];
+    return [...doomed.map((blob) => blob.hash), ...openingFiles, ...copied];
   });
   for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
 }

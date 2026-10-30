@@ -129,14 +129,19 @@ export async function verifyMetadataCommit(
   });
 }
 
-/** Store a checked metadata version, charging its ciphertext to its author's storage. */
+/**
+ * Store a checked metadata version, charging its ciphertext to its author's
+ * storage, unless the caller charged it already (`storageBytes` null).
+ */
 export async function storeMetadata(
   tx: Database,
   { metadata, envelopes, wrap }: MetadataCommit,
-  { accountId, storageBytes }: { accountId: string; storageBytes: number },
+  { accountId, storageBytes }: { accountId: string; storageBytes: number | null },
 ) {
   const { record } = metadata;
-  await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+  if (storageBytes !== null) {
+    await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+  }
   const inserted = await tx
     .insert(metadataRevisions)
     .values({
@@ -582,7 +587,8 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
       metadataHead: nodes.metadataHead,
     })
     .from(nodes)
-    .where(eq(nodes.spaceId, spaceId));
+    // A copy's new nodes show only once it finishes.
+    .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId)));
   const parents = new Map(all.map((node) => [node.id, node.parentId]));
   const view = await treeView(db, caller, spaceId, spaceShares, parents);
   if (!view) throw new ContentError('not-found');

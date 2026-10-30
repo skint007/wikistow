@@ -8,6 +8,7 @@ import { listenForTreeChanges } from '@wikistow/server';
 import { afterAll, beforeAll, expect, it } from 'vite-plus/test';
 import { PASSWORD } from './support/accounts.ts';
 import { personWithVault } from './support/content.ts';
+import { openCopy } from './support/copies.ts';
 import { Browser, createTestApp, type TestApp } from './support/harness.ts';
 import { invite, library, shareFolder, type Person } from './support/sharing.ts';
 
@@ -130,6 +131,113 @@ it('tells someone given access and shut out again before either is told', async 
     });
     await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.shared });
     await expect.poll(() => byMember, SOON).toContain(lib.spaceId);
+  } finally {
+    stop.abort();
+  }
+});
+
+it('tells both spaces when a move between them finishes', async () => {
+  const [owner, fromMember, toMember] = await Promise.all([
+    personWithVault(t),
+    personWithVault(t),
+    personWithVault(t),
+  ]);
+  const lib = await library(owner);
+  await shareFolder(owner.ctx, {
+    spaceId: lib.spaceId,
+    rootId: lib.shared,
+    people: [await invite(owner, fromMember, 'reader')],
+  });
+  const board = await spaceOperations.createSpace(owner.ctx, { name: 'Board' });
+  const pinned = await spaceOperations.createFolder(owner.ctx, {
+    spaceId: board,
+    parentId: null,
+    name: 'Pinned',
+  });
+  await shareFolder(owner.ctx, {
+    spaceId: board,
+    rootId: pinned,
+    people: [await invite(owner, toMember, 'reader')],
+  });
+  // Opened and sent before anyone listens: hidden nodes name no space.
+  const move = await openCopy(owner.ctx, {
+    kind: 'move',
+    from: lib.spaceId,
+    nodeId: lib.shared,
+    to: board,
+    parentId: pinned,
+  });
+  await move.open();
+  await move.send();
+  const stop = new AbortController();
+  try {
+    const [byFrom, byTo] = await Promise.all([
+      hearing(fromMember, stop.signal),
+      hearing(toMember, stop.signal),
+    ]);
+    await move.finish();
+    // The source's member loses the folder, and the destination's gains it.
+    await expect.poll(() => byFrom, SOON).toContain(lib.spaceId);
+    await expect.poll(() => byTo, SOON).toContain(board);
+  } finally {
+    stop.abort();
+  }
+});
+
+it('tells nobody of a copy opened, sent and cancelled while they listen', async () => {
+  const [owner, toMember] = await Promise.all([personWithVault(t), personWithVault(t)]);
+  const lib = await library(owner);
+  const board = await spaceOperations.createSpace(owner.ctx, { name: 'Board' });
+  const pinned = await spaceOperations.createFolder(owner.ctx, {
+    spaceId: board,
+    parentId: null,
+    name: 'Pinned',
+  });
+  await shareFolder(owner.ctx, {
+    spaceId: board,
+    rootId: pinned,
+    people: [await invite(owner, toMember, 'reader')],
+  });
+  const scratch = await spaceOperations.createSpace(owner.ctx, { name: 'Scratch' });
+  const theirs = await spaceOperations.createSpace(toMember.ctx, { name: 'Theirs' });
+  const stop = new AbortController();
+  try {
+    const [byOwner, byTo] = await Promise.all([
+      hearing(owner, stop.signal),
+      hearing(toMember, stop.signal),
+    ]);
+    // The setup's own changes may still be on their way: once a change made
+    // now is heard, everything before it has been, and is forgotten.
+    await spaceOperations.createFolder(owner.ctx, { spaceId: scratch, parentId: null, name: 'Z' });
+    await spaceOperations.createFolder(toMember.ctx, {
+      spaceId: theirs,
+      parentId: null,
+      name: 'Y',
+    });
+    await expect.poll(() => byOwner, SOON).toContain(scratch);
+    await expect.poll(() => byTo, SOON).toContain(theirs);
+    byOwner.length = 0;
+    byTo.length = 0;
+    const copy = await openCopy(owner.ctx, {
+      from: lib.spaceId,
+      nodeId: lib.shared,
+      to: board,
+      parentId: pinned,
+    });
+    await copy.open();
+    await copy.send();
+    await copy.cancel();
+    // A change each hears afterwards, in order, so anything the copy told them came first.
+    await spaceOperations.createFolder(owner.ctx, { spaceId: scratch, parentId: null, name: 'A' });
+    await spaceOperations.createFolder(toMember.ctx, {
+      spaceId: theirs,
+      parentId: null,
+      name: 'B',
+    });
+    await expect.poll(() => byOwner, SOON).toContain(scratch);
+    await expect.poll(() => byTo, SOON).toContain(theirs);
+    expect(byOwner).not.toContain(board);
+    expect(byTo).not.toContain(board);
   } finally {
     stop.abort();
   }
