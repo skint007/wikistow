@@ -71,6 +71,7 @@ export class PagesRefused extends Error {
 
 // A copy or move between spaces is undone in full when it fails: the
 // server, or the app, deletes what it made. The words differ only in the verb.
+// A failed copy is never sent again unseen, so the way on is Look again.
 const copyRefused = (
   nothing: string,
 ): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
@@ -83,8 +84,8 @@ const copyRefused = (
   'page-limit': `That would make more pages than your account may have, so ${nothing}.`,
   'folder-limit': `That would make more folders than your account may have, so ${nothing}.`,
   'storage-full': `Your storage is full, so ${nothing}. Free up some space, or ask your administrator for more.`,
-  'missing-blob': `An attachment didn’t arrive, so ${nothing}. Try again.`,
-  'rate-limited': `The server is busy, so ${nothing}. Try again in a moment.`,
+  'missing-blob': `An attachment didn’t arrive, so ${nothing}. Look at it again.`,
+  'rate-limited': `The server is busy, so ${nothing}. Wait a moment, then look at it again.`,
   'region-mismatch': `The server says that place is somewhere other than where this app found it, so ${nothing}. This could be an attack.`,
   'missing-key': `This app can’t open something in it, so ${nothing}.`,
   'unsupported-format': `Something in it was saved by a newer version of WikiStow, so ${nothing}. Update the app to copy it.`,
