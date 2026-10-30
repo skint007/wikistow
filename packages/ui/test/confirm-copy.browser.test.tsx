@@ -277,7 +277,9 @@ it('says a finish that went unanswered or stayed busy may have made it, and offe
   await act(async () => progress({ stage: 'finishing', sent: 1, total: 1 }));
   expect(button('Stop').disabled).toBe(true);
 
-  await act(async () => fail(new ApiError(429, 'rate-limited', 'Slow down')));
+  await act(async () =>
+    fail(new copyOperations.CopyKept(new ApiError(429, 'rate-limited', 'Slow down'), true)),
+  );
   await settle();
   expect(document.body.textContent).toContain(
     'This app couldn’t tell whether the copy finished, so it may already be there. Check where it was going before you copy it again.',
@@ -290,10 +292,40 @@ it('says a finish that went unanswered or stayed busy may have made it, and offe
   await confirmInWork('move');
   await act(async () => button('Move').click());
   await act(async () => progress({ stage: 'finishing', sent: 1, total: 1 }));
-  await act(async () => fail(new ApiError(0, 'network', 'No answer')));
+  await act(async () =>
+    fail(new copyOperations.CopyKept(new ApiError(0, 'network', 'No answer'), false)),
+  );
   await settle();
   expect(document.body.textContent).toContain('it may already be there, and gone from here.');
   expect(() => button('Look again')).toThrow();
+});
+
+it('says nothing may be there for a copy the client cancelled, even while finishing', async () => {
+  fake.preview = (copyId) => previewOf(copyId);
+  let progress: (p: Progress) => void = () => {};
+  let fail: (error: unknown) => void = () => {};
+  fake.make = (_preview, onProgress) => {
+    progress = onProgress;
+    return new Promise((_, reject) => (fail = reject));
+  };
+  await confirmInWork('copy');
+  await act(async () => button('Copy').click());
+  // Pages a stale finish named were being sent again when the network went:
+  // the client cancelled the copy, so it is an ordinary failure.
+  await act(async () => progress({ stage: 'finishing', sent: 1, total: 1 }));
+  await act(async () => fail(new ApiError(0, 'network', 'No answer')));
+  await settle();
+  expect(document.body.textContent).not.toContain('may already be there');
+  expect(document.activeElement).toBe(button('Look again'));
+  cleanup();
+
+  // So is a lost answer while sending.
+  await confirmInWork('copy');
+  await act(async () => button('Copy').click());
+  await act(async () => fail(new ApiError(0, 'network', 'No answer')));
+  await settle();
+  expect(document.body.textContent).not.toContain('may already be there');
+  expect(document.activeElement).toBe(button('Look again'));
 });
 
 it('lists the pages a refusal names, telling a live publication from nothing to copy', async () => {

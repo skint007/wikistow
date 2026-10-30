@@ -6,7 +6,6 @@ import {
   type SpaceId,
   type moveOperations,
 } from '@wikistow/client';
-import { ApiError, outcomeUnknown } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -149,7 +148,6 @@ export function ConfirmCopy({
       setStopAsked(false);
       setProgress({ stage: 'sending', sent: 0, total: confirmed.nodes.length });
       let made: copyOperations.MadeCopy | null = null;
-      let stage = 'sending' as copyOperations.CopyProgress['stage'];
       try {
         await runCommand(
           copyNode,
@@ -157,10 +155,7 @@ export function ConfirmCopy({
           {
             satisfies: requirementsHere(),
             ctx,
-            onProgress: (reached) => {
-              stage = reached.stage;
-              setProgress(reached);
-            },
+            onProgress: setProgress,
             signal: stop.signal,
             onMade: (copied) => {
               made = copied;
@@ -173,11 +168,8 @@ export function ConfirmCopy({
           setStopped(true);
           return;
         }
-        // A finish whose answer was lost, or that stayed busy, is left as it is.
-        if (
-          stage === 'finishing' &&
-          (outcomeUnknown(caught) || (caught instanceof ApiError && caught.code === 'rate-limited'))
-        ) {
+        // Left for its finish, whose answer was lost or which stayed busy.
+        if (caught instanceof copyOperations.CopyKept) {
           setUnsure(true);
           throw new FinishUnknown();
         }
