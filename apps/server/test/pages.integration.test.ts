@@ -758,7 +758,7 @@ describe('the attachment sweep', () => {
       await utimes(path, old, old);
     }
 
-    expect(await sweepBlobs(own.db, store)).toEqual({ staged: 1, openings: 0 });
+    expect(await sweepBlobs(own.db, store)).toEqual({ staged: 1, openings: 0, copies: 0 });
     const rows = (await own.db.select().from(schema.blobs)).map((b) => b.hash).sort();
     expect(rows).toEqual([kept.blobHash, recent.blobHash].sort());
     expect(await store.get(unlisted.blobHash)).toBeNull();
