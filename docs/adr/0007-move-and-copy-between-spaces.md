@@ -34,7 +34,7 @@ For each folder, its current name and look (one metadata version). The space's o
 
 Nothing else comes: no earlier drafts or published versions, no publications, no public link, no agent picks, no shares. A move deletes the source's history with the source. This was chosen over sealing every published version again as the mover, which would show one person as the author of all of history and make large pages slow.
 
-The new records are ordinary v2 records in the destination space, written and signed by the person moving or copying. The published version is written as section 13 writes a publication's version, with `basedOn: null`, and the draft also with `basedOn: null`, so neither names a version that isn't in the destination. Nothing inside the page records where it came from: a copy leaves out `wikistow.publication`, which a detached publication's versions can still hold. The audit log records the copy.
+The new records are ordinary v2 records in the destination space, written and signed by the person moving or copying. The draft has `basedOn: null`. The published version's `basedOn` names the new draft when the source's published version was made from its current draft, or the page had no draft, so a copy shows no unpublished changes where the source had none; otherwise it is `null`, as a publication's are. Neither names a version that isn't in the destination. Nothing inside the page records where it came from: a copy leaves out `wikistow.publication`, which a detached publication's versions can still hold. The audit log records the copy.
 
 ### 2. Who can do it
 
@@ -85,7 +85,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
    - every new node has its records;
    - the destination parent's permission version, region and key version are those the records were written at;
-   - for a move, the source node's permission version is the one sent at opening, the source subtree still holds exactly the nodes the copy mirrors, under the same parents, and every source page's heads and folder's metadata head are still the versions sealed.
+   - for a move, the source node's permission version is the one sent at opening, the source subtree still holds exactly the nodes the copy mirrors, under the same parents, and every source page's heads and folder's metadata head are still the versions sealed. A draft head is always compared, so a page that gained a draft meanwhile is stale.
 
    It then shows the new nodes, and, for a move, deletes the source subtree as `deleteNode` does, in the same transaction. A source head that moved on is `stale-head`, naming the nodes: the app seals those again, sends them, and finishes again. `rate-limited`, which is also the answer while a publication the delete ends is being written, keeps the copy, and the app finishes again shortly. Any other failure deletes the copy, and the app starts again from a new preview. Without the subtree check, a page someone added to a moved folder meanwhile would be deleted without being copied.
 
