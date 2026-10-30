@@ -1,11 +1,12 @@
 // The app's copy and move between spaces (protocol section 10), against the
 // real server: the preview, links between copied pages, a move that finds
 // its source changed at the finish and seals that page again, and a copy
-// that waits out a busy server or a lost answer.
+// that waits out a busy server or a lost answer, is stopped, or is given its IDs.
 import {
   ApiError,
   copyOperations as copies,
   linkTableOf,
+  newId,
   pageOperations as pages,
   PageId as PageIdSchema,
   publicationOperations as pubs,
@@ -472,6 +473,91 @@ describe('a busy server, or a lost answer', () => {
     const plan = ref(w.board, made.copies.get(w.plan) ?? '');
     expect((await current(w.dave.ctx, plan)).payload.title).toBe('Plan');
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
+  });
+});
+
+describe('stopping a copy, or choosing its IDs', () => {
+  it('cancels a copy stopped before its finish, and leaves nothing hidden', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    // Stop is pressed while the records are on their way.
+    const stop = new AbortController();
+    const stopping: Answer = async (input, send) => {
+      stop.abort();
+      return send(input);
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.records, stopping]]));
+    const caught = await copies.makeCopy(ctx, preview, { signal: stop.signal }).catch((e) => e);
+    expect(caught).toBeInstanceOf(copies.CopyStopped);
+    expect(sent).toContain(copyRoutes.cancel);
+    expect(sent).not.toContain(copyRoutes.finish);
+    expect(
+      await t.db.select().from(schema.copies).where(eq(schema.copies.id, preview.copyId)),
+    ).toEqual([]);
+    for (const { nodeId } of preview.nodes) {
+      expect(await t.db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId))).toEqual([]);
+    }
+    // What was to move stays where it was.
+    expect((await current(w.alice.ctx, w.page)).payload.title).toBe('Plan');
+  });
+
+  it('finishes a copy stopped once its finish was sent', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const stop = new AbortController();
+    const stopping: Answer = async (input, send) => {
+      stop.abort();
+      return send(input);
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, stopping]]));
+    const made = await copies.makeCopy(ctx, preview, { signal: stop.signal });
+    expect(sent).not.toContain(copyRoutes.cancel);
+    expect((await current(w.dave.ctx, ref(w.board, made.nodeId))).payload.title).toBe('Plan');
+  });
+
+  it('makes the copy and its nodes with the IDs its caller chose', async () => {
+    const w = await world();
+    const copyId = newId(PageIdSchema);
+    const chosen = new Map<string, string>(
+      [w.notes, w.budget, w.plan].map((id) => [id, newId(PageIdSchema)]),
+    );
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+      copyId,
+      ids: (sourceId) => chosen.get(sourceId) ?? '',
+    });
+    expect(preview.copyId).toBe(copyId);
+    expect(new Map(preview.nodes.map((n) => [n.sourceId, [n.nodeId, n.parentId]]))).toEqual(
+      new Map<string, unknown>([
+        [w.notes, [chosen.get(w.notes), w.pinned]],
+        [w.budget, [chosen.get(w.budget), chosen.get(w.notes)]],
+        [w.plan, [chosen.get(w.plan), chosen.get(w.notes)]],
+      ]),
+    );
+    const made = await copies.makeCopy(w.alice.ctx, preview);
+    expect(made.copies).toEqual(chosen);
+    expect((await current(w.dave.ctx, ref(w.board, chosen.get(w.plan) ?? ''))).payload.title).toBe(
+      'Plan',
+    );
+    // An ID that isn't one is refused before anything is sent.
+    await expect(
+      copies.previewCopy(w.alice.ctx, {
+        kind: 'copy',
+        source: { spaceId: w.lib, nodeId: w.plan },
+        destination: { spaceId: w.board, parentId: w.pinned },
+        ids: () => 'not an ID',
+      }),
+    ).rejects.toThrow();
   });
 });
 

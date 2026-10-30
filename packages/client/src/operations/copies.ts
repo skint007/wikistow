@@ -144,6 +144,14 @@ export type CopyPreview = {
 /** How far `makeCopy` has got: nodes sealed and sent, of `total`. */
 export type CopyProgress = { stage: 'sending' | 'finishing'; sent: number; total: number };
 
+/** `makeCopy` stopped by its `signal` before the finish was sent: the copy is cancelled. */
+export class CopyStopped extends Error {
+  constructor() {
+    super('The copy was stopped');
+    this.name = 'CopyStopped';
+  }
+}
+
 type ReadLinks = (markdown: string) => Promise<FoundLinks>;
 
 /** How long one request waits out the server's rate limits, in all, before giving up. */
@@ -227,7 +235,9 @@ function publishesIn(tree: Tree, region: Region) {
  * records and the server's tree disagree on (`region-mismatch`). The server
  * refuses the rest when the copy opens: someone who may not copy or move
  * it, and a publication from another page in it. Links are read with
- * `read`, by default here; the web app reads them in a worker.
+ * `read`, by default here; the web app reads them in a worker. The copy's
+ * ID and each new node's ID, by its source's, are made at random unless
+ * `copyId` and `ids` choose them, as the CLI does from an idempotency key.
  */
 export async function previewCopy(
   ctx: ClientContext,
@@ -236,11 +246,15 @@ export async function previewCopy(
     source,
     destination,
     read = async (markdown) => findLinks(markdown),
+    copyId = newId(copyRoutes.CopyId),
+    ids: idOf,
   }: {
     kind: 'copy' | 'move';
     source: { spaceId: SpaceId; nodeId: FolderId | PageId };
     destination: { spaceId: SpaceId; parentId: FolderId | null };
     read?: ReadLinks;
+    copyId?: string;
+    ids?: (sourceId: string) => string;
   },
 ): Promise<CopyPreview> {
   ctx = patient(ctx);
@@ -267,10 +281,10 @@ export async function previewCopy(
   const bringsPublished = publishesIn(destTree, target.region);
 
   const ids = new Map<string, FolderId | PageId>(
-    moving.map(({ kind: k, node }) => [
-      node.id,
-      k === 'folder' ? newId(FolderIdSchema) : newId(PageIdSchema),
-    ]),
+    moving.map(({ kind: k, node }) => {
+      const schema = k === 'folder' ? FolderIdSchema : PageIdSchema;
+      return [node.id, idOf ? schema.parse(idOf(node.id)) : newId(schema)];
+    }),
   );
   const nodes = moving.map(({ kind: k, node }): CopiedNode => {
     const parentId =
@@ -294,7 +308,7 @@ export async function previewCopy(
   const isMove = kind === 'move';
   return {
     kind,
-    copyId: newId(PageIdSchema),
+    copyId: copyRoutes.CopyId.parse(copyId),
     source: {
       spaceId: source.spaceId,
       nodeId: source.nodeId,
@@ -536,15 +550,26 @@ const FINISH_TRIES = 5;
  * `permission-version`; one refused for a newer key version is sealed again
  * and sent again. A broken character from a Milestone 1 client is written
  * as U+FFFD.
+ *
+ * When `signal` aborts, it stops before the next batch is sealed, cancels
+ * the copy and throws `CopyStopped`. Once the finish is sent, it no longer
+ * stops: the finish decides.
  */
 export async function makeCopy(
   ctx: ClientContext,
   preview: CopyPreview,
-  { onProgress = () => {} }: { onProgress?: (progress: CopyProgress) => void } = {},
+  {
+    onProgress = () => {},
+    signal,
+  }: { onProgress?: (progress: CopyProgress) => void; signal?: AbortSignal } = {},
 ): Promise<MadeCopy> {
   ctx = patient(ctx);
   const params = { copyId: preview.copyId };
   const total = preview.nodes.length;
+  const live = () => {
+    if (signal?.aborted) throw new CopyStopped();
+  };
+  live();
   await ctx.api.call(
     copyRoutes.open,
     {
@@ -572,10 +597,14 @@ export async function makeCopy(
   let maybeMade = false;
   try {
     let sent = 0;
-    await sendNodes(ctx, preview, preview.nodes, () => {
-      sent += 1;
-      onProgress({ stage: 'sending', sent, total });
+    await sendNodes(ctx, preview, preview.nodes, {
+      sent: () => {
+        sent += 1;
+        onProgress({ stage: 'sending', sent, total });
+      },
+      live,
     });
+    live();
     for (let tries = 1; ; tries++) {
       onProgress({ stage: 'finishing', sent: total, total });
       try {
@@ -587,7 +616,7 @@ export async function makeCopy(
         const stale = error.code === 'stale-head' ? error.detail?.nodeIds : undefined;
         if (stale && stale.length > 0) {
           const again = preview.nodes.filter((node) => stale.includes(node.nodeId));
-          await sendNodes(ctx, preview, again, () => {});
+          await sendNodes(ctx, preview, again);
         } else if (maybeMade) {
           await pause(1000 * tries);
         } else {
@@ -620,16 +649,18 @@ export async function cancelCopy(ctx: ClientContext, copyId: string): Promise<vo
  * request as fit by bytes and by count, with the destination's keys, and
  * once more with fresh keys and target for a batch the server refused for
  * a newer key version or other owners. Their versions are opened a part at
- * a time, many to a request. `sent` is called as each node goes.
+ * a time, many to a request. `sent` is called as each node goes, and `live`
+ * before each part is opened and each batch sealed, to stop there.
  */
 async function sendNodes(
   ctx: ClientContext,
   preview: CopyPreview,
   nodes: readonly CopiedNode[],
-  sent: () => void,
+  { sent = () => {}, live = () => {} }: { sent?: () => void; live?: () => void } = {},
 ) {
   const sealing = await sealingFor(ctx, preview);
   for (let i = 0; i < nodes.length; i += CHUNK) {
+    live();
     const part = nodes.slice(i, i + CHUNK);
     const versions = await sealing.open(part);
     let batch: CopiedNode[] = [];
@@ -640,6 +671,7 @@ async function sendNodes(
       batch = [];
       bytes = 0;
       const send = async () => {
+        live();
         const entries = [];
         for (const node of going) entries.push(await sealing.seal(node, versions));
         await ctx.api.call(copyRoutes.records, {
