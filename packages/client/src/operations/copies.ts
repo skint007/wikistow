@@ -669,9 +669,11 @@ export async function makeCopy(
         await ctx.api.call(copyRoutes.finish, { params });
         break;
       } catch (error) {
-        keep =
-          outcomeUnknown(error) || (error instanceof ApiError && error.code === 'rate-limited');
-        if (!(error instanceof ApiError) || tries >= FINISH_TRIES) throw error;
+        const busy = error instanceof ApiError && error.code === 'rate-limited';
+        keep = outcomeUnknown(error) || busy;
+        // Still busy once `patient` has waited as long as it would: the
+        // server keeps the copy for a later finish, so stop asking now.
+        if (!(error instanceof ApiError) || busy || tries >= FINISH_TRIES) throw error;
         const stale = error.code === 'stale-head' ? error.detail?.nodeIds : undefined;
         if (stale && stale.length > 0) {
           const again = preview.nodes.filter((node) => stale.includes(node.nodeId));

@@ -540,12 +540,14 @@ describe('a busy server, or a lost answer', () => {
     };
     const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, busy]]));
     expect(await rejection(copies.makeCopy(ctx, preview))).toBe('rate-limited');
+    // Asked once: its wait was already as long as the copy waits.
+    expect(sent.filter((route) => route === copyRoutes.finish)).toHaveLength(1);
     expect(sent).not.toContain(copyRoutes.cancel);
     // The server still has it, and a later finish makes it.
     await w.alice.ctx.api.call(copyRoutes.finish, { params: { copyId: preview.copyId } });
     const plan = ref(w.board, preview.nodes[0]?.nodeId ?? '');
     expect((await current(w.dave.ctx, plan)).payload.title).toBe('Plan');
-  }, 30_000);
+  });
 
   it('finishes again when the finish’s answer is lost, and cancels nothing', async () => {
     const w = await world();
