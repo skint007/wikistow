@@ -874,20 +874,26 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
         })),
       };
     }
-    const { payload: linked } = await writeLinks(
-      { ...payload, markdown, extensions },
-      {
-        page: { id: node.nodeId as PageId, parentId: node.parentId },
-        audience,
-        region,
-        // A copy is a new page, so its table is never carried, even within
-        // one region: only entries the writer can check stay (section 10).
-        tree: () => linkTree,
-        published: publicationsOf,
-        // Its text is the source's, apart from address links: no link is renamed.
-        renames: false,
-      },
-    );
+    const copied = { ...payload, markdown, extensions };
+    const { payload: linked } = await writeLinks(copied, {
+      page: { id: node.nodeId as PageId, parentId: node.parentId },
+      audience,
+      region,
+      // A publication into a share keeps only entries its readers read
+      // already: the source publication's, for the copies published with it.
+      ...(audience === 'published' && {
+        publication: {
+          table: new Map([...linkTableOf(copied)].filter(([, id]) => published.has(id))),
+          region,
+        },
+      }),
+      // A copy is a new page, so its table is never carried, even within
+      // one region: only entries the writer can check stay (section 10).
+      tree: () => linkTree,
+      published: publicationsOf,
+      // Its text is the source's, apart from address links: no link is renamed.
+      renames: false,
+    });
     return linked;
   };
 

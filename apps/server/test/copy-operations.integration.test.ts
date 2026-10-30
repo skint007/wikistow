@@ -379,6 +379,38 @@ describe('a copy’s link table', () => {
     expect(table.get('budget')).toBe(w.budget);
   });
 
+  it('keeps its publication’s entries between copied pages, for readers in a share', async () => {
+    const w = await world();
+    const budget = ref(w.lib, w.budget);
+    await pages.publishPage(w.alice.ctx, budget);
+    await pages.publishPage(w.alice.ctx, w.page);
+    // Budget is published under a new title since: Plan's publication finds it by its entry.
+    await pages.editDraft(w.alice.ctx, budget, { title: 'Forecast' });
+    await pages.publishPage(w.alice.ctx, budget);
+    const published = async (ctx: ClientContext, page: { spaceId: SpaceId; pageId: PageId }) => {
+      const { heads } = await pages.loadPage(ctx, page.pageId);
+      const { opened } = await pages.openRevisionOf(
+        ctx,
+        page,
+        'published',
+        heads.publishedHead ?? ('' as never),
+      );
+      if (opened.kind !== 'current') throw new Error('expected a publication');
+      return opened.payload;
+    };
+    expect(linkTableOf(await published(w.alice.ctx, w.page)).get('budget')).toBe(w.budget);
+
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const made = await copies.makeCopy(w.alice.ctx, preview);
+    const plan = await published(w.carol.ctx, ref(w.board, made.copies.get(w.plan) ?? ''));
+    expect(plan.markdown).toContain('[[Budget]]');
+    expect(linkTableOf(plan).get('budget')).toBe(made.copies.get(w.budget));
+  });
+
   it('renames no link, so its draft and publication keep the source’s text', async () => {
     const alice = await personWithVault(t);
     const space = await spaceOperations.createSpace(alice.ctx, { name: 'Notes' });
