@@ -942,31 +942,42 @@ export async function dropCopiesFrom(tx: Database, spaceId: string): Promise<str
  * Delete unfinished copies nobody sent anything to since `cutoff`, with
  * their nodes and attachments, as cancelling one does. Each is checked
  * again under the locks sending takes, so one sent to or finished
- * meanwhile stays. How many went. Copies finished before `cutoff` go too,
- * leaving their nodes, and aren't counted.
+ * meanwhile stays. How many went, and how many failed, which are left for
+ * the next sweep rather than stopping this one. Copies finished before
+ * `cutoff` go too, leaving their nodes, and aren't counted.
  */
-export async function sweepCopies(db: Database, store: BlobStore, cutoff: Date): Promise<number> {
+export async function sweepCopies(
+  db: Database,
+  store: BlobStore,
+  cutoff: Date,
+): Promise<{ removed: number; failed: number }> {
   await db.delete(copies).where(sql`${copies.finishedAt} < ${cutoff.toISOString()}`);
   const old = await db
     .select({ id: copies.id, spaceId: copies.destinationSpaceId })
     .from(copies)
     .where(and(isNull(copies.finishedAt), sql`${copies.touchedAt} < ${cutoff.toISOString()}`));
   let removed = 0;
+  let failed = 0;
   for (const { id, spaceId } of old) {
-    const hashes = await db.transaction(async (tx) => {
-      const [space] = await tx
-        .select({ id: spaces.id })
-        .from(spaces)
-        .where(eq(spaces.id, spaceId))
-        .for('key share');
-      if (!space) return null;
-      const [copy] = await tx.select().from(copies).where(eq(copies.id, id)).for('update');
-      if (!copy || copy.finishedAt !== null || copy.touchedAt >= cutoff) return null;
-      return dropHeld(tx, copy);
-    });
+    const hashes = await db
+      .transaction(async (tx) => {
+        const [space] = await tx
+          .select({ id: spaces.id })
+          .from(spaces)
+          .where(eq(spaces.id, spaceId))
+          .for('key share');
+        if (!space) return null;
+        const [copy] = await tx.select().from(copies).where(eq(copies.id, id)).for('update');
+        if (!copy || copy.finishedAt !== null || copy.touchedAt >= cutoff) return null;
+        return dropHeld(tx, copy);
+      })
+      .catch(() => {
+        failed += 1;
+        return null;
+      });
     if (!hashes) continue;
     removed += 1;
     for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
   }
-  return removed;
+  return { removed, failed };
 }

@@ -18,7 +18,7 @@ import {
 } from '@wikistow/client';
 import { copyRoutes, pageRoutes, publicationRoutes } from '@wikistow/contracts';
 import { fileBlobStore, schema, sweepBlobs, sweepDrafts } from '@wikistow/server';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import type { z } from 'zod';
 import { enrolledAgent } from './support/agents.ts';
@@ -911,6 +911,53 @@ describe('a copy’s hidden nodes', () => {
     await busy.send();
     await busy.finish();
     expect((await nodeRow(busy.newIdOf(w.page.pageId)))?.copyId).toBeNull();
+  });
+
+  it('go when more than one statement could name one by one, and one that can’t go stops no sweep', async () => {
+    const w = await world();
+    const big = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await big.open();
+    await big.send();
+    // More hidden pages than half Postgres's 65,535 parameters, which a
+    // delete naming each ID twice would pass.
+    const top = big.newIdOf(w.lib.shared);
+    const prefix = `big${big.copyId.slice(0, 8)}`;
+    await t.db.execute(sql`
+      insert into nodes (id, space_id, parent_id, kind, copy_id)
+      select ${prefix} || g, ${w.board}, ${top}, 'page', ${big.copyId}
+      from generate_series(1, 33000) g`);
+    expect(await big.cancel()).toEqual({ ok: true });
+    const [left] = await t.db
+      .select({ n: count() })
+      .from(schema.nodes)
+      .where(sql`${schema.nodes.id} like ${`${prefix}%`}`);
+    expect(left?.n).toBe(0);
+    expect(await nodeRow(top)).toBeNull();
+
+    // A copy whose hidden top went elsewhere can't be dropped: the sweep
+    // counts it, and goes on to the next.
+    const options = { from: w.lib.spaceId, nodeId: w.page.pageId, to: w.board, parentId: null };
+    const stuck = await openCopy(w.alice.ctx, options);
+    const abandoned = await openCopy(w.alice.ctx, options);
+    for (const copy of [stuck, abandoned]) await copy.open();
+    await t.db
+      .update(schema.nodes)
+      .set({ spaceId: w.bobs })
+      .where(eq(schema.nodes.id, stuck.newIdOf(w.page.pageId)));
+    await t.db
+      .update(schema.copies)
+      .set({ touchedAt: DAYS_AGO_2() })
+      .where(inArray(schema.copies.id, [stuck.copyId, abandoned.copyId]));
+    const swept = await sweepBlobs(t.db, fileBlobStore(t.blobDir));
+    expect(swept).toMatchObject({ copies: 1, copiesFailed: 1 });
+    expect(await copyRow(abandoned.copyId)).toBeNull();
+    expect(await copyRow(stuck.copyId)).not.toBeNull();
+    await t.db.delete(schema.copies).where(eq(schema.copies.id, stuck.copyId));
   });
 
   it('go with their copy, and with an unfinished copy’s source space', async () => {

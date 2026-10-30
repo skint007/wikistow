@@ -16,7 +16,8 @@
 // (`endPublicationsFrom`): it takes their rows, and any opening it removes,
 // without waiting, so a change in their space may wait for it without
 // closing a cycle.
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
+import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import { isLockNotAvailable } from '../db/errors.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
@@ -607,8 +608,8 @@ export async function endPublicationsFrom(
       .from(publications)
       .where(
         or(
-          and(inArray(publications.sourcePageId, pageIds), isNull(publications.detachedAt)),
-          inArray(publications.destinationPageId, pageIds),
+          and(anyId(publications.sourcePageId, pageIds), isNull(publications.detachedAt)),
+          anyId(publications.destinationPageId, pageIds),
         ),
       )
       .for('update', { noWait: true });
@@ -621,7 +622,7 @@ export async function endPublicationsFrom(
         await tx
           .select({ pageId: pageHeads.pageId })
           .from(pageHeads)
-          .where(inArray(pageHeads.pageId, ending))
+          .where(anyId(pageHeads.pageId, ending))
       ).map((heads) => heads.pageId),
     );
     const copies = ending.filter((pageId) => sent.has(pageId));
@@ -630,7 +631,7 @@ export async function endPublicationsFrom(
       await tx
         .update(publications)
         .set({ detachedAt: sql`now()` })
-        .where(inArray(publications.destinationPageId, copies));
+        .where(anyId(publications.destinationPageId, copies));
     }
     if (openings.length === 0) return [];
     // As `sweepOpenings` removes one: its space, then the page.
@@ -638,18 +639,18 @@ export async function endPublicationsFrom(
       .select({ id: spaces.id })
       .from(spaces)
       .innerJoin(nodes, eq(nodes.spaceId, spaces.id))
-      .where(inArray(nodes.id, openings))
+      .where(anyId(nodes.id, openings))
       .for('key share', { of: spaces, noWait: true });
     await tx
       .select({ id: nodes.id })
       .from(nodes)
-      .where(inArray(nodes.id, openings))
+      .where(anyId(nodes.id, openings))
       .for('update', { noWait: true });
     const uploaded = await tx
       .select({ hash: blobs.hash })
       .from(blobs)
-      .where(inArray(blobs.pageId, openings));
-    await tx.delete(nodes).where(inArray(nodes.id, openings));
+      .where(anyId(blobs.pageId, openings));
+    await tx.delete(nodes).where(anyId(nodes.id, openings));
     return uploaded.map((blob) => blob.hash);
   } catch (error) {
     if (!isLockNotAvailable(error)) throw error;

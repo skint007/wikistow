@@ -21,6 +21,7 @@ import {
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { BlobTooLarge, type BlobStore, type StagedBlob } from '../blobs/store.ts';
+import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import {
@@ -1302,7 +1303,7 @@ async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promi
     await tx
       .select({ id: nodes.id })
       .from(nodes)
-      .where(and(inArray(nodes.id, ids), eq(nodes.spaceId, spaceId)))
+      .where(and(anyId(nodes.id, ids), eq(nodes.spaceId, spaceId)))
       .for('update');
     locked = new Set(ids);
   }
@@ -1388,19 +1389,16 @@ export async function removeSubtree(
   // Its pages' public links, copies and the target rows naming them, in
   // their lock order, rather than by the cascade (ADR 0005, decision 5).
   await endLinks(tx, ids);
-  const doomed = await tx
-    .select({ hash: blobs.hash })
-    .from(blobs)
-    .where(inArray(blobs.pageId, [...ids]));
+  const doomed = await tx.select({ hash: blobs.hash }).from(blobs).where(anyId(blobs.pageId, ids));
   // Envelopes and folder metadata point at their subject by ID, not by
   // foreign key, so they are removed explicitly.
   const pageRevisions = tx
     .select({ id: revisions.id })
     .from(revisions)
-    .where(inArray(revisions.pageId, [...ids]));
+    .where(anyId(revisions.pageId, ids));
   const folderMetadata = and(
     eq(metadataRevisions.subjectKind, 'folder'),
-    inArray(metadataRevisions.subjectId, [...ids]),
+    anyId(metadataRevisions.subjectId, ids),
   );
   await tx
     .delete(keyEnvelopes)
@@ -1439,12 +1437,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * First, publications into another space opened more than a day ago that
  * never got a version, with nothing uploaded for them within the day
  * either (`sweepOpenings`): their uploads then go with them. And copies
- * nobody sent anything to for a day (`sweepCopies`), with their nodes.
+ * nobody sent anything to for a day (`sweepCopies`), with their nodes; one
+ * that fails is counted in `copiesFailed` and tried again next time.
  */
 export async function sweepBlobs(db: Database, store: BlobStore, { graceMs = DAY_MS } = {}) {
   const cutoff = new Date(Date.now() - graceMs);
   const openings = await sweepOpenings(db, cutoff);
-  const copies = await sweepCopies(db, store, cutoff);
+  const { removed: copies, failed: copiesFailed } = await sweepCopies(db, store, cutoff);
   const unlisted = and(
     lt(blobs.createdAt, cutoff),
     sql`not exists (select 1 from revision_blobs ref where ref.blob_hash = ${blobs.hash})`,
@@ -1470,7 +1469,7 @@ export async function sweepBlobs(db: Database, store: BlobStore, { graceMs = DAY
     if (file.writtenAt < cutoff) await deleteUnlistedFile(db, store, file.hash);
   }
   await store.clearStaging(graceMs);
-  return { staged, openings, copies };
+  return { staged, openings, copies, copiesFailed };
 }
 
 /**
