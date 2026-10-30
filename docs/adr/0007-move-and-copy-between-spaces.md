@@ -52,7 +52,7 @@ Moves are for people, with a session, as sharing is. An agent may copy where bot
 ### 3. What is refused
 
 - **A live publication**: a page the server's publication rows name as a destination, with a version, not yet detached (section 13), or a folder that holds one. An unfinished opening doesn't count. Its publishers detach it first. The dialog lists the pages.
-- **A move into the subtree itself**, as today.
+- **A destination inside the source subtree**, for a copy or a move, as for a move today.
 - **A move within one space.** That is the existing move of section 10, and the dialog sends it there.
 
 ### 4. The destination's region
@@ -91,7 +91,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 
 **Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share or a move between regions must cover. Deleting or moving one of their ancestors still takes them along. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
 
-A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
+A finished copy is kept for a day, so a finish sent again after a lost answer gets the same answer instead of copying everything twice. A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
 
 So a folder of any size moves or copies, which also avoids the one-request limit that section 10's moves still have.
 
