@@ -229,13 +229,14 @@ that arrives with its draft alone: pageId its copy, sourceId the original,
 and title null where it couldn't be read. links is null when some page's
 links couldn't be read.
 
-Nothing is made unless the copy finishes. If what it copies, or who has
-access where it goes, changes while it is sent, it is refused (exit 3):
-run it again. Refused as "forbidden" (exit 1), the agent or its person
+Nothing is made unless the copy finishes. If who has access where it
+goes changes while it is sent, it is refused (exit 3): run it again. It
+copies each page as it was when sealed; later edits there don't stop it. Refused as "forbidden" (exit 1), the agent or its person
 may not edit what it copies, or make pages where it goes; or, when
 detail.nodeIds names pages, some pages in it are publications from other
-pages, to be detached first, or have no version to copy. Ctrl-C or
-SIGTERM before the finish cancels the copy (exit 1, code "cancelled"). If
+pages, to be detached first, or have no version to copy. Once the copy
+is being sent, Ctrl-C or SIGTERM before the finish cancels it (exit 1,
+code "cancelled"). If
 the finish's answer is lost, the CLI sends the finish again, which is
 answered as the first was; if no answer comes at all, the copy may have
 been made.
