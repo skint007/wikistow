@@ -1,19 +1,23 @@
 // The app's copy and move between spaces (protocol section 10), against the
-// real server: the preview, links between copied pages, and a move that
-// finds its source changed at the finish and seals that page again.
+// real server: the preview, links between copied pages, a move that finds
+// its source changed at the finish and seals that page again, and a copy
+// that waits out a busy server or a lost answer.
 import {
+  ApiError,
   copyOperations as copies,
   linkTableOf,
   pageOperations as pages,
   PageId as PageIdSchema,
+  publicationOperations as pubs,
   publicLinkOperations as links,
   spaceOperations,
   utf8,
+  type ApiClient,
   type ClientContext,
   type PageId,
   type SpaceId,
 } from '@wikistow/client';
-import { copyRoutes } from '@wikistow/contracts';
+import { copyRoutes, pageRoutes, type RouteDef } from '@wikistow/contracts';
 import { schema } from '@wikistow/server';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -128,6 +132,41 @@ async function current(ctx: ClientContext, page: { spaceId: SpaceId; pageId: Pag
   if (opened.kind !== 'current') throw new Error('expected a current payload');
   return { heads, payload: opened.payload };
 }
+
+/**
+ * `ctx` talking to a server that is busy once for each kind of request:
+ * the first is `rate-limited`, asking for `retryAfterSeconds`, and the rest
+ * are answered. `asked` counts each kind's requests, refused ones too.
+ */
+function busyOnce(ctx: ClientContext, retryAfterSeconds = 0) {
+  const asked = new Map<string, number>();
+  const busy = (kind: string) => {
+    const count = (asked.get(kind) ?? 0) + 1;
+    asked.set(kind, count);
+    if (count === 1) {
+      throw new ApiError(429, 'rate-limited', 'Too many requests', {}, { retryAfterSeconds });
+    }
+  };
+  const { api } = ctx;
+  const real = api.call as unknown as (route: RouteDef, ...rest: unknown[]) => Promise<unknown>;
+  const busyApi: ApiClient = {
+    call: (async (route: RouteDef, ...rest: unknown[]) => {
+      busy(`${route.method} ${route.path}`);
+      return real(route, ...rest);
+    }) as unknown as ApiClient['call'],
+    upload: async (...args) => {
+      busy('upload');
+      return api.upload(...args);
+    },
+    download: async (...args) => {
+      busy('download');
+      return api.download(...args);
+    },
+  };
+  return { ctx: { ...ctx, api: busyApi }, asked };
+}
+
+const kindOf = (route: RouteDef) => `${route.method} ${route.path}`;
 
 describe('copying a folder into another space', () => {
   it('previews it, then copies it with its links between its own pages', async () => {
@@ -264,6 +303,178 @@ describe('copying a folder into another space', () => {
   });
 });
 
+describe('copying what has no draft, or none since it was published', () => {
+  it('makes a page with no draft from its publication', async () => {
+    const w = await world();
+    const budget = { spaceId: w.lib, pageId: w.budget };
+    const { revisionId } = await pages.publishPage(w.alice.ctx, budget);
+    const preview = await pubs.previewPublication(w.alice.ctx, {
+      source: budget,
+      revisionId,
+      audience: 'published',
+      spaceId: w.board,
+      parentId: w.pinned,
+    });
+    const published = await pubs.publishToSpace(w.alice.ctx, { preview, attachmentIds: new Set() });
+    // Ended without being detached: a publication, and no draft.
+    await pubs.endPublication(w.alice.ctx, { source: budget, spaceId: w.board });
+    const copy = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.board, nodeId: published.pageId },
+      destination: { spaceId: w.lib, parentId: null },
+    });
+    const made = await copies.makeCopy(w.alice.ctx, copy);
+    const { heads, payload } = await current(w.alice.ctx, ref(w.lib, made.nodeId));
+    expect(payload.markdown).toBe('the budget');
+    expect(heads.publishedHead).not.toBeNull();
+    expect(heads.draftChanges).toBe(false);
+  });
+
+  it('publishes a copy on its own draft when the source was published as it is', async () => {
+    const w = await world();
+    await pages.publishPage(w.alice.ctx, { spaceId: w.lib, pageId: w.budget });
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const made = await copies.makeCopy(w.alice.ctx, preview);
+    const budget = ref(w.board, made.copies.get(w.budget) ?? '');
+    const { heads } = await current(w.dave.ctx, budget);
+    expect(heads.draftChanges).toBe(false);
+    const { record } = await pages.openRevisionOf(
+      w.carol.ctx,
+      budget,
+      'published',
+      heads.publishedHead ?? ('' as never),
+    );
+    expect(record.basedOn).toBe(heads.draftHead);
+    // Plan's draft was edited since it was published: its copy shows that.
+    const plan = ref(w.board, made.copies.get(w.plan) ?? '');
+    expect((await current(w.dave.ctx, plan)).heads.draftChanges).toBe(true);
+  });
+});
+
+describe('a copy’s link table', () => {
+  it('keeps no entry its writer can’t check, even within one share', async () => {
+    const w = await world();
+    // Plan's table names Elsewhere, beside Notes, outside the agent's picks.
+    expect(linkTableOf((await current(w.alice.ctx, w.page)).payload).get('elsewhere')).toBe(
+      w.elsewhere,
+    );
+    const agent = await enrolledAgent(t, w.dave, {
+      picks: [{ spaceId: w.lib, folderId: w.notes, role: 'editor' }],
+    });
+    const preview = await copies.previewCopy(agent.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.lib, parentId: w.notes },
+    });
+    const made = await copies.makeCopy(agent.ctx, preview);
+    const { payload } = await current(w.alice.ctx, ref(w.lib, made.nodeId));
+    const table = linkTableOf(payload);
+    expect(table.has('elsewhere')).toBe(false);
+    expect(table.get('budget')).toBe(w.budget);
+  });
+});
+
+describe('a busy server, or a lost answer', () => {
+  it('copies more pages than a minute’s reads would open one by one, waiting out every limit', async () => {
+    const w = await world();
+    const many = await spaceOperations.createFolder(w.alice.ctx, {
+      spaceId: w.lib,
+      parentId: null,
+      name: 'Many',
+    });
+    const PAGES = 40;
+    let last: PageId | null = null;
+    for (let i = 0; i < PAGES; i++) {
+      last = await pages.createPage(w.alice.ctx, {
+        spaceId: w.lib,
+        parentId: many,
+        title: `Page ${i}`,
+        markdown: i === 0 ? 'Back to [[Plan]].' : `page ${i}, see [[Page 0]]`,
+      });
+    }
+    // Each kind of request is refused once, rate-limited, then answered.
+    const previewing = busyOnce(w.alice.ctx);
+    const moving = await copies.previewCopy(previewing.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    // Nothing was passed over: every page that links to Plan is listed.
+    expect(new Set(moving.inbound.map((p) => p.title))).toEqual(new Set(['Page 0', 'Stay']));
+
+    const copying = busyOnce(w.alice.ctx);
+    const whole = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: many },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    const made = await copies.makeCopy(copying.ctx, whole);
+    expect(made.copies.size).toBe(PAGES + 1);
+    // Versions are opened many to a request, not one by one.
+    const fetches = copying.asked.get(kindOf(pageRoutes.fetchRevisions)) ?? 0;
+    expect(fetches).toBeLessThan(10);
+    for (const route of [pageRoutes.fetchRevisions, copyRoutes.records, copyRoutes.finish]) {
+      expect(copying.asked.get(kindOf(route)), route.path).toBeGreaterThan(1);
+    }
+    const copied = ref(w.board, made.copies.get(last ?? '') ?? '');
+    expect((await current(w.dave.ctx, copied)).payload.markdown).toBe(
+      `page ${PAGES - 1}, see [[Page 0]]`,
+    );
+  });
+
+  it('waits as long as a busy finish asks, and finishes', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    let busy = true;
+    const finishing: Answer = async (input, send) => {
+      if (busy) {
+        busy = false;
+        throw new ApiError(429, 'rate-limited', 'Busy', {}, { retryAfterSeconds: 1 });
+      }
+      return send(input);
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, finishing]]));
+    const started = Date.now();
+    const made = await copies.makeCopy(ctx, preview);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+    expect(sent.filter((route) => route === copyRoutes.finish)).toHaveLength(2);
+    expect((await current(w.dave.ctx, ref(w.board, made.nodeId))).payload.title).toBe('Plan');
+  });
+
+  it('finishes again when the finish’s answer is lost, and cancels nothing', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    let lost = false;
+    const losing: Answer = async (input, send) => {
+      const answer = await send(input);
+      if (!lost) {
+        lost = true;
+        throw new ApiError(0, 'network', 'No answer from the finish');
+      }
+      return answer;
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, losing]]));
+    const made = await copies.makeCopy(ctx, preview);
+    expect(sent.filter((route) => route === copyRoutes.finish)).toHaveLength(2);
+    expect(sent).not.toContain(copyRoutes.cancel);
+    const plan = ref(w.board, made.copies.get(w.plan) ?? '');
+    expect((await current(w.dave.ctx, plan)).payload.title).toBe('Plan');
+    expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
+  });
+});
+
 describe('moving into another space', () => {
   it('previews what it ends, and seals again a page edited before the finish', async () => {
     const w = await world();
@@ -289,9 +500,24 @@ describe('moving into another space', () => {
       }
       return send(input);
     };
-    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.finish, finishing]]));
+    // Which nodes each records request carries, in order.
+    const batches: string[][] = [];
+    const recording: Answer = async (input, send) => {
+      const { nodes } = input.body as { nodes: { nodeId: string }[] };
+      batches.push(nodes.map((node) => node.nodeId));
+      return send(input);
+    };
+    const { ctx, sent } = lyingServer(
+      w.alice.ctx,
+      new Map<RouteDef, Answer>([
+        [copyRoutes.finish, finishing],
+        [copyRoutes.records, recording],
+      ]),
+    );
     const made = await copies.makeCopy(ctx, preview);
     expect(sent.filter((route) => route === copyRoutes.finish)).toHaveLength(2);
+    // Only Plan was sealed and sent again; the others' records stood.
+    expect(batches).toEqual([preview.nodes.map((node) => node.nodeId), [made.copies.get(w.plan)]]);
     const plan = ref(w.board, made.copies.get(w.plan) ?? '');
     expect((await current(w.dave.ctx, plan)).payload.markdown).toBe('edited at the last moment');
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
