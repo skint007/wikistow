@@ -6,6 +6,7 @@ import {
   type SpaceId,
   type moveOperations,
 } from '@wikistow/client';
+import { ApiError, outcomeUnknown } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Fragment, useEffect, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
 import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, useAction } from '../sharing/use-action';
-import { copyMessage, namedPages, PagesRefused } from './messages';
+import { copyMessage, FinishUnknown, namedPages, PagesRefused } from './messages';
 import { READ_BUDGET_MS } from './markdown-worker';
 import type { Destination } from './move-model';
 import { pageReader } from './page-reader';
@@ -67,6 +68,8 @@ export function ConfirmCopy({
   // The pages a refusal named, by source ID, and why.
   const [blocked, setBlocked] = useState<PagesRefused | null>(null);
   const [stopped, setStopped] = useState(false);
+  // Its finish may have made it (`FinishUnknown`), so it isn't offered again.
+  const [unsure, setUnsure] = useState(false);
   // Aborted by Stop; a new one for each try.
   const stopping = useRef<AbortController | null>(null);
   const [stopAsked, setStopAsked] = useState(false);
@@ -140,11 +143,13 @@ export function ConfirmCopy({
       setSpent(confirmed.copyId);
       setBlocked(null);
       setStopped(false);
+      setUnsure(false);
       const stop = new AbortController();
       stopping.current = stop;
       setStopAsked(false);
       setProgress({ stage: 'sending', sent: 0, total: confirmed.nodes.length });
       let made: copyOperations.MadeCopy | null = null;
+      let stage = 'sending' as copyOperations.CopyProgress['stage'];
       try {
         await runCommand(
           copyNode,
@@ -152,7 +157,10 @@ export function ConfirmCopy({
           {
             satisfies: requirementsHere(),
             ctx,
-            onProgress: setProgress,
+            onProgress: (reached) => {
+              stage = reached.stage;
+              setProgress(reached);
+            },
             signal: stop.signal,
             onMade: (copied) => {
               made = copied;
@@ -164,6 +172,14 @@ export function ConfirmCopy({
         if (caught instanceof copyOperations.CopyStopped) {
           setStopped(true);
           return;
+        }
+        // A finish whose answer was lost, or that stayed busy, is left as it is.
+        if (
+          stage === 'finishing' &&
+          (outcomeUnknown(caught) || (caught instanceof ApiError && caught.code === 'rate-limited'))
+        ) {
+          setUnsure(true);
+          throw new FinishUnknown();
         }
         const pageIds = namedPages(caught);
         if (!pageIds) throw caught;
@@ -212,7 +228,8 @@ export function ConfirmCopy({
     void preview.refetch();
   };
   const confirmable = shown !== undefined && !preview.isError && shown.copyId !== spent;
-  const offerLookAgain = !busy && shown !== undefined && shown.copyId === spent;
+  // Once tried, unless it may have been made.
+  const offerLookAgain = !busy && !unsure && shown !== undefined && shown.copyId === spent;
   // Focus moves on from a button that goes: from Stop, once it has run, to
   // Look again or Back; from Look again, once looked at again, to Copy or Move.
   const footer = useRef<HTMLDivElement>(null);

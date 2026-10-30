@@ -201,7 +201,31 @@ it('closes before it opens the copy, so the dialog isn’t shown for the space i
   expect(fake.events).toEqual(['closed', 'navigated']);
 });
 
-it('stops only while it sends, then moves focus on from the buttons that go', async () => {
+it('offers Look again after a failure, then moves focus on from the buttons that go', async () => {
+  fake.preview = (copyId) => previewOf(copyId);
+  let fail: (error: unknown) => void = () => {};
+  fake.make = () => new Promise((_, reject) => (fail = reject));
+  await confirmInWork('copy');
+
+  await act(async () => {
+    button('Copy').focus();
+    button('Copy').click();
+  });
+  await act(async () => fail(new ApiError(400, 'missing-blob', 'Missing')));
+  await settle();
+  expect(document.body.textContent).toContain(
+    'An attachment didn’t arrive, so nothing was copied. Look at it again.',
+  );
+  expect(document.activeElement).toBe(button('Look again'));
+
+  await act(async () => button('Look again').click());
+  await settle();
+  expect(() => button('Look again')).toThrow();
+  expect(document.activeElement).toBe(button('Copy'));
+  expect(button('Copy').disabled).toBe(false);
+});
+
+it('says a finish that went unanswered or stayed busy may have made it, and offers only Back', async () => {
   fake.preview = (copyId) => previewOf(copyId);
   let progress: (p: Progress) => void = () => {};
   let fail: (error: unknown) => void = () => {};
@@ -222,15 +246,20 @@ it('stops only while it sends, then moves focus on from the buttons that go', as
   await act(async () => fail(new ApiError(429, 'rate-limited', 'Slow down')));
   await settle();
   expect(document.body.textContent).toContain(
-    'The server is busy, so nothing was copied. Wait a moment, then look at it again.',
+    'This app couldn’t tell whether the copy finished, so it may already be there. Check where it was going before you copy it again.',
   );
-  expect(document.activeElement).toBe(button('Look again'));
-
-  await act(async () => button('Look again').click());
-  await settle();
   expect(() => button('Look again')).toThrow();
-  expect(document.activeElement).toBe(button('Copy'));
-  expect(button('Copy').disabled).toBe(false);
+  expect(document.activeElement).toBe(button('Back'));
+  cleanup();
+
+  fake.preview = (copyId) => previewOf(copyId, { kind: 'move' });
+  await confirmInWork('move');
+  await act(async () => button('Move').click());
+  await act(async () => progress({ stage: 'finishing', sent: 1, total: 1 }));
+  await act(async () => fail(new ApiError(0, 'network', 'No answer')));
+  await settle();
+  expect(document.body.textContent).toContain('it may already be there, and gone from here.');
+  expect(() => button('Look again')).toThrow();
 });
 
 it('says wikilinks find a page by title there, and address links in a move stop working', async () => {

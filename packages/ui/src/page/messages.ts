@@ -69,9 +69,21 @@ export class PagesRefused extends Error {
   }
 }
 
-// A copy or move between spaces is undone in full when it fails: the
-// server, or the app, deletes what it made. The words differ only in the verb.
-// A failed copy is never sent again unseen, so the way on is Look again.
+/**
+ * A copy whose finish may have made it: its answer was lost, or the server
+ * stayed too busy and keeps it for a later finish. It isn't cancelled.
+ */
+export class FinishUnknown extends Error {
+  constructor() {
+    super('It may have finished');
+    this.name = 'FinishUnknown';
+  }
+}
+
+// A copy or move between spaces that fails is undone in full, the server,
+// or the app, deleting what it made, unless it may have finished
+// (`FinishUnknown`). The words differ only in the verb. A failed copy is
+// never sent again unseen, so the way on is Look again.
 const copyRefused = (
   nothing: string,
 ): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
@@ -100,6 +112,11 @@ const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
  */
 export function copyMessage(error: unknown, copy: boolean): string {
   const nothing = copy ? 'nothing was copied' : 'nothing moved';
+  if (error instanceof FinishUnknown) {
+    return copy
+      ? 'This app couldn’t tell whether the copy finished, so it may already be there. Check where it was going before you copy it again.'
+      : 'This app couldn’t tell whether the move finished, so it may already be there, and gone from here. Check where it was going before you move it again.';
+  }
   if (error instanceof PagesRefused) {
     return error.reason === 'published-elsewhere'
       ? `Some pages in it were published here from other pages, so ${nothing}. Someone who can publish each one detaches it first, with Detach to edit…`
