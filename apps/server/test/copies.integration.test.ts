@@ -385,9 +385,78 @@ describe('what a copy refuses', () => {
     expect(draft?.markdown).toBe('draft words');
     expect(draft?.extensions['wikistow.publication']).toBeUndefined();
     expect((await textOf(w.alice.ctx, made, 'published'))?.markdown).toBe('draft words');
+    expect((await pages.loadPage(w.alice.ctx, made.pageId)).heads.draftChanges).toBe(false);
   });
 
-  it('refuses an opening made from an old preview', async () => {
+  it('is stale when a page moved with no draft has one by the finish', async () => {
+    const w = await world();
+    const { revisionId } = await pages.publishPage(w.alice.ctx, w.page);
+    const preview = await pubs.previewPublication(w.alice.ctx, {
+      source: w.page,
+      revisionId,
+      audience: 'published',
+      spaceId: w.board,
+      parentId: w.pinned,
+    });
+    const published = await pubs.publishToSpace(w.alice.ctx, {
+      preview,
+      attachmentIds: new Set(),
+    });
+    await pubs.endPublication(w.alice.ctx, { source: w.page, spaceId: w.board });
+    const move = await openCopy(w.alice.ctx, {
+      kind: 'move',
+      from: w.board,
+      nodeId: published.pageId,
+      to: w.lib.spaceId,
+      parentId: null,
+    });
+    await move.open();
+    await move.send();
+    // Detached meanwhile: it has a draft now.
+    const copy = { spaceId: w.board, pageId: published.pageId };
+    await pubs.detachPublication(w.alice.ctx, copy);
+    await pages.editDraft(w.alice.ctx, copy, { markdown: 'written once detached' });
+    const stale = await move.finish().then(
+      () => null,
+      (error: { code?: string; detail?: { nodeIds?: string[] } }) => error,
+    );
+    expect(stale?.code).toBe('stale-head');
+    expect(stale?.detail?.nodeIds).toEqual([move.newIdOf(published.pageId)]);
+    await move.send([published.pageId]);
+    await move.finish();
+    const made = at(w.lib.spaceId, move.newIdOf(published.pageId));
+    expect((await textOf(w.alice.ctx, made, 'draft'))?.markdown).toBe('written once detached');
+  });
+
+  it('shows unpublished changes in a copy only where the source has them', async () => {
+    const w = await world();
+    const changed = await copyAll(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    const info = (id: string) => pages.loadPage(w.alice.ctx, PageIdSchema.parse(id));
+    // Its draft was edited since it was published.
+    expect((await info(changed.newIdOf(w.page.pageId))).heads.draftChanges).toBe(true);
+    // Published as it is, its copy's publication names the copy's draft.
+    await pages.publishPage(w.alice.ctx, w.page);
+    const same = await copyAll(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    const made = await info(same.newIdOf(w.page.pageId));
+    expect(made.heads.draftChanges).toBe(false);
+    const [published] = await t.db
+      .select({ basedOn: schema.revisions.basedOn })
+      .from(schema.revisions)
+      .where(eq(schema.revisions.id, made.heads.publishedHead ?? ''));
+    expect(published?.basedOn).toBe(made.heads.draftHead);
+  });
+
+  it('copies a publication ended without being detached, its publication as its draft', async () => {
     const w = await world();
     const copy = await openCopy(w.alice.ctx, {
       from: w.lib.spaceId,

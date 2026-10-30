@@ -76,8 +76,10 @@ export const open = {
 
 /**
  * One version of a new page and the source version it was sealed from: a
- * new page's first version (`revision.record.basedOn` null), with the key
- * material of the new page's region at its current key version.
+ * new page's first version (`revision.record.basedOn` null; a published
+ * version may name the draft in its entry, when the source's was made from
+ * its current draft or it had none), with the key material of the new
+ * page's region at its current key version.
  */
 const CopiedVersion = z.object({ ...Commit, sourceRevisionId: RevisionId }).omit({
   permissionVersion: true,

@@ -405,8 +405,9 @@ export async function copyUploadAccess(db: Database, caller: Caller, copyId: str
  * they list are committed as any write's are: each entry replaces the
  * records sent for its node before, and is checked as any write is in the
  * destination parent's region, under its current key version, apart from
- * the head check: every record is a first version (`basedOn` null),
- * written by the caller. Each names a version of its node's source it was
+ * the head check: every record is a first version (`basedOn` null, or for
+ * a published version, the draft of its own entry), written by the caller.
+ * Each names a version of its node's source it was
  * sealed from. A published version goes only in a copy that brings them,
  * where the caller can still publish.
  */
@@ -531,11 +532,23 @@ async function storePage(
   entry: Extract<Entry, { kind: 'page' }>,
   { copy, share, caller, sourceId, storageBytes }: Target,
 ) {
+  // The draft first: a published version names it as its base when the
+  // source's was made from its current draft, or it had none, so the copy
+  // shows no unpublished changes where the source had none (section 10).
+  const draftId = entry.draft.revision.record.revisionId;
   const versions = [
-    { audience: 'draft' as const, version: entry.draft },
-    ...(entry.published ? [{ audience: 'published' as const, version: entry.published }] : []),
+    { audience: 'draft' as const, version: entry.draft, basedOn: null },
+    ...(entry.published
+      ? [
+          {
+            audience: 'published' as const,
+            version: entry.published,
+            basedOn: entry.published.revision.record.basedOn === draftId ? draftId : null,
+          },
+        ]
+      : []),
   ];
-  for (const { audience, version } of versions) {
+  for (const { audience, version, basedOn } of versions) {
     await requireSourceRevision(tx, { sourceId, revisionId: version.sourceRevisionId, audience });
     const commit = { ...version, permissionVersion: copy.permissionVersion };
     await verifyRevisionCommit(tx, commit, {
@@ -543,7 +556,7 @@ async function storePage(
       spaceId: copy.destinationSpaceId,
       pageId: entry.nodeId,
       audience,
-      basedOn: null,
+      basedOn,
       share,
       heads: null,
     });
@@ -756,7 +769,8 @@ async function requireRegion(tx: Database, copy: CopyRow, share: ShareRow | null
 
 /**
  * For a move, the new nodes whose source heads moved on since they were
- * sealed: a page's draft (its publication, for a page with no draft), and
+ * sealed: a page's draft (its publication, for a page with no draft, so
+ * one that has a draft now is stale), and
  * when the copy brings published versions, its published head, none for a
  * page not published; a folder's metadata head. If the listed source subtree isn't the one
  * mirrored, under the same parents, the move can't go on: `stale-head`
@@ -795,7 +809,9 @@ function staleNodes(
     const stale =
       node.kind === 'folder'
         ? source.metadataHead !== node.metadataFrom
-        : (source.draftHead ?? source.publishedHead) !== node.draftFrom ||
+        : // Always compared: a page sealed with no draft, its publication
+          // as its draft, is stale once it has one.
+          (source.draftHead ?? source.publishedHead) !== node.draftFrom ||
           (copy.bringsPublished && source.publishedHead !== node.publishedFrom);
     return stale ? [node.nodeId] : [];
   });

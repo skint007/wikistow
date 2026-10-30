@@ -173,6 +173,7 @@ export async function openCopy(
       audience: 'draft' | 'published',
       revisionId: RevisionId,
       from: 'draft' | 'published' = audience,
+      basedOn: RevisionId | null = null,
     ) => {
       const opened = await pages.openRevisionOf(ctx, source, from, revisionId, {
         fresh: true,
@@ -201,7 +202,7 @@ export async function openCopy(
           ...page,
           revisionId: newId(RevisionIdSchema),
           audience,
-          basedOn: null,
+          basedOn,
         },
         payload: { ...payload, attachments, extensions },
         ...target,
@@ -211,6 +212,14 @@ export async function openCopy(
         blobRefs: attachments.map((ref) => ref.blobHash),
         sourceRevisionId: revisionId,
       };
+    };
+    // The copy's publication names its draft when the source's was made
+    // from its current draft, or it had none.
+    const baseOf = async (draft: { revision: { record: { revisionId: RevisionId } } }) => {
+      if (!publishedHead) return null;
+      if (!draftHead) return draft.revision.record.revisionId;
+      const opened = await pages.openRevisionOf(ctx, source, 'published', publishedHead);
+      return opened.record.basedOn === draftHead ? draft.revision.record.revisionId : null;
     };
     // A page with no draft gets its publication as its draft too.
     const { draftHead, publishedHead } = info.heads;
@@ -223,8 +232,8 @@ export async function openCopy(
       nodeId: page.pageId,
       draft,
       published:
-        published && info.heads.publishedHead
-          ? await version('published', info.heads.publishedHead)
+        published && publishedHead
+          ? await version('published', publishedHead, 'published', await baseOf(draft))
           : null,
     };
   }
