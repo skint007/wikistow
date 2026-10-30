@@ -958,6 +958,9 @@ describe('a copy’s hidden nodes', () => {
       insert into nodes (id, space_id, parent_id, kind, copy_id)
       select ${prefix} || g, ${w.board}, ${top}, 'page', ${big.copyId}
       from generate_series(1, 33000) g`);
+    // As autovacuum would before long: planned from statistics taken while
+    // the table was small, walking the subtree compares every pair of nodes.
+    await t.db.execute(sql`analyze nodes`);
     expect(await big.cancel()).toEqual({ ok: true });
     const [left] = await t.db
       .select({ n: count() })
