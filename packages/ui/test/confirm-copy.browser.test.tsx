@@ -1,10 +1,10 @@
-import type {
-  ClientContext,
+import {
   copyOperations,
-  PageId,
-  SpaceId,
-  spaceOperations,
-  UnlockedVault,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+  type spaceOperations,
+  type UnlockedVault,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -27,14 +27,20 @@ type Preview = copyOperations.CopyPreview;
 type Made = copyOperations.MadeCopy;
 type Progress = copyOperations.CopyProgress;
 
-// The copy worked out and made, in place of a server: each test sets them.
+// The copy worked out and made, and the source's tree as a refusal reloads
+// it, in place of a server: each test sets them.
 const fake = vi.hoisted(() => ({
   preview: (_copyId: string): Preview => {
     throw new Error('No preview');
   },
-  make: async (_preview: Preview, _onProgress: (progress: Progress) => void): Promise<Made> => {
+  make: async (
+    _preview: Preview,
+    _onProgress: (progress: Progress) => void,
+    _signal: AbortSignal,
+  ): Promise<Made> => {
     throw new Error('No copy');
   },
+  pages: [] as { id: string; draftHead: string | null; publishedHead: string | null }[],
   events: [] as string[],
 }));
 vi.mock('@wikistow/client', async (importOriginal) => {
@@ -45,8 +51,15 @@ vi.mock('@wikistow/client', async (importOriginal) => {
     copyOperations: {
       ...actual.copyOperations,
       previewCopy: async () => fake.preview(`copy-${++copies}`),
-      makeCopy: (_ctx: unknown, preview: Preview, options: { onProgress: (p: Progress) => void }) =>
-        fake.make(preview, options.onProgress),
+      makeCopy: (
+        _ctx: unknown,
+        preview: Preview,
+        options: { onProgress: (p: Progress) => void; signal: AbortSignal },
+      ) => fake.make(preview, options.onProgress, options.signal),
+    },
+    spaceOperations: {
+      ...actual.spaceOperations,
+      loadTree: async () => ({ pages: fake.pages }),
     },
   };
 });
@@ -120,6 +133,7 @@ let cleanup = () => {};
 afterEach(() => {
   cleanup();
   fake.events = [];
+  fake.pages = [];
 });
 
 // Open the dialog on Bean plan, choose the top of Work, and go on to confirm.
@@ -225,6 +239,26 @@ it('offers Look again after a failure, then moves focus on from the buttons that
   expect(button('Copy').disabled).toBe(false);
 });
 
+it('stops when Stop is pressed while it sends, and offers Look again', async () => {
+  fake.preview = (copyId) => previewOf(copyId);
+  fake.make = (_preview, onProgress, signal) =>
+    new Promise((_, reject) => {
+      onProgress({ stage: 'sending', sent: 0, total: 1 });
+      signal.addEventListener('abort', () => reject(new copyOperations.CopyStopped()));
+    });
+  await confirmInWork('copy');
+
+  await act(async () => button('Copy').click());
+  await act(async () => {
+    button('Stop').focus();
+    button('Stop').click();
+  });
+  await settle();
+  expect(document.body.textContent).toContain('Stopped. Nothing was copied.');
+  expect(document.activeElement).toBe(button('Look again'));
+  expect(button('Copy').disabled).toBe(true);
+});
+
 it('says a finish that went unanswered or stayed busy may have made it, and offers only Back', async () => {
   fake.preview = (copyId) => previewOf(copyId);
   let progress: (p: Progress) => void = () => {};
@@ -260,6 +294,35 @@ it('says a finish that went unanswered or stayed busy may have made it, and offe
   await settle();
   expect(document.body.textContent).toContain('it may already be there, and gone from here.');
   expect(() => button('Look again')).toThrow();
+});
+
+it('lists the pages a refusal names, telling a live publication from nothing to copy', async () => {
+  const refused = () => new ApiError(403, 'forbidden', 'No', { nodeIds: [BEANS] });
+  const pagesList = (label: string) =>
+    document.querySelector(`ul[aria-label="${label}"]`)?.textContent;
+
+  fake.preview = (copyId) => previewOf(copyId);
+  fake.make = async () => {
+    throw refused();
+  };
+  fake.pages = [{ id: BEANS, draftHead: 'draft', publishedHead: 'published' }];
+  await confirmInWork('copy');
+  await act(async () => button('Copy').click());
+  await settle();
+  expect(document.body.textContent).toContain(
+    'Some pages in it were published here from other pages, so nothing was copied.',
+  );
+  expect(pagesList('Pages to detach first')).toBe('Bean plan');
+  cleanup();
+
+  fake.pages = [{ id: BEANS, draftHead: null, publishedHead: null }];
+  await confirmInWork('copy');
+  await act(async () => button('Copy').click());
+  await settle();
+  expect(document.body.textContent).toContain(
+    'Some pages in it have neither a draft nor a published version, so nothing was copied.',
+  );
+  expect(pagesList('Pages with nothing to copy')).toBe('Bean plan');
 });
 
 it('offers Look again when the preview itself fails, without saying nothing was copied', async () => {
