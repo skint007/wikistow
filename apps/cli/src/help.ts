@@ -239,8 +239,10 @@ in it are publications from other pages, to be detached first, or have
 no version to copy. Once the copy is being sent, Ctrl-C or SIGTERM
 before the finish cancels it (exit 1, code "cancelled"). If the finish's
 answer is lost, the CLI sends the finish again, which is answered as the
-first was; if no answer comes at all, or the server stays too busy to
-finish it, the copy may have been made (outcomeUnknown).
+first was; if no answer comes at all, the copy may have been made
+(outcomeUnknown). If the server stays too busy to finish it, the copy is
+cancelled and nothing is made (exit 1, code "busy"): copy again later,
+with the same --idempotency-key if it had one.
 
 Retrying a copy: give --idempotency-key KEY, a new KEY for each copy.
 Every page and folder it makes gets an ID made from KEY, so running the

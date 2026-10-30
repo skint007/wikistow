@@ -919,14 +919,19 @@ describe('copying', () => {
       expect(fresh.json().nodeId).toBe(opened[4]);
       expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan', 'Plan']);
 
-      // The server stays too busy to finish: the copy is kept for a later
-      // finish, so it may yet be made, and nothing says it wasn't.
+      // The server stays too busy to finish: no later run could send that
+      // finish, so the copy is cancelled, and the same key copies again.
       busy = true;
       const waiting = await w.run([...to, '--idempotency-key', 'copy-retry-5']);
       busy = false;
       expect(waiting.code, waiting.stdout).toBe(1);
-      expect(waiting.json().error).toMatchObject({ code: 'rate-limited', outcomeUnknown: true });
-      expect(waiting.json().error.message).toContain('same --idempotency-key');
+      expect(waiting.json().error).toMatchObject({ code: 'busy' });
+      expect(waiting.json().error.outcomeUnknown).toBeUndefined();
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan', 'Plan']);
+      const later = await w.run([...to, '--idempotency-key', 'copy-retry-5']);
+      expect(later.code, later.stdout).toBe(0);
+      expect(later.json().nodeId).toBe(opened[5]);
+      expect(await titlesIn(w.alice, w.board, w.pinned)).toEqual(['Plan', 'Plan', 'Plan', 'Plan']);
 
       // Every node of a keyed copy is made from the key, so a retry reports the copy's own IDs.
       const trip = ['folder', 'copy', w.trip, '--folder', w.drafts];
@@ -943,7 +948,7 @@ describe('copying', () => {
       const retried = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(retried.code, retried.stdout).toBe(0);
       expect(retried.json()).toEqual(earlier);
-      expect(opened).toHaveLength(7);
+      expect(opened).toHaveLength(8);
       const [packing] = first.json().unpublished as { pageId: string }[];
       expect(await titlesIn(w.alice, w.board, String(first.json().nodeId))).toEqual(
         expect.arrayContaining(['Packing', 'Route']),
@@ -956,7 +961,7 @@ describe('copying', () => {
       const gone = await w.run([...trip, '--idempotency-key', 'copy-retry-2']);
       expect(gone.code, gone.stdout).toBe(0);
       expect(gone.json()).toEqual(earlier);
-      expect(opened).toHaveLength(7);
+      expect(opened).toHaveLength(8);
     } finally {
       server.hooks.intercept = null;
     }

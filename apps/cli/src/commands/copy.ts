@@ -140,11 +140,25 @@ export async function copyNode(io: Io, out: Printer, args: CopyArgs, deps: Deps)
         });
       } catch (error) {
         // Before the finish, a failure ends the copy unseen: nothing was made.
-        // A finish never answered, though sent again, may have made it, and
-        // one still busy is kept for a later finish, so may have too.
-        const busy = error instanceof ApiError && error.code === 'rate-limited';
-        if (finishing && (outcomeUnknown(error) || busy)) {
+        // A finish never answered, though sent again, may have made it.
+        if (finishing && outcomeUnknown(error)) {
           throw new ChangeMayHaveHappened(error, key === null ? 'unkeyed' : 'resend');
+        }
+        // The server keeps a finish it was too busy for, for a later one, but
+        // no later run sends it: each run opens its own copy. So it is
+        // cancelled here, which leaves it be if an unanswered finish before
+        // made it; then the tree says which.
+        if (finishing && error instanceof ApiError && error.code === 'rate-limited') {
+          await copies.cancelCopy(ctx, preview.copyId).catch(() => undefined);
+          const top = preview.nodes[0];
+          const made = top && (await listed(ctx, spaceId, top.nodeId).catch(() => undefined));
+          if (made) return { preview };
+          throw new CliError(
+            'busy',
+            'The server was too busy to finish the copy, so nothing was made: wait a little ' +
+              'and copy again',
+            { cause: error },
+          );
         }
         if (error instanceof copies.CopyStopped) {
           throw new CliError('cancelled', 'Stopped before the copy finished; nothing was made');

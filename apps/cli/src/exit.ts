@@ -50,6 +50,7 @@ export type CliErrorCode =
   | 'published-elsewhere'
   | 'forbidden'
   | 'unfinished'
+  | 'busy'
   | 'failed';
 
 const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
@@ -73,6 +74,8 @@ const CLI_EXIT: Record<CliErrorCode, ExitStatus> = {
   forbidden: EXIT.failed,
   // A keyed copy whose first run left its copy open: the key can't make it.
   unfinished: EXIT.failed,
+  // The server stayed too busy to finish a copy, which was cancelled.
+  busy: EXIT.failed,
   failed: EXIT.failed,
 };
 
