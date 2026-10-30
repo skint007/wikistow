@@ -3,6 +3,8 @@
 // make one, what is refused, what a move ends, and the hidden nodes
 // nobody else sees until the copy finishes.
 import {
+  moveOperations as moves,
+  ownerOperations as owners,
   pageOperations as pages,
   PageId as PageIdSchema,
   publicationOperations as pubs,
@@ -15,14 +17,15 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { copyRoutes, pageRoutes, publicationRoutes } from '@wikistow/contracts';
-import { fileBlobStore, schema, sweepBlobs } from '@wikistow/server';
+import { fileBlobStore, schema, sweepBlobs, sweepDrafts } from '@wikistow/server';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import type { z } from 'zod';
 import { enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { copyAll, openCopy } from './support/copies.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
-import { ABOVE, invite, library, shareFolder } from './support/sharing.ts';
+import { ABOVE, draftHead, find, invite, library, shareFolder } from './support/sharing.ts';
 
 let t: TestApp;
 beforeAll(async () => {
@@ -112,6 +115,18 @@ async function textOf(
 
 const nodeRow = async (id: string) =>
   (await t.db.select().from(schema.nodes).where(eq(schema.nodes.id, id)))[0] ?? null;
+
+const copyRow = async (id: string) =>
+  (await t.db.select().from(schema.copies).where(eq(schema.copies.id, id)))[0] ?? null;
+
+/** A refusal's code and detail, or null if `promise` resolved. */
+const refusal = (promise: Promise<unknown>) =>
+  promise.then(
+    () => null,
+    (error: { code?: string; detail?: { nodeIds?: string[] } }) => error,
+  );
+
+const DAYS_AGO_2 = () => new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
 describe('copying', () => {
   it('copies a page into another space, its draft and publication with their files', async () => {
@@ -289,6 +304,50 @@ describe('copying', () => {
     expect(heads.publishedHead).toBeNull();
     expect(heads.draftHead).not.toBeNull();
   });
+
+  it('finishes when its source is deleted meanwhile, unlike a move', async () => {
+    const w = await world();
+    const options = {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned as FolderId | null,
+    };
+    const copy = await openCopy(w.alice.ctx, options);
+    await copy.open();
+    await copy.send();
+    const move = await openCopy(w.alice.ctx, { ...options, kind: 'move', parentId: null });
+    await move.open();
+    await move.send();
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.lib.shared });
+    // What was sealed from it still arrives.
+    await copy.finish();
+    const made = at(w.board, copy.newIdOf(w.page.pageId));
+    expect((await textOf(w.carol.ctx, made, 'published'))?.markdown).toBe('published words');
+    // A move has nothing left to delete, and ends.
+    expect(await rejection(move.finish())).toBe('not-found');
+    expect(await nodeRow(move.newIdOf(w.lib.shared))).toBeNull();
+  });
+
+  it('leaves the drafts it was sealed from to draft retention', async () => {
+    const w = await world();
+    const sealedFrom = await draftHead(w.alice, w.page);
+    await copyAll(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await pages.editDraft(w.alice.ctx, w.page, { markdown: 'saved over' });
+    await t.db
+      .update(schema.revisions)
+      .set({ createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) })
+      .where(eq(schema.revisions.pageId, w.page.pageId));
+    await sweepDrafts(t.db);
+    expect(
+      await t.db.select().from(schema.revisions).where(eq(schema.revisions.id, sealedFrom)),
+    ).toEqual([]);
+  });
 });
 
 describe('what a copy refuses', () => {
@@ -303,14 +362,17 @@ describe('what a copy refuses', () => {
       spaceId: w.board,
       parentId: w.pinned,
     });
-    await pubs.publishToSpace(w.alice.ctx, { preview, attachmentIds: new Set() });
+    const live = await pubs.publishToSpace(w.alice.ctx, { preview, attachmentIds: new Set() });
     const folder = await openCopy(w.alice.ctx, {
       from: w.board,
       nodeId: w.pinned,
       to: w.lib.spaceId,
       parentId: null,
     });
-    expect(await rejection(folder.open())).toBe('forbidden');
+    // The refusal names the page, for the dialog to list.
+    const refused = await refusal(folder.open());
+    expect(refused?.code).toBe('forbidden');
+    expect(refused?.detail?.nodeIds).toEqual([live.pageId]);
 
     // An opening nobody finished is in no tree, and stops nothing.
     const other = await spaceOperations.createFolder(w.alice.ctx, {
@@ -457,7 +519,7 @@ describe('what a copy refuses', () => {
     expect(published?.basedOn).toBe(made.heads.draftHead);
   });
 
-  it('copies a publication ended without being detached, its publication as its draft', async () => {
+  it('refuses an opening once the source changed since its preview', async () => {
     const w = await world();
     const copy = await openCopy(w.alice.ctx, {
       from: w.lib.spaceId,
@@ -486,6 +548,90 @@ describe('what a copy refuses', () => {
       permissionVersion,
     });
     expect(await rejection(pageCopy.open())).toBe('permission-version');
+  });
+
+  it('refuses records for a node twice, and published versions in a copy that doesn’t bring them', async () => {
+    const w = await world();
+    // Bob edits the shared folder but can't publish there. His own page,
+    // published, copied there without its publication.
+    const own = await pages.createPage(w.bob.ctx, {
+      spaceId: w.bobs,
+      parentId: null,
+      title: 'Bob’s',
+    });
+    const page = { spaceId: w.bobs, pageId: own };
+    await pages.editDraft(w.bob.ctx, page, { markdown: 'for readers' });
+    await pages.publishPage(w.bob.ctx, page);
+    const options = { from: w.bobs, nodeId: own, to: w.lib.spaceId, parentId: w.lib.shared };
+    expect(await rejection(openCopy(w.bob.ctx, options).then((copy) => copy.open()))).toBe(
+      'forbidden',
+    );
+    const copy = await openCopy(w.bob.ctx, { ...options, published: false });
+    await copy.open();
+    const send = (nodes: z.input<typeof copyRoutes.CopiedRecords>[]) =>
+      rejection(
+        w.bob.ctx.api.call(copyRoutes.records, {
+          params: { copyId: copy.copyId },
+          body: { nodes },
+        }),
+      );
+    // Sealed under the share's published key, which editors hold, it would
+    // reach readers though nobody who may publish there published it.
+    expect(await send([await copy.seal(own, { withPublished: true })])).toBe('forbidden');
+
+    // One set of records each: a node listed twice, or a second draft.
+    const entry = await copy.seal(own);
+    expect(await send([entry, await copy.seal(own)])).toBe('binding-mismatch');
+    const brings = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await brings.open();
+    const first = await brings.seal(w.page.pageId);
+    const second = await brings.seal(w.page.pageId);
+    const { publishedHead } = (await pages.loadPage(w.alice.ctx, w.page.pageId)).heads;
+    if (first.kind !== 'page' || second.kind !== 'page' || !publishedHead) {
+      throw new Error('expected a published page');
+    }
+    // A draft where its publication goes, named as sealed from that publication.
+    const twoDrafts = {
+      ...first,
+      published: { ...second.draft, sourceRevisionId: publishedHead },
+    };
+    expect(
+      await rejection(
+        w.alice.ctx.api.call(copyRoutes.records, {
+          params: { copyId: brings.copyId },
+          body: { nodes: [twoDrafts] },
+        }),
+      ),
+    ).toBe('binding-mismatch');
+    // Sent as they should be, they go.
+    expect(await send([entry])).toBe('no error');
+    await copy.finish();
+    const made = at(w.lib.spaceId, copy.newIdOf(own));
+    expect((await pages.loadPage(w.bob.ctx, made.pageId)).heads.publishedHead).toBeNull();
+  });
+
+  it('refuses records once access at the destination changed since the opening', async () => {
+    const w = await world();
+    // At the top of the space, whose own permission version it was opened at.
+    const copy = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: null,
+    });
+    await copy.open();
+    expect(copy.opening.parentId).toBeNull();
+    await sharing.addMember(w.alice.ctx, {
+      spaceId: w.board,
+      shareId: w.boardShare,
+      ...(await invite(w.alice, w.erin, 'reader')),
+    });
+    expect(await rejection(copy.send())).toBe('permission-version');
   });
 });
 
@@ -719,5 +865,157 @@ describe('a copy’s hidden nodes', () => {
     await busy.send();
     await busy.finish();
     expect((await nodeRow(busy.newIdOf(w.page.pageId)))?.copyId).toBeNull();
+  });
+
+  it('go with their copy, and with an unfinished copy’s source space', async () => {
+    const w = await world();
+    const scratch = await spaceOperations.createSpace(w.alice.ctx, { name: 'Scratch' });
+    const folder = await spaceOperations.createFolder(w.alice.ctx, {
+      spaceId: scratch,
+      parentId: null,
+      name: 'Notes',
+    });
+    const note = await pages.createPage(w.alice.ctx, {
+      spaceId: scratch,
+      parentId: folder,
+      title: 'Note',
+    });
+    await pages.editDraft(w.alice.ctx, { spaceId: scratch, pageId: note }, { markdown: 'a note' });
+    const copy = await openCopy(w.alice.ctx, {
+      from: scratch,
+      nodeId: folder,
+      to: w.board,
+      parentId: null,
+    });
+    await copy.open();
+    await copy.send();
+    const hidden = copy.sourceIds.map((id) => copy.newIdOf(id));
+    const names = () =>
+      t.db
+        .select({ id: schema.metadataRevisions.id })
+        .from(schema.metadataRevisions)
+        .where(inArray(schema.metadataRevisions.subjectId, hidden));
+    const [name] = await names();
+    if (!name) throw new Error('expected the folder’s name');
+    const [space] = await t.db
+      .select({ permissionVersion: schema.spaces.permissionVersion })
+      .from(schema.spaces)
+      .where(eq(schema.spaces.id, scratch));
+    await spaceOperations.deleteSpace(w.alice.ctx, {
+      spaceId: scratch,
+      permissionVersion: space?.permissionVersion ?? 1,
+    });
+    // Their names and key material too, which name them only by ID.
+    for (const id of hidden) expect(await nodeRow(id)).toBeNull();
+    expect(await copyRow(copy.copyId)).toBeNull();
+    expect(await names()).toEqual([]);
+    expect(
+      await t.db
+        .select()
+        .from(schema.keyEnvelopes)
+        .where(eq(schema.keyEnvelopes.subjectId, name.id)),
+    ).toEqual([]);
+    // The owners can still add an owner there: nothing is left to cover.
+    await owners.addCoOwner(w.alice.ctx, { spaceId: w.board, person: await find(w.alice, w.bob) });
+
+    // However else a copy's row goes, its hidden nodes go with it.
+    const other = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.page.pageId,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await other.open();
+    await other.send();
+    await t.db.delete(schema.copies).where(eq(schema.copies.id, other.copyId));
+    expect(await nodeRow(other.newIdOf(w.page.pageId))).toBeNull();
+  });
+
+  it('leave a share, a new co-owner and a move between regions nothing to cover', async () => {
+    const w = await world();
+    const folder = (name: string) =>
+      spaceOperations.createFolder(w.alice.ctx, { spaceId: w.board, parentId: null, name });
+    const hiddenUnder = async (parentId: FolderId | null) => {
+      const copy = await openCopy(w.alice.ctx, {
+        from: w.lib.spaceId,
+        nodeId: w.lib.shared,
+        to: w.board,
+        parentId,
+      });
+      await copy.open();
+      await copy.send();
+      return copy;
+    };
+    // A share over a folder holding a copy's hidden nodes.
+    const loose = await folder('Loose');
+    await hiddenUnder(loose);
+    await shareFolder(w.alice.ctx, {
+      spaceId: w.board,
+      rootId: loose,
+      people: [await invite(w.alice, w.erin, 'reader')],
+    });
+    // A co-owner, with hidden nodes in the owner region.
+    await hiddenUnder(null);
+    await owners.addCoOwner(w.alice.ctx, { spaceId: w.board, person: await find(w.alice, w.bob) });
+    // A folder holding some moved from the owner region into a share.
+    const moving = await folder('Moving');
+    const inside = await hiddenUnder(moving);
+    const preview = await moves.previewMove(w.alice.ctx, {
+      spaceId: w.board,
+      nodeId: moving,
+      parentId: w.pinned,
+    });
+    await moves.moveNode(w.alice.ctx, { preview });
+    // The hidden nodes moved along, and their copy fails at its finish.
+    expect((await nodeRow(inside.newIdOf(w.lib.shared)))?.parentId).toBe(moving);
+    expect(await rejection(inside.finish())).toBe('permission-version');
+  });
+});
+
+describe('a finished copy', () => {
+  it('answers a finish or cancel sent again as the finish did, and leaves its nodes when swept', async () => {
+    const w = await world();
+    const move = await copyAll(w.alice.ctx, {
+      kind: 'move',
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    const made = at(w.board, move.newIdOf(w.page.pageId));
+    // Its answer lost, the app finishes again, or gives up and cancels:
+    // nothing changes, and the source is gone already.
+    expect(await move.finish()).toEqual({ ok: true });
+    expect(await move.cancel()).toEqual({ ok: true });
+    expect(await move.finish()).toEqual({ ok: true });
+    expect(await nodeRow(w.lib.shared)).toBeNull();
+    expect((await nodeRow(made.pageId))?.copyId).toBeNull();
+    expect((await textOf(w.dave.ctx, made, 'draft'))?.markdown).toBe('draft words');
+    expect(
+      await t.db
+        .select()
+        .from(schema.auditEvents)
+        .where(
+          and(
+            eq(schema.auditEvents.action, 'node.moved-between-spaces'),
+            eq(schema.auditEvents.targetId, w.lib.shared),
+          ),
+        ),
+    ).toHaveLength(1);
+    // Its nodes are no longer its own.
+    expect(
+      await t.db.select().from(schema.copyNodes).where(eq(schema.copyNodes.copyId, move.copyId)),
+    ).toEqual([]);
+
+    // A day on, it goes, and its nodes stay.
+    await t.db
+      .update(schema.copies)
+      .set({ finishedAt: DAYS_AGO_2(), touchedAt: DAYS_AGO_2() })
+      .where(eq(schema.copies.id, move.copyId));
+    const { copies } = await sweepBlobs(t.db, fileBlobStore(t.blobDir));
+    expect(copies).toBe(0);
+    expect(await copyRow(move.copyId)).toBeNull();
+    expect((await textOf(w.carol.ctx, made, 'published'))?.markdown).toBe('published words');
+    expect(await rejection(move.finish())).toBe('not-found');
   });
 });
