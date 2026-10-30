@@ -63,7 +63,7 @@ Every new node takes the region of its parent's name record (section 6.1), as an
 ### 5. Links
 
 - **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page of the same copy to that page's new ID, and each Markdown link to the address of a page or folder of the same copy (`/s/<space>/p/<page>`, `/s/<space>/f/<folder>`) to its new address. In a published version, the page counts as published only when its own published version comes along.
-- **To any other page**, an entry stays only where the writer can check it at the destination (section 5.5); a copy never carries forward entries it can't check, even within one share. An entry for a page of another space never survives: those links resolve by title in the destination, or show as unresolved. Property references (ADR 0006) follow their links.
+- **To any other page**, an entry stays only where the writer can check it at the destination (section 5.5); a copy never carries forward entries it can't check, even within one share. An entry for a page of another space never survives: those links resolve by title in the destination, or show as unresolved. Property references (ADR 0006) follow their links. Apart from address links, a copy's text is the source's as it was: no link is renamed on the way.
 - **Into a moved page or folder**, wikilinks and address links from pages left in the source space stop working. The preview lists the linking pages the person can open.
 
 ### 6. The preview
