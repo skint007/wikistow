@@ -1309,6 +1309,8 @@ async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promi
       .select({ id: nodes.id })
       .from(nodes)
       .where(and(anyId(nodes.id, ids), eq(nodes.spaceId, spaceId)))
+      // In ID order, so everything that holds several nodes holds them alike.
+      .orderBy(nodes.id)
       .for('update');
     locked = new Set(ids);
   }

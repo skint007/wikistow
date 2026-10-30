@@ -19,7 +19,7 @@
 // destination's share, then nodes; a move's finish then holds the source's
 // shares and subtree as a delete does (`holdSubtree`).
 import type { copyRoutes } from '@wikistow/contracts';
-import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { BlobStore } from '../blobs/store.ts';
@@ -779,13 +779,19 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
     copy.permissionVersion,
   );
   const share = await lockShare(tx, who.share);
-  // The nodes made at the opening, every one with its records.
-  const [hidden] = await tx.select({ count: count() }).from(nodes).where(eq(nodes.copyId, copy.id));
+  // The nodes made at the opening, every one with its records, held in ID
+  // order, as deleting a node holds them, before anything writes to them.
+  const hidden = await tx
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(eq(nodes.copyId, copy.id))
+    .orderBy(nodes.id)
+    .for('update');
   const missing = made.some((node) =>
     node.kind === 'page' ? node.draftFrom === null : node.metadataFrom === null,
   );
   const top = made.find((node) => node.sourceParentId === null);
-  if (missing || !top || hidden?.count !== made.length) {
+  if (missing || !top || hidden.length !== made.length) {
     throw new ContentError('not-found', 'Some of what you are copying has no records yet');
   }
   await requireRegion(tx, copy, share);
