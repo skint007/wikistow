@@ -811,7 +811,7 @@ export function mountContentRoutes(
   routes.content(
     copyRoutes.records,
     async ({ params, body }, { actor }) => {
-      await sendCopyRecords(db, {
+      await sendCopyRecords(db, blobs, {
         actor,
         copyId: params.copyId,
         nodes: body.nodes,

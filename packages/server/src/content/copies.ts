@@ -440,8 +440,8 @@ export async function copyUploadAccess(db: Database, caller: Caller, copyId: str
  * records sent for its node before, and is checked as any write is in the
  * destination parent's region, at the parent's (or for the top of the
  * space, the space's) permission version sent at the opening
- * (`permission-version` otherwise, which ends the copy: the app cancels it
- * and previews again), under its current key version, apart from
+ * (`permission-version` otherwise, which ends the copy, as at the finish:
+ * the app previews again), under its current key version, apart from
  * the head check: every record is a first version (`basedOn` null, or for
  * a published version, the draft of its own entry), written by the caller.
  * Each names a version of its node's source it was
@@ -453,62 +453,73 @@ export async function copyUploadAccess(db: Database, caller: Caller, copyId: str
  */
 export async function sendCopyRecords(
   db: Database,
+  store: BlobStore,
   input: { actor: Actor; copyId: string; nodes: Entry[]; storageBytes: number },
 ) {
   if (new Set(input.nodes.map((entry) => entry.nodeId)).size !== input.nodes.length) {
     throw new ContentError('binding-mismatch', 'A node is listed twice');
   }
-  await db.transaction(async (tx) => {
-    const caller = await requireCaller(tx, input.actor);
-    const found = await requireOpener(tx, caller, input.copyId);
-    await lockSpace(tx, found.destinationSpaceId);
-    const copy = await requireOpener(tx, caller, input.copyId, { lock: true });
-    const access = await accessTo(tx, caller, {
-      spaceId: copy.destinationSpaceId,
-      nodeId: copy.destinationParentId,
-    });
-    if (!access) throw new ContentError('not-found');
-    if (!canEdit(access)) throw new ContentError('forbidden');
-    const share = await lockShare(tx, access.share);
-    // The records are written for the parent as it was at the opening.
-    requireVersion(
-      await parentVersion(tx, copy.destinationSpaceId, copy.destinationParentId),
-      copy.permissionVersion,
-    );
-    await tx
-      .update(copies)
-      .set({ touchedAt: sql`now()` })
-      .where(eq(copies.id, copy.id));
-    for (const entry of input.nodes) {
-      const [node] = await tx
-        .select({ kind: nodes.kind, sourceId: copyNodes.sourceId })
-        .from(copyNodes)
-        .innerJoin(nodes, eq(nodes.id, copyNodes.nodeId))
-        .where(and(eq(copyNodes.nodeId, entry.nodeId), eq(copyNodes.copyId, copy.id)))
-        .for('update', { of: nodes });
-      if (!node) throw new ContentError('not-found');
-      if (node.kind !== entry.kind) {
-        throw new ContentError('binding-mismatch', 'Those records are for another kind of node');
-      }
-      const target = {
-        copy,
-        share,
-        caller,
-        sourceId: node.sourceId,
-        storageBytes: input.storageBytes,
-      };
-      if (entry.kind === 'page') {
-        if (entry.published && !(copy.bringsPublished && access.canPublish)) {
-          throw new ContentError('forbidden', 'This copy brings no published versions');
+  let opener: Caller | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      const caller = await requireCaller(tx, input.actor);
+      const found = await requireOpener(tx, caller, input.copyId);
+      opener = caller;
+      await lockSpace(tx, found.destinationSpaceId);
+      const copy = await requireOpener(tx, caller, input.copyId, { lock: true });
+      const access = await accessTo(tx, caller, {
+        spaceId: copy.destinationSpaceId,
+        nodeId: copy.destinationParentId,
+      });
+      if (!access) throw new ContentError('not-found');
+      if (!canEdit(access)) throw new ContentError('forbidden');
+      const share = await lockShare(tx, access.share);
+      // The records are written for the parent as it was at the opening.
+      requireVersion(
+        await parentVersion(tx, copy.destinationSpaceId, copy.destinationParentId),
+        copy.permissionVersion,
+      );
+      await tx
+        .update(copies)
+        .set({ touchedAt: sql`now()` })
+        .where(eq(copies.id, copy.id));
+      for (const entry of input.nodes) {
+        const [node] = await tx
+          .select({ kind: nodes.kind, sourceId: copyNodes.sourceId })
+          .from(copyNodes)
+          .innerJoin(nodes, eq(nodes.id, copyNodes.nodeId))
+          .where(and(eq(copyNodes.nodeId, entry.nodeId), eq(copyNodes.copyId, copy.id)))
+          .for('update', { of: nodes });
+        if (!node) throw new ContentError('not-found');
+        if (node.kind !== entry.kind) {
+          throw new ContentError('binding-mismatch', 'Those records are for another kind of node');
         }
-        await clearPage(tx, entry.nodeId);
-        await storePage(tx, entry, target);
-      } else {
-        await clearFolder(tx, entry.nodeId);
-        await storeFolder(tx, entry, target);
+        const target = {
+          copy,
+          share,
+          caller,
+          sourceId: node.sourceId,
+          storageBytes: input.storageBytes,
+        };
+        if (entry.kind === 'page') {
+          if (entry.published && !(copy.bringsPublished && access.canPublish)) {
+            throw new ContentError('forbidden', 'This copy brings no published versions');
+          }
+          await clearPage(tx, entry.nodeId);
+          await storePage(tx, entry, target);
+        } else {
+          await clearFolder(tx, entry.nodeId);
+          await storeFolder(tx, entry, target);
+        }
       }
+    });
+  } catch (error) {
+    // Access at the destination changed since the opening: the copy ends, as at the finish.
+    if (opener && error instanceof ContentError && error.code === 'permission-version') {
+      await dropCopy(db, store, opener, input.copyId).catch(() => undefined);
     }
-  });
+    throw error;
+  }
 }
 
 type Target = {

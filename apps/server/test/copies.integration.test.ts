@@ -661,7 +661,7 @@ describe('what a copy refuses', () => {
     expect((await pages.loadPage(w.bob.ctx, made.pageId)).heads.publishedHead).toBeNull();
   });
 
-  it('refuses records once access at the destination changed since the opening', async () => {
+  it('refuses records once access at the destination changed since the opening, and ends', async () => {
     const w = await world();
     // At the top of the space, whose own permission version it was opened at.
     const copy = await openCopy(w.alice.ctx, {
@@ -678,6 +678,10 @@ describe('what a copy refuses', () => {
       ...(await invite(w.alice, w.erin, 'reader')),
     });
     expect(await rejection(copy.send())).toBe('permission-version');
+    // The copy ended with the refusal, as at the finish; a cancel after it finds nothing.
+    expect(await copyRow(copy.copyId)).toBeNull();
+    expect(await nodeRow(copy.newIdOf(w.page.pageId))).toBeNull();
+    expect(await rejection(copy.cancel())).toBe('not-found');
   });
 });
 
