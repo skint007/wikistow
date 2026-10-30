@@ -41,7 +41,7 @@ The new records are ordinary v2 records in the destination space, written and si
 | | At the source | At the destination folder |
 |---|---|---|
 | Move | an owner of the source space | can make pages (editor or owner) |
-| Copy | can read drafts of every page in the subtree (editor or owner) | can make pages (editor or owner) |
+| Copy | can edit at the source node, which covers everything under it (editor or owner) | can make pages (editor or owner) |
 
 Published versions arrive published only where the person can publish at the destination. Otherwise the pages arrive with their drafts alone, and the preview says which pages will be unpublished there.
 
@@ -92,7 +92,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 
 **Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share, a move between regions or a new co-owner must cover. Deleting or moving one of their ancestors still takes them along. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
 
-A finished copy is kept for a day, so a finish sent again after a lost answer gets the same answer instead of copying everything twice. Its nodes no longer belong to it, so removing it later, or a cancel sent after the finish, leaves them. The copy's references to its source don't cascade, so deleting the source never deletes the copy row: a move then fails at its finish, and a copy finishes without that node. A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
+A finished copy is kept for a day, so a finish sent again after a lost answer gets the same answer instead of copying everything twice. Its nodes no longer belong to it, so removing it later, or a cancel sent after the finish, leaves them. The copy's references to its source don't cascade, so deleting the source never deletes the copy row: a move then fails at its finish. A copy is checked at its source node, whose edit rights cover everything under it: it fails if that node is gone, and otherwise shows every node it sealed. A copy nobody finishes is swept one day after its last request, its nodes' records removed as `deleteNode` removes them, envelopes and folder metadata included, and its blobs with them. Cancelling deletes it at once.
 
 So a folder of any size moves or copies, which also avoids the one-request limit that section 10's moves still have.
 
