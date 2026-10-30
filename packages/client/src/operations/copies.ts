@@ -165,15 +165,29 @@ const PATIENCE_MS = 2 * 60 * 1000;
 /** How many nodes are opened at a time, many to a request: fewer than a records request takes. */
 const CHUNK = 200;
 
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Wait `ms`, or throw `CopyStopped` as soon as `signal` aborts. */
+const pause = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(new CopyStopped());
+    const stop = () => {
+      clearTimeout(timer);
+      reject(new CopyStopped());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', stop);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', stop, { once: true });
+  });
 
 /**
  * `ctx` with an API that waits out `rate-limited` and tries again, as long
  * as the server's `Retry-After` says (a second if it doesn't), for up to
  * `PATIENCE_MS` a request. That is also the finish's answer while
- * publications a delete ends are being written.
+ * publications a delete ends are being written. A wait ends early when
+ * `signal` aborts, throwing `CopyStopped`.
  */
-function patient(ctx: ClientContext): ClientContext {
+function patient(ctx: ClientContext, signal?: AbortSignal): ClientContext {
   const waiting = async <T>(send: () => Promise<T>): Promise<T> => {
     const until = Date.now() + PATIENCE_MS;
     for (;;) {
@@ -183,7 +197,7 @@ function patient(ctx: ClientContext): ClientContext {
         if (!(error instanceof ApiError) || error.code !== 'rate-limited') throw error;
         const ms = (error.retryAfterSeconds ?? 1) * 1000;
         if (Date.now() + ms > until) throw error;
-        await pause(ms);
+        await pause(ms, signal);
       }
     }
   };
@@ -586,9 +600,10 @@ const FINISH_TRIES = 5;
  * and sent again. A broken character from a Milestone 1 client is written
  * as U+FFFD.
  *
- * When `signal` aborts, it stops before the next batch is sealed, cancels
- * the copy and throws `CopyStopped`. Once the finish is sent, it no longer
- * stops: the finish decides.
+ * When `signal` aborts, it stops before the next node or attachment is
+ * sealed, or the next request is sent, and from a wait for a busy server;
+ * cancels the copy and throws `CopyStopped`. Once the finish is sent, it no
+ * longer stops: the finish decides.
  */
 export async function makeCopy(
   ctx: ClientContext,
@@ -598,6 +613,8 @@ export async function makeCopy(
     signal,
   }: { onProgress?: (progress: CopyProgress) => void; signal?: AbortSignal } = {},
 ): Promise<MadeCopy> {
+  // Only sending stops on `signal`; the finish, and a cancel, never do.
+  const sending = patient(ctx, signal);
   ctx = patient(ctx);
   const params = { copyId: preview.copyId };
   const total = preview.nodes.length;
@@ -605,7 +622,7 @@ export async function makeCopy(
     if (signal?.aborted) throw new CopyStopped();
   };
   live();
-  await ctx.api.call(
+  await sending.api.call(
     copyRoutes.open,
     {
       body: {
@@ -632,7 +649,7 @@ export async function makeCopy(
   let maybeMade = false;
   try {
     let sent = 0;
-    await sendNodes(ctx, preview, preview.nodes, {
+    await sendNodes(sending, preview, preview.nodes, {
       sent: () => {
         sent += 1;
         onProgress({ stage: 'sending', sent, total });
@@ -685,7 +702,8 @@ export async function cancelCopy(ctx: ClientContext, copyId: string): Promise<vo
  * once more with fresh keys and target for a batch the server refused for
  * a newer key version or other owners. Their versions are opened a part at
  * a time, many to a request. `sent` is called as each node goes, and `live`
- * before each part is opened and each batch sealed, to stop there.
+ * before each part is opened, each node sealed and each attachment read and
+ * sent, to stop there.
  */
 async function sendNodes(
   ctx: ClientContext,
@@ -693,7 +711,7 @@ async function sendNodes(
   nodes: readonly CopiedNode[],
   { sent = () => {}, live = () => {} }: { sent?: () => void; live?: () => void } = {},
 ) {
-  const sealing = await sealingFor(ctx, preview);
+  const sealing = await sealingFor(ctx, preview, live);
   for (let i = 0; i < nodes.length; i += CHUNK) {
     live();
     const part = nodes.slice(i, i + CHUNK);
@@ -706,9 +724,12 @@ async function sendNodes(
       batch = [];
       bytes = 0;
       const send = async () => {
-        live();
         const entries = [];
-        for (const node of going) entries.push(await sealing.seal(node, versions));
+        for (const node of going) {
+          live();
+          entries.push(await sealing.seal(node, versions));
+        }
+        live();
         await ctx.api.call(copyRoutes.records, {
           params: { copyId: preview.copyId },
           body: { nodes: entries },
@@ -758,7 +779,7 @@ function openedIn(versions: Opened, revisionId: RevisionId): OpenedRevision {
  * 10, **Links**). Each page is sealed from the heads the round's tree
  * lists, which a move's finish compares.
  */
-async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
+async function sealingFor(ctx: ClientContext, preview: CopyPreview, live: () => void) {
   const { source, destination } = preview;
   const sameSpace = source.spaceId === destination.spaceId;
   const tree = await loadTree(ctx, source.spaceId);
@@ -977,12 +998,15 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview) {
         const payload = await forCopy(opened, node, audience);
         const attachments: AttachmentRef[] = [];
         for (const ref of payload.attachments) {
+          live();
+          const blob = await downloadBlob(ctx, ref.blobHash);
           const resealed = resealAttachment({
             from: attachmentTarget(ctx, from, sealedFrom),
             to: attachmentTarget(ctx, page, audience),
             ref,
-            blob: await downloadBlob(ctx, ref.blobHash),
+            blob,
           });
+          live();
           await uploadBlob(ctx, page, audience, resealed.blob);
           attachments.push(resealed.ref);
         }

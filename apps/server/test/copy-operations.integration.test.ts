@@ -582,6 +582,71 @@ describe('stopping a copy, or choosing its IDs', () => {
     expect((await current(w.alice.ctx, w.page)).payload.title).toBe('Plan');
   });
 
+  it('stops between the attachments of one batch, and leaves nothing hidden', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    // Notes, Budget and Plan go in one batch. Stop is pressed while Plan's
+    // first file is read, once Notes and Budget are sealed.
+    const stop = new AbortController();
+    const { ctx: lying, sent } = lyingServer(w.alice.ctx, new Map());
+    const moved = { downloads: 0, uploads: 0 };
+    const ctx: ClientContext = {
+      ...lying,
+      api: {
+        ...lying.api,
+        download: async (...args) => {
+          moved.downloads += 1;
+          stop.abort();
+          return lying.api.download(...args);
+        },
+        upload: async (...args) => {
+          moved.uploads += 1;
+          return lying.api.upload(...args);
+        },
+      },
+    };
+    const caught = await copies.makeCopy(ctx, preview, { signal: stop.signal }).catch((e) => e);
+    expect(caught).toBeInstanceOf(copies.CopyStopped);
+    expect(moved).toEqual({ downloads: 1, uploads: 0 });
+    expect(sent).not.toContain(copyRoutes.records);
+    expect(sent).toContain(copyRoutes.cancel);
+    expect(
+      await t.db.select().from(schema.copies).where(eq(schema.copies.id, preview.copyId)),
+    ).toEqual([]);
+    for (const { nodeId } of preview.nodes) {
+      expect(await t.db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId))).toEqual([]);
+    }
+  });
+
+  it('stops waiting out a busy server', async () => {
+    const w = await world();
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'copy',
+      source: { spaceId: w.lib, nodeId: w.plan },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    // The records are refused for a minute, and Stop is pressed meanwhile.
+    const stop = new AbortController();
+    const busy: Answer = async () => {
+      setTimeout(() => stop.abort(), 50);
+      throw new ApiError(429, 'rate-limited', 'Busy', {}, { retryAfterSeconds: 60 });
+    };
+    const { ctx, sent } = lyingServer(w.alice.ctx, new Map([[copyRoutes.records, busy]]));
+    const started = Date.now();
+    const caught = await copies.makeCopy(ctx, preview, { signal: stop.signal }).catch((e) => e);
+    expect(caught).toBeInstanceOf(copies.CopyStopped);
+    expect(Date.now() - started).toBeLessThan(30_000);
+    expect(sent.filter((route) => route === copyRoutes.records)).toHaveLength(1);
+    expect(sent).toContain(copyRoutes.cancel);
+    expect(
+      await t.db.select().from(schema.copies).where(eq(schema.copies.id, preview.copyId)),
+    ).toEqual([]);
+  });
+
   it('finishes a copy stopped once its finish was sent', async () => {
     const w = await world();
     const preview = await copies.previewCopy(w.alice.ctx, {
