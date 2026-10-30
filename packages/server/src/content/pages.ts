@@ -263,14 +263,17 @@ export async function storeRevision(
     publishedSeq: number | null;
     restoredFrom: string | null;
     sourceRevisionId?: string | null;
-    storageBytes: number;
+    /** The account's storage, or null when the caller charged this version already. */
+    storageBytes: number | null;
   },
 ) {
   const { record } = commit.revision;
   // The plaintext's limit, as the server can count it. Versions stored before stay.
   if (commit.revision.payload.ciphertext.length > pageRoutes.MAX_PAYLOAD_CIPHERTEXT)
     throw new ContentError('too-large', 'This version is larger than a page may hold');
-  await charge(tx, accountId, commit.revision.payload.ciphertext.length, storageBytes);
+  if (storageBytes !== null) {
+    await charge(tx, accountId, commit.revision.payload.ciphertext.length, storageBytes);
+  }
   await tx.insert(revisions).values({
     id: record.revisionId,
     pageId: record.pageId,

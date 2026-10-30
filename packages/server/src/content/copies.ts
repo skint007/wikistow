@@ -53,6 +53,7 @@ import {
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
+import { charge } from './quota.ts';
 import {
   deleteUnlistedFile,
   holdSubtree,
@@ -483,6 +484,9 @@ export async function sendCopyRecords(
         .update(copies)
         .set({ touchedAt: sql`now()` })
         .where(eq(copies.id, copy.id));
+      // Each entry checked, and what was sent for it before removed, then
+      // the batch charged at once, then stored.
+      const targets: Target[] = [];
       for (const entry of input.nodes) {
         const [node] = await tx
           .select({ kind: nodes.kind, sourceId: copyNodes.sourceId })
@@ -494,23 +498,30 @@ export async function sendCopyRecords(
         if (node.kind !== entry.kind) {
           throw new ContentError('binding-mismatch', 'Those records are for another kind of node');
         }
-        const target = {
-          copy,
-          share,
-          caller,
-          sourceId: node.sourceId,
-          storageBytes: input.storageBytes,
-        };
+        targets.push({ copy, share, caller, sourceId: node.sourceId });
         if (entry.kind === 'page') {
           if (entry.published && !(copy.bringsPublished && access.canPublish)) {
             throw new ContentError('forbidden', 'This copy brings no published versions');
           }
           await clearPage(tx, entry.nodeId);
-          await storePage(tx, entry, target);
         } else {
           await clearFolder(tx, entry.nodeId);
-          await storeFolder(tx, entry, target);
         }
+      }
+      const bytes = input.nodes.reduce(
+        (sum, entry) =>
+          sum +
+          (entry.kind === 'page'
+            ? entry.draft.revision.payload.ciphertext.length +
+              (entry.published?.revision.payload.ciphertext.length ?? 0)
+            : entry.metadata.payload.ciphertext.length),
+        0,
+      );
+      await charge(tx, caller.accountId, bytes, input.storageBytes);
+      for (const [i, entry] of input.nodes.entries()) {
+        const target = targets[i] as Target;
+        if (entry.kind === 'page') await storePage(tx, entry, target);
+        else await storeFolder(tx, entry, target);
       }
     });
   } catch (error) {
@@ -527,7 +538,6 @@ type Target = {
   share: ShareRow | null;
   caller: Caller;
   sourceId: string;
-  storageBytes: number;
 };
 
 /**
@@ -589,7 +599,7 @@ async function requireSourceRevision(
 async function storePage(
   tx: Database,
   entry: Extract<Entry, { kind: 'page' }>,
-  { copy, share, caller, sourceId, storageBytes }: Target,
+  { copy, share, caller, sourceId }: Target,
 ) {
   // The draft first: a published version names it as its base when the
   // source's was made from its current draft, or it had none, so the copy
@@ -621,7 +631,8 @@ async function storePage(
     });
     await storeRevision(tx, commit, {
       accountId: caller.accountId,
-      storageBytes,
+      // Charged with the rest of its batch.
+      storageBytes: null,
       draftSeq: audience === 'draft' ? 1 : null,
       publishedSeq: audience === 'published' ? 1 : null,
       restoredFrom: null,
@@ -648,7 +659,7 @@ async function storePage(
 async function storeFolder(
   tx: Database,
   entry: Extract<Entry, { kind: 'folder' }>,
-  { copy, share, caller, sourceId, storageBytes }: Target,
+  { copy, share, caller, sourceId }: Target,
 ) {
   const [source] = await tx
     .select({ id: metadataRevisions.id })
@@ -669,7 +680,8 @@ async function storeFolder(
     basedOn: null,
     share,
   });
-  await storeMetadata(tx, entry, { accountId: caller.accountId, storageBytes });
+  // Charged with the rest of its batch.
+  await storeMetadata(tx, entry, { accountId: caller.accountId, storageBytes: null });
   await tx
     .update(nodes)
     .set({ metadataHead: entry.metadata.record.metadataRevisionId })

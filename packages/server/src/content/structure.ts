@@ -129,14 +129,19 @@ export async function verifyMetadataCommit(
   });
 }
 
-/** Store a checked metadata version, charging its ciphertext to its author's storage. */
+/**
+ * Store a checked metadata version, charging its ciphertext to its author's
+ * storage, unless the caller charged it already (`storageBytes` null).
+ */
 export async function storeMetadata(
   tx: Database,
   { metadata, envelopes, wrap }: MetadataCommit,
-  { accountId, storageBytes }: { accountId: string; storageBytes: number },
+  { accountId, storageBytes }: { accountId: string; storageBytes: number | null },
 ) {
   const { record } = metadata;
-  await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+  if (storageBytes !== null) {
+    await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+  }
   const inserted = await tx
     .insert(metadataRevisions)
     .values({

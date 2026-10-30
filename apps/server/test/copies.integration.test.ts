@@ -17,7 +17,7 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { copyRoutes, pageRoutes, publicationRoutes } from '@wikistow/contracts';
-import { fileBlobStore, schema, sweepBlobs, sweepDrafts } from '@wikistow/server';
+import { fileBlobStore, schema, sweepBlobs, sweepDrafts, usedBytes } from '@wikistow/server';
 import { and, count, eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import type { z } from 'zod';
@@ -365,6 +365,53 @@ describe('copying', () => {
 });
 
 describe('what a copy refuses', () => {
+  it('refuses a batch of records over its sender’s storage, though each would fit', async () => {
+    const w = await world();
+    const copy = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await copy.open();
+    const entries = await Promise.all(copy.sourceIds.map((id) => copy.seal(id)));
+    const sizes = entries.flatMap((entry) =>
+      entry.kind === 'folder'
+        ? [entry.metadata.payload.ciphertext.length]
+        : [
+            entry.draft.revision.payload.ciphertext.length,
+            ...(entry.published ? [entry.published.revision.payload.ciphertext.length] : []),
+          ],
+    );
+    expect(sizes.length).toBeGreaterThan(1);
+    const batch = sizes.reduce((a, b) => a + b, 0);
+    // Alice has room for any one of the records, but not for all of them.
+    const hash = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+    const { storageBytes } = t.config.limits;
+    await t.db.insert(schema.blobs).values({
+      hash,
+      spaceId: w.lib.spaceId,
+      pageId: w.page.pageId,
+      audience: 'draft',
+      size: storageBytes - (await usedBytes(t.db, w.alice.id)) - (batch - 1),
+      uploadedBy: w.alice.id,
+    });
+    const send = () =>
+      rejection(
+        w.alice.ctx.api.call(copyRoutes.records, {
+          params: { copyId: copy.copyId },
+          body: { nodes: entries },
+        }),
+      );
+    expect(await send()).toBe('storage-full');
+    const page = copy.newIdOf(w.page.pageId);
+    expect(
+      await t.db.select().from(schema.revisions).where(eq(schema.revisions.pageId, page)),
+    ).toEqual([]);
+    await t.db.delete(schema.blobs).where(eq(schema.blobs.hash, hash));
+    expect(await send()).toBe('no error');
+  });
+
   it('refuses a publication from another page, a destination inside the source, and a move within one space', async () => {
     const w = await world();
     // A copy of the page published into the board's folder.
