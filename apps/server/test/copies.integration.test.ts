@@ -139,7 +139,8 @@ describe('copying', () => {
       .from(schema.revisions)
       .where(eq(schema.revisions.pageId, made.pageId));
     expect(stored.map((r) => r.basedOn)).toEqual([null, null]);
-    expect(stored.every((r) => r.from !== null)).toBe(true);
+    // Its sources are the copy's own business: draft retention keeps none for it.
+    expect(stored.map((r) => r.from)).toEqual([null, null]);
     expect((await pages.loadHistory(w.carol.ctx, made)).length).toBe(1);
 
     // The source is as it was.

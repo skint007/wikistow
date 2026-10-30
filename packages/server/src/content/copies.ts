@@ -598,7 +598,6 @@ async function storePage(
       draftSeq: audience === 'draft' ? 1 : null,
       publishedSeq: audience === 'published' ? 1 : null,
       restoredFrom: null,
-      sourceRevisionId: version.sourceRevisionId,
     });
   }
   await tx.insert(pageHeads).values({
@@ -608,6 +607,8 @@ async function storePage(
     publishedHead: entry.published?.revision.record.revisionId ?? null,
     publishedCount: entry.published ? 1 : 0,
   });
+  // The source versions are kept here, not as the revisions' own source,
+  // which draft retention keeps for a publication's label: a copy pins none.
   await tx
     .update(copyNodes)
     .set({
