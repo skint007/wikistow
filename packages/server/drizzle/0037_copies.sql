@@ -12,6 +12,7 @@ CREATE TABLE "copies" (
 	"permission_version" bigint NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"touched_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"finished_at" timestamp with time zone,
 	CONSTRAINT "copies_id_shape" CHECK ("copies"."id" ~ '^[A-Za-z0-9_-]{1,64}$'),
 	CONSTRAINT "copies_move_elsewhere" CHECK ("copies"."kind" = 'copy' or "copies"."source_space_id" <> "copies"."destination_space_id")
 );
@@ -33,7 +34,9 @@ ALTER TABLE "copies" ADD CONSTRAINT "copies_destination_space_id_spaces_id_fk" F
 ALTER TABLE "copy_nodes" ADD CONSTRAINT "copy_nodes_node_id_nodes_id_fk" FOREIGN KEY ("node_id") REFERENCES "public"."nodes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "copy_nodes" ADD CONSTRAINT "copy_nodes_copy_id_copies_id_fk" FOREIGN KEY ("copy_id") REFERENCES "public"."copies"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "copies_touched_at_idx" ON "copies" USING btree ("touched_at");--> statement-breakpoint
+CREATE INDEX "copies_finished_at_idx" ON "copies" USING btree ("finished_at") WHERE "copies"."finished_at" is not null;--> statement-breakpoint
 CREATE INDEX "copy_nodes_copy_idx" ON "copy_nodes" USING btree ("copy_id");--> statement-breakpoint
+ALTER TABLE "nodes" ADD CONSTRAINT "nodes_copy_id_copies_id_fk" FOREIGN KEY ("copy_id") REFERENCES "public"."copies"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "nodes_copy_idx" ON "nodes" USING btree ("copy_id") WHERE "nodes"."copy_id" is not null;--> statement-breakpoint
 -- Hand-added, over 0035's version: a copy's hidden nodes are in no tree, so
 -- making them, giving them records and removing them names no space. Showing them (`copy_id` set

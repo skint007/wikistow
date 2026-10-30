@@ -1,5 +1,5 @@
 {
-  "id": "37145cb1-0bc8-45e2-a93a-a068db300597",
+  "id": "1552bbb5-55ad-4926-8cc4-62b7d3f0073a",
   "prevId": "6016a56b-3f35-4d2c-a3a1-47479f8f10d4",
   "version": "7",
   "dialect": "postgresql",
@@ -2888,6 +2888,19 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
+        "nodes_copy_id_copies_id_fk": {
+          "name": "nodes_copy_id_copies_id_fk",
+          "tableFrom": "nodes",
+          "tableTo": "copies",
+          "columnsFrom": [
+            "copy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "nodes_space_id_parent_id_nodes_space_id_id_fk": {
           "name": "nodes_space_id_parent_id_nodes_space_id_id_fk",
           "tableFrom": "nodes",
@@ -4659,6 +4672,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -4673,6 +4692,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "copies_finished_at_idx": {
+          "name": "copies_finished_at_idx",
+          "columns": [
+            {
+              "expression": "finished_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"copies\".\"finished_at\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}

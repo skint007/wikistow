@@ -12,6 +12,8 @@
 // order, shows the new nodes and, for a move, deletes the source as
 // deleting it would. A source head that moved on is `stale-head`, naming
 // the nodes to seal again; any other refusal at the finish deletes the copy.
+// A finished copy is kept a day, no longer holding its nodes, so a finish or
+// cancel sent again answers as the finish did.
 //
 // Locks, in order: the spaces (key share, by ID), the copy's row, the
 // destination's share, then nodes; a move's finish then holds the source's
@@ -363,11 +365,20 @@ async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
   }
 }
 
-/** The copy, for its opener; not-found for anyone else. Held for the change when `lock` is set. */
-async function requireOpener(tx: Database, caller: Caller, copyId: string, { lock = false } = {}) {
+/**
+ * The copy, for its opener; not-found for anyone else, and once it finished,
+ * unless `finished` is set. Held for the change when `lock` is set.
+ */
+async function requireOpener(
+  tx: Database,
+  caller: Caller,
+  copyId: string,
+  { lock = false, finished = false } = {},
+) {
   const query = tx.select().from(copies).where(eq(copies.id, copyId));
   const [copy] = lock ? await query.for('update') : await query;
   if (!copy || copy.openerId !== caller.identity.id) throw new ContentError('not-found');
+  if (copy.finishedAt !== null && !finished) throw new ContentError('not-found');
   return copy;
 }
 
@@ -386,8 +397,7 @@ export async function checkCopyOpener(db: Database, actor: Actor, copyId: string
  * counts as a request, so the sweep leaves the copy a day more.
  */
 export async function copyUploadAccess(db: Database, caller: Caller, copyId: string) {
-  const [copy] = await db.select().from(copies).where(eq(copies.id, copyId));
-  if (!copy || copy.openerId !== caller.identity.id) throw new ContentError('not-found');
+  const copy = await requireOpener(db, caller, copyId);
   const access = await accessTo(db, caller, {
     spaceId: copy.destinationSpaceId,
     nodeId: copy.destinationParentId,
@@ -633,7 +643,8 @@ async function storeFolder(
  * stays; so it does when it is busy (`rate-limited`), as while a
  * publication the source's delete ends is being written, to finish again
  * shortly. Any other refusal deletes it, as does `stale-head` for a changed
- * subtree, which names none.
+ * subtree, which names none. A copy that finished already is answered as
+ * it was, for a day (section 10), and nothing changes.
  */
 export async function finishCopy(
   db: Database,
@@ -644,10 +655,12 @@ export async function finishCopy(
   try {
     const hashes = await db.transaction(async (tx) => {
       const caller = await requireCaller(tx, input.actor);
-      const found = await requireOpener(tx, caller, input.copyId);
+      const found = await requireOpener(tx, caller, input.copyId, { finished: true });
+      if (found.finishedAt !== null) return [];
       opener = caller;
       await lockSpaces(tx, found.sourceSpaceId, found.destinationSpaceId);
-      const copy = await requireOpener(tx, caller, input.copyId, { lock: true });
+      const copy = await requireOpener(tx, caller, input.copyId, { lock: true, finished: true });
+      if (copy.finishedAt !== null) return [];
       return finishHeld(tx, caller, copy);
     });
     for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
@@ -715,8 +728,13 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
     }
     removed = await removeSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId, held);
   }
+  // Shown, and no longer the copy's: removing it later leaves them.
   await tx.update(nodes).set({ copyId: null }).where(eq(nodes.copyId, copy.id));
-  await tx.delete(copies).where(eq(copies.id, copy.id));
+  await tx.delete(copyNodes).where(eq(copyNodes.copyId, copy.id));
+  await tx
+    .update(copies)
+    .set({ finishedAt: sql`now()`, touchedAt: sql`now()` })
+    .where(eq(copies.id, copy.id));
   await audit(tx, {
     actor: copy.openedBy,
     action: copy.kind === 'move' ? 'node.moved-between-spaces' : 'node.copied',
@@ -837,16 +855,22 @@ async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
   return removed;
 }
 
+// A copy that finished meanwhile stays, with its nodes.
 async function dropCopy(db: Database, store: BlobStore, caller: Caller, copyId: string) {
   const hashes = await db.transaction(async (tx) => {
-    const found = await requireOpener(tx, caller, copyId);
+    const found = await requireOpener(tx, caller, copyId, { finished: true });
+    if (found.finishedAt !== null) return [];
     await lockSpace(tx, found.destinationSpaceId);
-    return dropHeld(tx, await requireOpener(tx, caller, copyId, { lock: true }));
+    const copy = await requireOpener(tx, caller, copyId, { lock: true, finished: true });
+    return copy.finishedAt === null ? dropHeld(tx, copy) : [];
   });
   for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
 }
 
-/** Delete an unfinished copy and its hidden nodes at once, for its opener. */
+/**
+ * Delete an unfinished copy and its hidden nodes at once, for its opener.
+ * One that finished is answered as its finish was, and stays (section 10).
+ */
 export async function cancelCopy(
   db: Database,
   store: BlobStore,
@@ -856,15 +880,42 @@ export async function cancelCopy(
 }
 
 /**
- * Delete copies nobody sent anything to since `cutoff`, with their nodes
- * and attachments, as cancelling one does. Each is checked again under the
- * locks sending takes, so one sent to meanwhile stays. How many went.
+ * For deleting the space `spaceId`, which the caller holds for update: its
+ * unfinished copies into other spaces, with their hidden nodes there and
+ * whatever was sent for them, as cancelling does. The cascade from the
+ * copy's row would take the nodes, but not their names and key material,
+ * which name them by ID. The hashes of their attachments, whose files go
+ * once the transaction commits.
+ */
+export async function dropCopiesFrom(tx: Database, spaceId: string): Promise<string[]> {
+  const out = await tx
+    .select({ id: copies.id, spaceId: copies.destinationSpaceId })
+    .from(copies)
+    .where(and(eq(copies.sourceSpaceId, spaceId), isNull(copies.finishedAt)))
+    .orderBy(copies.destinationSpaceId, copies.id);
+  const hashes: string[] = [];
+  for (const { id, spaceId: destinationId } of out) {
+    if (destinationId === spaceId) continue;
+    await lockSpace(tx, destinationId);
+    const [copy] = await tx.select().from(copies).where(eq(copies.id, id)).for('update');
+    if (copy && copy.finishedAt === null) hashes.push(...(await dropHeld(tx, copy)));
+  }
+  return hashes;
+}
+
+/**
+ * Delete unfinished copies nobody sent anything to since `cutoff`, with
+ * their nodes and attachments, as cancelling one does. Each is checked
+ * again under the locks sending takes, so one sent to or finished
+ * meanwhile stays. How many went. Copies finished before `cutoff` go too,
+ * leaving their nodes, and aren't counted.
  */
 export async function sweepCopies(db: Database, store: BlobStore, cutoff: Date): Promise<number> {
+  await db.delete(copies).where(sql`${copies.finishedAt} < ${cutoff.toISOString()}`);
   const old = await db
     .select({ id: copies.id, spaceId: copies.destinationSpaceId })
     .from(copies)
-    .where(sql`${copies.touchedAt} < ${cutoff.toISOString()}`);
+    .where(and(isNull(copies.finishedAt), sql`${copies.touchedAt} < ${cutoff.toISOString()}`));
   let removed = 0;
   for (const { id, spaceId } of old) {
     const hashes = await db.transaction(async (tx) => {
@@ -875,7 +926,7 @@ export async function sweepCopies(db: Database, store: BlobStore, cutoff: Date):
         .for('key share');
       if (!space) return null;
       const [copy] = await tx.select().from(copies).where(eq(copies.id, id)).for('update');
-      if (!copy || copy.touchedAt >= cutoff) return null;
+      if (!copy || copy.finishedAt !== null || copy.touchedAt >= cutoff) return null;
       return dropHeld(tx, copy);
     });
     if (!hashes) continue;

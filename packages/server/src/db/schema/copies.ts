@@ -5,13 +5,15 @@ import { nodes, spaces } from './spaces.ts';
 import { users } from './users.ts';
 
 /**
- * Copies of a page or folder, and moves into another space, not finished
- * yet (protocol section 10, "Copies, and moves between spaces"). The new
- * nodes are made hidden (`nodes.copyId`), get their records, and are shown
- * at the finish, which for a move deletes the source too. The source isn't
- * a foreign key: a copy whose source is deleted meanwhile still finishes,
- * and a move then fails its check of the source. One nobody finishes is
- * swept a day after its last request (`touchedAt`).
+ * Copies of a page or folder, and moves into another space (protocol
+ * section 10, "Copies, and moves between spaces"). The new nodes are made
+ * hidden (`nodes.copyId`), get their records, and are shown at the finish,
+ * which for a move deletes the source too. The source isn't a foreign key:
+ * a copy whose source is deleted meanwhile still finishes, and a move then
+ * fails its check of the source. One nobody finishes is swept with its
+ * nodes a day after its last request (`touchedAt`). A finished one is kept
+ * a day (`finishedAt`), its nodes no longer tied to it, so a finish sent
+ * again gets the same answer.
  */
 export const copies = pgTable(
   'copies',
@@ -41,6 +43,8 @@ export const copies = pgTable(
     permissionVersion: bigint({ mode: 'number' }).notNull(),
     createdAt: timestamptz().notNull().defaultNow(),
     touchedAt: timestamptz().notNull().defaultNow(),
+    /** When it finished; until then, null. */
+    finishedAt: timestamptz(),
   },
   (table) => [
     check('copies_id_shape', sql`${table.id} ~ '^[A-Za-z0-9_-]{1,64}$'`),
@@ -49,6 +53,9 @@ export const copies = pgTable(
       sql`${table.kind} = 'copy' or ${table.sourceSpaceId} <> ${table.destinationSpaceId}`,
     ),
     index('copies_touched_at_idx').on(table.touchedAt),
+    index('copies_finished_at_idx')
+      .on(table.finishedAt)
+      .where(sql`${table.finishedAt} is not null`),
   ],
 );
 

@@ -44,6 +44,7 @@ import {
 import { readSettings } from '../settings.ts';
 import { currentOwners, isOwner } from './access.ts';
 import { endAgentGrants } from './agents.ts';
+import { dropCopiesFrom } from './copies.ts';
 import { lookupIdentities } from './identities.ts';
 import {
   applyRotation,
@@ -644,7 +645,8 @@ export async function removeOwner(
  * members, `not-found` for anyone else). A space that is an owner's home
  * space stays (`home-space`). Everything in it goes in one transaction:
  * its folders and pages with every version, key and attachment, its names,
- * shares, groups and owners, and copies published into it. Its pages'
+ * shares, groups and owners, copies published into it, and unfinished
+ * copies of its nodes into other spaces (`dropCopiesFrom`). Its pages'
  * publications into other spaces end as a deleted page's do
  * (`endPublicationsFrom`), it drops out of everyone's saved order, and
  * its pages' public links end, with their copies.
@@ -700,6 +702,8 @@ export async function deleteSpace(
     // Its pages' public links, copies and the target rows naming them, in
     // their lock order, rather than by the cascade.
     await endLinks(tx, ids);
+    // Copies of its nodes into other spaces, unfinished, with their hidden nodes there.
+    const copied = await dropCopiesFrom(tx, spaceId);
     const doomed = await tx
       .select({ hash: blobs.hash })
       .from(blobs)
@@ -737,7 +741,7 @@ export async function deleteSpace(
       target: { kind: 'space', id: spaceId },
       details: { nodes: ids.length, shares: spaceShares.length },
     });
-    return [...doomed.map((blob) => blob.hash), ...openingFiles];
+    return [...doomed.map((blob) => blob.hash), ...openingFiles, ...copied];
   });
   for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
 }

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { bigint, check, foreignKey, index, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
+import { copies } from './copies.ts';
 import { timestamptz } from './helpers.ts';
 import { users } from './users.ts';
 
@@ -48,9 +49,11 @@ export const nodes = pgTable(
     metadataHead: text(),
     /**
      * Set while the node is one of a copy's new nodes, not shown yet: it is
-     * in no tree and counts for nothing outside its copy (`copies`).
+     * in no tree and counts for nothing outside its copy (`copies`). A copy
+     * deleted unfinished takes its nodes along; finishing one sets this to
+     * null, so removing the finished copy leaves them.
      */
-    copyId: text(),
+    copyId: text().references(() => copies.id, { onDelete: 'cascade' }),
     createdAt: timestamptz().notNull().defaultNow(),
   },
   (table) => [
