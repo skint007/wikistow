@@ -135,8 +135,12 @@ export async function openCopy(
     })),
   };
 
-  /** Seal one source node's records again for its copy, from the source as it is now. */
-  async function seal(sourceId: string): Promise<Entry> {
+  /**
+   * Seal one source node's records again for its copy, from the source as
+   * it is now; its published version when the copy brings them, or
+   * `withPublished` says so.
+   */
+  async function seal(sourceId: string, { withPublished = published } = {}): Promise<Entry> {
     const node = nodes.find((n) => n.id === sourceId);
     if (!node) throw new Error(`${sourceId} isn’t copied`);
     const target = await keyTarget(ctx, to, parentId);
@@ -232,7 +236,7 @@ export async function openCopy(
       nodeId: page.pageId,
       draft,
       published:
-        published && publishedHead
+        withPublished && publishedHead
           ? await version('published', publishedHead, 'published', await baseOf(draft))
           : null,
     };

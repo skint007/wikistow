@@ -113,8 +113,12 @@ export const CopiedRecords = z.discriminatedUnion('kind', [
 
 /**
  * Records for the copy's new nodes, each node's in one entry, which
- * replaces the records sent for that node before. Only the copy's opener
- * sends them. Published versions go only in a copy that brings them.
+ * replaces the records sent for that node before; a node listed twice is
+ * `binding-mismatch`. Only the copy's opener sends them. Published versions
+ * go only in a copy that brings them (`forbidden`). They are written at the
+ * destination parent's permission version sent at the opening (the space's
+ * for the top of a space): `permission-version` otherwise, which ends the
+ * copy, as at the finish. `key-version` is sealed again and sent again.
  */
 export const records = {
   method: 'POST',

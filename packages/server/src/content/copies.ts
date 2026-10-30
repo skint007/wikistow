@@ -438,17 +438,26 @@ export async function copyUploadAccess(db: Database, caller: Caller, copyId: str
  * opener, as the hidden nodes' own versions at once, so the attachments
  * they list are committed as any write's are: each entry replaces the
  * records sent for its node before, and is checked as any write is in the
- * destination parent's region, under its current key version, apart from
+ * destination parent's region, at the parent's (or for the top of the
+ * space, the space's) permission version sent at the opening
+ * (`permission-version` otherwise, which ends the copy: the app cancels it
+ * and previews again), under its current key version, apart from
  * the head check: every record is a first version (`basedOn` null, or for
  * a published version, the draft of its own entry), written by the caller.
  * Each names a version of its node's source it was
- * sealed from. A published version goes only in a copy that brings them,
- * where the caller can still publish.
+ * sealed from. An entry holds one set of records, of one node listed once:
+ * a folder's metadata, or a page's draft and at most one published version,
+ * each of its own audience (`verifyRevisionCommit`). A published version
+ * goes only in a copy that brings them, where the caller can still publish:
+ * its audience is all the server sees of it.
  */
 export async function sendCopyRecords(
   db: Database,
   input: { actor: Actor; copyId: string; nodes: Entry[]; storageBytes: number },
 ) {
+  if (new Set(input.nodes.map((entry) => entry.nodeId)).size !== input.nodes.length) {
+    throw new ContentError('binding-mismatch', 'A node is listed twice');
+  }
   await db.transaction(async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const found = await requireOpener(tx, caller, input.copyId);
@@ -461,6 +470,11 @@ export async function sendCopyRecords(
     if (!access) throw new ContentError('not-found');
     if (!canEdit(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
+    // The records are written for the parent as it was at the opening.
+    requireVersion(
+      await parentVersion(tx, copy.destinationSpaceId, copy.destinationParentId),
+      copy.permissionVersion,
+    );
     await tx
       .update(copies)
       .set({ touchedAt: sql`now()` })
