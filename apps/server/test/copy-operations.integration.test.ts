@@ -751,6 +751,31 @@ describe('moving into another space', () => {
     expect(await rejection(pages.loadPage(w.alice.ctx, w.plan))).toBe('not-found');
   });
 
+  it('doesn’t list its mover as losing access where they don’t own the destination', async () => {
+    const w = await world();
+    // Carol's space has a folder Alice edits.
+    const shelf = await spaceOperations.createSpace(w.carol.ctx, { name: 'Shelf' });
+    const inbox = await spaceOperations.createFolder(w.carol.ctx, {
+      spaceId: shelf,
+      parentId: null,
+      name: 'Inbox',
+    });
+    await shareFolder(w.carol.ctx, {
+      spaceId: shelf,
+      rootId: inbox,
+      people: [await invite(w.carol, w.alice, 'editor')],
+    });
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: w.notes },
+      destination: { spaceId: shelf, parentId: inbox },
+    });
+    expect(preview.audience?.kind).toBe('unlisted');
+    const lost = preview.losses.map((l) => l.identityId);
+    expect(lost).not.toContain(w.alice.vault.identity.public.id);
+    expect(lost).toContain(w.bob.vault.identity.public.id);
+  });
+
   it('points links to the folder it moves at its copy, and lists those it can’t', async () => {
     const w = await world();
     const notes = `/s/${w.lib}/f/${w.notes}`;

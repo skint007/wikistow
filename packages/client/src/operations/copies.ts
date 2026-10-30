@@ -395,7 +395,8 @@ const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
  * Who holds less at the destination than in the source's regions now, for
  * a move, whose mover owns the source space. Only someone the destination
  * audience names counts as keeping access, so for a non-owner's preview of
- * the destination, everyone at the source is listed.
+ * the destination, everyone at the source is listed but the mover, who
+ * writes there.
  */
 async function lossesOf(
   ctx: ClientContext,
@@ -413,7 +414,9 @@ async function lossesOf(
   const after = new Map(
     audience?.kind === 'verified' ? audience.people.map((p) => [p.identityId, p.reach]) : [],
   );
+  const mover = ctx.identity.public.id;
   return [...before].flatMap(([identityId, reach]) => {
+    if (audience?.kind === 'unlisted' && identityId === mover) return [];
     const kept = after.get(identityId) ?? null;
     return rank(kept) < rank(reach) ? [{ identityId, before: reach, after: kept }] : [];
   });
