@@ -582,7 +582,8 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
       metadataHead: nodes.metadataHead,
     })
     .from(nodes)
-    .where(eq(nodes.spaceId, spaceId));
+    // A copy's new nodes show only once it finishes.
+    .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId)));
   const parents = new Map(all.map((node) => [node.id, node.parentId]));
   const view = await treeView(db, caller, spaceId, spaceShares, parents);
   if (!view) throw new ContentError('not-found');

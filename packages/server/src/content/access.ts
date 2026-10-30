@@ -40,14 +40,15 @@ export const ancestorsOf = (spaceId: string, nodeId: string) => sql`
     where a.depth < ${MAX_DEPTH}
   )`;
 
-// A node and everything beneath it.
+// A node and everything beneath it, but a copy's hidden nodes, which count
+// for nothing outside their copy (section 10).
 export const subtreeOf = (spaceId: string, nodeId: string) => sql`
   with recursive subtree(id, depth) as (
     select id, 0 from nodes where id = ${nodeId} and space_id = ${spaceId}
     union all
     select n.id, s.depth + 1 from nodes n
       join subtree s on n.parent_id = s.id and n.space_id = ${spaceId}
-    where s.depth < ${MAX_DEPTH}
+    where s.depth < ${MAX_DEPTH} and n.copy_id is null
   )`;
 
 /**
@@ -166,6 +167,7 @@ export async function accessTo(
   who: Holder,
   { spaceId, nodeId }: { spaceId: string; nodeId: string | null },
 ): Promise<(Access & { share: ShareRow | null }) | null> {
+  if (nodeId !== null && (await isHidden(db, nodeId))) return null;
   const share = await shareAt(db, spaceId, nodeId);
   if (who.personId !== null) {
     if (!share) return null;
@@ -185,6 +187,17 @@ export async function accessTo(
   if (!share) return null;
   const member = await membership(db, who.identity.id, share.id);
   return member ? { role: member.role, canPublish: member.canPublish, share } : null;
+}
+
+/**
+ * Whether a node is one of a copy's new nodes, not shown yet: nobody has
+ * access to it, so no route serves or changes it, and nothing can be made
+ * in it, but what its copy does (section 10). Everything under a hidden
+ * node is hidden too.
+ */
+export async function isHidden(db: Database, nodeId: string): Promise<boolean> {
+  const [node] = await db.select({ copyId: nodes.copyId }).from(nodes).where(eq(nodes.id, nodeId));
+  return node !== undefined && node.copyId !== null;
 }
 
 /** A person's own access in a share: an owner of its space, or a member of it. */
@@ -491,7 +504,7 @@ export function readSnapshot<T>(db: Database, read: (tx: Database) => Promise<T>
  * the tree works them out (`sharesByNode`), and the caller's place in each
  * (`treeView`). A page that isn't in the space has no access. The queries
  * share a snapshot, so a move or unshare between two of them can't put a
- * page under a share that never held it.
+ * page under a share that never held it. A copy's hidden nodes have none.
  */
 export async function accessToPages(
   db: Database,
@@ -518,6 +531,7 @@ export async function accessToPagesIn(
       with recursive up(id, parent_id) as (
         select id, parent_id from nodes
         where space_id = ${spaceId} and id = any(${sql.param([...pageIds])}::text[])
+          and copy_id is null
         union
         select n.id, n.parent_id from nodes n
           join up on n.id = up.parent_id and n.space_id = ${spaceId}

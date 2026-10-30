@@ -166,15 +166,25 @@ type RecordParts = z.output<typeof RecordParts>;
 /**
  * The signed record of every owner-region version in the space, by ID:
  * every page and metadata version with no key wrap. These are what a new
- * co-owner must get an envelope for (section 7.6, step 2).
+ * co-owner must get an envelope for (section 7.6, step 2). A copy's hidden
+ * nodes count for nothing outside it (section 10): adding an owner moves
+ * on the permission versions their records were written at, so the copy
+ * fails at its finish.
  */
 async function ownerRegionRecords(tx: Database, spaceId: string) {
   // A stored record today's schemas refuse can't be signed over, and is left out.
-  const read = async (table: 'revisions' | 'metadata_revisions', wraps: string, column: string) => {
+  const read = async (
+    table: 'revisions' | 'metadata_revisions',
+    wraps: string,
+    column: string,
+    node: string,
+  ) => {
     const rows = await tx.execute<{ id: string; record: unknown }>(sql`
       select r.id, r.sealed -> 'record' as record from ${sql.identifier(table)} r
       where r.space_id = ${spaceId}
-        and not exists (select 1 from ${sql.identifier(wraps)} w where w.${sql.identifier(column)} = r.id)`);
+        and not exists (select 1 from ${sql.identifier(wraps)} w where w.${sql.identifier(column)} = r.id)
+        and not exists (select 1 from nodes n
+          where n.id = r.${sql.identifier(node)} and n.copy_id is not null)`);
     return new Map(
       [...rows].flatMap((row) => {
         const record = RecordParts.safeParse(row.record);
@@ -183,8 +193,13 @@ async function ownerRegionRecords(tx: Database, spaceId: string) {
     );
   };
   return {
-    revision: await read('revisions', 'revision_wraps', 'revision_id'),
-    metadata: await read('metadata_revisions', 'metadata_wraps', 'metadata_revision_id'),
+    revision: await read('revisions', 'revision_wraps', 'revision_id', 'page_id'),
+    metadata: await read(
+      'metadata_revisions',
+      'metadata_wraps',
+      'metadata_revision_id',
+      'subject_id',
+    ),
   };
 }
 
