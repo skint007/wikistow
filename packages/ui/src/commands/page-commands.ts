@@ -54,14 +54,21 @@ export const copyNode: Command<
   CommandEnv & {
     ctx: ClientContext;
     onProgress?: (progress: copyOperations.CopyProgress) => void;
+    /** Stops it before the finish is sent (`copyOperations.CopyStopped`). */
+    signal?: AbortSignal;
     onMade: (made: copyOperations.MadeCopy) => void;
   }
 > = {
   id: 'node.copy',
   input: z.object({ preview: CopyPreview }),
   requires: ['unlocked-vault'],
-  run: async ({ preview }, { ctx, onProgress, onMade }) =>
-    onMade(await copyOperations.makeCopy(ctx, preview, onProgress ? { onProgress } : {})),
+  run: async ({ preview }, { ctx, onProgress, signal, onMade }) =>
+    onMade(
+      await copyOperations.makeCopy(ctx, preview, {
+        ...(onProgress && { onProgress }),
+        ...(signal && { signal }),
+      }),
+    ),
 };
 
 const PageRefInput = z.object({ spaceId: SpaceId, pageId: PageId });

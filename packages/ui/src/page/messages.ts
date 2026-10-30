@@ -45,14 +45,28 @@ export function moveMessage(error: unknown, kind: 'folder' | 'page'): string {
 }
 
 /**
- * The pages a copy's refusal names as published here from other pages,
- * which their publishers detach first (ADR 0007, decision 3), or null for
- * any other failure.
+ * The pages a copy's refusal names, by source ID, or null for any other
+ * failure: pages published here from other pages, which their publishers
+ * detach first (ADR 0007, decision 3), or pages with neither a draft nor a
+ * published version, which have nothing to copy. Both are `forbidden`;
+ * the source's tree tells them apart (`PagesRefused`).
  */
-export function publishedFromElsewhere(error: unknown): string[] | null {
+export function namedPages(error: unknown): string[] | null {
   if (!(error instanceof ApiError) || error.code !== 'forbidden') return null;
   const nodeIds = error.detail?.nodeIds;
   return nodeIds && nodeIds.length > 0 ? nodeIds : null;
+}
+
+/** A copy refused for the pages it names (`namedPages`), and why. */
+export class PagesRefused extends Error {
+  readonly reason: 'published-elsewhere' | 'nothing-to-copy';
+  readonly pageIds: string[];
+  constructor(reason: PagesRefused['reason'], pageIds: string[]) {
+    super(reason);
+    this.name = 'PagesRefused';
+    this.reason = reason;
+    this.pageIds = pageIds;
+  }
 }
 
 // A copy or move between spaces is undone in full when it fails: the
@@ -80,13 +94,15 @@ const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
 
 /**
  * A short message for a failed copy, or move into another space (`copy`
- * false): this app's own words, never the server's. A refusal for pages
- * published from other pages is said here; the dialog lists them.
+ * false): this app's own words, never the server's. A refusal for the
+ * pages it names (`PagesRefused`) is said here; the dialog lists them.
  */
 export function copyMessage(error: unknown, copy: boolean): string {
   const nothing = copy ? 'nothing was copied' : 'nothing moved';
-  if (publishedFromElsewhere(error)) {
-    return `Some pages in it were published here from other pages, so ${nothing}. Someone who can publish each one detaches it first, with Detach to edit…`;
+  if (error instanceof PagesRefused) {
+    return error.reason === 'published-elsewhere'
+      ? `Some pages in it were published here from other pages, so ${nothing}. Someone who can publish each one detaches it first, with Detach to edit…`
+      : `Some pages in it have neither a draft nor a published version, so ${nothing}. Someone who can publish each one publishes or restores a version of it first.`;
   }
   if (error instanceof ApiError && error.code === 'forbidden') {
     return copy

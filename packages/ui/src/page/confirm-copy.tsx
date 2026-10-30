@@ -1,5 +1,6 @@
 import {
   copyOperations,
+  spaceOperations,
   type FolderId,
   type PageId,
   type SpaceId,
@@ -20,7 +21,7 @@ import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
 import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, useAction } from '../sharing/use-action';
-import { copyMessage, publishedFromElsewhere } from './messages';
+import { copyMessage, namedPages, PagesRefused } from './messages';
 import { READ_BUDGET_MS } from './markdown-worker';
 import type { Destination } from './move-model';
 import { pageReader } from './page-reader';
@@ -32,9 +33,6 @@ const REACH: Record<moveOperations.Reach, string> = {
   drafts: 'drafts and published versions',
   published: 'published versions',
 };
-
-// Thrown from the progress callback to stop a copy between batches.
-class Stopped extends Error {}
 
 const titleOf = (title: string | null) => (title?.trim() ? title : 'Untitled');
 
@@ -66,11 +64,11 @@ export function ConfirmCopy({
   const navigate = useNavigate();
   const { busy, error, setError, run } = useAction((caught) => copyMessage(caught, copy));
   const [progress, setProgress] = useState<copyOperations.CopyProgress | null>(null);
-  // The pages a refusal named as published from other pages, by source ID.
-  const [blocked, setBlocked] = useState<string[] | null>(null);
+  // The pages a refusal named, by source ID, and why.
+  const [blocked, setBlocked] = useState<PagesRefused | null>(null);
   const [stopped, setStopped] = useState(false);
-  // Read by the progress callback, and shown on the Stop button.
-  const stopping = useRef(false);
+  // Aborted by Stop; a new one for each try.
+  const stopping = useRef<AbortController | null>(null);
   const [stopAsked, setStopAsked] = useState(false);
   // A preview's copy is tried once: after it fails or stops, the person looks again.
   const [spent, setSpent] = useState<string | null>(null);
@@ -138,7 +136,8 @@ export function ConfirmCopy({
       setSpent(confirmed.copyId);
       setBlocked(null);
       setStopped(false);
-      stopping.current = false;
+      const stop = new AbortController();
+      stopping.current = stop;
       setStopAsked(false);
       setProgress({ stage: 'sending', sent: 0, total: confirmed.nodes.length });
       let made: copyOperations.MadeCopy | null = null;
@@ -149,23 +148,35 @@ export function ConfirmCopy({
           {
             satisfies: requirementsHere(),
             ctx,
-            onProgress: (next) => {
-              if (stopping.current) throw new Stopped();
-              setProgress(next);
-            },
+            onProgress: setProgress,
+            signal: stop.signal,
             onMade: (copied) => {
               made = copied;
             },
           },
         );
       } catch (caught) {
-        // Whatever stopped it, the copy is deleted.
-        if (stopping.current) {
+        // Stopped before its finish was sent: the copy is deleted.
+        if (caught instanceof copyOperations.CopyStopped) {
           setStopped(true);
           return;
         }
-        setBlocked(publishedFromElsewhere(caught));
-        throw caught;
+        const pageIds = namedPages(caught);
+        if (!pageIds) throw caught;
+        // Both refusals naming pages are `forbidden`: a page the source's
+        // tree lists with no version has nothing to copy.
+        const { pages } = await spaceOperations.loadTree(ctx, sourceSpaceId).catch(() => ({
+          pages: [],
+        }));
+        const empty = pages.filter((p) => p.draftHead === null && p.publishedHead === null);
+        const refused = new PagesRefused(
+          pageIds.every((id) => empty.some((p) => p.id === id))
+            ? 'nothing-to-copy'
+            : 'published-elsewhere',
+          pageIds,
+        );
+        setBlocked(refused);
+        throw refused;
       } finally {
         setProgress(null);
       }
@@ -184,11 +195,10 @@ export function ConfirmCopy({
       // A move ended shares and links at the source.
       if (!copy) void refreshAccess(queryClient, ctx);
     });
+  // It stops before the next batch is sealed, and cancels the copy.
   const stop = () => {
-    stopping.current = true;
+    stopping.current?.abort();
     setStopAsked(true);
-    // What is being sent now fails at once; the next batch isn't sealed.
-    if (spent) void copyOperations.cancelCopy(ctx, spent).catch(() => undefined);
   };
   const lookAgain = () => {
     setError(null);
@@ -322,6 +332,8 @@ export function ConfirmCopy({
               <p className="text-xs text-muted-foreground">
                 The pages they point at don’t go with it. There, each finds a page with the same
                 title, if there is one.
+                {shown.links?.some((link) => link.kind !== 'wikilink') &&
+                  ' Links to the address of a page or folder the move deletes, written so they can’t be pointed at its new place, stop working.'}
               </p>
             </section>
           )}
@@ -427,8 +439,15 @@ export function ConfirmCopy({
       )}
       <ErrorLine error={error} />
       {blocked && (
-        <ul aria-label="Pages to detach first" className="grid list-disc gap-1 pl-5 text-sm">
-          {blocked.map((pageId) => (
+        <ul
+          aria-label={
+            blocked.reason === 'published-elsewhere'
+              ? 'Pages to detach first'
+              : 'Pages with nothing to copy'
+          }
+          className="grid list-disc gap-1 pl-5 text-sm"
+        >
+          {blocked.pageIds.map((pageId) => (
             <li key={pageId}>
               <Name>{named(pageId)}</Name>
             </li>

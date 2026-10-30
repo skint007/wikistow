@@ -1,8 +1,11 @@
+import { ApiError } from '@wikistow/client/api';
 import { describe, expect, it } from 'vite-plus/test';
+import { copyMessage, namedPages, PagesRefused } from '../src/page/messages.ts';
 import { copyDestinations, copySpaces, type MoveTree } from '../src/page/move-model.ts';
 
 // Where a copy, or a move into another space, can go (ADR 0007): the
-// spaces the dialog offers, and where in each the person can make pages.
+// spaces the dialog offers, and where in each the person can make pages;
+// and what it says when one is refused.
 
 describe('where a copy goes in a space', () => {
   // Family: Garden › Beans, and Kitchen, shared with this person as a reader.
@@ -93,5 +96,32 @@ describe('the spaces a copy can go to', () => {
       name: 'This space',
       folderOnly: false,
     });
+  });
+});
+
+describe('a copy refused for the pages it names', () => {
+  const forbidden = (nodeIds?: string[]) =>
+    new ApiError(403, 'forbidden', 'Refused', nodeIds ? { nodeIds } : {});
+
+  it('names them only for a forbidden refusal that lists some', () => {
+    expect(namedPages(forbidden(['plan']))).toEqual(['plan']);
+    expect(namedPages(forbidden([]))).toBeNull();
+    expect(namedPages(forbidden())).toBeNull();
+    expect(namedPages(new ApiError(409, 'stale-head', 'Stale', { nodeIds: ['plan'] }))).toBeNull();
+  });
+
+  it('says what to do for each reason, a copy’s or a move’s', () => {
+    expect(copyMessage(new PagesRefused('published-elsewhere', ['plan']), true)).toMatch(
+      /published here from other pages, so nothing was copied.*Detach to edit/,
+    );
+    expect(copyMessage(new PagesRefused('nothing-to-copy', ['plan']), false)).toMatch(
+      /neither a draft nor a published version, so nothing moved.*publishes or restores/,
+    );
+  });
+
+  it('says access changed when records are refused for it, which ended the copy', () => {
+    expect(copyMessage(new ApiError(409, 'permission-version', 'Changed'), true)).toBe(
+      'Who has access changed while you were looking, so nothing was copied. Look at it again.',
+    );
   });
 });
