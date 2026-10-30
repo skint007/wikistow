@@ -138,9 +138,16 @@ export async function openCopy(
   /**
    * Seal one source node's records again for its copy, from the source as
    * it is now; its published version when the copy brings them, or
-   * `withPublished` says so.
+   * `withPublished` says so. A folder's name is a first version unless
+   * `nameBasedOn` says it is based on another.
    */
-  async function seal(sourceId: string, { withPublished = published } = {}): Promise<Entry> {
+  async function seal(
+    sourceId: string,
+    {
+      withPublished = published,
+      nameBasedOn = null,
+    }: { withPublished?: boolean; nameBasedOn?: MetadataRevisionId | null } = {},
+  ): Promise<Entry> {
     const node = nodes.find((n) => n.id === sourceId);
     if (!node) throw new Error(`${sourceId} isn’t copied`);
     const target = await keyTarget(ctx, to, parentId);
@@ -156,7 +163,7 @@ export async function openCopy(
           subjectKind: 'folder',
           subjectId: newIdOf(sourceId),
           metadataRevisionId: newId(MetadataRevisionId),
-          basedOn: null,
+          basedOn: nameBasedOn,
         },
         metadata: name.opened.metadata,
         ...target,

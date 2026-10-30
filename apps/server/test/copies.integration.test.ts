@@ -596,6 +596,29 @@ describe('what a copy refuses', () => {
     expect(refused?.detail?.nodeIds).toEqual([published.pageId]);
   });
 
+  it('refuses a folder name based on another version, as it would a draft', async () => {
+    const w = await world();
+    const copy = await openCopy(w.alice.ctx, {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: w.pinned,
+    });
+    await copy.open();
+    const structure = await spaceOperations.loadStructure(w.alice.ctx, w.lib.spaceId);
+    const head = structure.folders.find((f) => f.id === w.lib.shared)?.metadata?.head;
+    if (!head) throw new Error('expected the folder’s name');
+    // Its name, said to be based on the source folder's.
+    const entry = await copy.seal(w.lib.shared, { nameBasedOn: head });
+    const send = w.alice.ctx.api.call(copyRoutes.records, {
+      params: { copyId: copy.copyId },
+      body: { nodes: [entry] },
+    });
+    expect(await rejection(send)).toBe('stale-head');
+    // A first version goes.
+    await copy.send([w.lib.shared]);
+  });
+
   it('refuses records for a node twice, and published versions in a copy that doesn’t bring them', async () => {
     const w = await world();
     // Bob edits the shared folder but can't publish there. His own page,
