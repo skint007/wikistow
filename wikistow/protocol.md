@@ -411,7 +411,7 @@ Sections 5.1 to 5.6 record what Milestones 0 and 1 built. Those v1 formats stay 
 
 **Revision record** (`contracts/src/records/revision.ts`, `RevisionRecord`): `protocol` (1), `installationId`, `spaceId`, `pageId`, `revisionId`, `audience` (`"draft"` \| `"published"`), `basedOn` (revision ID or null), `authorId`, `authorKeyVersion`, `payloadHash`.
 
-`basedOn` names the previous draft for a draft, or the exact draft that was published for a published revision.
+`basedOn` names the previous draft for a draft, or the exact draft that was published for a published revision. A publication's versions (section 13) and a copy's (section 10) are the exceptions those sections give.
 
 **Sealing** (`sealRevision`):
 
