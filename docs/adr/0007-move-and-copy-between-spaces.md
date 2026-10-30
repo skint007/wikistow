@@ -53,6 +53,7 @@ Moves are for people, with a session, as sharing is. An agent may copy where bot
 
 - **A live publication**, or a folder that holds one: a page a publication row names as its destination, with a version, and no `detached_at` (section 13). Ending a publication sets `detached_at` too, so an ended one doesn't count, and nor does an unfinished opening. Its publishers detach it first. The dialog lists the pages.
 - **A destination inside the source subtree**, for a copy or a move, as for a move today.
+- **A page with nothing to copy**: no draft and no published version, as when a publication was ended and then unpublished. Someone who can publish it publishes or restores a version first.
 - **A move within one space.** That is the existing move of section 10, and the dialog sends it there.
 
 ### 4. The destination's region
@@ -82,7 +83,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 
 1. **Open.** `POST /api/copies` names the kind, whether it brings published versions (which needs publish rights at the destination), the source node and its space, the destination parent and space, the permission versions of both the preview was made at (the space's, for the top of a space), and a new ID, kind and parent for every node of the subtree that the person's tree lists. The server checks decisions 2 and 3, that both permission versions are current, and that the new nodes mirror the source, and makes them, hidden.
 2. **Upload.** The app uploads each page's attachments to its new node, then sends the nodes' records with their key material, in batches that fit the body limit: `POST /api/copies/:copyId/records`. Only the opener sends them. Each entry holds every record of one node: a folder's one metadata record, or a page's draft and at most one published version, which the server refuses unless the copy brings published versions; and names the source heads it was sealed from; a copy that doesn't bring published versions names no published heads, and the finish doesn't compare them. Records are stored as the hidden nodes' versions at once, so their attachments are committed and the attachment sweep leaves them alone. Sending a node again replaces what was sent for it before. Records are checked as any write is, apart from the head check: a draft's `basedOn` is `null`, and a published version's is `null` or the draft in the same entry (decision 1).
-3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
+3. **Finish.** `POST /api/copies/:copyId/finish`. Under a lock on both spaces, taken in ID order, and for a move with the source subtree locked as `deleteNode` locks it, so no save lands between the checks and the delete, the server checks decision 2 again, so someone who lost access since opening can't finish, and then:
    - every new node has its records;
    - the destination parent's permission version, region and key version are those the records were written at;
    - for a move, the source node's permission version is the one sent at opening, the source subtree still holds exactly the nodes the copy mirrors, under the same parents, and every source page's heads and folder's metadata head are still the versions sealed. A draft head is always compared, so a page that gained a draft meanwhile is stale.
@@ -91,7 +92,7 @@ The protocol calls the whole operation a **copy**, of kind `copy` or `move`, sin
 
 **Hidden nodes** are in no tree, page route or search, and count for nothing outside their copy: not in another copy's source, and not in the records a share, a move between regions or a new co-owner must cover. Deleting or moving one of their ancestors still takes them along. So a share made at the destination meanwhile doesn't wait for the copy; the copy fails at the finish and starts again.
 
-A finished copy is kept for a day, so a finish sent again after a lost answer gets the same answer instead of copying everything twice. Its nodes no longer belong to it, so removing it later, or a cancel sent after the finish, leaves them. A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
+A finished copy is kept for a day, so a finish sent again after a lost answer gets the same answer instead of copying everything twice. Its nodes no longer belong to it, so removing it later, or a cancel sent after the finish, leaves them. The copy's references to its source don't cascade, so deleting the source never deletes the copy row: a move then fails at its finish, and a copy finishes without that node. A copy nobody finishes is swept with its nodes and blobs one day after its last request, as an unfinished publication opening is. Cancelling deletes it at once.
 
 So a folder of any size moves or copies, which also avoids the one-request limit that section 10's moves still have.
 
