@@ -206,6 +206,18 @@ it('tells nobody of a copy opened, sent and cancelled while they listen', async 
       hearing(owner, stop.signal),
       hearing(toMember, stop.signal),
     ]);
+    // The setup's own changes may still be on their way: once a change made
+    // now is heard, everything before it has been, and is forgotten.
+    await spaceOperations.createFolder(owner.ctx, { spaceId: scratch, parentId: null, name: 'Z' });
+    await spaceOperations.createFolder(toMember.ctx, {
+      spaceId: theirs,
+      parentId: null,
+      name: 'Y',
+    });
+    await expect.poll(() => byOwner, SOON).toContain(scratch);
+    await expect.poll(() => byTo, SOON).toContain(theirs);
+    byOwner.length = 0;
+    byTo.length = 0;
     const copy = await openCopy(owner.ctx, {
       from: lib.spaceId,
       nodeId: lib.shared,
