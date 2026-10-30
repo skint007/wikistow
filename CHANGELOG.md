@@ -4,11 +4,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.20.0 - 2026-10-30
+
 ### Highlights
 
 #### Features
 
-- Move a page or folder into another space, or copy one anywhere you can make pages, this space included, with Move to… and Copy to… in its menus. Each page brings its current draft and published version, and links between the pages that go together keep working.
+- Move a page or folder into another space, or copy one anywhere you can make pages, this space included, with Move to… and Copy to… in its menus, where Move… was. Each page brings its current draft and published version, and links between the pages that go together keep working.
+- Agents can copy pages and folders too, with `wikistow page copy` and `wikistow folder copy`. They copy only within what they were picked for, and never move.
 
 ### Changes
 
@@ -23,6 +26,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### CLI
 
 - `wikistow page copy PAGE_ID` and `wikistow folder copy FOLDER_ID`, with `--space SPACE_ID`, `--folder FOLDER_ID` or both, copy a page, or a folder with everything in it, as new ones into a folder of any space the agent may make pages in, or the top of its share there. Each page brings its current draft and published version and their files. Pages arrive published only where the agent and its person may publish, and the output names the rest. It prints the new page's or folder's ID and space, and how many pages and folders were copied. An agent copies and never moves. With `--idempotency-key`, a retry finds the first run's copy once it finished, rather than making a second, and copies again if it was cancelled; one the server still holds open asks for a new key. Ctrl-C cancels a copy not yet finished. The skill says to copy only what the person asks for. (#223)
+
+#### Development
+
+- ADR 0007 (`docs/adr/0007-move-and-copy-between-spaces.md`) records how pages and folders move and copy between spaces: a copy seals each page's current draft and published version, and each folder's name and look, again as new hidden nodes at the destination, and a move between spaces is a copy that deletes its source when it finishes. Protocol section 10 gains *Copies, and moves between spaces*, and the spec's sharing rule, capability table and glossary (**Copy**) change with it. (#218)
+- `copyOperations` in the client: `previewCopy` works out who gains and loses access, pages arriving unpublished, links that won't work and what a move ends, sealing nothing, and can take the IDs the copy makes; `makeCopy` seals each node again for the destination, rewrites link-table entries and `/s/…/p/…` and `/s/…/f/…` addresses between copied pages, sends in batches under the body and entry limits, waits out `Retry-After`, stops on a signal, reseals pages a move's finish names as changed, and throws `CopyKept` when it leaves a copy for its finish; `cancelCopy` cancels one. (#220)
 
 ## 0.19.0 - 2026-10-29
 
