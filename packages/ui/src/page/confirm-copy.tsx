@@ -93,6 +93,10 @@ export function ConfirmCopy({
     staleTime: 0,
     gcTime: 0,
     retry: false,
+    // Worked out again only by Look again: never while a copy runs, and
+    // never as a fresh copy the person wasn't shown.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const shown = preview.data;
   const ends = shown?.ends;
@@ -196,7 +200,7 @@ export function ConfirmCopy({
       // A move ended shares and links at the source.
       if (!copy) void refreshAccess(queryClient, ctx);
     });
-  // It stops before the next batch is sealed, and cancels the copy.
+  // It stops before the next node or attachment is sealed, and cancels the copy.
   const stop = () => {
     stopping.current?.abort();
     setStopAsked(true);
