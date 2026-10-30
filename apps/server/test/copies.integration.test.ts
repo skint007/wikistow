@@ -358,6 +358,35 @@ describe('what a copy refuses', () => {
     expect(await rejection(here.open())).toBe('forbidden');
   });
 
+  it('copies a publication ended without being detached, its publication as its draft', async () => {
+    const w = await world();
+    const { revisionId } = await pages.publishPage(w.alice.ctx, w.page);
+    const preview = await pubs.previewPublication(w.alice.ctx, {
+      source: w.page,
+      revisionId,
+      audience: 'published',
+      spaceId: w.board,
+      parentId: w.pinned,
+    });
+    const published = await pubs.publishToSpace(w.alice.ctx, {
+      preview,
+      attachmentIds: new Set(),
+    });
+    expect(await pubs.endPublication(w.alice.ctx, { source: w.page, spaceId: w.board })).toBe(true);
+    const copy = await copyAll(w.alice.ctx, {
+      kind: 'move',
+      from: w.board,
+      nodeId: published.pageId,
+      to: w.lib.spaceId,
+      parentId: null,
+    });
+    const made = at(w.lib.spaceId, copy.newIdOf(published.pageId));
+    const draft = await textOf(w.alice.ctx, made, 'draft');
+    expect(draft?.markdown).toBe('draft words');
+    expect(draft?.extensions['wikistow.publication']).toBeUndefined();
+    expect((await textOf(w.alice.ctx, made, 'published'))?.markdown).toBe('draft words');
+  });
+
   it('refuses an opening made from an old preview', async () => {
     const w = await world();
     const copy = await openCopy(w.alice.ctx, {

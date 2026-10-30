@@ -84,7 +84,8 @@ const CopiedVersion = z.object({ ...Commit, sourceRevisionId: RevisionId }).omit
 });
 
 /**
- * Every record of one new node: a page's draft, and its published version
+ * Every record of one new node: a page's draft (its published version, for
+ * a page with no draft), and its published version
  * when the copy brings published versions and the page is published now; a
  * folder's name and look, with the key material of its region. Each names
  * the source version it was sealed from: the source's heads, which a move's
@@ -125,8 +126,9 @@ export const records = {
  * it would. Only the opener finishes, if they still may copy (or move)
  * from the source to the destination. A source head that moved on since its
  * node was sealed, for a move, is `stale-head`, naming the new nodes to seal
- * again (`detail.nodeIds`); send them and finish again. Any other refusal
- * deletes the copy: open a new one from a new preview.
+ * again (`detail.nodeIds`); send them and finish again. So is
+ * `rate-limited`: finish again shortly. Any other refusal deletes the copy:
+ * open a new one from a new preview.
  */
 export const finish = {
   method: 'POST',

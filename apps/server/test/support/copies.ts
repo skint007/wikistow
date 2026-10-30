@@ -169,15 +169,19 @@ export async function openCopy(
     const source = { spaceId: from, pageId: PageIdSchema.parse(sourceId) };
     const page = { spaceId: to, pageId: PageIdSchema.parse(newIdOf(sourceId)) };
     const info = await pages.loadPage(ctx, source.pageId);
-    const version = async (audience: 'draft' | 'published', revisionId: RevisionId) => {
-      const opened = await pages.openRevisionOf(ctx, source, audience, revisionId, {
+    const version = async (
+      audience: 'draft' | 'published',
+      revisionId: RevisionId,
+      from: 'draft' | 'published' = audience,
+    ) => {
+      const opened = await pages.openRevisionOf(ctx, source, from, revisionId, {
         fresh: true,
       });
       const payload: PagePayload = revisePayload(opened.opened, {});
       const attachments = [];
       for (const ref of payload.attachments) {
         const resealed = resealAttachment({
-          from: pages.attachmentTarget(ctx, source, audience),
+          from: pages.attachmentTarget(ctx, source, from),
           to: pages.attachmentTarget(ctx, page, audience),
           ref,
           blob: await pages.downloadBlob(ctx, ref.blobHash),
@@ -208,11 +212,16 @@ export async function openCopy(
         sourceRevisionId: revisionId,
       };
     };
-    if (!info.heads.draftHead) throw new Error('expected a draft');
+    // A page with no draft gets its publication as its draft too.
+    const { draftHead, publishedHead } = info.heads;
+    const draft = draftHead
+      ? await version('draft', draftHead)
+      : publishedHead && (await version('draft', publishedHead, 'published'));
+    if (!draft) throw new Error('expected a version');
     return {
       kind: 'page',
       nodeId: page.pageId,
-      draft: await version('draft', info.heads.draftHead),
+      draft,
       published:
         published && info.heads.publishedHead
           ? await version('published', info.heads.publishedHead)

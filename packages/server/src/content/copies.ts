@@ -506,7 +506,9 @@ async function clearFolder(tx: Database, folderId: string) {
   await tx.delete(metadataRevisions).where(named);
 }
 
-// The source version a record names must be one of its source's, of its audience.
+// The source version a record names must be one of its source's: of its
+// audience, or for a draft, the publication of a page with no draft, such as
+// a publication ended without being detached (section 10).
 async function requireSourceRevision(
   tx: Database,
   { sourceId, revisionId, audience }: { sourceId: string; revisionId: string; audience: string },
@@ -518,7 +520,7 @@ async function requireSourceRevision(
       and(
         eq(revisions.id, revisionId),
         eq(revisions.pageId, sourceId),
-        sql`${revisions.audience} = ${audience}`,
+        audience === 'draft' ? undefined : sql`${revisions.audience} = ${audience}`,
       ),
     );
   if (!version) throw new ContentError('not-found', 'That version of the source isn’t there');
@@ -615,8 +617,10 @@ async function storeFolder(
  * current. Then, at once, show the new nodes and, for a move, delete the
  * source as deleting it would. A head that moved on is `stale-head`,
  * naming the new nodes to seal again (`detail.nodeIds`), and the copy
- * stays; any other refusal deletes it, as does `stale-head` for a changed
- * subtree, which names none. Busy is only tried again.
+ * stays; so it does when it is busy (`rate-limited`), as while a
+ * publication the source's delete ends is being written, to finish again
+ * shortly. Any other refusal deletes it, as does `stale-head` for a changed
+ * subtree, which names none.
  */
 export async function finishCopy(
   db: Database,
@@ -752,8 +756,9 @@ async function requireRegion(tx: Database, copy: CopyRow, share: ShareRow | null
 
 /**
  * For a move, the new nodes whose source heads moved on since they were
- * sealed: a page's draft, and when the copy brings published versions, its
- * published head, none for a page not published; a folder's metadata head. If the listed source subtree isn't the one
+ * sealed: a page's draft (its publication, for a page with no draft), and
+ * when the copy brings published versions, its published head, none for a
+ * page not published; a folder's metadata head. If the listed source subtree isn't the one
  * mirrored, under the same parents, the move can't go on: `stale-head`
  * naming no nodes.
  */
@@ -790,7 +795,7 @@ function staleNodes(
     const stale =
       node.kind === 'folder'
         ? source.metadataHead !== node.metadataFrom
-        : source.draftHead !== node.draftFrom ||
+        : (source.draftHead ?? source.publishedHead) !== node.draftFrom ||
           (copy.bringsPublished && source.publishedHead !== node.publishedFrom);
     return stale ? [node.nodeId] : [];
   });
