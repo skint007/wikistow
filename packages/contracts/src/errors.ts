@@ -73,8 +73,9 @@ export const ErrorCode = z.custom<ErrorCode>(isErrorCode, 'Unknown error code');
 /**
  * IDs and numbers a refusal carries, never content: the share's current key
  * version for `key-version`, the share in the way for `share-nesting`,
- * for an editor's `stale-head` on a page, its current heads, or for a
- * move's `stale-head` because the node moved, where it is now.
+ * for an editor's `stale-head` on a page, its current heads, for a
+ * move's `stale-head` because the node moved, where it is now, or for a
+ * copy's `stale-head` at its finish, the new nodes whose sources changed.
  */
 export const ErrorDetail = z.object({
   keyVersion: z.number().int().optional(),
@@ -82,6 +83,7 @@ export const ErrorDetail = z.object({
   draftHead: z.string().nullable().optional(),
   publishedHead: z.string().nullable().optional(),
   parentId: z.string().nullable().optional(),
+  nodeIds: z.array(z.string()).optional(),
 });
 export type ErrorDetail = z.infer<typeof ErrorDetail>;
 
