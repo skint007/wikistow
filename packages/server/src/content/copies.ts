@@ -23,6 +23,7 @@ import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { BlobStore } from '../blobs/store.ts';
+import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import {
@@ -484,6 +485,22 @@ export async function sendCopyRecords(
         .update(copies)
         .set({ touchedAt: sql`now()` })
         .where(eq(copies.id, copy.id));
+      // The batch's nodes are held in ID order, as deleting a node holds
+      // them, so the two can't each wait on the other.
+      await tx
+        .select({ id: nodes.id })
+        .from(nodes)
+        .where(
+          and(
+            anyId(
+              nodes.id,
+              input.nodes.map((entry) => entry.nodeId),
+            ),
+            eq(nodes.copyId, copy.id),
+          ),
+        )
+        .orderBy(nodes.id)
+        .for('update');
       // Each entry checked, and what was sent for it before removed, then
       // the batch charged at once, then stored.
       const targets: Target[] = [];
@@ -912,6 +929,8 @@ async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
       .select({ id: nodes.id })
       .from(nodes)
       .where(and(eq(nodes.copyId, copy.id), eq(nodes.spaceId, copy.destinationSpaceId)))
+      // In ID order, as deleting a node holds them.
+      .orderBy(nodes.id)
       .for('update');
     const ids = held.map((node) => node.id);
     if (!ids.includes(top.nodeId)) throw new ContentError('not-found');
