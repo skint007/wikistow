@@ -185,13 +185,14 @@ export function ConfirmCopy({
       // Both trees, before opening what it made there.
       await queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
       searchIndexChanged(queryClient, { spaceIds: [sourceSpaceId, spaceId] });
+      // Closed first: a dialog left open would be shown again for the space it went to.
+      onDone();
       await (node.kind === 'folder'
         ? navigate({
             to: '/s/$spaceId/f/$folderId',
             params: { spaceId, folderId: nodeId as FolderId },
           })
         : navigate({ to: '/s/$spaceId/p/$pageId', params: { spaceId, pageId: nodeId as PageId } }));
-      onDone();
       // A move ended shares and links at the source.
       if (!copy) void refreshAccess(queryClient, ctx);
     });
@@ -207,6 +208,24 @@ export function ConfirmCopy({
     void preview.refetch();
   };
   const confirmable = shown !== undefined && !preview.isError && shown.copyId !== spent;
+  const offerLookAgain = !busy && shown !== undefined && shown.copyId === spent;
+  // Focus moves on from a button that goes: from Stop, once it has run, to
+  // Look again or Back; from Look again, once looked at again, to Copy or Move.
+  const footer = useRef<HTMLDivElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const againButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const was = useRef({ busy, offerLookAgain });
+  useEffect(() => {
+    if (was.current.busy && !busy) (againButton.current ?? backButton.current)?.focus();
+    else if (
+      was.current.offerLookAgain &&
+      !offerLookAgain &&
+      !footer.current?.contains(document.activeElement)
+    )
+      confirmButton.current?.focus();
+    was.current = { busy, offerLookAgain };
+  }, [busy, offerLookAgain]);
 
   return (
     <div className="grid gap-4">
@@ -330,10 +349,11 @@ export function ConfirmCopy({
                 </ul>
               )}
               <p className="text-xs text-muted-foreground">
-                The pages they point at don’t go with it. There, each finds a page with the same
-                title, if there is one.
-                {shown.links?.some((link) => link.kind !== 'wikilink') &&
-                  ' Links to the address of a page or folder the move deletes, written so they can’t be pointed at its new place, stop working.'}
+                {/* Links that couldn't be read could be of either kind. */}
+                {(shown.links?.some((link) => link.kind === 'wikilink') ?? true) &&
+                  'Wikilinks to pages that don’t go with it each find a page with the same title there, if there is one. '}
+                {(shown.links?.some((link) => link.kind !== 'wikilink') ?? !copy) &&
+                  'Links to the address of a page or folder the move deletes, written so they can’t be pointed at its new place, stop working.'}
               </p>
             </section>
           )}
@@ -454,26 +474,31 @@ export function ConfirmCopy({
           ))}
         </ul>
       )}
-      <DialogFooter>
+      <DialogFooter ref={footer}>
         {busy ? (
+          // Only while it sends: once the finish is sent, it no longer stops.
           <Button
             variant="ghost"
-            disabled={progress?.stage === 'finishing' || stopAsked}
+            disabled={progress?.stage !== 'sending' || stopAsked}
             onClick={stop}
           >
             Stop
           </Button>
         ) : (
-          <Button variant="ghost" onClick={onBack}>
+          <Button ref={backButton} variant="ghost" onClick={onBack}>
             Back
           </Button>
         )}
-        {!busy && shown && shown.copyId === spent && (
-          <Button variant="secondary" onClick={lookAgain}>
+        {offerLookAgain && (
+          <Button ref={againButton} variant="secondary" onClick={lookAgain}>
             Look again
           </Button>
         )}
-        <Button disabled={busy || !confirmable} onClick={() => shown && void go(shown)}>
+        <Button
+          ref={confirmButton}
+          disabled={busy || !confirmable}
+          onClick={() => shown && void go(shown)}
+        >
           {busy ? (copy ? 'Copying…' : 'Moving…') : copy ? 'Copy' : 'Move'}
         </Button>
       </DialogFooter>
