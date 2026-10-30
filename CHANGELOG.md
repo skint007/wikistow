@@ -4,7 +4,17 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- Move a page or folder into another space, or copy one anywhere you can make pages, this space included, with Move to… and Copy to… in its menus. Each page brings its current draft and published version, and links between the pages that go together keep working.
+
 ### Changes
+
+#### App
+
+- Move… is now Move to…, beside a new Copy to…, in the page menu and the sidebar’s folder and page menus. Their dialog picks a space above the folder. A move within the space is the move it was. A copy, or an owner’s move into another space, first shows who can open it there, who loses access, pages that arrive unpublished because you can’t publish there, and links that won’t find their page; a move also lists the pages left linking to it and what it ends: public links, publications, shares and their members, agent picks and earlier versions. A move between spaces always asks, even with asking before moves turned off. The dialog shows how far it has got, can stop, and opens what it made. Editors who aren’t owners are told only owners move into another space, and offered a copy. A page published here from another page stops a copy until it is detached, and the dialog names it. (#217)
 
 #### Server
 
