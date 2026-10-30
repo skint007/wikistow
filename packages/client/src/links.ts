@@ -276,6 +276,46 @@ export function findPageLinks(markdown: string): PageLink[] {
   return links;
 }
 
+/**
+ * `markdown` with each link to a page's address (`/s/<space>/p/<page>`, as
+ * `findPageLinks` finds them, and the reference definitions they point
+ * through) that `to` gives another page for pointing at that page instead:
+ * a copy's links between its own pages (protocol section 10). Only the
+ * address's path changes, so a host, a `#heading` or the link's text stay.
+ * An address written with escapes is left as it is.
+ */
+export function rewritePageLinks(
+  markdown: string,
+  to: (page: { spaceId: string; pageId: string }) => { spaceId: string; pageId: string } | null,
+): string {
+  const { body } = splitFrontmatter(markdown);
+  const offset = markdown.length - body.length;
+  const edits: { at: number; length: number; text: string }[] = [];
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type !== 'link' && node.type !== 'definition') continue;
+    const [, spaceId = '', pageId = ''] = PAGE_URL.exec(node.url) ?? [];
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (!spaceId || start === undefined || end === undefined) continue;
+    const target = to({ spaceId, pageId });
+    if (!target) continue;
+    const path = `/s/${spaceId}/p/${pageId}`;
+    // The address comes after the text, which may hold it too.
+    const at = body.slice(start, end).lastIndexOf(path);
+    if (at < 0) continue;
+    edits.push({
+      at: offset + start + at,
+      length: path.length,
+      text: `/s/${target.spaceId}/p/${target.pageId}`,
+    });
+  }
+  let out = markdown;
+  for (const edit of edits.sort((a, b) => b.at - a.at)) {
+    out = out.slice(0, edit.at) + edit.text + out.slice(edit.at + edit.length);
+  }
+  return out;
+}
+
 /** A page's wikilinks and links to WikiStow pages (`findWikilinks`, `findPageLinks`). */
 export type FoundLinks = { wikilinks: Wikilink[]; pageLinks: PageLink[] };
 

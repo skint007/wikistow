@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { findWikilinks, placedWikilinks, resolveWikilinks, tableWikilinks } from '../src/index.ts';
+import {
+  findWikilinks,
+  placedWikilinks,
+  resolveWikilinks,
+  rewritePageLinks,
+  tableWikilinks,
+} from '../src/index.ts';
 
 const targets = (markdown: string) => findWikilinks(markdown).map((link) => link.source);
 
@@ -89,5 +95,33 @@ describe('the wikilinks a link table holds', () => {
     expect(tableWikilinks('---\n- "[[A]]"\n---\n`=[[B]].x`').map((link) => link.target)).toEqual([
       'B',
     ]);
+  });
+});
+
+describe('rewriting links to page addresses', () => {
+  const copied = (page: { spaceId: string; pageId: string }) =>
+    page.spaceId === 'lib' && page.pageId === 'plan' ? { spaceId: 'board', pageId: 'copy' } : null;
+
+  it('points each link to a copied page at its copy, keeping the rest as written', () => {
+    const markdown = [
+      '---',
+      'link: /s/lib/p/plan',
+      '---',
+      '[/s/lib/p/plan](https://wiki.example/s/lib/p/plan#goals) and <https://wiki.example/s/lib/p/plan>',
+      '[by reference][ref], [another](/s/lib/p/other), `/s/lib/p/plan`',
+      '',
+      '[ref]: /s/lib/p/plan',
+    ].join('\n');
+    expect(rewritePageLinks(markdown, copied)).toBe(
+      [
+        '---',
+        'link: /s/lib/p/plan',
+        '---',
+        '[/s/lib/p/plan](https://wiki.example/s/board/p/copy#goals) and <https://wiki.example/s/board/p/copy>',
+        '[by reference][ref], [another](/s/lib/p/other), `/s/lib/p/plan`',
+        '',
+        '[ref]: /s/board/p/copy',
+      ].join('\n'),
+    );
   });
 });
