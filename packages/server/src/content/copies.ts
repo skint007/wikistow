@@ -363,12 +363,13 @@ function mirror(input: Open, listed: readonly Listed[]) {
 
 /**
  * Refuse a source holding a live publication from another page (section
- * 13): one with a version, not detached. Its publishers detach it first.
- * An opening nobody finished has no version, and isn't listed anyway.
+ * 13): one with a version, not detached, named in `detail.nodeIds` so the
+ * dialog lists them. Its publishers detach them first. An opening nobody
+ * finished has no version, and isn't listed anyway.
  */
 async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
   if (pageIds.length === 0) return;
-  const [live] = await tx
+  const live = await tx
     .select({ pageId: publications.destinationPageId })
     .from(publications)
     .innerJoin(pageHeads, eq(pageHeads.pageId, publications.destinationPageId))
@@ -378,11 +379,12 @@ async function requireNoPublication(tx: Database, pageIds: readonly string[]) {
         sql`${publications.destinationPageId} = any(${sql.param([...pageIds])}::text[])`,
       ),
     )
-    .limit(1);
-  if (live) {
+    .orderBy(publications.destinationPageId);
+  if (live.length > 0) {
     throw new ContentError(
       'forbidden',
       'A page published from another page is detached before it is copied',
+      { nodeIds: live.map((row) => row.pageId) },
     );
   }
 }
