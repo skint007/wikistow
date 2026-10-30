@@ -1008,6 +1008,69 @@ describe('a copy’s hidden nodes', () => {
     expect(await nodeRow(abandoned.newIdOf(w.page.pageId))).toBeNull();
   });
 
+  it('take their records with them, envelopes and names too, when cancelled, swept or sent again', async () => {
+    const w = await world();
+    // Into the board's owner region, whose records carry envelopes, not wraps.
+    const options = {
+      from: w.lib.spaceId,
+      nodeId: w.lib.shared,
+      to: w.board,
+      parentId: null as FolderId | null,
+    };
+    const recordsOf = async (copy: Awaited<ReturnType<typeof openCopy>>) => {
+      const hidden = copy.sourceIds.map((id) => copy.newIdOf(id));
+      const versions = await t.db
+        .select({ id: schema.revisions.id })
+        .from(schema.revisions)
+        .where(inArray(schema.revisions.pageId, hidden));
+      const names = await t.db
+        .select({ id: schema.metadataRevisions.id })
+        .from(schema.metadataRevisions)
+        .where(inArray(schema.metadataRevisions.subjectId, hidden));
+      const subjects = [...versions, ...names].map((row) => row.id);
+      const envelopes =
+        subjects.length === 0
+          ? []
+          : await t.db
+              .select({ id: schema.keyEnvelopes.subjectId })
+              .from(schema.keyEnvelopes)
+              .where(inArray(schema.keyEnvelopes.subjectId, subjects));
+      return { versions, names, envelopes };
+    };
+    const cancelled = await openCopy(w.alice.ctx, options);
+    const swept = await openCopy(w.alice.ctx, options);
+    for (const copy of [cancelled, swept]) {
+      await copy.open();
+      await copy.send();
+      const sent = await recordsOf(copy);
+      expect(sent.names).toHaveLength(1);
+      expect(sent.envelopes.length).toBeGreaterThan(0);
+    }
+
+    // The folder sent again: its first name and envelopes go.
+    const [first] = (await recordsOf(cancelled)).names;
+    await cancelled.send([w.lib.shared]);
+    const again = await recordsOf(cancelled);
+    expect(again.names).toHaveLength(1);
+    expect(again.names[0]?.id).not.toBe(first?.id);
+    expect(
+      await t.db
+        .select()
+        .from(schema.keyEnvelopes)
+        .where(eq(schema.keyEnvelopes.subjectId, first?.id ?? '')),
+    ).toEqual([]);
+
+    await cancelled.cancel();
+    await t.db
+      .update(schema.copies)
+      .set({ touchedAt: DAYS_AGO_2() })
+      .where(eq(schema.copies.id, swept.copyId));
+    await sweepBlobs(t.db, fileBlobStore(t.blobDir));
+    for (const copy of [cancelled, swept]) {
+      expect(await recordsOf(copy)).toEqual({ versions: [], names: [], envelopes: [] });
+    }
+  });
+
   it('leave a share, a new co-owner and a move between regions nothing to cover', async () => {
     const w = await world();
     const folder = (name: string) =>
