@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- In the visual editor, Enter after a ticked task makes an unticked one, as it does after an unticked task. Before, the new task was ticked too.
+
 ## 0.20.0 - 2026-10-30
 
 ### Highlights
