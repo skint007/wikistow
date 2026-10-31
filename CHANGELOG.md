@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- An uploaded banner image can be taller, up to three times the usual band, and fade into the page, with new Height and Fade sliders under Focal point in the Banner picker. Public pages show both. (#228)
+
 ## 0.20.0 - 2026-10-30
 
 ### Highlights
