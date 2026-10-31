@@ -4,6 +4,26 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.21.0 - 2026-10-31
+
+### Highlights
+
+#### Features
+
+- A Checklist button in the visual editor’s toolbar, beside Bulleted list and Numbered list, makes a list of tasks to tick, with Ctrl+Alt+9.
+- Select text and type a bracket or quote to wrap it, in both editors. In the visual editor `*` makes it italic, twice bold, `` ` `` inline code, `~` strikethrough, and `[` twice a wikilink.
+- Several cursors in Markdown mode, as in VS Code: Ctrl+Alt+Up or Down adds one (Shift+Alt+Up or Down on Linux), Alt+drag selects a column, Ctrl+click adds one, Ctrl+D selects the next match, and Escape goes back to one.
+- An uploaded banner image can be up to three times taller and fade into the page, with Height and Fade under Focal point in the Banner picker.
+- A page’s history says what a change made while reading did, such as “Ticked 3, unticked 1” or “Changed servings”, and folds a run of them into one row. It lists 20 versions at a time, with Show older versions for more.
+
+#### Fixes
+
+- In the visual editor, Enter after a ticked task starts an unticked one.
+
+#### Maintenance
+
+- Dependencies with published security advisories are updated, and the desktop app runs on Electron 44.10.1.
+
 ### Changes
 
 #### App
@@ -19,6 +39,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Development
 
 - Dependencies with security advisories: undici 7.30.1, from 7.30.0, which Electron's downloader uses; `smtp-server` 3.21.3 and `mailparser` 3.14.1, from 3.19.16 and 3.9.36, in the e2e mail server, with nodemailer 10.3.1; and overrides giving `micromark-extension-math` KaTeX 0.18.10 and drizzle-kit's `@esbuild-kit` loader esbuild 0.25.12, the copies the rest of the tree has, since their own ranges stop at KaTeX 0.16 and esbuild 0.18. (#236)
+
+#### Releases and packaging
+
+- Electron 44.10.1, from 44.10.0. (#237)
 
 ## 0.20.0 - 2026-10-30
 

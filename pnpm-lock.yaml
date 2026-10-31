@@ -72,8 +72,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       electron:
-        specifier: 44.10.0
-        version: 44.10.0
+        specifier: 44.10.1
+        version: 44.10.1
       zod:
         specifier: ^4.6.5
         version: 4.6.7
@@ -3472,8 +3472,8 @@ packages:
   electron-to-chromium@1.5.461:
     resolution: {integrity: sha512-3WZFARz1By+/rYcqQ0OLj4UcEdhd6tz2LEcDtKBUq7ey77EeJ1OtetY/5hjSUxw7dC5r5mA7FfkhRbqO9vnTCg==}
 
-  electron@44.10.0:
-    resolution: {integrity: sha512-ss4pCfrQKV4TWkuVYtWB4HmeysPZgB96cSYNKYZv1UVCRP4vQMGNW5oopFbvx6Bbfce1XtP5pm5RDuKehp0svQ==}
+  electron@44.10.1:
+    resolution: {integrity: sha512-CTqxvx02P+xCR/xUxAWBexQEJ42g9Rzy1/0N+ofGAtI/atgSYZKQnTX9/juwzftocWbZtoF2ftEGMGJujJDeBw==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -7590,7 +7590,7 @@ snapshots:
 
   electron-to-chromium@1.5.461: {}
 
-  electron@44.10.0:
+  electron@44.10.1:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
