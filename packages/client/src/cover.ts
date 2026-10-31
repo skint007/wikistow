@@ -52,6 +52,10 @@ export const Banner = z.discriminatedUnion('kind', [
     attachmentId: AttachmentId,
     /** The vertical focal point, 0 (top) to 100 (bottom). */
     focal: z.number().int().min(0).max(100),
+    /** The band's height, 0 (the usual band, when missing) to 100 (three times as tall). */
+    height: z.number().int().min(0).max(100).optional(),
+    /** How far the bottom edge fades into the page, 0 (none, when missing) to 100 (the whole band). */
+    fade: z.number().int().min(0).max(100).optional(),
   }),
 ]);
 export type Banner = z.infer<typeof Banner>;
@@ -127,7 +131,7 @@ export function coverOf(payload: Pick<PagePayload, 'extensions' | 'attachments'>
 export type BannerChoice =
   | { kind: 'theme' }
   | { kind: 'preset'; name: BannerPreset }
-  | { kind: 'image'; attachmentId: AttachmentId; focal: number };
+  | { kind: 'image'; attachmentId: AttachmentId; focal: number; height?: number; fade?: number };
 
 type Json = PagePayload['extensions'][string];
 type JsonObject = { [key: string]: Json };

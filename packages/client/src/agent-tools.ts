@@ -491,7 +491,8 @@ export async function applyProposal(
           page,
           basedOn: base,
           basedOnRegion: opened.region,
-          // Everything else in the draft, attachments and extensions included, is carried over.
+          // Everything else in the draft, attachments and extensions included, is carried over
+          // (but `wikistow.change`, which only a publication holds).
           payload: revisePayload(opened.opened, {
             title: proposal.title,
             markdown: proposal.markdown,

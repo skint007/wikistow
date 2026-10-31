@@ -106,6 +106,21 @@ export const historyQuery = (ctx: ClientContext, page: pageOperations.PageRef) =
     queryFn: () => pageOperations.loadHistory(ctx, page),
   });
 
+/**
+ * What each of the page's published versions `ids` changed while reading
+ * (ADR 0008). The versions never change, so neither does this.
+ */
+export const versionChangesQuery = (
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  ids: readonly RevisionId[],
+) =>
+  queryOptions({
+    queryKey: [PLAIN, 'version-changes', page.pageId, ids],
+    queryFn: () => pageOperations.versionChanges(ctx, page, ids),
+    staleTime: Infinity,
+  });
+
 /** A space's shares and their members, for its owners. */
 export const sharesQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({
