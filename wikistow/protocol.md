@@ -216,7 +216,7 @@ and be at most 254 characters. That is zod 4.6.5's `z.email()` pattern, which th
 **After parsing**, a decrypted payload is `malformed` if:
 - any string in it, member names included, isn't well-formed Unicode;
 - any number token anywhere in it isn't finite when read as an IEEE 754 double;
-- a field this document types as an integer breaks section 3.3, rule 6. That includes `format.major` and `format.minor`, an `AttachmentRef`'s `size`, the vault keyring's `public.keyVersion`, `wikistow.publication.format` (section 13), `wikistow.cover`'s `format` and `banner.focal` (section 5.5), and the contacts payloads' integers.
+- a field this document types as an integer breaks section 3.3, rule 6. That includes `format.major` and `format.minor`, an `AttachmentRef`'s `size`, the vault keyring's `public.keyVersion`, `wikistow.publication.format` (section 13), `wikistow.cover`'s `format` and `banner.focal`, `wikistow.change`'s `format`, `ticked` and `unticked` (section 5.5), and the contacts payloads' integers.
 
 Payloads of v1 records may hold strings that aren't well-formed, as Milestone 1 clients wrote them (`parseJson`, `illFormedStrings`). Unknown fields of a loose payload are carried forward as they are.
 
@@ -439,7 +439,7 @@ The author is bound into the AD, so nobody can re-sign another person's cipherte
 6. The sealed key opens, and the payload decrypts under the AD (`decrypt-failed`).
 7. The payload parses (section 5.5).
 
-`verifyRevisionRecord` runs steps 1–3 for lists such as history, which show records without content.
+`verifyRevisionRecord` runs steps 1–3 for lists such as history, which show records without content. History then opens the versions it shows to label those made by changes while reading (section 5.5, `wikistow.change`).
 
 **Server checks before storing** (`verifyRevisionCommit`, `checkEnvelopes`): the record binds this installation, space, page and audience; the author is the caller's current identity; `basedOn` equals the current head (`stale-head`); the signature is valid; `payloadHash` matches the ciphertext; and the key material is the one section 6.8 requires for the page's region. The writer also sends the current permission version (section 6.8).
 
@@ -551,6 +551,18 @@ Rules (`payload.ts`, `metadata.ts`):
 - An icon from the app's icon set, Lucide, shown in place of the emoji, named as in a page cover's `symbol`. It is encrypted with the rest of the metadata, like `wikistow.icon`.
 - Readers show it only when `format` is 1 and `name` is a name their icon set has. Anything else counts as none and shows the emoji (a space without one, its initials); it never makes the metadata `malformed`. Where `wikistow.icon` is present too, as when an older client added an image, the image shows.
 - Removing it writes `wikistow.symbol: null`. Choosing an icon removes the image (`wikistow.icon: null`); choosing an emoji or an image removes the icon. The emoji stays beside it, for older clients and the CLI.
+
+**Changes made while reading** (`change.ts`), the extension `wikistow.change` ([ADR 0008](../docs/adr/0008-reader-change-labels.md)):
+
+```
+{ format: 1, revision: RevisionId, ticked: integer ≥ 0, unticked: integer ≥ 0, properties: string[] }
+```
+
+- The publication that carries changes made while reading a page (tasks ticked, values a plugin block set) writes it. Their flush publishes only a draft that had no changes of its own, so the version is the publication before it plus those changes. `revision` is the publication's own revision ID. `ticked` and `unticked` count the task items whose box changed, and `properties` names the keys whose value changed, as written, comparing the draft's Markdown before and after the changes. `format`, `ticked` and `unticked` are integers (section 3.3, rule 6).
+- Saving a draft or restoring a version leaves it out, and so does every other publish.
+- A version counts it only when `revision` is its own ID. A client that doesn't know the namespace copies it into its next version (rule above), and detaching, copies (section 10) and publications into other spaces (section 13) copy it too. Each copy names a version it isn't in, so none counts it. One that doesn't match the schema counts as none; it never makes the payload `malformed`.
+- History says what such a version changed ("Ticked 3, unticked 1", "Changed servings"). It opens the versions it lists to read it, the newest 20 and more as asked, each once. Readers open those in their own history (section 11). Each counts by its own record alone, so a reader's oldest version is labelled like any other.
+- It tells nobody anything new: it is encrypted with the version, anyone who opens the version could compare it with the one before, and it was counted from a draft that equalled the publication before.
 
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
 
@@ -1427,7 +1439,7 @@ A publication copies explicitly chosen versions of a source page into a destinat
 
 **Unfinished openings.** A page opened for a publication that has no version yet is replaced when another source publisher opens one in a different folder, and is swept once it is a day old with nothing uploaded for it in that day. A publisher still working on it then gets not-found and opens again; nothing is shown to anyone in between.
 
-**Detaching** makes `D` an independent page. A publisher writes `D`'s first draft from its latest publication, **removing the `wikistow.publication` namespace** (and `wikistow.links`, which a publication's versions never carry; section 5.5). These, a publication's versions leaving out `wikistow.links`, and a copy of kind `copy` or `move` (section 10) leaving out `wikistow.publication` and the `wikistow.links` entries it can't keep, are the only places a namespace is dropped on purpose. The server marks the publication row `detached_at`.
+**Detaching** makes `D` an independent page. A publisher writes `D`'s first draft from its latest publication, **removing the `wikistow.publication` namespace** (and `wikistow.links`, which a publication's versions never carry; section 5.5). These, a publication's versions leaving out `wikistow.links`, a copy of kind `copy` or `move` (section 10) leaving out `wikistow.publication` and the `wikistow.links` entries it can't keep, and drafts and publishes leaving out `wikistow.change` (section 5.5), are the only places a namespace is dropped on purpose. The server marks the publication row `detached_at`.
 
 ---
 
