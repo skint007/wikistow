@@ -75,11 +75,18 @@ export const BANNERS: Record<BannerPreset, string> = {
 };
 
 /**
- * A banner image's focal point as the page shows it, in steps of 5%: a
- * class each, as the policy allows no style attribute.
+ * A banner image's focal point, height and fade as the page shows them, in
+ * steps of 5: a class each, as the policy allows no style attribute.
  */
-const FOCAL_STEP = 5;
-const focalStep = (focal: number) => Math.round(focal / FOCAL_STEP) * FOCAL_STEP;
+const STEP = 5;
+const step = (value: number) => Math.round(value / STEP) * STEP;
+const STEPS = Array.from({ length: 100 / STEP + 1 }, (_, i) => i * STEP);
+/** The class for a banner image's height or fade, none at 0: the usual band, with a hard edge. */
+const stepClass = (name: 'height' | 'fade', value: number | undefined) =>
+  step(value ?? 0) > 0 ? [`${name}-${step(value ?? 0)}`] : [];
+
+/** The band's height in pixels at `height` 0 to 100, as the app's `CoverBand`: up to three times `base`. */
+const coverHeight = (base: number, height: number) => base + (base * 2 * height) / 100;
 
 const tokens = (palette: Record<string, string>) =>
   Object.entries(palette)
@@ -96,7 +103,13 @@ ${PAGE_FONTS.map(
 :root { color-scheme: light dark; ${tokens(LIGHT)} --link-blue: #2b5fb4; --alert-important: #6d3fc0; --alert-caution: #b02525; }
 @media (prefers-color-scheme: dark) { :root { ${tokens(SLATE)} --link-blue: #8ab4f8; --alert-important: #c4b5fd; --alert-caution: var(--destructive); } }
 ${BANNER_PRESETS.map((name) => `.banner-${name} { --cover: ${BANNERS[name]}; }`).join('\n')}
-${Array.from({ length: 100 / FOCAL_STEP + 1 }, (_, i) => `.focal-${i * FOCAL_STEP} { object-position: 50% ${i * FOCAL_STEP}%; }`).join('\n')}
+${STEPS.map((n) => `.focal-${n} { object-position: 50% ${n}%; }`).join('\n')}
+${STEPS.slice(1)
+  .map(
+    (n) =>
+      `.cover.fade-${n} { background: none; } .fade-${n} > .banner-img { mask-image: linear-gradient(#000 ${100 - n}%, transparent); }`,
+  )
+  .join('\n')}
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
@@ -116,6 +129,9 @@ body { margin: 0; background: var(--background); color: var(--foreground); font:
 .card { background: var(--card); border-radius: 18px; box-shadow: var(--card-shadow); }
 .cover { position: relative; height: 120px; border-radius: 18px 18px 0 0; background: var(--cover); background-size: cover; }
 .banner-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+${STEPS.slice(1)
+  .map((n) => `.cover.height-${n} { height: ${coverHeight(120, n)}px; }`)
+  .join('\n')}
 .badge { position: absolute; left: 44px; bottom: -26px; width: 72px; height: 72px; display: grid; place-items: center; overflow: hidden; border-radius: 18px; background: var(--card); font-size: 48px; line-height: 1; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
 .badge img { width: 100%; height: 100%; object-fit: cover; }
 .badge svg { width: 58%; height: 58%; color: var(--primary); }
@@ -177,6 +193,9 @@ footer svg { width: 18px; height: 18px; flex: none; }
   .layout { padding: 0; }
   .card { border-radius: 0; box-shadow: none; }
   .cover { height: 104px; border-radius: 0; }
+${STEPS.slice(1)
+  .map((n) => `  .cover.height-${n} { height: ${coverHeight(104, n)}px; }`)
+  .join('\n')}
   .badge { left: 18px; bottom: -20px; width: 56px; height: 56px; border-radius: 16px; font-size: 36px; }
   .head { padding: 3.25rem 1.125rem 0; }
   .no-badge .head { padding-top: 1.75rem; }
@@ -256,14 +275,20 @@ function badgeHtml(id: string, cover: PublicCover): string | null {
 /** The card's top: its banner, with the badge over its edge, if any. */
 function coverHtml(id: string, cover: PublicCover) {
   const { banner } = cover;
-  const preset = banner.kind === 'preset' ? ` banner-${banner.name}` : '';
+  // A banner image's height and fade, where it has them, beside a preset's name.
+  const classes =
+    banner.kind === 'preset'
+      ? [`banner-${banner.name}`]
+      : banner.kind === 'image'
+        ? [...stepClass('height', banner.height), ...stepClass('fade', banner.fade)]
+        : [];
   const image =
     banner.kind === 'image'
-      ? `<img class="banner-img focal-${focalStep(banner.focal)}" src="${fileUrl(id, banner.attachmentId)}" alt="">`
+      ? `<img class="banner-img focal-${step(banner.focal)}" src="${fileUrl(id, banner.attachmentId)}" alt="">`
       : '';
   const badge = badgeHtml(id, cover);
   return {
-    html: `<div class="cover${preset}">${image}${badge ? `<div class="badge">${badge}</div>` : ''}</div>`,
+    html: `<div class="${['cover', ...classes].join(' ')}">${image}${badge ? `<div class="badge">${badge}</div>` : ''}</div>`,
     badge: badge !== null,
   };
 }
