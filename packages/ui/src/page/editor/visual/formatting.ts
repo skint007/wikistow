@@ -298,14 +298,15 @@ const boxable = (block: Node | null) => {
 // The items of the list at `start` in `tr`'s document, only those from
 // `from` to `to` if given, made items of a `kind` list. Each says which
 // kind it's in too, or Milkdown turns the list back. Boxes already ticked
-// stay ticked.
+// stay ticked, and an item that can't hold one gets none.
 function itemsAs(tr: Transaction, start: number, kind: ListKind, from = 0, to = Infinity) {
   const listType = kind === 'ordered' ? 'ordered' : 'bullet';
   tr.doc.nodeAt(start)?.forEach((child, offset) => {
     const at = start + 1 + offset;
     if (at + child.nodeSize <= from || at >= to) return;
     const label = listType === 'bullet' ? '•' : child.attrs['label'];
-    const checked = kind === 'task' ? (child.attrs['checked'] ?? false) : null;
+    const checked =
+      kind === 'task' && boxable(child.firstChild) ? (child.attrs['checked'] ?? false) : null;
     tr.setNodeMarkup(at, undefined, { ...child.attrs, listType, label, checked });
   });
 }
