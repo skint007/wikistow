@@ -295,6 +295,21 @@ const boxable = (block: Node | null) => {
   return first?.type.name !== 'html' || inlineHtml(String(first.attrs['value']));
 };
 
+// The items of the list at `start` in `tr`'s document, only those from
+// `from` to `to` if given, made items of a `kind` list. Each says which
+// kind it's in too, or Milkdown turns the list back. Boxes already ticked
+// stay ticked.
+function itemsAs(tr: Transaction, start: number, kind: ListKind, from = 0, to = Infinity) {
+  const listType = kind === 'ordered' ? 'ordered' : 'bullet';
+  tr.doc.nodeAt(start)?.forEach((child, offset) => {
+    const at = start + 1 + offset;
+    if (at + child.nodeSize <= from || at >= to) return;
+    const label = listType === 'bullet' ? '•' : child.attrs['label'];
+    const checked = kind === 'task' ? (child.attrs['checked'] ?? false) : null;
+    tr.setNodeMarkup(at, undefined, { ...child.attrs, listType, label, checked });
+  });
+}
+
 // Numbered, bulleted or a checklist: on text out of a list, a list of it;
 // on a list of another kind, the list turns into this kind; on one of this
 // kind, the selected items come out of it. A checklist is always bulleted,
@@ -322,37 +337,29 @@ function list(kind: ListKind): Format {
         if (!dispatch) return wrapInList(type)(state);
         // The new list is where the selected blocks start, as `wrapInList` puts it.
         return wrapInList(type)(state, (tr) => {
-          tr.doc.nodeAt(range.start)?.forEach((child, offset) => {
-            tr.setNodeMarkup(range.start + 1 + offset, undefined, {
-              ...child.attrs,
-              checked: false,
-            });
-          });
+          itemsAs(tr, range.start, kind);
           dispatch(tr);
         });
       }
       const { $from } = state.selection;
       const current = $from.node(depth);
-      if (kindOf(current) === kind) return liftListItem(item)(state, dispatch);
+      if (kindOf(current) === kind) {
+        // Lifted into a list around this one, the items take its kind.
+        const outer = $from.node(depth - 1).type === item ? $from.node(depth - 2) : null;
+        if (!outer || !dispatch) return liftListItem(item)(state, dispatch);
+        const start = $from.before(depth - 2);
+        return liftListItem(item)(state, (tr) => {
+          itemsAs(tr, start, kindOf(outer), tr.selection.from, tr.selection.to);
+          dispatch(tr);
+        });
+      }
       let boxes = true;
       current.forEach((child) => (boxes &&= boxable(child.firstChild)));
       if (kind === 'task' && !boxes) return false;
       if (dispatch) {
-        // Its items say which kind they're in too, or Milkdown turns it back.
         const start = $from.before(depth);
         const tr = state.tr.setNodeMarkup(start, type, { spread: current.attrs['spread'] });
-        const listType = kind === 'ordered' ? 'ordered' : 'bullet';
-        current.forEach((child, offset) => {
-          const label = listType === 'bullet' ? '•' : child.attrs['label'];
-          // Boxes already ticked stay ticked.
-          const checked = kind === 'task' ? (child.attrs['checked'] ?? false) : null;
-          tr.setNodeMarkup(start + 1 + offset, undefined, {
-            ...child.attrs,
-            listType,
-            label,
-            checked,
-          });
-        });
+        itemsAs(tr, start, kind);
         dispatch(tr);
       }
       return true;
