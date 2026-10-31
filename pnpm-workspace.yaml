@@ -9,6 +9,12 @@ overrides:
   'vite@8': 8.3.4
   # The browser tests run in the Playwright 1.63 image, with its browsers.
   playwright: 1.63.0
+  # Security fixes their parents' ranges don't reach yet: remark-math's
+  # micromark extension asks for KaTeX 0.16, and drizzle-kit's loader
+  # (@esbuild-kit, no longer maintained) for esbuild 0.18. Both take the
+  # copy the rest of the tree already has.
+  'micromark-extension-math>katex': 0.18.10
+  '@esbuild-kit/core-utils>esbuild': 0.25.12
 
 # The vite alias above reports its own version (1.0.0), which trips Vite peer ranges.
 peerDependencyRules:
