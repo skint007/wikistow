@@ -19,10 +19,12 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import { textEdits } from '../../link-renames';
 import { lineBreakFor, type EditorSurfaceProps } from '../surface';
 import { referenceCompletions, wikilinkCompletions } from './completion';
+import { multipleCursors } from './cursors';
 import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
 import { sourceTheme } from './theme';
+import { selectionWraps } from './wrap';
 
 // A change the session made (`replace`), which `onChange` doesn't report.
 const external = Annotation.define<boolean>();
@@ -187,7 +189,9 @@ function extensions({
     }),
     linkMarks(assist),
     fileDrops(() => latest().onFiles),
+    selectionWraps,
     typingLines,
+    multipleCursors,
     keymap.of([
       { key: 'Enter', run: insertNewline },
       ...completionKeymap,
@@ -211,7 +215,8 @@ function extensions({
  * goes in through the editor. Left to the browser, making or joining lines
  * writes a `style` attribute into the editor's DOM, which the Content
  * Security Policy refuses. The range is the one the browser names (a
- * spellcheck fix names one word), else the selection.
+ * spellcheck fix names one word), else the selection. Typed at the
+ * selection, it goes in at every cursor, as CodeMirror's own typing does.
  *
  * Edits this can't take over are left to the browser. Android Chrome
  * (126 and later) edits through EditContext, so it never touches the DOM.
@@ -236,8 +241,9 @@ const typingLines = EditorView.domEventHandlers({
     if (!across && !/[\r\n]/.test(text)) return false;
     event.preventDefault();
     const insert = withLineBreaks(text, state.lineBreak);
+    const { main } = state.selection;
     let spec: TransactionSpec;
-    if (targets.length === 0) {
+    if (targets.every(({ from, to }) => from === main.from && to === main.to)) {
       spec = state.replaceSelection(insert);
     } else {
       const changes = state.changes(targets.map(({ from, to }) => ({ from, to, insert })));

@@ -113,13 +113,14 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         });
         return written.revisionId;
       },
-      publish: async ({ draftHead, publishedHead }) => {
+      publish: async ({ draftHead, publishedHead }, change) => {
         const written = await pageOperations.publishPage(ctx, page, {
           expected: {
             draftHead: RevisionId.parse(draftHead),
             publishedHead: publishedHead === null ? null : RevisionId.parse(publishedHead),
           },
           read: readWikilinks,
+          change,
         });
         published = written.revisionId;
         // Before the page loads again, so the view reading it stays (`originOf`).

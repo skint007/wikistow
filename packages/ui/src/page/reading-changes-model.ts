@@ -3,6 +3,8 @@ import {
   setPageProperty,
   setTask,
   splitFrontmatter,
+  summarizeChange,
+  type ChangeSummary,
   type PropertyValue,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
@@ -122,8 +124,14 @@ export type FlushOperations = {
   openDraft: (revisionId: string) => Promise<string>;
   /** Save `markdown` as the draft on top of `basedOn`, opened before; the revision written. */
   saveDraft: (basedOn: string, markdown: string) => Promise<string>;
-  /** Publish the draft `expected.draftHead`, if the page's heads are still `expected`; the revision written. */
-  publish: (expected: { draftHead: string; publishedHead: string | null }) => Promise<string>;
+  /**
+   * Publish the draft `expected.draftHead`, saying what it changed
+   * (`change`), if the page's heads are still `expected`; the revision written.
+   */
+  publish: (
+    expected: { draftHead: string; publishedHead: string | null },
+    change: ChangeSummary,
+  ) => Promise<string>;
   /** Whether the page has a public link now, looked up afresh. */
   publicLink: () => Promise<boolean>;
 };
@@ -154,10 +162,10 @@ const stale = (error: unknown) => error instanceof ApiError && error.code === 's
  * publication when loaded, and only if neither head moved since
  * (`expected`), and the page has no public link by then, which the
  * publish would end without asking; otherwise the changes stay in the
- * draft. A draft already
- * as asked but with changes of its own, as one a flush saved and then
- * failed to publish leaves it, isn't known to be published: the changes
- * are said to be in the draft.
+ * draft. The publication says what the flush changed (`summarizeChange`),
+ * so history can label it (ADR 0008). A draft already as asked but with changes of its own, as one
+ * a flush saved and then failed to publish leaves it, isn't known to be
+ * published: the changes are said to be in the draft.
  */
 export async function flushChanges(
   operations: FlushOperations,
@@ -183,7 +191,10 @@ export async function flushChanges(
     // A link made since the page was shown: publishing would end its copy without asking.
     if (await operations.publicLink()) return { outcome: 'in-draft', dropped, publicLink: true };
     try {
-      await operations.publish({ draftHead: saved, publishedHead: heads.publishedHead });
+      await operations.publish(
+        { draftHead: saved, publishedHead: heads.publishedHead },
+        summarizeChange(before, markdown),
+      );
       return { outcome: 'published', dropped };
     } catch (error) {
       if (stale(error)) return { outcome: 'in-draft', dropped };

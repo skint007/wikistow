@@ -38,6 +38,11 @@ export const PAYLOAD_INTEGERS: readonly JsonPathPattern[] = [
   ['extensions', 'wikistow.rehome', 'format'],
   ['extensions', 'wikistow.cover', 'format'],
   ['extensions', 'wikistow.cover', 'banner', 'focal'],
+  ['extensions', 'wikistow.cover', 'banner', 'height'],
+  ['extensions', 'wikistow.cover', 'banner', 'fade'],
+  ['extensions', 'wikistow.change', 'format'],
+  ['extensions', 'wikistow.change', 'ticked'],
+  ['extensions', 'wikistow.change', 'unticked'],
 ];
 
 /**

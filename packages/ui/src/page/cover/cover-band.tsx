@@ -25,7 +25,8 @@ export function CoverBand({
     <div
       data-region="page.cover"
       data-banner={banner.kind === 'preset' ? banner.name : banner.kind}
-      className="bg-cover-band relative h-[120px] shrink-0 rounded-t-card max-[899px]:h-[104px]"
+      // 120px (104px on phones), up to three times that at `--cover-height: 100`.
+      className="bg-cover-band relative h-[calc(120px+2.4px*var(--cover-height,0))] shrink-0 rounded-t-card max-[899px]:h-[calc(104px+2.08px*var(--cover-height,0))]"
       style={coverStyle(banner, url)}
     >
       {children}

@@ -56,7 +56,7 @@ export function useCoverEditor({
       const cover = coverOf(current);
       const banner = bannerAttachment(cover);
       const replaced = [
-        // Moving the focal point keeps the banner's image.
+        // Moving the focal point, height or fade keeps the banner's image.
         changes.banner !== undefined &&
           !(changes.banner?.kind === 'image' && changes.banner.attachmentId === banner) &&
           banner,
