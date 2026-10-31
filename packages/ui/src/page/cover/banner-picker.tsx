@@ -33,9 +33,58 @@ const isCurrent = (banner: Banner, choice: BannerChoice | null) =>
     ? banner.kind === 'theme'
     : choice.kind === 'preset' && banner.kind === 'preset' && banner.name === choice.name;
 
+/** An image banner as this app writes it, its height and fade left out where it has none. */
+const imageChoice = ({ attachmentId, focal, height, fade }: Extract<Banner, { kind: 'image' }>) =>
+  ({
+    kind: 'image',
+    attachmentId,
+    focal,
+    ...(height !== undefined && { height }),
+    ...(fade !== undefined && { fade }),
+  }) satisfies BannerChoice;
+
+/** A 0 to 100 slider for an image banner, which changes the band as it moves. */
+function Slider({
+  label,
+  value,
+  valueText,
+  ends: [start, end],
+  onChange,
+}: {
+  label: string;
+  value: number;
+  valueText: string;
+  ends: [string, string];
+  onChange: (value: number) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="grid gap-1">
+      <label htmlFor={id} className="text-sm font-bold">
+        {label}
+      </label>
+      <input
+        id={id}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        aria-valuetext={valueText}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full"
+      />
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span>{start}</span>
+        <span>{end}</span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The Banner popover's content: the theme gradient, the presets, an
- * uploaded image with its focal point, and Remove.
+ * uploaded image with its focal point, height and fade, and Remove.
  */
 export function BannerPicker({
   banner,
@@ -51,7 +100,6 @@ export function BannerPicker({
   onChoose: (choice: BannerChoice | null) => void;
   onUpload: (file: File) => void;
 }) {
-  const focalId = useId();
   return (
     <div className="grid gap-3">
       <h2 className="text-sm font-bold">Banner</h2>
@@ -102,32 +150,29 @@ export function BannerPicker({
         </p>
       )}
       {banner.kind === 'image' && (
-        <div className="grid gap-1">
-          <label htmlFor={focalId} className="text-sm font-bold">
-            Focal point
-          </label>
-          <input
-            id={focalId}
-            type="range"
-            min={0}
-            max={100}
-            step={1}
+        <>
+          <Slider
+            label="Focal point"
             value={banner.focal}
-            aria-valuetext={`${banner.focal}% from the top`}
-            onChange={(event) =>
-              onChoose({
-                kind: 'image',
-                attachmentId: banner.attachmentId,
-                focal: Number(event.target.value),
-              })
-            }
-            className="w-full"
+            valueText={`${banner.focal}% from the top`}
+            ends={['Top', 'Bottom']}
+            onChange={(focal) => onChoose({ ...imageChoice(banner), focal })}
           />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Top</span>
-            <span>Bottom</span>
-          </div>
-        </div>
+          <Slider
+            label="Height"
+            value={banner.height ?? 0}
+            valueText={`${banner.height ?? 0}% of the way to the tallest`}
+            ends={['Short', 'Tall']}
+            onChange={(height) => onChoose({ ...imageChoice(banner), height })}
+          />
+          <Slider
+            label="Fade"
+            value={banner.fade ?? 0}
+            valueText={`${banner.fade ?? 0}% of the banner fades`}
+            ends={['None', 'Long']}
+            onChange={(fade) => onChoose({ ...imageChoice(banner), fade })}
+          />
+        </>
       )}
       <p className="text-xs text-muted-foreground">
         Images are resized and encrypted on this device.

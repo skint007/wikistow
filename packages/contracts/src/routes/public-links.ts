@@ -64,6 +64,8 @@ export const CopyCover = z.object({
       name: z.string().max(64).optional(),
       attachmentId: AttachmentId.optional(),
       focal: z.number().int().min(0).max(100).optional(),
+      height: z.number().int().min(0).max(100).optional(),
+      fade: z.number().int().min(0).max(100).optional(),
     })
     .optional(),
   icon: AttachmentId.optional(),

@@ -19,6 +19,8 @@ export const PublicCover = z.strictObject({
       kind: z.literal('image'),
       attachmentId: z.string(),
       focal: z.number().int().min(0).max(100),
+      height: z.number().int().min(0).max(100).optional(),
+      fade: z.number().int().min(0).max(100).optional(),
     }),
   ]),
   icon: z.string().nullable(),
@@ -55,7 +57,13 @@ export function acceptCover(
       banner?.kind === 'preset' && preset
         ? { kind: 'preset', name: preset }
         : banner?.kind === 'image' && bannerImage && banner.focal !== undefined
-          ? { kind: 'image', attachmentId: bannerImage, focal: banner.focal }
+          ? {
+              kind: 'image',
+              attachmentId: bannerImage,
+              focal: banner.focal,
+              ...(banner.height !== undefined && { height: banner.height }),
+              ...(banner.fade !== undefined && { fade: banner.fade }),
+            }
           : { kind: 'theme' },
     icon: image(cover.icon),
   };
