@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - An uploaded banner image can be taller, up to three times the usual band, and fade into the page, with new Height and Fade sliders under Focal point in the Banner picker. Public pages show both. (#228)
+- History says what changed in a version made by ticking tasks, or changing a value a block sets, while reading the page, such as "Ticked 3, unticked 1" or "Changed servings". A run of those versions by one person folds into one row, with a button to show the rest. History lists the newest 20 versions, with Show older versions for more. Such a version holds the payload extension `wikistow.change` (ADR 0008). (#234)
 
 ## 0.20.0 - 2026-10-30
 
