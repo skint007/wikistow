@@ -16,6 +16,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Typing a bracket or quote over selected text in the visual editor wraps the text instead of replacing it. Typing `*` or `_` makes it italic, twice bold, `` ` `` makes it inline code, `~` strikethrough, and `[` twice a wikilink. (#233)
 - In the visual editor, Enter after a ticked task makes an unticked one, as it does after an unticked task. Before, the new task was ticked too. (#235)
 
+#### Development
+
+- Dependencies with security advisories: undici 7.30.1, from 7.30.0, which Electron's downloader uses; `smtp-server` 3.21.3 and `mailparser` 3.14.1, from 3.19.16 and 3.9.36, in the e2e mail server, with nodemailer 10.3.1; and overrides giving `micromark-extension-math` KaTeX 0.18.10 and drizzle-kit's `@esbuild-kit` loader esbuild 0.25.12, the copies the rest of the tree has, since their own ranges stop at KaTeX 0.16 and esbuild 0.18. (#236)
+
 ## 0.20.0 - 2026-10-30
 
 ### Highlights
