@@ -24,6 +24,7 @@ import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
 import { sourceTheme } from './theme';
+import { selectionWraps } from './wrap';
 
 // A change the session made (`replace`), which `onChange` doesn't report.
 const external = Annotation.define<boolean>();
@@ -188,6 +189,7 @@ function extensions({
     }),
     linkMarks(assist),
     fileDrops(() => latest().onFiles),
+    selectionWraps,
     typingLines,
     multipleCursors,
     keymap.of([
