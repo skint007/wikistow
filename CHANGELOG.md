@@ -9,7 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - Checklist in the visual editor's toolbar, next to Bulleted list and Numbered list, with Ctrl+Alt+9 (⌘⌥9 on a Mac). It makes a list of unticked tasks, turns a bulleted or numbered list into one, and takes items out of one. Bulleted list and Numbered list take the boxes off a checklist. (#230)
-- Typing a bracket or quote over selected text in the visual editor wraps the text instead of replacing it. Typing `*` or `_` makes it italic, twice bold, `` ` `` makes it inline code, `~` strikethrough, and `[` twice a wikilink.
+- Typing a bracket or quote over selected text in the visual editor wraps the text instead of replacing it. Typing `*` or `_` makes it italic, twice bold, `` ` `` makes it inline code, `~` strikethrough, and `[` twice a wikilink. (#233)
 
 ## 0.20.0 - 2026-10-30
 
