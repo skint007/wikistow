@@ -9,6 +9,7 @@ import {
 } from '@wikistow/contracts';
 import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
+import { CHANGE_NAMESPACE, changeOf, withoutChange, type ChangeSummary } from '../change.ts';
 import { COVER_NAMESPACE, coverLeftBehind, coverOf, reviseCover } from '../cover.ts';
 import { CryptoError } from '../errors.ts';
 import { setPageProperty, type PropertyValue } from '../markdown/properties.ts';
@@ -113,7 +114,8 @@ export const attachmentTarget = (
  * every write route takes. Where the server says the page is (`share`) must
  * be that region: a wrap under the share's key version that counts for
  * writing, or envelopes to the space's sealing owners (section 6.8). A
- * payload larger than a version may hold is refused (`PageTooLarge`).
+ * payload larger than a version may hold is refused (`PageTooLarge`). The
+ * version's ID is new, or `revisionId` for a payload that names it.
  */
 export function commitFor(
   ctx: ClientContext,
@@ -125,12 +127,14 @@ export function commitFor(
     payload,
     region,
     target,
+    revisionId = newId(RevisionIdSchema),
   }: {
     audience: Audience;
     basedOn: RevisionId | null;
     payload: PagePayload;
     region: Region;
     target: Awaited<ReturnType<typeof treeTarget>>;
+    revisionId?: RevisionId;
   },
 ) {
   checkPayloadSize(payload);
@@ -139,7 +143,7 @@ export function commitFor(
     target: {
       installationId: ctx.installationId,
       ...page,
-      revisionId: newId(RevisionIdSchema),
+      revisionId,
       audience,
       basedOn,
     },
@@ -364,6 +368,28 @@ export async function loadHistory(ctx: ClientContext, page: PageRef) {
       publisher: { ...version.publisher, personId: forPerson ? personId : null },
     };
   });
+}
+
+/**
+ * What each of a page's published versions `ids` changed while reading
+ * (`changeOf`), or null for one that isn't such a version or doesn't open.
+ * Opened through the revision cache, in as few requests as
+ * `fetchRevisions` makes.
+ */
+export async function versionChanges(
+  ctx: ClientContext,
+  page: PageRef,
+  ids: readonly RevisionId[],
+): Promise<Map<RevisionId, ChangeSummary | null>> {
+  const wanted: Wanted = { pageId: page.pageId, audience: 'published' };
+  const fetched = await fetchRevisions(ctx, page.spaceId, new Map(ids.map((id) => [id, wanted])));
+  return new Map(
+    ids.map((id) => {
+      const open = fetched.get(id);
+      const version = open && checkedFor(open, { spaceId: page.spaceId, ...wanted });
+      return [id, version ? changeOf(version) : null];
+    }),
+  );
 }
 
 const BATCH = 200;
@@ -739,7 +765,8 @@ function current(revision: OpenedRevision): PagePayload {
  * `stale-head` and nothing is overwritten. `linkChoices` are the pages the
  * writer picked for ambiguous links, by key (`LinkWrite.chosen`). A draft
  * larger than a version may hold is refused before anything else
- * (`PageTooLarge`).
+ * (`PageTooLarge`). No draft holds what changes made while reading changed
+ * (`wikistow.change`), which only their publication says (ADR 0008).
  */
 export async function saveDraft(
   ctx: ClientContext,
@@ -766,7 +793,7 @@ export async function saveDraft(
   },
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
-  const { value: repairedPayload, repaired } = repairText(payload);
+  const { value: repairedPayload, repaired } = repairText(withoutChange(payload));
   checkPayloadSize(withoutLinkTable(repairedPayload));
   const linkTree = linkTreeFor(ctx, page.spaceId, tree);
   let linksKept = false;
@@ -1087,7 +1114,9 @@ async function checksOut(
  * CLI's `--permission-version`, the server refuses with `permission-version`
  * if who can read the page changed since. Its links are read with `read`,
  * as for `saveDraft`; if that fails, the publication keeps the table
- * readers already read (`writeLinks`).
+ * readers already read (`writeLinks`). Given `change`, what changes made
+ * while reading changed, it says so (`wikistow.change`, naming itself), as
+ * their flush's publication does; any other leaves it out (ADR 0008).
  */
 export async function publishPage(
   ctx: ClientContext,
@@ -1095,6 +1124,7 @@ export async function publishPage(
   {
     expected,
     read,
+    change,
   }: {
     expected?: {
       draftHead: RevisionId;
@@ -1102,6 +1132,7 @@ export async function publishPage(
       permissionVersion?: number;
     };
     read?: ReadWikilinks;
+    change?: ChangeSummary;
   } = {},
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
@@ -1109,7 +1140,7 @@ export async function publishPage(
   const heads = expected ?? loaded;
   if (!heads.draftHead) throw new ApiError(404, 'not-found', 'There is no draft to publish');
   const opened = await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
-  const { value: draft, repaired } = repairText(current(opened));
+  const { value: draft, repaired } = repairText(withoutChange(current(opened)));
   // Before its links are read and its attachments sealed again.
   checkPayloadSize({ markdown: draft.markdown });
   const previous =
@@ -1136,12 +1167,23 @@ export async function publishPage(
   // Resealed with the keys of each try, so a copy is reused only under the
   // key version the publication goes under.
   const written = await writePage(ctx, page, async (keys, target) => {
-    const payload = await resealAll(ctx, page, linked, {
+    const resealed = await resealAll(ctx, page, linked, {
       from: 'draft',
       to: 'published',
       earlier: previous,
       writing: writingFor(ctx, keys, region, target),
     });
+    // What it changed names the version it is in, so no copy of it counts.
+    const revisionId = newId(RevisionIdSchema);
+    const payload: PagePayload = change
+      ? {
+          ...resealed,
+          extensions: {
+            ...resealed.extensions,
+            [CHANGE_NAMESPACE]: { format: 1, revision: revisionId, ...change },
+          },
+        }
+      : resealed;
     const seen = expected?.permissionVersion;
     const commit = commitFor(ctx, keys, page, {
       audience: 'published',
@@ -1149,6 +1191,7 @@ export async function publishPage(
       payload,
       region,
       target: seen === undefined ? target : { ...target, permissionVersion: seen },
+      revisionId,
     });
     const result = await ctx.api.call(pageRoutes.publish, {
       params: { pageId: page.pageId },
@@ -1204,7 +1247,8 @@ export async function unpublishPage(
 
 /**
  * Make an earlier published version the new draft, listing the draft copies
- * of attachments it was published from. Nothing is published until Publish.
+ * of attachments it was published from, without what changes made while
+ * reading changed (`withoutChange`). Nothing is published until Publish.
  * Its link table is worked out again for the draft (`writeLinks`), and its
  * entries carried only if the publication is in the draft's region. Its
  * links are read with `read`, as for `saveDraft`.
@@ -1223,7 +1267,7 @@ export async function restorePublished(
   // The draft it was published from may still hold draft copies to list.
   const source = published.record.basedOn;
   const earlier = source === null ? null : await openIfReadable(ctx, page, 'draft', source);
-  const { value: repairedPayload, repaired } = repairText(current(published));
+  const { value: repairedPayload, repaired } = repairText(withoutChange(current(published)));
   checkPayloadSize({ markdown: repairedPayload.markdown });
   const region = draft.region;
   const {

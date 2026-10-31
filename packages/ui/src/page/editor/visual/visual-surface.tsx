@@ -47,6 +47,7 @@ import {
   unshownFootnotes,
 } from './plugins';
 import { FormatToolbar, FormatWatch } from './toolbar';
+import { wrapSelection } from './wrapping';
 import { Writer } from './writer';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -499,6 +500,7 @@ function Surface({
         linkKeys(host),
         format.plugin,
         formatKeys,
+        wrapSelection,
       ].flat(),
       view: {
         attributes: {
