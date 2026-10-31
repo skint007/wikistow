@@ -34,8 +34,8 @@
     "@wikistow/server-app": "workspace:*",
     "drizzle-orm": "0.45.3",
     "fflate": "0.8.3",
-    "mailparser": "3.9.36",
-    "smtp-server": "3.19.16",
+    "mailparser": "3.14.1",
+    "smtp-server": "3.21.3",
     "tailwindcss": "4.3.3"
   }
 }
