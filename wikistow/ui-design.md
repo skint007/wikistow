@@ -51,7 +51,7 @@ There is no top bar. Navigation lives in the rail, so both the tree and the page
 | Sidebar actions | Full-width **New page** (`primary`, `rounded-control`). A filter field below (`muted`, `rounded-row`). There is no import button; see [Import](#import). |
 | Folder tree | Scrolls inside the card. See [Folder tree](#folder-tree). |
 | Agent activity | Pinned to the bottom of the sidebar. `muted` card, `rounded-control`, bot icon in `primary`, showing the most recent agent edit in this space and whether it touched only a draft. |
-| Cover band | 120px, `bg-cover-band` (the `--cover` gradient), top corners match the card. It holds a glass toolbar: breadcrumbs pill (Space › Folder), viewers, **History**, **Share**, then the view's main action in solid `primary`: **Edit** on the published view, **Publish** on the draft view. See [Page views](#page-views). |
+| Cover band | 120px (up to 360px for an image banner), `bg-cover-band` (the `--cover` gradient), top corners match the card. It holds a glass toolbar: breadcrumbs pill (Space › Folder), viewers, **History**, **Share**, then the view's main action in solid `primary`: **Edit** on the published view, **Publish** on the draft view. See [Page views](#page-views). |
 | Page emoji | 72px badge, `card` background, `rounded-card`, overlapping the cover bottom by 26px at 44px from the left. A page image fills it, cropped to the square. |
 | Icons | An icon from the icon set (Lucide, all of it) stands where the emoji would: 1.2 times the emoji's font size, `strokeWidth={1.75}`, always in `foreground`, on a folder's tint and the space gradient too. The set is one chunk, loaded the first time an icon shows or the **Icons** tab opens; until then an empty box of the icon's size holds its place. A name the set doesn't have, or a set that fails to load, shows the emoji. |
 | Page header | Title 32px / 800 weight, then the status pill row. |
@@ -465,7 +465,7 @@ Chosen 2026-10-02: **I, Drawer**, picked because it matches the desktop layout. 
 
 - **Top bar** (52px): menu button, space tile and name, search button, account avatar. In the desktop app, the menu button carries the avatar's `update-dot` and "update available" in its label while a newer release is out.
 - **Drawer**: slides in from the left over a dimmed page, about 92% of the screen width. It holds the desktop rail (space tiles, labeled navigation, Settings, avatar) beside the sidebar card (space header, New page, filter, folder tree). These reuse the desktop components. Tapping a page or the dimmed area closes it.
-- **Page card**: full width with an 8px margin. The cover band is 104px, the emoji badge 56px, and the body padding 32px 18px. The table of contents is a collapsed **On this page** disclosure above the body.
+- **Page card**: full width with an 8px margin. The cover band is 104px (up to 312px for an image banner), the emoji badge 56px, and the body padding 32px 18px. The table of contents is a collapsed **On this page** disclosure above the body.
 - **Cover toolbar**: the same actions as desktop. To fit, the breadcrumb shows only the folder, and Assistant, History and Share become 30px icon buttons. The published view shows **Edit**; the draft view shows **Done** and **Publish**. Banner and emoji editing move into a menu on the draft view if the toolbar runs out of room.
 - **Pills and view rules** are unchanged from [Page views](#page-views).
 
