@@ -274,32 +274,84 @@ const codeBlock: Format = {
 
 const LISTS = ['bullet_list', 'ordered_list'];
 
-// Numbered or bulleted: on text out of a list, a list of it; on a list of
-// the other kind, the list turns into this kind; on one of this kind, the
-// selected items come out of it.
-function list(name: string): Format {
+type ListKind = 'bullet' | 'ordered' | 'task';
+
+// A checklist is a bulleted list whose items all have a box (`checked`
+// true or false; null on a plain item).
+function kindOf(list: Node): ListKind {
+  if (list.type.name === 'ordered_list') return 'ordered';
+  let tasks = true;
+  list.forEach((item) => (tasks &&= item.attrs['checked'] !== null));
+  return tasks ? 'task' : 'bullet';
+}
+
+// Whether `block` can be an item's first with a box: Markdown writes the
+// box first in its line (`- [ ] item`), so not a block other than a
+// paragraph, as code, nor HTML a block of its own, which reads as inline
+// after the box.
+const boxable = (block: Node | null) => {
+  const first = block?.firstChild;
+  if (block?.type.name !== 'paragraph') return false;
+  return first?.type.name !== 'html' || inlineHtml(String(first.attrs['value']));
+};
+
+// Numbered, bulleted or a checklist: on text out of a list, a list of it;
+// on a list of another kind, the list turns into this kind; on one of this
+// kind, the selected items come out of it. A checklist is always bulleted,
+// and the other kinds have no boxes.
+function list(kind: ListKind): Format {
+  const name = kind === 'ordered' ? 'ordered_list' : 'bullet_list';
   return {
     active: (state) => {
       const depth = depthOf(state, LISTS);
-      return depth !== null && state.selection.$from.node(depth).type.name === name;
+      return depth !== null && kindOf(state.selection.$from.node(depth)) === kind;
     },
     run: (state, dispatch) => {
       const type = state.schema.nodes[name];
       const item = state.schema.nodes['list_item'];
       if (!type || !item) return false;
       const depth = depthOf(state, LISTS);
-      if (depth === null) return wrapInList(type)(state, dispatch);
+      if (depth === null) {
+        const { $from, $to } = state.selection;
+        const range = $from.blockRange($to);
+        if (kind !== 'task') return wrapInList(type)(state, dispatch);
+        // Each selected block becomes an item.
+        if (!range) return false;
+        for (let i = range.startIndex; i < range.endIndex; i++)
+          if (!boxable(range.parent.child(i))) return false;
+        if (!dispatch) return wrapInList(type)(state);
+        // The new list is where the selected blocks start, as `wrapInList` puts it.
+        return wrapInList(type)(state, (tr) => {
+          tr.doc.nodeAt(range.start)?.forEach((child, offset) => {
+            tr.setNodeMarkup(range.start + 1 + offset, undefined, {
+              ...child.attrs,
+              checked: false,
+            });
+          });
+          dispatch(tr);
+        });
+      }
       const { $from } = state.selection;
       const current = $from.node(depth);
-      if (current.type === type) return liftListItem(item)(state, dispatch);
+      if (kindOf(current) === kind) return liftListItem(item)(state, dispatch);
+      let boxes = true;
+      current.forEach((child) => (boxes &&= boxable(child.firstChild)));
+      if (kind === 'task' && !boxes) return false;
       if (dispatch) {
         // Its items say which kind they're in too, or Milkdown turns it back.
         const start = $from.before(depth);
         const tr = state.tr.setNodeMarkup(start, type, { spread: current.attrs['spread'] });
-        const listType = name === 'ordered_list' ? 'ordered' : 'bullet';
+        const listType = kind === 'ordered' ? 'ordered' : 'bullet';
         current.forEach((child, offset) => {
           const label = listType === 'bullet' ? '•' : child.attrs['label'];
-          tr.setNodeMarkup(start + 1 + offset, undefined, { ...child.attrs, listType, label });
+          // Boxes already ticked stay ticked.
+          const checked = kind === 'task' ? (child.attrs['checked'] ?? false) : null;
+          tr.setNodeMarkup(start + 1 + offset, undefined, {
+            ...child.attrs,
+            listType,
+            label,
+            checked,
+          });
         });
         dispatch(tr);
       }
@@ -353,8 +405,9 @@ export const FORMATS = {
   code: mark('inlineCode'),
   quote,
   codeBlock,
-  orderedList: list('ordered_list'),
-  bulletList: list('bullet_list'),
+  orderedList: list('ordered'),
+  bulletList: list('bullet'),
+  taskList: list('task'),
 } satisfies Record<string, Format>;
 
 export type FormatName = keyof typeof FORMATS;
@@ -371,6 +424,7 @@ export const SHORTCUTS: Record<FormatName, string> = {
   codeBlock: 'Mod-Alt-c',
   orderedList: 'Mod-Alt-7',
   bulletList: 'Mod-Alt-8',
+  taskList: 'Mod-Alt-9',
 };
 
 /** A heading level's shortcut, 0 for text. */

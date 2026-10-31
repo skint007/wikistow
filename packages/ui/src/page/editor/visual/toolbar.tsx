@@ -12,6 +12,7 @@ import {
   Italic,
   Link,
   List,
+  ListChecks,
   ListOrdered,
   Paperclip,
   SquareCode,
@@ -290,6 +291,7 @@ const BUTTONS: { name: FormatName; label: string; icon: LucideIcon }[][] = [
   [
     { name: 'bulletList', label: 'Bulleted list', icon: List },
     { name: 'orderedList', label: 'Numbered list', icon: ListOrdered },
+    { name: 'taskList', label: 'Checklist', icon: ListChecks },
   ],
 ];
 
