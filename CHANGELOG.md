@@ -8,6 +8,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- An uploaded banner image can be taller, up to three times the usual band, and fade into the page, with new Height and Fade sliders under Focal point in the Banner picker. Public pages show both. (#228)
+- History says what changed in a version made by ticking tasks, or changing a value a block sets, while reading the page, such as "Ticked 3, unticked 1" or "Changed servings". A run of those versions by one person folds into one row, with a button to show the rest. History lists the newest 20 versions, with Show older versions for more. Such a version holds the payload extension `wikistow.change` (ADR 0008). (#234)
+- Several cursors in Markdown mode, as in VS Code: Ctrl+Alt+Up or Down adds a cursor above or below (also Shift+Alt+Up or Down on Linux, where copying a line moves to Ctrl+Shift+Alt+Up or Down), Alt+drag selects a column, Ctrl+click adds a cursor, Ctrl+D adds the next match, and Escape goes back to one. Cmd for Ctrl on a Mac. (#229)
+- In Markdown mode, typing a bracket, quote, `*`, `_` or `~` over selected text wraps it, as in VS Code, rather than replacing it. Typing `*` twice makes it bold. Brackets still don't close themselves as you type. (#232)
 - Checklist in the visual editor's toolbar, next to Bulleted list and Numbered list, with Ctrl+Alt+9 (⌘⌥9 on a Mac). It makes a list of unticked tasks, turns a bulleted or numbered list into one, and takes items out of one. Bulleted list and Numbered list take the boxes off a checklist. (#230)
 
 ## 0.20.0 - 2026-10-30
