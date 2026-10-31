@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Checklist in the visual editor's toolbar, next to Bulleted list and Numbered list, with Ctrl+Alt+9 (⌘⌥9 on a Mac). It makes a list of unticked tasks, turns a bulleted or numbered list into one, and takes items out of one. Bulleted list and Numbered list take the boxes off a checklist.
+
 ## 0.20.0 - 2026-10-30
 
 ### Highlights
