@@ -265,7 +265,7 @@
 /* Banner presets. Palette-independent: a preset looks the same in every theme.
  * A page card selects its banner by overriding --cover, for example
  *   style="--cover: var(--banner-ocean)"
- *   style="--cover: url(<decrypted blob URL>); --cover-focal: 30%"   (uploaded image)
+ *   style="--cover: url(<decrypted blob URL>); --cover-focal: 30%; --cover-height: 40; --cover-fade: 50%"   (uploaded image)
  * Without an override, --cover is the palette's own gradient. */
 :root {
   --banner-sunrise: linear-gradient(120deg, #ff9a8b, #ff6a88 45%, #ffd36e);
@@ -363,8 +363,13 @@
 }
 
 /* Utilities that Tailwind can't express in one class. */
+/* The band's image or gradient, under a veil of the card's colour that its
+ * bottom `--cover-fade` of the band fades into. A veil rather than a mask,
+ * so the toolbar and badge inside the band stay as they are. */
 @utility bg-cover-band {
-  background: var(--cover);
+  background:
+    linear-gradient(transparent calc(100% - var(--cover-fade, 0%)), var(--card)),
+    var(--cover);
   background-size: cover;
   background-position: center var(--cover-focal, 50%);
 }

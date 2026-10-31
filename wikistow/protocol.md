@@ -216,7 +216,7 @@ and be at most 254 characters. That is zod 4.6.5's `z.email()` pattern, which th
 **After parsing**, a decrypted payload is `malformed` if:
 - any string in it, member names included, isn't well-formed Unicode;
 - any number token anywhere in it isn't finite when read as an IEEE 754 double;
-- a field this document types as an integer breaks section 3.3, rule 6. That includes `format.major` and `format.minor`, an `AttachmentRef`'s `size`, the vault keyring's `public.keyVersion`, `wikistow.publication.format` (section 13), `wikistow.cover`'s `format` and `banner.focal`, `wikistow.change`'s `format`, `ticked` and `unticked` (section 5.5), and the contacts payloads' integers.
+- a field this document types as an integer breaks section 3.3, rule 6. That includes `format.major` and `format.minor`, an `AttachmentRef`'s `size`, the vault keyring's `public.keyVersion`, `wikistow.publication.format` (section 13), `wikistow.cover`'s `format`, `banner.focal`, `banner.height` and `banner.fade`, `wikistow.change`'s `format`, `ticked` and `unticked` (section 5.5), and the contacts payloads' integers.
 
 Payloads of v1 records may hold strings that aren't well-formed, as Milestone 1 clients wrote them (`parseJson`, `illFormedStrings`). Unknown fields of a loose payload are carried forward as they are.
 
@@ -519,12 +519,12 @@ Rules (`payload.ts`, `metadata.ts`):
 ```
 { format: 1, emoji?: string,
   banner?: {kind: "theme"} | {kind: "preset", name: "sunrise" | "ocean" | "meadow" | "lavender" | "dusk" | "stone"}
-         | {kind: "image", attachmentId, focal: integer 0–100},
+         | {kind: "image", attachmentId, focal: integer 0–100, height?: integer 0–100, fade?: integer 0–100},
   icon?: {attachmentId},
   symbol?: {name} }
 ```
 
-- `emoji` is one RGI emoji (Unicode UTS #51): a pictograph, a flag, a keycap, or a modifier, tag or ZWJ sequence, with nothing stacked after it. A reader whose Unicode data predates an emoji leaves it out. `focal` is the image's vertical focal point, 0 at the top. `format` and `banner.focal` are integers (section 3.3, rule 6).
+- `emoji` is one RGI emoji (Unicode UTS #51): a pictograph, a flag, a keycap, or a modifier, tag or ZWJ sequence, with nothing stacked after it. A reader whose Unicode data predates an emoji leaves it out. `focal` is the image's vertical focal point, 0 at the top. `height` is how tall the image's band is, from 0, the usual band, to 100, three times as tall; `fade` is how much of the band, from its bottom, fades into the page, from 0, none, to 100, all of it. A missing `height` or `fade` is 0, so readers from before them show the usual band with a hard edge. Writers from before them keep them as unknown fields, unless they change the banner, which writes it afresh without them. `format`, `banner.focal`, `banner.height` and `banner.fade` are integers (section 3.3, rule 6).
 - An image banner names one of the version's own attachments by ID; its key stays in `attachments[]`, so publishing re-encrypts it with the rest.
 - `icon` is the page's own image, shown in place of its emoji. It names one of the version's attachments the same way: an image the writer resized to fit 144 by 144 pixels and encoded afresh as WebP, JPEG or PNG, as for a folder icon below. The emoji stays beside it: choosing an image keeps the emoji, which older clients and failed loads show; choosing an emoji removes `icon`, and replacing or removing the image drops its attachment from `attachments[]` unless the text links to it.
 - `symbol` is an icon from the app's icon set, shown in place of the emoji: `name` is a Lucide icon's name, such as `square-terminal` (lowercase letters and digits in words joined by `-`, at most 64 characters). It needs no attachment. The emoji stays beside it as beside an image. Choosing an icon removes `icon`; choosing an emoji or an image removes `symbol`. Where both are present, as when an older client added an image, the image shows.
