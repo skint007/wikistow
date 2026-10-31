@@ -14,6 +14,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - In Markdown mode, typing a bracket, quote, `*`, `_` or `~` over selected text wraps it, as in VS Code, rather than replacing it. Typing `*` twice makes it bold. Brackets still don't close themselves as you type. (#232)
 - Checklist in the visual editor's toolbar, next to Bulleted list and Numbered list, with Ctrl+Alt+9 (⌘⌥9 on a Mac). It makes a list of unticked tasks, turns a bulleted or numbered list into one, and takes items out of one. Bulleted list and Numbered list take the boxes off a checklist. (#230)
 - Typing a bracket or quote over selected text in the visual editor wraps the text instead of replacing it. Typing `*` or `_` makes it italic, twice bold, `` ` `` makes it inline code, `~` strikethrough, and `[` twice a wikilink. (#233)
+- In the visual editor, Enter after a ticked task makes an unticked one, as it does after an unticked task. Before, the new task was ticked too. (#235)
 
 ## 0.20.0 - 2026-10-30
 

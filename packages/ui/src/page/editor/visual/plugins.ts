@@ -21,6 +21,7 @@ import {
   TextSelection,
   type Transaction,
 } from '@milkdown/kit/prose/state';
+import { splitListItem } from '@milkdown/kit/prose/schema-list';
 import { AddMarkStep, canSplit, dropPoint, RemoveMarkStep } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -1031,10 +1032,31 @@ function linkAt(view: EditorView): { node: Node; pos: number } | null {
  * Keys for links and tasks: Alt+Enter on an ambiguous link asks which
  * page it means; Backspace just after a link opens it again as text, its
  * `]]` gone, to edit or complete; Mod+Enter ticks the task the cursor is in.
+ * Enter splits a list item as Milkdown's own Enter does, but the new item of
+ * a ticked task starts unticked, where ProseMirror's split copies the tick.
  */
 export const linkKeys = (host: VisualHost) =>
   $prose(() =>
     keymap({
+      Enter: (state, dispatch) => {
+        const item = state.schema.nodes['list_item'];
+        if (!item) return false;
+        const { $from, $to } = state.selection;
+        // At the start of an item's text, the new item is the empty one left
+        // before it; elsewhere it's the one the cursor moves to.
+        const newBefore =
+          $from.parentOffset === 0 && $from.index(-1) === 0 && $to.pos < $from.end();
+        return splitListItem(item)(
+          state,
+          dispatch &&
+            ((tr) => {
+              const at = newBefore ? $from.before(-1) : tr.selection.$from.before(-1);
+              if (tr.doc.nodeAt(at)?.attrs.checked === true)
+                tr.setNodeAttribute(at, 'checked', false);
+              dispatch(tr);
+            }),
+        );
+      },
       'Alt-Enter': (_state, _dispatch, view) => {
         if (!view) return false;
         const at = linkAt(view);
