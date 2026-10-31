@@ -18,6 +18,7 @@ const theme = EditorView.theme({
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { fontFamily: 'inherit', lineHeight: 'inherit', overflow: 'auto' },
   '.cm-content': { padding: '16px', caretColor: 'var(--foreground)' },
+  '.cm-content.cm-crosshair': { cursor: 'crosshair' },
   '.cm-line': { padding: '0' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--foreground)' },
   '.cm-selectionBackground': {

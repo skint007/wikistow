@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Several cursors in Markdown mode, as in VS Code: Ctrl+Alt+Up or Down adds a cursor above or below (also Shift+Alt+Up or Down on Linux, where copying a line moves to Ctrl+Shift+Alt+Up or Down), Alt+drag selects a column, Ctrl+click adds a cursor, Ctrl+D adds the next match, and Escape goes back to one. Cmd for Ctrl on a Mac.
+
 ## 0.20.0 - 2026-10-30
 
 ### Highlights
