@@ -252,9 +252,9 @@ describe('a flush', () => {
   it('keeps the changes in the draft when the publication moved after the save', async () => {
     const page = server(LIST);
     const publish = page.operations.publish;
-    page.operations.publish = async () => {
+    page.operations.publish = async (_expected, change) => {
       page.state.publishedHead = 'p-other';
-      return publish({ draftHead: page.state.draftHead ?? '', publishedHead: 'p0' });
+      return publish({ draftHead: page.state.draftHead ?? '', publishedHead: 'p0' }, change);
     };
     expect((await flushChanges(page.operations, [task(LIST, 'milk', true)])).outcome).toBe(
       'in-draft',
