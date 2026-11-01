@@ -9,16 +9,19 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - The desktop app for Windows, x64 and Arm: download the installer from the release and run it. It isn't signed yet, so Windows asks first: choose More info, then Run anyway.
+- The desktop app for macOS, for Apple silicon and Intel, from the release or with `brew install --cask skint007/wikistow/wikistow`.
 
 ### Changes
 
 #### Desktop
 
 - The desktop app runs on Windows 10 and 11, keeping its sign-in, remembered unlock, search index and trust marks sealed with DPAPI, with its data in `%APPDATA%\WikiStow Desktop`, apart from the CLI's. The update notice links to the new installer (#250).
+- The desktop app for macOS, for Apple silicon and Intel. It has a menu bar (WikiStow, Edit, View, Window), Cmd shortcuts, and the system's window buttons in the titlebar, keeps its sign-in in the login Keychain, and takes `wikistow://` sign-in links. It isn't signed by an Apple developer, so macOS asks you to allow it under Privacy & Security the first time it opens. (#PR)
 
 #### Releases and packaging
 
 - Each release has unsigned Windows installers, `wikistow-desktop-<version>-x64-setup.exe` and `…-arm64-setup.exe`, built on Linux with NSIS and checked on Windows x64 and Arm runners. CI can be started by hand to build and check the desktop packages on a branch (#250).
+- Each release has `wikistow-desktop-<version>-macos-arm64.zip` and `…-macos-x64.zip`, checked in `SHA256SUMS`, built and started on a Mac of each kind in CI. A stable release also updates the Homebrew cask in the `skint007/wikistow` tap: `brew install --cask skint007/wikistow/wikistow`. (#PR)
 
 ## 0.21.0 - 2026-10-31
 
