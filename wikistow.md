@@ -330,6 +330,7 @@ wikistow tree --space SPACE_ID --json
 wikistow search "backup procedure" --json
 wikistow export --space SPACE_ID --out ~/notes-export --json
 wikistow page read PAGE_ID --draft --json
+wikistow page links PAGE_ID --json
 wikistow folder create --space SPACE_ID --parent FOLDER_ID --name "Network" --json
 wikistow page create --folder FOLDER_ID --title "Network notes" --file network.md --json
 wikistow page attach PAGE_ID --file router-photo.jpg --json
