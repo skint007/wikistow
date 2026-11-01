@@ -6,21 +6,22 @@
 import type { DesktopUpdate } from '@wikistow/contracts';
 import { net } from 'electron';
 import { readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
 /** GitHub's latest release is never a draft or a prerelease. */
 const LATEST = 'https://api.github.com/repos/skint007/wikistow/releases/latest';
 const RELEASE_PAGE = 'https://github.com/skint007/wikistow/releases/tag/';
+const DOWNLOAD = 'https://github.com/skint007/wikistow/releases/download/';
 const CHECK_MS = 6 * 60 * 60_000;
 /** How long one check may take, so the first answer never keeps the menu waiting long. */
 const ANSWER_MS = 10_000;
-/** Where every package installs the app, with its `install-source` (docs/desktop.md). */
+/** Where every Linux package installs the app, with its `install-source` (docs/desktop.md). */
 const PACKAGED = '/usr/lib/wikistow-desktop';
 
 const Latest = z.object({ tag_name: z.string() });
 const Kept = z.object({ version: z.string() });
-const Source = z.enum(['aur', 'deb', 'rpm']);
+const Source = z.enum(['aur', 'deb', 'rpm', 'windows', 'mac']);
 
 /** A version's numbers and whether it is a prerelease, or null if it isn't one. Build metadata (`+<commit>`) is ignored. */
 function parse(version: string) {
@@ -44,12 +45,26 @@ export function newer(latest: string, installed: string): boolean {
   return order > 0 || (order === 0 && now.prerelease);
 }
 
-/** How this copy was installed, trusted only when it runs from where the packages put it. */
+/**
+ * How this copy was installed, from its `install-source`. On Linux, trusted
+ * only when it runs from where the packages put it. The Windows installer
+ * and the Mac app keep it in `resources`, beside `app.asar`.
+ */
 async function installSource(appPath: string): Promise<DesktopUpdate['source']> {
-  if (!appPath.startsWith(`${PACKAGED}/`)) return null;
-  const word = await readFile(join(PACKAGED, 'install-source'), 'utf8').catch(() => '');
+  const linux = process.platform === 'linux';
+  if (linux && !appPath.startsWith(`${PACKAGED}/`)) return null;
+  const file = join(linux ? PACKAGED : dirname(appPath), 'install-source');
+  const word = await readFile(file, 'utf8').catch(() => '');
   const source = Source.safeParse(word.trim());
   return source.success ? source.data : null;
+}
+
+/** Where the notice sends the person: the installer for this computer on Windows, else the release page. */
+function releaseLink(version: string, source: DesktopUpdate['source']) {
+  if (source === 'windows') {
+    return `${DOWNLOAD}v${version}/wikistow-desktop-${version}-${process.arch}-setup.exe`;
+  }
+  return `${RELEASE_PAGE}v${version}`;
 }
 
 /** The update check for the app at `appPath`, running version `installed`, keeping its answer in `userData`. */
@@ -96,7 +111,7 @@ export function desktopUpdates(userData: string, installed: string, appPath: str
     async state(): Promise<DesktopUpdate | null> {
       await started;
       if (!latest || !newer(latest, installed)) return null;
-      return { installed, version: latest, url: `${RELEASE_PAGE}v${latest}`, source };
+      return { installed, version: latest, url: releaseLink(latest, source), source };
     },
   };
 }

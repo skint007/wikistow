@@ -86,10 +86,10 @@ export type DesktopUpdate = {
   installed: string;
   /** The newest stable release, as `0.4.0`. */
   version: string;
-  /** Its release page, with the notes and the downloads. */
+  /** Its release page, with the notes and the downloads; for a Windows install, its installer. */
   url: string;
   /** How this copy was installed (`install-source`), or null when the app can't tell. */
-  source: 'aur' | 'deb' | 'rpm' | null;
+  source: 'aur' | 'deb' | 'rpm' | 'windows' | 'mac' | null;
 };
 
 /** Whether the desktop window fills the screen, for its titlebar's buttons (#74). */

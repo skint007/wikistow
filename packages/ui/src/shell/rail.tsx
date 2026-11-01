@@ -517,6 +517,8 @@ const UPDATE_ROUTES = {
   },
   deb: { how: 'Download the new .deb and install it.', link: 'Release notes and download' },
   rpm: { how: 'Download the new .rpm and install it.', link: 'Release notes and download' },
+  windows: { how: 'Download the new installer and run it.', link: 'Download the installer' },
+  mac: { how: 'Download the new app from the release page.', link: 'Release notes and download' },
   unknown: { how: 'Get it from the release page.', link: 'Open the release' },
 } as const;
 
