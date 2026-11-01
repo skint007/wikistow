@@ -78,8 +78,9 @@ export async function trashNode(
   await db.transaction(async (tx) => {
     await lockSpace(tx, input.spaceId);
     await requireSpaceOwner(tx, input.accountId, input);
-    if (await isHidden(tx, input.nodeId)) throw new ContentError('not-found');
     await holdSubtree(tx, input);
+    // Looked at once held, so a delete of it that went first is seen.
+    if (await isHidden(tx, input.nodeId)) throw new ContentError('not-found');
     const ids = [
       ...(await tx.execute<{ id: string }>(
         sql`${subtreeOf(input.spaceId, input.nodeId)} select id from subtree`,
@@ -95,6 +96,9 @@ export async function trashNode(
       .set({ trashId: row.id })
       .where(and(anyId(nodes.id, ids), eq(nodes.spaceId, input.spaceId)));
     await endLinks(tx, ids);
+    // A write already past its access check, waiting on these rows, then
+    // fails rather than landing in the trash.
+    await bumpPermissions(tx, input.spaceId, ids);
   });
 }
 
