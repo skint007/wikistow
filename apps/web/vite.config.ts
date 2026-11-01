@@ -3,6 +3,7 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import type { ServerResponse } from 'node:http';
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -98,6 +99,34 @@ const publicPageFonts = {
   },
 };
 
+/**
+ * Mermaid's own single-file build, which the diagram host frame loads as a
+ * classic script (ADR 0010): a module script or `import()` from the
+ * frame's opaque origin would be a cross-origin request. Written to
+ * `/mermaid.js`, and served from node_modules by the dev server.
+ */
+const mermaidFile = createRequire(fileURLToPath(import.meta.url)).resolve(
+  'mermaid/dist/mermaid.min.js',
+);
+const diagramLibrary = {
+  name: 'diagram-library',
+  configureServer(server: {
+    middlewares: {
+      use: (path: string, handle: (req: unknown, res: ServerResponse) => void) => void;
+    };
+  }) {
+    server.middlewares.use('/mermaid.js', (_req, res) => {
+      res.setHeader('Content-Type', 'text/javascript');
+      res.end(readFileSync(mermaidFile));
+    });
+  },
+  async generateBundle(this: {
+    emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array }) => string;
+  }) {
+    this.emitFile({ type: 'asset', fileName: 'mermaid.js', source: await readFile(mermaidFile) });
+  },
+};
+
 // A plain object: the router plugin's Vite types differ from Vite+'s, so
 // defineConfig's checking can't compare them.
 export default {
@@ -114,6 +143,7 @@ export default {
     // For the dev server; a build bundles workers with `worker.plugins`.
     library,
     publicPageFonts,
+    diagramLibrary,
   ],
   define: { __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`) },
   resolve: { alias: { '@': ui('src'), 'decode-named-character-reference': entities } },

@@ -6,8 +6,8 @@
  *
  * One recorded exception: `'wasm-unsafe-eval'` lets libsodium compile its
  * WebAssembly. It does not permit JavaScript `eval` or `new Function`.
- * `frame-src 'self'` admits the plugin host frame (ADR 0002), which is
- * served with a stricter policy of its own.
+ * `frame-src 'self'` admits the plugin host frame (ADR 0002) and the
+ * diagram host frame (ADR 0010), each served with a policy of its own.
  */
 export const CSP = [
   "default-src 'none'",
@@ -60,17 +60,40 @@ export const pluginHostCsp = (origin: string) =>
   ].join('; ');
 
 /**
+ * The sandboxed frame that draws Mermaid diagrams (ADR 0010), its script,
+ * and Mermaid's own build, all files of the web build.
+ */
+export const DIAGRAM_HOST_PAGE = '/diagram-host.html';
+export const DIAGRAM_HOST_SCRIPT = '/diagram-host.js';
+export const DIAGRAM_LIBRARY = '/mermaid.js';
+
+/**
+ * The diagram frame's policy: only its two scripts, named exactly, and no
+ * requests. Mermaid writes `<style>` elements and style attributes to
+ * measure text, which only this frame's opaque origin may do.
+ */
+export const diagramHostCsp = (origin: string) =>
+  [
+    "default-src 'none'",
+    `script-src ${origin}${DIAGRAM_LIBRARY} ${origin}${DIAGRAM_HOST_SCRIPT}`,
+    "style-src 'unsafe-inline'",
+    "frame-ancestors 'self'",
+    'sandbox allow-scripts',
+  ].join('; ');
+
+/**
  * The security headers for the file at `path` of the app served from
- * `origin`: `SECURITY_HEADERS`, except that the host page has its own
- * policy and may be framed, and the host script loads from the frame's
- * opaque origin, which the usual `same-origin` resource policy refuses.
+ * `origin`: `SECURITY_HEADERS`, except that the host pages have their own
+ * policies and may be framed, and their scripts load from the frames'
+ * opaque origins, which the usual `same-origin` resource policy refuses.
  */
 export function securityHeadersFor(path: string, origin: string): Record<string, string> {
-  if (path === PLUGIN_HOST_PAGE) {
+  if (path === PLUGIN_HOST_PAGE || path === DIAGRAM_HOST_PAGE) {
     const { 'X-Frame-Options': _, ...headers } = SECURITY_HEADERS;
-    return { ...headers, 'Content-Security-Policy': pluginHostCsp(origin) };
+    const csp = path === PLUGIN_HOST_PAGE ? pluginHostCsp(origin) : diagramHostCsp(origin);
+    return { ...headers, 'Content-Security-Policy': csp };
   }
-  if (path === PLUGIN_HOST_SCRIPT) {
+  if (path === PLUGIN_HOST_SCRIPT || path === DIAGRAM_HOST_SCRIPT || path === DIAGRAM_LIBRARY) {
     return { ...SECURITY_HEADERS, 'Cross-Origin-Resource-Policy': 'cross-origin' };
   }
   return { ...SECURITY_HEADERS };
