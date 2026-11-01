@@ -3,6 +3,7 @@
 // plaintext to the server, so the app makes one only after saying so on
 // screen: from the public link dialog, or a Publish that asked first.
 import {
+  AttachmentId,
   pageRoutes,
   publicLinkRoutes,
   type PageId,
@@ -11,9 +12,10 @@ import {
 } from '@wikistow/contracts';
 import { ApiError } from '../api/client.ts';
 import { coverOf, type ShownCover } from '../cover.ts';
+import { DIAGRAM_LANGUAGE } from '../diagram.ts';
 import { utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
-import { PageId as PageIdSchema } from '../ids.ts';
+import { newId, PageId as PageIdSchema } from '../ids.ts';
 import { linkKey, linkTableOf, resolveLinked, writableInLink } from '../link-table.ts';
 import {
   findWikilinks,
@@ -46,7 +48,13 @@ import {
   type QueryRow,
 } from '../query.ts';
 import { sameRegion } from '../regions.ts';
-import { attachmentsShown, bodyHtml, chooseFiles, embedHtml } from '../reader/body-html.ts';
+import {
+  ATTACHMENT_SCHEME,
+  attachmentsShown,
+  bodyHtml,
+  chooseFiles,
+  embedHtml,
+} from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
 import {
   loadPage,
@@ -99,24 +107,39 @@ export type OtherValues = (page: Wikilink) => readonly PropertyData[] | undefine
  * one is text, not the start of a tag. So each `<` in the text of a block
  * (a paragraph, heading or table cell) with a value written in is escaped
  * too, which leaves it the text it was.
+ *
+ * A diagram (ADR 0010) that `diagrams` has an image for becomes that
+ * image, with its source in a `<details>` under it.
  */
 export function copyBody(
   markdown: string,
   others: OtherValues = () => undefined,
   tables: QueryTables = () => undefined,
+  diagrams: DiagramImages = () => undefined,
 ): string {
   const { frontmatter, body } = splitFrontmatter(markdown);
   const read = readProperties(frontmatter);
   const own = read.ok ? read.properties : [];
-  if (own.length === 0 && !mayReferOtherPages(body) && !body.includes(QUERY_LANGUAGE)) return body;
+  if (
+    own.length === 0 &&
+    !mayReferOtherPages(body) &&
+    !body.includes(QUERY_LANGUAGE) &&
+    !body.includes(DIAGRAM_LANGUAGE)
+  ) {
+    return body;
+  }
   const edits: { start: number; end: number; text: string }[] = [];
   for (const block of markdownNodes(parseMarkdown(body))) {
-    if (block.type === 'code' && block.lang === QUERY_LANGUAGE) {
-      const table = tables(block.value);
+    if (
+      block.type === 'code' &&
+      (block.lang === QUERY_LANGUAGE || block.lang === DIAGRAM_LANGUAGE)
+    ) {
+      const lines =
+        block.lang === QUERY_LANGUAGE ? tables(block.value) : diagramLines(block.value, diagrams);
       const start = block.position?.start.offset;
       const end = block.position?.end.offset;
-      if (table && start !== undefined && end !== undefined) {
-        edits.push({ start, end, text: tableIn(body, start, end, table) });
+      if (lines && start !== undefined && end !== undefined) {
+        edits.push({ start, end, text: tableIn(body, start, end, lines) });
       }
       continue;
     }
@@ -159,6 +182,50 @@ export function copyBody(
     at = edit.end;
   }
   return copy + body.slice(at);
+}
+
+/**
+ * A diagram's image, by its source: the copy's file for it and the width
+ * it shows at, or undefined to leave the diagram as written.
+ */
+export type DiagramImages = (source: string) => { id: string; width: number } | undefined;
+
+/** A diagram drawn for a copy: a PNG, and the width it shows at, half its own for a dense screen. */
+export type DrawnDiagram = { png: Uint8Array; width: number };
+
+/**
+ * The lines a public copy writes for the diagram `source`: its image, then
+ * its source in a fence no line of it closes, under a `<details>`.
+ */
+function diagramLines(source: string, diagrams: DiagramImages): string[] | undefined {
+  const image = diagrams(source);
+  if (image === undefined) return undefined;
+  const longest = Math.max(0, ...[...source.matchAll(/`+/g)].map(([run]) => run.length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return [
+    `<img src="${ATTACHMENT_SCHEME}${image.id}" alt="Diagram" width="${image.width}">`,
+    '',
+    '<details>',
+    '<summary>Diagram source</summary>',
+    '',
+    `${fence}${DIAGRAM_LANGUAGE}`,
+    ...source.split(/\r?\n/),
+    fence,
+    '',
+    '</details>',
+  ];
+}
+
+/**
+ * The diagrams in a body, by their source: fenced code labelled `mermaid`.
+ */
+function diagramBlocks(body: string): string[] {
+  if (!body.includes(DIAGRAM_LANGUAGE)) return [];
+  const sources = new Set<string>();
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    if (node.type === 'code' && node.lang === DIAGRAM_LANGUAGE) sources.add(node.value);
+  }
+  return [...sources];
 }
 
 /**
@@ -607,12 +674,19 @@ async function wikilinkTargets(
  * each file the server asks for, of those only, then committed. Pass
  * `published`, the version just published and its decrypted payload, right
  * after publishing it; otherwise the published head the server names is
- * opened, as a reader opens it.
+ * opened, as a reader opens it. Each diagram `drawDiagram` draws goes as
+ * an image, a file of the copy's own (ADR 0010); the rest stay as written.
  */
 export async function shareCopy(
   ctx: ClientContext,
   page: PageRef,
-  { published }: { published?: { revisionId: RevisionId; payload: PagePayload } } = {},
+  {
+    published,
+    drawDiagram,
+  }: {
+    published?: { revisionId: RevisionId; payload: PagePayload };
+    drawDiagram?: (source: string) => Promise<DrawnDiagram | null>;
+  } = {},
 ) {
   const version = published ?? (await openPublished(ctx, page));
   const { payload, revisionId } = version;
@@ -630,10 +704,12 @@ export async function shareCopy(
     ),
     targets: new Map(targets.map(({ key, pageId }) => [key, pageId])),
   });
+  const diagrams = await diagramFiles(body, drawDiagram);
+  const images: DiagramImages = (source) => diagrams.get(source);
   // Tables too large for a copy stay as written, rather than the copy failing to go up.
-  const withTables = copyBody(payload.markdown, others, listed.tables);
+  const withTables = copyBody(payload.markdown, others, listed.tables, images);
   const fits = utf8(withTables).length <= pageRoutes.MAX_MARKDOWN_BYTES;
-  const markdown = fits ? withTables : copyBody(payload.markdown, others);
+  const markdown = fits ? withTables : copyBody(payload.markdown, others, undefined, images);
   const tableTargets = fits ? listed.targets : [];
   const cover = copyCover(coverOf(payload));
   // The cover's images come first, as the server chooses them, so a long
@@ -645,15 +721,27 @@ export async function shareCopy(
       ...attachmentsUsed(body, payload.attachments),
     ]),
   ];
+  // The page's attachments, then the diagrams' images, already in hand.
+  const listedFiles = [
+    ...attachments.map(({ id, name, mediaType, size }) => ({ id, name, mediaType, size })),
+    ...[...diagrams.values()].map(({ id, name, mediaType, bytes }) => ({
+      id,
+      name,
+      mediaType,
+      size: bytes.length,
+    })),
+  ];
+  const bytesOf = new Map<string, Uint8Array>(
+    [...diagrams.values()].map(({ id, bytes }) => [id, bytes]),
+  );
   // Every file the copy should keep is opened before anything readable
   // goes up, so one that doesn't open sends nothing. Those left out for
   // size, as the server leaves them out, aren't opened yet.
   const kept = chooseFiles(
-    attachments.map((ref) => ref.id),
-    attachments,
+    listedFiles.map((file) => file.id),
+    listedFiles,
     { fileBytes: publicLinkRoutes.MAX_FILE_BYTES, copyBytes: publicLinkRoutes.MAX_COPY_BYTES },
   );
-  const bytesOf = new Map<string, Uint8Array>();
   for (const ref of attachments) {
     if (kept.some((file) => file.id === ref.id && !file.leftOut)) {
       bytesOf.set(ref.id, await readAttachment(ctx, page, 'published', ref));
@@ -665,12 +753,7 @@ export async function shareCopy(
       revisionId,
       title: payload.title,
       markdown,
-      attachments: attachments.map(({ id, name, mediaType, size }) => ({
-        id,
-        name,
-        mediaType,
-        size,
-      })),
+      attachments: listedFiles,
       targets: [...targets, ...tableTargets],
       cover,
     },
@@ -683,8 +766,8 @@ export async function shareCopy(
   );
   for (const id of files) {
     const ref = ours.get(id);
-    if (!ref) continue;
-    const bytes = bytesOf.get(id) ?? (await readAttachment(ctx, page, 'published', ref));
+    const bytes = bytesOf.get(id) ?? (ref && (await readAttachment(ctx, page, 'published', ref)));
+    if (!bytes) continue;
     const path = publicLinkRoutes.FILE_UPLOAD_PATH.replace(
       ':copyId',
       encodeURIComponent(copyId),
@@ -693,6 +776,31 @@ export async function shareCopy(
   }
   await ctx.api.call(publicLinkRoutes.commit, { params: { copyId } });
   return { copyId };
+}
+
+/**
+ * Each diagram in `body` that `draw` draws, by its source, as a PNG file
+ * for a copy: a new ID, a name, its bytes and the width it shows at. One
+ * it can't draw is left out, and with no `draw` all are.
+ */
+async function diagramFiles(body: string, draw?: (source: string) => Promise<DrawnDiagram | null>) {
+  const files = new Map<
+    string,
+    { id: AttachmentId; name: string; mediaType: string; bytes: Uint8Array; width: number }
+  >();
+  if (!draw) return files;
+  for (const source of diagramBlocks(body)) {
+    const drawn = await draw(source);
+    if (!drawn) continue;
+    files.set(source, {
+      id: newId(AttachmentId),
+      name: `diagram-${files.size + 1}.png`,
+      mediaType: 'image/png',
+      bytes: drawn.png,
+      width: drawn.width,
+    });
+  }
+  return files;
 }
 
 /**
