@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Import… in the space menu and each folder's menu, beside Export…, brings in notes from Joplin: a JEX file, or a Markdown + Front Matter export's folder or zip. Each notebook becomes a folder and each note a published page, with its files as attachments, its tags, dates and to-do state as front matter, and links between notes as wikilinks. It shows how far it has got, can stop, and lists links it couldn't rewrite and notes it left out, such as encrypted ones. Importing the same export into the same place again makes nothing twice and finishes an import cut short.
+
+#### CLI
+
+- `wikistow import PATH`, with `--space SPACE_ID`, `--folder FOLDER_ID` or both, imports a Joplin export as Import… does, for agents that may publish there. The skill says to use it only when the person asks.
+
 ## 0.21.0 - 2026-10-31
 
 ### Highlights
