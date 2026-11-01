@@ -20,7 +20,7 @@ import {
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { $remark } from '@milkdown/kit/utils';
 import { alertOf } from '@wikistow/client/reader';
-import type { Link, Root, Text } from 'mdast';
+import type { Link, Nodes, Root, Text } from 'mdast';
 import { defaultHandlers, type State } from 'mdast-util-to-markdown';
 import type { Options } from 'remark-stringify';
 import type { Pluggable } from 'unified';
@@ -119,11 +119,42 @@ const escaped: Handle = (node: Text, parent, state, info) => {
   return safe(body) + (parent?.children.at(-1) === node ? space : '');
 };
 
-/** Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`, not `\[!NOTE]`. */
+// A dollar, with the backslashes before it.
+const DOLLAR = /(\\*)\$/g;
+
+/**
+ * Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`,
+ * not `\[!NOTE]`. In a block with inline math, every dollar is escaped
+ * (`nearMath`): one that could open math could close at that math's end.
+ */
 const text: Handle = (node: Text, ...rest) => {
-  const written = escaped(node, ...rest);
-  return node.data?.alert ? written.replace(/^\\\[/, '[') : written;
+  const escapedText = escaped(node, ...rest);
+  const written = node.data?.alert ? escapedText.replace(/^\\\[/, '[') : escapedText;
+  if (!node.data?.nearMath) return written;
+  return written.replace(DOLLAR, (dollar, slashes: string) =>
+    slashes.length % 2 ? dollar : `${slashes}\\$`,
+  );
 };
+
+/** Marks the text of each block of `tree` holding inline math (`nearMath`). Without recursion. */
+function markNearMath(tree: Root) {
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (!('children' in node)) continue;
+    const phrasing =
+      node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell';
+    const texts: Text[] = [];
+    let math = false;
+    const inside: Nodes[] = phrasing ? [...node.children] : [];
+    for (let child = inside.pop(); child; child = inside.pop()) {
+      if (child.type === 'inlineMath') math = true;
+      if (child.type === 'text') texts.push(child);
+      if ('children' in child) inside.push(...child.children);
+    }
+    if (math) for (const text of texts) text.data = { ...text.data, nearMath: true };
+    if (!phrasing) stack.push(...node.children);
+  }
+}
 
 // A block quote, the text of its alert's marker, if it's one, marked so.
 type QuoteArgs = Parameters<typeof defaultHandlers.blockquote>;
@@ -137,6 +168,8 @@ declare module 'mdast' {
   interface TextData {
     /** Whether it starts with an alert's marker (`alertOf`). */
     alert?: boolean;
+    /** Whether its block holds inline math (`markNearMath`). */
+    nearMath?: boolean;
   }
   interface LinkData {
     /** Whether it may be written as its literal: the link mark's `bare`. */
@@ -190,8 +223,12 @@ function autolinked(node: Link, state: State): boolean {
 
 // The document, with no link split (`wholeLinks`).
 type RootArgs = Parameters<typeof defaultHandlers.root>;
-const whole = (...[node, parent, state, info]: RootArgs) =>
-  defaultHandlers.root(wholeLinks(node) as Root, parent, state, info);
+// Its text marked where it's near inline math (`markNearMath`).
+function whole(...[node, parent, state, info]: RootArgs) {
+  const tree = wholeLinks(node) as Root;
+  markNearMath(tree);
+  return defaultHandlers.root(tree, parent, state, info);
+}
 
 // Otherwise `<…>` where its text is its address and that reads as it,
 // `[…](…)` where it isn't or doesn't.

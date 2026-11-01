@@ -4,6 +4,9 @@
 import {
   markdownNodes,
   markdownText,
+  mathFromMarkdown,
+  mathSyntax,
+  mathToMarkdownExtension,
   parseMarkdown,
   splitFrontmatter,
   wikilinkFromMarkdown,
@@ -27,6 +30,17 @@ export function remarkWikilinks(this: Processor) {
 }
 
 /**
+ * A remark plugin: reads math (`$$` blocks, `$…$` inline) as `math` and
+ * `inlineMath` nodes, and writes them back (`mathSyntax`).
+ */
+export function remarkMath(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push(mathSyntax);
+  (data.fromMarkdownExtensions ??= []).push(mathFromMarkdown());
+  (data.toMarkdownExtensions ??= []).push(mathToMarkdownExtension);
+}
+
+/**
  * How a syntax beyond GitHub's is read: the remark plugins that read it
  * into `type` nodes. Its entry in `markdownSyntaxes`
  * (`packages/ui/src/registries.tsx`) adds
@@ -39,8 +53,21 @@ export const wikilinkReading = {
   remarkPlugins: [remarkWikilinks],
 } satisfies SyntaxReading;
 
+/** Math blocks (`$$`), read with inline math by one plugin. */
+export const mathReading = { type: 'math', remarkPlugins: [remarkMath] } satisfies SyntaxReading;
+
+/** Inline math (`$…$`), which `mathReading`'s plugin reads. */
+export const inlineMathReading = {
+  type: 'inlineMath',
+  remarkPlugins: [],
+} satisfies SyntaxReading;
+
 /** Every syntax a page body is read with beyond GitHub's, each registered in `markdownSyntaxes`. */
-export const syntaxReadings: readonly SyntaxReading[] = [wikilinkReading];
+export const syntaxReadings: readonly SyntaxReading[] = [
+  wikilinkReading,
+  mathReading,
+  inlineMathReading,
+];
 
 /**
  * Remark plugins every page body is read with, in order: GitHub's syntax

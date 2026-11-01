@@ -5,9 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
+import { MATH_FONT, PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
 import { REACT_FILES } from '../../packages/ui/src/workshop/library.ts';
 
 const ui = (path: string) => fileURLToPath(new URL(`../../packages/ui/${path}`, import.meta.url));
@@ -81,7 +81,7 @@ const library = {
 
 /**
  * The fonts a public page loads, which the server serves from this build
- * (`PAGE_FONTS`), written under `/fonts/` by names that don't change, as
+ * (`PAGE_FONTS`, `MATH_FONT`), written under `/fonts/` by names that don't change, as
  * the page's one stylesheet names them.
  */
 const publicPageFonts = {
@@ -91,9 +91,13 @@ const publicPageFonts = {
     emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array }) => string;
   }) {
     const resolve = createRequire(ui('package.json')).resolve;
-    for (const { file } of PAGE_FONTS) {
-      const source = await readFile(resolve(`@fontsource-variable/nunito/files/${file}`));
-      this.emitFile({ type: 'asset', fileName: `fonts/${file}`, source });
+    const files = [
+      ...PAGE_FONTS.map(({ file }) => `@fontsource-variable/nunito/files/${file}`),
+      `@fontsource/noto-sans-math/files/${MATH_FONT}`,
+    ];
+    for (const path of files) {
+      const source = await readFile(resolve(path));
+      this.emitFile({ type: 'asset', fileName: `fonts/${basename(path)}`, source });
     }
   },
 };

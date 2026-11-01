@@ -1,5 +1,13 @@
-/* The app's global stylesheet: the self-hosted font, then the design tokens. */
+/* The app's global stylesheet: the self-hosted fonts, then the design tokens. */
 @import '@fontsource-variable/nunito';
+/* Math's, all of it: the package's own rule covers only Latin. A browser loads it only for a page that shows math. */
+@font-face {
+  font-family: 'Noto Sans Math';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('@fontsource/noto-sans-math/files/noto-sans-math-latin-400-normal.woff2') format('woff2');
+}
 @import './theme.css';
 /* ProseMirror's own few rules, under the visual editor's (see page/editor/visual). */
 @import '@milkdown/kit/prose/view/style/prosemirror.css' layer(base);
@@ -313,6 +321,37 @@
     @apply mt-2;
   }
 
+  /* Math, as MathML (see packages/client/src/reader/math.ts), in a math font, as systems may have none; TeX KaTeX can't read stays as written. */
+  .page-body math {
+    font-family: 'Noto Sans Math', math;
+  }
+  /* What the browser would give MathML that the reset takes away, and what
+     KaTeX writes as attributes MathML Core leaves out: the space between a
+     matrix's cells, an aligned equation's columns, cases flush left, a box. */
+  .page-body mtd {
+    padding: 0.5ex 0.4em;
+  }
+  .page-body mtable[columnspacing^='0em'] > mtr > mtd {
+    padding-inline: 0;
+  }
+  .page-body mtable[columnalign^='right left'] > mtr > mtd:nth-child(odd) {
+    text-align: right;
+  }
+  .page-body mtable[columnalign^='right left'] > mtr > mtd:nth-child(even),
+  .page-body mtable[columnalign='left left'] > mtr > mtd {
+    text-align: left;
+  }
+  .page-body menclose[notation='box'] {
+    border: 1px solid;
+    padding: 0.2em 0.3em;
+  }
+  .page-body .math-display {
+    @apply overflow-x-auto overflow-y-hidden py-1;
+  }
+  .page-body .math-error {
+    @apply text-destructive;
+  }
+
   /* The visual editor's own (see page/editor/visual). */
   .page-body li[data-item-type='task'] {
     @apply -ml-6 flex list-none items-baseline gap-2;
@@ -340,6 +379,12 @@
   }
   .page-body .tableWrapper :is(td, th) {
     @apply min-w-24;
+  }
+  .page-body .math-editable {
+    @apply cursor-pointer;
+  }
+  .page-body .math-source + * {
+    @apply mt-1;
   }
   .page-body .ProseMirror-selectednode {
     @apply rounded-row outline-2 outline-ring;

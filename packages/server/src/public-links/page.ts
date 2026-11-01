@@ -6,7 +6,7 @@
 import { BANNER_PRESETS, type BannerPreset } from '@wikistow/client';
 import { createHash } from 'node:crypto';
 import { NO_COVER, symbolNode, type PublicCover } from './cover.ts';
-import { PAGE_FONTS } from './fonts.ts';
+import { MATH_FONT, PAGE_FONTS } from './fonts.ts';
 import type { PublicPage } from './links.ts';
 import type { Outline } from './segments.ts';
 
@@ -100,6 +100,7 @@ ${PAGE_FONTS.map(
   ({ file, unicodeRange }) =>
     `@font-face { font-family: "Nunito Variable"; font-style: normal; font-display: swap; font-weight: 200 1000; src: url(/fonts/${file}) format("woff2-variations"); unicode-range: ${unicodeRange}; }`,
 ).join('\n')}
+@font-face { font-family: "Noto Sans Math"; font-style: normal; font-display: swap; font-weight: 400; src: url(/fonts/${MATH_FONT}) format("woff2"); }
 :root { color-scheme: light dark; ${tokens(LIGHT)} --link-blue: #2b5fb4; --alert-important: #6d3fc0; --alert-caution: #b02525; }
 @media (prefers-color-scheme: dark) { :root { ${tokens(SLATE)} --link-blue: #8ab4f8; --alert-important: #c4b5fd; --alert-caution: var(--destructive); } }
 ${BANNER_PRESETS.map((name) => `.banner-${name} { --cover: ${BANNERS[name]}; }`).join('\n')}
@@ -167,6 +168,14 @@ ${STEPS.slice(1)
 .page-body pre { overflow-x: auto; background: var(--muted); border-radius: 12px; padding: 1rem; }
 .page-body pre code { background: none; padding: 0; }
 .page-body .code-block { background: var(--muted); border-radius: 12px; overflow: hidden; }
+.page-body math { font-family: "Noto Sans Math", math; }
+.page-body mtd { padding: 0.5ex 0.4em; }
+.page-body mtable[columnspacing^="0em"] > mtr > mtd { padding-inline: 0; }
+.page-body mtable[columnalign^="right left"] > mtr > mtd:nth-child(odd) { text-align: right; }
+.page-body mtable[columnalign^="right left"] > mtr > mtd:nth-child(even), .page-body mtable[columnalign="left left"] > mtr > mtd { text-align: left; }
+.page-body menclose[notation="box"] { border: 1px solid; padding: 0.2em 0.3em; }
+.page-body .math-display { overflow-x: auto; overflow-y: hidden; padding: 0.25rem 0; }
+.page-body .math-error { color: var(--destructive); }
 .page-body .code-block > pre { margin: 0; padding-top: 0.25rem; border-radius: 0; }
 .page-body .code-language { padding: 0.5rem 1rem 0; font: 0.75rem ${MONO}; color: var(--subtle-foreground); }
 .page-body :is(.hljs-comment, .hljs-quote, .hljs-meta) { color: var(--subtle-foreground); }
