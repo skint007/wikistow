@@ -118,7 +118,9 @@ export async function lockSpaceForUpdate(tx: Database, spaceId: string) {
  * Every node at or under `rootId`, or every node of the space for `null`,
  * but a copy's hidden nodes, which count for nothing outside their copy
  * (section 10): a share or move at a copy's destination changes the region
- * its records were written for, and the copy fails at its finish.
+ * its records were written for, and the copy fails at its finish. Nor
+ * nodes in the trash, which nobody is shown: restoring one checks its
+ * records are still in the region it goes back to.
  */
 export async function nodesUnder(tx: Database, spaceId: string, rootId: string | null) {
   const rows =
@@ -126,7 +128,7 @@ export async function nodesUnder(tx: Database, spaceId: string, rootId: string |
       ? await tx
           .select({ id: nodes.id })
           .from(nodes)
-          .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId)))
+          .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId), isNull(nodes.trashId)))
       : [
           ...(await tx.execute<{ id: string }>(
             sql`${subtreeOf(spaceId, rootId)} select id from subtree`,
@@ -165,7 +167,12 @@ export async function recordsUnder(tx: Database, spaceId: string, rootId: string
                   tx
                     .select({ id: nodes.id })
                     .from(nodes)
-                    .where(and(eq(nodes.spaceId, spaceId), isNotNull(nodes.copyId))),
+                    .where(
+                      and(
+                        eq(nodes.spaceId, spaceId),
+                        or(isNotNull(nodes.copyId), isNotNull(nodes.trashId)),
+                      ),
+                    ),
                 ),
               ),
             )
@@ -211,6 +218,7 @@ export async function rootPermissionVersion(tx: Database, spaceId: string, rootI
         eq(nodes.spaceId, spaceId),
         eq(nodes.kind, 'folder'),
         isNull(nodes.copyId),
+        isNull(nodes.trashId),
       ),
     );
   if (!folder) throw new ContentError('not-found');
@@ -1244,7 +1252,8 @@ export async function sharedWithMe(db: Database, actor: Actor, report: ReportUnr
           await db
             .select({ id: nodes.id, spaceId: nodes.spaceId, head: nodes.metadataHead })
             .from(nodes)
-            .where(inArray(nodes.id, rootIds))
+            // A share rooted in the trash isn't listed.
+            .where(and(inArray(nodes.id, rootIds), isNull(nodes.trashId)))
         ).map((node) => [`${node.spaceId} ${node.id}`, node.head]),
   );
   const named = held.flatMap((row) => {

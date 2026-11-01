@@ -138,6 +138,7 @@ async function parentVersion(tx: Database, spaceId: string, parentId: string | n
               eq(nodes.spaceId, spaceId),
               eq(nodes.kind, 'folder'),
               isNull(nodes.copyId),
+              isNull(nodes.trashId),
             ),
           );
   if (!parent) throw new ContentError('not-found');
