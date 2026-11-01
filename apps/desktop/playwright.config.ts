@@ -5,6 +5,9 @@ import { defineConfig, devices } from '@playwright/test';
 // can run at once. The browser half of a sign-in runs in Chromium.
 const port = Number(process.env['E2E_PORT'] ?? 3200);
 process.env['E2E_PORT'] = String(port);
+// The Mac app scripts/macos-app.sh built, alone: CI's macOS job sets
+// MAC_APP to it. Its check needs no server.
+const macApp = Boolean(process.env['MAC_APP']);
 
 export default defineConfig({
   testDir: 'e2e',
@@ -19,11 +22,15 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'desktop', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'node ../web/e2e/serve.ts',
-    url: `http://localhost:${port}/api/health`,
-    reuseExistingServer: false,
-    stdout: 'pipe',
-    timeout: 60_000,
-  },
+  ...(macApp
+    ? { testMatch: 'packed.spec.ts' }
+    : {
+        webServer: {
+          command: 'node ../web/e2e/serve.ts',
+          url: `http://localhost:${port}/api/health`,
+          reuseExistingServer: false,
+          stdout: 'pipe',
+          timeout: 60_000,
+        },
+      }),
 });
