@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Math in pages: `$…$` inline and `$$` blocks show as MathML in the reader and the visual editor, where a click opens the TeX to edit. A single dollar follows Pandoc's rule, so prices like `$5 and $10` stay text.
+
+#### Server
+
+- Public pages show math too, and copies made before are rendered again.
+
 ## 0.21.0 - 2026-10-31
 
 ### Highlights
