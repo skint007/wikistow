@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- A fenced `mermaid` code block shows as its diagram in the reader and under its code in the visual editor, with a button to see the source. Mermaid runs in a sandboxed frame and loads only on pages with a diagram. A public page shows each diagram as an image, with its source under it. (#PR)
+
+#### Server
+
+- A public page shows an image at the width the page gives it, as the app does, so public pages are rendered again once after the update. (#PR)
+
 ## 0.21.0 - 2026-10-31
 
 ### Highlights
