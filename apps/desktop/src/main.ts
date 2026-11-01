@@ -71,9 +71,9 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// The launcher entry the desktop shows for these windows, which also claims
-// `wikistow://` links (packaging/wikistow-desktop.desktop).
-app.setDesktopName('wikistow-desktop.desktop');
+// The launcher entry the Linux desktop shows for these windows, which also
+// claims `wikistow://` links (packaging/wikistow-desktop.desktop).
+if (process.platform === 'linux') app.setDesktopName('wikistow-desktop.desktop');
 
 // A second launch, such as the browser opening a `wikistow://` link, hands
 // its arguments to this one and quits.
@@ -655,18 +655,19 @@ app.on('before-quit', (event) => {
 });
 
 /**
- * The system's secret store, if it is one worth trusting. Without a keyring,
- * Electron seals with a key every program knows; then nothing secret is kept
- * and each launch signs in again. The async API keeps its key in the keyring
- * under the app's name: on KWallet `WikiStow Safe Storage` in `WikiStow
- * Keys`, where the sync API uses the entry every Chromium-based app shares.
+ * The system's secret store, if it is one worth trusting. On Windows
+ * (DPAPI) and macOS (the Keychain) the key is the person's own, or there is
+ * none. On Linux, without a keyring, Electron seals with a key every program
+ * knows; then nothing secret is kept and each launch signs in again. The
+ * async API keeps its key in the keyring under the app's name: on KWallet
+ * `WikiStow Safe Storage` in `WikiStow Keys`, where the sync API uses the
+ * entry every Chromium-based app shares.
  */
 async function systemCipher(): Promise<Cipher | null> {
-  // Linux only, for now: the key can't be checked anywhere else.
-  if (process.platform !== 'linux') return null;
+  if (!(await safeStorage.isAsyncEncryptionAvailable().catch(() => false))) return null;
   // Electron picks its key once, so one sealed value shows which it is.
   const probe = await safeStorage.encryptStringAsync('probe').catch(() => null);
-  if (!probe || !sealedByKeyring(probe)) return null;
+  if (!probe || (process.platform === 'linux' && !sealedByKeyring(probe))) return null;
   return {
     encrypt: (text) => safeStorage.encryptStringAsync(text),
     decrypt: async (sealed) => (await safeStorage.decryptStringAsync(sealed)).result,
