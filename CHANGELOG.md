@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Linked from, below each page in the reader and the draft view, lists the pages in its space that link to it, by title with their folders. It shows only pages you can open, in the version you see, with drafts labelled for editors, and nothing when no page links there.
+
 ## 0.21.0 - 2026-10-31
 
 ### Highlights
