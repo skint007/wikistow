@@ -9,6 +9,7 @@ import {
   sharingOperations,
   spaceKeys,
   spaceOperations,
+  trashOperations,
   type ClientContext,
   type PageId,
   type RevisionId,
@@ -167,6 +168,13 @@ export const spaceKeysQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   });
 
 /** Shares this person is a member of, with their root's name and who shared them. */
+/** What is in the trash of the spaces this person owns (protocol section 10). */
+export const trashQuery = (ctx: ClientContext) =>
+  queryOptions({
+    queryKey: [PLAIN, 'trash'],
+    queryFn: () => trashOperations.loadTrash(ctx),
+  });
+
 export const sharedWithMeQuery = (ctx: ClientContext) =>
   queryOptions({
     queryKey: [PLAIN, 'shared-with-me'],

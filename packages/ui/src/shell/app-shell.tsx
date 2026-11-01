@@ -19,6 +19,7 @@ import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
 import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
+import { TrashNotice } from '../page/trash-notice';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
 import { linkedSearch, SearchOpener, takeHeldSearch } from './search-link';
@@ -169,6 +170,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         <SafeModeBanner />
         <RestoreNotice />
+        {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
         {signOutFailed && (
           <p
             role="alert"
