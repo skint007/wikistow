@@ -30,11 +30,15 @@ export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
   onSelect && { label, onSelect, destructive };
 
-/** A folder's actions: for everyone, Open and Export; for editors, what they can do there. */
+/**
+ * A folder's actions: for everyone, Open and Export; for editors, what they
+ * can do there; Import for those who can publish there too.
+ */
 export function folderActions({
   onOpen,
   editing,
   onExport,
+  onImport,
 }: {
   onOpen: () => void;
   editing: {
@@ -49,6 +53,7 @@ export function folderActions({
     onDelete: (() => void) | undefined;
   } | null;
   onExport: () => void;
+  onImport: (() => void) | undefined;
 }): MenuAction[] {
   return [
     action('Open', onOpen),
@@ -61,6 +66,7 @@ export function folderActions({
     action('Copy to…', editing?.onCopy),
     action('Share…', editing?.onShare),
     action('Export…', onExport),
+    action('Import…', onImport),
     action('Delete folder', editing?.onDelete, true),
   ].filter((item) => item !== undefined);
 }
