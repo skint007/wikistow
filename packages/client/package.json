@@ -25,6 +25,7 @@
   "dependencies": {
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
+    "fflate": "0.8.3",
     "libsodium-wrappers-sumo": "^0.8.4",
     "lowlight": "3.3.0",
     "mdast-util-from-markdown": "2.1.0",

@@ -256,6 +256,9 @@ importers:
       '@wikistow/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       libsodium-wrappers-sumo:
         specifier: ^0.8.4
         version: 0.8.4
