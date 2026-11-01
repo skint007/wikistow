@@ -18,6 +18,7 @@ import { hashKey, queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { DesktopBridge } from '@wikistow/contracts';
 import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
+import { readIndexLinks } from '../page/page-reader';
 
 // Everything here is decrypted or describes encrypted content, so every key
 // starts with PLAIN and locking the vault drops it all.
@@ -236,13 +237,18 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       let index: searchOperations.PageIndex;
       try {
         if (shown) {
-          index = await searchOperations.updateIndex(ctx, shown, changes, { signal, onProgress });
+          index = await searchOperations.updateIndex(ctx, shown, changes, {
+            signal,
+            onProgress,
+            readLinks: readIndexLinks,
+          });
         } else {
           const sealed = await device?.searchIndex().catch(() => null);
           index = await searchOperations.indexSpaces(ctx, {
             kept: sealed ? searchOperations.openKept(ctx, sealed, __APP_VERSION__) : null,
             signal,
             onProgress,
+            readLinks: readIndexLinks,
           });
         }
       } catch (error) {

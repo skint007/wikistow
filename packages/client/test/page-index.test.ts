@@ -127,6 +127,66 @@ describe('a page index', () => {
   });
 });
 
+describe('the pages linking to a page', () => {
+  /** A page whose links are given as the index keeps them, titled `title`. */
+  const linking = (
+    id: string,
+    links: { key: string; pageId: string | null }[],
+    { title = id, folderIds = [] }: { title?: string; folderIds?: FolderId[] } = {},
+  ) => {
+    const [doc] = page(home, id, folderIds, '');
+    return [doc, { title, text: '', links }] as const;
+  };
+  const index = new PageIndex();
+  for (const [doc, content] of [
+    // A link to itself isn't listed.
+    linking('router', [{ key: 'router', pageId: null }]),
+    linking('by-title', [{ key: 'router', pageId: null }]),
+    // Its table entry follows a rename.
+    linking('renamed', [{ key: 'old router', pageId: 'router' }]),
+    linking('twin-1', [], { title: 'Twin', folderIds: [recipes] }),
+    linking('twin-2', [], { title: 'Twin', folderIds: [soups] }),
+    // Ambiguous: only an entry counts.
+    linking('unpicked', [{ key: 'twin', pageId: null }]),
+    linking('picked', [{ key: 'twin', pageId: 'twin-2' }]),
+    linking('in-folder', [{ key: 'soups/twin', pageId: null }]),
+    // Missing, and an entry for a page this index doesn't hold.
+    linking('nowhere', [
+      { key: 'later', pageId: null },
+      { key: 'router', pageId: 'hidden' },
+    ]),
+    linking('elsewhere', []),
+  ])
+    index.addText(doc, content);
+  const linksTo = (from: searchOperations.PageIndex, id: string) =>
+    ids(from.linksTo(home, PageId.parse(id)));
+
+  it('resolves each link as the reader does', () => {
+    expect(linksTo(index, 'router')).toEqual(['by-title', 'nowhere', 'renamed']);
+    expect(linksTo(index, 'twin-2')).toEqual(['in-folder', 'picked']);
+    expect(linksTo(index, 'twin-1')).toEqual([]);
+    expect(index.linksTo(work, PageId.parse('router'))).toEqual([]);
+  });
+
+  it('follows the pages it holds as it changes', () => {
+    // Read first, so the new index is read from this one's lists.
+    expect(linksTo(index, 'router')).toHaveLength(3);
+    const [laterDoc, later] = linking('later-page', [], { title: 'Later' });
+    const [byTitle] = linking('by-title', []);
+    const next = index.with([
+      [laterDoc, later],
+      [
+        { ...byTitle, revisionId: RevisionId.parse('by-title-r2') },
+        { title: 'by-title', text: '' },
+      ],
+    ]);
+    expect(linksTo(next, 'later-page')).toEqual(['nowhere']);
+    expect(linksTo(next, 'router')).toEqual(['nowhere', 'renamed']);
+    // The index it came from is as it was.
+    expect(linksTo(index, 'router')).toEqual(['by-title', 'nowhere', 'renamed']);
+  });
+});
+
 describe('a kept index', () => {
   const installationId = InstallationId.parse('test-installation');
   const identity = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human' });
@@ -145,7 +205,7 @@ describe('a kept index', () => {
     expect(openKept(ctx, sealed, '1.0.1')).toBeNull();
   });
 
-  it('opens as nothing when kept before properties were, even by the same build', () => {
+  it('opens as nothing when kept before properties or links were, even by the same build', () => {
     // As `sealKept` seals, with the rows an earlier build wrote.
     const seal = (rows: unknown[][]) =>
       sealOnDevice(
@@ -155,10 +215,11 @@ describe('a kept index', () => {
         utf8(JSON.stringify(rows)),
       );
     const row = ['bean-soup-r1', home, 'bean-soup', 'Bean soup', 'text'];
-    expect(openKept(ctx, seal([[...row, []]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, [], []]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([row]), '1.0.0')).toBeNull();
     expect(
-      openKept(ctx, seal([[...row, [{ key: 'a', type: 'map', value: 1 }]]]), '1.0.0'),
+      openKept(ctx, seal([[...row, [{ key: 'a', type: 'map', value: 1 }], []]]), '1.0.0'),
     ).toBeNull();
   });
 });
