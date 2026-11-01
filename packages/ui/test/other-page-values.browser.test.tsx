@@ -24,12 +24,14 @@ import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface
 import { Markdown } from '../src/page/markdown.tsx';
 import { otherPages } from '../src/page/other-pages.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
+import { openVault, PAGE_REF } from './page-view.ts';
 
 // References to other pages' values (`` `=[[Page]].key` ``, ADR 0006
 // decision 5), as the reader and the editors show them: from the viewer's
 // search index, and the same text as written for anything it doesn't hold.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+openVault();
 
 const spaceId = SpaceId.parse('s-home');
 
@@ -255,6 +257,7 @@ async function pageEditor(initial: string, mode: 'source' | 'visual') {
       attachments={{ list: [], url: async () => null }}
       onFiles={() => {}}
       otherPages={others}
+      page={PAGE_REF}
     />,
   );
   if (mode === 'visual') {

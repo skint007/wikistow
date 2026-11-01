@@ -672,6 +672,9 @@ test('capture the property rows, on the published and the draft view, wide and o
 
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByText('Published v1')).toBeVisible();
+  // The reader starts with them collapsed to one line.
+  await shoot('reader-collapsed', rows);
+  await rows.getByRole('button', { name: 'Properties · 9' }).click();
   await page.getByRole('button', { name: 'Show 3 more' }).waitFor();
   await shoot('reader', rows);
   await shoot('reader-phone', page, true);

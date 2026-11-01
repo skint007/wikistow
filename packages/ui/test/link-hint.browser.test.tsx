@@ -26,7 +26,6 @@ import type { LinkAssist } from '../src/page/editor/surface.ts';
 // wikilink's, a reference's in a link, a page link chip's and a tag's.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-
 // As in the desktop app, which sets its bridge before the pages load.
 window.wikistowDesktop = {} as NonNullable<Window['wikistowDesktop']>;
 const { BodyLink } = await import('../src/page/body-link.tsx');
@@ -34,6 +33,9 @@ const { HintLayer } = await import('../src/components/ui/tooltip.tsx');
 const { default: VisualSurface } = await import('../src/page/editor/visual/visual-surface.tsx');
 const { Markdown } = await import('../src/page/markdown.tsx');
 const { TagPill } = await import('../src/page/property-value.tsx');
+// Its properties keep their open state in the vault's account.
+const { openVault } = await import('./page-view.ts');
+openVault();
 
 const unmounts: (() => void)[] = [];
 afterEach(() => {

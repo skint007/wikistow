@@ -9,19 +9,25 @@ import {
   type PropertyEdit,
   type PropertyValue,
 } from '@wikistow/client';
-import { Plus } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ChevronRight, Plus } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
 import { propertiesText, withProperties } from './properties';
 import { propertyLabel, referable } from './property-model';
 import { composing, PropertyRow, type RowFocus } from './property-rows';
+import { usePropertiesShown } from './properties-shown';
 import { PropertyKey, PropertyValueView, ROW, type LinkScope } from './property-value';
 
 // A page's frontmatter as rows (ADR 0006), between its status pills and its
 // body: one row per property, its key in sentence case and its value as the
 // type it reads as. A block that doesn't read as properties is its text.
+// The box collapses to one line, as it starts unless the person opened it
+// on this page or turned on Show properties (`usePropertiesShown`).
+
+/** The page whose properties are shown, for which their box's open state is kept. */
+type ShownPage = Parameters<typeof usePropertiesShown>[0];
 
 /** The keys pages near this one use, loaded once asked for: undefined until then. */
 export type PropertyKeys = { keys: readonly string[] | undefined; load: () => void };
@@ -35,6 +41,52 @@ const READ = '[--row:1.5rem]';
 const EDITED = '[--row:2rem]';
 const MONO = 'font-mono text-[13px] leading-relaxed';
 
+/**
+ * The Properties region: its first line, `summary`, opens and closes it,
+ * and `children` show under it while it's open.
+ */
+function Collapsible({
+  summary,
+  shown,
+  onShown,
+  className,
+  children,
+}: {
+  summary: string;
+  shown: boolean;
+  onShown: (shown: boolean) => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <section aria-label="Properties" className={cn(PANEL, className)}>
+      <button
+        type="button"
+        aria-expanded={shown}
+        aria-controls={shown ? id : undefined}
+        onClick={() => onShown(!shown)}
+        className="-mx-1 flex items-center gap-1 rounded-row px-1 text-left font-bold text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <ChevronRight
+          aria-hidden
+          className={cn('size-4 shrink-0 transition-transform', shown && 'rotate-90')}
+          strokeWidth={1.75}
+        />
+        {summary}
+      </button>
+      {shown && (
+        <div id={id} className="grid gap-1">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const count = (properties: readonly Property[]) => `Properties · ${properties.length}`;
+const AS_TEXT = 'Properties (as text)';
+
 /** Why a block shows as its text: one line. */
 const Why = ({ reason }: { reason: string }) => (
   <p className="text-xs text-muted-foreground">Shown as text: {reason}</p>
@@ -47,15 +99,24 @@ const Why = ({ reason }: { reason: string }) => (
  * It sits in the body, not among the `pagePanels`, which open from the
  * toolbar.
  */
-export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; scope: LinkScope }) {
+export function PropertiesBox({
+  frontmatter,
+  scope,
+  page,
+}: {
+  frontmatter: string;
+  scope: LinkScope;
+  page: ShownPage;
+}) {
   const [all, setAll] = useState(false);
+  const [open, setOpen] = usePropertiesShown(page);
   const read = useMemo(() => readProperties(frontmatter), [frontmatter]);
   if (!read.ok) {
     return (
-      <section aria-label="Properties" className={PANEL}>
+      <Collapsible summary={AS_TEXT} shown={open} onShown={setOpen}>
         <pre className={cn(MONO, 'overflow-x-auto')}>{propertiesText(frontmatter)}</pre>
         <Why reason={read.reason} />
-      </section>
+      </Collapsible>
     );
   }
   const { properties } = read;
@@ -64,7 +125,7 @@ export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; sco
   const shown = all || more <= 0 ? properties : properties.slice(0, SHOWN_ROWS);
   const tags = tagProperties(properties);
   return (
-    <section aria-label="Properties" className={cn(PANEL, READ)}>
+    <Collapsible summary={count(properties)} shown={open} onShown={setOpen} className={READ}>
       <dl className="grid">
         {shown.map((property) => (
           <div key={property.key} className={ROW}>
@@ -86,7 +147,7 @@ export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; sco
           </Button>
         </div>
       )}
-    </section>
+    </Collapsible>
   );
 }
 
@@ -96,11 +157,14 @@ export function PropertiesBox({ frontmatter, scope }: { frontmatter: string; sco
  * each row's menu renames, retypes, removes or puts a reference to it in
  * the page. **Add property** adds a key at the block's end, and **Edit as
  * text** shows the text between the delimiters to edit as it is, as a
- * block that doesn't read as properties always shows.
+ * block that doesn't read as properties always shows. The box opens on its
+ * own for something to do, a property being added or a block to fix, which
+ * leaves what's kept for the page as it was.
  */
 export function PropertiesEditor({
   frontmatter,
   scope,
+  page,
   adding: addingFirst = false,
   onChange,
   onRemove,
@@ -109,6 +173,7 @@ export function PropertiesEditor({
 }: {
   frontmatter: string;
   scope: LinkScope;
+  page: ShownPage;
   /** The keys pages in the same folder use, which Add property suggests. */
   propertyKeys?: PropertyKeys | undefined;
   /** Open with a new property's name being typed, as when the block was just added. */
@@ -122,6 +187,14 @@ export function PropertiesEditor({
   // which stays text until they go back to rows, not as soon as it reads.
   const [asText, setAsText] = useState<'chosen' | 'unread' | null>(null);
   const [adding, setAdding] = useState(addingFirst);
+  const [kept, keep] = usePropertiesShown(page);
+  // Opened on its own, until the person closes it.
+  const [itself, setItself] = useState(addingFirst);
+  const open = kept || itself;
+  const setOpen = (next: boolean) => {
+    setItself(false);
+    if (next !== kept) keep(next);
+  };
   // The keys to suggest are loaded only once a property is being added.
   const load = propertyKeys?.load;
   useEffect(() => {
@@ -133,7 +206,10 @@ export function PropertiesEditor({
   // Where the focus goes back to once a row is drawn, by key.
   const [focusing, setFocusing] = useState<{ key: string; at: RowFocus } | null>(null);
   const read = useMemo(() => readProperties(frontmatter), [frontmatter]);
-  if (!read.ok && asText === null) setAsText('unread');
+  if (!read.ok && asText === null) {
+    setAsText('unread');
+    setItself(true);
+  }
   // Why each value that can't change in place can't.
   const locks = useMemo(
     () =>
@@ -159,21 +235,23 @@ export function PropertiesEditor({
 
   if (!read.ok || asText) {
     return (
-      <PropertiesText
-        frontmatter={frontmatter}
-        focus={asText === 'chosen'}
-        reason={read.ok ? null : read.reason}
-        onChange={onChange}
-        onRemove={onRemove}
-        onRows={
-          read.ok
-            ? () => {
-                setError(null);
-                setAsText(null);
-              }
-            : null
-        }
-      />
+      <Collapsible summary={AS_TEXT} shown={open} onShown={setOpen}>
+        <PropertiesText
+          frontmatter={frontmatter}
+          focus={asText === 'chosen'}
+          reason={read.ok ? null : read.reason}
+          onChange={onChange}
+          onRemove={onRemove}
+          onRows={
+            read.ok
+              ? () => {
+                  setError(null);
+                  setAsText(null);
+                }
+              : null
+          }
+        />
+      </Collapsible>
     );
   }
   const { properties } = read;
@@ -181,7 +259,7 @@ export function PropertiesEditor({
   const tags = tagProperties(properties);
   const focusFor = (key: string) => (at: RowFocus | null) => setFocusing(at ? { key, at } : null);
   return (
-    <section aria-label="Properties" className={cn(PANEL, EDITED)}>
+    <Collapsible summary={count(properties)} shown={open} onShown={setOpen} className={EDITED}>
       {properties.length > 0 && (
         <dl className="grid">
           {properties.map((property) => (
@@ -261,7 +339,7 @@ export function PropertiesEditor({
           {error}
         </p>
       )}
-    </section>
+    </Collapsible>
   );
 }
 
@@ -355,7 +433,7 @@ function PropertiesText({
   const text = propertiesText(frontmatter);
   const ends = text.split('\n').some((line) => /^(?:---|\.\.\.)\r?$/.test(line));
   return (
-    <section aria-label="Properties" className={PANEL}>
+    <>
       <textarea
         autoFocus={focus}
         aria-label="Properties as text"
@@ -384,6 +462,6 @@ function PropertiesText({
           Remove properties
         </Button>
       </div>
-    </section>
+    </>
   );
 }

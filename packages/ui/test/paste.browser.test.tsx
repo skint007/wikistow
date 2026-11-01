@@ -9,6 +9,7 @@ import { MARKDOWN_MARK, markOf } from '../src/page/editor/visual/copy-marks.ts';
 import { inertHost } from '../src/page/editor/visual/host.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { viewOf } from './editor-view.ts';
+import { PAGE_REF } from './page-view.ts';
 
 // What the visual editor makes of what's pasted into it, in Chromium.
 
@@ -84,6 +85,7 @@ async function mountPage(): Promise<Mounted> {
         links={host.links()}
         attachments={host.attachments()}
         onFiles={() => {}}
+        page={PAGE_REF}
       />,
     ),
   );
