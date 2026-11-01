@@ -4,8 +4,9 @@
 // and serves the plugins installed on this computer and copies of those
 // approved from the server's library, serves the builds the plugin
 // workshop previews, checks for a newer release, and opens its window where
-// it was last left. The window has no system frame or menu: the pages draw
-// its titlebar, and main answers the menu's old shortcuts.
+// it was last left. The window has no system frame: the pages draw its
+// titlebar, and main answers the old menu's shortcuts. A Mac keeps its menu
+// bar (mac-menu.ts) and the system's window buttons.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
@@ -40,6 +41,7 @@ import { contextMenu } from './context-menu.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
+import { macMenu } from './mac-menu.ts';
 import { libraryPlugins } from './plugins/library.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
@@ -85,6 +87,8 @@ if (process.platform === 'win32' && !app.commandLine.hasSwitch('user-data-dir'))
 // A second launch, such as the browser opening a `wikistow://` link, hands
 // its arguments to this one and quits.
 if (!app.requestSingleInstanceLock()) app.quit();
+
+const mac = process.platform === 'darwin';
 
 // The web build sits inside the packed app (`scripts/asar.ts`), or beside it
 // in the workspace. It is looked for rather than read off `app.isPackaged`,
@@ -353,8 +357,12 @@ function openWindow() {
     icon: join(app.getAppPath(), 'packaging', 'wikistow-desktop.png'),
     // The page's titlebar stands in for the frame (shell/titlebar.tsx). Its
     // empty part moves the window and double-clicking it maximizes; the
-    // window still resizes from a few pixels inside each edge.
-    frame: false,
+    // window still resizes from a few pixels inside each edge. A Mac's
+    // window buttons stay, drawn by the system over its left end, centred
+    // in its 36 pixels.
+    ...(mac
+      ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 11 } }
+      : { frame: false }),
     show: false,
     webPreferences: {
       preload: join(import.meta.dirname, 'preload.cjs'),
@@ -392,8 +400,7 @@ function openWindow() {
     const action = shortcut(input);
     if (!action) return;
     event.preventDefault();
-    if (action === 'quit') app.quit();
-    else windowAction(action);
+    act(action);
   });
   // Right-click on the app's own page; plugin frames get no menu. The
   // spellchecker uses the system's language, as Electron does by default.
@@ -511,6 +518,12 @@ const windowState = (window: BrowserWindow): WindowState => ({
   fullScreen: window.isFullScreen(),
 });
 
+/** What a shortcut or a Mac's menu asks for: quitting, or `windowAction`. */
+function act(action: WindowAction | 'quit') {
+  if (action === 'quit') app.quit();
+  else windowAction(action);
+}
+
 /**
  * What the titlebar or a shortcut asks of the window. Maximize and restore go
  * through `maximize()` and `unmaximize()` so `place` keeps the state, and
@@ -605,6 +618,14 @@ function setSafeMode(on: boolean) {
   window?.webContents.reload();
   watchReload();
 }
+
+// On a Mac, links come to the running app as this event instead, from the
+// scheme its Info.plist claims (scripts/macos-app.sh).
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  window?.focus();
+  void linkArrived(url);
+});
 
 app.on('second-instance', (_event, argv) => {
   if (window?.isMinimized()) window.restore();
@@ -705,7 +726,8 @@ void app.whenReady().then(async () => {
   );
   protocol.handle('app', serve);
   // No menu bar, and none of its shortcuts: `shortcut` keeps the useful ones.
-  Menu.setApplicationMenu(null);
+  // A Mac's menu bar is never empty, so it has the app's own.
+  Menu.setApplicationMenu(mac ? Menu.buildFromTemplate(macMenu(act)) : null);
   updates.start();
   handle('update', () => updates.state());
   handle('server', async () => server);
