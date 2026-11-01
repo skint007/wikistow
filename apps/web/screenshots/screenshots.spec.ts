@@ -862,10 +862,13 @@ test('capture tag pills, which open tag search, on the draft and the published v
 
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByText('Published v1')).toBeVisible();
+  // The reader starts with them collapsed.
+  await rows.getByRole('button', { name: 'Properties · 2' }).click();
   await rows.getByRole('link', { name: 'winter' }).hover();
   await shoot('reader', rows);
 
   await page.getByRole('treeitem', { name: /Pea soup/ }).click();
+  await rows.getByRole('button', { name: 'Properties · 2' }).click();
   const tag = rows.getByRole('link', { name: 'soup' });
   await tag.waitFor();
   const box = await tag.boundingBox();
