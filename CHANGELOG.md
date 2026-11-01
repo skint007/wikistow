@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- A page’s properties start collapsed to one line, "Properties · 12", which opens them, in the reader and the draft view. Each page remembers whether you opened or closed them on this device, and Show properties in Settings, under Pages, starts them open instead.
+- A page’s properties start collapsed to one line, "Properties · 12", which opens them, in the reader and the draft view. Each page remembers whether you opened or closed them on this device, and Show properties in Settings, under Pages, starts them open instead. (#246)
 
 ## 0.21.0 - 2026-10-31
 
