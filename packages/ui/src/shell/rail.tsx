@@ -300,12 +300,12 @@ function SpaceTiles({
           const movable = index >= first;
           const items = [
             movable && index > first && (
-              <ContextMenuItem key="up" onSelect={() => void move(index, index - 1)}>
+              <ContextMenuItem key="up" {...needs.select(() => void move(index, index - 1))}>
                 Move up
               </ContextMenuItem>
             ),
             movable && index < spaces.length - 1 && (
-              <ContextMenuItem key="down" onSelect={() => void move(index, index + 2)}>
+              <ContextMenuItem key="down" {...needs.select(() => void move(index, index + 2))}>
                 Move down
               </ContextMenuItem>
             ),
@@ -319,7 +319,8 @@ function SpaceTiles({
               aria-current={active ? 'page' : undefined}
               data-hint={plainText(name)}
               data-hint-side="right"
-              draggable={movable}
+              // The order is the server's to keep (ADR 0009, decision 8).
+              draggable={movable && !needs.offline}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData(SPACE_DRAG_TYPE, '');

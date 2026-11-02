@@ -918,7 +918,11 @@ function PageBody({
                       notKept={notKept}
                       editing={
                         canEdit
-                          ? { parentId: info.parentId, create: info.parentId !== null || topOpened }
+                          ? {
+                              parentId: info.parentId,
+                              // Making a page needs the server (ADR 0009, decision 8).
+                              create: !needs.offline && (info.parentId !== null || topOpened),
+                            }
                           : null
                       }
                     />
