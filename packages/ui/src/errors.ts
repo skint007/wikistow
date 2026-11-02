@@ -17,9 +17,9 @@ const MESSAGES: Partial<Record<string, string>> = {
   'last-admin': 'There must always be at least one administrator.',
   'space-limit': 'Your account has made as many spaces as this server allows.',
   'folder-limit':
-    'Your account has made as many folders as this server allows. Deleting folders it made frees room.',
+    'Your account has made as many folders as this server allows. Deleting folders it made, then emptying the trash, frees room.',
   'page-limit':
-    'Your account has made as many pages as this server allows. Deleting pages it made frees room.',
+    'Your account has made as many pages as this server allows. Deleting pages it made, then emptying the trash, frees room.',
   'too-deep': 'Folders go at most 256 levels deep, so nothing was added there.',
   'cannot-target-self': 'You can’t do that to your own account.',
   'reauth-required': 'Sign in again to continue.',

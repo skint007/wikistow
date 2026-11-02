@@ -26,6 +26,7 @@ import { useReauth } from '../../../auth/reauth';
 import { desktop } from '../../../desktop';
 import { errorMessage, unwrap } from '../../../errors';
 import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-moves';
+import { showProperties, useShowProperties } from '../../../page/properties-shown';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
@@ -90,6 +91,7 @@ function Settings() {
             </SettingsGroup>
             <SettingsGroup id="pages" title="Pages" note="Working with pages and folders">
               <AskBeforeMoves />
+              <ShowProperties />
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />
@@ -194,6 +196,25 @@ function AskBeforeMoves() {
           aria-label="Ask before moving"
           checked={asking}
           onCheckedChange={(on) => askBeforeMoves.set(on)}
+        />
+      }
+    />
+  );
+}
+
+/** Whether a page’s properties start open, where the person hasn’t chosen otherwise on it. */
+function ShowProperties() {
+  const showing = useShowProperties();
+  return (
+    <SettingRow
+      name="Show properties"
+      scope={THIS_DEVICE}
+      state="Starts a page’s properties open, not collapsed to one line."
+      action={
+        <Switch
+          aria-label="Show properties"
+          checked={showing}
+          onCheckedChange={(on) => showProperties.set(on)}
         />
       }
     />

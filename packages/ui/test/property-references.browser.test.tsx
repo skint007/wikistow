@@ -19,11 +19,14 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { LinkAssist } from '../src/page/editor/surface.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { Markdown } from '../src/page/markdown.tsx';
+import { openVault } from './page-view.ts';
 
 // References to the page's values in its body, as the reader draws them:
 // the value as text or a link chip, never HTML made from it.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+// Its properties keep their open state in the vault's account.
+openVault();
 
 const PAGE = `---
 servings: 4
