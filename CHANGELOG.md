@@ -20,10 +20,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Linked from, below each page in the reader and the draft view, lists the pages in its space that link to it, by title with their folders. It shows only pages you can open, in the version you see, with drafts labelled for editors, and nothing when no page links there. (#248)
 - Math in pages: `$…$` inline and `$$` blocks show as MathML in the reader and the visual editor, where a click opens the TeX to edit. A single dollar follows Pandoc's rule, so prices like `$5 and $10` stay text. (#252)
 - A fenced `mermaid` code block shows as its diagram in the reader and under its code in the visual editor, with a button to see the source. Mermaid runs in a sandboxed frame and loads only on pages with a diagram. A public page shows each diagram as an image, with its source under it. (#253)
+- Import… in the space menu and each folder's menu, beside Export…, brings in notes from Joplin: a JEX file, or a Markdown + Front Matter export's folder or zip. Each notebook becomes a folder and each note a published page, with its files as attachments, its tags, dates and to-do state as front matter, and links between notes as wikilinks. It shows how far it has got, can stop, and lists links it couldn't rewrite and notes it left out, such as encrypted ones. Importing the same export into the same place again makes nothing twice and finishes an import cut short. (#254)
 
 #### CLI
 
 - `wikistow page links PAGE_ID` lists the pages that link to a page, from what the agent can read, as the app's Linked from does. (#248)
+- `wikistow import PATH`, with `--space SPACE_ID`, `--folder FOLDER_ID` or both, imports a Joplin export as Import… does, for agents that may publish there. The skill says to use it only when the person asks. (#254)
 
 #### Desktop
 

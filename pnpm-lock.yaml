@@ -262,6 +262,9 @@ importers:
       '@wikistow/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       hast-util-from-html:
         specifier: 2.0.3
         version: 2.0.3

@@ -142,6 +142,7 @@ export async function openAgent(
     input,
     makeStore = systemSecretStore,
     send = cliFetch,
+    journaled = true,
   }: {
     unlock: UnlockOptions;
     idempotencyKey?: string | null;
@@ -149,6 +150,11 @@ export async function openAgent(
     input?: string;
     makeStore?: StoreFactory;
     send?: Fetch;
+    /**
+     * False for a command that makes many changes and keeps its own keys
+     * (`import`): its requests skip the journal, which takes one change.
+     */
+    journaled?: boolean;
   },
 ): Promise<OpenedAgent> {
   const { dir, file } = readKeyFile(io);
@@ -165,7 +171,7 @@ export async function openAgent(
   });
   const api = createApiClient({
     baseUrl: file.server,
-    fetch: journal.fetch(send),
+    fetch: journaled ? journal.fetch(send) : send,
     token: secrets.token,
   });
   const { restore } = await api.call(systemRoutes.installation);

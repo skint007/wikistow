@@ -552,6 +552,15 @@ Rules (`payload.ts`, `metadata.ts`):
 - Readers show it only when `format` is 1 and `name` is a name their icon set has. Anything else counts as none and shows the emoji (a space without one, its initials); it never makes the metadata `malformed`. Where `wikistow.icon` is present too, as when an older client added an image, the image shows.
 - Removing it writes `wikistow.symbol: null`. Choosing an icon removes the image (`wikistow.icon: null`); choosing an emoji or an image removes the icon. The emoji stays beside it, for older clients and the CLI.
 
+**What an import made it from** (`import.ts`), the page payload and node metadata extension `wikistow.import`:
+
+```
+{ from: "joplin", key: string }
+```
+
+- Written by Import (wikistow.md, Import) on each folder and page it makes, `key` naming the notebook or note: its path in a Joplin Markdown export, its Joplin ID in a JEX. It is encrypted with the rest of the payload or metadata, and copied unchanged into later versions and publications, like any namespace a client doesn't touch.
+- Importing again into the same place looks for it on the folders and pages there, so nothing is made twice. Anything else ignores it.
+
 **Changes made while reading** (`change.ts`), the extension `wikistow.change` ([ADR 0008](../docs/adr/0008-reader-change-labels.md)):
 
 ```

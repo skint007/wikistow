@@ -1124,6 +1124,8 @@ async function checksOut(
  * readers already read (`writeLinks`). Given `change`, what changes made
  * while reading changed, it says so (`wikistow.change`, naming itself), as
  * their flush's publication does; any other leaves it out (ADR 0008).
+ * Its links are worked out from `tree`, the space as the caller sees it,
+ * or one loaded if they need it.
  */
 export async function publishPage(
   ctx: ClientContext,
@@ -1132,6 +1134,7 @@ export async function publishPage(
     expected,
     read,
     change,
+    tree,
   }: {
     expected?: {
       draftHead: RevisionId;
@@ -1140,6 +1143,7 @@ export async function publishPage(
     };
     read?: ReadWikilinks;
     change?: ChangeSummary;
+    tree?: LinkTree;
   } = {},
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
@@ -1167,7 +1171,7 @@ export async function publishPage(
     ...(previous?.opened.kind === 'current'
       ? { publication: { table: linkTableOf(previous.opened.payload), region: previous.region } }
       : {}),
-    tree: linkTreeFor(ctx, page.spaceId),
+    tree: linkTreeFor(ctx, page.spaceId, tree),
     published: publicationsFor(ctx, page.spaceId),
     ...(read ? { read } : {}),
   });

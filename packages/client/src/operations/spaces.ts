@@ -19,6 +19,7 @@ import {
   type FolderLook,
   type FolderPicture,
   type MetadataChanges,
+  type NodeMetadata,
 } from '../metadata.ts';
 import { CryptoError } from '../errors.ts';
 import { repairText } from '../json.ts';
@@ -250,7 +251,8 @@ function placing(tree: {
 
 /**
  * A new folder at the root or inside `parentId`, with `look`, or ⭐ on blue
- * until someone changes it, and an image or icon if `picture` names one.
+ * until someone changes it, an image or icon if `picture` names one, and
+ * `extensions` in its metadata, such as where an import made it from.
  */
 export async function createFolder(
   ctx: ClientContext,
@@ -260,15 +262,19 @@ export async function createFolder(
     name,
     look,
     picture,
+    extensions = {},
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     name: string;
     look?: FolderLook;
     picture?: FolderPicture;
+    extensions?: NodeMetadata['extensions'];
   },
 ): Promise<FolderId> {
   const folderId = newId(FolderIdSchema);
+  const made = newFolderMetadata(name, look, picture);
+  const content = { ...made, extensions: { ...made.extensions, ...extensions } };
   await withFreshKeys(ctx, spaceId, async (keys) => {
     const { permissionVersion, share, region } = await newNodeTarget(ctx, spaceId, parentId);
     const { metadata, envelopes, wrap } = sealMetadataV2({
@@ -281,7 +287,7 @@ export async function createFolder(
         metadataRevisionId: newId(MetadataRevisionId),
         basedOn: null,
       },
-      metadata: newFolderMetadata(name, look, picture),
+      metadata: content,
       ...keyTargetFor(ctx, keys, region, share),
     });
     await ctx.api.call(structureRoutes.createFolder, {
