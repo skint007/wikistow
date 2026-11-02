@@ -145,7 +145,8 @@ export function ImportDialog({
         {(stage.kind === 'choose' || stage.kind === 'reading') && (
           <>
             <p className="text-sm text-muted-foreground">
-              Encrypted notes must be decrypted in Joplin before you export them.
+              JEX keeps notebook names exactly. Encrypted notes must be decrypted in Joplin before
+              you export them.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button

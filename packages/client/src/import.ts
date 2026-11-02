@@ -180,13 +180,7 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
     encryptedNotes: [],
     target: (note, url) => {
       if (SCHEME.test(url) || url.startsWith('#') || url.startsWith('/')) return null;
-      let decoded: string;
-      try {
-        decoded = decodeURIComponent(url.replace(/[?#].*$/s, ''));
-      } catch {
-        return null;
-      }
-      const path = cleanPath(`${dirOf(note.path)}/${decoded}`);
+      const path = cleanPath(`${dirOf(note.path)}/${unescapeLinkUrl(url.replace(/[?#].*$/s, ''))}`);
       if (path === null) return null;
       if (byPath.has(path)) return { kind: 'note', key: path };
       if (resources.has(path)) return { kind: 'resource', key: path };
@@ -195,6 +189,13 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
     },
   };
 }
+
+/**
+ * A link's path as Joplin wrote it (`markdownUtils.unescapeLinkUrl`): it
+ * encodes only spaces and parentheses, and keeps a `%` in a name as it is.
+ */
+const unescapeLinkUrl = (url: string) =>
+  url.replace(/%20/g, ' ').replace(/%28/g, '(').replace(/%29/g, ')');
 
 /** The `title` the front matter gives, if it reads as one. */
 function frontmatterTitle(markdown: string): string | null {
