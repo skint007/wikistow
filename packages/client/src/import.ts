@@ -464,6 +464,13 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
       found.push(...htmlLinks(body.slice(start, end), offset + start, note, target));
       return;
     }
+    // A reference's definition naming a note: Joplin never writes one; reported, not rewritten.
+    if (node.type === 'definition') {
+      const named = target(note, node.url);
+      if (named !== null && named !== 'missing' && named.kind === 'note') {
+        found.push({ kind: 'kept', source: node.url });
+      }
+    }
     if (node.type === 'link' && start !== undefined && end !== undefined) {
       const named = target(note, node.url);
       if (named !== null && named !== 'missing' && named.kind === 'note') {
