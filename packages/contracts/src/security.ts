@@ -61,14 +61,15 @@ export const pluginHostCsp = (origin: string) =>
 
 /**
  * The sandboxed frame that draws Mermaid diagrams (ADR 0010), its script,
- * and Mermaid's own build, all files of the web build.
+ * and the folder holding Mermaid's own build, named by its hash, all of
+ * the web build.
  */
 export const DIAGRAM_HOST_PAGE = '/diagram-host.html';
 export const DIAGRAM_HOST_SCRIPT = '/diagram-host.js';
-export const DIAGRAM_LIBRARY = '/mermaid.js';
+export const DIAGRAM_LIBRARY = '/assets/mermaid/';
 
 /**
- * The diagram frame's policy: only its two scripts, named exactly, and no
+ * The diagram frame's policy: only its script and Mermaid's folder, and no
  * requests. Mermaid writes `<style>` elements and style attributes to
  * measure text, which only this frame's opaque origin may do.
  */
@@ -93,7 +94,11 @@ export function securityHeadersFor(path: string, origin: string): Record<string,
     const csp = path === PLUGIN_HOST_PAGE ? pluginHostCsp(origin) : diagramHostCsp(origin);
     return { ...headers, 'Content-Security-Policy': csp };
   }
-  if (path === PLUGIN_HOST_SCRIPT || path === DIAGRAM_HOST_SCRIPT || path === DIAGRAM_LIBRARY) {
+  if (
+    path === PLUGIN_HOST_SCRIPT ||
+    path === DIAGRAM_HOST_SCRIPT ||
+    path.startsWith(DIAGRAM_LIBRARY)
+  ) {
     return { ...SECURITY_HEADERS, 'Cross-Origin-Resource-Policy': 'cross-origin' };
   }
   return { ...SECURITY_HEADERS };

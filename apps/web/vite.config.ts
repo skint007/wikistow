@@ -2,12 +2,18 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
 import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  DIAGRAM_HOST_PAGE,
+  DIAGRAM_HOST_SCRIPT,
+  DIAGRAM_LIBRARY,
+} from '../../packages/contracts/src/security.ts';
 import { PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
 import { REACT_FILES } from '../../packages/ui/src/workshop/library.ts';
 
@@ -102,12 +108,24 @@ const publicPageFonts = {
 /**
  * Mermaid's own single-file build, which the diagram host frame loads as a
  * classic script (ADR 0010): a module script or `import()` from the
- * frame's opaque origin would be a cross-origin request. Written to
- * `/mermaid.js`, and served from node_modules by the dev server.
+ * frame's opaque origin would be a cross-origin request. Written under
+ * `/assets/mermaid/` by its hash, so it is cached for good, with the host
+ * page naming it. The dev server serves both from here.
  */
 const mermaidFile = createRequire(fileURLToPath(import.meta.url)).resolve(
   'mermaid/dist/mermaid.min.js',
 );
+const hostPage = (library: string) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WikiStow diagram host</title>
+    <script src="${library}"></script>
+    <script src="${DIAGRAM_HOST_SCRIPT}"></script>
+  </head>
+  <body></body>
+</html>
+`;
 const diagramLibrary = {
   name: 'diagram-library',
   configureServer(server: {
@@ -115,15 +133,28 @@ const diagramLibrary = {
       use: (path: string, handle: (req: unknown, res: ServerResponse) => void) => void;
     };
   }) {
-    server.middlewares.use('/mermaid.js', (_req, res) => {
+    const library = `${DIAGRAM_LIBRARY}dev.js`;
+    server.middlewares.use(library, (_req, res) => {
       res.setHeader('Content-Type', 'text/javascript');
       res.end(readFileSync(mermaidFile));
     });
+    server.middlewares.use(DIAGRAM_HOST_PAGE, (_req, res) => {
+      res.setHeader('Content-Type', 'text/html');
+      res.end(hostPage(library));
+    });
   },
   async generateBundle(this: {
-    emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array }) => string;
+    emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array | string }) => string;
   }) {
-    this.emitFile({ type: 'asset', fileName: 'mermaid.js', source: await readFile(mermaidFile) });
+    const source = await readFile(mermaidFile);
+    const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
+    const library = `${DIAGRAM_LIBRARY}${hash}.js`;
+    this.emitFile({ type: 'asset', fileName: library.slice(1), source });
+    this.emitFile({
+      type: 'asset',
+      fileName: DIAGRAM_HOST_PAGE.slice(1),
+      source: hostPage(library),
+    });
   },
 };
 
