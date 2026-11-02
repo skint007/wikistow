@@ -19,7 +19,7 @@
 // destination's share, then nodes; a move's finish then holds the source's
 // shares and subtree as a delete does (`holdSubtree`).
 import type { copyRoutes } from '@wikistow/contracts';
-import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { BlobStore } from '../blobs/store.ts';
@@ -37,6 +37,7 @@ import {
   publications,
   revisions,
   revisionWraps,
+  shares,
   spaces,
 } from '../db/schema/index.ts';
 import {
@@ -808,19 +809,7 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
         nodeIds: stale,
       });
     }
-    // What was deleted from under it stays in the trash, at the top of the
-    // space, rather than going for good with the move.
-    const lifted = await tx
-      .update(nodes)
-      .set({ parentId: null })
-      .where(
-        and(
-          anyId(nodes.id, held),
-          ne(nodes.id, copy.sourceNodeId),
-          sql`exists (select 1 from trash t where t.node_id = ${nodes.id})`,
-        ),
-      )
-      .returning({ id: nodes.id });
+    const lifted = await liftTrash(tx, copy, held);
     const going =
       lifted.length === 0
         ? held
@@ -846,6 +835,52 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
     },
   });
   return removed;
+}
+
+/**
+ * Before a move deletes its source for good: what was deleted from under it
+ * stays in the trash, moved under the source's parent, where its keys still
+ * fit, as long as no share whose keys it needs goes with the move: one
+ * rooted at the source or between it and the item. Those go with the move,
+ * since nobody could open them after it. `held` is the source subtree. The
+ * items moved, whose subtrees leave it.
+ */
+async function liftTrash(tx: Database, copy: CopyRow, held: readonly string[]) {
+  const rows = await tx
+    .select({ id: nodes.id, parentId: nodes.parentId, trashId: nodes.trashId })
+    .from(nodes)
+    .where(anyId(nodes.id, held));
+  const parentOf = new Map(rows.map((node) => [node.id, node.parentId]));
+  const trashed = new Set(rows.flatMap((node) => (node.trashId ? [node.id] : [])));
+  const roots = new Set(
+    (
+      await tx
+        .select({ rootId: shares.rootId })
+        .from(shares)
+        .where(and(eq(shares.spaceId, copy.sourceSpaceId), anyId(shares.rootId, held)))
+    ).flatMap((share) => (share.rootId ? [share.rootId] : [])),
+  );
+  // Each topmost item in the trash under the source, unless a share above it goes.
+  const kept = rows.filter((node) => {
+    if (!node.trashId || node.id === copy.sourceNodeId) return false;
+    for (let at = node.parentId; at; at = parentOf.get(at) ?? null) {
+      if (trashed.has(at) || roots.has(at)) return false;
+      if (at === copy.sourceNodeId) return true;
+    }
+    return false;
+  });
+  if (kept.length === 0) return [];
+  const source = rows.find((node) => node.id === copy.sourceNodeId);
+  return tx
+    .update(nodes)
+    .set({ parentId: source?.parentId ?? null })
+    .where(
+      anyId(
+        nodes.id,
+        kept.map((node) => node.id),
+      ),
+    )
+    .returning({ id: nodes.id });
 }
 
 /**

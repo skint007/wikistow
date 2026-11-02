@@ -203,19 +203,52 @@ describe('the trash', () => {
 
   it('keeps what was deleted from a folder that moves to another space', async () => {
     const owner = await personWithVault(t);
+    const member = await personWithVault(t);
     const lib = await library(owner);
+    await shareFolder(owner.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.above,
+      people: [await invite(owner, member, 'editor')],
+    });
     const elsewhere = await spaceOperations.createSpace(owner.ctx, { name: 'Elsewhere' });
-    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.beside.pageId });
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.page.pageId });
     const preview = await copies.previewCopy(owner.ctx, {
       kind: 'move',
-      source: { spaceId: lib.spaceId, nodeId: lib.above },
+      source: { spaceId: lib.spaceId, nodeId: lib.shared },
       destination: { spaceId: elsewhere, parentId: null },
     });
     await copies.makeCopy(owner.ctx, preview);
-    expect(await nodesOf(lib.spaceId)).toEqual([lib.beside.pageId]);
-    expect(await trash.restoreTrash(owner.ctx, await trashIdOf(owner, lib.beside.pageId))).toEqual(
-      expect.objectContaining({ parentId: null }),
+    // It comes back beside where the folder was, in the share its keys are for.
+    expect(await trash.restoreTrash(owner.ctx, await trashIdOf(owner, lib.page.pageId))).toEqual(
+      expect.objectContaining({ parentId: lib.above }),
     );
+    const seen = await spaceOperations.loadTree(member.ctx, lib.spaceId);
+    expect(seen.pages.find((page) => page.id === lib.page.pageId)).toMatchObject({
+      parentId: lib.above,
+      title: 'Plan',
+    });
+  });
+
+  it('lets what was deleted from a shared folder go with it when the folder moves away', async () => {
+    const owner = await personWithVault(t);
+    const member = await personWithVault(t);
+    const lib = await library(owner);
+    await shareFolder(owner.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [await invite(owner, member, 'editor')],
+    });
+    const elsewhere = await spaceOperations.createSpace(owner.ctx, { name: 'Elsewhere' });
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.page.pageId });
+    const preview = await copies.previewCopy(owner.ctx, {
+      kind: 'move',
+      source: { spaceId: lib.spaceId, nodeId: lib.shared },
+      destination: { spaceId: elsewhere, parentId: null },
+    });
+    await copies.makeCopy(owner.ctx, preview);
+    // Its keys were the share's, which went with the move, so nobody could open it.
+    expect(await trash.loadTrash(owner.ctx)).toEqual([]);
+    expect(await nodesOf(lib.spaceId)).not.toContain(lib.page.pageId);
   });
 
   it('deletes for good one item, a space’s whole trash, or what has waited 30 days', async () => {
