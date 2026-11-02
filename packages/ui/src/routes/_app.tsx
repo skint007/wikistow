@@ -3,6 +3,7 @@ import { createFileRoute, Outlet, redirect, useNavigate, useRouter } from '@tans
 import { useEffect } from 'react';
 import { meQuery } from '../api';
 import { ReauthProvider } from '../auth/reauth';
+import { keptFor } from '../data/kept-store';
 import { desktop } from '../desktop';
 import { AppShell } from '../shell/app-shell';
 import { withoutSearchHash } from '../shell/search-link';
@@ -25,6 +26,8 @@ export const Route = createFileRoute('/_app')({
         search: { redirect: withoutSearchHash(location.href, { hold: false }) },
       });
     }
+    // What's kept for offline is this account's, or goes, before any session reads it.
+    await keptFor(me.account);
     // After a refresh, a browser tab opens the vault it kept, whichever page
     // it is on, unless it was left idle past the lock delay. The desktop app
     // opens a remembered one on the unlock page.

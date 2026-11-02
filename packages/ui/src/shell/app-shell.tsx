@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { onSignedOutElsewhere } from '../data/kept-store';
 import { useTreeChanges } from '../data/tree-changes';
 import { desktopUpdateQuery } from '../desktop';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
@@ -46,6 +47,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
   useTreeChanges(vault.status === 'unlocked' ? vault.ctx : null);
+  // Another tab signing out deletes what's kept: this one stops keeping first.
+  useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
   // The avatar's update mark is in the drawer, so the button opening it carries it too.
   const { data: update } = useQuery(desktopUpdateQuery);

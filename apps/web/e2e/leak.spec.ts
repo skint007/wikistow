@@ -26,10 +26,50 @@ async function browserStorage(page: Page) {
           };
         })
       : undefined;
+    // What's kept for offline (ADR 0009): each item's name and bytes, as
+    // text, so anything kept unsealed would show, and whose it is.
+    const kept = (await indexedDB.databases()).some((db) => db.name === 'wikistow-kept')
+      ? await new Promise<{ items: string[][]; queue: string[][]; meta: unknown[] }>(
+          (resolve, reject) => {
+            const open = indexedDB.open('wikistow-kept');
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+              const db = open.result;
+              const tx = db.transaction(['items', 'queue', 'meta']);
+              const all = (store: string) => {
+                const keys = tx.objectStore(store).getAllKeys();
+                const values = tx.objectStore(store).getAll();
+                return { keys, values };
+              };
+              const [items, queue, meta] = [all('items'), all('queue'), all('meta')];
+              const text = (value: unknown) =>
+                value &&
+                typeof value === 'object' &&
+                'sealed' in value &&
+                value.sealed instanceof Uint8Array
+                  ? new TextDecoder('latin1').decode(value.sealed)
+                  : JSON.stringify(value);
+              const pairs = ({ keys, values }: ReturnType<typeof all>) =>
+                keys.result.map((key, i) => [
+                  typeof key === 'string' ? key : '',
+                  text(values.result[i]),
+                ]);
+              tx.oncomplete = () => {
+                db.close();
+                resolve({ items: pairs(items), queue: pairs(queue), meta: meta.values.result });
+              };
+              tx.onerror = () => reject(tx.error);
+            };
+          },
+        )
+      : undefined;
     return {
       local: entries(localStorage),
       session: entries(sessionStorage),
-      indexedDb: (await indexedDB.databases()).map((db) => db.name),
+      indexedDb: (await indexedDB.databases())
+        .map((db) => db.name ?? '')
+        .sort((a, b) => a.localeCompare(b)),
+      kept,
       wrappingKey: wrappingKey && {
         algorithm: wrappingKey.algorithm.name,
         extractable: wrappingKey.extractable,
@@ -58,6 +98,9 @@ async function browserStorage(page: Page) {
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
  * wrapping key in IndexedDB that no script can read out, and, when it is
  * `remembered`, another sealed copy in localStorage. Locking forgets them all.
+ * The pages opened here are kept for offline in IndexedDB (ADR 0009), each
+ * item sealed and named by a tag, with the account they belong to beside
+ * them, open or locked. Signing out deletes them.
  */
 async function expectNothingStored(
   page: Page,
@@ -90,7 +133,12 @@ async function expectNothingStored(
     expect.stringMatching(/^tsr-scroll-restoration-v1/),
     ...(open ? ['wikistow.vault'] : []),
   ]);
-  expect(stored.indexedDb).toEqual(open ? ['wikistow-vault'] : []);
+  expect(stored.indexedDb).toEqual(open ? ['wikistow-kept', 'wikistow-vault'] : ['wikistow-kept']);
+  // The index, the space, the page's versions and its image, at least.
+  expect(stored.kept?.items.length).toBeGreaterThanOrEqual(4);
+  expect(stored.kept?.items.every(([name]) => /^[\w-]{22}$/.test(name ?? ''))).toBe(true);
+  expect(stored.kept?.queue).toEqual([]);
+  expect(stored.kept?.meta).toEqual([{ id: expect.any(String), name: expect.any(String) }]);
   expect(stored.wrappingKey).toEqual(
     open ? { algorithm: 'AES-GCM', extractable: false } : undefined,
   );
@@ -114,7 +162,7 @@ async function expectNothingStored(
  * Decrypted pages, the keys that open them, the search index built from
  * them and a Markdown export live only in memory, apart from the vault key
  * the tab keeps sealed for a refresh, and the browser for later visits when
- * asked to. After a whole page flow, a search and an export, the browser's
+ * asked to, and the pages opened, kept sealed for offline. After a whole page flow, a search and an export, the browser's
  * storage holds the theme choice, the editor picked, the last restore seen,
  * the open folders' IDs, the router's scroll positions, the session cookie
  * and those sealed copies, and nothing typed.
@@ -155,8 +203,9 @@ test('the browser stores no page content or key material', async ({ page, freshP
   ];
   const check = (open = true, remembered = false) =>
     expectNothingStored(page, secrets, { open, editor: 'visual', remembered });
-  // While the vault is open, once search has indexed it, and after it locks.
-  await check();
+  // While the vault is open, once the page is kept for offline, once search
+  // has indexed it, and after it locks.
+  await expect(() => check()).toPass();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+k');
   const search = page.getByRole('dialog', { name: 'Search' });
@@ -193,4 +242,10 @@ test('the browser stores no page content or key material', async ({ page, freshP
   await expect(remember).toBeDisabled();
   // Forgetting the kept unlock finishes a moment after the page locks.
   await expect(() => check(false)).toPass();
+  // Signing out deletes what was kept for offline.
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/sign-in/);
+  const signedOut = await browserStorage(page);
+  expect(signedOut.indexedDb).toEqual([]);
 });
