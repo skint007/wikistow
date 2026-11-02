@@ -34,7 +34,12 @@ async function browserStorage(page: Page) {
         algorithm: wrappingKey.algorithm.name,
         extractable: wrappingKey.extractable,
       },
-      caches: await caches.keys(),
+      caches: await Promise.all(
+        (await caches.keys()).map(async (name) => ({
+          name,
+          files: (await (await caches.open(name)).keys()).map(({ url }) => new URL(url).pathname),
+        })),
+      ),
     };
   });
   const cookies = await page.context().cookies();
@@ -46,6 +51,7 @@ async function browserStorage(page: Page) {
  * restore it has seen (none here), the folders open in each space's tree
  * (their IDs), the pages whose properties were opened or closed (their
  * IDs), scroll positions and session cookie, and none of `secrets`.
+ * The service worker keeps the app's own files in Cache Storage.
  * Settings kept on the device once changed, such as `wikistow.idleLock`,
  * `wikistow.askBeforeMoves` (`false`) and `wikistow.showProperties`
  * (`true`), aren't set here. While the vault is open, the tab
@@ -88,7 +94,15 @@ async function expectNothingStored(
   expect(stored.wrappingKey).toEqual(
     open ? { algorithm: 'AES-GCM', extractable: false } : undefined,
   );
-  expect(stored.caches).toEqual([]);
+  // The service worker's copy of the app's own files (ADR 0009), and nothing the server answers.
+  expect(stored.caches).toEqual([
+    { name: expect.stringMatching(/^wikistow-app-[0-9a-f]{16}$/), files: expect.any(Array) },
+  ]);
+  expect(
+    stored.caches
+      .flatMap(({ files }) => files)
+      .filter((file) => !/^\/(assets\/)?[\w.-]+$/.test(file)),
+  ).toEqual([]);
   expect(stored.cookies.map((c) => c.name)).toEqual([
     expect.stringMatching(/^better-auth\.session_token$/),
   ]);
