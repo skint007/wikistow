@@ -18,6 +18,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A page’s properties start collapsed to one line, "Properties · 12", which opens them, in the reader and the draft view. Each page remembers whether you opened or closed them on this device, and Show properties in Settings, under Pages, starts them open instead. (#246)
 - Deleting a page or folder moves it, with everything in it, to its space's trash for 30 days. Trash in the rail lists what was deleted in the spaces you own, with who deleted it and when, to restore or delete for good, and Empty trash clears it. After a delete, Undo puts it back. A restored page or folder comes back with its versions, attachments, shares and published state; its public link stays off. (#249)
 - Linked from, below each page in the reader and the draft view, lists the pages in its space that link to it, by title with their folders. It shows only pages you can open, in the version you see, with drafts labelled for editors, and nothing when no page links there. (#248)
+- Math in pages: `$…$` inline and `$$` blocks show as MathML in the reader and the visual editor, where a click opens the TeX to edit. A single dollar follows Pandoc's rule, so prices like `$5 and $10` stay text. (#252)
 
 #### CLI
 
@@ -32,6 +33,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Each release has unsigned Windows installers, `wikistow-desktop-<version>-x64-setup.exe` and `…-arm64-setup.exe`, built on Linux with NSIS and checked on Windows x64 and Arm runners. CI can be started by hand to build and check the desktop packages on a branch (#250).
 - Each release has `wikistow-desktop-<version>-macos-arm64.zip` and `…-macos-x64.zip`, checked in `SHA256SUMS`, built and started on a Mac of each kind in CI. A stable release also updates the Homebrew cask in the `skint007/wikistow` tap: `brew install --cask skint007/wikistow/wikistow`. (#247)
+
+#### Server
+
+- Public pages show math too, and copies made before are rendered again. (#252)
 
 ## 0.21.0 - 2026-10-31
 

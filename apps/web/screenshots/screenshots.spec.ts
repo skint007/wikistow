@@ -1005,3 +1005,65 @@ test('capture query tables: in the reader, the visual editor, a block that doesn
   await expect(visitor.getByRole('table')).toBeVisible();
   await visitor.screenshot({ path: 'screenshots/query-public-page.png', fullPage: true });
 });
+
+test('capture math: inline and block, in the reader, the visual editor, its TeX open, and the public page', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'math-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Formulas');
+  await fillSource(
+    page,
+    [
+      'Prices like $5 and $10 stay as written.',
+      'A body’s kinetic energy is $E_k = \\tfrac{1}{2} m v^2$, and a wave’s speed is $v = f\\lambda$.',
+      '$$\n\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}\n$$',
+      'The roots of $ax^2 + bx + c = 0$ are',
+      '$$\nx = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\n$$',
+      '$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}^{-1} = \\frac{1}{ad - bc} \\begin{pmatrix} d & -b \\\\ -c & a \\end{pmatrix}\n$$',
+      '$$\n\\begin{aligned} f(x) &= (x + 1)^2 \\\\ &= x^2 + 2x + 1 \\end{aligned}\n$$',
+      'TeX that doesn’t read stays as written: $\\frac{1}{$.',
+      '',
+    ].join('\n\n'),
+  );
+  await waitForSave(page);
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('math')).toHaveCount(7);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await shoot('visual', visual);
+  await visual.locator('.math-inline').first().click();
+  await expect(visual.getByRole('textbox', { name: 'Math, as TeX' })).toBeFocused();
+  await shoot('visual-inline-open', visual);
+  await page.keyboard.press('Escape');
+  await visual.locator('.math-display').first().click();
+  await expect(visual.getByRole('textbox', { name: 'Math block, as TeX' })).toBeFocused();
+  await shoot('visual-block-open', visual);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await expect(page.locator('.page-body').first().locator('math')).toHaveCount(7);
+  await shoot('reader', page);
+  await shoot('reader-phone', page, true);
+
+  await openLinkDialog(page, 'Formulas');
+  const dialog = page.getByRole('dialog', { name: 'Share “Formulas” with a public link?' });
+  await dialog.getByRole('button', { name: 'Turn on public link' }).click();
+  const link = page
+    .getByRole('dialog', { name: 'Public link for “Formulas”' })
+    .getByLabel('Public link');
+  await expect(link).toHaveValue(/\/p\/[\w-]{22}$/);
+  const url = await link.inputValue();
+  const visitor = await freshPage();
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  // A visitor sees "being updated" until the copy goes up.
+  await expect(async () => {
+    await visitor.goto(url);
+    await expect(visitor.locator('math')).toHaveCount(7, { timeout: 2_000 });
+  }).toPass();
+  await visitor.screenshot({ path: 'screenshots/math-public-page.png', fullPage: true });
+});

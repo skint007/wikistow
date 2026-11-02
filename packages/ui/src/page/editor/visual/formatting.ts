@@ -204,12 +204,13 @@ export function quoteAs(kind: QuoteKind): Format {
 }
 
 // A leaf in text going into a code block: a line break ends a line, a
-// wikilink or HTML is its source, a footnote reference as it's written;
-// other atoms, as images, have no text.
+// wikilink or HTML is its source, a footnote reference or inline math as
+// it's written; other atoms, as images, have no text.
 function leafText(leaf: Node): string {
   const { source, value, label } = leaf.attrs;
   if (leaf.type.name === 'hardbreak') return '\n';
   if (leaf.type.name === 'footnote_reference') return `[^${String(label)}]`;
+  if (leaf.type.name === 'math_inline') return `$${String(value)}$`;
   return typeof source === 'string' ? source : typeof value === 'string' ? value : '';
 }
 
@@ -368,12 +369,14 @@ function list(kind: ListKind): Format {
   };
 }
 
-// Whether a heading can hold `block`'s content: no line break, nor HTML
-// that's a block of its own.
+// Whether a heading can hold `block`'s content: no line break, in math
+// too, nor HTML that's a block of its own.
 const headingHolds = (block: Node) => {
   let holds = true;
   block.forEach((child) => {
     if (child.type.name === 'hardbreak') holds = false;
+    if (child.type.name === 'math_inline' && /[\r\n]/.test(String(child.attrs['value'])))
+      holds = false;
     if (child.type.name === 'html') holds &&= inlineHtml(String(child.attrs['value']));
   });
   return holds;

@@ -1,12 +1,14 @@
 // A page body as sanitized HTML, for reading it outside the app: the
 // server's public pages (ADR 0005) render it so, and the app works out
 // from it which attachments a public copy needs. No React here, and no
-// highlighting: callers that want it run `highlightCode` first.
+// highlighting or math: callers that want them run `highlightCode` and
+// `renderMath` (`@wikistow/client/reader/math`) first.
 import type { Element, ElementContent, Root as HastRoot, Nodes as HastNodes } from 'hast';
 import type { Root, WikilinkNode } from 'mdast';
-import { toHast } from 'mdast-util-to-hast';
+import type { InlineMath, Math as MathBlock } from 'mdast-util-math';
+import { toHast, type State } from 'mdast-util-to-hast';
 import { resolveWikilinks } from '../links.ts';
-import { sanitizedPage } from './page-html.ts';
+import { sanitizedPage, SYNTAX } from './page-html.ts';
 
 /** How a link or image names one of the page's attachments: `attachment:<id>`. */
 export const ATTACHMENT_SCHEME = 'attachment:';
@@ -18,13 +20,46 @@ export type WikilinkHtml = (link: WikilinkNode) => ElementContent | ElementConte
  * A page body, read as the reader reads it (`readBody`), as HTML: its raw
  * HTML parsed and the whole of it sanitized (`sanitizedPage`), each
  * wikilink made by `wikilink` first, so it is sanitized with the rest.
+ * Math, which the page's HTML may not hold, goes in after, as `renderMath`
+ * made it, or as its TeX if it didn't.
  */
 export function bodyHtml(tree: Root, wikilink: WikilinkHtml): HastRoot {
+  const math: ElementContent[] = [];
+  const held = (state: State, node: MathBlock | InlineMath): Element => {
+    const code: Element = { type: 'element', tagName: 'code', properties: {}, children: [] };
+    code.children.push({ type: 'text', value: node.value });
+    math.push(state.applyData(node, code));
+    return {
+      type: 'element',
+      tagName: 'span',
+      properties: { [SYNTAX]: math.length - 1 },
+      children: [],
+    };
+  };
   const html = toHast(tree, {
     allowDangerousHtml: true,
-    handlers: { wikilink: (_state, node: WikilinkNode) => wikilink(node) },
+    handlers: {
+      wikilink: (_state, node: WikilinkNode) => wikilink(node),
+      math: held,
+      inlineMath: held,
+    },
   });
-  return sanitizedPage(html.type === 'root' ? html : { type: 'root', children: [] });
+  const clean = sanitizedPage(html.type === 'root' ? html : { type: 'root', children: [] });
+  return math.length > 0 ? withMath(clean, math) : clean;
+}
+
+/** `tree` with each placeholder `bodyHtml` held math in replaced by that math. Without recursion. */
+function withMath(tree: HastRoot, math: readonly ElementContent[]): HastRoot {
+  const stack: HastNodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (!('children' in node)) continue;
+    node.children = node.children.map((child) => {
+      const at = child.type === 'element' ? child.properties[SYNTAX] : undefined;
+      return (at !== undefined && math[Number(at)]) || child;
+    });
+    stack.push(...node.children);
+  }
+  return tree;
 }
 
 /**

@@ -4,14 +4,16 @@
 import { findLinks, placedWikilinks, tableWikilinks } from '@wikistow/client/links';
 import { linkSpans } from '@wikistow/client/markdown';
 import { headingTexts, highlightCode, readBody } from '@wikistow/client/reader';
+import { renderMath } from '@wikistow/client/reader/math';
 import { meaningOf, readerFidelity } from './editor/visual/reader-fidelity';
 
 export const markdownJobs = {
   /**
-   * A page body as the reader reads it (`readBody`), its code highlighted.
-   * Only the worker loads highlight.js, which the page's thread needn't.
+   * A page body as the reader reads it (`readBody`), its code highlighted
+   * and its math as MathML. Only the worker loads highlight.js and KaTeX,
+   * which the page's thread needn't.
    */
-  body: (body: string) => highlightCode(readBody(body)),
+  body: (body: string) => renderMath(highlightCode(readBody(body))),
   /** A page's links where each is written, for export to rewrite (`linkSpans`). */
   spans: linkSpans,
   /** A page's wikilinks and links to pages, for the publish preview (`findLinks`). */
