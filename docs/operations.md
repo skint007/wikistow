@@ -4,7 +4,7 @@ How to run a WikiStow server so it stays up, set up its first administrator and 
 
 ## Choose an image
 
-Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such as `0.2.0`. Run a version tag, or pin its digest, and change it on purpose to upgrade. Take a backup first: the server migrates the database when it starts. `<major>.<minor>` tags, such as `0.2`, move to that line's newest release, and `latest` moves to the newest stable release from `main`. `sha-<commit>` tags are builds of `main` commits for testing, not releases, and `main` moves to the newest of them. Every image's labels name its version and source commit ([releasing](releasing.md)).
+Releases publish the server image as `ghcr.io/skint007/wikistow:<version>`, such as `0.2.0`. Run a version tag, or pin its digest, and change it on purpose to upgrade. Take a backup first: the server migrates the database when it starts. `<major>.<minor>` tags, such as `0.2`, move to that line's newest release, and `latest` moves to the newest stable release from `main`. `beta` moves to the newest release from `main`, a beta or a stable release, for a test server that tries betas first ([releasing](releasing.md#beta-and-stable)). `sha-<commit>` tags are builds of `main` commits for testing, not releases, and `main` moves to the newest of them. Every image's labels name its version and source commit ([releasing](releasing.md)).
 
 ## Run the server under a restart policy
 

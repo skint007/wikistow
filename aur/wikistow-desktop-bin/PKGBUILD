@@ -7,6 +7,9 @@
 
 # pacman sorts a prerelease such as 0.3.0rc.1 before 0.3.0 only without the `-`.
 _version=0.2.0
+# The beta channel's wikistow-desktop-beta-bin is this package, renamed and
+# with _channel=beta, which the app reads to offer betas (docs/releasing.md).
+_channel=stable
 pkgname=wikistow-desktop-bin
 pkgver=${_version//-/}
 pkgrel=1
@@ -31,6 +34,7 @@ package() {
     install -Dm644 app.asar "$pkgdir/usr/lib/wikistow-desktop/app.asar"
     # How the app was installed, for the app to read (docs/desktop.md).
     echo aur > "$pkgdir/usr/lib/wikistow-desktop/install-source"
+    echo "$_channel" > "$pkgdir/usr/lib/wikistow-desktop/channel"
     install -Dm755 wikistow-desktop "$pkgdir/usr/bin/wikistow-desktop"
     install -Dm644 wikistow-desktop.desktop "$pkgdir/usr/share/applications/wikistow-desktop.desktop"
     install -Dm644 wikistow-desktop.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/wikistow-desktop.svg"
