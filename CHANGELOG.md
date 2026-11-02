@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- A page’s properties start collapsed to one line, "Properties · 12", which opens them, in the reader and the draft view. Each page remembers whether you opened or closed them on this device, and Show properties in Settings, under Pages, starts them open instead. (#246)
 - Deleting a page or folder moves it, with everything in it, to its space's trash for 30 days. Trash in the rail lists what was deleted in the spaces you own, with who deleted it and when, to restore or delete for good, and Empty trash clears it. After a delete, Undo puts it back. A restored page or folder comes back with its versions, attachments, shares and published state; its public link stays off. (#249)
 
 ## 0.21.0 - 2026-10-31

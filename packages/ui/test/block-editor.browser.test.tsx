@@ -14,6 +14,7 @@ import {
   type PluginsSnapshot,
 } from '../src/plugins/runtime.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
+import { openVault, PAGE_REF } from './page-view.ts';
 
 // A plugin block in the visual editor sets the page's properties as the
 // person's edit (#212): the draft's frontmatter changes, only that value,
@@ -21,6 +22,7 @@ import '@milkdown/kit/prose/view/style/prosemirror.css';
 // own change.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+openVault();
 
 const links: LinkAssist = {
   pages: [],
@@ -81,7 +83,7 @@ function mount(initial: string, runtime: PluginRuntime) {
           links={links}
           attachments={{ list: [], url: async () => null }}
           onFiles={() => {}}
-          page={{ spaceId: 's', pageId: 'p' }}
+          page={PAGE_REF}
         />
       </PluginsContext>,
     ),
