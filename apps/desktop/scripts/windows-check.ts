@@ -4,13 +4,13 @@
 //
 //   node scripts/windows-check.ts <wikistow-desktop-…-setup.exe>
 //
-// It checks what the installer adds, that the app opens its sign-in page
-// and trusts the system's secret store (DPAPI), that a second launch with a
-// `wikistow://` link hands it over and quits, and that the uninstaller
-// takes everything away again.
+// It checks what the installer adds, that the app opens its sign-in page,
+// keeps its data apart from the CLI's and trusts the system's secret store
+// (DPAPI), that a second launch with a `wikistow://` link hands it over and
+// quits, and that the uninstaller takes everything away again. The runner
+// is fresh, so the app runs on its own data folder.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const [given] = process.argv.slice(2);
@@ -66,8 +66,7 @@ check(existsSync(shortcut), 'the Start menu has WikiStow');
 check(registry(LINKS)?.includes(`"${exe}" "%1"`) === true, 'wikistow:// links open the app');
 check(registry(UNINSTALL) !== null, 'Settings > Apps lists the uninstaller');
 
-const profile = mkdtempSync(join(tmpdir(), 'wikistow-check-'));
-const app = spawn(exe, [`--user-data-dir=${profile}`, `--remote-debugging-port=${PORT}`], {
+const app = spawn(exe, [`--remote-debugging-port=${PORT}`], {
   stdio: 'inherit',
 });
 const exited = new Promise<number | null>((resolve) => app.once('exit', resolve));
@@ -118,15 +117,13 @@ try {
     (await evaluate('window.wikistowDesktop.secureStorage()')) === true,
     'the app trusts the secret store',
   );
+  // %APPDATA%\WikiStow would be the CLI's %APPDATA%\wikistow.
+  const data = join(env('APPDATA'), 'WikiStow Desktop');
+  check(existsSync(data), 'the app keeps its data in %APPDATA%\\WikiStow Desktop');
+  check(!existsSync(join(env('APPDATA'), 'WikiStow')), 'and nothing in %APPDATA%\\WikiStow');
 
   // As the browser does with a sign-in link: the second launch hands it over and quits.
-  const second = spawnSync(
-    exe,
-    [`--user-data-dir=${profile}`, 'wikistow://desktop-sign-in?code=x'],
-    {
-      timeout: 30_000,
-    },
-  );
+  const second = spawnSync(exe, ['wikistow://desktop-sign-in?code=x'], { timeout: 30_000 });
   check(second.status === 0 && app.exitCode === null, 'a second launch hands over its link');
 
   // Closing the window quits the app, as its close button does.

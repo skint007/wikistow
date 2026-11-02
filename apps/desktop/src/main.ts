@@ -75,6 +75,13 @@ protocol.registerSchemesAsPrivileged([
 // claims `wikistow://` links (packaging/wikistow-desktop.desktop).
 if (process.platform === 'linux') app.setDesktopName('wikistow-desktop.desktop');
 
+// On Windows the app's data would be %APPDATA%\WikiStow, which is the CLI's
+// %APPDATA%\wikistow as Windows ignores case, so it gets a folder of its own.
+// Set before anything reads it, the single-instance lock included.
+if (process.platform === 'win32' && !app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', join(app.getPath('appData'), 'WikiStow Desktop'));
+}
+
 // A second launch, such as the browser opening a `wikistow://` link, hands
 // its arguments to this one and quits.
 if (!app.requestSingleInstanceLock()) app.quit();
