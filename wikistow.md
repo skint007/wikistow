@@ -338,7 +338,7 @@ Search indexes titles and text locally according to the user's effective view. R
 
 ## Offline
 
-Status: proposed in [ADR 0009](docs/adr/0009-offline.md) (#242). Only the app shell is built so far. The paragraphs above describe what is built, and each build step updates them.
+Status: accepted in [ADR 0009](docs/adr/0009-offline.md) (#242). Only the app shell is built so far. The paragraphs above describe what is built, and each build step updates them.
 
 - **What's kept.** The desktop app keeps every page the person can see; the browser the pages opened on it, or every page if they turn that on (Settings, **Keep for offline**). A kept page has its published version and, for editors, its draft, with the images they show; the trees are kept too, with titles only for kept pages. Each item is sealed for the person on this installation under a key from their identity key (`sealOnDevice`), in the desktop's `kept` folder, or in IndexedDB in the browser. Without a trusted keyring the desktop keeps pages in memory for one launch only, and offline changes on disk either way. The browser then keeps its trust marks too, as the desktop does. Either keeps its search index only with every page kept.
 - **Unlocking offline.** The device keeps the vault wrapper, the last `/api/me` answer and the contacts record. The passphrase or a remembered unlock opens the vault with no server (recovery waits for it), and the session opens from the kept record, checked against its mark.
