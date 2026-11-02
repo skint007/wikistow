@@ -46,7 +46,7 @@ Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is instal
 
 ### Windows
 
-The app runs on Windows 10 and 11. Download the installer for your computer from the [latest release](https://github.com/skint007/wikistow/releases/latest): `wikistow-desktop-<version>-x64-setup.exe` for most PCs, or `wikistow-desktop-<version>-arm64-setup.exe` for Windows on Arm, such as a Surface Pro X or a Snapdragon laptop. **Settings → System → About** shows which you have, under **System type**. The x64 app also runs on Arm, more slowly.
+The app runs on Windows 10 and 11 on x64, and Windows 11 on Arm. Download the installer for your computer from the [latest release](https://github.com/skint007/wikistow/releases/latest): `wikistow-desktop-<version>-x64-setup.exe` for most PCs, or `wikistow-desktop-<version>-arm64-setup.exe` for Windows on Arm, such as a Snapdragon laptop. **Settings → System → About** shows which you have, under **System type**. The x64 app also runs on Windows 11 on Arm, more slowly.
 
 The installer isn't signed yet, so the first time Windows shows **Windows protected your PC**. Choose **More info**, check that the app is the installer you downloaded and the publisher is **Unknown publisher**, then choose **Run anyway**. To check the download first, compare `Get-FileHash .\wikistow-desktop-<version>-x64-setup.exe` in PowerShell with its line in the release's `SHA256SUMS`.
 

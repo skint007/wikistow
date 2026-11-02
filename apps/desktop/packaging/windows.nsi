@@ -57,8 +57,9 @@ VIAddVersionKey LegalCopyright "MIT License"
 !macroend
 
 ; What an install puts in its folder: Electron's files, its `locales` and
-; `resources` folders, and the uninstaller. Only those go, so a folder
-; chosen with /D keeps anything else in it.
+; `resources` folders, and the uninstaller. The folder is the app's own:
+; nothing offers another (/D isn't documented), and every top-level file
+; in it goes.
 !macro RemoveApp
   Delete "$INSTDIR\*.*"
   RMDir /r "$INSTDIR\locales"
@@ -66,8 +67,8 @@ VIAddVersionKey LegalCopyright "MIT License"
 !macroend
 
 Function .onInit
-  ; The arm64 app doesn't run on an x64 computer. The x64 one runs on arm64,
-  ; emulated, but more slowly than the arm64 one.
+  ; The arm64 app doesn't run on an x64 computer. The x64 one runs on
+  ; Windows 11 on Arm, emulated, but more slowly than the arm64 one.
   !if ${ARCH} == arm64
     ${IfNot} ${IsNativeARM64}
       MessageBox MB_ICONSTOP "This is the installer for Windows on Arm. Download the x64 one for this computer." /SD IDOK
