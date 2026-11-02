@@ -12,6 +12,7 @@ import {
   Search,
   Settings,
   Shield,
+  Trash2,
   Users,
 } from 'lucide-react';
 import { useCallback, useEffect, useId, useState, type DragEvent } from 'react';
@@ -75,7 +76,8 @@ export function Rail({
     <nav
       aria-label="Spaces and navigation"
       data-region="rail"
-      className="flex h-full flex-col items-center gap-2 py-3.5"
+      // Scrolls itself when the window is too short for every item.
+      className="flex h-full flex-col items-center gap-2 overflow-y-auto py-3.5"
     >
       {vault.status === 'unlocked' ? (
         <>
@@ -93,6 +95,15 @@ export function Rail({
             Search
           </button>
           <SharedLinkHere vault={vault} onNavigate={onNavigate} />
+          <Link
+            to="/trash"
+            onClick={onNavigate}
+            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
+            activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
+          >
+            <Trash2 className="size-4" strokeWidth={1.75} />
+            Trash
+          </Link>
         </>
       ) : (
         <SharedLink here={false} onNavigate={onNavigate} />
@@ -517,6 +528,16 @@ const UPDATE_ROUTES = {
   },
   deb: { how: 'Download the new .deb and install it.', link: 'Release notes and download' },
   rpm: { how: 'Download the new .rpm and install it.', link: 'Release notes and download' },
+  windows: { how: 'Download the new installer and run it.', link: 'Download the installer' },
+  mac: {
+    how: (
+      <>
+        Download the new app, or with Homebrew run{' '}
+        <span className="whitespace-nowrap">brew upgrade wikistow</span>.
+      </>
+    ),
+    link: 'Release notes and download',
+  },
   unknown: { how: 'Get it from the release page.', link: 'Open the release' },
 } as const;
 

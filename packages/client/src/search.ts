@@ -86,7 +86,8 @@ import {
  * one past `2√n` is spread over the changes before it, so each pays for
  * some `√n` pages', and one asked for is paid by the change that asks.
  *
- * Each page keeps its title, its reduced text, its properties, and one
+ * Each page keeps its title, its reduced text, its properties, its links (a
+ * key and maybe an ID each, once per target), and one
  * posting of two small integers per distinct term: a few times the text's
  * size in memory, and the properties a few times their block's, which is
  * at most 64 KiB: up to some 16 times for a block of one-item lists, each
@@ -120,16 +121,16 @@ export class SearchIndex<T> {
 
   /**
    * Index a page as another index read it (`pages`): its title, its text
-   * already reduced, and its properties, none if left out. Only while the
+   * already reduced, its properties and its links, none if left out. Only while the
    * index is built: not once it is derived (`with`), or derived from.
    */
-  addText(doc: T, { title, text, properties = [] }: IndexedText): void {
+  addText(doc: T, { title, text, properties = [], links = [] }: IndexedText): void {
     if (this.#frozen) throw new Error('An index derived, or derived from, doesn’t change');
-    this.#base.add({ doc, title, text, properties });
+    this.#base.add({ doc, title, text, properties, links });
     this.#held = null;
   }
 
-  /** Each page it holds, with its text as reduced for search and its properties. */
+  /** Each page it holds, with its text as reduced for search, its properties and links. */
   pages(): readonly Readonly<IndexedPage<T>>[] {
     if (this.#removed.size === 0 && this.#added.pages.length === 0) return this.#base.pages;
     return (this.#held ??= [...this.#base.pages, ...this.#added.pages].filter(
@@ -428,19 +429,32 @@ function after(sorted: readonly string[], term: string): number {
   return low;
 }
 
-/** A page as an index holds it: what its hits return, its title, its reduced text and its properties. */
+/**
+ * A page as an index holds it: what its hits return, its title, its reduced
+ * text, its properties and its links.
+ */
 export type IndexedPage<T> = {
   doc: T;
   title: string;
   text: string;
   properties: readonly Readonly<PropertyData>[];
+  links: readonly Readonly<IndexedLink>[];
 };
+
+/**
+ * One page link of a page, kept so others can list the pages that link to
+ * them: its target text folded as a link table keys it (`linkKey`), and the
+ * page the version's link table names for it, if any. Search doesn't read
+ * them; they are resolved when asked (`PageIndex.linksTo`).
+ */
+export type IndexedLink = { key: string; pageId: string | null };
 
 /** A page as `addText` takes it. */
 export type IndexedText = {
   title: string;
   text: string;
   properties?: readonly Readonly<PropertyData>[];
+  links?: readonly Readonly<IndexedLink>[];
 };
 
 /** What the index keeps of a page's Markdown: its text for search, and its properties. */

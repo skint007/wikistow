@@ -78,7 +78,7 @@ vi.mock('@wikistow/client', async (actual) => {
               revisionId: saved.revisionId,
               draft: true,
             },
-            { title: saved.title, text: saved.markdown },
+            { title: saved.payload.title, text: saved.payload.markdown },
           ]);
         }
         return index.with(pages, { spaces: changes.spaces === 'all' ? 'all' : spaces });
@@ -201,13 +201,21 @@ describe('the app’s search index', () => {
     client.failNext = true;
     const soup = put(home, 'soup', 'own words', 'own-1');
     searchIndexChanged(queryClient, {
-      saved: { ...soup, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'own words' },
+      saved: {
+        ...soup,
+        basedOn: RevisionId.parse('r1'),
+        payload: { title: 'soup', markdown: 'own words', extensions: {} },
+      },
     });
     searchIndexChanged(queryClient, { spaceIds: [work] });
     await vi.advanceTimersByTimeAsync(GATHER_MS);
     const later = put(home, 'soup', 'more words', 'own-2');
     searchIndexChanged(queryClient, {
-      saved: { ...later, basedOn: soup.revisionId, title: 'soup', markdown: 'more words' },
+      saved: {
+        ...later,
+        basedOn: soup.revisionId,
+        payload: { title: 'soup', markdown: 'more words', extensions: {} },
+      },
     });
     await vi.advanceTimersByTimeAsync(GATHER_MS);
     // The second save waits as one with the first, over what it was saved over.
@@ -226,7 +234,11 @@ describe('the app’s search index', () => {
     stop();
     const doc = put(home, 'soup', 'unshown words', 'own-1');
     searchIndexChanged(queryClient, {
-      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'unshown words' },
+      saved: {
+        ...doc,
+        basedOn: RevisionId.parse('r1'),
+        payload: { title: 'soup', markdown: 'unshown words', extensions: {} },
+      },
     });
     const again = new QueryObserver(queryClient, searchIndexQuery(ctxOf(), queryClient));
     const unsubscribe = again.subscribe(() => {});
@@ -240,7 +252,11 @@ describe('the app’s search index', () => {
     client.slowNext = true;
     const doc = put(home, 'soup', 'given up words', 'own-1');
     searchIndexChanged(queryClient, {
-      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'given up words' },
+      saved: {
+        ...doc,
+        basedOn: RevisionId.parse('r1'),
+        payload: { title: 'soup', markdown: 'given up words', extensions: {} },
+      },
     });
     await vi.advanceTimersByTimeAsync(GATHER_MS);
     // Navigated away while it updated: React Query gives it up.
@@ -258,7 +274,11 @@ describe('the app’s search index', () => {
     const index = data();
     const doc = put(home, 'soup', 'locked words', 'own-1');
     searchIndexChanged(queryClient, {
-      saved: { ...doc, basedOn: RevisionId.parse('r1'), title: 'soup', markdown: 'locked words' },
+      saved: {
+        ...doc,
+        basedOn: RevisionId.parse('r1'),
+        payload: { title: 'soup', markdown: 'locked words', extensions: {} },
+      },
     });
     // Locked before the update: the index and what it waited for go.
     stop();
@@ -286,7 +306,11 @@ describe('the app’s search index', () => {
       // tells of a change in its space, the echo.
       const doc = put(home, 'soup', `bean soup ${i}`, `own-${i}`);
       searchIndexChanged(queryClient, {
-        saved: { ...doc, basedOn, title: 'soup', markdown: `bean soup ${i}` },
+        saved: {
+          ...doc,
+          basedOn,
+          payload: { title: 'soup', markdown: `bean soup ${i}`, extensions: {} },
+        },
       });
       basedOn = doc.revisionId;
       await vi.advanceTimersByTimeAsync(GATHER_MS);
@@ -342,7 +366,11 @@ describe('the app’s search index', () => {
     for (let i = 1; i <= (KEEP_AT_MOST_MS * 2.5) / 1_000; i++) {
       const doc = put(home, 'soup', `words ${i}`, `own-${i}`);
       searchIndexChanged(queryClient, {
-        saved: { ...doc, basedOn, title: 'soup', markdown: `words ${i}` },
+        saved: {
+          ...doc,
+          basedOn,
+          payload: { title: 'soup', markdown: `words ${i}`, extensions: {} },
+        },
       });
       basedOn = doc.revisionId;
       await vi.advanceTimersByTimeAsync(1_000);

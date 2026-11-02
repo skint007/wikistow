@@ -10,6 +10,7 @@ import {
   sealRevisionV2,
   sharingOperations as sharing,
   spaceOperations,
+  trashOperations as trash,
   type ClientContext,
   type KeyTarget,
   type PagePayload,
@@ -785,7 +786,7 @@ describe('deleting', () => {
     expect((await pages.loadPage(alice.ctx, page.pageId)).pageId).toBe(page.pageId);
   });
 
-  it('removes a folder with its pages, keys, metadata, and blob files', async () => {
+  it('removes a folder for good with its pages, keys, metadata, and blob files', async () => {
     const alice = await personWithVault(t);
     const bob = await personWithVault(t);
     const spaceId = await spaceOperations.createSpace(alice.ctx, { name: 'Space' });
@@ -824,8 +825,14 @@ describe('deleting', () => {
       rejection(pages.deleteNode(person.ctx, { spaceId, nodeId: folderId }));
     expect(await remove(bob)).toBe('forbidden');
     expect(await remove(alice)).toBe('no error');
-
     const rows = async (query: ReturnType<typeof sql>) => [...(await t.db.execute(query))].length;
+    // In the trash until it is emptied.
+    expect(await rows(sql`select 1 from nodes where space_id = ${spaceId}`)).toBe(2);
+    expect(
+      await trash.emptyTrash(bob.ctx, spaceId).catch((error: { code?: string }) => error.code),
+    ).toBe('forbidden');
+    expect(await trash.emptyTrash(alice.ctx, spaceId)).toBe(1);
+
     expect(await rows(sql`select 1 from nodes where space_id = ${spaceId}`)).toBe(0);
     expect(await rows(sql`select 1 from revisions where space_id = ${spaceId}`)).toBe(0);
     expect(await rows(sql`select 1 from page_heads where page_id = ${pageId}`)).toBe(0);

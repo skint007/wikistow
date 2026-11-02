@@ -399,6 +399,12 @@ const IN_FLIGHT = 3;
 /** What a fetched revision must be: a version of this page, for this audience. */
 export type Wanted = { pageId: PageId; audience: Audience };
 
+/**
+ * `fresh` opens them again rather than from memory; `trash` fetches
+ * versions of pages in the trash, which only a space's owners can.
+ */
+export type RevisionOptions = { fresh?: boolean; trash?: boolean };
+
 /** Open now, but throw only to whoever asks for this one. */
 function openedNow(open: () => OpenedRevision): () => OpenedRevision {
   try {
@@ -423,7 +429,7 @@ export async function fetchRevisions(
   ctx: ClientContext,
   spaceId: SpaceId,
   wanted: ReadonlyMap<RevisionId, Wanted>,
-  { fresh = false }: { fresh?: boolean } = {},
+  { fresh = false, trash = false }: RevisionOptions = {},
 ): Promise<Map<RevisionId, () => OpenedRevision>> {
   const fetched = new Map<RevisionId, () => OpenedRevision>();
   const generation = ctx.revisions.generation;
@@ -439,7 +445,8 @@ export async function fetchRevisions(
   const send = () => {
     while (requests.length < IN_FLIGHT && queue.length > 0) {
       const ids = queue.splice(0, BATCH);
-      const answer = ctx.api.call(pageRoutes.fetchRevisions, { body: { ids } });
+      const route = trash ? pageRoutes.trashRevisions : pageRoutes.fetchRevisions;
+      const answer = ctx.api.call(route, { body: { ids } });
       // A later batch failing while an earlier one is opened is left for its turn.
       answer.catch(() => {});
       requests.push({ asked: new Set(ids), answer });
@@ -519,7 +526,7 @@ export async function shownVersions(
   ctx: ClientContext,
   spaceId: SpaceId,
   pages: readonly PageSummary[],
-  options: { fresh?: boolean } = {},
+  options: RevisionOptions = {},
 ): Promise<Map<PageId, OpenedRevision | null>> {
   const shown = new Map<PageId, RevisionId>();
   for (const page of pages) {
@@ -597,7 +604,7 @@ export async function pageLabels(
   ctx: ClientContext,
   spaceId: SpaceId,
   pages: readonly PageSummary[],
-  options: { fresh?: boolean } = {},
+  options: RevisionOptions = {},
 ): Promise<Map<PageId, PageLabel | null>> {
   const versions = await shownVersions(ctx, spaceId, pages, options);
   return new Map(
@@ -1317,7 +1324,10 @@ export async function restorePublished(
   };
 }
 
-/** Delete a folder or page and everything beneath it. */
+/**
+ * Delete a folder or page and everything beneath it: it goes to the
+ * space's trash (`trashOperations`), where its owners can restore it.
+ */
 export async function deleteNode(
   ctx: ClientContext,
   { spaceId, nodeId }: { spaceId: SpaceId; nodeId: FolderId | PageId },
