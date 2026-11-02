@@ -27,7 +27,16 @@ export async function searchIndexFile(): Promise<IndexFile | null> {
         drop: () => bridge.dropSearchIndex(),
       }
     : browserSearchIndex;
-  if (keepEveryPage().get()) return file;
-  await file.drop().catch(() => {});
+  if (keepEveryPage().get()) {
+    dropped = false;
+    return file;
+  }
+  // Once until Every page is chosen again, not at each update.
+  if (!dropped) {
+    dropped = true;
+    await file.drop().catch(() => {});
+  }
   return null;
 }
+
+let dropped = false;

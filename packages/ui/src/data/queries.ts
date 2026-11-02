@@ -20,7 +20,7 @@ import { hashKey, queryOptions, type QueryClient } from '@tanstack/react-query';
 import { PLAIN } from '../vault/store';
 import { readIndexLinks } from '../page/page-reader';
 import { connection, noAnswer } from './connection';
-import { searchIndexFile, type IndexFile } from './index-file';
+import { searchIndexFile } from './index-file';
 import { keepChanged } from './keeper';
 
 // Everything here is decrypted or describes encrypted content, so every key
@@ -344,7 +344,7 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         // What the file held of a version let go goes at once, as from
         // memory, but for this person's own drafts saved over.
         const now = !shown || searchOperations.letGo(shown, index, changes.saved);
-        keepLater(queryClient, ctx, file, now);
+        keepLater(queryClient, ctx, now);
       }
       return index;
     },
@@ -516,8 +516,9 @@ function follow(queryClient: QueryClient) {
 
 /**
  * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
- * after it first changed, this device keeps it in `file`, sealed for this
- * person and build: once for a burst of changes, not once each. With `now`, as
+ * after it first changed, this device keeps it, sealed for this person and
+ * build, where it keeps it then (`searchIndexFile`), so not after a switch
+ * to **Pages I open**: once for a burst of changes, not once each. With `now`, as
  * for an index built afresh or one that let go of a version other than a
  * draft this person saved over (`letGo`), at once, so the file holds
  * nothing longer than memory does. Failing to keep it only means reading more pages at the next
@@ -525,7 +526,7 @@ function follow(queryClient: QueryClient) {
  * vault locked or access changed meanwhile, nothing is kept, and nothing
  * here holds on to the index till then.
  */
-function keepLater(queryClient: QueryClient, ctx: ClientContext, file: IndexFile, now: boolean) {
+function keepLater(queryClient: QueryClient, ctx: ClientContext, now: boolean) {
   const state = followingOf(queryClient);
   // A write due at once stays so: it keeps the index then shown, this one.
   if (state.keeping?.now) return;
@@ -534,24 +535,26 @@ function keepLater(queryClient: QueryClient, ctx: ClientContext, file: IndexFile
   if (state.keeping) clearTimeout(state.keeping.timer);
   // Locking, or `refreshAccess`, clears the cache, which moves this on.
   const { generation } = ctx.revisions;
-  const keep = () => {
+  const keep = async () => {
     state.keeping = null;
+    const file = await searchIndexFile();
     const index = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
-    if (!index || ctx.revisions.generation !== generation) return;
-    try {
-      const sealed = searchOperations.sealKept(
-        ctx,
-        searchOperations.keptPages(index),
-        __APP_VERSION__,
-      );
-      void file.write(sealed).catch(() => {});
-    } catch {
-      // Locked meanwhile: nothing to keep.
-    }
+    if (!file || !index || ctx.revisions.generation !== generation) return;
+    // Throws if the vault locked meanwhile: nothing to keep.
+    const sealed = searchOperations.sealKept(
+      ctx,
+      searchOperations.keptPages(index),
+      __APP_VERSION__,
+    );
+    await file.write(sealed);
   };
   // Even at once, after React Query takes it as the index shown.
   const wait = now ? 0 : Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - at));
-  state.keeping = { since: now ? at : since, now, timer: setTimeout(keep, wait) };
+  state.keeping = {
+    since: now ? at : since,
+    now,
+    timer: setTimeout(() => void keep().catch(() => {}), wait),
+  };
 }
 
 /**
