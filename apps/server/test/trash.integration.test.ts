@@ -2,6 +2,7 @@
 // once, for members and agents and for the owners themselves, until it is
 // restored, and only owners see or restore it.
 import {
+  copyOperations as copies,
   pageOperations as pages,
   RevisionId,
   spaceOperations,
@@ -198,6 +199,23 @@ describe('the trash', () => {
     await trash.restoreTrash(owner.ctx, await trashIdOf(owner, inner));
     const back = await spaceOperations.loadTree(member.ctx, lib.spaceId);
     expect(back.folders.map((folder) => folder.id).sort()).toEqual([inner, lib.shared].sort());
+  });
+
+  it('keeps what was deleted from a folder that moves to another space', async () => {
+    const owner = await personWithVault(t);
+    const lib = await library(owner);
+    const elsewhere = await spaceOperations.createSpace(owner.ctx, { name: 'Elsewhere' });
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: lib.beside.pageId });
+    const preview = await copies.previewCopy(owner.ctx, {
+      kind: 'move',
+      source: { spaceId: lib.spaceId, nodeId: lib.above },
+      destination: { spaceId: elsewhere, parentId: null },
+    });
+    await copies.makeCopy(owner.ctx, preview);
+    expect(await nodesOf(lib.spaceId)).toEqual([lib.beside.pageId]);
+    expect(await trash.restoreTrash(owner.ctx, await trashIdOf(owner, lib.beside.pageId))).toEqual(
+      expect.objectContaining({ parentId: null }),
+    );
   });
 
   it('deletes for good one item, a space’s whole trash, or what has waited 30 days', async () => {

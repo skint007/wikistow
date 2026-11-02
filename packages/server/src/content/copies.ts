@@ -19,7 +19,7 @@
 // destination's share, then nodes; a move's finish then holds the source's
 // shares and subtree as a delete does (`holdSubtree`).
 import type { copyRoutes } from '@wikistow/contracts';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { BlobStore } from '../blobs/store.ts';
@@ -808,7 +808,24 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
         nodeIds: stale,
       });
     }
-    removed = await removeSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId, held);
+    // What was deleted from under it stays in the trash, at the top of the
+    // space, rather than going for good with the move.
+    const lifted = await tx
+      .update(nodes)
+      .set({ parentId: null })
+      .where(
+        and(
+          anyId(nodes.id, held),
+          ne(nodes.id, copy.sourceNodeId),
+          sql`exists (select 1 from trash t where t.node_id = ${nodes.id})`,
+        ),
+      )
+      .returning({ id: nodes.id });
+    const going =
+      lifted.length === 0
+        ? held
+        : await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId });
+    removed = await removeSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId, going);
   }
   // Shown, and no longer the copy's: removing it later leaves them.
   await tx.update(nodes).set({ copyId: null }).where(eq(nodes.copyId, copy.id));
