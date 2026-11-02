@@ -124,17 +124,22 @@ const DOLLAR = /(\\*)\$/g;
 
 /**
  * Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`,
- * not `\[!NOTE]`. In a block with inline math, or a dollar in its code or
- * a link, every dollar is escaped (`nearMath`): one that could open math
+ * not `\[!NOTE]`. Each dollar not before a digit is escaped, as one could
+ * close math (`mathToMarkdownExtension`), checked again on what's written,
+ * since remark skips some; and in a block with inline math, or a dollar in
+ * its code or a link, every one (`nearMath`), as one that could open math
  * could close at that dollar.
  */
-const text: Handle = (node: Text, ...rest) => {
-  const escapedText = escaped(node, ...rest);
+const text: Handle = (node: Text, parent, state, info) => {
+  const escapedText = escaped(node, parent, state, info);
   const written = node.data?.alert ? escapedText.replace(/^\\\[/, '[') : escapedText;
-  if (!node.data?.nearMath) return written;
-  return written.replace(DOLLAR, (dollar, slashes: string) =>
-    slashes.length % 2 ? dollar : `${slashes}\\$`,
-  );
+  // Nothing escapes in an autolink, which math can't start in.
+  if (state.stack.includes('autolink')) return written;
+  return written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
+    const next = written.charAt(at + dollar.length) || info.after.charAt(0);
+    const bare = slashes.length % 2 === 0;
+    return bare && (node.data?.nearMath || !/\d/.test(next)) ? `${slashes}\\$` : dollar;
+  });
 };
 
 // Whether `node`, not text, is or holds a dollar that could close math

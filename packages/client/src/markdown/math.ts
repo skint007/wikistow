@@ -16,8 +16,8 @@ import type {
 // `$$…$$` inline, as remark-math reads them, but with a single dollar
 // read by Pandoc's rule, as Obsidian, Joplin and GitHub do: it opens only
 // before a character that isn't a space, and closes only after one, not
-// before a digit. So `$5 and $10` stays text. A block's fences may share
-// a line with its TeX, as those apps allow.
+// before a digit. So `$5 and $10` stays text. A block's TeX may end on
+// its closing line (`…\end{aligned}$$`), as those apps allow.
 
 // micromark character codes: `$`, `\`, and the negative ones it uses for
 // line endings (CR, LF, CRLF), a tab (-2) and its virtual spaces (-1).
@@ -288,15 +288,12 @@ export const mathFromMarkdownExtension: FromMarkdownExtension = {
 };
 export type { InlineMath, Math as MathBlock } from 'mdast-util-math';
 
-// A `$` in text that could close inline math: after something not a space,
-// before no digit. Escaping each, no two in text make math. So is each next
-// to another, which could make a `$$`. Prices (`$5 and $10`) stay as typed.
-const UNSAFE: Unsafe[] = [
-  { character: '$', before: '\\S', after: '\\D|$', inConstruct: 'phrasing' },
-  { character: '$', after: '\\$', inConstruct: 'phrasing' },
-  { character: '$', before: '\\$', inConstruct: 'phrasing' },
-  { atBreak: true, character: '$', after: '\\$' },
-];
+// A `$` in text not before a digit, which is any that could close inline
+// math, or make a `$$` with the next: escaping each, no two in text make
+// math. Prices (`$5 and $10`) stay as typed. remark skips an escape that
+// depends on the next character when that one is escaped, so the visual
+// editor checks what it wrote again (`config.ts`).
+const UNSAFE: Unsafe[] = [{ character: '$', after: '\\D|$', inConstruct: 'phrasing' }];
 
 // Inline math that reads back between single dollars: no space at either
 // end, no dollar or line ending inside, no backslash ending it.
