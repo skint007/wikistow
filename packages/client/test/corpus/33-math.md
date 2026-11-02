@@ -21,3 +21,4 @@ $$$ dinner stays text, as no line closes it.
 | Price | Formula |
 | ----- | ------- |
 | $5    | $x^2$   |
+| $\|x\|$ | abs   |

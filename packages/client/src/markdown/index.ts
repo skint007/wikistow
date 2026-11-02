@@ -2,7 +2,7 @@ import type { Nodes, Root } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
-import { mathFromMarkdown, mathSyntax } from './math.ts';
+import { mathFromMarkdownExtension, mathSyntax } from './math.ts';
 import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 
 export * from './frontmatter.ts';
@@ -21,7 +21,7 @@ export * from './wikilink.ts';
 export const parseMarkdown = (body: string): Root =>
   fromMarkdown(body, {
     extensions: [gfm(), wikilinkSyntax, mathSyntax],
-    mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown, mathFromMarkdown()],
+    mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown, mathFromMarkdownExtension],
   });
 
 /** Every node of `tree`, in document order. */

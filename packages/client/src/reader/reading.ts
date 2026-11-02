@@ -4,7 +4,7 @@
 import {
   markdownNodes,
   markdownText,
-  mathFromMarkdown,
+  mathFromMarkdownExtension,
   mathSyntax,
   mathToMarkdownExtension,
   parseMarkdown,
@@ -36,7 +36,7 @@ export function remarkWikilinks(this: Processor) {
 export function remarkMath(this: Processor) {
   const data = this.data();
   (data.micromarkExtensions ??= []).push(mathSyntax);
-  (data.fromMarkdownExtensions ??= []).push(mathFromMarkdown());
+  (data.fromMarkdownExtensions ??= []).push(mathFromMarkdownExtension);
   (data.toMarkdownExtensions ??= []).push(mathToMarkdownExtension);
 }
 

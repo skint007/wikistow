@@ -1,3 +1,4 @@
+import type { Extension as FromMarkdownExtension } from 'mdast-util-from-markdown';
 import { mathFromMarkdown, mathToMarkdown } from 'mdast-util-math';
 import type { Handlers, Options as ToMarkdownExtension, Unsafe } from 'mdast-util-to-markdown';
 import { math } from 'micromark-extension-math';
@@ -36,7 +37,7 @@ if (!double) throw new Error('micromark-extension-math has no inline math');
  * Inline math between single dollars, by Pandoc's rule: `$` before
  * something not a space, up to the next `$` after something not a space
  * or backslash and before no digit, on the lines of one paragraph. Its
- * tokens are those remark-math's own makes, so `mathFromMarkdown` reads it.
+ * tokens are those remark-math's own makes, so `mathFromMarkdownExtension` reads it.
  */
 const tokenize: Tokenizer = function (effects, ok, nok) {
   // The last character inside, which a closing `$` must come after.
@@ -264,7 +265,27 @@ export const mathSyntax: Extension = {
   text: { [DOLLAR]: [single, double] },
 };
 
-export { mathFromMarkdown };
+const fromMarkdown = mathFromMarkdown();
+
+/**
+ * Reads math into `math` and `inlineMath` nodes, as remark-math does. In a
+ * table cell, `\|` in inline math is a `|`, as it is in inline code, since
+ * a bare one ends the cell.
+ */
+export const mathFromMarkdownExtension: FromMarkdownExtension = {
+  ...fromMarkdown,
+  exit: {
+    ...fromMarkdown.exit,
+    mathText(token) {
+      fromMarkdown.exit?.['mathText']?.call(this, token);
+      const node = this.stack.at(-1);
+      const math = node && 'children' in node ? node.children.at(-1) : undefined;
+      if (!this.data.inTable || math?.type !== 'inlineMath') return;
+      math.value = math.value.replace(/\\\|/g, '|');
+      math.data = { ...math.data, hChildren: [{ type: 'text', value: math.value }] };
+    },
+  },
+};
 export type { InlineMath, Math as MathBlock } from 'mdast-util-math';
 
 // A `$` in text that could close inline math: after something not a space,
@@ -286,8 +307,12 @@ type InlineArgs = Parameters<Handlers['inlineMath']>;
 
 /** Inline math between single dollars where it reads back so, before no digit; else remark-math's `$$`. */
 function inlineMath(...[node, parent, state, info]: InlineArgs) {
-  if (SINGLE.test(node.value) && !/^\d/.test(info.after)) return `$${node.value}$`;
-  return written.inlineMath?.(node, parent, state, info) ?? '';
+  const math =
+    SINGLE.test(node.value) && !/^\d/.test(info.after)
+      ? `$${node.value}$`
+      : (written.inlineMath?.(node, parent, state, info) ?? '');
+  // In a table cell, a bar is escaped, as GFM writes one in inline code.
+  return state.stack.includes('tableCell') ? math.replace(/\|/g, '\\$&') : math;
 }
 inlineMath.peek = () => '$';
 
