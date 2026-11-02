@@ -67,7 +67,7 @@ export function DiagramBlock({ source, pre }: { source: string; pre: ComponentPr
   const drawn = useQuery(diagramQuery(source, useDark()));
   const error = drawn.error && failure(drawn.error);
   return (
-    <div className="code-block" data-diagram="">
+    <div className="code-block">
       <div className="code-language flex items-center gap-2 pt-1 pr-1">
         <span className="min-w-0 flex-1">mermaid</span>
         {!error && (
@@ -129,7 +129,7 @@ export function DiagramPreview({ source }: { source: string }) {
     );
   }
   return (
-    <div className="overflow-x-auto px-4 pb-4" data-diagram="">
+    <div className="overflow-x-auto px-4 pb-4">
       {drawn.data ? (
         <DiagramImage svg={drawn.data} />
       ) : (

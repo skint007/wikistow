@@ -1,5 +1,6 @@
 import type { publicLinkOperations } from '@wikistow/client';
 import { DIAGRAM_HOST_PAGE } from '@wikistow/contracts';
+import { vaultStore } from '../vault/store';
 
 /** How long Mermaid may take to load in a new frame, a 5.5 MB file on a slow line. */
 const LOAD_MS = 120_000;
@@ -34,8 +35,8 @@ type Waiting = { resolve: (svg: string) => void; reject: (error: Error) => void 
  * with no requests allowed, and hands back each diagram as SVG text. The
  * frame is laid out off screen, not hidden, so text has a size. It is
  * made for the first diagram, which is when Mermaid loads, and removed
- * once idle, or if it doesn't load or takes too long over a diagram,
- * failing those it hadn't drawn.
+ * once idle, when the vault locks, or if it doesn't load or takes too
+ * long over a diagram, failing those it hadn't drawn.
  */
 class DiagramFrame {
   readonly #iframe = document.createElement('iframe');
@@ -115,6 +116,11 @@ class DiagramFrame {
 }
 
 let frame: DiagramFrame | null = null;
+
+// Removed when the vault locks, so no page's diagram outlives the keys.
+vaultStore.subscribe(() => {
+  if (vaultStore.get().status === 'locked') frame?.remove('The vault is locked.');
+});
 
 /**
  * Draw the Mermaid diagram `source`, in its dark theme if `dark`: its SVG
