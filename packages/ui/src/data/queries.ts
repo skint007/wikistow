@@ -167,7 +167,6 @@ export const spaceKeysQuery = (ctx: ClientContext, spaceId: SpaceId) =>
     queryFn: () => spaceKeys(ctx, spaceId, { refresh: true }),
   });
 
-/** Shares this person is a member of, with their root's name and who shared them. */
 /** What is in the trash of the spaces this person owns (protocol section 10). */
 export const trashQuery = (ctx: ClientContext) =>
   queryOptions({
@@ -175,6 +174,7 @@ export const trashQuery = (ctx: ClientContext) =>
     queryFn: () => trashOperations.loadTrash(ctx),
   });
 
+/** Shares this person is a member of, with their root's name and who shared them. */
 export const sharedWithMeQuery = (ctx: ClientContext) =>
   queryOptions({
     queryKey: [PLAIN, 'shared-with-me'],
