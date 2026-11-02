@@ -95,8 +95,9 @@ const unread = (tex: string): Element => ({
 });
 
 /**
- * `tex` as a MathML `<math>` element, shown as a block if `display`; as
- * written, in a `code.math-error`, if KaTeX can't read it. Nothing it can
+ * `tex` as a MathML `<math>` element, shown as a block if `display`, with
+ * the TeX as its `alttext`; as written, in a `code.math-error`, if KaTeX
+ * can't read it. Nothing it can
  * load or run: KaTeX trusts no `\href` or `\includegraphics`, and what it
  * writes is cut to `schema`.
  */
@@ -115,7 +116,10 @@ export function texElement(tex: string, display: boolean): Element {
   // KaTeX's `<span class="katex">` around it goes with the sanitizing.
   const clean = sanitize(fromHtml(html, { fragment: true }), schema);
   const [math] = clean.type === 'root' ? clean.children : [];
-  return math?.type === 'element' && math.tagName === 'math' ? math : unread(tex);
+  if (math?.type !== 'element' || math.tagName !== 'math') return unread(tex);
+  // The TeX as MathML's own text alternative, which pasting it into the
+  // visual editor reads back as math.
+  return { ...math, properties: { ...math.properties, alttext: tex } };
 }
 
 /**

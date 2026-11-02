@@ -58,6 +58,12 @@ const node = (name: string, display: boolean) =>
           value: dom instanceof HTMLElement ? (dom.getAttribute('data-math') ?? '') : '',
         }),
       },
+      // MathML with its TeX, as the reader and many sites show math.
+      {
+        tag: display ? 'math[display="block"][alttext]' : 'math[alttext]',
+        priority: display ? 60 : 50,
+        getAttrs: (dom) => ({ value: dom.getAttribute('alttext') ?? '' }),
+      },
     ],
     toDOM: (node) => [
       display ? 'div' : 'span',
@@ -276,7 +282,8 @@ function typedMath(state: EditorState, match: RegExpMatchArray, start: number, e
   const code = state.schema.marks['inlineCode'];
   const inCode = $start.parent.type.spec.code || (code && state.doc.rangeHasMark(start, end, code));
   if (!type || !tex || inCode || $start.nodeBefore?.type === type) return null;
-  return state.tr.replaceWith(start, end, type.create({ value: tex }));
+  // With the marks it was typed in, which the text after it then keeps.
+  return state.tr.replaceWith(start, end, type.create({ value: tex }, null, $start.marks()));
 }
 
 const typedThen = $inputRule(
