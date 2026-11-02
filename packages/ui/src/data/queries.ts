@@ -228,7 +228,7 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       const onProgress = (progress: searchOperations.IndexProgress) =>
         queryClient.setQueryData(searchProgressKey, progress);
-      // The desktop app keeps one between launches only with a trusted keyring.
+      // The desktop app keeps one between launches only with a trusted secret store.
       const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
       const changes = takeChanges(queryClient);
