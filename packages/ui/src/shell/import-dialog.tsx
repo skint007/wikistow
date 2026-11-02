@@ -1,11 +1,13 @@
 import {
   archiveFiles,
   cleanPath,
+  importFromOf,
   importOperations,
-  readJoplinExport,
+  readImport,
   type FolderId,
   type ImportFile,
-  type JoplinExport,
+  type ImportFrom,
+  type ImportSource,
   type SpaceId,
 } from '@wikistow/client';
 import { useEffect, useRef, useState } from 'react';
@@ -36,7 +38,9 @@ export type Importing = { folderId: FolderId | null; name: string };
 type Stage =
   | { kind: 'choose' }
   | { kind: 'reading' }
-  | { kind: 'found'; joplin: JoplinExport }
+  /** Files with no mark of either app: the person says which. */
+  | { kind: 'ask'; files: ImportFile[] }
+  | { kind: 'found'; source: ImportSource }
   | { kind: 'importing'; progress: importOperations.ImportProgress | null }
   | { kind: 'done'; summary: importOperations.ImportSummary };
 
@@ -56,10 +60,12 @@ function folderFiles(list: FileList): ImportFile[] {
 }
 
 /**
- * Import a Joplin export into a space, or a folder of it: a JEX file, or a
- * Markdown + Front Matter export as its folder or a zip of it. It reads the
- * export first and says what it found, then makes the folders and pages
- * (`importJoplin`), showing how far it has got, and stops at the next step
+ * Import an Obsidian vault or a Joplin export into a space, or a folder of
+ * it: a vault as its folder or a zip of it, a JEX file, or a Markdown +
+ * Front Matter export as its folder or a zip of it. It reads the files
+ * first, asks which app they came from when they don't say, and says what
+ * it found, then makes the folders and pages (`importNotes`), showing how
+ * far it has got, and stops at the next step
  * if Cancel is pressed or the dialog closed. Running it again finishes an
  * import cut short and changes nothing already imported. At the end it says
  * what it made, and lists links it couldn't rewrite and notes left out.
@@ -93,32 +99,38 @@ export function ImportDialog({
     if (folderInput.current) folderInput.current.webkitdirectory = true;
   });
 
-  const read = async (files: () => Promise<ImportFile[]>) => {
+  const read = async (files: () => Promise<ImportFile[]>, from?: ImportFrom) => {
     setError(null);
     setStage({ kind: 'reading' });
     try {
-      const joplin = await readJoplinExport(await files());
-      if (joplin.notes.length === 0 && joplin.encrypted === 0) {
-        setError('No Joplin notes were found there.');
+      const listed = await files();
+      const app = from ?? (await importFromOf(listed));
+      if (app === null) {
+        setStage({ kind: 'ask', files: listed });
+        return;
+      }
+      const source = await readImport(listed, app);
+      if (source.notes.length === 0 && source.encrypted === 0) {
+        setError(`No ${app === 'obsidian' ? 'Obsidian' : 'Joplin'} notes were found there.`);
         setStage({ kind: 'choose' });
         return;
       }
-      setStage({ kind: 'found', joplin });
+      setStage({ kind: 'found', source });
     } catch (caught) {
       setError(errorMessage(caught));
       setStage({ kind: 'choose' });
     }
   };
 
-  const start = async (target: Importing, joplin: JoplinExport) => {
+  const start = async (target: Importing, source: ImportSource) => {
     const controller = new AbortController();
     running.current = controller;
     setError(null);
     setStage({ kind: 'importing', progress: null });
     try {
-      const summary = await importOperations.importJoplin(ctx, {
+      const summary = await importOperations.importNotes(ctx, {
         scope: { spaceId, ...(target.folderId === null ? {} : { folderId: target.folderId }) },
-        joplin,
+        source,
         onProgress: (progress) => {
           if (!controller.signal.aborted) setStage({ kind: 'importing', progress });
         },
@@ -128,7 +140,7 @@ export function ImportDialog({
     } catch (caught) {
       if (controller.signal.aborted || caught instanceof importOperations.ImportStopped) return;
       setError(`${errorMessage(caught)} Import again to finish: what is already there stays.`);
-      setStage({ kind: 'found', joplin });
+      setStage({ kind: 'found', source });
     } finally {
       if (running.current === controller) running.current = null;
     }
@@ -144,15 +156,16 @@ export function ImportDialog({
             Import into “<Name>{importing?.name ?? ''}</Name>”
           </DialogTitle>
           <DialogDescription>
-            Bring in notes from Joplin. In Joplin, choose File, Export all, then JEX or Markdown +
-            Front Matter. Each notebook becomes a folder, and each note a published page.
+            Bring in notes from Obsidian or Joplin. Each folder or notebook becomes a folder, and
+            each note a published page.
           </DialogDescription>
         </DialogHeader>
         {(stage.kind === 'choose' || stage.kind === 'reading') && (
           <>
             <p className="text-sm text-muted-foreground">
-              JEX keeps notebook names exactly. Encrypted notes must be decrypted in Joplin before
-              you export them.
+              From Obsidian, choose the vault’s folder, or a zip of it. From Joplin, choose File,
+              Export all, then JEX or Markdown + Front Matter. JEX keeps notebook names exactly.
+              Encrypted notes must be decrypted in Joplin before you export them.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -167,7 +180,7 @@ export function ImportDialog({
                 disabled={busy}
                 onClick={() => folderInput.current?.click()}
               >
-                Choose an export folder…
+                Choose a folder…
               </Button>
             </div>
             <input
@@ -175,7 +188,7 @@ export function ImportDialog({
               type="file"
               accept=".jex,.zip,.tar"
               hidden
-              aria-label="Joplin export file"
+              aria-label="Export or vault file"
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 event.currentTarget.value = '';
@@ -192,7 +205,7 @@ export function ImportDialog({
               ref={folderInput}
               type="file"
               hidden
-              aria-label="Joplin export folder"
+              aria-label="Export or vault folder"
               onChange={(event) => {
                 const list = event.currentTarget.files;
                 const files = list ? folderFiles(list) : [];
@@ -202,14 +215,36 @@ export function ImportDialog({
             />
             {stage.kind === 'reading' && (
               <p role="status" className="text-sm font-bold">
-                Reading the export…
+                Reading the files…
               </p>
             )}
           </>
         )}
+        {stage.kind === 'ask' && (
+          <div className="grid gap-2">
+            <p className="text-sm font-bold">Where are these notes from?</p>
+            <p className="text-sm text-muted-foreground">
+              They don’t say whether they are an Obsidian vault or a Joplin export.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => void read(async () => stage.files, 'obsidian')}
+              >
+                An Obsidian vault
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void read(async () => stage.files, 'joplin')}
+              >
+                A Joplin export
+              </Button>
+            </div>
+          </div>
+        )}
         {stage.kind === 'found' && (
           <p role="status" className="text-sm font-bold">
-            {foundStatus(stage.joplin)}
+            {foundStatus(stage.source)}
           </p>
         )}
         {stage.kind === 'importing' && (
@@ -245,7 +280,7 @@ export function ImportDialog({
             <Button
               disabled={busy}
               onClick={() =>
-                importing && stage.kind === 'found' && void start(importing, stage.joplin)
+                importing && stage.kind === 'found' && void start(importing, stage.source)
               }
             >
               {busy ? 'Importing…' : 'Import'}
@@ -257,7 +292,7 @@ export function ImportDialog({
   );
 }
 
-/** What an import made, then each link it left as written and each note it left out. */
+/** What an import made, then each link it left as written and each note or file it left out. */
 function Report({ summary }: { summary: importOperations.ImportSummary }) {
   const { unresolved, skipped } = summary;
   return (
@@ -270,7 +305,7 @@ function Report({ summary }: { summary: importOperations.ImportSummary }) {
           <h3 className="text-sm font-bold">Links left as they were</h3>
           <p className="text-sm text-muted-foreground">
             They name a note or file that wasn’t imported, a note whose title a wikilink can’t hold
-            (with | or #), or one of two notes of one title in one notebook.
+            (with | or #), or one of two notes of one title in one folder.
           </p>
           <ul className="max-h-40 overflow-y-auto rounded-control bg-muted px-3 py-2 text-sm">
             {unresolved.map(({ path, link }, i) => (
@@ -283,7 +318,7 @@ function Report({ summary }: { summary: importOperations.ImportSummary }) {
       )}
       {skipped.length > 0 && (
         <section className="grid gap-1">
-          <h3 className="text-sm font-bold">Notes left out</h3>
+          <h3 className="text-sm font-bold">Notes and files left out</h3>
           <ul className="max-h-40 overflow-y-auto rounded-control bg-muted px-3 py-2 text-sm">
             {skipped.map(({ path, reason }, i) => (
               <li key={i} className="truncate">

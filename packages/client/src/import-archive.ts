@@ -131,9 +131,10 @@ function paxPath(records: string): string | null {
 
 /**
  * `files` without the one folder around them all, when it is the export's
- * own: a zip made from a Markdown export's folder holds it. A Joplin export
- * has notes only in notebooks, so a lone folder at the top holding no
- * notes, only folders, or one holding `_resources`, is that folder.
+ * own: a zip made from a Markdown export's or vault's folder holds it. A
+ * Joplin export has notes only in notebooks, so a lone folder at the top
+ * holding no notes, only folders, or one holding `_resources`, is that
+ * folder. One holding `.obsidian/` is a vault's.
  */
 function withoutWrapper(files: ImportFile[]): ImportFile[] {
   const tops = new Set(files.map((file) => file.path.split('/')[0]));
@@ -143,7 +144,9 @@ function withoutWrapper(files: ImportFile[]): ImportFile[] {
   }
   const inner = files.map((file) => file.path.slice(top.length + 1));
   const notesAtTop = inner.some((path) => !path.includes('/') && /\.(md|html)$/i.test(path));
-  const resources = inner.some((path) => path.startsWith('_resources/'));
-  if (notesAtTop && !resources) return files;
+  const marked = inner.some(
+    (path) => path.startsWith('_resources/') || path.startsWith('.obsidian/'),
+  );
+  if (notesAtTop && !marked) return files;
   return files.map((file, i) => ({ ...file, path: inner[i] ?? file.path }));
 }

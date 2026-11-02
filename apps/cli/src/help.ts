@@ -92,7 +92,7 @@ Commands:
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
   export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
-  import PATH [--space SPACE_ID] [--folder FOLDER_ID]
+  import PATH [--space SPACE_ID] [--folder FOLDER_ID] [--from obsidian|joplin]
   folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
   folder copy FOLDER_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page read PAGE_ID [--draft] [--revision REVISION_ID]
@@ -406,17 +406,20 @@ links still name it there. A lost connection, an expired session or a
 server error fails the export instead.
 `,
   import: `Usage: wikistow import PATH [--space SPACE_ID] [--folder FOLDER_ID]
+                       [--from obsidian|joplin]
 
-Import notes from Joplin. PATH is an export made in Joplin with File >
-Export all: a JEX file, or a Markdown + Front Matter export's folder, or a
-zip of it. Each notebook becomes a folder, and each note a page titled as
-in Joplin, published, so readers see it at once: run it only when your
-person asks for this import. The agent must be able to edit and publish
-where it goes: its share and its person both.
+Import notes from Obsidian or Joplin. PATH is an Obsidian vault's folder
+or a zip of it, or an export made in Joplin with File > Export all: a JEX
+file, or a Markdown + Front Matter export's folder, or a zip of it. Each
+folder or notebook becomes a folder, and each note a page titled as there,
+published, so readers see it at once: run it only when your person asks
+for this import. The agent must be able to edit and publish where it
+goes: its share and its person both.
 
---folder is where the notebooks go. Without it, they go at the top of the
+--folder is where the folders go. Without it, they go at the top of the
 agent's share in --space, as for folder copy. --space saves looking up
-which space --folder is in.
+which space --folder is in. --from says which app PATH came from, needed
+when it doesn't say: a vault without its .obsidian folder, say.
 
 Links between notes become wikilinks, with as many folders as it takes to
 name a page alone ([[Home/README]]). A note's files become attachments of
@@ -426,23 +429,33 @@ writes them. An HTML note is imported as raw HTML, which readers see
 sanitized. A note over ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} is left out, and so is an encrypted one:
 decrypt it in Joplin and export again.
 
+From a vault, a page is titled by its note's file name, its front matter
+kept as written. Hidden files and folders (.obsidian, .trash, .git) are
+skipped. Links resolve as Obsidian resolves them, and a wikilink stays as
+written unless it must change to name its page here (written with .md, or
+a name two pages share). An embed (![[photo.png|300]]) stays one, naming
+the page's attachment by its name. Files no imported note links to or
+embeds, .canvas files among them, are left out and listed.
+
 Each folder and page remembers the note it came from. So running the same
 import again into the same place makes nothing twice, leaves what it
 imported as it is, and finishes anything a run cut short: after any
 failure, or Ctrl-C, run it again. It takes no --idempotency-key.
 
 With --json:
-  {"spaceId":"...","folderId":"...","format":"markdown|jex","folders":N,
-   "pages":[{"path":"...","pageId":"...","title":"..."}],"existing":N,
+  {"spaceId":"...","folderId":"...","format":"markdown|jex|obsidian",
+   "folders":N,"pages":[{"path":"...","pageId":"...","title":"..."}],"existing":N,
    "attachments":N,"unresolved":[{"path":"...","link":"..."}],
-   "skipped":[{"path":"...","reason":"encrypted|too-large"}],"encrypted":N}
+   "skipped":[{"path":"...","reason":"encrypted|too-large|unused"}],"encrypted":N}
 paths are where each note is in the export. folders, pages and attachments
 are what this run made; existing counts pages an earlier run finished.
 unresolved lists every note's links left as written, on every run, each
 by its text, a file by its name, else as written: to a note or file that
 wasn't imported or was too large for the server, to a note's files past
 the 200 a page lists, or to a note no wikilink can name (one of two of
-one title in one notebook, or a title with | # [ ] ^ \` < or \\ in it).
+one title in one folder, or a title with | # [ ] ^ \` < or \\ in it), or a
+vault's wikilink or embed naming nothing in the vault. unused lists a
+vault's files that no imported note names.
 For a page an earlier run saved, it lists the links its draft still
 holds as written. encrypted counts the export's encrypted items.
 `,

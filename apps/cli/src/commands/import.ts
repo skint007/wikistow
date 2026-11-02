@@ -1,12 +1,14 @@
-// `wikistow import`: a Joplin export as folders and published pages
-// (wikistow.md, Import), as Import… does in WikiStow.
+// `wikistow import`: a Joplin export or an Obsidian vault as folders and
+// published pages (wikistow.md, Import), as Import… does in WikiStow.
 import {
   archiveFiles,
+  importFromOf,
   importOperations,
-  readJoplinExport,
+  readImport,
   UnreadableArchive,
   type ImportFile,
-  type JoplinExport,
+  type ImportFrom,
+  type ImportSource,
 } from '@wikistow/client';
 import type { FolderId, SpaceId } from '@wikistow/contracts';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
@@ -38,8 +40,12 @@ function folderFiles(root: string): ImportFile[] {
   return files;
 }
 
-/** PATH as a Joplin export: a Markdown export's folder, or a JEX or zip file. */
-async function readExport(path: string): Promise<JoplinExport> {
+/**
+ * PATH as a Joplin export (a Markdown export's folder, or a JEX or zip
+ * file) or an Obsidian vault (its folder or a zip), `from` saying which
+ * when its files don't.
+ */
+async function readExport(path: string, from: ImportFrom | null): Promise<ImportSource> {
   let files: ImportFile[];
   try {
     files = lstatSync(path).isDirectory() ? folderFiles(path) : archiveFiles(readFileSync(path));
@@ -49,17 +55,28 @@ async function readExport(path: string): Promise<JoplinExport> {
     }
     throw new CliError('usage', `Can't read ${path}`, { cause });
   }
-  const joplin = await readJoplinExport(files);
-  if (joplin.notes.length === 0 && joplin.encrypted === 0) {
-    throw new CliError('usage', `${path} has no Joplin notes`);
+  const app = from ?? (await importFromOf(files));
+  if (app === null) {
+    throw new CliError(
+      'usage',
+      `Can't tell whether ${path} is an Obsidian vault or a Joplin export: give --from obsidian or --from joplin`,
+    );
   }
-  return joplin;
+  const source = await readImport(files, app);
+  if (source.notes.length === 0 && source.encrypted === 0) {
+    throw new CliError(
+      'usage',
+      `${path} has no ${app === 'obsidian' ? 'Obsidian' : 'Joplin'} notes`,
+    );
+  }
+  return source;
 }
 
 /**
- * `import PATH [--space S] [--folder F]`: a Joplin export (a JEX file, or a
- * Markdown + Front Matter export's folder or zip) into `--folder`, or the
- * top of this agent's share in `--space`, as `importJoplin` does it. Its
+ * `import PATH [--space S] [--folder F] [--from obsidian|joplin]`: a Joplin
+ * export (a JEX file, or a Markdown + Front Matter export's folder or zip)
+ * or an Obsidian vault (its folder or a zip) into `--folder`, or the top of
+ * this agent's share in `--space`, as `importNotes` does it. Its
  * many changes skip the journal: the import keeps its own keys, so running
  * it again finishes one cut short and changes nothing already there. SIGINT
  * or SIGTERM stops it at the next step.
@@ -67,10 +84,15 @@ async function readExport(path: string): Promise<JoplinExport> {
 export async function importNotes(
   io: Io,
   out: Printer,
-  args: ContentArgs & { path: string; spaceId: SpaceId | null; folderId: FolderId | null },
+  args: ContentArgs & {
+    path: string;
+    from: ImportFrom | null;
+    spaceId: SpaceId | null;
+    folderId: FolderId | null;
+  },
   deps: Deps,
 ) {
-  const joplin = await readExport(args.path);
+  const source = await readExport(args.path, args.from);
   const agent = await openAgent(io, {
     unlock: args.unlock,
     makeStore: deps.makeStore,
@@ -92,9 +114,9 @@ export async function importNotes(
     } else if (folderId === null) {
       folderId = await shareStart(ctx, spaceId, '--folder');
     }
-    const summary = await importOperations.importJoplin(ctx, {
+    const summary = await importOperations.importNotes(ctx, {
       scope: { spaceId, ...(folderId === null ? {} : { folderId }) },
-      joplin,
+      source,
       signal: stop.signal,
     });
     done = { spaceId, folderId, summary };
@@ -110,7 +132,7 @@ export async function importNotes(
   await finish(agent).catch((error: unknown) => out.warn(stateNotSaved(error)));
   const { summary } = done;
   out.result(
-    { spaceId: done.spaceId, folderId: done.folderId, format: joplin.format, ...summary },
+    { spaceId: done.spaceId, folderId: done.folderId, format: source.format, ...summary },
     () => {
       const n = (count: number, what: string) => `${count} ${what}${count === 1 ? '' : 's'}`;
       out.line(
@@ -126,7 +148,9 @@ export async function importNotes(
         const why =
           reason === 'encrypted'
             ? 'it is encrypted; decrypt it in Joplin first'
-            : 'it is too large';
+            : reason === 'unused'
+              ? 'no imported note links to it'
+              : 'it is too large';
         out.note(`Left out ${out.foreign(path)}: ${why}`);
       }
       if (summary.encrypted > 0) {
