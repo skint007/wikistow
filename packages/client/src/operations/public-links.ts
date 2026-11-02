@@ -789,8 +789,11 @@ async function diagramFiles(body: string, draw?: (source: string) => Promise<Dra
     { id: AttachmentId; name: string; mediaType: string; bytes: Uint8Array; width: number }
   >();
   if (!draw) return files;
-  for (const source of diagramBlocks(body)) {
-    const drawn = await draw(source);
+  // All at once, so they wait on one load of Mermaid, not one each.
+  const sources = diagramBlocks(body);
+  const drawings = await Promise.all(sources.map(draw));
+  for (const [at, source] of sources.entries()) {
+    const drawn = drawings[at];
     if (!drawn) continue;
     files.set(source, {
       id: newId(AttachmentId),
