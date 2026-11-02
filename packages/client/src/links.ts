@@ -202,14 +202,22 @@ export function resolveWikilinks(
       ? attachments.filter((a) => fold(a.name) === fold(link.target)).map((a) => a.id)
       : link.target === ''
         ? [selfId]
-        : pagesFor(link.target, pages, index);
+        : pagesTitled(link.target, pages, index);
     const status: LinkStatus =
       found.length === 1 ? 'resolved' : found.length === 0 ? 'missing' : 'ambiguous';
     return { ...link, status, targets: found };
   });
 }
 
-function pagesFor(target: string, pages: readonly LinkablePage[], index?: PageIndex): string[] {
+/**
+ * The IDs of the pages a link's `target` names by title, as `resolveWikilinks`
+ * matches them: none, one, or several when ambiguous.
+ */
+export function pagesTitled(
+  target: string,
+  pages: readonly LinkablePage[],
+  index?: PageIndex,
+): string[] {
   const titled = (title: string) =>
     index
       ? (index.titled.get(fold(title)) ?? [])

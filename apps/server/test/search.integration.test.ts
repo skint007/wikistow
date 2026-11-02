@@ -266,8 +266,7 @@ describe('a search index', () => {
           ...lib.page,
           basedOn,
           revisionId: written.revisionId,
-          title: written.payload.title,
-          markdown: written.payload.markdown,
+          payload: written.payload,
         },
       ],
     });
@@ -295,8 +294,7 @@ describe('a search index', () => {
           ...lib.page,
           basedOn,
           revisionId: written.revisionId,
-          title: written.payload.title,
-          markdown: written.payload.markdown,
+          payload: written.payload,
         },
       ],
     });
@@ -320,8 +318,7 @@ describe('a search index', () => {
           ...lib.page,
           basedOn: written.revisionId,
           revisionId: written.revisionId,
-          title: 'Plan',
-          markdown: 'mysavedsecret again',
+          payload: { title: 'Plan', markdown: 'mysavedsecret again', extensions: {} },
         },
       ],
     });

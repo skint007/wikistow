@@ -11,11 +11,16 @@ import { ApiError } from '../api/client.ts';
 import { openOnDevice, sealOnDevice } from '../device-seal.ts';
 import { canonical, decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
+import { linkKey, linkTableOf, type ReadWikilinks } from '../link-table.ts';
+import { pageIndex, pagesTitled } from '../links.ts';
+import { parseWikilink } from '../markdown/wikilink.ts';
 import { foldPropertyName, type PropertyData } from '../markdown/properties.ts';
+import type { PagePayload } from '../payload.ts';
 import {
   hasTag,
   indexedContent,
   SearchIndex,
+  type IndexedLink,
   type IndexedPage,
   type IndexedText,
 } from '../search.ts';
@@ -64,12 +69,13 @@ export class IndexAbandoned extends Error {
   }
 }
 
-/** A page as the index holds it, for what reads its properties (`PageIndex`). */
+/** A page as the index holds it, for what reads its properties or links (`PageIndex`). */
 export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   readonly folderIds: readonly FolderId[];
   readonly path: readonly (string | null)[];
   readonly title: string;
   readonly properties: readonly Readonly<PropertyData>[];
+  readonly links: readonly Readonly<IndexedLink>[];
 };
 
 /** Which pages of the index to list (`PageIndex.list`). */
@@ -114,6 +120,25 @@ export class PageIndex extends SearchIndex<SearchPage> {
   /** The page `pageId` in `spaceId`, or undefined if this person can't open it. */
   page(spaceId: SpaceId, pageId: PageId): IndexedEntry | undefined {
     return this.#lookup().byPage.get(pageKey(spaceId, pageId))?.entry;
+  }
+
+  /**
+   * The pages in `pageId`'s space that link to it, by title, then ID: each
+   * page's links (`indexedLinks`) resolved as the reader resolves them,
+   * through the version's link table when its entry names a page this
+   * index holds, else by title among the space's pages here. A link
+   * matching several pages counts only through its entry; one matching
+   * none counts for nothing, and a page's links to itself aren't listed.
+   * Built from this person's own index, so it lists only pages they can
+   * open, each in the version they see. The first call for a space reads
+   * every link of its pages; after that it takes constant time until the
+   * space changes.
+   */
+  linksTo(spaceId: SpaceId, pageId: PageId): readonly IndexedEntry[] {
+    const read = this.#lookup();
+    let linked = read.linked.get(spaceId);
+    if (!linked) read.linked.set(spaceId, (linked = linkedIn(read.bySpace.get(spaceId) ?? [])));
+    return linked.get(pageId) ?? [];
   }
 
   /** The pages in `scope`, by title, then ID. */
@@ -165,7 +190,8 @@ export class PageIndex extends SearchIndex<SearchPage> {
     pages: Iterable<readonly [SearchPage, IndexedText?]>,
     { spaces = [] }: { spaces?: Iterable<SpaceId> | 'all' } = {},
   ): PageIndex {
-    const { byPage, bySpace } = this.#lookup();
+    const read = this.#lookup();
+    const { byPage, bySpace } = read;
     const given = new Map<string, readonly [SearchPage, IndexedText?]>();
     for (const page of pages) given.set(pageKey(page[0].spaceId, page[0].pageId), page);
     const removed = new Map<string, Held>();
@@ -176,8 +202,15 @@ export class PageIndex extends SearchIndex<SearchPage> {
       if (held) removed.set(key, held);
       const text = content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined);
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
-      const page = { doc, title: text.title, text: text.text, properties: text.properties ?? [] };
-      added.push({ page, entry: { ...doc, title: page.title, properties: page.properties } });
+      const page = {
+        doc,
+        title: text.title,
+        text: text.text,
+        properties: text.properties ?? [],
+        links: text.links ?? [],
+      };
+      const { title, properties, links } = page;
+      added.push({ page, entry: { ...doc, title, properties, links } });
     }
     const relisted = spaces === 'all' ? [...bySpace.keys()] : spaces;
     let relisting = false;
@@ -195,7 +228,7 @@ export class PageIndex extends SearchIndex<SearchPage> {
       added.map(({ page }) => page),
       { compact: relisting && removed.size > 0 },
     );
-    next.#read = followed({ byPage, bySpace }, removed, added);
+    next.#read = followed(read, removed, added);
     return next;
   }
 
@@ -205,10 +238,10 @@ export class PageIndex extends SearchIndex<SearchPage> {
 
   #lookup(): Lookup {
     if (this.#read === null) {
-      const read: Lookup = { bySpace: new Map(), byPage: new Map() };
+      const read: Lookup = { bySpace: new Map(), byPage: new Map(), linked: new Map() };
       for (const page of this.pages()) {
-        const { doc, title, properties } = page;
-        const entry: IndexedEntry = { ...doc, title, properties };
+        const { doc, title, properties, links } = page;
+        const entry: IndexedEntry = { ...doc, title, properties, links };
         let space = read.bySpace.get(doc.spaceId);
         if (!space) read.bySpace.set(doc.spaceId, (space = []));
         space.push(entry);
@@ -224,8 +257,16 @@ export class PageIndex extends SearchIndex<SearchPage> {
 /** A page an index holds: as it lists it, and as it indexed it. */
 type Held = { entry: IndexedEntry; page: Readonly<IndexedPage<SearchPage>> };
 
-/** What a `PageIndex` holds, grouped to read: each space's pages by title, and each page. */
-type Lookup = { bySpace: Map<SpaceId, IndexedEntry[]>; byPage: Map<string, Held> };
+/**
+ * What a `PageIndex` holds, grouped to read: each space's pages by title,
+ * each page, and for the spaces asked about so far, the pages linking to
+ * each page (`linksTo`).
+ */
+type Lookup = {
+  bySpace: Map<SpaceId, IndexedEntry[]>;
+  byPage: Map<string, Held>;
+  linked: Map<SpaceId, ReadonlyMap<string, IndexedEntry[]>>;
+};
 
 const pageKey = (spaceId: SpaceId, pageId: PageId) => `${spaceId}/${pageId}`;
 
@@ -260,6 +301,7 @@ function followed(
 ): Lookup {
   const byPage = new Map(read.byPage);
   const bySpace = new Map(read.bySpace);
+  const linked = new Map(read.linked);
   const changed = new Set<SpaceId>();
   for (const [key, held] of removed) {
     byPage.delete(key);
@@ -281,8 +323,43 @@ function followed(
     }
     if (entries.length > 0) bySpace.set(spaceId, entries);
     else bySpace.delete(spaceId);
+    // Worked out again when next asked: a title or link here may have changed.
+    linked.delete(spaceId);
   }
-  return { byPage, bySpace };
+  return { byPage, bySpace, linked };
+}
+
+/**
+ * For the pages of one space, `entries` by title, the pages linking to each
+ * page, by its ID, in `entries`' order (`PageIndex.linksTo`).
+ */
+function linkedIn(entries: readonly IndexedEntry[]): Map<string, IndexedEntry[]> {
+  // The names of the folders above a page: the last of its path's names.
+  const titles = pageIndex(
+    entries.map((entry) => ({
+      id: entry.pageId,
+      title: entry.title,
+      folders: entry.path.slice(entry.path.length - entry.folderIds.length).map((n) => n ?? ''),
+    })),
+  );
+  const linked = new Map<string, IndexedEntry[]>();
+  for (const entry of entries) {
+    const targets = new Set<string>();
+    for (const { key, pageId } of entry.links) {
+      if (pageId !== null && titles.titles.has(pageId)) targets.add(pageId);
+      else {
+        const [only, ...more] = pagesTitled(key, [], titles);
+        if (only !== undefined && more.length === 0) targets.add(only);
+      }
+    }
+    targets.delete(entry.pageId);
+    for (const target of targets) {
+      const into = linked.get(target);
+      if (into) into.push(entry);
+      else linked.set(target, [entry]);
+    }
+  }
+  return linked;
 }
 
 /** Where `entry` goes in `entries`, sorted `byTitle`. */
@@ -316,6 +393,8 @@ export const nameOf = (loaded: LoadedMetadata | null) =>
  * A page whose shown version is in `kept`, as an earlier index read it
  * (`keptPages`), is indexed from there without being opened; a version's
  * content never changes. Others come from the revision cache where they can.
+ * With `readLinks`, each page also keeps its links (`indexedLinks`), for
+ * `PageIndex.linksTo`, read with it; without, none, as search needs none.
  * If the cache is cleared (the vault locks, or access changes) or `signal`
  * aborts, it stops with `IndexAbandoned` and what it built is dropped.
  */
@@ -326,11 +405,13 @@ export async function indexSpaces(
     kept,
     onProgress,
     signal,
+    readLinks,
   }: {
     spaceIds?: readonly SpaceId[];
     kept?: KeptPages | null;
     onProgress?: (progress: IndexProgress) => void;
     signal?: AbortSignal;
+    readLinks?: ReadWikilinks;
   } = {},
 ): Promise<PageIndex> {
   const live = liveness(ctx, signal);
@@ -345,6 +426,7 @@ export async function indexSpaces(
     },
     live,
     onProgress,
+    readLinks,
     each: (doc, content) => content && index.addText(doc, content),
   });
   return index;
@@ -364,9 +446,8 @@ export type SavedVersion = {
   pageId: PageId;
   basedOn: RevisionId;
   revisionId: RevisionId;
-  /** The title and Markdown written, as the server holds them. */
-  title: string;
-  markdown: string;
+  /** The payload written, as the server holds it: its title, Markdown and link table. */
+  payload: Pick<PagePayload, 'title' | 'markdown' | 'extensions'>;
 };
 
 /**
@@ -383,7 +464,8 @@ export type SavedVersion = {
  * holds the page in the version it was saved over, or in the one saved
  * before it. Otherwise, as when the page is new to the index, someone
  * else's version came between, or access changed, its space is listed.
- * A save, given as it is written, needs nothing from the server.
+ * A save, given as it is written, needs nothing from the server. Links are
+ * kept with `readLinks`, as `indexSpaces` keeps them.
  */
 export async function updateIndex(
   ctx: ClientContext,
@@ -392,7 +474,12 @@ export async function updateIndex(
   {
     onProgress,
     signal,
-  }: { onProgress?: (progress: IndexProgress) => void; signal?: AbortSignal } = {},
+    readLinks,
+  }: {
+    onProgress?: (progress: IndexProgress) => void;
+    signal?: AbortSignal;
+    readLinks?: ReadWikilinks;
+  } = {},
 ): Promise<PageIndex> {
   const live = liveness(ctx, signal);
   const all = changes.spaces === 'all';
@@ -417,12 +504,15 @@ export async function updateIndex(
         index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
       live,
       onProgress,
+      readLinks,
       each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
     });
   }
   for (const saved of saves.values()) {
     const held = index.page(saved.spaceId, saved.pageId);
     if (!held || listing.has(saved.spaceId)) continue;
+    // As in `readPages`: locking stops the links' reads.
+    live();
     pages.push([
       {
         spaceId: held.spaceId,
@@ -435,7 +525,7 @@ export async function updateIndex(
         draft: true,
         unpublished: false,
       },
-      { title: saved.title, ...indexedContent(saved.markdown) },
+      await contentOfPayload(saved.payload, readLinks),
     ]);
   }
   live();
@@ -510,11 +600,13 @@ async function readPages(
     reuse,
     live,
     onProgress,
+    readLinks,
     each,
   }: {
     reuse: (spaceId: SpaceId, pageId: PageId, head: RevisionId) => IndexedText | 'held' | undefined;
     live: () => void;
     onProgress: ((progress: IndexProgress) => void) | undefined;
+    readLinks: ReadWikilinks | undefined;
     each: (doc: SearchPage, content: IndexedText | null) => void;
   },
 ): Promise<void> {
@@ -540,8 +632,16 @@ async function readPages(
       const unkept = chunk.filter((page) => !reused.has(page.id));
       const versions = unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept) : null;
       live();
+      // One at a time, each read checked first: locking or giving up stops
+      // the reads, rather than leave them queued with the pages' text.
+      const opened = new Map<PageId, Awaited<ReturnType<typeof contentOf>>>();
+      for (const page of unkept) {
+        live();
+        opened.set(page.id, await contentOf(versions?.get(page.id), readLinks));
+      }
+      live();
       for (const page of chunk) {
-        const version = reused.get(page.id) ?? contentOf(versions?.get(page.id));
+        const version = reused.get(page.id) ?? opened.get(page.id);
         if (!version) continue;
         const path: (string | null)[] = [];
         const folderIds: FolderId[] = [];
@@ -586,6 +686,7 @@ export type KeptPages = ReadonlyMap<
     title: string;
     text: string;
     properties: readonly Readonly<PropertyData>[];
+    links: readonly Readonly<IndexedLink>[];
   }
 >;
 
@@ -593,9 +694,9 @@ export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
     index
       .pages()
-      .map(({ doc, title, text, properties }) => [
+      .map(({ doc, title, text, properties, links }) => [
         doc.revisionId,
-        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties },
+        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties, links },
       ]),
   );
 
@@ -605,8 +706,18 @@ const KeptProperty = z.object({
   type: z.enum(['list', 'number', 'boolean', 'date', 'url', 'wikilink', 'text']),
   value: z.union([KeptScalar, z.array(z.union([KeptScalar, z.array(KeptScalar)]))]),
 }) satisfies z.ZodType<PropertyData>;
+// A link as kept: its key, and the page its table entry names, or null.
+const KeptLink = z.tuple([z.string(), PageId.nullable()]);
 const KeptJson = z.array(
-  z.tuple([RevisionId, SpaceId, PageId, z.string(), z.string(), z.array(KeptProperty)]),
+  z.tuple([
+    RevisionId,
+    SpaceId,
+    PageId,
+    z.string(),
+    z.string(),
+    z.array(KeptProperty),
+    z.array(KeptLink),
+  ]),
 );
 
 // The desktop app keeps the index between launches as these bytes (#3),
@@ -614,7 +725,7 @@ const KeptJson = z.array(
 // another account or server's. They are bound to the app's `build` too:
 // another build may reduce pages differently (`searchText`), so its file
 // opens as nothing and every page is read again. So does one kept before
-// properties were (its rows have a field fewer), whatever its build.
+// properties or links were (its rows have a field fewer), whatever its build.
 const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
@@ -628,6 +739,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.title,
     page.text,
     page.properties,
+    page.links.map(({ key, pageId }) => [key, pageId]),
   ]);
   return sealOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), utf8(JSON.stringify(json)));
 }
@@ -639,9 +751,16 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   try {
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
-      json.map(([id, spaceId, pageId, title, text, properties]) => [
+      json.map(([id, spaceId, pageId, title, text, properties, links]) => [
         id,
-        { spaceId, pageId, title, text, properties },
+        {
+          spaceId,
+          pageId,
+          title,
+          text,
+          properties,
+          links: links.map(([key, target]) => ({ key, pageId: target })),
+        },
       ]),
     );
   } catch {
@@ -649,13 +768,76 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   }
 }
 
-/** What a version gives the index, when it opens. */
-function contentOf(
+/** What a version gives the index, when it opens, its links read with `readLinks`. */
+async function contentOf(
   version: OpenedRevision | null | undefined,
-): { revisionId: RevisionId; content: IndexedText } | null {
+  readLinks: ReadWikilinks | undefined,
+): Promise<{ revisionId: RevisionId; content: IndexedText } | null> {
   if (version?.opened.kind !== 'current') return null;
-  const { title, markdown } = version.opened.payload;
-  return { revisionId: version.record.revisionId, content: { title, ...indexedContent(markdown) } };
+  const content = await contentOfPayload(version.opened.payload, readLinks);
+  return { revisionId: version.record.revisionId, content };
+}
+
+/**
+ * What a payload gives the index: its title, its text and properties, and
+ * with `readLinks`, its links.
+ */
+async function contentOfPayload(
+  payload: Pick<PagePayload, 'title' | 'markdown' | 'extensions'>,
+  readLinks: ReadWikilinks | undefined,
+): Promise<IndexedText> {
+  return {
+    title: payload.title,
+    ...indexedContent(payload.markdown),
+    links: readLinks ? await indexedLinks(payload, readLinks) : [],
+  };
+}
+
+// Where a wikilink may be written: every one is, in the body, a property's
+// value or a reference, as the tokenizer reads it (`wikilinkSyntax`), and
+// so is some text that isn't one, in code say.
+const WRITTEN_WIKILINK = /!?\[\[[^[\]\r\n]*\]\]/g;
+
+/**
+ * The page links a payload's link table would hold entries for
+ * (`tableWikilinks`: the body's, a property's value that is one wikilink,
+ * and the page a reference to another page's value names), each target
+ * once, with the page its table entry names. Links to this page's own
+ * headings (`[[#Heading]]`) and embeds are left out.
+ *
+ * Reading Markdown takes some milliseconds a page, so it is read only when
+ * needed. Each `[[…]]` written anywhere in it is found first; when the
+ * table has an entry for each, those are its links, as the save that wrote
+ * the table read them. Else its links are read with `read`, and a body
+ * whose links can't be read, in time or at all, has none.
+ */
+async function indexedLinks(
+  payload: Pick<PagePayload, 'markdown' | 'extensions'>,
+  read: ReadWikilinks,
+): Promise<IndexedLink[]> {
+  if (!payload.markdown.includes('[[')) return [];
+  const table = linkTableOf(payload);
+  const written = new Set<string>();
+  for (const [source] of payload.markdown.matchAll(WRITTEN_WIKILINK)) {
+    const link = parseWikilink(source);
+    if (link && !link.embed && !link.unsupported && link.target !== '') written.add(linkKey(link));
+  }
+  if ([...written].every((key) => table.has(key))) {
+    return [...written].map((key) => ({ key, pageId: table.get(key) ?? null }));
+  }
+  let found: Awaited<ReturnType<ReadWikilinks>>;
+  try {
+    found = await read(payload.markdown);
+  } catch {
+    return [];
+  }
+  const links = new Map<string, PageId | null>();
+  for (const link of found) {
+    if (link.embed || link.target === '') continue;
+    const key = linkKey(link);
+    if (!links.has(key)) links.set(key, table.get(key) ?? null);
+  }
+  return [...links].map(([key, pageId]) => ({ key, pageId }));
 }
 
 /**

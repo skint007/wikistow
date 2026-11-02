@@ -106,6 +106,7 @@ Commands:
                                [--permission-version N])
   page copy PAGE_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page history PAGE_ID
+  page links PAGE_ID
   page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
 
 The usual loop, with --json:
@@ -575,5 +576,22 @@ attachments by page read --json.${PIPES}
   'page history': `Usage: wikistow page history PAGE_ID
 
 The published versions, newest first, and who published each.
+`,
+  'page links': `Usage: wikistow page links PAGE_ID
+
+The pages in the page's space that link to it, by title, from the pages
+this agent can read. A page counts when a wikilink in its body, a property
+whose value is one wikilink, or a reference to another page's value
+(\`=[[Page]].key\`) names this page, as page read resolves links: a link
+matching several pages counts only once a writer picked this one. Each
+page is read as page read would show it: the draft if this agent edits
+the page, the published version otherwise. With --json:
+  {"pageId":"...","links":[{"pageId":"...","title":"...",
+    "folders":["Recipes"],"draft":false,"unpublished":false}]}
+folders are the folders the page is in, outermost first (null for one
+whose name can't be read). draft and unpublished are as search gives
+them. No page linking here is not a failure: links is empty. Without
+--json, one line per page: its ID, title, [draft] or [unpublished], and
+folders.
 `,
 } as const satisfies Record<CommandName, string>;
