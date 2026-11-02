@@ -51,10 +51,12 @@ export function ShareDialog({
 
   const failed = tree.error ?? shares.error ?? keys.error;
   const owners = keys.data?.listed.map((owner) => owner.identity.id) ?? [];
+  // A share rooted in the trash is in nobody's way, as the server has it.
+  const live = shares.data?.filter(
+    (share) => share.rootId === null || tree.data?.folders.some((f) => f.id === share.rootId),
+  );
   const target =
-    tree.data && shares.data
-      ? shareTarget({ shares: shares.data, folders: tree.data.folders }, shown)
-      : null;
+    tree.data && live ? shareTarget({ shares: live, folders: tree.data.folders }, shown) : null;
   const name = shareName(tree.data, shown);
 
   const body = () => {
@@ -80,8 +82,8 @@ export function ShareDialog({
         const other = shareName(tree.data, target.share.rootId);
         // How many shares sit inside the space or folder that can't be shared.
         const held =
-          target.kind === 'holds' && tree.data && shares.data
-            ? shares.data.filter(
+          target.kind === 'holds' && tree.data && live
+            ? live.filter(
                 (share) =>
                   shown === null ||
                   shareTarget({ shares: [share], folders: tree.data.folders }, shown).kind ===

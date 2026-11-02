@@ -39,6 +39,7 @@ import {
   ancestorsOf,
   currentOwners,
   isOwner,
+  liveShares,
   subtreeOf,
   type ShareRow,
 } from './access.ts';
@@ -652,10 +653,11 @@ export async function makeShare(
  * The nesting rule (section 6.1): a space share needs a space with no
  * shares; a folder share, a folder with no share root above it or under it,
  * in a space that isn't shared. Refused as `share-nesting`, naming the share
- * in the way.
+ * in the way. A share rooted in the trash is in nobody's way: restoring its
+ * root checks the rule then.
  */
 async function requireNoNesting(tx: Database, spaceId: string, rootId: string | null) {
-  const inSpace = await tx.select().from(shares).where(eq(shares.spaceId, spaceId));
+  const inSpace = await liveShares(tx, spaceId);
   const nested = (share: ShareRow | undefined) => {
     if (share) {
       throw new ContentError('share-nesting', 'Shares never nest', { shareId: share.id });

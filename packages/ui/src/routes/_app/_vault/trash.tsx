@@ -30,7 +30,8 @@ const day = (time: number) => new Date(time).toLocaleDateString(undefined, { dat
 function restoreMessage(error: unknown, entries: readonly Entry[]) {
   if (error instanceof ApiError && error.code === 'region-mismatch') {
     const folder = entries.find((entry) => entry.nodeId === error.detail.nodeIds?.[0]);
-    if (folder) return `Restore “${folder.title ?? 'its shared folder'}” first: it was in there.`;
+    if (folder)
+      return `Restore “${folder.title ?? 'that folder'}” first: it held the shared folder this was in.`;
     return 'Who can see where it was changed since it was deleted, so it can’t go back there.';
   }
   return errorMessage(error);

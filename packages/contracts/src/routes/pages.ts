@@ -262,7 +262,8 @@ const TrashParams = z.object({ trashId: TrashId });
  * the space, or of the shared folder it was in. Refused as
  * `region-mismatch` when its keys don't fit there any more: who can see
  * that place changed after it was deleted, or the shared folder it was in
- * is in the trash itself.
+ * is in the trash itself, when `nodeIds` names the item of the trash to
+ * restore first.
  */
 export const restoreTrash = {
   method: 'POST',

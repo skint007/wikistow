@@ -188,13 +188,13 @@ describe('the trash', () => {
       title: 'Deep',
     });
 
-    // With the shared folder in the trash too, it waits for that one.
-    await remove(lib.shared);
+    // With the shared folder in the trash too, it waits for what holds it.
+    await remove(lib.above);
     const refused = await trash
       .restoreTrash(owner.ctx, await trashIdOf(owner, inner))
       .catch((error: { code?: string; detail?: { nodeIds?: string[] } }) => error);
-    expect(refused).toMatchObject({ code: 'region-mismatch', detail: { nodeIds: [lib.shared] } });
-    await trash.restoreTrash(owner.ctx, await trashIdOf(owner, lib.shared));
+    expect(refused).toMatchObject({ code: 'region-mismatch', detail: { nodeIds: [lib.above] } });
+    await trash.restoreTrash(owner.ctx, await trashIdOf(owner, lib.above));
     await trash.restoreTrash(owner.ctx, await trashIdOf(owner, inner));
     const back = await spaceOperations.loadTree(member.ctx, lib.spaceId);
     expect(back.folders.map((folder) => folder.id).sort()).toEqual([inner, lib.shared].sort());

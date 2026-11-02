@@ -272,12 +272,14 @@ async function destination(
   const [share] = await tx.select().from(shares).where(eq(shares.id, shareId));
   if (!share?.rootId) return null;
   const [top] = await tx
-    .select({ trashId: nodes.trashId })
+    .select({ trashed: trash.nodeId })
     .from(nodes)
+    .leftJoin(trash, eq(trash.id, nodes.trashId))
     .where(eq(nodes.id, share.rootId));
-  if (!top || top.trashId !== null) {
+  // Named by what was deleted, which may be a folder above the shared one.
+  if (top?.trashed) {
     throw new ContentError('region-mismatch', 'Restore the shared folder it was in first', {
-      nodeIds: [share.rootId],
+      nodeIds: [top.trashed],
     });
   }
   return share.rootId;
