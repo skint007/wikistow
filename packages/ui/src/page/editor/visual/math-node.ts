@@ -177,11 +177,15 @@ class MathView implements NodeView {
     field.remove();
     const pos = this.#getPos();
     if (pos === undefined || this.#gone) return;
-    const value = this.#display ? field.value.trim() : field.value.replace(/\s+/g, ' ').trim();
+    // Left as it was, as it was; typed, without spaces around it, and inline on one line.
+    const before = String(this.#node.attrs.value);
+    const typed = field.value;
+    const value =
+      typed === before ? before : this.#display ? typed.trim() : typed.replace(/\s+/g, ' ').trim();
     const { tr } = this.#view.state;
     const end = pos + this.#node.nodeSize;
     if (!value) tr.delete(pos, end);
-    else if (value !== this.#node.attrs.value) tr.setNodeMarkup(pos, undefined, { value });
+    else if (value !== before) tr.setNodeMarkup(pos, undefined, { value });
     else this.#draw();
     if (refocus) {
       // After inline math, to type on; on a block, to move on from.
@@ -238,6 +242,9 @@ const mathKeys = $prose(
           const { $from, empty } = selection;
           const paragraph = $from.parent;
           if (!type || !empty || paragraph.type.name !== 'paragraph') return false;
+          // Not where a block can't go, as in a table cell.
+          const holder = $from.node(-1);
+          if (!holder.canReplaceWith($from.index(-1), $from.indexAfter(-1), type)) return false;
           if (paragraph.textContent !== '$$' || paragraph.childCount !== 1) return false;
           if ($from.parentOffset !== paragraph.content.size) return false;
           const math = type.create();

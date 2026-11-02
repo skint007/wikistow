@@ -11,12 +11,11 @@ import type { Root } from 'mdast';
 import { markdownNodes } from '../markdown/index.ts';
 
 // MathML Core's elements and the attributes KaTeX writes on them: no
-// links, styles, classes or ids, and nothing else.
+// links, styles, classes or ids, and nothing else, nor the TeX.
 const schema: Schema = {
   tagNames: [
     'math',
     'semantics',
-    'annotation',
     'mrow',
     'mi',
     'mn',
@@ -56,7 +55,6 @@ const schema: Schema = {
       'depth',
       'display',
       'displaystyle',
-      'encoding',
       'fence',
       'form',
       'height',
@@ -83,7 +81,9 @@ const schema: Schema = {
       'width',
     ],
   },
-  strip: [],
+  // The TeX KaTeX keeps in the MathML, which a page's outline, a heading's
+  // text and its word count would read as text.
+  strip: ['annotation'],
 };
 
 /** TeX KaTeX can't read, as written, marked so. */
