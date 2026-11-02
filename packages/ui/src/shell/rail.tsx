@@ -44,7 +44,7 @@ import { meQuery } from '../api';
 import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
-import { desktop, desktopUpdateQuery, linkHint } from '../desktop';
+import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../desktop';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
@@ -433,33 +433,59 @@ function NewSpaceDialog({
 }
 
 /**
- * Sign out, and whether the server refused the last try. Held by the shell:
- * signing out locks the vault first, which leaves for the unlock page and
- * closes the phone drawer, unmounting the menu it was started from.
+ * Whether a failed sign-out's answer wasn't WikiStow's: a 404, or a body
+ * that isn't its JSON, such as a proxy's error page. Its own refusals name
+ * a code or a message.
+ */
+const notWikiStow = (error: { status: number }) =>
+  error.status === 404 || !['code', 'message', 'error'].some((key) => key in error);
+
+/**
+ * Sign out, and why the last try failed: the server refused it (`refused`),
+ * or no WikiStow answered (`gone`, #257): no answer at all, or one that
+ * wasn't WikiStow's (`notWikiStow`). Either way the session is still alive
+ * there. In the desktop app `signOutHere` then signs out on this computer
+ * only. Held by the shell: signing out locks the vault first, which leaves
+ * for the unlock page and closes the phone drawer, unmounting the menu it
+ * was started from.
  */
 export function useSignOut() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [failed, setFailed] = useState(false);
-  // A sign-out the server refused leaves the session alive, so say so rather
-  // than showing the sign-in page over it. Leaving before the cache is
-  // cleared keeps the session check from sending sign-in back to itself.
-  const signOut = useCallback(async () => {
-    setFailed(false);
-    // Unsaved edits are saved first, or the person chose to drop them.
-    if (!(await vaultStore.requestLock())) return;
-    const { error } = await authClient.signOut().catch((caught: unknown) => ({ error: caught }));
-    if (error) {
-      setFailed(true);
-      return;
-    }
-    await desktop?.signedOut();
+  const [failed, setFailed] = useState<'refused' | 'gone' | null>(null);
+  // Leaving before the cache is cleared keeps the session check from sending
+  // sign-in back to itself.
+  const leave = useCallback(async () => {
     // A search a link asked for was this person's, not the next one's.
     takeHeldSearch();
     await navigate({ to: '/sign-in' });
     queryClient.clear();
   }, [navigate, queryClient]);
-  return { signOut, failed };
+  // A failed sign-out leaves the session alive, so say so rather than
+  // showing the sign-in page over it.
+  const signOut = useCallback(async () => {
+    setFailed(null);
+    // Unsaved edits are saved first, or the person chose to drop them.
+    if (!(await vaultStore.requestLock())) return;
+    const outcome = await authClient.signOut().then(
+      ({ error }) => (error ? (notWikiStow(error) ? 'gone' : 'refused') : null),
+      () => 'gone' as const,
+    );
+    setFailed(outcome);
+    if (outcome) return;
+    await desktop?.signedOut();
+    await leave();
+  }, [leave]);
+  const signOutHere = useCallback(async () => {
+    // Nothing is saved first: the server that would take it is gone.
+    vaultStore.lock();
+    await desktop?.signOutHere();
+    setFailed(null);
+    // Sign-in asks for a server again, not the one forgotten.
+    queryClient.setQueryData(desktopServerQuery.queryKey, null);
+    await leave();
+  }, [leave, queryClient]);
+  return { signOut, signOutHere: desktop ? signOutHere : null, failed };
 }
 
 function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {

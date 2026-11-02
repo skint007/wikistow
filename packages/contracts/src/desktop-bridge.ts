@@ -133,6 +133,13 @@ export type DesktopBridge = {
   /** Tell the app its person signed out, once the server ended the session. It forgets the unlock too. */
   signedOut(): Promise<void>;
   /**
+   * Sign out on this computer only, for a server that no longer answers as
+   * WikiStow (#257): forget the session, the unlock, everything kept and the
+   * server chosen, so sign-in asks for one. The server isn't asked, so its
+   * session stays alive until it expires or is signed out from elsewhere.
+   */
+  signOutHere(): Promise<void>;
+  /**
    * Whether this computer has a secret store the app trusts (GNOME Keyring
    * or KWallet on Linux, DPAPI on Windows, the Keychain on macOS). Only then
    * does it keep the session between launches, or offer to remember the
@@ -233,6 +240,7 @@ export const DESKTOP_CHANNELS = {
   signIn: 'wikistow:sign-in',
   cancelSignIn: 'wikistow:cancel-sign-in',
   signedOut: 'wikistow:signed-out',
+  signOutHere: 'wikistow:sign-out-here',
   secureStorage: 'wikistow:secure-storage',
   rememberVault: 'wikistow:remember-vault',
   rememberedVault: 'wikistow:remembered-vault',

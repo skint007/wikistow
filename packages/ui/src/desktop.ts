@@ -16,6 +16,12 @@ declare global {
 export const desktop: DesktopBridge | null =
   typeof window === 'undefined' ? null : (window.wikistowDesktop ?? null);
 
+/** The server the desktop app signed in to last, or null: none chosen yet, or a browser. */
+export const desktopServerQuery = queryOptions({
+  queryKey: ['desktop-server'],
+  queryFn: () => desktop?.server() ?? null,
+});
+
 /** Where a hint cuts a long address short. */
 const LONGEST_ADDRESS = 200;
 

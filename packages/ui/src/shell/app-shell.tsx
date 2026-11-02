@@ -22,6 +22,7 @@ import { useVault, vaultStore } from '../vault/store';
 import { TrashNotice } from '../page/trash-notice';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
+import { SignOutHere } from './session-error';
 import { linkedSearch, SearchOpener, takeHeldSearch } from './search-link';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
@@ -45,7 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
   useTreeChanges(vault.status === 'unlocked' ? vault.ctx : null);
-  const { signOut, failed: signOutFailed } = useSignOut();
+  const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
   // The avatar's update mark is in the drawer, so the button opening it carries it too.
   const { data: update } = useQuery(desktopUpdateQuery);
   // The session search was opened in: unlocking again starts a new one, closed.
@@ -172,12 +173,17 @@ export function AppShell({ children }: { children: ReactNode }) {
         <RestoreNotice />
         {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
         {signOutFailed && (
-          <p
+          <div
             role="alert"
-            className="fixed bottom-4 left-4 z-50 rounded-card bg-card px-4 py-2 text-sm text-destructive shadow-card min-[900px]:left-20"
+            className="fixed bottom-4 left-4 z-50 grid max-w-sm gap-3 rounded-card bg-card px-4 py-2 text-sm shadow-card min-[900px]:left-20"
           >
-            Couldn’t sign out. Try again.
-          </p>
+            <p className="text-destructive">
+              {signOutFailed === 'refused'
+                ? 'Couldn’t sign out. Try again.'
+                : 'Couldn’t reach the server to sign out, so the session there is still open. Try again.'}
+            </p>
+            {signOutFailed === 'gone' && signOutHere && <SignOutHere signOutHere={signOutHere} />}
+          </div>
         )}
       </SearchOpener>
     </SlotContext>

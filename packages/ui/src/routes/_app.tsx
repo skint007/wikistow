@@ -6,6 +6,7 @@ import { ReauthProvider } from '../auth/reauth';
 import { desktop } from '../desktop';
 import { AppShell } from '../shell/app-shell';
 import { withoutSearchHash } from '../shell/search-link';
+import { SessionError } from '../shell/session-error';
 import { idleTooLong, useIdleLock } from '../vault/idle-lock';
 import { restoreInTab } from '../vault/open';
 import { forgetKeptUnlock, vaultStore } from '../vault/store';
@@ -33,6 +34,8 @@ export const Route = createFileRoute('/_app')({
     }
   },
   component: AppLayout,
+  // The session check got no answer, or not WikiStow's, or the server failed (#257).
+  errorComponent: SessionError,
 });
 
 function AppLayout() {

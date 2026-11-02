@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { safeRedirect } from '@/lib/redirect';
 import { installationQuery, meQuery } from '../api';
 import { authClient } from '../auth/client';
-import { desktop } from '../desktop';
+import { desktop, desktopServerQuery } from '../desktop';
 import { errorMessage, unwrap } from '../errors';
 
 // The router parses query values as JSON (`?verified=1` arrives as a number),
@@ -194,10 +194,7 @@ function DesktopSignIn({ onDone }: { onDone: () => Promise<void> }) {
   // to an earlier try is ignored.
   const attempt = useRef(0);
   const [waiting, setWaiting] = useState(false);
-  const { data: server } = useQuery({
-    queryKey: ['desktop-server'],
-    queryFn: () => desktop?.server() ?? null,
-  });
+  const { data: server } = useQuery(desktopServerQuery);
   const form = useForm({
     resolver: zodResolver(ServerAddress),
     values: { server: server ?? '' },

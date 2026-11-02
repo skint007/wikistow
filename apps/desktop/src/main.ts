@@ -191,6 +191,29 @@ async function saveConfig() {
   await rename(next, configFile());
 }
 
+// The server's answer to signing out already cleared the session cookie;
+// its other cookies stay, as a browser's would. The unlock goes with it.
+async function signedOut() {
+  forget();
+  await persist();
+  await removeKept();
+}
+
+/**
+ * Sign out on this computer only, when the server no longer answers as
+ * WikiStow (#257): what signing out forgets, and the server's cookies and the
+ * server chosen too, so sign-in asks for a server. Nothing goes to the
+ * server, whose session stays alive until it expires or is revoked.
+ */
+async function signOutHere() {
+  cookie = null;
+  server = null;
+  await signedOut();
+  // A failed write brings the old server back at the next launch, where this
+  // can be done again.
+  await saveConfig().catch(() => {});
+}
+
 /**
  * Send `request` on to the server with the session, keeping any cookie the
  * server changes. Fails when there is no server, or no answer.
@@ -736,13 +759,8 @@ void app.whenReady().then(async () => {
     signInRun += 1;
     pending?.done({ ok: false, message: 'Signing in was cancelled.' });
   });
-  // The server's answer to signing out already cleared the session cookie;
-  // its other cookies stay, as a browser's would. The unlock goes with it.
-  handle('signedOut', async () => {
-    forget();
-    await persist();
-    await removeKept();
-  });
+  handle('signedOut', signedOut);
+  handle('signOutHere', signOutHere);
   handle('secureStorage', async () => store?.secure === true);
   handle('rememberVault', async (accountId, key) => {
     // The pages only offer this with a trusted store.
