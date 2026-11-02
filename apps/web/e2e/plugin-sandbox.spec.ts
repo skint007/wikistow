@@ -18,6 +18,11 @@ import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './v
 const BUILD = fileURLToPath(new URL('../../../packages/plugin-sdk/src/build.ts', import.meta.url));
 const PAGE_TOOLS = fileURLToPath(new URL('../../../examples/plugins/page-tools', import.meta.url));
 
+// The app's service worker checks `/sw.js` again when the browser chooses,
+// such as after a frame loads, and that request lands on the route the first
+// test counts. The frames aren't the worker's, so these tests run without it.
+test.use({ serviceWorkers: 'block' });
+
 // The sandboxed frame that holds plugin scripts' workers (ADR 0002), driven
 // from the app's page (`sandbox.ts`). The desktop app checks it under
 // `app://` too (`apps/desktop/e2e/plugins.spec.ts`).

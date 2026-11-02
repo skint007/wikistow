@@ -5,14 +5,17 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { ServerResponse } from 'node:http';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transformWithOxc } from 'vite-plus';
 import {
   DIAGRAM_HOST_PAGE,
   DIAGRAM_HOST_SCRIPT,
   DIAGRAM_LIBRARY,
+  PLUGIN_HOST_PAGE,
+  PLUGIN_HOST_SCRIPT,
 } from '../../packages/contracts/src/security.ts';
 import { MATH_FONT, PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
 import { REACT_FILES } from '../../packages/ui/src/workshop/library.ts';
@@ -162,6 +165,62 @@ const diagramLibrary = {
   },
 };
 
+/**
+ * The service worker, `/sw.js` (ADR 0009, decision 6), written once the
+ * build is on disk: `sw/sw.ts` with the files it keeps named before it.
+ * It keeps the files at the top of the build but the frames' own, and
+ * everything under `/assets/` but source maps, Workshop's esbuild, which
+ * only an online Workshop loads, and Mermaid, which only the diagram
+ * frame loads: the frame's opaque origin is never the worker's. Its cache
+ * is named by a hash of those files, so each build that changes one
+ * installs again.
+ */
+const LEFT_TO_SERVER = new Set([
+  PLUGIN_HOST_PAGE,
+  PLUGIN_HOST_SCRIPT,
+  DIAGRAM_HOST_PAGE,
+  DIAGRAM_HOST_SCRIPT,
+]);
+const appShell = () => {
+  let outDir = '';
+  return {
+    name: 'app-shell',
+    apply: 'build' as const,
+    configResolved(config: { build: { outDir: string }; root: string }) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async closeBundle() {
+      const files: string[] = [];
+      for (const entry of await readdir(outDir, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const file = `/${relative(outDir, join(entry.parentPath, entry.name)).replaceAll(sep, '/')}`;
+        const top = !file.slice(1).includes('/');
+        const kept = top
+          ? !LEFT_TO_SERVER.has(file) && file !== '/sw.js'
+          : file.startsWith('/assets/') &&
+            !file.startsWith(DIAGRAM_LIBRARY) &&
+            !file.endsWith('.map') &&
+            !/\/esbuild-[^/]*\.wasm$/.test(file);
+        if (kept) files.push(file);
+      }
+      files.sort();
+      const hash = createHash('sha256');
+      for (const file of files) hash.update(file).update(await readFile(join(outDir, file)));
+      const shell = { cache: `wikistow-app-${hash.digest('hex').slice(0, 16)}`, files };
+      const { code } = await transformWithOxc(
+        await readFile(new URL('sw/sw.ts', import.meta.url), 'utf8'),
+        'sw.ts',
+        { lang: 'ts' },
+      );
+      // The type-only export that makes `sw.ts` a module to the type checker
+      // comes out as `export {};`, which a worker's classic script can't hold.
+      const script = code.replace(/^export \{\};\n?/m, '');
+      if (/^(import|export)\b/m.test(script)) throw new Error('sw/sw.ts must not import or export');
+      await writeFile(join(outDir, 'sw.js'), `const SHELL = ${JSON.stringify(shell)};\n${script}`);
+    },
+  };
+};
+
 // A plain object: the router plugin's Vite types differ from Vite+'s, so
 // defineConfig's checking can't compare them.
 export default {
@@ -179,6 +238,7 @@ export default {
     library,
     publicPageFonts,
     diagramLibrary,
+    appShell(),
   ],
   define: { __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`) },
   resolve: { alias: { '@': ui('src'), 'decode-named-character-reference': entities } },
