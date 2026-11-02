@@ -17,12 +17,15 @@ import {
   type ReadingChange,
   type ReadingRights,
 } from '../src/page/reading-changes-model.ts';
+import { openVault } from './page-view.ts';
 
 // A page's task checkboxes in the reader (#212): ticked where the page can
 // change while it's read, each tick queued and shown at once; disabled
 // anywhere else.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+// Its properties keep their open state in the vault's account.
+openVault();
 
 const PAGE = `---
 title: Shopping

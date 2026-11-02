@@ -45,8 +45,6 @@ import {
   accessTo,
   accessToPages,
   canEdit,
-  isHidden,
-  isOwner,
   lockShare,
   lockSpace,
   lockSpaceOf,
@@ -60,7 +58,7 @@ import {
 } from './access.ts';
 import { ContentError } from './errors.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
-import { currentIdentity, requireCaller, type Actor } from './identities.ts';
+import { requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { charge, usedBytes } from './quota.ts';
 import { copyUploadAccess, sweepCopies } from './copies.ts';
@@ -81,12 +79,6 @@ export type RevisionCommit = {
   blobRefs: string[];
   permissionVersion: number;
 };
-
-async function requireIdentity(db: Database, accountId: string): Promise<PublicIdentity> {
-  const identity = await currentIdentity(db, accountId);
-  if (!identity) throw new ContentError('vault-missing', 'Set up your vault first');
-  return identity;
-}
 
 /**
  * The page's node row. Writers hold it `FOR SHARE` for their transaction, so
@@ -769,6 +761,11 @@ export async function fetchRevisions(
   actor: Actor,
   ids: readonly string[],
   report: ReportUnreadable,
+  readable: (
+    tx: Database,
+    who: Holder,
+    rows: readonly RevisionPlace[],
+  ) => Promise<Map<string, number>> = readableRevisions,
 ) {
   const caller = await requireCaller(db, actor);
   const { identity } = caller;
@@ -792,7 +789,7 @@ export async function fetchRevisions(
       .from(revisions)
       .where(inArray(revisions.id, [...ids]));
     const keysFor = await revisionKeyMaterial(tx, identity, ids, report);
-    const readable = await readableRevisions(tx, caller, rows);
+    const allowed = await readable(tx, caller, rows);
     const sent = [];
     const deferred = [];
     let bytes = 0;
@@ -800,7 +797,7 @@ export async function fetchRevisions(
     const position = new Map(ids.map((id, i) => [id, i]));
     rows.sort((a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0));
     for (const row of rows) {
-      const from = readable.get(row.id);
+      const from = allowed.get(row.id);
       const keys = keysFor.get(row.id);
       if (from === undefined || !keys) continue;
       if (sent.length > 0 && bytes + row.payloadSize > REVISION_BATCH_BYTES) {
@@ -854,7 +851,7 @@ export async function fetchRevisions(
   // instead, so the answer still carries one when any is left. The rest is
   // always shorter.
   if (answered.length === 0 && deferred.length > 0) {
-    return fetchRevisions(db, actor, deferred, report);
+    return fetchRevisions(db, actor, deferred, report, readable);
   }
   return { revisions: answered, deferred };
 }
@@ -1335,33 +1332,6 @@ async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): P
     where sh.space_id = ${spaceId}
     order by sh.id
     for update of sh`);
-}
-
-/**
- * Delete a folder or page and everything beneath it, for space owners, with
- * the shares rooted in it (`removeSubtree`). It holds the space against a
- * share being made meanwhile. Its blob files, and those of any opening that
- * goes, are removed after the transaction commits, each kept if an upload
- * of the same bytes has stored it again by then. Any left by a failure
- * here go in the sweep's pass over files without rows. A copy's hidden
- * nodes are its own to remove (section 10).
- */
-export async function deleteNode(
-  db: Database,
-  store: BlobStore,
-  input: { accountId: string; spaceId: string; nodeId: string },
-) {
-  const hashes = await db.transaction(async (tx) => {
-    const identity = await requireIdentity(tx, input.accountId);
-    await lockSpace(tx, input.spaceId);
-    if (!(await isOwner(tx, identity.id, input.spaceId))) {
-      const access = await accessTo(tx, { identity, personId: null }, input);
-      throw new ContentError(access ? 'forbidden' : 'not-found');
-    }
-    if (await isHidden(tx, input.nodeId)) throw new ContentError('not-found');
-    return removeSubtree(tx, input.spaceId, input.nodeId, await holdSubtree(tx, input));
-  });
-  for (const hash of hashes) await deleteUnlistedFile(db, store, hash);
 }
 
 /**

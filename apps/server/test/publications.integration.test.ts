@@ -8,6 +8,7 @@ import {
   publicationOperations as pubs,
   sharingOperations as sharing,
   spaceOperations,
+  trashOperations,
   utf8,
   type ClientContext,
   type FolderId,
@@ -427,18 +428,24 @@ describe('publishing into another space', () => {
     expect(await rejection(list(w.dave))).toBe('forbidden');
   });
 
-  it('ends where a deleted page went, leaving the copy readable', async () => {
+  it('ends where a page deleted for good went, leaving the copy readable', async () => {
     const w = await world();
     const onBoard = await publish(w.alice.ctx, w, { revisionId: w.published });
+    const detachedAt = async () => {
+      const [row] = await t.db
+        .select({ detachedAt: schema.publications.detachedAt })
+        .from(schema.publications)
+        .where(eq(schema.publications.destinationPageId, onBoard.pageId));
+      return row?.detachedAt;
+    };
+    // In the trash, it could come back, so its publications wait.
     await pages.deleteNode(w.alice.ctx, { spaceId: w.lib.spaceId, nodeId: w.page.pageId });
+    expect(await detachedAt()).toBeNull();
+    await trashOperations.emptyTrash(w.alice.ctx, w.lib.spaceId);
     // The copy stays for its readers, ended, and its publishers there detach
     // it to edit it.
     const copy = copyOf(w, onBoard.pageId);
-    const [row] = await t.db
-      .select({ detachedAt: schema.publications.detachedAt })
-      .from(schema.publications)
-      .where(eq(schema.publications.destinationPageId, onBoard.pageId));
-    expect(row?.detachedAt).toBeInstanceOf(Date);
+    expect(await detachedAt()).toBeInstanceOf(Date);
     expect(
       (await pages.openRevisionOf(w.carol.ctx, copy, 'published', onBoard.revisionId)).opened,
     ).toMatchObject({ kind: 'current', payload: { title: 'Plan' } });
