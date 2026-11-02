@@ -24,6 +24,12 @@ import { ErrorLine } from '../sharing/use-action';
 import { useClient } from '../vault/store';
 import { doneStatus, foundStatus, importStatus, skipReason } from './import-model';
 
+/**
+ * The largest JEX or zip the browser reads: it holds the whole file, and a
+ * zip's files unpacked too. A folder is read a file at a time.
+ */
+const MAX_ARCHIVE_BYTES = 1024 ** 3;
+
 /** Where an import goes: the top of the space (`folderId` null) or a folder, by the name shown. */
 export type Importing = { folderId: FolderId | null; name: string };
 
@@ -173,8 +179,13 @@ export function ImportDialog({
               onChange={(event) => {
                 const file = event.currentTarget.files?.[0];
                 event.currentTarget.value = '';
-                if (file)
+                if (file && file.size > MAX_ARCHIVE_BYTES) {
+                  setError(
+                    'This file is over 1 GB, too large to read in the browser. Unpack it and choose its folder, or use wikistow import on the command line.',
+                  );
+                } else if (file) {
                   void read(async () => archiveFiles(new Uint8Array(await file.arrayBuffer())));
+                }
               }}
             />
             <input

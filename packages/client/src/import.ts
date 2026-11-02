@@ -173,6 +173,8 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
     encrypted: 0,
     encryptedNotes: [],
     target: (note, url) => {
+      // Joplin writes a link to a deleted note as its ID, and to one in its trash as `undefined`.
+      if (/^:\/[0-9a-zA-Z]{32}\b/.test(url) || /(?:^|\/)undefined$/.test(url)) return 'missing';
       if (SCHEME.test(url) || url.startsWith('#') || url.startsWith('/')) return null;
       const path = cleanPath(`${dirOf(note.path)}/${unescapeLinkUrl(url.replace(/[?#].*$/s, ''))}`);
       if (path === null) return null;
