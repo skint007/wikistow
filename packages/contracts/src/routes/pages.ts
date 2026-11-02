@@ -10,7 +10,7 @@ import {
 } from '../records/revision.ts';
 import { KeyWrap } from '../records/share.ts';
 import type { RouteDef } from '../route.ts';
-import { AccessRole, AgentEdit } from './structure.ts';
+import { AccessRole, AgentEdit, ServedMetadata } from './structure.ts';
 
 const BlobHash = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 
@@ -201,12 +201,91 @@ export const fetchRevisions = {
   }),
 } as const satisfies RouteDef;
 
-/** Delete a folder or page and everything beneath it (space owners). */
+/**
+ * Delete a folder or page and everything beneath it (space owners): it goes
+ * to the space's trash (`listTrash`), and out of every tree, at once.
+ */
 export const deleteNode = {
   method: 'DELETE',
   path: '/api/spaces/:spaceId/nodes/:nodeId',
   params: z.object({ spaceId: SpaceId, nodeId: NodeId }),
   response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/** How long a deleted page or folder stays in the trash before it is deleted for good. */
+export const TRASH_DAYS = 30;
+
+export const TrashId = z.uuid();
+
+/**
+ * Something deleted, in a space the caller owns: the page or folder, with
+ * everything that was under it. A folder's name comes with it; a page's
+ * title is in its head version, fetched with `trashRevisions`.
+ */
+export const TrashItem = z.strictObject({
+  trashId: TrashId,
+  spaceId: SpaceId,
+  nodeId: NodeId,
+  kind: z.enum(['folder', 'page']),
+  deletedAt: z.iso.datetime(),
+  /** The name of who deleted it, as the server has it; null once their account is gone. */
+  deletedBy: z.string().nullable(),
+  /** A folder's name; null for a page. */
+  name: ServedMetadata.nullable(),
+  draftHead: RevisionId.nullable(),
+  publishedHead: RevisionId.nullable(),
+});
+
+/** What is in the trash of every space the caller owns, newest first. */
+export const listTrash = {
+  method: 'GET',
+  path: '/api/trash',
+  response: z.strictObject({ items: z.array(TrashItem) }),
+} as const satisfies RouteDef;
+
+/**
+ * `fetchRevisions` for versions of pages in the trash of spaces the caller
+ * owns, so the trash can show their titles. Nothing else is served.
+ */
+export const trashRevisions = {
+  method: 'POST',
+  path: '/api/trash/revisions',
+  body: fetchRevisions.body,
+  response: fetchRevisions.response,
+} as const satisfies RouteDef;
+
+const TrashParams = z.object({ trashId: TrashId });
+
+/**
+ * Put it back where it was (space owners), with everything that went with
+ * it. If the folder it was in is in the trash too, it goes to the top of
+ * the space, or of the shared folder it was in. Refused as
+ * `region-mismatch` when its keys don't fit there any more: who can see
+ * that place changed after it was deleted, or the shared folder it was in
+ * is in the trash itself, when `nodeIds` names the item of the trash to
+ * restore first.
+ */
+export const restoreTrash = {
+  method: 'POST',
+  path: '/api/trash/:trashId/restore',
+  params: TrashParams,
+  response: z.strictObject({ spaceId: SpaceId, nodeId: NodeId, parentId: FolderId.nullable() }),
+} as const satisfies RouteDef;
+
+/** Delete it for good (space owners), as it was deleted before the trash. */
+export const purgeTrash = {
+  method: 'DELETE',
+  path: '/api/trash/:trashId',
+  params: TrashParams,
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/** Delete for good everything in the trash of one space the caller owns, or of all of them. */
+export const emptyTrash = {
+  method: 'POST',
+  path: '/api/trash/empty',
+  body: z.object({ spaceId: SpaceId.nullable() }),
+  response: z.strictObject({ removed: z.number().int() }),
 } as const satisfies RouteDef;
 
 /**

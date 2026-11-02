@@ -6,6 +6,7 @@ export * as workshopTools from './workshop-tools.ts';
 export * from './api/client.ts';
 export * from './change.ts';
 export * from './cover.ts';
+export * from './diagram.ts';
 export { deviceTag } from './device-seal.ts';
 export * from './encoding.ts';
 export * from './enrollment.ts';
@@ -41,6 +42,7 @@ export * from './tree.ts';
 export * from './tree-changes.ts';
 export * from './vault.ts';
 export * as pageOperations from './operations/pages.ts';
+export * as trashOperations from './operations/trash.ts';
 export {
   agentContactsMark,
   closeSession,

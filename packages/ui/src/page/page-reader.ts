@@ -20,10 +20,22 @@ const editReader = new MarkdownWorker();
  */
 export const checkReader = new MarkdownWorker();
 
+// The worker the search index reads each page's links in, apart, so
+// indexing a library doesn't hold up the page shown (`readIndexLinks`).
+const indexReader = new MarkdownWorker();
+
 vaultStore.subscribe(() => {
   if (vaultStore.get().status !== 'locked') return;
-  for (const reader of [pageReader, editReader, checkReader]) reader.close();
+  for (const reader of [pageReader, editReader, checkReader, indexReader]) reader.close();
 });
+
+/**
+ * A page's wikilinks as the search index keeps them, for listing the pages
+ * that link to a page (`indexedLinks`), read in a worker of their own and
+ * given as long as the reader.
+ */
+export const readIndexLinks: ReadWikilinks = (markdown) =>
+  indexReader.run('tableLinks', markdown, { budgetMs: READ_BUDGET_MS });
 
 /**
  * A page's wikilinks, read in `pageReader` and given as long as the reader,

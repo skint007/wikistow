@@ -18,6 +18,7 @@
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
     "electron": "44.10.1",
+    "resedit": "^3.1.0",
     "zod": "^4.6.5"
   },
   "productName": "WikiStow"

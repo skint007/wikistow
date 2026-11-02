@@ -24,6 +24,7 @@ import { errorMessage } from '../errors';
 import { publicLinksQuery, revisionQuery, treeQuery } from '../data/queries';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { useClient } from '../vault/store';
+import { diagramPng } from './diagrams';
 import { publicLinkMessage } from './messages';
 
 /** A version just published, which the Publish confirmation uploads without opening it again. */
@@ -198,7 +199,7 @@ function LinkSteps({
           await publicLinkOperations.turnOn(ctx, page.pageId);
         }
         setStep('Uploading the public page…');
-        await publicLinkOperations.shareCopy(ctx, page, { published });
+        await publicLinkOperations.shareCopy(ctx, page, { published, drawDiagram: diagramPng });
       } finally {
         setStep(null);
         await refresh();
@@ -474,7 +475,10 @@ function PublishSteps({
       }
       setStep('Updating the public page…');
       try {
-        await publicLinkOperations.shareCopy(ctx, page, { published: version });
+        await publicLinkOperations.shareCopy(ctx, page, {
+          published: version,
+          drawDiagram: diagramPng,
+        });
       } catch (caught) {
         // A newer publication can't be sent from here, which has only this one.
         const code = caught instanceof ApiError ? caught.code : null;

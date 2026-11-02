@@ -3,6 +3,7 @@ import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
 import { splitFrontmatter } from './frontmatter.ts';
+import { mathFromMarkdownExtension, mathSyntax } from './math.ts';
 import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 
 // Task-list items (`- [ ] milk`) ticked in a page's Markdown, as the reader
@@ -57,15 +58,15 @@ export function bodyStart(markdown: string): number {
 
 /**
  * Every task item in `markdown`, in order, as the reader reads them:
- * GitHub-flavoured Markdown and wikilinks, the frontmatter split off first.
+ * GitHub-flavoured Markdown, wikilinks and math, the frontmatter split off first.
  * Read without recursion, as a page may nest deep.
  */
 export function taskItems(markdown: string): TaskItem[] {
   const { body } = splitFrontmatter(markdown);
   const start = bodyStart(markdown);
   const tree = fromMarkdown(body, {
-    extensions: [gfm(), wikilinkSyntax],
-    mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown],
+    extensions: [gfm(), wikilinkSyntax, mathSyntax],
+    mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown, mathFromMarkdownExtension],
   });
   const found: TaskItem[] = [];
   const stack: Nodes[] = [tree];

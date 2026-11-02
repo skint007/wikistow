@@ -9,6 +9,7 @@ import {
   sharingOperations,
   spaceKeys,
   spaceOperations,
+  trashOperations,
   type ClientContext,
   type PageId,
   type RevisionId,
@@ -18,6 +19,7 @@ import { hashKey, queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { DesktopBridge } from '@wikistow/contracts';
 import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
+import { readIndexLinks } from '../page/page-reader';
 
 // Everything here is decrypted or describes encrypted content, so every key
 // starts with PLAIN and locking the vault drops it all.
@@ -166,6 +168,13 @@ export const spaceKeysQuery = (ctx: ClientContext, spaceId: SpaceId) =>
     queryFn: () => spaceKeys(ctx, spaceId, { refresh: true }),
   });
 
+/** What is in the trash of the spaces this person owns (protocol section 10). */
+export const trashQuery = (ctx: ClientContext) =>
+  queryOptions({
+    queryKey: [PLAIN, 'trash'],
+    queryFn: () => trashOperations.loadTrash(ctx),
+  });
+
 /** Shares this person is a member of, with their root's name and who shared them. */
 export const sharedWithMeQuery = (ctx: ClientContext) =>
   queryOptions({
@@ -228,7 +237,7 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       const onProgress = (progress: searchOperations.IndexProgress) =>
         queryClient.setQueryData(searchProgressKey, progress);
-      // The desktop app keeps one between launches only with a trusted keyring.
+      // The desktop app keeps one between launches only with a trusted secret store.
       const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
       const changes = takeChanges(queryClient);
@@ -236,13 +245,18 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       let index: searchOperations.PageIndex;
       try {
         if (shown) {
-          index = await searchOperations.updateIndex(ctx, shown, changes, { signal, onProgress });
+          index = await searchOperations.updateIndex(ctx, shown, changes, {
+            signal,
+            onProgress,
+            readLinks: readIndexLinks,
+          });
         } else {
           const sealed = await device?.searchIndex().catch(() => null);
           index = await searchOperations.indexSpaces(ctx, {
             kept: sealed ? searchOperations.openKept(ctx, sealed, __APP_VERSION__) : null,
             signal,
             onProgress,
+            readLinks: readIndexLinks,
           });
         }
       } catch (error) {

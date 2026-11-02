@@ -1,5 +1,15 @@
 import { sql } from 'drizzle-orm';
-import { bigint, check, foreignKey, index, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  check,
+  foreignKey,
+  index,
+  pgTable,
+  text,
+  unique,
+  uuid,
+  type AnyPgColumn,
+} from 'drizzle-orm/pg-core';
 import { copies } from './copies.ts';
 import { timestamptz } from './helpers.ts';
 import { users } from './users.ts';
@@ -54,6 +64,13 @@ export const nodes = pgTable(
      * null, so removing the finished copy leaves them.
      */
     copyId: text().references(() => copies.id, { onDelete: 'cascade' }),
+    /**
+     * Set while the node is in the trash, on every node of what was deleted
+     * (`trash`): it is in no tree, and nobody can open or change it.
+     * Restoring sets it back to null; deleting the trash row, which only
+     * deleting for good does, takes the nodes along.
+     */
+    trashId: uuid().references((): AnyPgColumn => trash.id, { onDelete: 'cascade' }),
     createdAt: timestamptz().notNull().defaultNow(),
   },
   (table) => [
@@ -72,5 +89,36 @@ export const nodes = pgTable(
     index('nodes_copy_idx')
       .on(table.copyId)
       .where(sql`${table.copyId} is not null`),
+    index('nodes_trash_idx')
+      .on(table.trashId)
+      .where(sql`${table.trashId} is not null`),
+  ],
+);
+
+/**
+ * A deleted page or folder, with everything that was under it, kept for
+ * 30 days before it is deleted for good. `nodeId` is the one deleted; it
+ * keeps its parent, where restoring puts it back. A node under it that was
+ * deleted before it keeps its own row.
+ */
+export const trash = pgTable(
+  'trash',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    spaceId: text()
+      .notNull()
+      .references(() => spaces.id, { onDelete: 'cascade' }),
+    nodeId: text().notNull(),
+    deletedBy: uuid().references(() => users.id, { onDelete: 'set null' }),
+    deletedAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.spaceId, table.nodeId],
+      foreignColumns: [nodes.spaceId, nodes.id],
+    }).onDelete('cascade'),
+    unique('trash_node_unique').on(table.nodeId),
+    index('trash_space_idx').on(table.spaceId),
+    index('trash_deleted_at_idx').on(table.deletedAt),
   ],
 );

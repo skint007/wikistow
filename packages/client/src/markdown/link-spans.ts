@@ -7,6 +7,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { decodeString } from 'micromark-util-decode-string';
 import type { PlacedWikilink } from '../links.ts';
 import { splitFrontmatter } from './frontmatter.ts';
+import { mathSyntax } from './math.ts';
 import { parseWikilink, wikilinkSyntax } from './wikilink.ts';
 
 type Span = { start: number; end: number };
@@ -30,7 +31,7 @@ export type LinkSpans = {
 };
 
 // The reader's syntax (`parseMarkdown`), made once.
-const SYNTAX = [gfm(), wikilinkSyntax];
+const SYNTAX = [gfm(), wikilinkSyntax, mathSyntax];
 
 /**
  * The page's links as the reader reads them (`parseMarkdown`), and where

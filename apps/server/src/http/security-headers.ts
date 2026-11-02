@@ -2,8 +2,8 @@ import { securityHeadersFor } from '@wikistow/contracts';
 import type { MiddlewareHandler } from 'hono';
 
 /**
- * The app's headers on every response, with the plugin host frame's
- * exceptions (`securityHeadersFor`). A response that sets its own Content
+ * The app's headers on every response, with the plugin and diagram host
+ * frames' exceptions (`securityHeadersFor`). A response that sets its own Content
  * Security Policy keeps it: avatars send a stricter one that also
  * sandboxes the image, should someone open it on its own.
  */

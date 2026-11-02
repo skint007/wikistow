@@ -10,11 +10,13 @@ import {
   linkTableOf,
   outcomeUnknown,
   pageOperations as pages,
+  readWikilinksHere,
   publicationOperations as publications,
   renamedLinks,
   repairText,
   resolveLinked,
   revisePayload,
+  searchOperations,
   sharingOperations,
   spaceOperations,
   type AttachmentRef,
@@ -1295,6 +1297,44 @@ export async function pageHistory(
         ? `${out.foreign(v.publisher.agentName)} (for ${out.foreign(v.publisher.name ?? 'someone')})`
         : out.foreign(v.publisher.name ?? v.publisher.identityId);
       out.line(`v${v.publishedSeq}  ${v.revisionId}  ${out.foreign(v.publishedAt)}  ${by}`);
+    }
+  });
+}
+
+/**
+ * `page links`: the pages in the page's space that link to it, from what
+ * this agent can read, each in the version it sees, by title. Built from
+ * its own search index of the space, as the app's Linked from list is.
+ */
+export async function pageLinks(
+  io: Io,
+  out: Printer,
+  args: ContentArgs & { pageId: PageId },
+  deps: Deps,
+) {
+  const links = await withAgent(io, out, args, deps, async ({ ctx }) => {
+    const { page } = await pageRef(ctx, args.pageId);
+    const index = await searchOperations.indexSpaces(ctx, {
+      spaceIds: [page.spaceId],
+      readLinks: readWikilinksHere,
+    });
+    return index.linksTo(page.spaceId, page.pageId).map((entry) => ({
+      pageId: entry.pageId,
+      title: entry.title,
+      // The folders it is in, outermost first: the space is the page's.
+      folders: entry.path.slice(entry.path.length - entry.folderIds.length),
+      draft: entry.draft,
+      unpublished: entry.unpublished,
+    }));
+  });
+  out.result({ pageId: args.pageId, links }, () => {
+    if (links.length === 0) out.note('No pages link here.');
+    for (const link of links) {
+      const state = link.draft ? '  [draft]' : link.unpublished ? '  [unpublished]' : '';
+      const where = link.folders.map((name) => name ?? 'Unreadable folder').join(' / ');
+      out.line(
+        `${link.pageId}  ${out.foreign(link.title)}${state}${where ? `  ${out.foreign(where)}` : ''}`,
+      );
     }
   });
 }

@@ -16,7 +16,7 @@ import { workerVaultCrypto } from './worker-crypto';
 
 /**
  * Start the session for an unlocked vault. The desktop app, with a trusted
- * keyring, keeps its contacts and No going back marks between launches
+ * secret store, keeps its contacts and No going back marks between launches
  * (`KeptMarks`); the browser keeps them for one session.
  */
 export async function startSession(vault: UnlockedVault) {

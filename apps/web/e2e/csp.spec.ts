@@ -34,6 +34,16 @@ test('both editors raise none, with everything each of them draws', async ({
     '',
     'A [[Everything]] link and ![remote](https://example.test/x.png)',
     '',
+    '```mermaid',
+    'flowchart LR',
+    '  Sow --> Water',
+    '```',
+    '',
+    // KaTeX writes a style for a framed box, which the page leaves out.
+    'Math $x^2$ and $\\fcolorbox{red}{blue}{x}$',
+    '',
+    '$$\n\\frac{a}{b}\n$$',
+    '',
     picture,
   ].join('\n');
   await fillSource(page, body);
@@ -50,7 +60,10 @@ test('both editors raise none, with everything each of them draws', async ({
   const visual = page.locator('#page-visual');
   await page.getByRole('group', { name: 'Editor' }).getByRole('button', { name: 'Visual' }).click();
   await expect(visual.getByRole('img', { name: 'bed.png' })).toBeVisible();
+  // A diagram, drawn in its own frame (ADR 0010) and shown as an image.
+  await expect(visual.getByRole('img', { name: 'Diagram' })).toBeVisible();
   await expect(visual.locator('th', { hasText: 'Right' })).toHaveClass('text-right');
+  await expect(visual.locator('math')).toHaveCount(3);
   await visual.getByRole('checkbox').first().check();
   await visual.click();
   await page.keyboard.press('ControlOrMeta+End');

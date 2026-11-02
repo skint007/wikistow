@@ -761,14 +761,15 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               ?
             </DialogTitle>
             <DialogDescription>
-              This deletes the folder, {deletingContents?.folders ?? 0} folder(s) and{' '}
-              {deletingContents?.pages ?? 0} page(s) inside it, with every version and attachment.
-              It can’t be undone.
+              It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
+              {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You can
+              restore it from Trash until then. Any public links in it end.
             </DialogDescription>
           </DialogHeader>
           <DeleteButton
             spaceId={spaceId}
             nodeId={deleting}
+            name={deletingName?.kind === 'folder' ? deletingName.name : 'Folder'}
             onDone={() => {
               setDeleting(null);
               const current = tree.pages.find((p) => p.id === params.pageId);
@@ -950,7 +951,6 @@ function PageRowDialog({
     <DeletePageDialog
       page={page}
       title={title}
-      publishedCount={info.heads.publishedCount}
       open={open}
       onOpenChange={onOpenChange}
       onDone={() => {

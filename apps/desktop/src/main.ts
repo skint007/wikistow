@@ -4,8 +4,9 @@
 // and serves the plugins installed on this computer and copies of those
 // approved from the server's library, serves the builds the plugin
 // workshop previews, checks for a newer release, and opens its window where
-// it was last left. The window has no system frame or menu: the pages draw
-// its titlebar, and main answers the menu's old shortcuts.
+// it was last left. The window has no system frame: the pages draw its
+// titlebar, and main answers the old menu's shortcuts. A Mac keeps its menu
+// bar (mac-menu.ts) and the system's window buttons.
 import {
   DESKTOP_CHANNELS,
   SECURITY_HEADERS,
@@ -40,6 +41,7 @@ import { contextMenu } from './context-menu.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
+import { macMenu } from './mac-menu.ts';
 import { libraryPlugins } from './plugins/library.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
@@ -71,13 +73,22 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// The launcher entry the desktop shows for these windows, which also claims
-// `wikistow://` links (packaging/wikistow-desktop.desktop).
-app.setDesktopName('wikistow-desktop.desktop');
+// The launcher entry the Linux desktop shows for these windows, which also
+// claims `wikistow://` links (packaging/wikistow-desktop.desktop).
+if (process.platform === 'linux') app.setDesktopName('wikistow-desktop.desktop');
+
+// On Windows the app's data would be %APPDATA%\WikiStow, which is the CLI's
+// %APPDATA%\wikistow as Windows ignores case, so it gets a folder of its own.
+// Set before anything reads it, the single-instance lock included.
+if (process.platform === 'win32' && !app.commandLine.hasSwitch('user-data-dir')) {
+  app.setPath('userData', join(app.getPath('appData'), 'WikiStow Desktop'));
+}
 
 // A second launch, such as the browser opening a `wikistow://` link, hands
 // its arguments to this one and quits.
 if (!app.requestSingleInstanceLock()) app.quit();
+
+const mac = process.platform === 'darwin';
 
 // The web build sits inside the packed app (`scripts/asar.ts`), or beside it
 // in the workspace. It is looked for rather than read off `app.isPackaged`,
@@ -232,7 +243,7 @@ async function serve(request: Request): Promise<Response> {
   const found = file ? await net.fetch(pathToFileURL(file).href).catch(() => null) : null;
   if (!found?.ok) return new Response(null, { status: 404 });
   const headers = new Headers(found.headers);
-  // The plugin host frame's page and script get the server's exceptions (ADR 0002).
+  // The plugin and diagram host frames' files get the server's exceptions (ADR 0002, 0010).
   for (const [name, value] of Object.entries(securityHeadersFor(url.pathname, APP_ORIGIN))) {
     headers.set(name, value);
   }
@@ -346,8 +357,12 @@ function openWindow() {
     icon: join(app.getAppPath(), 'packaging', 'wikistow-desktop.png'),
     // The page's titlebar stands in for the frame (shell/titlebar.tsx). Its
     // empty part moves the window and double-clicking it maximizes; the
-    // window still resizes from a few pixels inside each edge.
-    frame: false,
+    // window still resizes from a few pixels inside each edge. A Mac's
+    // window buttons stay, drawn by the system over its left end, centred
+    // in its 36 pixels.
+    ...(mac
+      ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 14, y: 11 } }
+      : { frame: false }),
     show: false,
     webPreferences: {
       preload: join(import.meta.dirname, 'preload.cjs'),
@@ -385,8 +400,7 @@ function openWindow() {
     const action = shortcut(input);
     if (!action) return;
     event.preventDefault();
-    if (action === 'quit') app.quit();
-    else windowAction(action);
+    act(action);
   });
   // Right-click on the app's own page; plugin frames get no menu. The
   // spellchecker uses the system's language, as Electron does by default.
@@ -504,6 +518,12 @@ const windowState = (window: BrowserWindow): WindowState => ({
   fullScreen: window.isFullScreen(),
 });
 
+/** What a shortcut or a Mac's menu asks for: quitting, or `windowAction`. */
+function act(action: WindowAction | 'quit') {
+  if (action === 'quit') app.quit();
+  else windowAction(action);
+}
+
 /**
  * What the titlebar or a shortcut asks of the window. Maximize and restore go
  * through `maximize()` and `unmaximize()` so `place` keeps the state, and
@@ -599,6 +619,14 @@ function setSafeMode(on: boolean) {
   watchReload();
 }
 
+// On a Mac, links come to the running app as this event instead, from the
+// scheme its Info.plist claims (scripts/macos-app.sh).
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  window?.focus();
+  void linkArrived(url);
+});
+
 app.on('second-instance', (_event, argv) => {
   if (window?.isMinimized()) window.restore();
   window?.focus();
@@ -655,18 +683,19 @@ app.on('before-quit', (event) => {
 });
 
 /**
- * The system's secret store, if it is one worth trusting. Without a keyring,
- * Electron seals with a key every program knows; then nothing secret is kept
- * and each launch signs in again. The async API keeps its key in the keyring
- * under the app's name: on KWallet `WikiStow Safe Storage` in `WikiStow
- * Keys`, where the sync API uses the entry every Chromium-based app shares.
+ * The system's secret store, if it is one worth trusting. On Windows
+ * (DPAPI) and macOS (the Keychain) the key is the person's own, or there is
+ * none. On Linux, without a keyring, Electron seals with a key every program
+ * knows; then nothing secret is kept and each launch signs in again. The
+ * async API keeps its key in the keyring under the app's name: on KWallet
+ * `WikiStow Safe Storage` in `WikiStow Keys`, where the sync API uses the
+ * entry every Chromium-based app shares.
  */
 async function systemCipher(): Promise<Cipher | null> {
-  // Linux only, for now: the key can't be checked anywhere else.
-  if (process.platform !== 'linux') return null;
+  if (!(await safeStorage.isAsyncEncryptionAvailable().catch(() => false))) return null;
   // Electron picks its key once, so one sealed value shows which it is.
   const probe = await safeStorage.encryptStringAsync('probe').catch(() => null);
-  if (!probe || !sealedByKeyring(probe)) return null;
+  if (!probe || (process.platform === 'linux' && !sealedByKeyring(probe))) return null;
   return {
     encrypt: (text) => safeStorage.encryptStringAsync(text),
     decrypt: async (sealed) => (await safeStorage.decryptStringAsync(sealed)).result,
@@ -697,7 +726,8 @@ void app.whenReady().then(async () => {
   );
   protocol.handle('app', serve);
   // No menu bar, and none of its shortcuts: `shortcut` keeps the useful ones.
-  Menu.setApplicationMenu(null);
+  // A Mac's menu bar is never empty, so it has the app's own.
+  Menu.setApplicationMenu(mac ? Menu.buildFromTemplate(macMenu(act)) : null);
   updates.start();
   handle('update', () => updates.state());
   handle('server', async () => server);

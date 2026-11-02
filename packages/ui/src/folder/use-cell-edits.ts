@@ -128,8 +128,7 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
           pageId: cell.pageId,
           basedOn,
           revisionId,
-          title: payload.title,
-          markdown: payload.markdown,
+          payload,
         },
       });
       void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });

@@ -165,7 +165,7 @@ function appPorts(
         };
       });
       searchIndexChanged(queryClient, {
-        saved: { ...page, basedOn, revisionId, title: written.title, markdown: written.markdown },
+        saved: { ...page, basedOn, revisionId, payload: written },
       });
       // The first edit after publishing changes the tree's unpublished marker.
       if (changedStatus || overtaken)

@@ -51,10 +51,9 @@ export const stays = (what: string): Unkept => ({
 
 // Obsidian syntax that Markdown reads as text, which the visual editor would
 // write back escaped, or edit as if it were text: callouts (`> [!note]`)
-// other than GitHub's alerts (`alertOf`), which it keeps,
-// math (`$x$`, `$$`), comments (`%%`), and tags (`#tag`) and highlights
-// (`==text==`) starting a line, which Markdown escapes there.
-const INLINE_MATH = /\$\$|\$[^\s$](?:[^$\n]*[^\s$])?\$(?!\d)/;
+// other than GitHub's alerts (`alertOf`), which it keeps, comments
+// (`%%`), and tags (`#tag`) and highlights (`==text==`) starting a line,
+// which Markdown escapes there. Math is read as math (`mathSyntax`).
 const LINE_STARTS = { tags: /^[ \t]*#[^\s#]/, highlights: /^[ \t]*==[^\s=]/ };
 
 const CALLOUT = /^\[!([^\]\n]*)\]?/;
@@ -93,7 +92,6 @@ function obsidianSyntax(tree: Root, body: string): Unkept | null {
       if (child.type !== 'text') continue;
       const text = raw(child);
       if (text.includes('%%')) return stays('comments');
-      if (INLINE_MATH.test(text)) return stays('math');
       // The text's lines that start a line of the page.
       const lines = text.split('\n').slice(i === 0 && node.type === 'paragraph' ? 0 : 1);
       for (const [what, pattern] of Object.entries(LINE_STARTS))

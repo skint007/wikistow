@@ -20,7 +20,7 @@ import {
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { $remark } from '@milkdown/kit/utils';
 import { alertOf } from '@wikistow/client/reader';
-import type { Link, Root, Text } from 'mdast';
+import type { Link, Nodes, Root, Text } from 'mdast';
 import { defaultHandlers, type State } from 'mdast-util-to-markdown';
 import type { Options } from 'remark-stringify';
 import type { Pluggable } from 'unified';
@@ -119,11 +119,61 @@ const escaped: Handle = (node: Text, parent, state, info) => {
   return safe(body) + (parent?.children.at(-1) === node ? space : '');
 };
 
-/** Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`, not `\[!NOTE]`. */
-const text: Handle = (node: Text, ...rest) => {
-  const written = escaped(node, ...rest);
-  return node.data?.alert ? written.replace(/^\\\[/, '[') : written;
+// A dollar, with the backslashes before it.
+const DOLLAR = /(\\*)\$/g;
+
+/**
+ * Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`,
+ * not `\[!NOTE]`. Each dollar not before a digit is escaped, as one could
+ * close math (`mathToMarkdownExtension`), checked again on what's written,
+ * since remark skips some; and in a block with inline math, or a dollar in
+ * its code or a link, every one (`nearMath`), as one that could open math
+ * could close at that dollar.
+ */
+const text: Handle = (node: Text, parent, state, info) => {
+  const escapedText = escaped(node, parent, state, info);
+  const written = node.data?.alert ? escapedText.replace(/^\\\[/, '[') : escapedText;
+  // Nothing escapes in an autolink, which math can't start in.
+  if (state.stack.includes('autolink')) return written;
+  return written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
+    const next = written.charAt(at + dollar.length) || info.after.charAt(0);
+    const bare = slashes.length % 2 === 0;
+    return bare && (node.data?.nearMath || !/\d/.test(next)) ? `${slashes}\\$` : dollar;
+  });
 };
+
+// Whether `node`, not text, is or holds a dollar that could close math
+// opened in the text before it: inline math, or a dollar in code, a link's
+// address or title, or HTML.
+const closesMath = (node: Nodes) =>
+  node.type === 'inlineMath' ||
+  (node.type !== 'text' &&
+    (('value' in node && node.value.includes('$')) ||
+      ('url' in node && node.url.includes('$')) ||
+      ('title' in node && !!node.title?.includes('$'))));
+
+/**
+ * Marks the text of each block of `tree` where a dollar outside its text
+ * could close math (`closesMath`, `nearMath`). Without recursion.
+ */
+function markNearMath(tree: Root) {
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (!('children' in node)) continue;
+    const phrasing =
+      node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell';
+    const texts: Text[] = [];
+    let near = false;
+    const inside: Nodes[] = phrasing ? [...node.children] : [];
+    for (let child = inside.pop(); child; child = inside.pop()) {
+      near ||= closesMath(child);
+      if (child.type === 'text') texts.push(child);
+      if ('children' in child) inside.push(...child.children);
+    }
+    if (near) for (const text of texts) text.data = { ...text.data, nearMath: true };
+    if (!phrasing) stack.push(...node.children);
+  }
+}
 
 // A block quote, the text of its alert's marker, if it's one, marked so.
 type QuoteArgs = Parameters<typeof defaultHandlers.blockquote>;
@@ -137,6 +187,8 @@ declare module 'mdast' {
   interface TextData {
     /** Whether it starts with an alert's marker (`alertOf`). */
     alert?: boolean;
+    /** Whether its block holds a dollar outside text that could close math (`markNearMath`). */
+    nearMath?: boolean;
   }
   interface LinkData {
     /** Whether it may be written as its literal: the link mark's `bare`. */
@@ -190,8 +242,12 @@ function autolinked(node: Link, state: State): boolean {
 
 // The document, with no link split (`wholeLinks`).
 type RootArgs = Parameters<typeof defaultHandlers.root>;
-const whole = (...[node, parent, state, info]: RootArgs) =>
-  defaultHandlers.root(wholeLinks(node) as Root, parent, state, info);
+// Its text marked where it's near inline math (`markNearMath`).
+function whole(...[node, parent, state, info]: RootArgs) {
+  const tree = wholeLinks(node) as Root;
+  markNearMath(tree);
+  return defaultHandlers.root(tree, parent, state, info);
+}
 
 // Otherwise `<…>` where its text is its address and that reads as it,
 // `[…](…)` where it isn't or doesn't.

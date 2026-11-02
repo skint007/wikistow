@@ -18,8 +18,9 @@ export type PageIndexState = {
 
 /**
  * The pages this person can open, as their search index holds them, each
- * in the version they see: titles, text and properties (`PageIndex`), for
- * search and for whatever lists pages by their properties.
+ * in the version they see: titles, text, properties and links
+ * (`PageIndex`), for search, for whatever lists pages by their properties,
+ * and for the pages linking to a page (`LinkedFrom`).
  *
  * One index serves every caller. While a component uses this (and
  * `enabled`), the index is built if it isn't, and updated after a change

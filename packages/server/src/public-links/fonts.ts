@@ -17,3 +17,10 @@ export const PAGE_FONTS = [
       'U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF',
   },
 ] as const;
+
+/**
+ * The math font a public page shows math in (`@fontsource/noto-sans-math`),
+ * which the same build writes under `/fonts/`; a browser loads it only for
+ * a page that shows math.
+ */
+export const MATH_FONT = 'noto-sans-math-latin-400-normal.woff2';
