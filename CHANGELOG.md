@@ -4,6 +4,22 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- The desktop app for Windows, x64 and Arm: download the installer from the release and run it. It isn't signed yet, so Windows asks first: choose More info, then Run anyway.
+
+### Changes
+
+#### Desktop
+
+- The desktop app runs on Windows 10 and 11, keeping its sign-in, remembered unlock, search index and trust marks sealed with DPAPI, with its data in `%APPDATA%\WikiStow Desktop`, apart from the CLI's. The update notice links to the new installer (#250).
+
+#### Releases and packaging
+
+- Each release has unsigned Windows installers, `wikistow-desktop-<version>-x64-setup.exe` and `…-arm64-setup.exe`, built on Linux with NSIS and checked on Windows x64 and Arm runners. CI can be started by hand to build and check the desktop packages on a branch (#250).
+
 ## 0.21.0 - 2026-10-31
 
 ### Highlights
