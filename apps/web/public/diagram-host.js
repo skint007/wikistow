@@ -16,8 +16,11 @@
 
   // Mermaid sizes the SVG to its container (`width="100%"` and a
   // max-width style). As an image it needs its own size: its viewBox's.
+  // Mermaid writes the SVG as HTML, whose one entity XML lacks is
+  // `&nbsp;` (a non-breaking space in a label).
   function sized(svg) {
-    var doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    var xml = svg.replace(/&nbsp;/g, '&#160;');
+    var doc = new DOMParser().parseFromString(xml, 'image/svg+xml');
     var root = doc.documentElement;
     var box = root.viewBox.baseVal;
     if (box && box.width > 0 && box.height > 0) {
@@ -28,8 +31,8 @@
     return new XMLSerializer().serializeToString(root);
   }
 
-  function render(id, source, dark) {
-    mermaid.initialize({
+  function settings(dark) {
+    return {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: dark ? 'dark' : 'default',
@@ -41,19 +44,26 @@
       // A journey's text is HTML in the SVG by default, which a canvas
       // won't export, so its public copy would get no image.
       journey: { textPlacement: 'tspan' },
-    });
-    count += 1;
-    return mermaid.render('diagram-' + count, source).then(
-      function (result) {
+    };
+  }
+
+  // Anything that throws on the way, sizing too, fails this diagram only.
+  function render(id, source, dark) {
+    return Promise.resolve()
+      .then(function () {
+        mermaid.initialize(settings(dark));
+        count += 1;
+        return mermaid.render('diagram-' + count, source);
+      })
+      .then(function (result) {
         parent.postMessage({ type: 'rendered', id: id, svg: sized(result.svg) }, '*');
-      },
-      function (error) {
+      })
+      .catch(function (error) {
         parent.postMessage(
           { type: 'failed', id: id, error: String((error && error.message) || error) },
           '*',
         );
-      },
-    );
+      });
   }
 
   window.addEventListener('message', function (event) {

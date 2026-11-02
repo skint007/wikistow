@@ -31,11 +31,15 @@ const diagramQuery = (source: string, dark: boolean) =>
     placeholderData: keepPreviousData,
   });
 
-/** Why a diagram didn't draw, as a reader is told: Mermaid's first line. */
-const failure = (error: Error) =>
-  `This diagram couldn’t be drawn. ${
-    error instanceof DiagramError ? (error.message.split('\n', 1)[0] ?? '') : ''
-  }`.trim();
+/**
+ * Why a diagram didn't draw, as a reader is told: Mermaid's first line,
+ * and its last, which says what a syntax error expected.
+ */
+function failure(error: Error) {
+  const lines = error instanceof DiagramError ? error.message.trim().split('\n') : [];
+  const reason = lines.length > 1 ? `${lines[0]} ${lines.at(-1)}` : (lines[0] ?? '');
+  return `This diagram couldn’t be drawn. ${reason}`.trim();
+}
 
 /**
  * The diagram `svg` as an image, which runs nothing in it. Not draggable:
