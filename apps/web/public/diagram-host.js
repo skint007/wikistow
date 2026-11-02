@@ -18,7 +18,11 @@
   // max-width style). As an image it needs its own size: its viewBox's.
   // Mermaid writes the SVG as HTML, whose one entity XML lacks is
   // `&nbsp;` (a non-breaking space in a label).
-  function sized(svg) {
+  //
+  // A journey's tasks drawn as SVG text are filled with its
+  // `sectionColours`, white, which Mermaid reads once as it loads, so
+  // setting it does nothing: they take the theme's text colour here.
+  function sized(svg, dark) {
     var xml = svg.replace(/&nbsp;/g, '&#160;');
     var doc = new DOMParser().parseFromString(xml, 'image/svg+xml');
     var root = doc.documentElement;
@@ -28,6 +32,8 @@
       root.setAttribute('height', String(Math.ceil(box.height)));
       root.style.removeProperty('max-width');
     }
+    var tasks = root.querySelectorAll('text.task');
+    for (var i = 0; i < tasks.length; i++) tasks[i].setAttribute('fill', dark ? '#ccc' : '#333');
     return new XMLSerializer().serializeToString(root);
   }
 
@@ -56,7 +62,7 @@
         return mermaid.render('diagram-' + count, source);
       })
       .then(function (result) {
-        parent.postMessage({ type: 'rendered', id: id, svg: sized(result.svg) }, '*');
+        parent.postMessage({ type: 'rendered', id: id, svg: sized(result.svg, dark) }, '*');
       })
       .catch(function (error) {
         parent.postMessage(
