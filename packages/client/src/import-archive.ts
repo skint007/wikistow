@@ -15,8 +15,9 @@ export class UnreadableArchive extends Error {
 }
 
 /**
- * `path` with `\` as `/`, without empty or `.` parts, and each `..` taking
- * off the part before it; null if it climbs out of the top or names nothing.
+ * `path` in NFC, with `\` as `/`, without empty or `.` parts, and each `..`
+ * taking off the part before it; null if it climbs out of the top or names
+ * nothing. NFC, so a name macOS wrote decomposed matches a link to it.
  */
 export function cleanPath(path: string): string | null {
   const parts: string[] = [];
@@ -25,7 +26,7 @@ export function cleanPath(path: string): string | null {
     if (part !== '..') parts.push(part);
     else if (parts.pop() === undefined) return null;
   }
-  return parts.length === 0 ? null : parts.join('/');
+  return parts.length === 0 ? null : parts.join('/').normalize('NFC');
 }
 
 /** What macOS adds to a zip or a copied folder: `__MACOSX/` and `._name` resource forks. */
@@ -57,11 +58,26 @@ function zipFiles(bytes: Uint8Array): ImportFile[] {
   }
   const files: ImportFile[] = [];
   for (const [name, data] of Object.entries(entries)) {
-    const path = name.endsWith('/') ? null : cleanPath(name);
+    const path = name.endsWith('/') ? null : cleanPath(utf8Name(name));
     if (path === null || macOsExtra(path)) continue;
     files.push({ path, size: data.length, read: async () => data });
   }
   return withoutWrapper(files);
+}
+
+/**
+ * fflate reads a zip entry's name as Latin-1 unless the zip flags it as
+ * UTF-8, which macOS Finder's Compress doesn't: such a name is read again
+ * as UTF-8 when its bytes are UTF-8.
+ */
+function utf8Name(name: string): string {
+  const codes = Array.from(name, (char) => char.charCodeAt(0));
+  if (codes.every((code) => code < 0x80) || codes.some((code) => code > 0xff)) return name;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(codes));
+  } catch {
+    return name;
+  }
 }
 
 const BLOCK = 512;

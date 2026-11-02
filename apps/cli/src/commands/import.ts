@@ -27,7 +27,7 @@ function folderFiles(root: string): ImportFile[] {
       if (stats.isDirectory()) walk(path);
       else if (stats.isFile()) {
         files.push({
-          path: relative(root, path).split(sep).join('/'),
+          path: relative(root, path).split(sep).join('/').normalize('NFC'),
           size: stats.size,
           read: async () => readFileSync(path),
         });
