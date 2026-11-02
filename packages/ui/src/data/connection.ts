@@ -63,6 +63,15 @@ export const connection = {
     stopProbing = startProbing();
   },
 
+  /**
+   * Offline, ask the server now whether it answers, as when the person asks
+   * to try again, rather than waiting for the next check.
+   */
+  async check(): Promise<void> {
+    if (state.online || !probe) return;
+    if (await probe()) connection.heard();
+  },
+
   /** How to ask the server whether it answers, set once by the API client. */
   setProbe(ask: () => Promise<boolean>) {
     probe = ask;
