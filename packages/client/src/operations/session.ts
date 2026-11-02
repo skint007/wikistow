@@ -11,12 +11,14 @@ import { CryptoError } from '../errors.ts';
 import { FolderKeyring } from '../folder-keys.ts';
 import { keyHash, type PrivateIdentity, type PublicIdentity } from '../identity.ts';
 import { KeptMarks, type KeptFile } from '../kept-marks.ts';
+import type { KeptStore } from '../kept-store.ts';
 import { MemoryKeyVersionMarks, type KeyVersionMarks } from '../key-versions.ts';
 import { unseenRestore } from '../restore.ts';
 import { RevisionCache } from '../revision-cache.ts';
 import { TrustStore } from '../trust.ts';
 import type { UnlockedVault } from '../vault.ts';
 import { readContacts, readPersonContacts, writeContacts, type ContactsBook } from './contacts.ts';
+import { KeptContent } from './kept.ts';
 import type { SpaceKeys } from './keys.ts';
 
 /**
@@ -49,6 +51,12 @@ export type ClientContext = {
    * and the contacts mark, which follows `contacts.book` (`openSession`).
    */
   kept?: KeptMarks;
+  /**
+   * Pages and what they show kept on this device for offline use (ADR
+   * 0009), where the app keeps them: versions are read from here before
+   * the server, and the keeper keeps them current (`keep`).
+   */
+  keptContent?: KeptContent;
   /** Each space as this session last worked it out (`spaceKeys`). */
   spaces: Map<SpaceId, Promise<SpaceKeys>>;
   /**
@@ -96,12 +104,13 @@ export class MemoryAgentPins implements AgentPins {
  * (`KeptMarks`). After a restore of the server those marks haven't seen,
  * they are dropped first, so what the server serves now is the starting
  * point (`unseenRestore`); the app tells the person itself. Without `kept`,
- * as in the browser, each session starts with none.
+ * as in the browser, each session starts with none. With `content`, the
+ * session reads and keeps pages there (`keptContent`).
  */
 export async function openSession(
   api: ApiClient,
   vault: UnlockedVault,
-  { kept: file }: { kept?: KeptFile } = {},
+  { kept: file, content }: { kept?: KeptFile; content?: KeptStore } = {},
 ): Promise<ClientContext> {
   const { installationId, restore } = await api.call(systemRoutes.installation);
   const kept = file && (await KeptMarks.open(file, { identity: vault.identity, installationId }));
@@ -113,6 +122,8 @@ export async function openSession(
   const book = await readContacts(owner, kept?.contactsMark ?? null);
   kept?.keepContactsMark(book.mark);
   trust.load(book.payloads);
+  const keptContent =
+    content && (await KeptContent.open(content, { identity: vault.identity, installationId }));
   return {
     api,
     installationId,
@@ -123,6 +134,7 @@ export async function openSession(
     revisions: new RevisionCache(),
     marks: kept ?? new MemoryKeyVersionMarks(),
     ...(kept && { kept }),
+    ...(keptContent && { keptContent }),
     spaces: new Map(),
   };
 }
@@ -208,6 +220,7 @@ export function agentContactsMark(ctx: ClientContext): ContactsMark | null {
  */
 export function closeSession(ctx: ClientContext): void {
   ctx.kept?.close();
+  ctx.keptContent?.close();
   ctx.revisions.close();
   ctx.keyring.wipe();
   ctx.spaces.clear();

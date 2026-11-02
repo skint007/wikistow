@@ -9,6 +9,8 @@
 // bar (mac-menu.ts) and the system's window buttons.
 import {
   DESKTOP_CHANNELS,
+  KEPT_FOLDERS,
+  KEPT_ITEM_NAME,
   SECURITY_HEADERS,
   securityHeadersFor,
   WINDOW_ACTIONS,
@@ -39,7 +41,7 @@ import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
 import { contextMenu } from './context-menu.ts';
 import { cookieChange, forward } from './forward.ts';
-import { keptFile } from './kept-file.ts';
+import { keptFile, keptFolder } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
 import { macMenu } from './mac-menu.ts';
 import { libraryPlugins } from './plugins/library.ts';
@@ -157,11 +159,39 @@ const workshop = desktopWorkshop(app.getPath('userData'));
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
 const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
+// What the pages keep for offline use (ADR 0009): pages, trees and images
+// in `kept`, changes made offline in `queue`, and whose they are.
+const keptFolders = {
+  kept: keptFolder(join(app.getPath('userData'), 'kept')),
+  queue: keptFolder(join(app.getPath('userData'), 'queue')),
+};
+const keptAccountFile = keptFile(join(app.getPath('userData'), 'kept-account'));
 const place = windowPlace(app.getPath('userData'));
 
-/** Delete what the pages kept sealed: the search index and the trust marks. */
-async function removeKept() {
+/**
+ * Delete the search index and the trust marks the pages kept sealed, as
+ * at every new sign-in. Pages kept for offline stay: the pages delete them
+ * once the server names another account (ADR 0009, decision 10).
+ */
+async function removeSignInKept() {
   await Promise.all([searchIndex.remove(), trustMarks.remove()]).catch(() => {});
+}
+
+/**
+ * Delete what the pages kept sealed that needs a trusted keyring: the
+ * search index, the trust marks and the pages kept for offline. Changes
+ * made offline, and whose they are, stay: they are kept with or without a
+ * keyring, and are never lost to one that didn't open.
+ */
+async function removeKept() {
+  await Promise.all([removeSignInKept(), keptFolders.kept.clear()]).catch(() => {});
+}
+
+/** Delete everything the pages kept, as signing out does. */
+async function removeAllKept() {
+  await Promise.all([removeKept(), keptFolders.queue.clear(), keptAccountFile.remove()]).catch(
+    () => {},
+  );
 }
 
 /**
@@ -196,7 +226,7 @@ async function saveConfig() {
 async function signedOut() {
   forget();
   await persist();
-  await removeKept();
+  await removeAllKept();
 }
 
 /**
@@ -362,14 +392,15 @@ async function linkArrived(link: string) {
   // The server's other cookies stay, if it is the same server.
   const kept = server === waiting.origin ? cookie : null;
   cookie = cookieChange(kept, [redeemed]) ?? kept;
-  // A new sign-in starts with no unlock, search index or marks kept, whoever it is for.
+  // A new sign-in starts with no unlock, search index or marks kept, whoever
+  // it is for. Pages kept for offline wait for the pages to learn whose it is.
   forget();
   server = waiting.origin;
   waiting.done({ ok: true, value: undefined });
   // Signed in either way; a failed write only means signing in again next time.
   await saveConfig().catch(() => {});
   await persist();
-  await removeKept();
+  await removeSignInKept();
 }
 
 function openWindow() {
@@ -726,6 +757,7 @@ async function systemCipher(): Promise<Cipher | null> {
 }
 
 const VaultKey = z.instanceof(Uint8Array).refine((key) => key.length === 32);
+const KeptAccountJson = z.strictObject({ id: z.string().max(100), name: z.string().max(200) });
 
 void app.whenReady().then(async () => {
   await loadConfig();
@@ -785,6 +817,39 @@ void app.whenReady().then(async () => {
   handle('keepTrustMarks', async (sealed) => {
     if (store?.secure) await trustMarks.write(z.instanceof(Uint8Array).parse(sealed));
   });
+  // Pages are kept on disk only with a trusted keyring, as the session is;
+  // changes made offline, and whose they are, either way (ADR 0009).
+  const keptIn = (folder: unknown) => {
+    const name = z.enum(KEPT_FOLDERS).parse(folder);
+    return name === 'queue' || store?.secure ? keptFolders[name] : null;
+  };
+  const KeptName = z.string().regex(KEPT_ITEM_NAME);
+  handle('keptItems', async (folder) => (await keptIn(folder)?.list()) ?? []);
+  handle('keptItem', async (folder, name) => {
+    const parsed = KeptName.parse(name);
+    return (await keptIn(folder)?.read(parsed)) ?? null;
+  });
+  handle('keepItem', async (folder, name, sealed) => {
+    const parsed = { name: KeptName.parse(name), sealed: z.instanceof(Uint8Array).parse(sealed) };
+    await keptIn(folder)?.write(parsed.name, parsed.sealed);
+  });
+  handle('dropKeptItems', async (folder, names) => {
+    await keptIn(folder)?.remove(z.array(KeptName).parse(names));
+  });
+  handle('keptAccount', async () => {
+    const kept = await keptAccountFile.read();
+    if (!kept) return null;
+    try {
+      return KeptAccountJson.parse(JSON.parse(Buffer.from(kept).toString('utf8')));
+    } catch {
+      return null;
+    }
+  });
+  handle('keepKeptAccount', async (account) => {
+    const parsed = KeptAccountJson.parse(account);
+    await keptAccountFile.write(Buffer.from(JSON.stringify(parsed)));
+  });
+  handle('clearKept', removeAllKept);
   handle('plugins', async () => plugins.list(safeMode));
   handle('pickPlugin', async (kind) => {
     const development = kind === 'development';
