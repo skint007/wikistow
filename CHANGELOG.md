@@ -4,12 +4,23 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.22.0 - 2026-11-02
+
 ### Highlights
 
 #### Features
 
-- The desktop app for Windows, x64 and Arm: download the installer from the release and run it. It isn't signed yet, so Windows asks first: choose More info, then Run anyway.
-- The desktop app for macOS, for Apple silicon and Intel, from the release or with `brew install --cask skint007/wikistow/wikistow`.
+- Deleting a page or folder moves it to its space’s trash for 30 days. Trash in the rail lists what you deleted in the spaces you own, to restore or delete for good, and Undo puts back what you just deleted.
+- Linked from, below each page, lists the pages in its space that link to it. Agents get the same list with `wikistow page links`.
+- Math in pages: `$…$` inline and `$$` blocks show as math in the reader, the visual editor and public pages. Prices like `$5 and $10` stay text.
+- A `mermaid` code block shows as its diagram, with a button to see its source.
+- Import… in the space and folder menus brings in notes from Joplin, from a JEX file or a Markdown + Front Matter export. Agents can import with `wikistow import`.
+- The desktop app for Windows, x64 and Arm: download the installer from the release and run it. It isn’t signed yet, so Windows asks first: choose More info, then Run anyway.
+- The desktop app for macOS, for Apple silicon and Intel: download the zip for your Mac from the release. It isn’t signed by an Apple developer, so the first time it opens, allow it under System Settings, Privacy & Security, Open Anyway.
+
+#### UI polish
+
+- A page’s properties start collapsed to one line, such as “Properties · 12”, which opens them. Show properties in Settings, under Pages, starts them open instead.
 
 ### Changes
 
