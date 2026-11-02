@@ -257,7 +257,8 @@ function Report({ summary }: { summary: importOperations.ImportSummary }) {
         <section className="grid gap-1">
           <h3 className="text-sm font-bold">Links left as they were</h3>
           <p className="text-sm text-muted-foreground">
-            They name a note or file that wasn’t imported, or a note no link can name alone.
+            They name a note or file that wasn’t imported, a note whose title a wikilink can’t hold
+            (with | or #), or one of two notes of one title in one notebook.
           </p>
           <ul className="max-h-40 overflow-y-auto rounded-control bg-muted px-3 py-2 text-sm">
             {unresolved.map(({ path, link }, i) => (
