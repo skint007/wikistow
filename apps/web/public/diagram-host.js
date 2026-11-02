@@ -19,9 +19,11 @@
   // Mermaid writes the SVG as HTML, whose one entity XML lacks is
   // `&nbsp;` (a non-breaking space in a label).
   //
-  // A journey's tasks drawn as SVG text are filled with its
-  // `sectionColours`, white, which Mermaid reads once as it loads, so
-  // setting it does nothing: they take the theme's text colour here.
+  // A journey's task and section names drawn as SVG text are filled with
+  // its `sectionColours`, white, which Mermaid reads once as it loads, so
+  // setting it does nothing, and a section's name also takes its box's
+  // colour from the SVG's stylesheet. They take the theme's text colour
+  // here, as a style, which beats the stylesheet.
   function sized(svg, dark) {
     var xml = svg.replace(/&nbsp;/g, '&#160;');
     var doc = new DOMParser().parseFromString(xml, 'image/svg+xml');
@@ -32,8 +34,10 @@
       root.setAttribute('height', String(Math.ceil(box.height)));
       root.style.removeProperty('max-width');
     }
-    var tasks = root.querySelectorAll('text.task');
-    for (var i = 0; i < tasks.length; i++) tasks[i].setAttribute('fill', dark ? '#ccc' : '#333');
+    var names = root.querySelectorAll('text.task, text.journey-section');
+    for (var i = 0; i < names.length; i++) {
+      names[i].style.setProperty('fill', dark ? '#ccc' : '#333');
+    }
     return new XMLSerializer().serializeToString(root);
   }
 
