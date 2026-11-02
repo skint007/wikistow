@@ -119,6 +119,14 @@ _Avoid_: Transfer (that is handing a space to another owner), duplicate, clone.
 **Attachment**
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 
+**Kept for offline**
+What a device holds, sealed for one person, so pages open with no connection: the published version and, for editors, the draft of each kept page, the images they show, and the trees, with titles only for kept pages. The desktop keeps every page; the browser the pages opened on it, or every page if asked. Proposed in ADR 0009.
+_Avoid_: Cached, synced.
+
+**Offline change**
+A draft, new page or new folder made while the app couldn't reach the server. It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Proposed in ADR 0009.
+_Avoid_: Outbox, pending sync.
+
 **Template**
 A page in a folder named Templates that new pages can start from. Its `{{variables}}` are filled in by the person making the page; the copy is an ordinary page with no tie to its template.
 _Avoid_: Blueprint, page type.
