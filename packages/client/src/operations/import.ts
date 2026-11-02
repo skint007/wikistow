@@ -4,6 +4,7 @@ import { utf8 } from '../encoding.ts';
 import {
   importKeyOf,
   importMark,
+  leftAsWritten,
   noteLinks,
   rewriteNote,
   wikilinkTarget,
@@ -46,7 +47,7 @@ export type ImportSummary = {
   existing: number;
   /** Attachments this run uploaded. */
   attachments: number;
-  /** Links to notes or files no run can rewrite, left as written, by note. */
+  /** Links left as written, by note: by this run, or as an earlier run's saved draft still holds them. */
   unresolved: { path: string; link: string }[];
   skipped: ImportSkipped[];
   /** Encrypted items in a JEX, which Joplin must decrypt before exporting. */
@@ -183,6 +184,8 @@ export async function importJoplin(
   const { notes } = joplin;
   const placed: { note: JoplinNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
   const pageOf = new Map<string, PageId>();
+  // The draft an earlier run saved, by note: what it holds says what that run left.
+  const savedBefore = new Map<string, string>();
   let existing = 0;
   onProgress?.({ phase: 'pages', done: 0, total: notes.length });
   for (const [i, note] of notes.entries()) {
@@ -194,6 +197,8 @@ export async function importJoplin(
       let pageId: PageId;
       if (earlier) {
         pageId = earlier.pageId;
+        const { opened } = earlier.draft;
+        if (opened.kind === 'current') savedBefore.set(note.key, opened.payload.markdown);
         if (earlier.done) existing++;
         else placed.push({ note, pageId, draft: earlier.draft });
       } else {
@@ -236,19 +241,16 @@ export async function importJoplin(
     skipped,
     encrypted: joplin.encrypted,
   };
-  // Each note's links, and those no run can rewrite, reported on every run,
-  // so one finishing another's work lists them too.
-  const linksOf = new Map<string, { links: NoteLink[]; files: Set<string> }>();
+  // Each note's links, and those left as written: by this run as it saves
+  // the note, or by an earlier one, as its saved draft still holds them.
+  const linksOf = new Map<string, NoteLink[]>();
+  const unresolvedOf = new Map<string, string[]>();
   for (const note of notes) {
     if (!pageOf.has(note.key)) continue;
     const links = noteLinks(note, joplin.target);
-    const files = filesOf(links, joplin);
-    linksOf.set(note.key, { links, files });
-    const { unresolved } = rewriteNote(note, links, {
-      wikilink,
-      attachment: (key) => (files.has(key) ? key : undefined),
-    });
-    summary.unresolved.push(...unresolved.map((link) => ({ path: note.path, link })));
+    linksOf.set(note.key, links);
+    const saved = savedBefore.get(note.key);
+    if (saved !== undefined) unresolvedOf.set(note.key, leftAsWritten(note, links, saved));
     await pace();
   }
   onProgress?.({ phase: 'saving', done: 0, total: placed.length });
@@ -261,9 +263,9 @@ export async function importJoplin(
     const saved = opened !== null && (opened.markdown !== '' || opened.attachments.length > 0);
     let tooLarge = false;
     if (!saved) {
-      const { links = [], files = new Set<string>() } = linksOf.get(note.key) ?? {};
+      const links = linksOf.get(note.key) ?? [];
       const attached = new Map<string, AttachmentRef>();
-      for (const key of files) {
+      for (const key of filesOf(links, joplin)) {
         const resource = joplin.resources.get(key);
         if (!resource?.file) continue;
         const bytes = await resource.file.read();
@@ -276,14 +278,12 @@ export async function importJoplin(
           attached.set(key, ref);
           summary.attachments++;
         } catch (error) {
-          // A file larger than the server takes: its links stay as written,
-          // reported by this run only, as no other knows the limit.
+          // A file larger than the server takes: its links stay as written.
           if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
-          summary.unresolved.push({ path: note.path, link: resource.name });
         }
         live();
       }
-      const { markdown } = rewriteNote(note, links, {
+      const { markdown, unresolved } = rewriteNote(note, links, {
         wikilink,
         attachment: (key) => attached.get(key)?.id,
       });
@@ -307,6 +307,7 @@ export async function importJoplin(
           payload,
           tree,
         });
+        unresolvedOf.set(note.key, unresolved);
       } catch (error) {
         // Its links written out, longer than a page holds: left as an empty draft.
         if (!(error instanceof PageTooLarge)) throw error;
@@ -323,6 +324,9 @@ export async function importJoplin(
     onProgress?.({ phase: 'saving', done: i + 1, total: placed.length });
     await pace();
   }
+  summary.unresolved = notes.flatMap((note) =>
+    (unresolvedOf.get(note.key) ?? []).map((link) => ({ path: note.path, link })),
+  );
   return summary;
 }
 

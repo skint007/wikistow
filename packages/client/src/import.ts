@@ -560,6 +560,23 @@ export function rewriteNote(
   return { markdown: out + note.markdown.slice(at), unresolved };
 }
 
+/**
+ * Which of `links` a saved version of `note` (`markdown`) still holds as
+ * written, named as `rewriteNote` names what it couldn't rewrite: so a
+ * later run reports what an earlier one left, as it left it.
+ */
+export function leftAsWritten(
+  note: JoplinNote,
+  links: readonly NoteLink[],
+  markdown: string,
+): string[] {
+  return links.flatMap((link) => {
+    const source = link.kind === 'kept' ? link.source : note.markdown.slice(link.start, link.end);
+    if (!markdown.includes(source)) return [];
+    return [link.kind === 'note' ? link.text || source : source];
+  });
+}
+
 // What a wikilink's text after its bar can't hold and still read back as its text.
 const UNALIASABLE = /[[\]|\r\n`<\\]/;
 
