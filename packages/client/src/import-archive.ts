@@ -115,7 +115,7 @@ function paxPath(records: string): string | null {
  * has notes only in notebooks, so a lone folder at the top holding no
  * notes, only folders, or one holding `_resources`, is that folder.
  */
-export function withoutWrapper(files: ImportFile[]): ImportFile[] {
+function withoutWrapper(files: ImportFile[]): ImportFile[] {
   const tops = new Set(files.map((file) => file.path.split('/')[0]));
   const [top] = tops;
   if (tops.size !== 1 || top === undefined || files.some((file) => file.path === top)) {

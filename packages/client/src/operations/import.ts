@@ -9,6 +9,7 @@ import {
   wikilinkTarget,
   type JoplinExport,
   type JoplinNote,
+  type NoteLink,
 } from '../import.ts';
 import { linkablePages, pageIndex } from '../links.ts';
 import { pace } from '../pace.ts';
@@ -21,6 +22,7 @@ import {
   uploadAttachment,
   type OpenedRevision,
 } from './pages.ts';
+import { patient } from './patience.ts';
 import type { ClientContext } from './session.ts';
 import { createFolder, loadStructure, loadTree } from './spaces.ts';
 
@@ -43,7 +45,7 @@ export type ImportSummary = {
   existing: number;
   /** Attachments this run uploaded. */
   attachments: number;
-  /** Links to notes or files this run couldn't rewrite, left as written, by note. */
+  /** Links to notes or files no run can rewrite, left as written, by note. */
   unresolved: { path: string; link: string }[];
   skipped: ImportSkipped[];
   /** Encrypted items in a JEX, which Joplin must decrypt before exporting. */
@@ -84,8 +86,9 @@ const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\
  * of that key where it would go is used, a published one left as it is,
  * and an unpublished one finished. An import cut short is finished so.
  *
- * Stops with `ImportStopped`, at the next step, if `signal` aborts or the
- * revision cache is cleared (the vault locks, or access changes). The
+ * It waits out the server's rate limits (`patient`). Stops with
+ * `ImportStopped`, at the next step, if `signal` aborts or the revision
+ * cache is cleared (the vault locks, or access changes). The
  * person must be able to edit and publish at `scope`; else it is refused
  * (`forbidden`) before anything is made. A note over the page size limit
  * is left out, and so are encrypted notes; any other failure fails the
@@ -105,6 +108,8 @@ export async function importJoplin(
     signal?: AbortSignal;
   },
 ): Promise<ImportSummary> {
+  // Hundreds of notes take longer than the server's write limits allow at once.
+  ctx = patient(ctx, () => new ImportStopped(), signal);
   const generation = ctx.revisions.generation;
   const live = () => {
     if (signal?.aborted || ctx.revisions.generation !== generation) throw new ImportStopped();
@@ -203,12 +208,15 @@ export async function importJoplin(
   }
 
   // Every page there now, with its title, for links to resolve against.
-  const tree = await loadTree(ctx, spaceId);
+  // Each publication goes in it as it is made: one into a share names only
+  // pages already published there (`writeLinks`).
+  const loaded = await loadTree(ctx, spaceId);
   live();
+  const listed = new Map(loaded.pages.map((page) => [page.id, { ...page }]));
+  const tree = { ...loaded, pages: [...listed.values()] };
   const linkable = linkablePages(tree);
   const index = pageIndex(linkable);
   const linkableById = new Map(linkable.map((page) => [page.id, page]));
-  const listed = new Map(tree.pages.map((page) => [page.id, page]));
   const wikilink = (key: string) => {
     const page = linkableById.get(pageOf.get(key) ?? '');
     const target = page && wikilinkTarget(page, linkable, index);
@@ -224,6 +232,20 @@ export async function importJoplin(
     skipped,
     encrypted: joplin.encrypted,
   };
+  // Each note's links, and those no run can rewrite, reported on every run,
+  // so one finishing another's work lists them too.
+  const linksOf = new Map<string, NoteLink[]>();
+  for (const note of notes) {
+    if (!pageOf.has(note.key)) continue;
+    const links = noteLinks(note, joplin.target);
+    linksOf.set(note.key, links);
+    const { unresolved } = rewriteNote(note, links, {
+      wikilink,
+      attachment: (key) => (joplin.resources.get(key)?.file ? key : undefined),
+    });
+    summary.unresolved.push(...unresolved.map((link) => ({ path: note.path, link })));
+    await pace();
+  }
   onProgress?.({ phase: 'saving', done: 0, total: placed.length });
   for (const [i, { note, pageId, draft }] of placed.entries()) {
     const page = { spaceId, pageId };
@@ -234,7 +256,7 @@ export async function importJoplin(
     const saved = opened !== null && (opened.markdown !== '' || opened.attachments.length > 0);
     let tooLarge = false;
     if (!saved) {
-      const links = noteLinks(note, joplin.target);
+      const links = linksOf.get(note.key) ?? [];
       const attached = new Map<string, AttachmentRef>();
       for (const link of links) {
         if (link.kind !== 'resource' || attached.has(link.key)) continue;
@@ -252,10 +274,11 @@ export async function importJoplin(
         } catch (error) {
           // A file larger than the server takes: its links stay as written.
           if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
+          summary.unresolved.push({ path: note.path, link: resource.name });
         }
         live();
       }
-      const { markdown, unresolved } = rewriteNote(note, links, {
+      const { markdown } = rewriteNote(note, links, {
         wikilink,
         attachment: (key) => attached.get(key)?.id,
       });
@@ -279,7 +302,6 @@ export async function importJoplin(
           payload,
           tree,
         });
-        summary.unresolved.push(...unresolved.map((link) => ({ path: note.path, link })));
       } catch (error) {
         // Its links written out, longer than a page holds: left as an empty draft.
         if (!(error instanceof PageTooLarge)) throw error;
@@ -289,7 +311,7 @@ export async function importJoplin(
       live();
     }
     if (!tooLarge) {
-      await publishPage(ctx, page, { tree });
+      heads.publishedHead = (await publishPage(ctx, page, { tree })).revisionId;
       summary.pages.push({ path: note.path, pageId, title: titleOf(note) });
       live();
     }

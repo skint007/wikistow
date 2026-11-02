@@ -3,7 +3,6 @@ import {
   cleanPath,
   importOperations,
   readJoplinExport,
-  withoutWrapper,
   type FolderId,
   type ImportFile,
   type JoplinExport,
@@ -47,7 +46,7 @@ function folderFiles(list: FileList): ImportFile[] {
       read: async () => new Uint8Array(await file.arrayBuffer()),
     });
   }
-  return withoutWrapper(files);
+  return files;
 }
 
 /**
