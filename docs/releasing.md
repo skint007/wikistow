@@ -20,7 +20,7 @@ GitHub Actions checks every change and publishes the server image and the deskto
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
 
-A push to `main` or a release tag also runs four more jobs, which pull requests skip for time:
+A push to `main` or a release tag also runs four more jobs, which pull requests skip for time. To run them on a branch before it merges, start CI by hand: **Actions → CI → Run workflow**, and pick the branch.
 
 | Job | What it does |
 | --- | --- |
