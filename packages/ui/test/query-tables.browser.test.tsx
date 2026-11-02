@@ -271,6 +271,7 @@ describe('a query block in the visual editor', () => {
         links={links}
         attachments={{ list: [], url: async () => null }}
         onFiles={() => {}}
+        page={{ spaceId, pageId: PageId.parse('p-self') }}
         queryTable={(source) => (
           <QueryTable
             source={source}

@@ -15,11 +15,13 @@ import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface
 import { PropertiesBox, PropertiesEditor, type PropertyKeys } from '../src/page/properties-box.tsx';
 import type { LinkScope } from '../src/page/property-value.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
+import { openProperties, openVault, PAGE_REF } from './page-view.ts';
 
 // The property rows, mounted for real: what they show, and that an edit
 // through them changes only the edited value's characters in the block.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+openVault();
 
 // A note as Obsidian writes one, with comments and quoting of its own.
 const NOTE = `---
@@ -85,6 +87,7 @@ async function editor(initial: string, propertyKeys?: PropertyKeys) {
       <PropertiesEditor
         frontmatter={block}
         scope={scope}
+        page={PAGE_REF}
         onChange={(next) => {
           blocks.push(next);
           setBlock(next);
@@ -97,7 +100,7 @@ async function editor(initial: string, propertyKeys?: PropertyKeys) {
   }
   // Routed, as the page is, so its tags can link to their search.
   const container = await render(routed(<Draft />));
-  await expect.poll(() => container.querySelector('section')).not.toBeNull();
+  await openProperties(container);
   return { container, blocks, last: () => blocks.at(-1) };
 }
 
@@ -130,7 +133,10 @@ async function fromMenu(container: HTMLElement, label: string, item: string) {
 
 describe('the reader’s property rows', () => {
   it('shows six rows in sentence case, each value as its type, then the rest on asking', async () => {
-    const container = await render(routed(<PropertiesBox frontmatter={NOTE} scope={scope} />));
+    const container = await render(
+      routed(<PropertiesBox frontmatter={NOTE} scope={scope} page={PAGE_REF} />),
+    );
+    await openProperties(container);
     await expect
       .poll(() => rows(container))
       .toEqual(['Title', 'Tags', 'Cook time', 'Servings', 'Vegetarian', 'Created']);
@@ -152,8 +158,9 @@ describe('the reader’s property rows', () => {
 
   it('shows a block that doesn’t read as properties as its text, saying why', async () => {
     const container = await render(
-      <PropertiesBox frontmatter={'---\n- just\n- a list\n---\n'} scope={scope} />,
+      <PropertiesBox frontmatter={'---\n- just\n- a list\n---\n'} scope={scope} page={PAGE_REF} />,
     );
+    await openProperties(container);
     expect(container.querySelector('pre')?.textContent).toBe('- just\n- a list');
     expect(container.textContent).toContain('Shown as text:');
     expect(container.querySelector('dl')).toBeNull();
@@ -161,7 +168,7 @@ describe('the reader’s property rows', () => {
 
   it('shows nothing for a block with no properties', async () => {
     const container = await render(
-      <PropertiesBox frontmatter={'---\n# a comment\n---\n'} scope={scope} />,
+      <PropertiesBox frontmatter={'---\n# a comment\n---\n'} scope={scope} page={PAGE_REF} />,
     );
     expect(container.textContent).toBe('');
   });
@@ -172,9 +179,11 @@ describe('the reader’s property rows', () => {
         <PropertiesBox
           frontmatter={'---\ngoes_with: "[[Secret]]"\n---\n'}
           scope={{ ...scope, editor: false }}
+          page={PAGE_REF}
         />,
       ),
     );
+    await openProperties(container);
     await expect.poll(() => rows(container)).toEqual(['Goes with']);
     expect(container.querySelector('dd')?.innerHTML).toBe('Secret');
   });
@@ -389,8 +398,10 @@ async function pageEditor(initial: string, mode: 'source' | 'visual' | 'split') 
       links={links}
       attachments={{ list: [], url: async () => null }}
       onFiles={() => {}}
+      page={PAGE_REF}
     />,
   );
+  if (initial.startsWith('---')) await openProperties(container);
   if (mode !== 'source') {
     await expect.poll(() => container.querySelector('#page-visual')).not.toBeNull();
   }
@@ -716,8 +727,10 @@ describe('Insert in page', () => {
           links={links}
           attachments={{ list: [], url: async () => null }}
           onFiles={() => {}}
+          page={PAGE_REF}
         />,
       );
+      await openProperties(container);
       if (mode === 'visual') {
         await expect.poll(() => container.querySelector('#page-visual')).not.toBeNull();
       } else {

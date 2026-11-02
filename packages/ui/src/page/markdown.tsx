@@ -365,7 +365,11 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
       <PageProperties value={properties}>
         <OtherPagesContext value={others}>
           {frontmatter !== null && (
-            <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
+            <PropertiesBox
+              frontmatter={frontmatter}
+              scope={bodyLinkScope(context)}
+              page={attachments.page}
+            />
           )}
           {read.isPending ? (
             <StillReading />
