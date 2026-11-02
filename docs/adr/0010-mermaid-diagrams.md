@@ -27,7 +27,7 @@ Run 2026-11-01 against the built app on Mermaid 12.2.0. The frame drew a flowcha
 | Chromium (Playwright) | All drew, sized from their viewBox, no policy violation. The hostile label showed as text. The parse error came back as Mermaid's message. |
 | Firefox (Playwright) | The same. |
 | WebKit (Playwright, in the CI image) | The same. |
-| Desktop app, `app://wikistow` (Electron 44, in the CI image) | The same. Chromium accepts `script-src` naming the app's two files under `app://wikistow`. The frame has no `wikistowDesktop` bridge. |
+| Desktop app, `app://wikistow` (Electron 44, in the CI image) | The same. Chromium accepts `script-src` naming Mermaid's folder and the host script under `app://wikistow`. The frame has no `wikistowDesktop` bridge. |
 
 In every one the frame's own `fetch` of the app's API and of another host failed, and it could read no cookie, `localStorage` or parent document. Its first diagram took about 0.5 s with Mermaid loading, later ones 30 to 150 ms.
 
