@@ -84,3 +84,35 @@ test('a sign-in with two-factor turned on asks for a code', async ({ freshPage, 
   await other.getByRole('button', { name: 'Verify' }).click();
   await expectSignedIn(other);
 });
+
+test('a session check the server doesn’t answer shows its own screen, with Try again', async ({
+  page,
+  admin,
+}) => {
+  await signIn(page, admin.email);
+  await expectSignedIn(page);
+  const account = page.getByRole('button', { name: 'Account' });
+  await expect(account).toBeVisible();
+  // The server's host moved: its proxy answers every path with a 404 (#257).
+  await page.route('**/api/me', (route) =>
+    route.fulfill({ status: 404, contentType: 'text/plain', body: '404 page not found' }),
+  );
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'The server didn’t answer as WikiStow' }),
+  ).toBeVisible();
+  await expect(account).toHaveCount(0);
+  await expect(page.getByText(new URL(page.url()).origin)).toBeVisible();
+  // Only the desktop app has a session of its own to forget.
+  await expect(page.getByRole('button', { name: 'Sign out on this computer' })).toHaveCount(0);
+
+  await page.unroute('**/api/me');
+  await page.route('**/api/me', (route) => route.abort());
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByRole('heading', { name: 'Can’t reach the server' })).toBeVisible();
+
+  await page.unroute('**/api/me');
+  await page.getByRole('button', { name: 'Try again' }).click();
+  // Back in the app, where it was.
+  await expect(account).toBeVisible();
+});

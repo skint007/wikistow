@@ -19,6 +19,7 @@ const bridge: DesktopBridge = {
   signIn: (origin) => call(DESKTOP_CHANNELS.signIn, origin),
   cancelSignIn: () => call(DESKTOP_CHANNELS.cancelSignIn),
   signedOut: () => call(DESKTOP_CHANNELS.signedOut),
+  signOutHere: () => call(DESKTOP_CHANNELS.signOutHere),
   secureStorage: () => call(DESKTOP_CHANNELS.secureStorage),
   rememberVault: (accountId, vaultKey) => call(DESKTOP_CHANNELS.rememberVault, accountId, vaultKey),
   rememberedVault: (accountId) => call(DESKTOP_CHANNELS.rememberedVault, accountId),

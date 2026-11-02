@@ -148,6 +148,8 @@ The app asks for your server's address, such as `https://wiki.example.com`, then
 
 Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps → Review** in the browser.
 
+If the server stops answering as WikiStow, say because its address moved, the app says so and names it, with **Try again** and **Sign out on this computer**. Signing out offers the same when it can't reach the server. Signing out on this computer forgets the session, your remembered unlock, the kept files below and the server's address, without asking the server, and then asks for a server, so you can sign in to another. The old session stays on the server until it expires, or until you sign it out there under **Settings → Desktop apps**.
+
 ## The keyring
 
 On Windows the app seals what it keeps with Windows' own data protection (DPAPI), under a key tied to your Windows account, so there is nothing to set up, and it keeps what this section describes as a keyring would. Another person signed in to the same PC can't open it; programs you run can, as with a keyring.
