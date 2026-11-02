@@ -302,14 +302,27 @@ function depthOf(held: readonly { id: string; parentId: string | null }[], nodeI
 
 // The share each record of `nodeIds` is wrapped in (null: the owners'
 // envelopes), with the node it is of: page versions and folder names.
+// `sealed` says whether it has envelopes, which a record whose share was
+// deleted, taking its wraps, lacks.
 async function recordShares(tx: Database, nodeIds: readonly string[]) {
+  const sealed = (kind: 'revision' | 'metadata', id: unknown) =>
+    sql<boolean>`exists (select 1 from key_envelopes e
+      where e.subject_kind = ${kind} and e.subject_id = ${id})`;
   const pages = await tx
-    .select({ nodeId: revisions.pageId, shareId: revisionWraps.shareId })
+    .select({
+      nodeId: revisions.pageId,
+      shareId: revisionWraps.shareId,
+      sealed: sealed('revision', revisions.id),
+    })
     .from(revisions)
     .leftJoin(revisionWraps, eq(revisionWraps.revisionId, revisions.id))
     .where(anyId(revisions.pageId, nodeIds));
   const folders = await tx
-    .select({ nodeId: metadataRevisions.subjectId, shareId: metadataWraps.shareId })
+    .select({
+      nodeId: metadataRevisions.subjectId,
+      shareId: metadataWraps.shareId,
+      sealed: sealed('metadata', metadataRevisions.id),
+    })
     .from(metadataRevisions)
     .leftJoin(metadataWraps, eq(metadataWraps.metadataRevisionId, metadataRevisions.id))
     .where(
@@ -342,7 +355,8 @@ async function requireRegion(
     held.map((node) => node.id),
   )) {
     const expected = holding.get(record.nodeId)?.id ?? to?.id ?? null;
-    if ((record.shareId ?? null) !== expected) {
+    const shareId = record.shareId ?? (record.sealed ? null : 'none');
+    if (shareId !== expected) {
       throw new ContentError(
         'region-mismatch',
         'Who can see where it was changed after it was deleted, so it can’t go back there',

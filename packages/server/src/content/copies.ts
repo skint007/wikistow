@@ -840,9 +840,8 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
 /**
  * Before a move deletes its source for good: what was deleted from under it
  * stays in the trash, moved under the source's parent, where its keys still
- * fit, as long as no share whose keys it needs goes with the move: one
- * rooted at the source or between it and the item. Those go with the move,
- * since nobody could open them after it. `held` is the source subtree. The
+ * fit, unless a share rooted at the source or between it and the item goes
+ * with the move. Those go with the move too, since they may need its keys. `held` is the source subtree. The
  * items moved, whose subtrees leave it.
  */
 async function liftTrash(tx: Database, copy: CopyRow, held: readonly string[]) {
