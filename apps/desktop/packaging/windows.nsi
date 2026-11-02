@@ -1,8 +1,9 @@
 ; The Windows installer, built by scripts/windows-packages.sh with makensis
 ; for each architecture. It installs for the person running it, with no
-; administrator prompt, into %LOCALAPPDATA%\Programs\WikiStow: a Start menu
-; entry, `wikistow://` links for signing in, and an uninstaller listed in
-; Settings > Apps. The app's data in %APPDATA%\WikiStow stays when it goes.
+; administrator prompt, into %LOCALAPPDATA%\Programs\WikiStow Desktop: a
+; Start menu entry, `wikistow://` links for signing in, and an uninstaller
+; listed in Settings > Apps. Not Programs\wikistow, which is the CLI's, on
+; the PATH: Windows ignores case, so its wikistow.exe would be WikiStow.exe. The app's data in %APPDATA%\WikiStow stays when it goes.
 ;
 ; makensis (from any folder: it reads the icon beside this file) -DVERSION=<version> -DFILE_VERSION=<a.b.c.0> -DARCH=<x64|arm64>
 ;   -DAPP=<staged app folder> -DOUT=<installer> packaging/windows.nsi
@@ -21,7 +22,7 @@ SetCompressor /SOLID lzma
 
 Name "WikiStow"
 OutFile "${OUT}"
-InstallDir "$LOCALAPPDATA\Programs\WikiStow"
+InstallDir "$LOCALAPPDATA\Programs\WikiStow Desktop"
 BrandingText "WikiStow ${VERSION}"
 
 VIProductVersion "${FILE_VERSION}"

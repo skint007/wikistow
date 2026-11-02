@@ -21,7 +21,7 @@ const env = (name: string) => {
   if (!value) throw new Error(`${name} is not set`);
   return value;
 };
-const folder = join(env('LOCALAPPDATA'), 'Programs', 'WikiStow');
+const folder = join(env('LOCALAPPDATA'), 'Programs', 'WikiStow Desktop');
 const exe = join(folder, 'WikiStow.exe');
 const shortcut = join(
   env('APPDATA'),
@@ -57,7 +57,7 @@ async function until<T>(what: string, look: () => Promise<T | null | undefined>,
 
 // NSIS's silent install runs to the end before it exits.
 execFileSync(installer, ['/S'], { stdio: 'inherit' });
-check(existsSync(exe), 'the app is installed in %LOCALAPPDATA%\\Programs\\WikiStow');
+check(existsSync(exe), 'the app is installed in %LOCALAPPDATA%\\Programs\\WikiStow Desktop');
 check(
   readFileSync(join(folder, 'resources', 'install-source'), 'utf8') === 'windows\n',
   'install-source says windows',
