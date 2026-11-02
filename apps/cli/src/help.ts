@@ -437,13 +437,13 @@ With --json:
    "skipped":[{"path":"...","reason":"encrypted|too-large"}],"encrypted":N}
 paths are where each note is in the export. folders, pages and attachments
 are what this run made; existing counts pages an earlier run finished.
-unresolved lists every note's links left as written, on every run: to a
-note or file that wasn't imported or was too large for the server, to a
-note's files past the 200 a page lists, or to a note no wikilink can name
-(one of two of one title in one notebook, or a title with | # [ ] ^ \` <
-or \\ in it). For a page an earlier run saved, it lists the links its
-draft still holds as written. encrypted counts the export's encrypted
-items.
+unresolved lists every note's links left as written, on every run, each
+by its text, a file by its name, else as written: to a note or file that
+wasn't imported or was too large for the server, to a note's files past
+the 200 a page lists, or to a note no wikilink can name (one of two of
+one title in one notebook, or a title with | # [ ] ^ \` < or \\ in it).
+For a page an earlier run saved, it lists the links its draft still
+holds as written. encrypted counts the export's encrypted items.
 `,
   'folder copy': copyHelp('folder'),
   'page read': `Usage: wikistow page read PAGE_ID [--draft] [--revision REVISION_ID]

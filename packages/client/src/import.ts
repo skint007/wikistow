@@ -48,8 +48,10 @@ export type JoplinResource = {
 /** Why a note isn't imported. */
 export type JoplinSkipReason = 'encrypted' | 'too-large';
 
-/** What a link in a note names: another note or a resource, by key. */
-export type JoplinTarget = { kind: 'note' | 'resource'; key: string };
+/** What a link in a note names: another note, or a resource, by key, and the resource's name. */
+export type JoplinTarget =
+  | { kind: 'note'; key: string }
+  | { kind: 'resource'; key: string; name: string };
 
 /** A Joplin export, read. */
 export type JoplinExport = {
@@ -181,7 +183,8 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
       const path = cleanPath(`${dirOf(note.path)}/${unescapeLinkUrl(url.replace(/[?#].*$/s, ''))}`);
       if (path === null) return null;
       if (byPath.has(path)) return { kind: 'note', key: path };
-      if (resources.has(path)) return { kind: 'resource', key: path };
+      const resource = resources.get(path);
+      if (resource) return { kind: 'resource', key: path, name: resource.name };
       // A link that looks like one of the export's own, to something it doesn't have.
       return path.startsWith(`${MD_RESOURCES}/`) || /\.(md|html)$/i.test(path) ? 'missing' : null;
     },
@@ -359,7 +362,8 @@ async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
       const id = match?.[1];
       if (!id) return null;
       if (noteIds.has(id)) return { kind: 'note', key: id };
-      if (resources.has(id)) return { kind: 'resource', key: id };
+      const resource = resources.get(id);
+      if (resource) return { kind: 'resource', key: id, name: resource.name };
       return 'missing';
     },
   };
@@ -430,7 +434,7 @@ export type NoteLink =
   /** A Markdown link to another note: it becomes a wikilink, `text` its text. */
   | { kind: 'note'; key: string; start: number; end: number; text: string; inTable: boolean }
   /** The URL of a link, image or HTML attribute naming a resource: it becomes `attachment:ID`. */
-  | { kind: 'resource'; key: string; start: number; end: number }
+  | { kind: 'resource'; key: string; name: string; start: number; end: number }
   /** One that can't be rewritten (a note link in HTML, a missing note or file), as written. */
   | { kind: 'kept'; source: string };
 
@@ -453,7 +457,7 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
     const named = target(note, url);
     if (named === 'missing') found.push({ kind: 'kept', source: url });
     else if (named?.kind === 'resource')
-      found.push({ kind: 'resource', key: named.key, ...destination });
+      found.push({ kind: 'resource', key: named.key, name: named.name, ...destination });
   }
   // Each link to a note, whole, and resources in HTML.
   const walk = (node: Nodes, inTable: boolean) => {
@@ -516,7 +520,7 @@ function htmlLinks(
       continue;
     }
     const start = offset + (match.index ?? 0) + match[0].length - url.length - 1;
-    found.push({ kind: 'resource', key: named.key, start, end: start + url.length });
+    found.push({ ...named, start, end: start + url.length });
   }
   return found;
 }
@@ -558,7 +562,7 @@ export function rewriteNote(
       text = wikilinkFor(link, rewrites.wikilink(link.key));
     }
     if (text === undefined) {
-      unresolved.push(link.kind === 'note' ? link.text || source : source);
+      unresolved.push(labelOf(link, source));
       continue;
     }
     out += note.markdown.slice(at, link.start) + text;
@@ -566,6 +570,10 @@ export function rewriteNote(
   }
   return { markdown: out + note.markdown.slice(at), unresolved };
 }
+
+/** How the report names a link left as written: a note link by its text, a file by its name. */
+const labelOf = (link: Exclude<NoteLink, { kind: 'kept' }>, source: string) =>
+  link.kind === 'note' ? link.text || source : link.name;
 
 /**
  * Which of `links` a saved version of `note` (`markdown`) still holds as
@@ -580,7 +588,7 @@ export function leftAsWritten(
   return links.flatMap((link) => {
     const source = link.kind === 'kept' ? link.source : note.markdown.slice(link.start, link.end);
     if (!markdown.includes(source)) return [];
-    return [link.kind === 'note' ? link.text || source : source];
+    return [link.kind === 'kept' ? source : labelOf(link, source)];
   });
 }
 
