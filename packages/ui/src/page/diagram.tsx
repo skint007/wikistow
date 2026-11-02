@@ -33,11 +33,12 @@ const diagramQuery = (source: string, dark: boolean) =>
 
 /**
  * Why a diagram didn't draw, as a reader is told: Mermaid's first line,
- * and its last, which says what a syntax error expected.
+ * and for a syntax error its last, which says what it expected.
  */
 function failure(error: Error) {
   const lines = error instanceof DiagramError ? error.message.trim().split('\n') : [];
-  const reason = lines.length > 1 ? `${lines[0]} ${lines.at(-1)}` : (lines[0] ?? '');
+  const last = lines.length > 1 ? lines.at(-1) : undefined;
+  const reason = [lines[0], last?.startsWith('Expecting') && last].filter(Boolean).join(' ');
   return `This diagram couldn’t be drawn. ${reason}`.trim();
 }
 
