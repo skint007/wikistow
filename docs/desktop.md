@@ -58,7 +58,7 @@ To update, download the new release's installer and run it; it replaces the old 
 
 Each Linux package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`.
 
-The Windows installer writes `windows` to `resources\install-source`, beside the app's `app.asar`. The install folder is yours to change, so that file only decides what the update notice says. A Mac app keeps `mac` in the same place, in `WikiStow.app/Contents/Resources`.
+The Windows installer writes `windows` to `resources\install-source`, beside the app's `app.asar`. The install folder is yours to change, so that file only decides what the update notice says.
 
 ### Updates
 

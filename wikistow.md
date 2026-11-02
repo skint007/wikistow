@@ -35,7 +35,7 @@ This departs from the preferred stack's Next.js on purpose (decided 2026-10-02).
 ```mermaid
 flowchart LR
     W[Browser interface] --> C[Shared document client]
-    D[Linux desktop interface] --> C
+    D[Desktop interface] --> C
     A[Agent CLI] --> C
     C --> K[Client key storage]
     C --> S[Authenticated API]
