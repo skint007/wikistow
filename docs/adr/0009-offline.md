@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Reading and editing pages offline
@@ -106,7 +106,7 @@ Settings, under **This device**, shows the choice, how much is kept ("1,204 page
 
 ### 8. What waits for the server
 
-Everything else, and the control says "Needs the connection" (a `data-hint`) rather than failing: publishing and unpublishing, ticking tasks while reading (which publishes), editing a query table's cells, public links, sharing, members and groups, moves and copies, deleting and the Trash, renaming a folder or changing its look, new spaces, templates, history and restoring a version, agents and the chat assistant, browser plugins (the desktop's run from disk), export, Settings that the server stores, signing in, and signing out. Offline, Lock vault seals everything kept until the next unlock. Back online, Publish, restoring a version, and moving or copying a page wait until the page's offline change is sent, so they never act on the draft from before it.
+Everything else, and the control says "Needs the connection" (a `data-hint`) rather than failing: publishing and unpublishing, ticking tasks while reading (which publishes), editing a query table's cells, public links, sharing, members and groups, moves and copies, deleting and the Trash, renaming a folder or changing its look, new spaces, templates, history and restoring a version, agents and the chat assistant, browser plugins (the desktop's run from disk), export, Settings that the server stores, signing in, and signing out (except the desktop's **Sign out on this computer**, decision 10). Offline, Lock vault seals everything kept until the next unlock. Back online, Publish, restoring a version, and moving or copying a page wait until the page's offline change is sent, so they never act on the draft from before it.
 
 ### 9. Search, Linked from and query tables
 
@@ -118,6 +118,7 @@ Everything else, and the control says "Needs the connection" (a `data-hint`) rat
 
 - **Lock** clears what's decrypted in memory, as now. Everything kept stays sealed.
 - **Sign out** needs the connection. Before it does anything it warns when offline changes haven't been sent: "2 changes you made offline haven't been saved yet. Signing out deletes them." It tells the other tabs on the `BroadcastChannel`, which lock and stop keeping and sending, then deletes everything kept: pages, attachments, trees, the index, the queue, the trust marks, the wrapper and the `/api/me` answer. Every tab closes its connection to the database when another asks to delete it (`versionchange`), so a second tab can neither hold the deletion up nor write again after it. The service worker's cache holds only the app's files, so it stays.
+- **A server that's gone** (#257): no answer, a 404 from `/api/me` or the sign-out route, or an answer that isn't WikiStow's JSON, as when its host moved and a proxy answers every path. The desktop app's error screen, and its sign-out when the sign-out route gets one of those answers, offer **Sign out on this computer**. It forgets the session, the vault and the server chosen (`config.json`), and deletes everything kept, as a sign-out does, then asks for a server. The error screen offers it for a server error (5xx) too, beside **Try again**; a sign-out that gets WikiStow's own refusal, a 5xx among them, leaves the session as it is. The server's session stays alive until it expires or is revoked from another device, and the screen says so. The offline-changes warning above comes first here too. A browser tab only offers **Try again**: its session cookie is the server's to end. Once offline unlock is built, a start with no answer, or a proxy's 5xx, opens offline instead (decision 5), so the screen stays for the other cases, and offline the desktop's **Sign out** offers **Sign out on this computer** in place of "Needs the connection" (decision 8), so a server that never comes back still has a way out.
 - **A session the server ended** (a revoke, a suspension, a password reset, or a session that lapsed unused, which the app can't tell apart) goes to sign-in as now, and everything kept stays, sealed. A sign-in to the same account takes it up again, sends the queue, and the next listing drops what its access no longer covers (decision 3).
 - **Signing in** to another account deletes everything kept. When the queue holds changes not yet sent, the sign-in page says so first, by the kept account's name ("This device has 2 changes Sam made offline that haven't been saved yet. Signing in as someone else deletes them."). What's kept for the same account stays. So the desktop's main process stops deleting the `kept` folder at every new sign-in, as it does `search-index` and `trust-marks` today (`linkArrived`, `apps/desktop/src/main.ts`): the pages delete it once the `/api/me` answer names another account.
 
@@ -132,7 +133,7 @@ Agents and the CLI, which stay online; merging edits; keeping older versions or 
 - **Seal offline revisions at once.** The issue suggested it. A key rotation or a permission change while offline would make every queued save fail, and a move would change its region. Sealing at send time keeps every server check as it is, and attachments, whose AD names no share, are still sealed at once.
 - **vite-plugin-pwa (Workbox).** Standard, but brings a large dependency for about 100 lines. Rejected for a small worker of the app's own.
 - **Keep the browser on its cached build until every tab closes**, the default lifecycle. It would leave people on old builds online. Rejected for taking over at once, which matches today's loading.
-- **A third conflict choice, "Keep both" as a separate page.** It would never lose either edit, but adds a choice to the conflict view for every save. Left for review (below).
+- **A third conflict choice, "Keep both" as a separate page.** It would never lose either edit, but adds a choice to the conflict view for every save. Rejected on review (below).
 
 ## Consequences
 
@@ -141,14 +142,14 @@ Agents and the CLI, which stay online; merging edits; keeping older versions or 
 - `leak.spec` gains the new storage: `wikistow-kept` while open and after a lock, holding none of the test's markers readable, and gone after sign-out. Today it expects Cache Storage to be empty; step 4 lets it hold the service worker's cache of app files, by name, before and after sign-out.
 - A browser that used only memory now writes sealed content to disk by default, for the pages a person opens. Decided on #242.
 
-## For review
+## Review
 
-Choices Scott may want to change before any code:
-- Kept versions are the published version plus, for editors, the draft (decision 1). Keeping only the version search shows would halve the first download, but an editor offline would see the draft where the reader shows the publication.
-- Images kept with every kept page on the desktop, other files only once opened, and no cap (decision 1).
-- Sign out needs the connection (decision 10). It could delete what's kept offline and end the server session later.
-- The conflict view's two choices are kept as they are (decision 7). A **Keep both** choice could save the offline text as a new page beside it.
-- **Save as a new page in my space** for an offline edit whose page is gone (decision 7).
+Scott accepted this ADR on 2026-11-02, with these choices:
+- Kept versions are the published version plus, for editors, the draft (decision 1).
+- Images are kept with every kept page on the desktop, other files once opened, with no cap (decision 1).
+- The conflict view keeps its two choices, with no **Keep both** (decision 7).
+- An offline edit whose page is gone offers **Save as a new page in my space** (decision 7).
+- Sign out still needs the connection (decision 10), except when the server is gone: then the desktop app can sign out on this computer only, as amended there (#257).
 
 ## Implementation, in pull requests
 

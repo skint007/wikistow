@@ -24,7 +24,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
 - Bulk import from Joplin and from an Obsidian vault (see **Import**). A person can also move one Obsidian note by pasting its Markdown into a page, or have an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
-Comments, simultaneous live editing, semantic search, passkeys and MCP integration are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is proposed in [ADR 0009](docs/adr/0009-offline.md), not built yet (see [Offline](#offline)).
+Comments, simultaneous live editing, semantic search, passkeys and MCP integration are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is decided in [ADR 0009](docs/adr/0009-offline.md), not built yet (see [Offline](#offline)).
 
 ## Architecture
 
@@ -345,7 +345,7 @@ Status: accepted in [ADR 0009](docs/adr/0009-offline.md) (#242). Only the app sh
 - **Unlocking offline.** The device keeps the vault wrapper, the last `/api/me` answer and the contacts record. The passphrase or a remembered unlock opens the vault with no server (recovery waits for it), and the session opens from the kept record, checked against its mark.
 - **The app shell** (built). The browser app has a service worker, `/sw.js`, that keeps this build's own files (not source maps, Workshop's esbuild or Mermaid), so the app loads offline after one visit. Hashed files under `/assets/` come from its copy. App pages and the files at the top of the site come from the server, and from the copy when the server gives no answer within 3 seconds, or a proxy's 5xx. It keeps no API answer, public page or anything per account, and a new deploy's worker takes over at once. A web app manifest, `/manifest.webmanifest`, lets phones install the app. The desktop app, which loads from disk, has no worker.
 - **Offline changes.** Drafts of kept pages, new pages and new folders wait on the device, sealed, each naming what it was based on, and go to the server in order once it answers, sealed then with the share's current keys. A page someone saved meanwhile comes back as the usual conflict; one deleted, put in the trash or out of reach offers to save the text as a new page in the person's own space. Everything else that needs the server, publishing, sharing, moves and deletes among it, waits, and says so.
-- **Letting go.** Kept content stays readable on the device after someone loses access, until the app is back online and drops it; the setting says so. Signing out, which needs the connection, deletes everything kept, after warning about offline changes not yet sent.
+- **Letting go.** Kept content stays readable on the device after someone loses access, until the app is back online and drops it; the setting says so. Signing out, which needs the connection, deletes everything kept, after warning about offline changes not yet sent. When the server is gone, the desktop app can sign out on this computer only (see Desktop and CLI).
 
 ## Interface design
 
