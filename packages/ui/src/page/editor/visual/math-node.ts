@@ -1,7 +1,7 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
 import { InputRule } from '@milkdown/kit/prose/inputrules';
 import type { Node } from '@milkdown/kit/prose/model';
-import { NodeSelection, Plugin, TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, Plugin, TextSelection, type EditorState } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $inputRule, $node, $prose, $view } from '@milkdown/kit/utils';
 import type { ElementContent } from 'hast';
@@ -251,19 +251,58 @@ const mathKeys = $prose(
 );
 
 // Typed inline math, by the reader's rule: `$`, something not a space,
-// and a closing `$` after something not a space, outside code.
-const TYPED = /(?<![$\\])\$([^\s$](?:[^$]*[^\s$\\])?)\$$/;
+// and a closing `$` after something not a space. It's made once the next
+// character is typed, if that isn't a digit, which a closing `$` can't be
+// before (`$5-$10` stays text), or on Enter.
+const TYPED = String.raw`(?<![$\\])\$([^\s$](?:[^$]*[^\s$\\])?)\$`;
+const TYPED_THEN = new RegExp(`${TYPED}([^\\d$])$`);
+const TYPED_LAST = new RegExp(`${TYPED}$`);
 
-const typedMath = $inputRule(
-  (ctx) =>
-    new InputRule(TYPED, (state, match, start, end) => {
-      const [, tex] = match;
-      const code = state.schema.marks['inlineCode'];
-      const inCode =
-        state.doc.resolve(start).parent.type.spec.code ||
-        (code && state.doc.rangeHasMark(start, end, code));
-      if (!tex || inCode) return null;
-      return state.tr.replaceWith(start, end, inlineMathSchema.type(ctx).create({ value: tex }));
+/**
+ * `state` with the typed math `match` found from `start` to `end` made an
+ * atom; null in code, or against other math, as `$a$$b$` reads otherwise.
+ */
+function typedMath(state: EditorState, match: RegExpMatchArray, start: number, end: number) {
+  const type = state.schema.nodes['math_inline'];
+  const [, tex] = match;
+  const $start = state.doc.resolve(start);
+  const code = state.schema.marks['inlineCode'];
+  const inCode = $start.parent.type.spec.code || (code && state.doc.rangeHasMark(start, end, code));
+  if (!type || !tex || inCode || $start.nodeBefore?.type === type) return null;
+  return state.tr.replaceWith(start, end, type.create({ value: tex }));
+}
+
+const typedThen = $inputRule(
+  () =>
+    new InputRule(TYPED_THEN, (state, match, start, end) => {
+      const typed = match[2] ?? '';
+      return typedMath(state, match, start, end)?.insertText(typed, start + 1) ?? null;
+    }),
+);
+
+/** Enter after typed math makes it first. */
+const typedLast = $prose(
+  () =>
+    new Plugin({
+      props: {
+        handleKeyDown(view, event) {
+          if (event.key !== 'Enter' || event.isComposing) return false;
+          const { $from, empty } = view.state.selection;
+          if (!empty || !$from.parent.isTextblock) return false;
+          const offset = $from.parentOffset;
+          const before = $from.parent.textBetween(
+            Math.max(0, offset - 500),
+            offset,
+            undefined,
+            '\uFFFC',
+          );
+          const match = TYPED_LAST.exec(before);
+          const tr = match && typedMath(view.state, match, $from.pos - match[0].length, $from.pos);
+          if (tr) view.dispatch(tr);
+          // Enter goes on to do what it does.
+          return false;
+        },
+      },
     }),
 );
 
@@ -280,5 +319,6 @@ export const inlineMathEditorNode = (): MilkdownPlugin[] =>
   [
     inlineMathSchema,
     $view(inlineMathSchema, () => (n, v, p) => new MathView(n, v, p)),
-    typedMath,
+    typedThen,
+    typedLast,
   ].flat();
