@@ -41,8 +41,10 @@ export function windowPlace(userData: string) {
   return {
     /**
      * The kept size and position, fitted to the work area of the display it
-     * is mostly on, and whether the window was maximized. The default size
-     * when nothing (or nothing readable) was kept. Needs the app ready.
+     * is mostly on, and whether the window was maximized. When nothing (or
+     * nothing readable) was kept, the default size, shrunk to fit the main
+     * display's work area, as a small laptop screen's is shorter. Needs the
+     * app ready.
      */
     read() {
       try {
@@ -50,7 +52,10 @@ export function windowPlace(userData: string) {
         const { workArea } = screen.getDisplayMatching(kept.bounds);
         return { bounds: fitInto(kept.bounds, workArea), maximized: kept.maximized };
       } catch {
-        return { bounds: DEFAULT_SIZE, maximized: false };
+        const { workArea } = screen.getPrimaryDisplay();
+        const width = Math.min(DEFAULT_SIZE.width, workArea.width);
+        const height = Math.min(DEFAULT_SIZE.height, workArea.height);
+        return { bounds: { width, height }, maximized: false };
       }
     },
     /**
