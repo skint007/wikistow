@@ -28,6 +28,10 @@ export function cleanPath(path: string): string | null {
   return parts.length === 0 ? null : parts.join('/');
 }
 
+/** What macOS adds to a zip or a copied folder: `__MACOSX/` and `._name` resource forks. */
+export const macOsExtra = (path: string) =>
+  path.split('/').some((part) => part === '__MACOSX' || part.startsWith('._'));
+
 const isTar = (bytes: Uint8Array) =>
   bytes.length >= 512 && new TextDecoder().decode(bytes.subarray(257, 262)) === 'ustar';
 const isZip = (bytes: Uint8Array) =>
@@ -54,7 +58,7 @@ function zipFiles(bytes: Uint8Array): ImportFile[] {
   const files: ImportFile[] = [];
   for (const [name, data] of Object.entries(entries)) {
     const path = name.endsWith('/') ? null : cleanPath(name);
-    if (path === null) continue;
+    if (path === null || macOsExtra(path)) continue;
     files.push({ path, size: data.length, read: async () => data });
   }
   return withoutWrapper(files);

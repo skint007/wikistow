@@ -11,7 +11,7 @@
 //   `:/<id>`. Its notes get the front matter the Markdown export writes.
 import type { Nodes } from 'mdast';
 import { stringify } from 'yaml';
-import { cleanPath, type ImportFile } from './import-archive.ts';
+import { cleanPath, macOsExtra, type ImportFile } from './import-archive.ts';
 import { foldTitle, resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
 import {
   linkSpans,
@@ -143,6 +143,7 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
   const notes: JoplinNote[] = [];
   const dirs = new Set<string>();
   for (const file of [...files].sort((a, b) => compare(a.path, b.path))) {
+    if (macOsExtra(file.path)) continue;
     if (file.path.startsWith(`${MD_RESOURCES}/`)) {
       const name = nameOf(file.path);
       resources.set(file.path, { key: file.path, name, mediaType: mediaTypeOf(name), file });
@@ -151,7 +152,9 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
     const html = /\.html$/i.test(file.path);
     if (!html && !/\.md$/i.test(file.path)) continue;
     for (let dir = dirOf(file.path); dir !== ''; dir = dirOf(dir)) dirs.add(dir);
-    const markdown = await textOf(file);
+    const text = await textOf(file);
+    const { frontmatter, body } = splitFrontmatter(text);
+    const markdown = html ? `${frontmatter ?? ''}${htmlBlock(body)}` : text;
     const parent = dirOf(file.path);
     notes.push({
       key: file.path,
@@ -203,6 +206,30 @@ function frontmatterTitle(markdown: string): string | null {
   if (title === undefined || title === null || Array.isArray(title)) return null;
   const text = String(title).trim();
   return text === '' ? null : text;
+}
+
+/**
+ * An HTML note's body as one Markdown HTML block, which the reader renders
+ * as HTML: without the blank lines that would end it, or the indentation
+ * that would make what follows a code block. Inside `<pre>` lines keep
+ * their indentation, and a blank one becomes an empty `<span>`, which shows
+ * the same there.
+ */
+export function htmlBlock(html: string): string {
+  const last = (pattern: RegExp, text: string) =>
+    Math.max(-1, ...Array.from(text.matchAll(pattern), (match) => match.index));
+  let inPre = false;
+  const lines: string[] = [];
+  for (const line of html.split('\n')) {
+    const blank = line.trim() === '';
+    if (!inPre && blank) continue;
+    const text = inPre ? (blank ? '<span></span>' : line) : line.trimStart();
+    const open = last(/<pre\b/gi, text);
+    const close = last(/<\/pre\s*>/gi, text);
+    inPre = open > close || (inPre && close < 0);
+    lines.push(text);
+  }
+  return lines.join('\n');
 }
 
 // ---- JEX ----
@@ -300,13 +327,14 @@ async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
       encryptedNotes.push(item.path);
       continue;
     }
+    const html = item.props.get('markup_language') === '2';
     notes.push({
       key: id,
       parent: parentOf(item),
       title: item.title.trim(),
       path: `${where.get(parentOf(item)) ?? ''}${item.title.trim() || id}`,
-      markdown: `${joplinFrontmatter(item, (noteTags.get(id) ?? []).sort())}\n${item.body}`,
-      html: item.props.get('markup_language') === '2',
+      markdown: `${joplinFrontmatter(item, (noteTags.get(id) ?? []).sort())}\n${html ? htmlBlock(item.body) : item.body}`,
+      html,
     });
   }
   const noteIds = new Set(notes.map((note) => note.key));
