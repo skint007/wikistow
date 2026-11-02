@@ -30,7 +30,7 @@ A push to `main` or a release tag also runs four more jobs, which pull requests 
 | `windows-packages` | Builds the Windows installers from the build, x64 and arm64 ([below](#the-windows-installers)) |
 | `windows-packages-check` | Installs each on Windows of its architecture, starts the app, and uninstalls it |
 
-After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
+After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. The `main` tag moves to the newest of these builds, for a test server that follows `main`. It waits for the packages too, so a release whose packages fail publishes nothing.
 
 Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap.
 
