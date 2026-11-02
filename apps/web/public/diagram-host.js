@@ -1,5 +1,6 @@
-// The diagram host frame (ADR 0010). The app frames diagram-host.html with
-// sandbox="allow-scripts", so Mermaid runs here at an opaque origin, under
+// The diagram host frame (ADR 0010). The app frames diagram-host.html
+// (which the build writes, loading Mermaid's own script before this one)
+// with sandbox="allow-scripts", so Mermaid runs here at an opaque origin, under
 // a policy that allows no requests, and may use the inline styles it needs
 // to measure text. It draws each diagram it is sent and returns the SVG
 // as text; the app shows it as an image, where nothing in it runs.
@@ -37,6 +38,9 @@
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       htmlLabels: false,
       flowchart: { htmlLabels: false },
+      // A journey's text is HTML in the SVG by default, which a canvas
+      // won't export, so its public copy would get no image.
+      journey: { textPlacement: 'tspan' },
     });
     count += 1;
     return mermaid.render('diagram-' + count, source).then(

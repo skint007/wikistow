@@ -1,7 +1,9 @@
 import type { publicLinkOperations } from '@wikistow/client';
 import { DIAGRAM_HOST_PAGE } from '@wikistow/contracts';
 
-/** How long one diagram may take to draw before the frame is replaced. */
+/** How long Mermaid may take to load in a new frame, a 5.5 MB file on a slow line. */
+const LOAD_MS = 120_000;
+/** How long the frame may take over one diagram before it is replaced. */
 const DRAW_MS = 10_000;
 /** How long the frame stays once nothing is being drawn, so Mermaid isn't kept loaded. */
 const IDLE_MS = 60_000;
@@ -32,7 +34,8 @@ type Waiting = { resolve: (svg: string) => void; reject: (error: Error) => void 
  * with no requests allowed, and hands back each diagram as SVG text. The
  * frame is laid out off screen, not hidden, so text has a size. It is
  * made for the first diagram, which is when Mermaid loads, and removed
- * once idle, or if a diagram takes too long.
+ * once idle, or if it doesn't load or takes too long over a diagram,
+ * failing those it hadn't drawn.
  */
 class DiagramFrame {
   readonly #iframe = document.createElement('iframe');
@@ -40,20 +43,20 @@ class DiagramFrame {
   readonly #queue: { id: number; source: string; dark: boolean }[] = [];
   readonly #waiting = new Map<number, Waiting>();
   #next = 0;
-  #idle: ReturnType<typeof setTimeout> | undefined;
+  #timer: ReturnType<typeof setTimeout> | undefined;
   readonly #listen = (event: MessageEvent<unknown>) => {
     if (event.source !== this.#iframe.contentWindow || !isFrameMessage(event.data)) return;
     const message = event.data;
     if (message.type === 'ready') {
       this.#ready = true;
       for (const queued of this.#queue.splice(0)) this.#post(queued);
-      return;
+    } else {
+      const waiting = this.#waiting.get(message.id);
+      this.#waiting.delete(message.id);
+      if (message.type === 'rendered') waiting?.resolve(message.svg);
+      else waiting?.reject(new DiagramError(message.error));
     }
-    const waiting = this.#waiting.get(message.id);
-    this.#waiting.delete(message.id);
-    if (message.type === 'rendered') waiting?.resolve(message.svg);
-    else waiting?.reject(new DiagramError(message.error));
-    this.#settle();
+    this.#arm();
   };
 
   constructor() {
@@ -64,16 +67,20 @@ class DiagramFrame {
     this.#iframe.src = DIAGRAM_HOST_PAGE;
     window.addEventListener('message', this.#listen);
     document.body.append(this.#iframe);
+    this.#arm();
   }
 
   draw(source: string, dark: boolean): Promise<string> {
-    clearTimeout(this.#idle);
     const id = this.#next++;
     const drawn = new Promise<string>((resolve, reject) => {
       this.#waiting.set(id, { resolve, reject });
     });
-    if (this.#ready) this.#post({ id, source, dark });
-    else this.#queue.push({ id, source, dark });
+    if (!this.#ready) this.#queue.push({ id, source, dark });
+    else {
+      this.#post({ id, source, dark });
+      // The frame draws one at a time: one already going keeps its time.
+      if (this.#waiting.size === 1) this.#arm();
+    }
     return drawn;
   }
 
@@ -81,16 +88,24 @@ class DiagramFrame {
     this.#iframe.contentWindow?.postMessage({ type: 'render', ...message }, '*');
   }
 
-  /** Nothing left to draw: removed after a while. */
-  #settle() {
-    if (this.#waiting.size > 0) return;
-    clearTimeout(this.#idle);
-    this.#idle = setTimeout(() => this.remove(), IDLE_MS);
+  /**
+   * Time what the frame is doing now: loading, the diagram it is on, from
+   * when it started it, or nothing, before it goes.
+   */
+  #arm() {
+    clearTimeout(this.#timer);
+    if (!this.#ready) {
+      this.#timer = setTimeout(() => this.remove('Mermaid didn’t load.'), LOAD_MS);
+    } else if (this.#waiting.size > 0) {
+      this.#timer = setTimeout(() => this.remove('The diagram took too long to draw.'), DRAW_MS);
+    } else {
+      this.#timer = setTimeout(() => this.remove(), IDLE_MS);
+    }
   }
 
-  /** Removed, failing whatever it hadn't drawn. */
+  /** Removed, failing whatever it hadn't drawn with `reason`. */
   remove(reason = 'The diagram couldn’t be drawn.') {
-    clearTimeout(this.#idle);
+    clearTimeout(this.#timer);
     window.removeEventListener('message', this.#listen);
     this.#iframe.remove();
     for (const { reject } of this.#waiting.values()) reject(new DiagramError(reason));
@@ -106,17 +121,8 @@ let frame: DiagramFrame | null = null;
  * text, sized to its own width and height, for an image (`diagramUrl`).
  * Rejects with a `DiagramError` saying why it didn't draw.
  */
-export function drawDiagram(source: string, dark: boolean): Promise<string> {
-  const drawing = (frame ??= new DiagramFrame());
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      drawing.remove('The diagram took too long to draw.');
-      reject(new DiagramError('The diagram took too long to draw.'));
-    }, DRAW_MS);
-  });
-  return Promise.race([drawing.draw(source, dark), late]).finally(() => clearTimeout(timer));
-}
+export const drawDiagram = (source: string, dark: boolean): Promise<string> =>
+  (frame ??= new DiagramFrame()).draw(source, dark);
 
 /** A diagram's SVG as an image's address. Revoke it when the image goes. */
 export const diagramUrl = (svg: string) =>
