@@ -20,12 +20,14 @@ GitHub Actions checks every change and publishes the server image and the deskto
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
 
-A push to `main` or a release tag also runs two more jobs, which pull requests skip for time:
+A push to `main` or a release tag also runs four more jobs, which pull requests skip for time:
 
 | Job | What it does |
 | --- | --- |
 | `linux-packages` | Builds the `.deb` and `.rpm` from the build ([below](#the-deb-and-rpm)) |
 | `linux-packages-check` | Installs them on each supported distribution, and checks every library resolves |
+| `windows-packages` | Builds the Windows installers from the build, x64 and arm64 ([below](#the-windows-installers)) |
+| `windows-packages-check` | Installs each on Windows of its architecture, starts the app, and uninstalls it |
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
 
@@ -126,14 +128,16 @@ gh release edit v0.5.0 --notes-file notes.md
 
 ## The desktop downloads
 
-Each release has the desktop app, for x86_64, from the tested build:
+Each release has the desktop app from the tested build:
 
 | File | For |
 | --- | --- |
 | `wikistow-desktop-<version>.tar.gz` | The AUR package, which runs it on Arch's `electron44` |
 | `wikistow-desktop-<version>-amd64.deb` | Debian 13, Ubuntu 24.04 and Ubuntu 26.04 |
 | `wikistow-desktop-<version>-x86_64.rpm` | Fedora 43 and 44 |
-| `SHA256SUMS` | The checksums of the three, and of the [CLI downloads](#the-cli-downloads) |
+| `wikistow-desktop-<version>-x64-setup.exe` | Windows 10 and 11 on x64 |
+| `wikistow-desktop-<version>-arm64-setup.exe` | Windows 11 on Arm |
+| `SHA256SUMS` | The checksums of these, and of the [CLI downloads](#the-cli-downloads) |
 
 Check a download before you use it:
 
@@ -204,6 +208,21 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) scripts/linux-packages.sh "$(node .
 ```
 
 CI pins nfpm's version and checksum in `linux-packages`.
+
+## The Windows installers
+
+`apps/desktop/scripts/windows-packages.sh` builds both on Linux, as the app has no native modules. For each architecture it downloads Electron's Windows build of the pinned version, checked against the checksums the `electron` package ships, renames `electron.exe` to `WikiStow.exe` and gives it the app's icon and name (`scripts/windows-exe.ts`, with [resedit](https://github.com/jet2jet/resedit-js)), adds `app.asar` and the [install source](desktop.md#how-it-was-installed), and packs it with [NSIS](https://nsis.sourceforge.io) from `apps/desktop/packaging/windows.nsi`. The installer is per-user, so it needs no administrator, and adds the Start menu entry, the `wikistow://` links and the uninstaller. Compressing takes a few minutes per architecture, so CI builds them in parallel jobs. Unlike the Linux packages, they don't come out byte for byte the same each time.
+
+`windows-packages-check` runs `scripts/windows-check.ts` on GitHub's Windows x64 and Windows 11 Arm runners: a silent install, the app's sign-in page, DPAPI as its secret store, a second launch handing over a `wikistow://` link, and a silent uninstall that leaves nothing behind.
+
+The installers aren't signed, so SmartScreen warns until people choose **More info → Run anyway** ([desktop](desktop.md#windows)). Signing them needs a code-signing certificate, kept outside this repository like the AUR key.
+
+To build them yourself, with `makensis` on your `PATH` (`apt install nsis`, or `nsis` on Arch), after the build in the README:
+
+```sh
+cd apps/desktop
+scripts/windows-packages.sh "$(node ../../scripts/version.ts)" out/windows-packages
+```
 
 ## The AUR packages
 
