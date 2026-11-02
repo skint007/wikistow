@@ -17,6 +17,10 @@ on:
         description: Tag the image `latest` too, for the newest stable release.
         type: boolean
         default: false
+      beta:
+        description: Tag the image `beta` too, for the newest release from main, beta or stable.
+        type: boolean
+        default: false
 
 # Every job only reads, except the image job, which pushes to GHCR. Pull
 # requests, forks' included, never reach it.
@@ -452,7 +456,8 @@ jobs:
   # The server image, from the tested build, on a push to main or a release
   # tag. A main push is tagged `sha-` and the commit's first 8 characters,
   # which never moves, and `main`, which moves to the newest main build; a
-  # release with its version (docs/releasing.md). It
+  # release with its version, and `beta` for any release from main
+  # (docs/releasing.md). It
   # waits for the desktop packages too, so a release that can't ship them
   # publishes nothing.
   image:
@@ -488,6 +493,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ inputs.latest == true }}
+            type=raw,value=beta,enable=${{ inputs.beta == true }}
           labels: |
             org.opencontainers.image.title=WikiStow
             org.opencontainers.image.version=${{ steps.version.outputs.version }}

@@ -9,6 +9,9 @@
 
 # pacman sorts a prerelease such as 0.3.0rc.1 before 0.3.0 only without the `-`.
 _version=0.6.0
+# The beta channel's wikistow-cli-beta-bin is this package, renamed
+# (docs/releasing.md).
+_channel=stable
 pkgname=wikistow-cli-bin
 pkgver=${_version//-/}
 pkgrel=1

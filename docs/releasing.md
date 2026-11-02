@@ -45,7 +45,27 @@ node scripts/version.ts 0.3.0   # sets it everywhere
 
 A release build shows the version alone in the account menu, as `0.2.0`. Any other build adds the commit it was built from, as `0.2.0+5b9e5ec4`, the same 8 characters as its image's `sha-` tag. The desktop app's `app.asar`, the CLI's `wikistow --version`, the image's `org.opencontainers.image.version` label and the desktop packages all carry the same version.
 
-Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-rc.1`, is a prerelease. Its GitHub Release is marked as one, its image gets only its own tag, and the AUR packages don't take it. Its `.deb` and `.rpm` carry `0.3.0~rc.1`, which apt and dnf sort before `0.3.0`.
+Versions follow [semantic versioning](https://semver.org). A version with a suffix, such as `0.3.0-beta.1`, is a prerelease. Its GitHub Release is marked as one, and only the [beta channel](#beta-and-stable) takes it. Its `.deb` and `.rpm` carry `0.3.0~beta.1`, which apt and dnf sort before `0.3.0`.
+
+## Beta and stable
+
+Each new version goes out as a beta first, then as a stable release once it has been tried. Both are tagged on `main`; there is no beta branch.
+
+| | Beta channel | Stable channel |
+| --- | --- | --- |
+| Takes | every release from `main`: betas, and stable releases too | stable releases only |
+| Server image | `:beta`, plus each release's own tag | `:latest`, `:<major>.<minor>`, each release's own tag |
+| AUR | `wikistow-desktop-beta-bin`, `wikistow-cli-beta-bin` | `wikistow-desktop-bin`, `wikistow-cli-bin` |
+| GitHub Release | marked as a prerelease | marked as the latest |
+| Desktop update notice | the newest release, betas included | the newest stable release |
+
+1. **Cut a beta.** [Cut a release](#cut-a-release) with the next version and `-beta.1`, such as `0.23.0-beta.1`. The beta channel takes it; nothing changes for stable.
+2. **Fix what the beta finds.** Merge the fixes to `main`, then cut `-beta.2`, and so on.
+3. **Promote it.** Cut a release of the version without its suffix, `0.23.0`. Its version pull request changes only the version and the changelog. Its entry describes everything since the stable release before, the betas' changes included ([below](#who-writes-what)). Both channels take it.
+
+A stable release is cut from `main` as it is then, so whatever merged after the last beta ships in it untried. Promote right after the last beta, or cut another beta first. A fix to an older stable release still goes on a `release/` branch ([below](#cut-a-release)), which neither channel's newest moves for.
+
+The two AUR packages of each kind install the same files and conflict, so a computer has one or the other: installing `wikistow-desktop-bin` asks to remove `wikistow-desktop-beta-bin`, and the other way round. Settings and sign-in stay.
 
 ## Cut a release
 
@@ -64,9 +84,9 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
 
 3. `.github/workflows/release.yml` then runs on the tag:
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, that Electron is its major's newest patch, and that every release in the commit's history, this one too, has a changelog entry dated the day of its tag.
-   2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
+   2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0`, `:0.3` for a stable release, `:latest` for a stable release from `main`, and `:beta` for any release from `main`.
    3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
-   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), and `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)).
+   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), and `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)). For any release from `main`, `aur-beta` publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`.
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
@@ -243,9 +263,11 @@ The tap `skint007/homebrew-wikistow` holds the cask, so `brew install --cask ski
 
 Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's Linux binary for its architecture, x86_64 or aarch64, with `LICENSE`. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
 
+Their beta twins, `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`, follow every release from `main` ([beta and stable](#beta-and-stable)). They have no sources of their own: publishing takes the same PKGBUILDs and renames the package, adds "(beta channel)" to its description, and sets `_channel=beta`. The desktop package writes `_channel` to `/usr/lib/wikistow-desktop/channel`, so the app offers betas. The stable channel's job refuses a beta version.
+
 `.github/workflows/aur.yml` publishes both, once the release's files are up, in a job for each. Each job sets its PKGBUILD's version, `pkgrel` and checksums from the release's `SHA256SUMS`, builds the package as a user who isn't root, checking what it downloads against them, and generates `.SRCINFO`. The runner is x86_64, so the build downloads only the x86_64 binary; the aarch64 checksum comes from `SHA256SUMS` alone. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/<package>.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped. The AUR creates a package on its first push. One package failing doesn't stop the other.
 
-To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version, the package (or both) and the next `pkgrel`, such as `2`. Each package counts its own `pkgrel`, and the next release starts both again at 1.
+To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version, the package (or both), the channel and the next `pkgrel`, such as `2`. Each package counts its own `pkgrel`, and the next release starts both again at 1.
 
 ## The server image
 

@@ -22,6 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       latest: ${{ steps.branch.outputs.latest }}
+      beta: ${{ steps.branch.outputs.beta }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,6 +45,8 @@ jobs:
       - run: node scripts/changelog.ts --tags
       # Only reviewed commits: main's, or a release/ branch's for a fix to
       # an older release. Only a stable release from main becomes `latest`.
+      # Every release from main, a beta or stable, is the beta channel's
+      # newest (docs/releasing.md#beta-and-stable).
       - id: branch
         run: |
           branches=$(git branch -r --contains "$GITHUB_SHA")
@@ -52,8 +55,13 @@ jobs:
             exit 1
           fi
           latest=false
-          if grep -Eq '^ *origin/main$' <<< "$branches" && [[ "$GITHUB_REF_NAME" != *-* ]]; then latest=true; fi
+          beta=false
+          if grep -Eq '^ *origin/main$' <<< "$branches"; then
+            beta=true
+            [[ "$GITHUB_REF_NAME" == *-* ]] || latest=true
+          fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "beta=$beta" >> "$GITHUB_OUTPUT"
       # The .deb and .rpm bundle this Electron, so it must be its major's
       # newest patch, with every security fix released so far.
       - run: |
@@ -69,6 +77,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       latest: ${{ needs.verify.outputs.latest == 'true' }}
+      beta: ${{ needs.verify.outputs.beta == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -180,6 +189,20 @@ jobs:
       version: ${{ needs.verify.outputs.version }}
     # The called job's environment alone leaves its secrets empty
     # (actions/runner#4453). The repository has no other secrets.
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # The beta packages (`-beta-bin`) follow every release from main, betas
+  # and stable releases alike.
+  aur-beta:
+    needs: [verify, github-release]
+    if: needs.verify.outputs.beta == 'true'
+    uses: ./.github/workflows/aur.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      channel: beta
+    # As above (actions/runner#4453).
     secrets: inherit
     permissions:
       contents: read

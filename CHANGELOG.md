@@ -6,8 +6,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### Desktop
+
+- On the beta channel, the update notice offers betas: a beta build, or one installed with `wikistow-desktop-beta-bin`, is offered the newest release of any kind, and other builds the newest stable one, as before. (#259)
+
 #### Releases and packaging
 
+- Each version goes out as a beta first, then as a stable release. Every release from `main` also tags its server image `beta` and publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin` to the AUR; stable releases still publish `wikistow-desktop-bin` and `wikistow-cli-bin`. (#259)
 - Each push to `main` also tags its server image `main`, which moves to the newest `main` build, for a test server that follows it. (#256)
 
 ## 0.22.0 - 2026-11-02

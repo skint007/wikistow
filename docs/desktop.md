@@ -26,6 +26,8 @@ makepkg -si
 
 `pacman -Syu` alone doesn't update AUR packages. Your AUR helper's update, such as `yay -Syu`, does. Without a helper, run `git pull` in that folder and `makepkg -si` again.
 
+To try each release before it's stable, install [`wikistow-desktop-beta-bin`](https://aur.archlinux.org/packages/wikistow-desktop-beta-bin) instead. It takes betas and stable releases alike, and its update notice offers betas ([releasing](releasing.md#beta-and-stable)). It and `wikistow-desktop-bin` replace each other, keeping your settings and sign-in. The CLI has `wikistow-cli-beta-bin` too.
+
 ### Debian, Ubuntu and Fedora
 
 The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Releases have them from 0.3.0 on. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it. apt and dnf install what it depends on.
@@ -96,9 +98,9 @@ The Mac app carries its own, `WikiStow.app/Contents/Resources/install-source`, b
 
 ### Updates
 
-When a newer stable release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; on Windows, the new installer, which the link downloads in your browser, x64 or Arm as the app you have is; on a Mac it is the new zip, or `brew upgrade wikistow`; when the app can't tell how it was installed, it opens the release page. Otherwise the link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
+When a newer release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; on Windows, the new installer, which the link downloads in your browser, x64 or Arm as the app you have is; on a Mac it is the new zip, or `brew upgrade wikistow`; when the app can't tell how it was installed, it opens the release page. Otherwise the link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
 
-The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikistow/releases/latest`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. GitHub's latest release is never a prerelease, so the app only offers stable releases; running a prerelease such as `0.4.0-rc.1`, you're offered `0.4.0` once it's out. The app keeps the last answer in `update.json` in its data folder, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
+The app asks GitHub for its newest releases (`api.github.com/repos/skint007/wikistow/releases`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. It offers the newest stable release. On the beta channel, it offers the newest release of any kind, betas included: the app is on it when it is a beta itself, such as `0.4.0-beta.1`, or installed with `wikistow-desktop-beta-bin`, whose `/usr/lib/wikistow-desktop/channel` says `beta`. A beta installed from a release's downloads leaves the channel once you install a stable release over it. The app keeps the last answer in `update.json` in its data folder, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
 
 ## The window
 

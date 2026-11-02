@@ -84,7 +84,7 @@ export type WorkshopVersion = {
 export type DesktopUpdate = {
   /** The app's own version, as `0.3.0`. */
   installed: string;
-  /** The newest stable release, as `0.4.0`. */
+  /** The newest release on this copy's channel, as `0.4.0` (stable) or `0.5.0-beta.1` (beta). */
   version: string;
   /** Its release page, with the notes and the downloads; for a Windows install, its installer. */
   url: string;

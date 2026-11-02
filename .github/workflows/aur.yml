@@ -1,7 +1,10 @@
 # Publishes wikistow-desktop-bin and wikistow-cli-bin to the AUR for a GitHub
-# Release that already has their downloads. The release workflow runs it for
-# both after each stable release from main. Run it by hand to publish either
-# again, such as with a packaging fix and a higher pkgrel (docs/releasing.md).
+# Release that already has their downloads, or on the beta channel
+# wikistow-desktop-beta-bin and wikistow-cli-beta-bin, made from the same
+# PKGBUILDs. The release workflow runs it for both stable packages after each
+# stable release from main, and for both beta ones after every release from
+# main. Run it by hand to publish either again, such as with a packaging fix
+# and a higher pkgrel (docs/releasing.md).
 name: AUR
 
 on:
@@ -16,6 +19,9 @@ on:
       package:
         type: string
         default: both
+      channel:
+        type: string
+        default: stable
   workflow_dispatch:
     inputs:
       version:
@@ -31,6 +37,11 @@ on:
         type: choice
         options: [both, wikistow-desktop-bin, wikistow-cli-bin]
         default: both
+      channel:
+        description: The stable packages, or their -beta-bin twins
+        type: choice
+        options: [stable, beta]
+        default: stable
 
 permissions: {}
 
@@ -41,7 +52,7 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(inputs.package == 'both' && '["wikistow-desktop-bin", "wikistow-cli-bin"]' || format('["{0}"]', inputs.package)) }}
-    name: ${{ matrix.package }}
+    name: ${{ matrix.package }} (${{ inputs.channel }})
     runs-on: ubuntu-24.04
     # Holds the AUR key, for release tags and main only.
     environment: aur
@@ -65,10 +76,17 @@ jobs:
           PACKAGE: ${{ matrix.package }}
           VERSION: ${{ inputs.version }}
           PKGREL: ${{ inputs.pkgrel }}
+          CHANNEL: ${{ inputs.channel }}
           AUR_USERNAME: ${{ vars.AUR_USERNAME }}
           AUR_EMAIL: ${{ vars.AUR_EMAIL }}
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ && "$PKGREL" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CHANNEL" == stable || "$CHANNEL" == beta ]]
+          # A stable release reaches both channels; a beta only its own.
+          if [[ "$CHANNEL" == stable && "$VERSION" == *-* ]]; then
+            echo "::error::$VERSION is a beta: only the beta channel's packages take it"
+            exit 1
+          fi
           sums=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS")
           sum() {
             local sha
@@ -95,6 +113,13 @@ jobs:
           cd /home/builder/pkg
           sed -i -e "s/^_version=.*/_version=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" "${checksums[@]}" \
             -e "s|^# Maintainer:.*|# Maintainer: $AUR_USERNAME <$AUR_EMAIL>|" PKGBUILD
+          # The beta twin: the same package under its own name, which says
+          # its channel, so the desktop app offers it betas.
+          if [ "$CHANNEL" = beta ]; then
+            sed -i -e "s/^pkgname=$PACKAGE\$/pkgname=${PACKAGE%-bin}-beta-bin/" -e "s/^_channel=.*/_channel=beta/" \
+              -e '/^pkgdesc=/s/"$/ (beta channel)"/' PKGBUILD
+            grep -qx "pkgname=${PACKAGE%-bin}-beta-bin" PKGBUILD
+          fi
           chown -R builder: .
           # Electron isn't needed to package the desktop app, only to run it.
           runuser -u builder -- makepkg --nodeps --noconfirm
@@ -105,6 +130,7 @@ jobs:
           PACKAGE: ${{ matrix.package }}
           VERSION: ${{ inputs.version }}
           PKGREL: ${{ inputs.pkgrel }}
+          CHANNEL: ${{ inputs.channel }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           AUR_KNOWN_HOSTS: ${{ vars.AUR_KNOWN_HOSTS }}
           AUR_USERNAME: ${{ vars.AUR_USERNAME }}
@@ -122,7 +148,9 @@ jobs:
           export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
           # Only the PKGBUILD and its .SRCINFO go to the AUR. A package's first
           # push creates it there.
-          git clone "ssh://aur@aur.archlinux.org/$PACKAGE.git" "$RUNNER_TEMP/aur"
+          name=$PACKAGE
+          [ "$CHANNEL" = beta ] && name="${PACKAGE%-bin}-beta-bin"
+          git clone "ssh://aur@aur.archlinux.org/$name.git" "$RUNNER_TEMP/aur"
           cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO "$RUNNER_TEMP/aur/"
           cd "$RUNNER_TEMP/aur"
           git add PKGBUILD .SRCINFO
