@@ -10,16 +10,10 @@
 //   then `key: value` lines, and the files in `resources/`. Links are
 //   `:/<id>`. Its notes get the front matter the Markdown export writes.
 import type { Nodes } from 'mdast';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { cleanPath, macOsExtra, type ImportFile } from './import-archive.ts';
 import { foldTitle, resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
-import {
-  linkSpans,
-  markdownText,
-  parseMarkdown,
-  readProperties,
-  splitFrontmatter,
-} from './markdown/index.ts';
+import { linkSpans, markdownText, parseMarkdown, splitFrontmatter } from './markdown/index.ts';
 
 /** Which of Joplin's export formats an export is. */
 export type JoplinFormat = 'markdown' | 'jex';
@@ -197,16 +191,23 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
 const unescapeLinkUrl = (url: string) =>
   url.replace(/%20/g, ' ').replace(/%28/g, '(').replace(/%29/g, ')');
 
-/** The `title` the front matter gives, if it reads as one. */
+/**
+ * The `title` the front matter gives, read as Joplin reads it, every value
+ * text (YAML's failsafe schema), so `title: 1.10` stays `1.10`.
+ */
 function frontmatterTitle(markdown: string): string | null {
   const { frontmatter } = splitFrontmatter(markdown);
-  const read = readProperties(frontmatter);
-  if (!read.ok) return null;
-  const title = read.properties.find((property) => property.key === 'title')?.value;
-  // `title: 2024` reads as a number.
-  if (title === undefined || title === null || Array.isArray(title)) return null;
-  const text = String(title).trim();
-  return text === '' ? null : text;
+  if (frontmatter === null) return null;
+  const inner = frontmatter.replace(/^---\r?\n/, '').replace(/^(?:---|\.\.\.)\r?\n?$/m, '');
+  let read: unknown;
+  try {
+    read = parse(inner, { schema: 'failsafe' });
+  } catch {
+    return null;
+  }
+  const title =
+    typeof read === 'object' && read !== null && 'title' in read ? read.title : undefined;
+  return typeof title === 'string' && title.trim() !== '' ? title.trim() : null;
 }
 
 /**
