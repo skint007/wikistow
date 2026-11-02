@@ -92,6 +92,28 @@ export type DesktopUpdate = {
   source: 'aur' | 'deb' | 'rpm' | 'windows' | 'mac' | null;
 };
 
+/**
+ * Where the pages keep sealed items for offline use (ADR 0009): `kept` for
+ * pages, trees and images, `queue` for changes made offline.
+ */
+export type KeptFolder = 'kept' | 'queue';
+export const KEPT_FOLDERS = ['kept', 'queue'] as const satisfies readonly KeptFolder[];
+
+/**
+ * A kept item's name: base64url (`deviceTag`), so no name leaves its folder.
+ * The desktop app's main process refuses any other.
+ */
+export const KEPT_ITEM_NAME = /^[\w-]{1,64}$/;
+
+/** A kept item as listed: its name, and its size in bytes. */
+export type KeptItem = { name: string; size: number };
+
+/**
+ * The account everything kept belongs to, kept unsealed so the app can tell
+ * whose it is before anyone unlocks (ADR 0009, decision 2).
+ */
+export type KeptAccount = { id: string; name: string };
+
 /** Whether the desktop window fills the screen, for its titlebar's buttons (#74). */
 export type WindowState = { maximized: boolean; fullScreen: boolean };
 
@@ -168,6 +190,23 @@ export type DesktopBridge = {
   trustMarks(): Promise<Uint8Array | null>;
   /** Keep these sealed marks, in place of the ones kept. */
   keepTrustMarks(sealed: Uint8Array): Promise<void>;
+  /**
+   * The items kept in `folder` (ADR 0009). The `kept` folder holds items
+   * only with a trusted secret store, and lists none without; the `queue`
+   * folder holds them either way.
+   */
+  keptItems(folder: KeptFolder): Promise<KeptItem[]>;
+  /** The sealed item `name` in `folder`, or null if there is none. */
+  keptItem(folder: KeptFolder, name: string): Promise<Uint8Array | null>;
+  /** Keep a sealed item as `name` in `folder`, in place of any kept so. */
+  keepItem(folder: KeptFolder, name: string, sealed: Uint8Array): Promise<void>;
+  /** Delete the items `names` from `folder`. */
+  dropKeptItems(folder: KeptFolder, names: string[]): Promise<void>;
+  /** The account the kept items belong to, or null. */
+  keptAccount(): Promise<KeptAccount | null>;
+  keepKeptAccount(account: KeptAccount): Promise<void>;
+  /** Delete everything kept for offline: both folders and the account. */
+  clearKept(): Promise<void>;
   /** The plugins on this computer, and whether safe mode is on. */
   plugins(): Promise<PluginsState>;
   /**
@@ -249,6 +288,13 @@ export const DESKTOP_CHANNELS = {
   keepSearchIndex: 'wikistow:keep-search-index',
   trustMarks: 'wikistow:trust-marks',
   keepTrustMarks: 'wikistow:keep-trust-marks',
+  keptItems: 'wikistow:kept-items',
+  keptItem: 'wikistow:kept-item',
+  keepItem: 'wikistow:keep-item',
+  dropKeptItems: 'wikistow:drop-kept-items',
+  keptAccount: 'wikistow:kept-account',
+  keepKeptAccount: 'wikistow:keep-kept-account',
+  clearKept: 'wikistow:clear-kept',
   plugins: 'wikistow:plugins',
   pickPlugin: 'wikistow:pick-plugin',
   approvePlugin: 'wikistow:approve-plugin',

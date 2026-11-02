@@ -9,6 +9,7 @@ import {
 } from '@wikistow/client';
 import { vaultRoutes } from '@wikistow/contracts';
 import { api } from '../api';
+import { keptStore } from '../data/kept-store';
 import { desktop } from '../desktop';
 import { forgetKeptUnlock, vaultStore } from './store';
 import { forgetInBrowser, rememberedInTab, rememberInBrowser } from './tab-unlock';
@@ -17,13 +18,18 @@ import { workerVaultCrypto } from './worker-crypto';
 /**
  * Start the session for an unlocked vault. The desktop app, with a trusted
  * secret store, keeps its contacts and No going back marks between launches
- * (`KeptMarks`); the browser keeps them for one session.
+ * (`KeptMarks`); the browser keeps them for one session. Both read and keep
+ * pages for offline use in this device's store (`keptStore`).
  */
 export async function startSession(vault: UnlockedVault) {
   const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
-  if (!device) return openSession(api, vault);
+  // Pages kept for offline (ADR 0009); a device that can't keep them keeps none.
+  const content = (await keptStore().catch(() => null))?.store;
   return openSession(api, vault, {
-    kept: { read: () => device.trustMarks(), write: (sealed) => device.keepTrustMarks(sealed) },
+    ...(device && {
+      kept: { read: () => device.trustMarks(), write: (sealed) => device.keepTrustMarks(sealed) },
+    }),
+    ...(content && { content }),
   });
 }
 

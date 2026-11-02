@@ -45,6 +45,7 @@ import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
 import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../desktop';
+import { forgetKept } from '../data/kept-store';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
@@ -474,12 +475,15 @@ export function useSignOut() {
     setFailed(outcome);
     if (outcome) return;
     await desktop?.signedOut();
+    // Everything kept for offline goes with the session (ADR 0009, decision 10).
+    await forgetKept();
     await leave();
   }, [leave]);
   const signOutHere = useCallback(async () => {
     // Nothing is saved first: the server that would take it is gone.
     vaultStore.lock();
     await desktop?.signOutHere();
+    await forgetKept();
     setFailed(null);
     // Sign-in asks for a server again, not the one forgotten.
     queryClient.setQueryData(desktopServerQuery.queryKey, null);

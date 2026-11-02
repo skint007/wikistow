@@ -20,6 +20,7 @@ import type { DesktopBridge } from '@wikistow/contracts';
 import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
 import { readIndexLinks } from '../page/page-reader';
+import { keepChanged } from './keeper';
 
 // Everything here is decrypted or describes encrypted content, so every key
 // starts with PLAIN and locking the vault drops it all.
@@ -498,6 +499,8 @@ export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext
   // next stale, and so do the saves it hasn't taken.
   forget(queryClient);
   void queryClient.resetQueries({ queryKey: searchIndexKey });
+  // Pages kept for offline let go of what access no longer covers.
+  keepChanged(ctx);
   // An open page keeps what it shows while it reopens, so an editor on it stays
   // mounted with its own saves; the refetch cancels any opening under old access.
   queryClient.removeQueries({ queryKey: [PLAIN, 'revision'], type: 'inactive' });

@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - The browser app can be installed on phones and computers, and once opened online it loads without a connection. A service worker keeps the app's own files only, never pages or anything from your account. Reading pages offline comes in later releases. (#261)
 - Import… also reads an Obsidian vault, as its folder or a zip of it: each folder that holds notes becomes a folder, each note a published page titled by its file name, and the files its notes link to or embed attachments of their pages. Links resolve as Obsidian resolves them, and files no note names are listed in the report. (#260)
+- Pages are now kept on the device, sealed for you, for reading offline in a later release: in the browser the pages you open, in the desktop app every page. Settings → Keep for offline changes which, and shows how much is kept. Pages kept load from the device instead of the server. Signing out deletes them. (#263)
 - When the server can’t be reached or doesn’t answer as WikiStow, the app shows a screen of its own that names the server, with Try again, in place of the router’s “Something went wrong!”. (#262)
 
 #### Desktop

@@ -46,6 +46,7 @@ import {
   searchIndexChanged,
   treeQuery,
 } from '../../../../../../data/queries';
+import { pageOpened } from '../../../../../../data/keeper';
 import { PLAIN } from '../../../../../../vault/store';
 import { errorMessage, pageOpenMessage } from '../../../../../../errors';
 import { decryptedQuery } from '../../../../../../page/attachments';
@@ -281,6 +282,11 @@ function PageBody({
     // Opened before the page loads again, it shows at once; else the one before stays meanwhile.
     placeholderData: keepPreviousData,
   });
+  // Kept for offline from its first opening here, with Pages I open (ADR 0009).
+  const revisionShown = revision !== undefined;
+  useEffect(() => {
+    if (revisionShown) pageOpened(ctx, { spaceId: page.spaceId, pageId: page.pageId });
+  }, [ctx, revisionShown, page.spaceId, page.pageId]);
   // Wikilinks resolve by title among the pages this person can open.
   const { data: tree } = useQuery(treeQuery(ctx, page.spaceId));
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);

@@ -2,6 +2,7 @@ import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/cl
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
+import { keepChanged } from './keeper';
 import {
   publicLinksQuery,
   searchIndexChanged,
@@ -17,7 +18,9 @@ import {
  * load again too, for a space renamed, deleted or newly shared, and so do
  * the space's public links, which turning one on or off tells of, and the
  * search index, which lists those spaces again now only if something shows
- * it. The page that is open stays as it is. A tab out of view stops
+ * it, and the pages kept for offline (`keepChanged`), which follow those
+ * spaces, or every space when unlocked or back in view. The page that is
+ * open stays as it is. A tab out of view stops
  * listening, so a dozen tabs don't hold a dozen connections, and its trees
  * load again when it is back in view, as every query does
  * (`refetchOnWindowFocus`); the index, which doesn't, then lists every
@@ -31,6 +34,7 @@ export function useTreeChanges(ctx: ClientContext | null) {
     // Trees load again when the tab is back in view, being stale at once;
     // the index is told it may have missed changes anywhere.
     searchIndexChanged(queryClient);
+    keepChanged(ctx);
     const stop = new AbortController();
     const reloadLists = () => {
       void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
@@ -45,12 +49,14 @@ export function useTreeChanges(ctx: ClientContext | null) {
         }
         reloadLists();
         searchIndexChanged(queryClient, { spaceIds });
+        keepChanged(ctx, { spaces: spaceIds });
       },
       onMissed: () => {
         void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
         void queryClient.invalidateQueries({ queryKey: [PLAIN, 'public-links'] });
         reloadLists();
         searchIndexChanged(queryClient);
+        keepChanged(ctx);
       },
     });
     return () => stop.abort();

@@ -437,6 +437,20 @@ export async function fetchRevisions(
     const cached = fresh ? undefined : ctx.revisions.get({ spaceId, revisionId, ...expected });
     if (cached) fetched.set(revisionId, () => cached);
   }
+  // Then from the device, where it keeps them (ADR 0009), into memory too.
+  const kept = fresh ? undefined : ctx.keptContent;
+  if (kept) {
+    const found = await Promise.all(
+      [...wanted]
+        .filter(([revisionId]) => !fetched.has(revisionId) && kept.hasVersion(revisionId))
+        .map(([revisionId, expected]) => kept.version({ spaceId, revisionId, ...expected })),
+    );
+    for (const opened of found) {
+      if (!opened) continue;
+      ctx.revisions.put(opened, generation);
+      fetched.set(opened.record.revisionId, () => opened);
+    }
+  }
   const queue = [...wanted.keys()].filter((id) => !fetched.has(id));
   const requests: {
     asked: ReadonlySet<RevisionId>;
@@ -481,6 +495,8 @@ export async function fetchRevisions(
             ...expected,
           });
           ctx.revisions.put(opened, generation);
+          // A kept version opened fresh, say after a move, is kept as it opens now.
+          if (fresh) void ctx.keptContent?.refreshVersion(opened).catch(() => {});
           return opened;
         }),
       );
@@ -964,8 +980,14 @@ export async function uploadBlob(
   await ctx.api.upload(`${path}?audience=${audience}`, blob, pageRoutes.BlobUploadResult);
 }
 
-export const downloadBlob = (ctx: ClientContext, blobHash: string) =>
-  ctx.api.download(pageRoutes.BLOB_DOWNLOAD_PATH.replace(':hash', encodeURIComponent(blobHash)));
+/** An attachment's blob as the server serves it: from the device where it keeps it (ADR 0009), else the server. */
+export async function downloadBlob(ctx: ClientContext, blobHash: string): Promise<Uint8Array> {
+  const kept = await ctx.keptContent?.blob(blobHash);
+  if (kept) return kept;
+  return ctx.api.download(
+    pageRoutes.BLOB_DOWNLOAD_PATH.replace(':hash', encodeURIComponent(blobHash)),
+  );
+}
 
 /** Encrypt and upload a file. Add the returned ref to a draft's attachments to keep it. */
 export async function uploadAttachment(
@@ -978,15 +1000,23 @@ export async function uploadAttachment(
   return ref;
 }
 
-/** Download and decrypt an attachment listed in a revision of `audience`. */
+/**
+ * Download and decrypt an attachment listed in a revision of `audience`.
+ * With `opened`, as when the person opens it in the app, a kept page keeps
+ * it on the device too (ADR 0009, decision 1); an export or a public link
+ * reading it doesn't.
+ */
 export async function readAttachment(
   ctx: ClientContext,
   page: PageRef,
   audience: Audience,
   ref: AttachmentRef,
+  { opened = false }: { opened?: boolean } = {},
 ): Promise<Uint8Array> {
   const blob = await downloadBlob(ctx, ref.blobHash);
-  return openAttachment({ target: attachmentTarget(ctx, page, audience), ref, blob });
+  const bytes = openAttachment({ target: attachmentTarget(ctx, page, audience), ref, blob });
+  if (opened) void ctx.keptContent?.attachmentOpened(page, ref.blobHash, blob).catch(() => {});
+  return bytes;
 }
 
 /** Open an earlier copy fresh: attachment reuse checks its current region and key version. */

@@ -23,6 +23,8 @@ import { AiSettings } from '../../../ai/ai-settings';
 import { api, meQuery } from '../../../api';
 import { authClient } from '../../../auth/client';
 import { useReauth } from '../../../auth/reauth';
+import { keepChanged, keepEveryPage, useKeeping } from '../../../data/keeper';
+import { keptStore } from '../../../data/kept-store';
 import { desktop } from '../../../desktop';
 import { errorMessage, unwrap } from '../../../errors';
 import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-moves';
@@ -33,7 +35,8 @@ import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../
 import { ThemePicker } from '../../../theme/theme-picker';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
 import { rememberOpenVault } from '../../../vault/open';
-import { useVault } from '../../../vault/store';
+import { PLAIN, useVault } from '../../../vault/store';
+import { useDeviceSwitch } from '../../../shell/device-switch';
 import { forgetInBrowser, useRememberedInBrowser } from '../../../vault/tab-unlock';
 
 export const Route = createFileRoute('/_app/settings/')({ component: Settings });
@@ -92,6 +95,7 @@ function Settings() {
             <SettingsGroup id="pages" title="Pages" note="Working with pages and folders">
               <AskBeforeMoves />
               <ShowProperties />
+              <KeepForOffline />
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />
@@ -220,6 +224,78 @@ function ShowProperties() {
     />
   );
 }
+
+const KEEP_OPTIONS = [
+  { value: 'every', label: 'Every page' },
+  { value: 'opened', label: 'Pages I open' },
+] as const;
+
+/**
+ * **Keep for offline** (ADR 0009, decision 1): every page, or the pages
+ * opened on this device, with how much is kept, and the keeper's progress
+ * while it runs. A desktop app without a trusted keyring keeps nothing
+ * between launches, so the choice is off there.
+ */
+function KeepForOffline() {
+  const vault = useVault();
+  const every = useDeviceSwitch(keepEveryPage());
+  const { progress, runs } = useKeeping();
+  const { data: onDisk } = useQuery({
+    queryKey: ['kept-on-disk'],
+    queryFn: async () => (await keptStore()).onDisk,
+  });
+  const ctx = vault.status === 'unlocked' ? vault.ctx : null;
+  const { data: usage } = useQuery({
+    queryKey: [PLAIN, 'kept-usage', runs],
+    queryFn: () => ctx?.keptContent?.usage() ?? null,
+    enabled: ctx !== null,
+  });
+  function change(value: (typeof KEEP_OPTIONS)[number]['value']) {
+    keepEveryPage().set(value === 'every');
+    // Asked once kept: a browser may clear storage it wasn't asked to keep.
+    if (value === 'every' && !desktop) void navigator.storage?.persist?.().catch(() => false);
+    if (ctx) keepChanged(ctx);
+  }
+  const keyless = onDisk === false;
+  return (
+    <SettingRow
+      name="Keep for offline"
+      scope={THIS_DEVICE}
+      state={
+        keyless ? (
+          'Needs a keyring to keep pages between launches.'
+        ) : (
+          <>
+            {progress
+              ? `Keeping pages for offline: ${progress.pages.toLocaleString('en')} of ${progress.total.toLocaleString('en')}. `
+              : usage && `${keptPages(usage.pages)}, ${keptSize(usage.bytes)}. `}
+            Pages stay readable on this device after someone removes your access, until the app is
+            back online.
+          </>
+        )
+      }
+      action={
+        <Picker
+          label="Keep for offline"
+          className="w-40"
+          value={every && !keyless ? 'every' : 'opened'}
+          options={KEEP_OPTIONS}
+          disabled={keyless}
+          onChange={change}
+        />
+      }
+    />
+  );
+}
+
+const keptPages = (pages: number) =>
+  pages === 1 ? '1 page' : `${pages.toLocaleString('en')} pages`;
+
+const MB = 1024 * 1024;
+const keptSize = (bytes: number) =>
+  bytes < MB
+    ? `${Math.ceil(bytes / 1024).toLocaleString('en')} KB`
+    : `${(bytes < 10 * MB ? Number((bytes / MB).toFixed(1)) : Math.round(bytes / MB)).toLocaleString('en')} MB`;
 
 const NewName = z.object({ name: accountRoutes.DisplayName });
 

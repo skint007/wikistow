@@ -43,6 +43,7 @@ export const decryptedQuery = (
         attachments.page,
         attachments.audience,
         ref,
+        { opened: true },
       );
       return vaultStore.objectUrl(bytes, ref.mediaType, epoch);
     },
