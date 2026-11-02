@@ -213,14 +213,17 @@ function frontmatterTitle(markdown: string): string | null {
  * as HTML: without the blank lines that would end it, or the indentation
  * that would make what follows a code block. Inside `<pre>` lines keep
  * their indentation, and a blank one becomes an empty `<span>`, which shows
- * the same there.
+ * the same there. Its `<style>` and `<script>` elements go: the reader
+ * shows them as text, and a clip of a complete page starts with the
+ * site's stylesheet.
  */
 export function htmlBlock(html: string): string {
   const last = (pattern: RegExp, text: string) =>
     Math.max(-1, ...Array.from(text.matchAll(pattern), (match) => match.index));
   let inPre = false;
   const lines: string[] = [];
-  for (const line of html.split('\n')) {
+  const unstyled = html.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  for (const line of unstyled.split('\n')) {
     const blank = line.trim() === '';
     if (!inPre && blank) continue;
     const text = inPre ? (blank ? '<span></span>' : line) : line.trimStart();
@@ -450,8 +453,9 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
   const walk = (node: Nodes, inTable: boolean) => {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
-    if (node.type === 'html' && start !== undefined) {
-      found.push(...htmlLinks(node.value, offset + start, note, target));
+    if (node.type === 'html' && start !== undefined && end !== undefined) {
+      // As written: in a list or quote, its value has lost their prefixes.
+      found.push(...htmlLinks(body.slice(start, end), offset + start, note, target));
       return;
     }
     if (node.type === 'link' && start !== undefined && end !== undefined) {
