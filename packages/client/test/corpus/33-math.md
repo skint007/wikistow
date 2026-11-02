@@ -8,6 +8,13 @@ $$
 \int_0^1 x\,dx = \frac{1}{2}
 $$
 
+$$\begin{aligned}
+a &= b \\
+c &= d
+\end{aligned}$$
+
+$$$ dinner stays text, as no line closes it.
+
 - A list item with $\alpha$ and a bare $3.
 - **Bold $\beta$** and [a link with $\gamma$](https://example.com).
 

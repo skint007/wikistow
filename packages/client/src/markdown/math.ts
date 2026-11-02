@@ -1,13 +1,22 @@
 import { mathFromMarkdown, mathToMarkdown } from 'mdast-util-math';
 import type { Handlers, Options as ToMarkdownExtension, Unsafe } from 'mdast-util-to-markdown';
 import { math } from 'micromark-extension-math';
-import type { Code, Construct, Extension, State, Token, Tokenizer } from 'micromark-util-types';
+import type {
+  Code,
+  Construct,
+  Effects,
+  Extension,
+  State,
+  Token,
+  Tokenizer,
+} from 'micromark-util-types';
 
 // Math as Markdown syntax (wikistow.md, Math): `$$` blocks and `$…$` or
 // `$$…$$` inline, as remark-math reads them, but with a single dollar
 // read by Pandoc's rule, as Obsidian, Joplin and GitHub do: it opens only
 // before a character that isn't a space, and closes only after one, not
-// before a digit. So `$5 and $10` stays text.
+// before a digit. So `$5 and $10` stays text. A block's fences may share
+// a line with its TeX, as those apps allow.
 
 // micromark character codes: `$`, `\`, and the negative ones it uses for
 // line endings (CR, LF, CRLF), a tab (-2) and its virtual spaces (-1).
@@ -17,9 +26,9 @@ const isDigit = (code: Code) => code !== null && code >= 48 && code <= 57;
 const isLineEnding = (code: Code) => code !== null && code < -2;
 const isSpace = (code: Code) => code !== null && (code < 0 || code === 32);
 
-// remark-math's own constructs: its `$$` blocks, and inline math with at
-// least two dollars, which is read as a code span is.
-const { flow, text } = math({ singleDollarTextMath: false });
+// remark-math's own inline math with at least two dollars, which is read
+// as a code span is.
+const { text } = math({ singleDollarTextMath: false });
 const [double] = [text?.[DOLLAR]].flat();
 if (!double) throw new Error('micromark-extension-math has no inline math');
 
@@ -103,8 +112,157 @@ const single: Construct = {
   ...(double.previous && { previous: double.previous }),
 };
 
-/** The micromark extension reading math: blocks, and inline math by `single` or remark-math's `$$`. */
-export const mathSyntax: Extension = { flow, text: { [DOLLAR]: [single, double] } };
+// The next line, unless it's a lazy one (a paragraph's, in a quote it isn't marked as in).
+const nonLazyContinuation: Construct = {
+  partial: true,
+  tokenize(effects, ok, nok) {
+    const lineStart: State = (code) => (this.parser.lazy[this.now().line] ? nok(code) : ok(code));
+    return (code) => {
+      if (code === null) return ok(code);
+      effects.enter('lineEnding');
+      effects.consume(code);
+      effects.exit('lineEnding');
+      return lineStart;
+    };
+  },
+};
+
+/**
+ * A math block: a line of two dollars or more, up to a line ending with as
+ * many, the TeX between, or all of it on one line (`$$x$$`). Anything else
+ * on its first line makes that line text, so a price (`$$$ dinner`) hides
+ * nothing and a paragraph may start with inline math (`$$x$$ is…`). As a
+ * code fence does, one no line closes goes on to its container's end: a
+ * block can't turn out not to be one after its first line, as micromark
+ * can't take back the lines after it. Its tokens are remark-math's.
+ */
+const tokenizeBlock: Tokenizer = function (effects, ok, nok) {
+  const tail = this.events.at(-1);
+  const indent =
+    tail && tail[1].type === 'linePrefix' ? tail[2].sliceSerialize(tail[1], true).length : 0;
+  let size = 0;
+  let firstLine = true;
+  let spaces = 0;
+
+  // A closing fence: as many dollars or more, ending the line, spaces aside.
+  const closing: Construct = {
+    partial: true,
+    tokenize(effects, ok, nok) {
+      let count = 0;
+      const sequence: State = (code) => {
+        if (code === DOLLAR) {
+          count++;
+          effects.consume(code);
+          return sequence;
+        }
+        if (count < size) return nok(code);
+        effects.exit('mathFlowFenceSequence');
+        return trailing(code);
+      };
+      const trailing = whitespace(effects, (code) => {
+        if (code !== null && !isLineEnding(code)) return nok(code);
+        effects.exit('mathFlowFence');
+        return ok(code);
+      });
+      return whitespace(effects, (code) => {
+        if (code !== DOLLAR) return nok(code);
+        effects.enter('mathFlowFence');
+        effects.enter('mathFlowFenceSequence');
+        return sequence(code);
+      });
+    },
+  };
+
+  const after: State = (code) => {
+    effects.exit('mathFlow');
+    return ok(code);
+  };
+  const lineEnd: State = (code) => {
+    // Interrupting a paragraph, the first line says.
+    if (firstLine && this.interrupt) return ok(code);
+    firstLine = false;
+    if (code === null) return after(code);
+    return effects.attempt(nonLazyContinuation, lineStart, after)(code);
+  };
+  // As much of a line's indent as the opening fence had goes.
+  const lineStart: State = (code) => {
+    if (spaces < indent && (code === 32 || code === -1 || code === -2)) {
+      if (spaces === 0) effects.enter('linePrefix');
+      spaces++;
+      effects.consume(code);
+      return lineStart;
+    }
+    if (spaces > 0) effects.exit('linePrefix');
+    spaces = 0;
+    return beforeChunk(code);
+  };
+  const beforeChunk: State = (code) => {
+    if (code === null || isLineEnding(code)) return lineEnd(code);
+    if (code === DOLLAR || isSpace(code)) return effects.attempt(closing, after, chunkStart)(code);
+    return chunkStart(code);
+  };
+  const chunkStart: State = (code) => {
+    effects.enter('mathFlowValue');
+    effects.consume(code);
+    return chunk;
+  };
+  const chunk: State = (code) => {
+    if (code === null || isLineEnding(code)) {
+      effects.exit('mathFlowValue');
+      return firstLine ? nok(code) : lineEnd(code);
+    }
+    if (code === DOLLAR) {
+      effects.exit('mathFlowValue');
+      return effects.attempt(closing, after, firstLine ? nok : chunkStart)(code);
+    }
+    effects.consume(code);
+    return chunk;
+  };
+  const opening: State = (code) => {
+    if (code === DOLLAR) {
+      size++;
+      effects.consume(code);
+      return opening;
+    }
+    if (size < 2) return nok(code);
+    effects.exit('mathFlowFenceSequence');
+    return whitespace(effects, (code) => {
+      effects.exit('mathFlowFence');
+      return beforeChunk(code);
+    })(code);
+  };
+  return (code) => {
+    effects.enter('mathFlow');
+    effects.enter('mathFlowFence');
+    effects.enter('mathFlowFenceSequence');
+    return opening(code);
+  };
+};
+
+/** Spaces and tabs, if any, as one `whitespace` token, then `next`. */
+function whitespace(effects: Effects, next: State): State {
+  const inside: State = (code) => {
+    if (code === 32 || code === -1 || code === -2) {
+      effects.consume(code);
+      return inside;
+    }
+    effects.exit('whitespace');
+    return next(code);
+  };
+  return (code) => {
+    if (code !== 32 && code !== -1 && code !== -2) return next(code);
+    effects.enter('whitespace');
+    return inside(code);
+  };
+}
+
+const block: Construct = { name: 'mathFlow', tokenize: tokenizeBlock, concrete: true };
+
+/** The micromark extension reading math: blocks (`block`), and inline math by `single` or remark-math's `$$`. */
+export const mathSyntax: Extension = {
+  flow: { [DOLLAR]: block },
+  text: { [DOLLAR]: [single, double] },
+};
 
 export { mathFromMarkdown };
 export type { InlineMath, Math as MathBlock } from 'mdast-util-math';

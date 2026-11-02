@@ -368,12 +368,14 @@ function list(kind: ListKind): Format {
   };
 }
 
-// Whether a heading can hold `block`'s content: no line break, nor HTML
-// that's a block of its own.
+// Whether a heading can hold `block`'s content: no line break, in math
+// too, nor HTML that's a block of its own.
 const headingHolds = (block: Node) => {
   let holds = true;
   block.forEach((child) => {
     if (child.type.name === 'hardbreak') holds = false;
+    if (child.type.name === 'math_inline' && /[\r\n]/.test(String(child.attrs['value'])))
+      holds = false;
     if (child.type.name === 'html') holds &&= inlineHtml(String(child.attrs['value']));
   });
   return holds;
