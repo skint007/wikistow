@@ -280,6 +280,61 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The Mac app, one per kind of Mac, each built and started on its own: the
+  # tested app.asar in Electron's darwin build, signed ad hoc
+  # (scripts/macos-app.sh). The check starts the app it zipped, with no
+  # server: its pages, menu bar, Keychain and window buttons.
+  macos-app:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    name: macos-app (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      # Only the desktop app's dependencies: Electron, for its checksums,
+      # and Playwright.
+      - run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          pnpm install --frozen-lockfile --filter @wikistow/desktop
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: apps
+      - working-directory: apps/desktop
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          scripts/macos-app.sh "$(node ../../scripts/version.ts)" "$ARCH" out/macos
+          [ "$(lipo -archs out/macos/WikiStow.app/Contents/MacOS/WikiStow)" = "$(echo "$ARCH" | sed s/x64/x86_64/)" ]
+      - working-directory: apps/desktop
+        run: MAC_APP="$PWD/out/macos/WikiStow.app" ./node_modules/.bin/playwright test
+        env:
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-results-${{ matrix.arch }}
+          path: apps/desktop/test-results
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-app-${{ matrix.arch }}
+          path: apps/desktop/out/macos/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
   # Each supported distribution installs the packages, and every library
   # and symbol Electron links against must resolve. It doesn't start the app.
   linux-packages-check:
@@ -385,7 +440,7 @@ jobs:
   passed:
     name: CI passed
     if: always()
-    needs: [check, test, test-integration, test-browser, build, smoke, e2e, e2e-desktop]
+    needs: [check, test, test-integration, test-browser, build, smoke, e2e, e2e-desktop, macos-app]
     runs-on: ubuntu-24.04
     steps:
       - env:

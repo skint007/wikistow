@@ -16,6 +16,7 @@ GitHub Actions checks every change and publishes the server image and the deskto
 | `smoke` | The server and CLI bundles, run outside the workspace as the image runs them |
 | `e2e` | The web app's browser tests against the built pages |
 | `e2e-desktop` | The desktop app's tests under a virtual display, with GNOME Keyring |
+| `macos-app` | Builds the [Mac app](#the-mac-app) for Apple silicon on a `macos-15` runner and for Intel on `macos-15-intel`, and starts each |
 | `CI passed` | Passes only when every job above passed. Require this one check on `main` |
 
 Pull-request jobs, forks' included, get a token that can only read the repository, and no secrets. They publish nothing.
@@ -31,7 +32,7 @@ A push to `main` or a release tag also runs four more jobs, which pull requests 
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. It waits for the packages too, so a release whose packages fail publishes nothing.
 
-Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains.
+Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap.
 
 ## Versions
 
@@ -65,7 +66,7 @@ Versions follow [semantic versioning](https://semver.org). A version with a suff
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, that Electron is its major's newest patch, and that every release in the commit's history, this one too, has a changelog entry dated the day of its tag.
    2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0` and `:0.3`, and `:latest` for a stable release from `main`.
    3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
-   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)).
+   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), and `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)).
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
@@ -128,7 +129,7 @@ gh release edit v0.5.0 --notes-file notes.md
 
 ## The desktop downloads
 
-Each release has the desktop app from the tested build:
+Each release has the desktop app, for Linux on x86_64, for Windows and for macOS, from the tested build:
 
 | File | For |
 | --- | --- |
@@ -137,6 +138,8 @@ Each release has the desktop app from the tested build:
 | `wikistow-desktop-<version>-x86_64.rpm` | Fedora 43 and 44 |
 | `wikistow-desktop-<version>-x64-setup.exe` | Windows 10 and 11 on x64 |
 | `wikistow-desktop-<version>-arm64-setup.exe` | Windows 11 on Arm |
+| `wikistow-desktop-<version>-macos-arm64.zip` | Macs with Apple silicon, and the Homebrew cask |
+| `wikistow-desktop-<version>-macos-x64.zip` | Intel Macs, and the Homebrew cask |
 | `SHA256SUMS` | The checksums of these, and of the [CLI downloads](#the-cli-downloads) |
 
 Check a download before you use it:
@@ -224,6 +227,18 @@ cd apps/desktop
 scripts/windows-packages.sh "$(node ../../scripts/version.ts)" out/windows-packages
 ```
 
+## The Mac app
+
+`apps/desktop/scripts/macos-app.sh` builds `WikiStow.app` for one kind of Mac, on a Mac, and zips it. It takes Electron's own darwin build at the version `apps/desktop/package.json` pins, checked against the checksums in its npm package, renames it WikiStow, puts the tested `app.asar` in its `Resources`, with `install-source` and the icon (`packaging/wikistow-desktop.icns`), and sets its `Info.plist`: its name, `io.github.skint007.wikistow`, the release's version, and the `wikistow` scheme. Changing the bundle breaks Electron's signature, and Apple silicon runs nothing unsigned, so it signs the app again ad hoc (`codesign --sign -`), which names nobody. There is no Apple Developer ID or notarization, so Gatekeeper asks the person to allow it ([desktop](desktop.md#the-first-time-it-opens)).
+
+CI's `macos-app` job builds each on a Mac of its own kind, checks the binary's architecture, and starts the app it built with Playwright and no server (`MAC_APP`, `e2e/packed.spec.ts`): its pages, its menu bar, the Keychain as its secret store, and no window buttons of its own. It runs on every pull request, since nothing else starts the Mac app. The release publishes the two zips it made. Raising Electron raises the Mac app's too.
+
+## The Homebrew cask
+
+The tap `skint007/homebrew-wikistow` holds the cask, so `brew install --cask skint007/wikistow/wikistow` installs the app. Its source is `apps/desktop/packaging/homebrew/wikistow.rb`; change it through a pull request. Homebrew's own cask repository takes no app that Gatekeeper refuses, so the cask can't go there unsigned.
+
+`.github/workflows/homebrew.yml` publishes it, once the release's files are up: it fills in the version and the two zips' checksums from the release's `SHA256SUMS`, checks Ruby parses it, and pushes it to the tap's `Casks/wikistow.rb` with the tap's deploy key, as `github-actions[bot]`. A push that would change nothing is skipped. Without the key it warns and publishes nothing, so a release never fails for it. To publish again, such as after a fix to the cask or once the tap exists, merge the fix, then run **Actions → Homebrew → Run workflow** on `main` with the release's version.
+
 ## The AUR packages
 
 Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's Linux binary for its architecture, x86_64 or aarch64, with `LICENSE`. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
@@ -243,7 +258,7 @@ docker image inspect ghcr.io/skint007/wikistow:0.3.0 \
 
 ## Repository settings
 
-The workflows use the token GitHub gives each run, and the AUR key. Set up the public repository once, as an administrator:
+The workflows use the token GitHub gives each run, the AUR key and the tap's key. Set up the public repository once, as an administrator:
 
 1. **Settings → Actions → General.** Keep the default workflow permissions at **Read repository contents and packages permissions**. The workflows ask for more only in the jobs that publish. Require approval before fork pull requests from outside contributors run workflows.
 2. **Settings → Rules → Rulesets**, for `main`: require a pull request, require the status check **CI passed** from GitHub Actions, and block force pushes and deletion.
@@ -258,6 +273,7 @@ The workflows use the token GitHub gives each run, and the AUR key. Set up the p
    | `AUR_USERNAME`, `AUR_EMAIL` | Variables | The name and email the AUR commits carry |
 
    Upload the key from the computer that holds it, so it never shows on screen: `gh secret set AUR_SSH_PRIVATE_KEY --env aur < <key file>`.
+6. The tap: a public repository `skint007/homebrew-wikistow`, with a `Casks` folder. Make a key for it with `ssh-keygen -t ed25519 -N '' -f homebrew-tap`, and add `homebrew-tap.pub` under the tap's **Settings → Deploy keys**, with **Allow write access**. That key can push only to the tap. Then **Settings → Environments → `homebrew`** here, limited to the `v*` tags and `main`, with the private half as the secret `HOMEBREW_TAP_KEY`: `gh secret set HOMEBREW_TAP_KEY --env homebrew < homebrew-tap`. Delete both files after.
 
 ## Moving from the private repository
 
