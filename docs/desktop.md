@@ -50,7 +50,7 @@ The app runs on Windows 10 and 11 on x64, and Windows 11 on Arm. Download the in
 
 The installer isn't signed yet, so the first time Windows shows **Windows protected your PC**. Choose **More info**, check that the app is the installer you downloaded and the publisher is **Unknown publisher**, then choose **Run anyway**. To check the download first, compare `Get-FileHash .\wikistow-desktop-<version>-x64-setup.exe` in PowerShell with its line in the release's `SHA256SUMS`.
 
-It installs for you alone, with no administrator prompt, into `%LOCALAPPDATA%\Programs\WikiStow Desktop`, beside the CLI's `%LOCALAPPDATA%\Programs\wikistow` if you have it. It adds **WikiStow** to the Start menu, registers `wikistow://` links for signing in, and lists the app under **Settings → Apps → Installed apps**, where **Uninstall** removes it.
+It installs for you alone, with no administrator prompt, into `%LOCALAPPDATA%\Programs\WikiStow Desktop`, beside the CLI's `%LOCALAPPDATA%\Programs\wikistow` if you have it. It adds **WikiStow** to the Start menu, registers `wikistow://` links for signing in, and lists the app under **Settings → Apps** (**Installed apps** on Windows 11, **Apps & features** on Windows 10), where **Uninstall** removes it.
 
 To update, download the new release's installer and run it; it replaces the old version. Close WikiStow first, or the installer asks you to. Windows shows the SmartScreen prompt again for each new installer.
 
