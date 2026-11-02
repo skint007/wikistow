@@ -33,6 +33,7 @@ import { propertiesChanged, propertyReferences } from './property-references';
 import { usePluginRuntime } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
 import { QueryResults } from './query-results';
+import { DiagramPreview } from '../../diagram';
 import {
   cellLinks,
   EXTERNAL,
@@ -241,6 +242,7 @@ function Surface({
     page: () => latest.current.page ?? null,
     plugins: () => plugins,
     queries: new QueryResults(),
+    diagrams: new QueryResults(),
     properties: () => latest.current.properties ?? null,
     setProperty: () => latest.current.setProperty ?? null,
     propertyViews: new Set(),
@@ -258,6 +260,11 @@ function Surface({
   const queries = useSyncExternalStore(
     host.queries?.subscribe ?? noQueries.subscribe,
     host.queries?.list ?? noQueries.list,
+  );
+  // And each diagram, under its code.
+  const diagrams = useSyncExternalStore(
+    host.diagrams?.subscribe ?? noQueries.subscribe,
+    host.diagrams?.list ?? noQueries.list,
   );
   const text = useRef(initial);
   // The editor once it's made, its writer, and the text it was last given,
@@ -591,6 +598,9 @@ function Surface({
           queries.map(({ key, element, source }) =>
             createPortal(queryTable(source), element, String(key)),
           )}
+        {diagrams.map(({ key, element, source }) =>
+          createPortal(<DiagramPreview source={source} />, element, String(key)),
+        )}
       </div>
     </div>
   );

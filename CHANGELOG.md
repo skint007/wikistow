@@ -19,6 +19,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Deleting a page or folder moves it, with everything in it, to its space's trash for 30 days. Trash in the rail lists what was deleted in the spaces you own, with who deleted it and when, to restore or delete for good, and Empty trash clears it. After a delete, Undo puts it back. A restored page or folder comes back with its versions, attachments, shares and published state; its public link stays off. (#249)
 - Linked from, below each page in the reader and the draft view, lists the pages in its space that link to it, by title with their folders. It shows only pages you can open, in the version you see, with drafts labelled for editors, and nothing when no page links there. (#248)
 - Math in pages: `$…$` inline and `$$` blocks show as MathML in the reader and the visual editor, where a click opens the TeX to edit. A single dollar follows Pandoc's rule, so prices like `$5 and $10` stay text. (#252)
+- A fenced `mermaid` code block shows as its diagram in the reader and under its code in the visual editor, with a button to see the source. Mermaid runs in a sandboxed frame and loads only on pages with a diagram. A public page shows each diagram as an image, with its source under it. (#253)
 
 #### CLI
 
@@ -37,6 +38,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - Public pages show math too, and copies made before are rendered again. (#252)
+- A public page shows an image at the width the page gives it, as the app does, so public pages are rendered again once after the update. (#253)
 
 ## 0.21.0 - 2026-10-31
 
