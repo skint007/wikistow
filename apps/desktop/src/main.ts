@@ -232,7 +232,7 @@ async function serve(request: Request): Promise<Response> {
   const found = file ? await net.fetch(pathToFileURL(file).href).catch(() => null) : null;
   if (!found?.ok) return new Response(null, { status: 404 });
   const headers = new Headers(found.headers);
-  // The plugin host frame's page and script get the server's exceptions (ADR 0002).
+  // The plugin and diagram host frames' files get the server's exceptions (ADR 0002, 0010).
   for (const [name, value] of Object.entries(securityHeadersFor(url.pathname, APP_ORIGIN))) {
     headers.set(name, value);
   }

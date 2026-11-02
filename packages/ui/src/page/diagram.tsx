@@ -37,7 +37,11 @@ const failure = (error: Error) =>
     error instanceof DiagramError ? (error.message.split('\n', 1)[0] ?? '') : ''
   }`.trim();
 
-/** The diagram `svg` as an image, which runs nothing in it. */
+/**
+ * The diagram `svg` as an image, which runs nothing in it. Not draggable:
+ * dropped in the visual editor, it would become an image of its `blob:`
+ * address, gone once the page is reloaded.
+ */
 function DiagramImage({ svg }: { svg: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -45,7 +49,7 @@ function DiagramImage({ svg }: { svg: string }) {
     setUrl(made);
     return () => URL.revokeObjectURL(made);
   }, [svg]);
-  return url && <img src={url} alt="Diagram" className="max-w-full" />;
+  return url && <img src={url} alt="Diagram" draggable={false} className="max-w-full" />;
 }
 
 /**
