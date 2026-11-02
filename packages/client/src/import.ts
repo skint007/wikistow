@@ -12,7 +12,7 @@
 import type { Nodes } from 'mdast';
 import { parse, stringify } from 'yaml';
 import { cleanPath, macOsExtra, type ImportFile } from './import-archive.ts';
-import { foldTitle, resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
+import { resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
 import { linkSpans, markdownText, parseMarkdown, splitFrontmatter } from './markdown/index.ts';
 
 /** Which of Joplin's export formats an export is. */
@@ -601,11 +601,10 @@ function wikilinkFor(
 ): string | undefined {
   if (!named) return undefined;
   const { target, title } = named;
-  const fold = foldTitle;
   let shown: string | null = link.text === '' ? title : link.text;
-  if (fold(shown) === fold(target) || UNALIASABLE.test(shown)) shown = null;
-  // Without its own text a link shows its page's title.
-  if (shown !== null && target === title && fold(shown) === fold(title)) shown = null;
+  // Without its own text a link shows its page's title, so text that is
+  // the title, case and all, needs no bar.
+  if (UNALIASABLE.test(shown) || (shown === title && target === title)) shown = null;
   return `[[${target}${shown === null ? '' : `${link.inTable ? '\\|' : '|'}${shown}`}]]`;
 }
 
