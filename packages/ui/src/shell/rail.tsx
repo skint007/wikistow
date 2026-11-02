@@ -76,7 +76,8 @@ export function Rail({
     <nav
       aria-label="Spaces and navigation"
       data-region="rail"
-      className="flex h-full flex-col items-center gap-2 py-3.5"
+      // Scrolls itself when the window is too short for every item.
+      className="flex h-full flex-col items-center gap-2 overflow-y-auto py-3.5"
     >
       {vault.status === 'unlocked' ? (
         <>

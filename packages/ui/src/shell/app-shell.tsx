@@ -104,7 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-region="app"
           className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
         >
-          <div className="hidden min-[900px]:block">
+          <div className="hidden min-h-0 min-[900px]:block">
             <Rail onSignOut={signOut} onSearch={() => search()} />
           </div>
           <header
