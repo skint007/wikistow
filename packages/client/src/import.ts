@@ -1,7 +1,7 @@
-// Import from Joplin (wikistow.md, Import): its two export formats read
-// into notebooks, notes and resources, and each note's links found and
-// rewritten for WikiStow. This part is pure; `operations/import.ts` makes
-// the folders and pages.
+// Import from Joplin and Obsidian (wikistow.md, Import): Joplin's two
+// export formats and an Obsidian vault, read into folders, notes and
+// files, and each note's links found and rewritten for WikiStow. This part
+// is pure; `operations/import.ts` makes the folders and pages.
 //
 // - Markdown + Front Matter: notebooks as folders, notes as `.md` files
 //   (`.html` for HTML notes) with front matter, files in `_resources/`.
@@ -9,24 +9,31 @@
 // - JEX, a tar of Joplin's raw items, `<id>.md` each: the title, the body,
 //   then `key: value` lines, and the files in `resources/`. Links are
 //   `:/<id>`. Its notes get the front matter the Markdown export writes.
+// - An Obsidian vault: folders, notes as `.md` files titled by their
+//   names, and any other files. Links are wikilinks and embeds naming a
+//   note or file by name or path, as Obsidian resolves them, or Markdown
+//   links to their paths.
 import type { Nodes } from 'mdast';
 import { parse, stringify } from 'yaml';
 import { cleanPath, macOsExtra, type ImportFile } from './import-archive.ts';
-import { resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
+import { foldTitle, resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
 import { linkSpans, markdownText, parseMarkdown, splitFrontmatter } from './markdown/index.ts';
 
-/** Which of Joplin's export formats an export is. */
-export type JoplinFormat = 'markdown' | 'jex';
+/** The app notes are imported from. */
+export type ImportFrom = 'joplin' | 'obsidian';
 
-/** A notebook, by its key: its path in a Markdown export, its ID in a JEX. */
-export type JoplinNotebook = { key: string; parent: string | null; name: string };
+/** What was read: one of Joplin's export formats, or an Obsidian vault. */
+export type ImportFormat = 'markdown' | 'jex' | 'obsidian';
+
+/** A folder, by its key: its path in a Markdown export or vault, its ID in a JEX. */
+export type SourceFolder = { key: string; parent: string | null; name: string };
 
 /**
- * A note: its key, as for a notebook, its Markdown with front matter, and
- * where it is in the export: its file in a Markdown export, its notebooks
- * and title in a JEX.
+ * A note: its key, as for a folder, its Markdown with front matter, and
+ * where it is in the export: its file in a Markdown export or vault, its
+ * notebooks and title in a JEX.
  */
-export type JoplinNote = {
+export type SourceNote = {
   key: string;
   parent: string | null;
   title: string;
@@ -37,7 +44,7 @@ export type JoplinNote = {
 };
 
 /** A file notes link to, by its key: its path, or its ID in a JEX. */
-export type JoplinResource = {
+export type SourceFile = {
   key: string;
   name: string;
   mediaType: string;
@@ -45,47 +52,56 @@ export type JoplinResource = {
   file: ImportFile | null;
 };
 
-/** Why a note isn't imported. */
-export type JoplinSkipReason = 'encrypted' | 'too-large';
-
-/** What a link in a note names: another note, or a resource, by key, and the resource's name. */
-export type JoplinTarget =
+/** What a link in a note names: another note, or a file, by key, and the file's name. */
+export type SourceTarget =
   | { kind: 'note'; key: string }
   | { kind: 'resource'; key: string; name: string };
 
-/** A Joplin export, read. */
-export type JoplinExport = {
-  format: JoplinFormat;
-  /** Parents before their notebooks. */
-  notebooks: JoplinNotebook[];
-  notes: JoplinNote[];
-  resources: ReadonlyMap<string, JoplinResource>;
+/** A Joplin export or an Obsidian vault, read. */
+export type ImportSource = {
+  format: ImportFormat;
+  /** Parents before the folders in them. */
+  folders: SourceFolder[];
+  notes: SourceNote[];
+  files: ReadonlyMap<string, SourceFile>;
   /** Encrypted items in a JEX, which Joplin must decrypt before exporting. */
   encrypted: number;
   /** Encrypted notes, by where they are in the export. */
   encryptedNotes: string[];
   /** What `url` in `note` names, or null for a link that isn't the export's own. */
-  target: (note: JoplinNote, url: string) => JoplinTarget | 'missing' | null;
+  target: (note: SourceNote, url: string) => SourceTarget | 'missing' | null;
+  /**
+   * What a wikilink's target in `note` names, in a vault, whose wikilinks
+   * name its notes and files. A Joplin export's are left as written.
+   */
+  wikilink?: (note: SourceNote, target: string) => SourceTarget | 'missing';
 };
+
+/** The app `format` comes from. */
+export const importFrom = (format: ImportFormat): ImportFrom =>
+  format === 'obsidian' ? 'obsidian' : 'joplin';
 
 /** The extension namespace naming what an imported folder or page came from. */
 export const IMPORT_NAMESPACE = 'wikistow.import';
 
 /** What `wikistow.import` holds: where it came from, and its key there. */
-export type ImportMark = { from: 'joplin'; key: string };
+export type ImportMark = { from: ImportFrom; key: string };
 
-/** The extension a folder or page imported with `key` gets. */
-export const importMark = (key: string): Record<string, ImportMark> => ({
-  [IMPORT_NAMESPACE]: { from: 'joplin', key },
+/** The extension a folder or page imported from `from` with `key` gets. */
+export const importMark = (from: ImportFrom, key: string): Record<string, ImportMark> => ({
+  [IMPORT_NAMESPACE]: { from, key },
 });
 
-/** The key `extensions` marks an import with, if it has one. */
-export function importKeyOf(extensions: Readonly<Record<string, unknown>>): string | null {
+/** The key `extensions` marks an import from `from` with, if it has one. */
+export function importKeyOf(
+  extensions: Readonly<Record<string, unknown>>,
+  from: ImportFrom,
+): string | null {
   const mark = extensions[IMPORT_NAMESPACE];
   if (typeof mark !== 'object' || mark === null || !('key' in mark) || !('from' in mark)) {
     return null;
   }
-  return mark.from === 'joplin' && typeof mark.key === 'string' ? mark.key : null;
+  return mark.from === from && typeof mark.key === 'string' ? mark.key : null;
 }
 
 /** A Markdown export's attachment folder; a JEX's. */
@@ -93,13 +109,14 @@ const MD_RESOURCES = '_resources';
 const JEX_RESOURCES = 'resources';
 const JEX_ITEM = /^([0-9a-zA-Z]{32})\.md$/;
 
-/** Media types by extension, for a Markdown export, which doesn't say. */
+/** Media types by extension, for a Markdown export or vault, which doesn't say. */
 const MEDIA_TYPES: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  avif: 'image/avif',
   svg: 'image/svg+xml',
   bmp: 'image/bmp',
   pdf: 'application/pdf',
@@ -110,6 +127,10 @@ const MEDIA_TYPES: Record<string, string> = {
   json: 'application/json',
   zip: 'application/zip',
   mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  webm: 'video/webm',
   mp4: 'video/mp4',
 };
 
@@ -123,9 +144,32 @@ const textOf = async (file: ImportFile) => decoder.decode(await file.read());
  * `files` as a Joplin export: a JEX if its top holds Joplin's raw items
  * (`<id>.md`), else a Markdown + Front Matter export.
  */
-export async function readJoplinExport(files: readonly ImportFile[]): Promise<JoplinExport> {
+export async function readJoplinExport(files: readonly ImportFile[]): Promise<ImportSource> {
   const jex = files.some((file) => JEX_ITEM.test(file.path));
   return jex ? readJex(files) : readMarkdownExport(files);
+}
+
+/** `files` read as an export from `from`. */
+export const readImport = (files: readonly ImportFile[], from: ImportFrom) =>
+  from === 'obsidian' ? readObsidianVault(files) : readJoplinExport(files);
+
+/**
+ * Which app `files` came from, by their marks: an Obsidian vault's
+ * `.obsidian/` settings folder at the top; a JEX's raw items, or a
+ * Markdown export's `_resources/` folder, or every note with a `title` in
+ * its front matter, as Joplin writes them. Null when there's no telling,
+ * as for a vault zipped without its settings: the person is asked.
+ */
+export async function importFromOf(files: readonly ImportFile[]): Promise<ImportFrom | null> {
+  if (files.some((file) => file.path.startsWith('.obsidian/'))) return 'obsidian';
+  if (files.some((file) => JEX_ITEM.test(file.path) || file.path.startsWith(`${MD_RESOURCES}/`))) {
+    return 'joplin';
+  }
+  const notes = files.filter((file) => !hidden(file.path) && /\.md$/i.test(file.path));
+  for (const note of notes) {
+    if (frontmatterTitle(await textOf(note)) === null) return null;
+  }
+  return notes.length > 0 ? 'joplin' : null;
 }
 
 // ---- Markdown + Front Matter ----
@@ -134,9 +178,9 @@ const dirOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/'))
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
-async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinExport> {
-  const resources = new Map<string, JoplinResource>();
-  const notes: JoplinNote[] = [];
+async function readMarkdownExport(files: readonly ImportFile[]): Promise<ImportSource> {
+  const resources = new Map<string, SourceFile>();
+  const notes: SourceNote[] = [];
   const dirs = new Set<string>();
   for (const file of [...files].sort((a, b) => compare(a.path, b.path))) {
     if (macOsExtra(file.path)) continue;
@@ -169,9 +213,9 @@ async function readMarkdownExport(files: readonly ImportFile[]): Promise<JoplinE
   const byPath = new Set(notes.map((note) => note.path));
   return {
     format: 'markdown',
-    notebooks,
+    folders: notebooks,
     notes,
-    resources,
+    files: resources,
     encrypted: 0,
     encryptedNotes: [],
     target: (note, url) => {
@@ -277,7 +321,7 @@ const unescapeValue = (value: string) =>
 
 const TYPE = { note: '1', folder: '2', resource: '4', tag: '5', noteTag: '6' } as const;
 
-async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
+async function readJex(files: readonly ImportFile[]): Promise<ImportSource> {
   const items = new Map<string, JoplinItem & { path: string }>();
   for (const file of files) {
     if (!JEX_ITEM.test(file.path)) continue;
@@ -313,7 +357,7 @@ async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
     const parent = item.props.get('parent_id') ?? '';
     return folderIds.has(parent) ? parent : null;
   };
-  const resources = new Map<string, JoplinResource>();
+  const resources = new Map<string, SourceFile>();
   for (const [id, item] of of(TYPE.resource)) {
     const ext = item.props.get('file_extension') ?? '';
     const name = encrypted(item) ? '' : item.title || (ext ? `${id}.${ext}` : id);
@@ -332,7 +376,7 @@ async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
   const where = new Map<string | null, string>([[null, '']]);
   for (const { key, parent, name } of notebooks)
     where.set(key, `${where.get(parent) ?? ''}${name}/`);
-  const notes: JoplinNote[] = [];
+  const notes: SourceNote[] = [];
   const encryptedNotes: string[] = [];
   for (const [id, item] of of(TYPE.note)) {
     if (encrypted(item)) {
@@ -352,9 +396,9 @@ async function readJex(files: readonly ImportFile[]): Promise<JoplinExport> {
   const noteIds = new Set(notes.map((note) => note.key));
   return {
     format: 'jex',
-    notebooks,
+    folders: notebooks,
     notes,
-    resources,
+    files: resources,
     encrypted: [...items.values()].filter(encrypted).length,
     encryptedNotes,
     target: (_note, url) => {
@@ -406,11 +450,11 @@ function joplinFrontmatter(item: JoplinItem, tags: readonly string[]): string {
 }
 
 /** Notebooks with each parent before the notebooks in it; one in a loop goes at the top. */
-function parentsFirst(notebooks: JoplinNotebook[]): JoplinNotebook[] {
+function parentsFirst(notebooks: SourceFolder[]): SourceFolder[] {
   const byKey = new Map(notebooks.map((notebook) => [notebook.key, notebook]));
   const placed = new Set<string>();
-  const ordered: JoplinNotebook[] = [];
-  const place = (notebook: JoplinNotebook, seen: Set<string>) => {
+  const ordered: SourceFolder[] = [];
+  const place = (notebook: SourceFolder, seen: Set<string>) => {
     if (placed.has(notebook.key)) return;
     const parent = notebook.parent === null ? undefined : byKey.get(notebook.parent);
     if (parent && seen.has(parent.key)) notebook = { ...notebook, parent: null };
@@ -427,23 +471,197 @@ function parentsFirst(notebooks: JoplinNotebook[]): JoplinNotebook[] {
 // By code unit, so the order never depends on a locale.
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+// ---- Obsidian vault ----
+
+/** A hidden file or folder, which Obsidian doesn't list: `.obsidian/`, `.trash/`, `.git/`. */
+const hidden = (path: string) => path.split('/').some((part) => part.startsWith('.'));
+
+/** `path` percent-decoded, or as it is if it isn't. */
+function decoded(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
+ * `files` as an Obsidian vault: each `.md` file a note titled by its name,
+ * its front matter kept as written, in folders as the vault has them;
+ * folders without notes in them are left out. Hidden files and folders are
+ * left out too, as Obsidian leaves them out, and so are macOS's extras.
+ * Every other file is one a note may link to or embed.
+ */
+export async function readObsidianVault(files: readonly ImportFile[]): Promise<ImportSource> {
+  const notes: SourceNote[] = [];
+  const others = new Map<string, SourceFile>();
+  const dirs = new Set<string>();
+  // Every file's path by its name, lowercased, as Obsidian looks them up.
+  const byName = new Map<string, string[]>();
+  for (const file of [...files].sort((a, b) => compare(a.path, b.path))) {
+    if (hidden(file.path) || macOsExtra(file.path)) continue;
+    const name = nameOf(file.path);
+    const named = byName.get(name.toLowerCase());
+    if (named) named.push(file.path);
+    else byName.set(name.toLowerCase(), [file.path]);
+    if (!name.endsWith('.md')) {
+      others.set(file.path, { key: file.path, name, mediaType: mediaTypeOf(name), file });
+      continue;
+    }
+    for (let dir = dirOf(file.path); dir !== ''; dir = dirOf(dir)) dirs.add(dir);
+    const parent = dirOf(file.path);
+    notes.push({
+      key: file.path,
+      parent: parent === '' ? null : parent,
+      title: name.slice(0, -'.md'.length),
+      path: file.path,
+      markdown: await textOf(file),
+      html: false,
+    });
+  }
+  const folders = [...dirs].sort(compare).map((dir) => {
+    const parent = dirOf(dir);
+    return { key: dir, parent: parent === '' ? null : parent, name: nameOf(dir) };
+  });
+  const notePaths = new Set(notes.map((note) => note.key));
+  // What a link's path names, by name or path.
+  const find = (linkpath: string, from: string): SourceTarget | 'missing' => {
+    const path = linkpathDest(byName, linkpath, from);
+    if (path === null) return 'missing';
+    return notePaths.has(path)
+      ? { kind: 'note', key: path }
+      : { kind: 'resource', key: path, name: nameOf(path) };
+  };
+  return {
+    format: 'obsidian',
+    folders,
+    notes,
+    files: others,
+    encrypted: 0,
+    encryptedNotes: [],
+    target: (note, url) => {
+      if (SCHEME.test(url) || url.startsWith('#')) return null;
+      // Obsidian reads a Markdown link's path percent-decoded, and a wikilink's as written.
+      const path = decoded(url.replace(/#.*$/s, ''));
+      return path === '' ? null : find(path, note.path);
+    },
+    wikilink: (note, target) => find(target, note.path),
+  };
+}
+
+/**
+ * The file a link's path (`linkpath`, without its `#heading`) names from
+ * the note at `from`, as Obsidian 1.15's `getLinkpathDest` finds it among
+ * `byName`, the vault's files by their names, lowercased: by name, with or
+ * without `.md`, and case aside. Of several of that name, the one at a
+ * relative path (`./`, `../`) or the path from the vault's top, else those
+ * whose path ends with it, the ones under the note's folder first, then
+ * the shortest path.
+ */
+function linkpathDest(
+  byName: ReadonlyMap<string, readonly string[]>,
+  linkpath: string,
+  from: string,
+): string | null {
+  let wanted = linkpath.toLowerCase();
+  let name = nameOf(wanted);
+  let found = name.includes('.') ? byName.get(name) : undefined;
+  if (!found) {
+    wanted = `${linkpath}.md`.toLowerCase();
+    name = nameOf(wanted);
+    found = byName.get(name);
+  }
+  if (!found) return null;
+  const candidates = found;
+  if (name === wanted && candidates.length === 1) return candidates[0] ?? null;
+  const at = (path: string) =>
+    candidates.find((candidate) => candidate.toLowerCase() === path) ?? null;
+  let dir = dirOf(from).toLowerCase();
+  if (wanted.startsWith('./') || wanted.startsWith('../')) {
+    if (wanted.startsWith('./../')) wanted = wanted.slice(2);
+    if (wanted.startsWith('./')) {
+      wanted = `${dir === '' ? '' : `${dir}/`}${wanted.slice(2)}`;
+    } else {
+      while (wanted.startsWith('../')) {
+        wanted = wanted.slice(3);
+        dir = dirOf(dir);
+      }
+      wanted = `${dir === '' ? '' : `${dir}/`}${wanted}`;
+    }
+    const relative = at(wanted);
+    if (relative) return relative;
+  }
+  if (wanted.startsWith('/')) wanted = wanted.slice(1);
+  const exact = at(wanted);
+  if (exact) return exact;
+  if (linkpath.startsWith('/')) return null;
+  const near: string[] = [];
+  const far: string[] = [];
+  for (const path of candidates) {
+    const lower = path.toLowerCase();
+    if (lower.endsWith(wanted)) (lower.startsWith(dir) ? near : far).push(path);
+  }
+  const shortest = (a: string, b: string) => a.length - b.length;
+  return near.sort(shortest)[0] ?? far.sort(shortest)[0] ?? null;
+}
+
 // ---- Links ----
 
 /** A link in a note that names something in the export, and where it is written. */
 export type NoteLink =
   /** A Markdown link to another note: it becomes a wikilink, `text` its text. */
   | { kind: 'note'; key: string; start: number; end: number; text: string; inTable: boolean }
-  /** The URL of a link, image or HTML attribute naming a resource: it becomes `attachment:ID`. */
+  /** The URL of a link, image or HTML attribute naming a file: it becomes `attachment:ID`. */
   | { kind: 'resource'; key: string; name: string; start: number; end: number }
+  /**
+   * A vault's wikilink to a note, null when the vault has none of that
+   * name: rewritten only when it doesn't name that page as written.
+   */
+  | {
+      kind: 'wikilink';
+      key: string | null;
+      start: number;
+      end: number;
+      source: string;
+      target: string;
+      heading: string | null;
+      shown: string | null;
+      inTable: boolean;
+    }
+  /**
+   * A vault's embed or wikilink naming a file (`![[photo.png|300]]`,
+   * `[[doc.pdf]]`): an embed names its page's attachment by name, a link
+   * becomes a Markdown one to `attachment:ID`.
+   */
+  | {
+      kind: 'file';
+      key: string;
+      name: string;
+      start: number;
+      end: number;
+      embed: boolean;
+      /** An image's: a Markdown image, if it can't stay an embed. */
+      image: boolean;
+      target: string;
+      heading: string | null;
+      shown: string | null;
+      inTable: boolean;
+    }
   /** One that can't be rewritten (a note link in HTML, a missing note or file), as written. */
   | { kind: 'kept'; source: string };
 
 /**
- * The links in `note` that name the export's own notes and resources, as
- * the reader reads the Markdown: in no code, the front matter left alone.
- * In HTML, only `src` and `href` attributes naming resources are rewritten.
+ * The links in `note` that name the export's own notes and files, as the
+ * reader reads the Markdown: in no code, the front matter left alone. In
+ * HTML, only `src` and `href` attributes naming files are rewritten. In a
+ * vault, wikilinks and embeds too, but not page embeds (`![[Note]]`),
+ * block references (`[[Note#^id]]`) or links to this note's headings,
+ * which stay as written.
  */
-export function noteLinks(note: JoplinNote, target: JoplinExport['target']): NoteLink[] {
+export function noteLinks(
+  note: SourceNote,
+  { target, wikilink, files }: Pick<ImportSource, 'target' | 'wikilink' | 'files'>,
+): NoteLink[] {
   const { frontmatter, body } = splitFrontmatter(note.markdown);
   const offset = frontmatter?.length ?? 0;
   const found: NoteLink[] = [];
@@ -451,7 +669,7 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
     found.push(...htmlLinks(body, offset, note, target));
     return found;
   }
-  // Each resource's URL, from where its destination is written.
+  // Each file's URL, from where its destination is written.
   for (const { url, destination } of linkSpans(note.markdown).urls) {
     if (!destination) continue;
     const named = target(note, url);
@@ -459,7 +677,7 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
     else if (named?.kind === 'resource')
       found.push({ kind: 'resource', key: named.key, name: named.name, ...destination });
   }
-  // Each link to a note, whole, and resources in HTML.
+  // Each link to a note, whole, and files in HTML.
   const walk = (node: Nodes, inTable: boolean) => {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
@@ -467,6 +685,51 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
       // As written: in a list or quote, its value has lost their prefixes.
       found.push(...htmlLinks(body.slice(start, end), offset + start, note, target));
       return;
+    }
+    if (
+      node.type === 'wikilink' &&
+      wikilink &&
+      !node.unsupported &&
+      node.target !== '' &&
+      start !== undefined &&
+      end !== undefined
+    ) {
+      const named = wikilink(note, node.target);
+      const at = { start: offset + start, end: offset + end };
+      const { source, target, heading, shown, embed } = node;
+      if (named === 'missing') {
+        found.push(
+          embed
+            ? { kind: 'kept', source }
+            : { kind: 'wikilink', key: null, ...at, source, target, heading, shown, inTable },
+        );
+      } else if (named.kind === 'resource') {
+        const image = files.get(named.key)?.mediaType.startsWith('image/') ?? false;
+        const { key, name } = named;
+        found.push({
+          kind: 'file',
+          key,
+          name,
+          ...at,
+          embed,
+          image,
+          target,
+          heading,
+          shown,
+          inTable,
+        });
+      } else if (!embed) {
+        found.push({
+          kind: 'wikilink',
+          key: named.key,
+          ...at,
+          source,
+          target,
+          heading,
+          shown,
+          inTable,
+        });
+      }
     }
     // A reference's definition naming a note: Joplin never writes one; reported, not rewritten.
     if (node.type === 'definition') {
@@ -503,12 +766,12 @@ export function noteLinks(note: JoplinNote, target: JoplinExport['target']): Not
   return found.sort((a, b) => ('start' in a ? a.start : -1) - ('start' in b ? b.start : -1));
 }
 
-/** `src` and `href` attributes in `html` naming resources, at `offset` in the note. */
+/** `src` and `href` attributes in `html` naming files, at `offset` in the note. */
 function htmlLinks(
   html: string,
   offset: number,
-  note: JoplinNote,
-  target: JoplinExport['target'],
+  note: SourceNote,
+  target: ImportSource['target'],
 ): NoteLink[] {
   const found: NoteLink[] = [];
   for (const match of html.matchAll(/\s(?:src|href)\s*=\s*(["'])(.*?)\1/gis)) {
@@ -529,18 +792,30 @@ function htmlLinks(
 export type LinkRewrites = {
   /** The wikilink target naming a note's page alone, or undefined when none can. */
   wikilink: (key: string) => { target: string; title: string } | undefined;
-  /** A resource's attachment ID on this note's page, or undefined when it wasn't attached. */
-  attachment: (key: string) => string | undefined;
+  /**
+   * A file's attachment on this note's page: its ID, and whether it is the
+   * page's only attachment of its name, as an embed names it. Undefined
+   * when it wasn't attached.
+   */
+  attachment: (key: string) => { id: string; alone: boolean } | undefined;
+  /**
+   * Whether a wikilink's target, as written, names the page made for the
+   * note of `key` alone; with `key` null, whether it names any one page.
+   */
+  resolves: (target: string, key: string | null) => boolean;
 };
 
 /**
  * `note`'s Markdown with each of `links` rewritten: a link to a note as a
  * wikilink, keeping its text where it isn't the title (`[[Title|text]]`, a
- * bar written `\|` in a table), and a resource's URL as `attachment:ID`.
- * What can't be rewritten stays as written, and is listed in `unresolved`.
+ * bar written `\|` in a table), and a file's URL as `attachment:ID`. A
+ * vault's wikilink to a note changes only when it wouldn't name that page
+ * as written, keeping its heading and text; one naming a file becomes a
+ * Markdown image or link to the attachment. What can't be rewritten stays
+ * as written, and is listed in `unresolved`.
  */
 export function rewriteNote(
-  note: JoplinNote,
+  note: SourceNote,
   links: readonly NoteLink[],
   rewrites: LinkRewrites,
 ): { markdown: string; unresolved: string[] } {
@@ -556,8 +831,18 @@ export function rewriteNote(
     const source = note.markdown.slice(link.start, link.end);
     let text: string | undefined;
     if (link.kind === 'resource') {
-      const id = rewrites.attachment(link.key);
-      text = id === undefined ? undefined : `attachment:${id}`;
+      const attached = rewrites.attachment(link.key);
+      text = attached && `attachment:${attached.id}`;
+    } else if (link.kind === 'file') {
+      const attached = rewrites.attachment(link.key);
+      const rewritten = attached && fileLink(link, attached);
+      // An embed that names its attachment as written.
+      if (rewritten === null) continue;
+      text = rewritten;
+    } else if (link.kind === 'wikilink') {
+      // It works as written.
+      if (rewrites.resolves(link.target, link.key)) continue;
+      text = link.key === null ? undefined : vaultWikilink(link, rewrites.wikilink(link.key));
     } else {
       text = wikilinkFor(link, rewrites.wikilink(link.key));
     }
@@ -571,24 +856,37 @@ export function rewriteNote(
   return { markdown: out + note.markdown.slice(at), unresolved };
 }
 
-/** How the report names a link left as written: a note link by its text, a file by its name. */
+/**
+ * How the report names a link left as written: a Markdown link to a note
+ * by its text, a file by its name, a wikilink as written.
+ */
 const labelOf = (link: Exclude<NoteLink, { kind: 'kept' }>, source: string) =>
-  link.kind === 'note' ? link.text || source : link.name;
+  link.kind === 'note' ? link.text || source : link.kind === 'wikilink' ? source : link.name;
 
 /**
- * Which of `links` a saved version of `note` (`markdown`) still holds as
- * written, named as `rewriteNote` names what it couldn't rewrite: so a
- * later run reports what an earlier one left, as it left it.
+ * Which of `links` a saved version of `note` still holds as written, named
+ * as `rewriteNote` names what it couldn't rewrite: so a later run reports
+ * what an earlier one left, as it left it. A vault's wikilink that names
+ * its page as written, and an embed naming one of the version's
+ * attachments, were left so on purpose.
  */
 export function leftAsWritten(
-  note: JoplinNote,
+  note: SourceNote,
   links: readonly NoteLink[],
-  markdown: string,
+  saved: { markdown: string; attachments: readonly { name: string }[] },
+  { resolves }: Pick<LinkRewrites, 'resolves'>,
 ): string[] {
+  const named = (target: string) =>
+    saved.attachments.filter((a) => foldTitle(a.name) === foldTitle(target)).length === 1;
   return links.flatMap((link) => {
-    const source = link.kind === 'kept' ? link.source : note.markdown.slice(link.start, link.end);
-    if (!markdown.includes(source)) return [];
-    return [link.kind === 'kept' ? source : labelOf(link, source)];
+    if (link.kind === 'wikilink' && resolves(link.target, link.key)) return [];
+    if (link.kind === 'file' && link.embed && named(link.target)) return [];
+    if (link.kind === 'kept') return saved.markdown.includes(link.source) ? [link.source] : [];
+    // With a character either side, so a link isn't found inside another
+    // (`[[doc.pdf]]` in `![[doc.pdf]]`), or a path in a rewritten link's text.
+    const around = note.markdown.slice(Math.max(0, link.start - 1), link.end + 1);
+    if (!saved.markdown.includes(around)) return [];
+    return [labelOf(link, note.markdown.slice(link.start, link.end))];
   });
 }
 
@@ -606,6 +904,51 @@ function wikilinkFor(
   // the title, case and all, needs no bar.
   if (UNALIASABLE.test(shown) || (shown === title && target === title)) shown = null;
   return `[[${target}${shown === null ? '' : `${link.inTable ? '\\|' : '|'}${shown}`}]]`;
+}
+
+/**
+ * A vault's wikilink to `named`, its heading and text kept. Without text of
+ * its own it shows its target as written, without `.md`, as Obsidian does.
+ */
+function vaultWikilink(
+  link: Extract<NoteLink, { kind: 'wikilink' }>,
+  named: { target: string; title: string } | undefined,
+): string | undefined {
+  if (!named) return undefined;
+  const written = link.target.replace(/\.md$/i, '');
+  const shown =
+    link.shown ?? (written === named.target || UNALIASABLE.test(written) ? null : written);
+  const heading = link.heading === null ? '' : `#${link.heading}`;
+  return `[[${named.target}${heading}${shown === null ? '' : `${link.inTable ? '\\|' : '|'}${shown}`}]]`;
+}
+
+/**
+ * A vault's embed or link naming a file, for its page. An embed stays one,
+ * its size or text as written (`![[photo.png|300]]`), naming the page's
+ * attachment by its name: unchanged where it already does, case aside.
+ * The reader shows the image at its own size, the size kept for going
+ * back to Obsidian. A link, or an
+ * embed whose name the page's attachments share or a wikilink can't hold,
+ * becomes what uploading it writes: `![name](attachment:ID)` for an image's
+ * embed, `[name](attachment:ID)` otherwise, with the link's own text.
+ * Null when it stays as written.
+ */
+function fileLink(
+  link: Extract<NoteLink, { kind: 'file' }>,
+  { id, alone }: { id: string; alone: boolean },
+): string | null {
+  if (link.embed && alone && !UNWRITABLE.test(link.name)) {
+    if (foldTitle(link.target) === foldTitle(link.name)) return null;
+    const heading = link.heading === null ? '' : `#${link.heading}`;
+    const shown = link.shown === null ? '' : `${link.inTable ? '\\|' : '|'}${link.shown}`;
+    return `![[${link.name}${heading}${shown}]]`;
+  }
+  const size = link.shown !== null && /^\d+(?:x\d+)?$/.test(link.shown);
+  const text = (link.shown === null || (link.embed && size) ? link.name : link.shown).replace(
+    /[\\[\]*_`<>|]/g,
+    '\\$&',
+  );
+  return `${link.embed && link.image ? '!' : ''}[${text}](attachment:${id})`;
 }
 
 // What a wikilink's target can't hold.

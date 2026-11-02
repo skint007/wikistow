@@ -64,7 +64,10 @@ const COMMANDS = {
     options: { space: { type: 'string' }, folder: { type: 'string' }, out: { type: 'string' } },
     positionals: 0,
   },
-  import: { options: { space: { type: 'string' }, folder: { type: 'string' } }, positionals: 1 },
+  import: {
+    options: { space: { type: 'string' }, folder: { type: 'string' }, from: { type: 'string' } },
+    positionals: 1,
+  },
   'folder create': {
     options: { space: { type: 'string' }, parent: { type: 'string' }, name: { type: 'string' } },
     positionals: 0,
@@ -456,8 +459,12 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
     case 'import': {
       const space = optional(values, 'space');
       const folder = optional(values, 'folder');
+      const from = optional(values, 'from');
       if (space === null && folder === null) {
         throw new CliError('usage', 'import takes --space, --folder or both');
+      }
+      if (from !== null && from !== 'obsidian' && from !== 'joplin') {
+        throw new CliError('usage', '--from takes obsidian or joplin');
       }
       return importNotes(
         io,
@@ -465,6 +472,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
         {
           ...content,
           path: first,
+          from,
           spaceId: space === null ? null : id(SpaceId, space, 'space'),
           folderId: folder === null ? null : id(FolderId, folder, 'folder'),
         },

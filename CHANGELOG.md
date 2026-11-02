@@ -9,10 +9,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - The browser app can be installed on phones and computers, and once opened online it loads without a connection. A service worker keeps the app's own files only, never pages or anything from your account. Reading pages offline comes in later releases. (#261)
+- Import… also reads an Obsidian vault, as its folder or a zip of it: each folder that holds notes becomes a folder, each note a published page titled by its file name, and the files its notes link to or embed attachments of their pages. Links resolve as Obsidian resolves them, and files no note names are listed in the report. (#260)
 
 #### Desktop
 
 - On the beta channel, the update notice offers betas: a beta build, or one installed with `wikistow-desktop-beta-bin`, is offered the newest release of any kind, and other builds the newest stable one, as before. (#259)
+
+#### CLI
+
+- `wikistow import` takes an Obsidian vault too, and `--from obsidian|joplin` for files that don't say which app they came from. (#260)
 
 #### Releases and packaging
 
