@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Releases and packaging
+
+- Each push to `main` also tags its server image `main`, which moves to the newest `main` build, for a test server that follows it. (#256)
+
 ## 0.22.0 - 2026-11-02
 
 ### Highlights

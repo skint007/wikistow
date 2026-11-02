@@ -451,7 +451,8 @@ jobs:
 
   # The server image, from the tested build, on a push to main or a release
   # tag. A main push is tagged `sha-` and the commit's first 8 characters,
-  # which never moves; a release with its version (docs/releasing.md). It
+  # which never moves, and `main`, which moves to the newest main build; a
+  # release with its version (docs/releasing.md). It
   # waits for the desktop packages too, so a release that can't ship them
   # publishes nothing.
   image:
@@ -483,6 +484,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=sha-${{ steps.version.outputs.commit }},enable=${{ github.ref_type == 'branch' }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ inputs.latest == true }}
