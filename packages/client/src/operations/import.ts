@@ -234,14 +234,15 @@ export async function importJoplin(
   };
   // Each note's links, and those no run can rewrite, reported on every run,
   // so one finishing another's work lists them too.
-  const linksOf = new Map<string, NoteLink[]>();
+  const linksOf = new Map<string, { links: NoteLink[]; files: Set<string> }>();
   for (const note of notes) {
     if (!pageOf.has(note.key)) continue;
     const links = noteLinks(note, joplin.target);
-    linksOf.set(note.key, links);
+    const files = filesOf(links, joplin);
+    linksOf.set(note.key, { links, files });
     const { unresolved } = rewriteNote(note, links, {
       wikilink,
-      attachment: (key) => (joplin.resources.get(key)?.file ? key : undefined),
+      attachment: (key) => (files.has(key) ? key : undefined),
     });
     summary.unresolved.push(...unresolved.map((link) => ({ path: note.path, link })));
     await pace();
@@ -256,11 +257,10 @@ export async function importJoplin(
     const saved = opened !== null && (opened.markdown !== '' || opened.attachments.length > 0);
     let tooLarge = false;
     if (!saved) {
-      const links = linksOf.get(note.key) ?? [];
+      const { links = [], files = new Set<string>() } = linksOf.get(note.key) ?? {};
       const attached = new Map<string, AttachmentRef>();
-      for (const link of links) {
-        if (link.kind !== 'resource' || attached.has(link.key)) continue;
-        const resource = joplin.resources.get(link.key);
+      for (const key of files) {
+        const resource = joplin.resources.get(key);
         if (!resource?.file) continue;
         const bytes = await resource.file.read();
         try {
@@ -269,10 +269,11 @@ export async function importJoplin(
             mediaType: resource.mediaType,
             bytes,
           });
-          attached.set(link.key, ref);
+          attached.set(key, ref);
           summary.attachments++;
         } catch (error) {
-          // A file larger than the server takes: its links stay as written.
+          // A file larger than the server takes: its links stay as written,
+          // reported by this run only, as no other knows the limit.
           if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
           summary.unresolved.push({ path: note.path, link: resource.name });
         }
@@ -319,6 +320,20 @@ export async function importJoplin(
     await pace();
   }
   return summary;
+}
+
+/**
+ * The files `links` name that the export has, each once, in order: at
+ * most as many as a version lists (`MAX_ATTACHMENTS`). Links to the rest
+ * stay as written.
+ */
+function filesOf(links: readonly NoteLink[], joplin: JoplinExport): Set<string> {
+  const files = new Set<string>();
+  for (const link of links) {
+    if (files.size === pageRoutes.MAX_ATTACHMENTS) break;
+    if (link.kind === 'resource' && joplin.resources.get(link.key)?.file) files.add(link.key);
+  }
+  return files;
 }
 
 /**
