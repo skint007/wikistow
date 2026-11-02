@@ -129,7 +129,7 @@ function Unlock() {
             </div>
             <p className="text-sm text-muted-foreground">
               {desktop
-                ? 'Unlocks when WikiStow starts, until you lock it or sign out. Your keyring keeps the key.'
+                ? 'Unlocks when WikiStow starts, until you lock it or sign out. Your system’s secret store keeps the key.'
                 : 'Unlocks on later visits, until you lock it or sign out. Anyone who can use this browser profile can read your vault.'}
             </p>
           </div>

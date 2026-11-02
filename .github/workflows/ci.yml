@@ -8,6 +8,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # By hand on any branch (Actions → CI → Run workflow), which also builds
+  # and checks the desktop packages, as a push to main does.
+  workflow_dispatch:
   workflow_call:
     inputs:
       latest:
@@ -237,11 +240,11 @@ jobs:
           retention-days: 7
 
   # The .deb and .rpm: the tested app.asar on the Electron the desktop tests
-  # ran, packaged by nfpm. On a push only, to spare pull requests the time,
-  # so main shows a packaging break before a release tag does.
+  # ran, packaged by nfpm. Not for pull requests, to spare them the time, so
+  # main shows a packaging break before a release tag does.
   linux-packages:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     container: *node_image
     env:
@@ -315,6 +318,68 @@ jobs:
           done | grep -E 'not found|undefined symbol' && exit 1
           echo 'Every library and symbol resolves.'
 
+  # The Windows installers, x64 and arm64: the tested app.asar in Electron's
+  # Windows build of the same version, packaged by NSIS. Built on Linux, as
+  # the app has no native modules; each architecture in its own job, since
+  # compressing one takes a few minutes. Not for pull requests, as the Linux
+  # packages aren't.
+  windows-packages:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    container: *node_image
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nsis >/dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: apps
+      - working-directory: apps/desktop
+        run: scripts/windows-packages.sh "$(node ../../scripts/version.ts)" out/windows-packages ${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-package-${{ matrix.arch }}
+          path: apps/desktop/out/windows-packages
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each installer on Windows of its architecture: it installs, the app opens
+  # its sign-in page and trusts DPAPI, and the uninstaller removes it all.
+  windows-packages-check:
+    needs: windows-packages
+    runs-on: ${{ matrix.runner }}
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: windows-2025 }
+          - { arch: arm64, runner: windows-11-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .node-version
+            apps/desktop/scripts/windows-check.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-package-${{ matrix.arch }}
+          path: installer
+      - shell: bash
+        run: node apps/desktop/scripts/windows-check.ts installer/wikistow-desktop-*-${{ matrix.arch }}-setup.exe
+
   # The one check branch protection needs. A job skipped because another
   # failed would count as passing, so this one runs regardless and looks.
   passed:
@@ -335,7 +400,7 @@ jobs:
   # waits for the desktop packages too, so a release that can't ship them
   # publishes nothing.
   image:
-    needs: [passed, linux-packages-check]
+    needs: [passed, linux-packages-check, windows-packages-check]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:

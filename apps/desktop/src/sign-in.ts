@@ -29,7 +29,9 @@ export function handoffCode(link: string): string | null {
   } catch {
     return null;
   }
-  if (`${url.protocol}//${url.host}${url.pathname}` !== desktopRoutes.DESKTOP_LINK) return null;
+  // Windows hands the link over with a `/` after its host.
+  const path = url.pathname === '/' ? '' : url.pathname;
+  if (`${url.protocol}//${url.host}${path}` !== desktopRoutes.DESKTOP_LINK) return null;
   const codes = url.searchParams.getAll('code');
   if (codes.length !== 1 || [...url.searchParams.keys()].length !== 1) return null;
   const parsed = desktopRoutes.HandoffCode.safeParse(codes[0]);

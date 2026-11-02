@@ -20,12 +20,12 @@ export type Secrets = {
 
 export const NO_SECRETS: Secrets = { origin: null, cookie: null, vault: null };
 
-// Chromium starts what it seals with the name of the key it used. `v11` is
-// the key the keyring holds (Secret Service or KWallet); `v10` is the
+// On Linux, Chromium starts what it seals with the name of the key it used.
+// `v11` is the key the keyring holds (Secret Service or KWallet); `v10` is the
 // fallback every program on the computer knows, used when there is no keyring.
 const KEYRING_KEY = Buffer.from('v11');
 
-/** Whether `sealed` was sealed with the keyring's key, rather than a fallback. */
+/** Whether `sealed` was sealed with the Linux keyring's key, rather than a fallback. */
 export const sealedByKeyring = (sealed: Buffer) =>
   sealed.subarray(0, KEYRING_KEY.length).equals(KEYRING_KEY);
 
