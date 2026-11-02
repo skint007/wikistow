@@ -13,6 +13,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- A page’s properties start collapsed to one line, "Properties · 12", which opens them, in the reader and the draft view. Each page remembers whether you opened or closed them on this device, and Show properties in Settings, under Pages, starts them open instead. (#246)
+- Deleting a page or folder moves it, with everything in it, to its space's trash for 30 days. Trash in the rail lists what was deleted in the spaces you own, with who deleted it and when, to restore or delete for good, and Empty trash clears it. After a delete, Undo puts it back. A restored page or folder comes back with its versions, attachments, shares and published state; its public link stays off. (#249)
+- Linked from, below each page in the reader and the draft view, lists the pages in its space that link to it, by title with their folders. It shows only pages you can open, in the version you see, with drafts labelled for editors, and nothing when no page links there. (#248)
+
+#### CLI
+
+- `wikistow page links PAGE_ID` lists the pages that link to a page, from what the agent can read, as the app's Linked from does. (#248)
+
 #### Desktop
 
 - The desktop app runs on Windows 10 and 11, keeping its sign-in, remembered unlock, search index and trust marks sealed with DPAPI, with its data in `%APPDATA%\WikiStow Desktop`, apart from the CLI's. The update notice links to the new installer (#250).

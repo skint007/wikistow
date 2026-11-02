@@ -3,6 +3,7 @@ import {
   readProperties,
   setProperty,
   splitFrontmatter,
+  type pageOperations,
   type PropertyValue,
 } from '@wikistow/client';
 import { Plus } from 'lucide-react';
@@ -113,6 +114,8 @@ export function PageEditor({
   ref,
   ...assist
 }: EditorSurfaceProps & {
+  /** The page edited, for which its properties' open state is kept too. */
+  page: pageOperations.PageRef;
   status: ReactNode;
   /** The keys pages in this page's folder use, which Add property suggests. */
   propertyKeys?: PropertyKeys | undefined;
@@ -530,8 +533,9 @@ export function PageEditor({
         <PropertiesEditor
           frontmatter={properties}
           adding={propertiesAdded}
+          page={assist.page}
           scope={{
-            spaceId: assist.page?.spaceId ?? '',
+            spaceId: assist.page.spaceId,
             selfId: assist.links.selfId,
             pages: assist.links.pages,
             links: assist.links.table,

@@ -1,4 +1,8 @@
-import { pageOperations as pages, spaceOperations as spaces } from '@wikistow/client';
+import {
+  pageOperations as pages,
+  spaceOperations as spaces,
+  trashOperations as trash,
+} from '@wikistow/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -10,7 +14,7 @@ beforeAll(async () => {
 afterAll(() => t.drop());
 
 describe('live items per account', () => {
-  it('counts folders across an account’s spaces, and frees capacity when one is deleted', async () => {
+  it('counts folders across an account’s spaces, and frees capacity when one is deleted for good', async () => {
     const alice = await personWithVault(t);
     const first = await spaces.createSpace(alice.ctx, { name: 'One' });
     const second = await spaces.createSpace(alice.ctx, { name: 'Two' });
@@ -29,6 +33,13 @@ describe('live items per account', () => {
     const bobs = await spaces.createSpace(bob.ctx, { name: 'Bob' });
     await spaces.createFolder(bob.ctx, { spaceId: bobs, parentId: null, name: 'C' });
     await pages.deleteNode(alice.ctx, { spaceId: first, nodeId: folderId });
+    // It counts until it is deleted for good.
+    expect(
+      await rejection(
+        spaces.createFolder(alice.ctx, { spaceId: second, parentId: null, name: 'B' }),
+      ),
+    ).toBe('folder-limit');
+    await trash.emptyTrash(alice.ctx, first);
     await spaces.createFolder(alice.ctx, { spaceId: second, parentId: null, name: 'B' });
   });
 });

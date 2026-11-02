@@ -17,8 +17,13 @@ import {
   CryptoError,
   createFolder,
   createPage,
-  deleteNode,
   deleteSpace,
+  emptyTrash,
+  listTrash,
+  purgeTrash,
+  restoreTrash,
+  trashNode,
+  trashRevisions,
   downloadBlob,
   fetchRevisions,
   pageHistory,
@@ -861,20 +866,19 @@ export function mountContentRoutes(
     })),
   }));
 
+  // Revisions with their times as the routes send them.
+  const sentRevisions = ({ revisions, deferred }: Awaited<ReturnType<typeof fetchRevisions>>) => ({
+    revisions: revisions.map((r) => ({
+      ...r,
+      meta: { ...r.meta, createdAt: r.meta.createdAt.toISOString() },
+    })),
+    deferred,
+  });
+
   routes.content(
     pageRoutes.fetchRevisions,
-    async ({ body }, { actor }) => {
-      const { revisions, deferred } = await fetchRevisions(db, actor, body.ids, report).catch(
-        toApiError,
-      );
-      return {
-        revisions: revisions.map((r) => ({
-          ...r,
-          meta: { ...r.meta, createdAt: r.meta.createdAt.toISOString() },
-        })),
-        deferred,
-      };
-    },
+    async ({ body }, { actor }) =>
+      sentRevisions(await fetchRevisions(db, actor, body.ids, report).catch(toApiError)),
     { rateLimit: FETCH_LIMIT },
   );
 
@@ -894,9 +898,49 @@ export function mountContentRoutes(
   routes.account(
     pageRoutes.deleteNode,
     async ({ params }, { principal }) => {
-      await deleteNode(db, blobs, { accountId: principal.accountId, ...params }).catch(toApiError);
+      await trashNode(db, { accountId: principal.accountId, ...params }).catch(toApiError);
       return { ok: true as const };
     },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(pageRoutes.listTrash, async (_input, { principal }) => ({
+    items: await listTrash(db, principal.accountId, report).catch(toApiError),
+  }));
+
+  routes.account(
+    pageRoutes.trashRevisions,
+    async ({ body }, { principal }) =>
+      sentRevisions(
+        await trashRevisions(db, principal.accountId, body.ids, report).catch(toApiError),
+      ),
+    { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.account(
+    pageRoutes.restoreTrash,
+    async ({ params }, { principal }) =>
+      restoreTrash(db, { accountId: principal.accountId, ...params }).catch(toApiError),
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    pageRoutes.purgeTrash,
+    async ({ params }, { principal }) => {
+      await purgeTrash(db, blobs, { accountId: principal.accountId, ...params }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    pageRoutes.emptyTrash,
+    async ({ body }, { principal }) => ({
+      removed: await emptyTrash(db, blobs, {
+        accountId: principal.accountId,
+        spaceId: body.spaceId,
+      }).catch(toApiError),
+    }),
     { rateLimit: WRITE_LIMIT },
   );
 

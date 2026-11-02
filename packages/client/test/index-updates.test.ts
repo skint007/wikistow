@@ -350,8 +350,7 @@ describe('a page index derived change by change', () => {
       pageId: next.pageId,
       basedOn: page.doc.revisionId,
       revisionId: next.revisionId,
-      title: page.content.title,
-      markdown: '',
+      payload: { title: page.content.title, markdown: '', extensions: {} },
     };
     expect(letGo(index, replaced, [saved])).toBe(false);
     // Saved over, but someone else's version stands in, as when its editor
@@ -431,8 +430,7 @@ describe('an update with this person’s own saves', () => {
     pageId: first.doc.pageId,
     basedOn,
     revisionId: RevisionId.parse(`own-${n}`),
-    title: `Saved ${n}`,
-    markdown,
+    payload: { title: `Saved ${n}`, markdown, extensions: {} },
   });
 
   it('puts each in where it was, asking the server for nothing', async () => {
@@ -444,7 +442,7 @@ describe('an update with this person’s own saves', () => {
     const doc = { ...first.doc, revisionId: two.revisionId, draft: true, unpublished: false };
     const expected = new Map(world).set(keyOf(doc), {
       doc,
-      content: { title: two.title, ...indexedContent(two.markdown) },
+      content: { title: two.payload.title, ...indexedContent(two.payload.markdown) },
     });
     expect(seen(next)).toEqual(seen(fresh(expected)));
     expect(next.list({ spaceId: doc.spaceId, tag: 'mine' }).map(({ pageId }) => pageId)).toEqual([

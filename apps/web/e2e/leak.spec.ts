@@ -44,9 +44,11 @@ async function browserStorage(page: Page) {
 /**
  * The browser keeps the theme, the editor last picked, the server's last
  * restore it has seen (none here), the folders open in each space's tree
- * (their IDs), scroll positions and session cookie, and
- * none of `secrets`. Settings kept on the device once changed, such as
- * `wikistow.idleLock` and `wikistow.askBeforeMoves` (`false`), aren't set here. While the vault is open, the tab
+ * (their IDs), the pages whose properties were opened or closed (their
+ * IDs), scroll positions and session cookie, and none of `secrets`.
+ * Settings kept on the device once changed, such as `wikistow.idleLock`,
+ * `wikistow.askBeforeMoves` (`false`) and `wikistow.showProperties`
+ * (`true`), aren't set here. While the vault is open, the tab
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
  * wrapping key in IndexedDB that no script can read out, and, when it is
  * `remembered`, another sealed copy in localStorage. Locking forgets them all.
@@ -58,9 +60,8 @@ async function expectNothingStored(
 ) {
   const stored = await browserStorage(page);
   const { installationId } = await (await page.request.get('/api/installation')).json();
-  const expanded = Object.keys(stored.local).filter((key) =>
-    key.startsWith(`wikistow.expanded.${installationId}.`),
-  );
+  const kept = (prefix: string) =>
+    Object.keys(stored.local).filter((key) => key.startsWith(`${prefix}${installationId}.`));
   expect(stored.local).toEqual({
     'wikistow.theme': expect.any(String),
     ...(editor ? { 'wikistow.editor': editor } : {}),
@@ -68,7 +69,14 @@ async function expectNothingStored(
     [`wikistow.restore.${installationId}`]: '',
     // Folder IDs only.
     ...Object.fromEntries(
-      expanded.map((key) => [key, expect.stringMatching(/^\[("[\w-]+",?)*\]$/)]),
+      kept('wikistow.expanded.').map((key) => [key, expect.stringMatching(/^\[("[\w-]+",?)*\]$/)]),
+    ),
+    // Page IDs, each open or not.
+    ...Object.fromEntries(
+      kept('wikistow.properties.').map((key) => [
+        key,
+        expect.stringMatching(/^\{("[\w-]+":(true|false),?)*\}$/),
+      ]),
     ),
   });
   // The router's scroll positions, by visit, and the kept unlock.
