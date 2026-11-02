@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- The browser app can be installed on phones and computers, and once opened online it loads without a connection. A service worker keeps the app's own files only, never pages or anything from your account. Reading pages offline comes in later releases. (#261)
+
 #### Desktop
 
 - On the beta channel, the update notice offers betas: a beta build, or one installed with `wikistow-desktop-beta-bin`, is offered the newest release of any kind, and other builds the newest stable one, as before. (#259)
