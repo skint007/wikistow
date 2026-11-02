@@ -13,6 +13,7 @@ import {
   sweepPasswordBudgets,
   sweepPlugins,
   sweepPublicLinks,
+  sweepTrash,
 } from '@wikistow/server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -52,8 +53,9 @@ const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.
 // (see sweepBlobs); library plugin files no version lists (see
 // sweepPlugins); old draft checkpoints nothing needs (see sweepDrafts);
 // password allowances that are full again (see sweepPasswordBudgets);
-// and public copies nobody finished, or whose sharer or uploader can no
-// longer publish their page (see sweepPublicLinks), every 10 minutes.
+// public copies nobody finished, or whose sharer or uploader can no
+// longer publish their page (see sweepPublicLinks), every 10 minutes; and
+// whatever has been in the trash for 30 days (see sweepTrash).
 const sweeps = [
   scheduleSweep(stdoutLog, 'blob-sweep', () => sweepBlobs(db, blobs)),
   scheduleSweep(stdoutLog, 'plugin-sweep', async () => ({
@@ -66,6 +68,7 @@ const sweeps = [
     deleted: await sweepPasswordBudgets(db),
   })),
   scheduleSweep(stdoutLog, 'public-link-sweep', () => sweepPublicLinks(db), 10 * 60 * 1000),
+  scheduleSweep(stdoutLog, 'trash-sweep', () => sweepTrash(db, blobs)),
 ];
 
 // Public copies a release's reader renders differently are rendered again,

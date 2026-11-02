@@ -19,6 +19,7 @@ import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
 import { Rail, UpdateDot, useSignOut } from './rail';
 import { useVault, vaultStore } from '../vault/store';
+import { TrashNotice } from '../page/trash-notice';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
 import { linkedSearch, SearchOpener, takeHeldSearch } from './search-link';
@@ -103,7 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-region="app"
           className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
         >
-          <div className="hidden min-[900px]:block">
+          <div className="hidden min-h-0 min-[900px]:block">
             <Rail onSignOut={signOut} onSearch={() => search()} />
           </div>
           <header
@@ -169,6 +170,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         <SafeModeBanner />
         <RestoreNotice />
+        {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
         {signOutFailed && (
           <p
             role="alert"

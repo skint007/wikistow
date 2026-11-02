@@ -611,7 +611,15 @@ async function requirePickable(tx: Database, share: ShareRow, folderId: string) 
   const [folder] = await tx
     .select({ id: nodes.id })
     .from(nodes)
-    .where(and(eq(nodes.id, folderId), eq(nodes.spaceId, share.spaceId), eq(nodes.kind, 'folder')));
+    .where(
+      and(
+        eq(nodes.id, folderId),
+        eq(nodes.spaceId, share.spaceId),
+        eq(nodes.kind, 'folder'),
+        isNull(nodes.copyId),
+        isNull(nodes.trashId),
+      ),
+    );
   if (!folder) throw new ContentError('not-found');
   if (share.rootId === null) return;
   const rows = await tx.execute<{ id: string }>(sql`

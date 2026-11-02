@@ -1020,7 +1020,6 @@ function PageBody({
       <DeletePageDialog
         page={page}
         title={title}
-        publishedCount={info.heads.publishedCount}
         open={deleting}
         onOpenChange={setDeleting}
         onDone={() => {
