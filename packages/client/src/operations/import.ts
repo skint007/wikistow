@@ -16,6 +16,7 @@ import { pace } from '../pace.ts';
 import { newPayload, PageTooLarge, revisePayload, type AttachmentRef } from '../payload.ts';
 import {
   createPage,
+  loadPage,
   publishPage,
   saveDraft,
   shownVersions,
@@ -83,8 +84,9 @@ const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\
  *
  * Each folder and page keeps its note's key (`importMark`), so running the
  * same import again into the same place changes nothing: a folder or page
- * of that key where it would go is used, a published one left as it is,
- * and an unpublished one finished. An import cut short is finished so.
+ * of that key where it would go is used, one ever published left as it
+ * is, even if someone unpublished it since, and one never published
+ * finished. An import cut short is finished so.
  *
  * It waits out the server's rate limits (`patient`). Stops with
  * `ImportStopped`, at the next step, if `signal` aborts or the revision
@@ -167,7 +169,9 @@ export async function importJoplin(
       if (version?.opened.kind !== 'current' || page.draftHead === null) continue;
       const key = importKeyOf(version.opened.payload.extensions);
       if (key === null) continue;
-      const done = page.publishedHead !== null;
+      // Published once, it is done: one unpublished since was unpublished by someone.
+      const done =
+        page.publishedHead !== null || (await loadPage(ctx, page.id)).heads.publishedCount > 0;
       earlierPages.set(placedAt(page.parentId, key), { pageId: page.id, done, draft: version });
     }
   }
