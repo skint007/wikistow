@@ -124,8 +124,9 @@ const DOLLAR = /(\\*)\$/g;
 
 /**
  * Text (`escaped`), but an alert's marker as GitHub writes it: `[!NOTE]`,
- * not `\[!NOTE]`. In a block with inline math, every dollar is escaped
- * (`nearMath`): one that could open math could close at that math's end.
+ * not `\[!NOTE]`. In a block with inline math, or a dollar in its code or
+ * a link, every dollar is escaped (`nearMath`): one that could open math
+ * could close at that dollar.
  */
 const text: Handle = (node: Text, ...rest) => {
   const escapedText = escaped(node, ...rest);
@@ -136,7 +137,20 @@ const text: Handle = (node: Text, ...rest) => {
   );
 };
 
-/** Marks the text of each block of `tree` holding inline math (`nearMath`). Without recursion. */
+// Whether `node`, not text, is or holds a dollar that could close math
+// opened in the text before it: inline math, or a dollar in code, a link's
+// address or title, or HTML.
+const closesMath = (node: Nodes) =>
+  node.type === 'inlineMath' ||
+  (node.type !== 'text' &&
+    (('value' in node && node.value.includes('$')) ||
+      ('url' in node && node.url.includes('$')) ||
+      ('title' in node && !!node.title?.includes('$'))));
+
+/**
+ * Marks the text of each block of `tree` where a dollar outside its text
+ * could close math (`closesMath`, `nearMath`). Without recursion.
+ */
 function markNearMath(tree: Root) {
   const stack: Nodes[] = [tree];
   for (let node = stack.pop(); node; node = stack.pop()) {
@@ -144,14 +158,14 @@ function markNearMath(tree: Root) {
     const phrasing =
       node.type === 'paragraph' || node.type === 'heading' || node.type === 'tableCell';
     const texts: Text[] = [];
-    let math = false;
+    let near = false;
     const inside: Nodes[] = phrasing ? [...node.children] : [];
     for (let child = inside.pop(); child; child = inside.pop()) {
-      if (child.type === 'inlineMath') math = true;
+      near ||= closesMath(child);
       if (child.type === 'text') texts.push(child);
       if ('children' in child) inside.push(...child.children);
     }
-    if (math) for (const text of texts) text.data = { ...text.data, nearMath: true };
+    if (near) for (const text of texts) text.data = { ...text.data, nearMath: true };
     if (!phrasing) stack.push(...node.children);
   }
 }
@@ -168,7 +182,7 @@ declare module 'mdast' {
   interface TextData {
     /** Whether it starts with an alert's marker (`alertOf`). */
     alert?: boolean;
-    /** Whether its block holds inline math (`markNearMath`). */
+    /** Whether its block holds a dollar outside text that could close math (`markNearMath`). */
     nearMath?: boolean;
   }
   interface LinkData {

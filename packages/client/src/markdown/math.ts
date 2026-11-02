@@ -319,9 +319,9 @@ inlineMath.peek = () => '$';
 /**
  * Writes math as remark-math does, inline math between single dollars where
  * it can be (`inlineMath`), and escapes only the dollars in text that could
- * make math (`UNSAFE`). Where a block holds inline math, a dollar in its
- * text that could open math could close at that math's end, so the visual
- * editor escapes those too.
+ * make math (`UNSAFE`). Where a block holds inline math, or a dollar in
+ * code or a link, a dollar in its text that could open math could close
+ * there, so the visual editor escapes those too.
  */
 export const mathToMarkdownExtension: ToMarkdownExtension = {
   unsafe: UNSAFE,
