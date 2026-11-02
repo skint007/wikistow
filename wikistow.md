@@ -22,7 +22,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Existing agents use a CLI with their own identity and limited grants. Publishing is an additional grant, not implied by editing permission.
 - Browser and Linux desktop clients come first. Search runs on the client over content the user can decrypt.
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
-- No bulk importer. A person moves an Obsidian note by pasting its Markdown into a page, or has an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
+- Bulk import only from Joplin (see **Import**). A person moves an Obsidian note by pasting its Markdown into a page, or has an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
 Offline editing, Windows and macOS packaging, comments, simultaneous live editing, semantic search, passkeys and MCP integration are later work. A stale edit produces a conflict instead of overwriting another writer.
 
