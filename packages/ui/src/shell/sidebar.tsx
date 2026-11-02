@@ -70,6 +70,7 @@ import {
   type PageAction,
   type PageInfo,
 } from './tree-menus';
+import { useNeedsConnection } from './needs-connection';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -264,6 +265,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const standing = useOwnerStanding(spaceId);
+  // New pages and folders, and moves, need the server (ADR 0009, decision 8).
+  const needs = useNeedsConnection();
   const [focused, setFocused] = useState<string | null>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
 
@@ -440,7 +443,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           <div className="flex flex-1">
             <Button
               className="flex-1 rounded-l-control rounded-r-none"
-              onClick={() => setCreating({ kind: 'page', parentId: null })}
+              {...needs.click(() => setCreating({ kind: 'page', parentId: null }))}
             >
               <Plus strokeWidth={1.75} /> New page
             </Button>
@@ -455,7 +458,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setFromTemplate(null)}>
+                <DropdownMenuItem {...needs.select(() => setFromTemplate(null))}>
                   New page from template…
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -466,7 +469,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             size="icon"
             aria-label="New folder"
             className="rounded-control"
-            onClick={() => setCreating({ kind: 'folder', parentId: null })}
+            {...needs.click(() => setCreating({ kind: 'folder', parentId: null }))}
           >
             <FolderPlus strokeWidth={1.75} />
           </Button>
@@ -547,7 +550,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   aria-expanded={row.expanded}
                   aria-selected={shown}
                   onClick={() => openFolder(row.id)}
-                  draggable={canEditAt(row.id)}
+                  draggable={canEditAt(row.id) && !needs.offline}
                   onDragStart={(event) =>
                     startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                   }
@@ -625,7 +628,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 {...common}
                 aria-selected={selected}
                 onClick={() => openPage(row.id)}
-                draggable={canEditAt(row.parentId)}
+                draggable={canEditAt(row.parentId) && !needs.offline}
                 onDragStart={(event) =>
                   startDrag(event, { id: row.id, kind: 'page', name: row.title })
                 }

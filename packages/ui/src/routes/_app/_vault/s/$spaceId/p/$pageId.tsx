@@ -1,6 +1,7 @@
 import {
   bannerAttachment,
   coverOf,
+  keptOperations,
   linkablePages,
   linkTableOf,
   pageOperations,
@@ -90,6 +91,8 @@ import { usePlugins, type ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
+import { useNeedsConnection } from '../../../../../../shell/needs-connection';
+import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
 
@@ -320,6 +323,15 @@ function PageBody({
   const shareable = sharer && (shareRoot !== null || topOpened);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Offline, what needs the server says so (ADR 0009, decision 8), and the
+  // page says when its space was last listed, which it is shown as of.
+  const needs = useNeedsConnection();
+  const listedAt = needs.offline ? ctx.keptContent?.space(page.spaceId)?.listedAt : undefined;
+  // Offline, links to the space's pages this device doesn't keep say so.
+  const notKept = useMemo(
+    () => (needs.offline && tree ? keptOperations.notKeptIn(ctx, page.spaceId) : undefined),
+    [needs.offline, tree, ctx, page.spaceId],
+  );
   // The published body as shown, whose headings the table of contents lists.
   const [shownBody, setShownBody] = useState<HTMLElement | null>(null);
   const headings = useHeadings(shownBody);
@@ -342,8 +354,9 @@ function PageBody({
         revision: revisionId,
         pinned,
         publicLink: linked,
+        offline: needs.offline,
       }),
-    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked],
+    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked, needs.offline],
   );
 
   const go = (view: 'draft' | 'published') =>
@@ -554,21 +567,21 @@ function PageBody({
               </nav>
               <AssistantButton />
               {pagePanels.map(({ id, label, icon: Icon }) => (
-                <Button key={id} variant="ghost" size="sm" onClick={() => setPanel(id)}>
+                <Button key={id} variant="ghost" size="sm" {...needs.click(() => setPanel(id))}>
                   <Icon strokeWidth={1.75} /> <span className="max-[899px]:sr-only">{label}</span>
                 </Button>
               ))}
               <PageViews place="page.toolbar" shown={pluginShown} />
               <PagePlugins shown={pluginShown} />
               {shareable && (
-                <Button variant="ghost" size="sm" onClick={() => setSharing(true)}>
+                <Button variant="ghost" size="sm" {...needs.click(() => setSharing(true))}>
                   <Share strokeWidth={1.75} /> <span className="max-[899px]:sr-only">Share</span>
                 </Button>
               )}
               {model.actions.edit && (
                 <Button
                   size="sm"
-                  onClick={() => void act(() => runCommand(editPage, page, commandEnv))}
+                  {...needs.click(() => void act(() => runCommand(editPage, page, commandEnv)))}
                 >
                   <Pencil strokeWidth={1.75} /> Edit
                 </Button>
@@ -598,12 +611,12 @@ function PageBody({
                 </Button>
               )}
               {model.actions.publish && (
-                <Button size="sm" disabled={busy} onClick={() => void publish()}>
+                <Button size="sm" disabled={busy} {...needs.click(() => void publish())}>
                   <Check strokeWidth={1.75} /> Publish
                 </Button>
               )}
               {model.actions.detach && (
-                <Button size="sm" variant="secondary" onClick={() => setDetaching(true)}>
+                <Button size="sm" variant="secondary" {...needs.click(() => setDetaching(true))}>
                   <Unlink strokeWidth={1.75} /> Detach to edit…
                 </Button>
               )}
@@ -641,31 +654,36 @@ function PageBody({
                       </>
                     )}
                     {canEdit && (
-                      <DropdownMenuItem onSelect={() => setMoving('move')}>
+                      <DropdownMenuItem {...needs.select(() => setMoving('move'))}>
                         Move to…
                       </DropdownMenuItem>
                     )}
                     {canEdit && (
-                      <DropdownMenuItem onSelect={() => setMoving('copy')}>
+                      <DropdownMenuItem {...needs.select(() => setMoving('copy'))}>
                         Copy to…
                       </DropdownMenuItem>
                     )}
                     {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
                     {canEdit && info.canPublish && (
-                      <DropdownMenuItem onSelect={() => setPublishing(true)}>
+                      <DropdownMenuItem {...needs.select(() => setPublishing(true))}>
                         Publish to another space…
                       </DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
-                      <DropdownMenuItem onSelect={onShareLink}>Share public link…</DropdownMenuItem>
+                      <DropdownMenuItem {...needs.select(onShareLink)}>
+                        Share public link…
+                      </DropdownMenuItem>
                     )}
                     {publishedHead && info.canPublish && (
-                      <DropdownMenuItem onSelect={() => setUnpublishing(true)}>
+                      <DropdownMenuItem {...needs.select(() => setUnpublishing(true))}>
                         Unpublish…
                       </DropdownMenuItem>
                     )}
                     {sharer && (
-                      <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        {...needs.select(() => setDeleting(true))}
+                      >
                         Delete page
                       </DropdownMenuItem>
                     )}
@@ -749,6 +767,14 @@ function PageBody({
             </h1>
           )}
           <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
+            {listedAt && (
+              <span
+                data-hint="When this device last heard from the server about this space"
+                className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+              >
+                As of {asOf(new Date(listedAt))}
+              </span>
+            )}
             {provenance && (
               <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
                 <span aria-hidden>↗</span>
@@ -775,7 +801,7 @@ function PageBody({
                 </span>
               </button>
             )}
-            {publisher && copiesUnknown && (
+            {publisher && copiesUnknown && !needs.offline && (
               // Said as it changes, so a retry that fails again is heard.
               <span aria-live="polite">
                 <button
@@ -889,6 +915,7 @@ function PageBody({
                       }}
                       pages={linkable}
                       links={linkTableOf(payload)}
+                      notKept={notKept}
                       editing={
                         canEdit
                           ? { parentId: info.parentId, create: info.parentId !== null || topOpened }

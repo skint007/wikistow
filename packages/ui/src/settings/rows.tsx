@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/button';
 import { desktop } from '../desktop';
+import { useNeedsConnection } from '../shell/needs-connection';
 
 /** The pill on a setting kept on this device only. Unmarked settings follow the account. */
 export const THIS_DEVICE = desktop ? 'This computer' : 'This browser';
@@ -132,6 +133,7 @@ export function FormRow({
   children: ReactNode;
 } & Omit<RowProps, 'name' | 'action' | 'children'>) {
   const { open, setOpen } = use(OpenedContext);
+  const needs = useNeedsConnection();
   const shown = open === id;
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -157,7 +159,8 @@ export function FormRow({
           variant={shown ? 'ghost' : 'outline'}
           aria-expanded={shown}
           aria-controls={shown ? panelId : undefined}
-          onClick={() => (shown ? hide() : setOpen(id))}
+          // What these rows change is the server's: offline it waits (ADR 0009, decision 8).
+          {...(shown ? { onClick: hide } : needs.click(() => setOpen(id)))}
         >
           {shown ? close : label}
         </Button>

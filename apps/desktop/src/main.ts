@@ -813,6 +813,9 @@ void app.whenReady().then(async () => {
   handle('keepSearchIndex', async (sealed) => {
     if (store?.secure) await searchIndex.write(z.instanceof(Uint8Array).parse(sealed));
   });
+  handle('dropSearchIndex', async () => {
+    await searchIndex.remove();
+  });
   handle('trustMarks', async () => (store?.secure ? trustMarks.read() : null));
   handle('keepTrustMarks', async (sealed) => {
     if (store?.secure) await trustMarks.write(z.instanceof(Uint8Array).parse(sealed));

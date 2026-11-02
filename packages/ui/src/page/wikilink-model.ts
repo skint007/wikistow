@@ -1,4 +1,5 @@
 import {
+  linkKey,
   resolveLinked,
   resolveWikilinks,
   withHeading,
@@ -25,7 +26,11 @@ export type WikilinkView =
   | { kind: 'image' | 'file'; attachmentId: string; text: string }
   | { kind: 'missing'; title: string; text: string }
   | { kind: 'ambiguous'; text: string }
+  | { kind: 'not-kept'; text: string }
   | { kind: 'text'; text: string };
+
+/** What a link to a page this device doesn't keep says, offline. */
+export const NOT_KEPT_HINT = 'This page isn’t kept on this device';
 
 export type WikilinkScope = {
   /** The pages the viewer can open in the space, or null until known. */
@@ -37,6 +42,11 @@ export type WikilinkScope = {
   attachments: readonly { id: string; name: string; mediaType: string }[];
   /** The viewer edits this page. */
   editor: boolean;
+  /**
+   * Offline, the pages of the space this device lists but keeps no version
+   * of (ADR 0009, decision 4), whose titles it doesn't know.
+   */
+  notKept?: ReadonlySet<string> | undefined;
 };
 
 /**
@@ -45,7 +55,9 @@ export type WikilinkScope = {
  * against the viewer's own pages. An entry for a page the viewer can't open
  * counts for nothing. A link without its own text shows the target's
  * current title. Obsidian forms WikiStow doesn't support stay as written
- * and load nothing.
+ * and load nothing. Offline, one whose entry names a page this device
+ * doesn't keep is `not-kept`, and for an editor, so is one that names no
+ * page while any aren't kept, as it may name one of them.
  */
 export function wikilinkView(link: WikilinkNode, scope: WikilinkScope): WikilinkView {
   if (link.unsupported) return { kind: 'text', text: link.source };
@@ -84,6 +96,12 @@ export function wikilinkView(link: WikilinkNode, scope: WikilinkScope): Wikilink
       text: link.shown ?? withHeading(link.target && title, link.heading),
       name: withHeading(title, link.heading),
     };
+  }
+  if (scope.notKept && scope.notKept.size > 0 && found?.status !== 'ambiguous') {
+    const entry = scope.links.get(linkKey(link));
+    if (scope.editor || (entry !== undefined && scope.notKept.has(entry))) {
+      return { kind: 'not-kept', text: written.text };
+    }
   }
   if (!scope.editor) return written;
   return found?.status === 'ambiguous'

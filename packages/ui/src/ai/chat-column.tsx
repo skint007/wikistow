@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { chatStore, useChatStore } from './chat';
 import { ChatPanel } from './chat-panel';
 import { aiStatusQuery } from './session';
+import { useNeedsConnection } from '../shell/needs-connection';
 
 /** Wide enough for the chat beside the page, rather than over it. */
 const WIDE = '(min-width: 1200px)';
@@ -49,9 +50,18 @@ export function ChatColumn() {
 export function AssistantButton() {
   const { data } = useQuery(aiStatusQuery);
   const { open } = useChatStore();
+  const needs = useNeedsConnection();
   if (!data?.enabled) return null;
   return (
-    <Button variant="ghost" size="sm" aria-pressed={open} onClick={() => chatStore.setOpen(!open)}>
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-pressed={open}
+      // Offline it still closes.
+      {...(open
+        ? { onClick: () => chatStore.setOpen(false) }
+        : needs.click(() => chatStore.setOpen(true)))}
+    >
       <Sparkles strokeWidth={1.75} /> <span className="max-[899px]:sr-only">Assistant</span>
     </Button>
   );

@@ -10,19 +10,20 @@ import { linkHint } from '../desktop';
 import { errorMessage } from '../errors';
 import { AttachmentImage, AttachmentLink, ATTACHMENT_SCHEME } from './attachments';
 import { InLink, PageBody, type PageBodyContext } from './body-context';
-import { wikilinkView, type WikilinkView } from './wikilink-model';
+import { NOT_KEPT_HINT, wikilinkView, type WikilinkView } from './wikilink-model';
 
 /** One wikilink in a page body, resolved against what the viewer can open. */
 export function WikilinkReader({ node }: { node: WikilinkNode }) {
   const body = use(PageBody);
   if (!body) throw new Error('unreachable: a page body provides it');
-  const { attachments, pages, links, editing } = body;
+  const { attachments, pages, links, editing, notKept } = body;
   const view = wikilinkView(node, {
     pages,
     links,
     selfId: attachments.page.pageId,
     attachments: attachments.attachments,
     editor: editing !== null,
+    notKept,
   });
   // In a link's text, a link to a page or a file, or one to create a page,
   // is part of that link (`InLink`), not a control of its own inside it.
@@ -49,6 +50,17 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
     case 'missing':
       if (inLink || !editing?.create) return view.text;
       return <CreateLink body={body} parentId={editing.parentId} {...view} />;
+    case 'not-kept':
+      return (
+        <span
+          data-hint={NOT_KEPT_HINT}
+          data-hint-side="top"
+          aria-description={NOT_KEPT_HINT}
+          className="underline decoration-dotted underline-offset-2"
+        >
+          {view.text}
+        </span>
+      );
     case 'ambiguous':
       // The chooser comes with the source editor; until then, just a hint,
       // above it, as a link's (`linkHint`), where the pointer doesn't cover it.

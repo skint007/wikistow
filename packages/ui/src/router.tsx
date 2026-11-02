@@ -1,6 +1,7 @@
-import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { MutationCache, onlineManager, QueryCache, QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@wikistow/client/api';
 import { meQuery } from './api';
+import { connection } from './data/connection';
 import { vaultStore } from './vault/store';
 import { pluginRuntime } from './plugins/runtime';
 import { createRouter, type RouterHistory } from '@tanstack/react-router';
@@ -19,8 +20,17 @@ export function createAppRouter({ history }: { history: RouterHistory }) {
   const queryClient: QueryClient = new QueryClient({
     queryCache: new QueryCache({ onError: sessionLost }),
     mutationCache: new MutationCache({ onError: sessionLost }),
-    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: true } },
+    // Never paused for the browser's idea of offline: offline, queries read
+    // what's kept (ADR 0009, decision 4), and the app has its own idea of it.
+    defaultOptions: {
+      queries: { retry: false, refetchOnWindowFocus: true, networkMode: 'always' },
+      mutations: { networkMode: 'always' },
+    },
   });
+  // Back online, what's shown loads again from the server (`refetchOnReconnect`).
+  onlineManager.setEventListener((setOnline) =>
+    connection.subscribe(() => setOnline(connection.get().online)),
+  );
   vaultStore.attach(queryClient);
   pluginRuntime.start(queryClient);
   return createRouter({

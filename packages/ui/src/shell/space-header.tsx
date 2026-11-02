@@ -27,6 +27,7 @@ import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
 import { useClient } from '../vault/store';
+import { useNeedsConnection } from './needs-connection';
 import { SpaceIcon, SpaceLookDialog } from './space-look';
 
 /**
@@ -66,6 +67,8 @@ export function SpaceHeader({
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
   const [action, setAction] = useState<OwnerAction | null>(null);
+  // Everything in the space's menu needs the server (ADR 0009, decision 8).
+  const needs = useNeedsConnection();
   const { data: order } = useQuery(spaceOrderQuery(ctx));
   const deletable = owner && order !== undefined && order.homeId !== spaceId;
   return (
@@ -103,32 +106,36 @@ export function SpaceHeader({
         <DropdownMenuContent align="end">
           {owner && (
             <>
-              <DropdownMenuItem onSelect={() => setRestyling(true)}>
+              <DropdownMenuItem {...needs.select(() => setRestyling(true))}>
                 <Palette strokeWidth={1.75} /> Name and look…
               </DropdownMenuItem>
               {onShare && (
-                <DropdownMenuItem onSelect={onShare}>
+                <DropdownMenuItem {...needs.select(onShare)}>
                   <Share strokeWidth={1.75} /> Share space…
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
-                onSelect={() => void navigate({ to: '/s/$spaceId/members', params: { spaceId } })}
+                {...needs.select(
+                  () => void navigate({ to: '/s/$spaceId/members', params: { spaceId } }),
+                )}
               >
                 <Users strokeWidth={1.75} /> Members and owners
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => void navigate({ to: '/s/$spaceId/groups', params: { spaceId } })}
+                {...needs.select(
+                  () => void navigate({ to: '/s/$spaceId/groups', params: { spaceId } }),
+                )}
               >
                 <UsersRound strokeWidth={1.75} /> Groups
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem onSelect={onExport}>
+          <DropdownMenuItem {...needs.select(onExport)}>
             <Download strokeWidth={1.75} /> Export…
           </DropdownMenuItem>
           {onImport && (
-            <DropdownMenuItem onSelect={onImport}>
+            <DropdownMenuItem {...needs.select(onImport)}>
               <Upload strokeWidth={1.75} /> Import…
             </DropdownMenuItem>
           )}
@@ -137,7 +144,7 @@ export function SpaceHeader({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
-                onSelect={() => setAction({ kind: 'delete' })}
+                {...needs.select(() => setAction({ kind: 'delete' }))}
               >
                 <Trash2 strokeWidth={1.75} /> Delete space…
               </DropdownMenuItem>

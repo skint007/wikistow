@@ -89,13 +89,10 @@ vi.mock('@wikistow/client', async (actual) => {
   };
 });
 
-// The desktop app, with a trusted keyring and nothing kept yet.
-vi.mock('../src/desktop', () => ({
-  desktop: {
-    secureStorage: async () => true,
-    searchIndex: async () => null,
-    keepSearchIndex: client.keepSearchIndex,
-  },
+// A device that keeps the index, as the desktop app with a trusted keyring
+// does with Every page, with nothing kept yet.
+vi.mock('../src/data/index-file', () => ({
+  searchIndexFile: async () => ({ read: async () => null, write: client.keepSearchIndex }),
 }));
 
 const { GATHER_MS, KEEP_AT_MOST_MS, KEEP_MS, searchIndexChanged, searchIndexQuery } =

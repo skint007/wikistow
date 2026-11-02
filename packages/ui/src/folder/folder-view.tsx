@@ -59,6 +59,7 @@ import {
   type OwnWrite,
 } from './folder-model';
 import { useCellEdits, type CellEdits, type SaveProperty } from './use-cell-edits';
+import { useOffline } from '../data/connection';
 
 // A folder's own view (ADR 0006, decision 8; ui-design, Folder view): the
 // pages directly in it as a list or a table of their properties, from the
@@ -123,6 +124,7 @@ export function FolderView({
   );
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
   const edits = useCellEdits(spaceId, save);
+  const offline = useOffline();
 
   if (!tree) return <FolderCard>{null}</FolderCard>;
   const folder = tree.folders.find((f) => f.id === folderId);
@@ -146,7 +148,8 @@ export function FolderView({
       ? { name: opened.metadata.name, ...folderLook(opened.metadata) }
       : { name: 'Unreadable folder', emoji: '⚠️', tint: 'orange' };
   const role = shareCovering(tree, folderId)?.role ?? tree.space?.role;
-  const canEdit = role === 'editor' || role === 'owner';
+  // A cell's edit saves the page's draft: offline, the table only reads (ADR 0009, decision 8).
+  const canEdit = (role === 'editor' || role === 'owner') && !offline;
   const crumbs = crumbsOf(tree, folder.parentId);
   const shownColumns = columns.filter((column) => !column.hidden);
   const pagesHere = tree.pages.filter((p) => p.parentId === folderId).length;
