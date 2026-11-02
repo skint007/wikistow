@@ -11,6 +11,7 @@ import {
   Share,
   ShieldAlert,
   Trash2,
+  Upload,
   Users,
   UsersRound,
 } from 'lucide-react';
@@ -30,7 +31,8 @@ import { SpaceIcon, SpaceLookDialog } from './space-look';
 
 /**
  * The sidebar's head: the space tile and name, and for owners, how many
- * people have access. Its menu exports the space, and for owners changes its
+ * people have access. Its menu exports the space, imports into it for those
+ * who can publish there, and for owners changes its
  * name and look, shares it, shows its members or its groups, or deletes it,
  * unless it is their home space.
  * A new owner who hasn't confirmed who added them gets a way back to that
@@ -45,6 +47,7 @@ export function SpaceHeader({
   metadata,
   onShare,
   onExport,
+  onImport,
 }: {
   spaceId: SpaceId;
   /** Null for someone who holds only folder shares in the space. */
@@ -54,6 +57,8 @@ export function SpaceHeader({
   /** Unset when the space can't be shared whole, as when its own name failed its checks. */
   onShare: (() => void) | undefined;
   onExport: () => void;
+  /** Unset for someone who can't edit and publish at the top of the space. */
+  onImport: (() => void) | undefined;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -122,6 +127,11 @@ export function SpaceHeader({
           <DropdownMenuItem onSelect={onExport}>
             <Download strokeWidth={1.75} /> Export…
           </DropdownMenuItem>
+          {onImport && (
+            <DropdownMenuItem onSelect={onImport}>
+              <Upload strokeWidth={1.75} /> Import…
+            </DropdownMenuItem>
+          )}
           {deletable && (
             <>
               <DropdownMenuSeparator />

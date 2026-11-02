@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   findWikilinks,
   markdownNodes,
+  mathToMarkdownExtension,
   parseMarkdown,
   parseWikilink,
   splitFrontmatter,
@@ -25,7 +26,7 @@ const samples = readdirSync(corpus)
   .map((name) => ({ name, markdown: readFileSync(new URL(name, corpus), 'utf8') }));
 
 const stringify = (tree: Nodes) =>
-  toMarkdown(tree, { extensions: [gfmToMarkdown(), wikilinkToMarkdown] });
+  toMarkdown(tree, { extensions: [gfmToMarkdown(), wikilinkToMarkdown, mathToMarkdownExtension] });
 
 // What the page says, with where each node sat left out.
 const meaning = (body: string): unknown =>

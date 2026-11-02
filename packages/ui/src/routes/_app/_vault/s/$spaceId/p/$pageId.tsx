@@ -78,6 +78,7 @@ import {
   type ReadingQueue,
 } from '../../../../../../page/reading-changes-model';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
+import { LinkedFrom } from '../../../../../../page/linked-from';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
@@ -892,6 +893,7 @@ function PageBody({
                 </div>
               </>
             ))}
+          {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
           {plugins.regions['page.footer'].length > 0 && (
             <div data-region="page.footer" className="grid gap-3">
               <PageViews place="page.footer" shown={pluginShown} />
@@ -1020,7 +1022,6 @@ function PageBody({
       <DeletePageDialog
         page={page}
         title={title}
-        publishedCount={info.heads.publishedCount}
         open={deleting}
         onOpenChange={setDeleting}
         onDone={() => {

@@ -47,6 +47,7 @@ import { ShareDialog } from '../sharing/share-dialog';
 import { useClient } from '../vault/store';
 import { useExpandedFolders } from './expanded-folders';
 import { ExportDialog, type Exporting } from './export-dialog';
+import { ImportDialog, type Importing } from './import-dialog';
 import {
   DEFAULT_CHOICE,
   FolderLookDialog,
@@ -259,6 +260,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [moving, setMoving] = useState<Moving | null>(null);
   const startMove = useStartMove(spaceId, setMoving);
   const [exporting, setExporting] = useState<Exporting | null>(null);
+  const [importing, setImporting] = useState<Importing | null>(null);
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const standing = useOwnerStanding(spaceId);
@@ -306,6 +308,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // failed its checks; one in a newer format still opened.
   const topOpened = tree.space?.metadata !== null;
   const canEdit = canEditAt(null) && topOpened;
+  // Importing publishes what it makes, so it needs publish rights there too.
+  const canImportAt = (parentId: FolderId | null) =>
+    canEditAt(parentId) && ((shareCovering(tree, parentId) ?? tree.space)?.canPublish ?? false);
   const focusId =
     focused && rows.some((r) => r.id === focused)
       ? focused
@@ -424,6 +429,11 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         metadata={tree.space?.metadata}
         onShare={topOpened ? () => setSharing({ rootId: null }) : undefined}
         onExport={() => setExporting({ folderId: null, name: spaceName ?? 'Shared with you' })}
+        onImport={
+          canImportAt(null) && topOpened && spaceName !== null
+            ? () => setImporting({ folderId: null, name: spaceName })
+            : undefined
+        }
       />
       {canEdit && (
         <div className="flex gap-2">
@@ -525,6 +535,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   }
                 : null,
               onExport: () => setExporting({ folderId: row.id, name: row.name }),
+              onImport: canImportAt(row.id)
+                ? () => setImporting({ folderId: row.id, name: row.name })
+                : undefined,
             });
             const shown = params.folderId === row.id;
             return (
@@ -713,6 +726,11 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         exporting={exporting}
         onOpenChange={(open) => !open && setExporting(null)}
       />
+      <ImportDialog
+        spaceId={spaceId}
+        importing={importing}
+        onOpenChange={(open) => !open && setImporting(null)}
+      />
       {pageDialog && (
         <PageRowDialog
           spaceId={spaceId}
@@ -743,14 +761,15 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               ?
             </DialogTitle>
             <DialogDescription>
-              This deletes the folder, {deletingContents?.folders ?? 0} folder(s) and{' '}
-              {deletingContents?.pages ?? 0} page(s) inside it, with every version and attachment.
-              It can’t be undone.
+              It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
+              {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You can
+              restore it from Trash until then. Any public links in it end.
             </DialogDescription>
           </DialogHeader>
           <DeleteButton
             spaceId={spaceId}
             nodeId={deleting}
+            name={deletingName?.kind === 'folder' ? deletingName.name : 'Folder'}
             onDone={() => {
               setDeleting(null);
               const current = tree.pages.find((p) => p.id === params.pageId);
@@ -932,7 +951,6 @@ function PageRowDialog({
     <DeletePageDialog
       page={page}
       title={title}
-      publishedCount={info.heads.publishedCount}
       open={open}
       onOpenChange={onOpenChange}
       onDone={() => {

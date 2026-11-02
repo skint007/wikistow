@@ -12,6 +12,7 @@ import {
   draftPage,
   listSpaces,
   pageHistory,
+  pageLinks,
   publishPage,
   publishTo,
   readPage,
@@ -22,6 +23,7 @@ import {
 } from './commands/content.ts';
 import { copyNode } from './commands/copy.ts';
 import { exportMarkdown } from './commands/export.ts';
+import { importNotes } from './commands/import.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { WINDOWS } from './files.ts';
@@ -62,6 +64,7 @@ const COMMANDS = {
     options: { space: { type: 'string' }, folder: { type: 'string' }, out: { type: 'string' } },
     positionals: 0,
   },
+  import: { options: { space: { type: 'string' }, folder: { type: 'string' } }, positionals: 1 },
   'folder create': {
     options: { space: { type: 'string' }, parent: { type: 'string' }, name: { type: 'string' } },
     positionals: 0,
@@ -123,6 +126,7 @@ const COMMANDS = {
     positionals: 1,
   },
   'page history': { options: {}, positionals: 1 },
+  'page links': { options: {}, positionals: 1 },
   'page download-attachment': {
     options: { draft: { type: 'boolean' }, revision: { type: 'string' }, out: { type: 'string' } },
     positionals: 2,
@@ -449,6 +453,24 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
         deps,
       );
     }
+    case 'import': {
+      const space = optional(values, 'space');
+      const folder = optional(values, 'folder');
+      if (space === null && folder === null) {
+        throw new CliError('usage', 'import takes --space, --folder or both');
+      }
+      return importNotes(
+        io,
+        out,
+        {
+          ...content,
+          path: first,
+          spaceId: space === null ? null : id(SpaceId, space, 'space'),
+          folderId: folder === null ? null : id(FolderId, folder, 'folder'),
+        },
+        deps,
+      );
+    }
     case 'folder create': {
       const space = optional(values, 'space');
       const parent = optional(values, 'parent');
@@ -634,5 +656,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
     }
     case 'page history':
       return pageHistory(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
+    case 'page links':
+      return pageLinks(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
   }
 }

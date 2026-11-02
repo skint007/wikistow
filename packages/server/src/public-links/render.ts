@@ -17,6 +17,7 @@ import {
   type AlertType,
   type ChosenFile,
 } from '@wikistow/client/reader';
+import { renderMath } from '@wikistow/client/reader/math';
 import type { Element, ElementContent } from 'hast';
 import { toHtml } from 'hast-util-to-html';
 import type { WikilinkNode } from 'mdast';
@@ -113,7 +114,7 @@ export function renderBody(input: RenderInput): Rendered {
     });
     return element('a', { href: `#${mark}-${wikilinks.length - 1}` }, [text(link.value)]);
   };
-  const tree = bodyHtml(highlightCode(readBody(input.markdown)), wikilink);
+  const tree = bodyHtml(renderMath(highlightCode(readBody(input.markdown))), wikilink);
   const files =
     input.files ??
     chooseFiles(
@@ -154,7 +155,13 @@ export function renderBody(input: RenderInput): Rendered {
     if (kept.get(id) || !RASTER_TYPES.has(file.mediaType)) {
       return download(id, [text(alt || file.name)], inLink);
     }
-    return element('img', { src: fileUrl(id), alt: alt || file.name }, []);
+    // A width the page gives it, as the app's reader keeps one; a diagram's (ADR 0010).
+    const width = node.properties['width'];
+    return element(
+      'img',
+      { src: fileUrl(id), alt: alt || file.name, ...(typeof width === 'number' && { width }) },
+      [],
+    );
   };
 
   const link = (node: Element, inLink: boolean): ElementContent | ElementContent[] => {

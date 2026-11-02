@@ -19,6 +19,8 @@ export type VisualHost = {
   plugins(): PluginRuntime | null;
   /** Where query blocks' results go, which the surface draws; none where nobody sees them. */
   queries?: QueryResults;
+  /** Where diagrams go (ADR 0010), which the surface draws; none where nobody sees them. */
+  diagrams?: QueryResults;
   /** The page's properties, as its frontmatter has them now; null where they don't read. */
   properties(): readonly PropertyData[] | null;
   /** How a plugin block sets one of them as the person's edit (`EditorSurfaceProps`); null where nothing may. */

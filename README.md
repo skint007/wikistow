@@ -1,12 +1,18 @@
 # WikiStow
 
-WikiStow is a self-hosted encrypted wiki for people and their agents. It has a browser app, a Linux desktop app, and a command-line client. Pages support Markdown, attachments, sharing, drafts, and published versions.
+WikiStow is a self-hosted encrypted wiki for people and their agents. It has a browser app, a desktop app for Linux, Windows and macOS, and a command-line client. Pages support Markdown, attachments, sharing, drafts, and published versions.
 
 The clients encrypt page content before sending it to the server. Accounts, permissions, and some operational metadata remain on the server. The optional AI assistant sends the content a person chooses to their configured provider through the server. A page someone gives a public link has its published version stored readable on the server while the link is on, so anyone with the link can read it. See the [protocol](wikistow/protocol.md) and [operations guide](docs/operations.md) for the details and limits.
 
 ## Install the desktop app
 
-The desktop app runs on Linux on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead. [docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
+On Linux the desktop app runs on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead.
+
+On Windows 10 and 11 on x64, or Windows 11 on Arm, run `wikistow-desktop-<version>-x64-setup.exe` or `…-arm64-setup.exe` from the [latest release](https://github.com/skint007/wikistow/releases/latest). It isn't signed yet, so Windows says **Windows protected your PC** at first: choose **More info**, then **Run anyway**. Run each new release's installer to update.
+
+On a Mac (macOS 13 or newer, Apple silicon or Intel), install it with Homebrew, `brew install --cask skint007/wikistow/wikistow`, or download the zip for your Mac from the latest release. The app isn't signed by an Apple developer, so the first time it opens, allow it under **System Settings → Privacy & Security → Open Anyway**.
+
+[docs/desktop.md](docs/desktop.md) covers installing, updating and removing it.
 
 ## Install the command-line client
 
@@ -98,7 +104,7 @@ The root Compose file runs development services only. For a server, configure th
 
 To set up the first administrator, start the server, open its address, and create the account on the **Set up WikiStow** page. Until then anyone who can reach the server can claim it, so do this before you share the address ([details](docs/operations.md#first-administrator)).
 
-- [Linux desktop app and its packages](docs/desktop.md)
+- [Desktop app and its packages](docs/desktop.md)
 - [Images, first administrator, backup, restore, and AI configuration](docs/operations.md)
 - [Versions and releases](docs/releasing.md)
 - [Restore verification against a test instance](deploy/test-instance/README.md)

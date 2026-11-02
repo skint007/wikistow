@@ -13,6 +13,7 @@ import { safeRedirect } from '@/lib/redirect';
 import { meQuery } from '../../../api';
 import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
+import { isApple } from '../../../shell/search-model';
 import { vaultMessage } from '../../../vault/messages';
 import { rememberOpenVault, unlockWith } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
@@ -129,7 +130,7 @@ function Unlock() {
             </div>
             <p className="text-sm text-muted-foreground">
               {desktop
-                ? 'Unlocks when WikiStow starts, until you lock it or sign out. Your keyring keeps the key.'
+                ? `Unlocks when WikiStow starts, until you lock it or sign out. Your ${isApple() ? 'Keychain' : 'system’s secret store'} keeps the key.`
                 : 'Unlocks on later visits, until you lock it or sign out. Anyone who can use this browser profile can read your vault.'}
             </p>
           </div>

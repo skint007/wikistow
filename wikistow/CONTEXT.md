@@ -116,6 +116,10 @@ A page or folder, with everything under it, sealed again as new pages and folder
 Older text also calls a publication's destination page a copy (protocol section 13, the interface design), and a public link keeps a readable copy; the protocol names this one "a copy of kind `copy` or `move`" where it could be confused.
 _Avoid_: Transfer (that is handing a space to another owner), duplicate, clone.
 
+**Trash**
+Where a deleted page or folder waits, with everything under it, for 30 days before it is deleted for good. Only the space's owners see it, and they can restore it from there.
+_Avoid_: Recycle bin, archive.
+
 **Attachment**
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 

@@ -38,9 +38,15 @@ they grant this agent folders under Agents in WikiStow.
 Before creating a page, \`search\` for one on the same subject, and draft on
 that one rather than making a second.
 
-To move in notes kept in folders, such as an Obsidian vault or Joplin
-notebooks, make the folders first with \`folder create\`, under the share
-the person named, then create each page in its folder.
+\`page links\` lists the pages that link to a page: use it to find the
+notes related to one.
+
+To move in notes kept in folders, such as an Obsidian vault, make the
+folders first with \`folder create\`, under the share the person named,
+then create each page in its folder. For a Joplin export (a JEX file, or a
+Markdown + Front Matter folder or zip), use \`wikistow import\` instead,
+and only when the person asks for that import: it publishes every page it
+makes. Run it again after any failure; it never makes a page twice.
 
 ## Edit on the current draft
 

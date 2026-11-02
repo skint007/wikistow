@@ -1,4 +1,4 @@
-import { QUERY_LANGUAGE, type AttachmentRef } from '@wikistow/client';
+import { DIAGRAM_LANGUAGE, QUERY_LANGUAGE, type AttachmentRef } from '@wikistow/client';
 import { CODE_LANGUAGES, type AlertType } from '@wikistow/client/reader';
 import { Fragment, type Node } from '@milkdown/kit/prose/model';
 import { NodeSelection, Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state';
@@ -227,9 +227,10 @@ class CodeBlockView implements NodeView {
   readonly #picker = createRoot(this.#header);
   readonly #block = document.createElement('div');
   readonly #pre = document.createElement('pre');
-  // A query block's result, under its code (`QueryResults`).
+  // A query block's result or a diagram, under its code (`QueryResults`).
   readonly #result = document.createElement('div');
   #query: ReturnType<QueryResults['add']> | null = null;
+  #resultsIn: QueryResults | null = null;
   readonly #view: EditorView;
   readonly #getPos: () => number | undefined;
   readonly #host: VisualHost;
@@ -377,20 +378,27 @@ class CodeBlockView implements NodeView {
     this.#drawQuery();
   }
 
-  /** A query block's result under it, for its text now; any other block has none. */
+  /**
+   * A query block's result under it, or a diagram's drawing, for its text
+   * now; any other block has none.
+   */
   #drawQuery() {
-    const queries = this.#host.queries;
-    const query = String(this.#node.attrs.language) === QUERY_LANGUAGE && queries;
-    if (!query) {
+    const language = String(this.#node.attrs.language);
+    const results =
+      (language === QUERY_LANGUAGE && this.#host.queries) ||
+      (language === DIAGRAM_LANGUAGE && this.#host.diagrams) ||
+      null;
+    if (this.#resultsIn !== results) {
       this.#query?.remove();
       this.#query = null;
+      this.#resultsIn = results;
       this.#result.remove();
-      return;
     }
+    if (!results) return;
     if (this.#query) this.#query.set(this.#node.textContent);
     else {
       this.dom.append(this.#result);
-      this.#query = query.add(this.#result, this.#node.textContent);
+      this.#query = results.add(this.#result, this.#node.textContent);
     }
   }
 

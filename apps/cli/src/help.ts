@@ -92,6 +92,7 @@ Commands:
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
   export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
+  import PATH [--space SPACE_ID] [--folder FOLDER_ID]
   folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
   folder copy FOLDER_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page read PAGE_ID [--draft] [--revision REVISION_ID]
@@ -106,6 +107,7 @@ Commands:
                                [--permission-version N])
   page copy PAGE_ID [--space SPACE_ID] [--folder FOLDER_ID]
   page history PAGE_ID
+  page links PAGE_ID
   page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
 
 The usual loop, with --json:
@@ -403,6 +405,47 @@ A left-out attachment's path is where it would have been: its page's
 links still name it there. A lost connection, an expired session or a
 server error fails the export instead.
 `,
+  import: `Usage: wikistow import PATH [--space SPACE_ID] [--folder FOLDER_ID]
+
+Import notes from Joplin. PATH is an export made in Joplin with File >
+Export all: a JEX file, or a Markdown + Front Matter export's folder, or a
+zip of it. Each notebook becomes a folder, and each note a page titled as
+in Joplin, published, so readers see it at once: run it only when your
+person asks for this import. The agent must be able to edit and publish
+where it goes: its share and its person both.
+
+--folder is where the notebooks go. Without it, they go at the top of the
+agent's share in --space, as for folder copy. --space saves looking up
+which space --folder is in.
+
+Links between notes become wikilinks, with as many folders as it takes to
+name a page alone ([[Home/README]]). A note's files become attachments of
+its page, and their links and images, HTML ones too, name them. Tags,
+dates and to-do state are the page's front matter, as the Markdown export
+writes them. An HTML note is imported as raw HTML, which readers see
+sanitized. A note over ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)} is left out, and so is an encrypted one:
+decrypt it in Joplin and export again.
+
+Each folder and page remembers the note it came from. So running the same
+import again into the same place makes nothing twice, leaves what it
+imported as it is, and finishes anything a run cut short: after any
+failure, or Ctrl-C, run it again. It takes no --idempotency-key.
+
+With --json:
+  {"spaceId":"...","folderId":"...","format":"markdown|jex","folders":N,
+   "pages":[{"path":"...","pageId":"...","title":"..."}],"existing":N,
+   "attachments":N,"unresolved":[{"path":"...","link":"..."}],
+   "skipped":[{"path":"...","reason":"encrypted|too-large"}],"encrypted":N}
+paths are where each note is in the export. folders, pages and attachments
+are what this run made; existing counts pages an earlier run finished.
+unresolved lists every note's links left as written, on every run, each
+by its text, a file by its name, else as written: to a note or file that
+wasn't imported or was too large for the server, to a note's files past
+the 200 a page lists, or to a note no wikilink can name (one of two of
+one title in one notebook, or a title with | # [ ] ^ \` < or \\ in it).
+For a page an earlier run saved, it lists the links its draft still
+holds as written. encrypted counts the export's encrypted items.
+`,
   'folder copy': copyHelp('folder'),
   'page read': `Usage: wikistow page read PAGE_ID [--draft] [--revision REVISION_ID]
 
@@ -575,5 +618,22 @@ attachments by page read --json.${PIPES}
   'page history': `Usage: wikistow page history PAGE_ID
 
 The published versions, newest first, and who published each.
+`,
+  'page links': `Usage: wikistow page links PAGE_ID
+
+The pages in the page's space that link to it, by title, from the pages
+this agent can read. A page counts when a wikilink in its body, a property
+whose value is one wikilink, or a reference to another page's value
+(\`=[[Page]].key\`) names this page, as page read resolves links: a link
+matching several pages counts only once a writer picked this one. Each
+page is read as page read would show it: the draft if this agent edits
+the page, the published version otherwise. With --json:
+  {"pageId":"...","links":[{"pageId":"...","title":"...",
+    "folders":["Recipes"],"draft":false,"unpublished":false}]}
+folders are the folders the page is in, outermost first (null for one
+whose name can't be read). draft and unpublished are as search gives
+them. No page linking here is not a failure: links is empty. Without
+--json, one line per page: its ID, title, [draft] or [unpublished], and
+folders.
 `,
 } as const satisfies Record<CommandName, string>;

@@ -29,6 +29,7 @@ import {
 import { readSettings } from '../settings.ts';
 import {
   accessTo,
+  liveShares,
   canEdit,
   agentGrantsOf,
   capAgent,
@@ -577,7 +578,7 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
   const caller = await requireCaller(db, actor);
   const [space] = await db.select().from(spaces).where(eq(spaces.id, spaceId));
   if (!space?.metadataHead) throw new ContentError('not-found');
-  const spaceShares = await db.select().from(shares).where(eq(shares.spaceId, spaceId));
+  const spaceShares = await liveShares(db, spaceId);
   const all = await db
     .select({
       id: nodes.id,
@@ -587,8 +588,8 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
       metadataHead: nodes.metadataHead,
     })
     .from(nodes)
-    // A copy's new nodes show only once it finishes.
-    .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId)));
+    // A copy's new nodes show only once it finishes, and the trash never.
+    .where(and(eq(nodes.spaceId, spaceId), isNull(nodes.copyId), isNull(nodes.trashId)));
   const parents = new Map(all.map((node) => [node.id, node.parentId]));
   const view = await treeView(db, caller, spaceId, spaceShares, parents);
   if (!view) throw new ContentError('not-found');

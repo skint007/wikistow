@@ -24,7 +24,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
-import { ApiError, outcomeUnknown, type ApiClient } from '../api/client.ts';
+import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { FolderId as FolderIdSchema, newId, PageId as PageIdSchema } from '../ids.ts';
@@ -58,6 +58,7 @@ import {
 } from './pages.ts';
 import { PUBLICATION_NAMESPACE, type ClosedLink } from './publications.ts';
 import { keyTargetFor, newNodeTarget, treeTarget } from './records.ts';
+import { patient, pause } from './patience.ts';
 import type { ClientContext } from './session.ts';
 import { list as listPublicLinks } from './public-links.ts';
 import { listShares } from './sharing.ts';
@@ -176,57 +177,11 @@ export class CopyKept extends Error {
 
 type ReadLinks = (markdown: string) => Promise<FoundLinks>;
 
-/** How long one request waits out the server's rate limits, in all, before giving up. */
-const PATIENCE_MS = 2 * 60 * 1000;
-
 /** How many nodes are opened at a time, many to a request: fewer than a records request takes. */
 const CHUNK = 200;
 
-/** Wait `ms`, or throw `CopyStopped` as soon as `signal` aborts. */
-const pause = (ms: number, signal?: AbortSignal) =>
-  new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) return reject(new CopyStopped());
-    const stop = () => {
-      clearTimeout(timer);
-      reject(new CopyStopped());
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', stop);
-      resolve();
-    }, ms);
-    signal?.addEventListener('abort', stop, { once: true });
-  });
-
-/**
- * `ctx` with an API that waits out `rate-limited` and tries again, as long
- * as the server's `Retry-After` says (a second if it doesn't), for up to
- * `PATIENCE_MS` a request. That is also the finish's answer while
- * publications a delete ends are being written. A wait ends early when
- * `signal` aborts, throwing `CopyStopped`.
- */
-function patient(ctx: ClientContext, signal?: AbortSignal): ClientContext {
-  const waiting = async <T>(send: () => Promise<T>): Promise<T> => {
-    const until = Date.now() + PATIENCE_MS;
-    for (;;) {
-      try {
-        return await send();
-      } catch (error) {
-        if (!(error instanceof ApiError) || error.code !== 'rate-limited') throw error;
-        const ms = (error.retryAfterSeconds ?? 1) * 1000;
-        if (Date.now() + ms > until) throw error;
-        await pause(ms, signal);
-      }
-    }
-  };
-  const { api } = ctx;
-  const patientApi: ApiClient = {
-    call: ((...args: Parameters<ApiClient['call']>) =>
-      waiting(() => api.call(...args))) as ApiClient['call'],
-    upload: (...args) => waiting(() => api.upload(...args)),
-    download: (...args) => waiting(() => api.download(...args)),
-  };
-  return { ...ctx, api: patientApi };
-}
+/** What a wait for the server throws when the copy is stopped. */
+const stopped = () => new CopyStopped();
 
 /**
  * The listed subtree of `nodeId` in `tree`, top first, every parent before
@@ -293,7 +248,7 @@ export async function previewCopy(
     ids?: (sourceId: string) => string;
   },
 ): Promise<CopyPreview> {
-  ctx = patient(ctx);
+  ctx = patient(ctx, stopped);
   const sameSpace = source.spaceId === destination.spaceId;
   if (kind === 'move' && sameSpace) {
     throw new ApiError(403, 'forbidden', 'A move within one space is an ordinary move');
@@ -635,8 +590,8 @@ export async function makeCopy(
   }: { onProgress?: (progress: CopyProgress) => void; signal?: AbortSignal } = {},
 ): Promise<MadeCopy> {
   // Only sending stops on `signal`; the finish, and a cancel, never do.
-  const sending = patient(ctx, signal);
-  ctx = patient(ctx);
+  const sending = patient(ctx, stopped, signal);
+  ctx = patient(ctx, stopped);
   const params = { copyId: preview.copyId };
   const total = preview.nodes.length;
   const live = () => {
@@ -701,7 +656,7 @@ export async function makeCopy(
           const again = preview.nodes.filter((node) => stale.includes(node.nodeId));
           await sendNodes(ctx, preview, again);
         } else if (keep) {
-          await pause(1000 * tries);
+          await pause(1000 * tries, stopped);
         } else {
           throw error;
         }

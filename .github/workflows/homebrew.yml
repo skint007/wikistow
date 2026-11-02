@@ -1,0 +1,86 @@
+# Publishes the desktop app's Homebrew cask to the skint007/wikistow tap
+# (github.com/skint007/homebrew-wikistow) for a GitHub Release that already
+# has its Mac downloads. The release workflow runs it after each stable
+# release from main. Run it by hand to publish a release again, such as
+# with a fix to the cask (docs/releasing.md). Until the `homebrew`
+# environment holds the tap's deploy key, it says so and publishes nothing.
+name: Homebrew
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release to publish, such as 0.22.0
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    # Holds the tap's deploy key, for release tags and main only.
+    environment: homebrew
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The cask with the release's version and its two downloads' checksums
+      # from the release's SHA256SUMS. Ruby checks it parses.
+      - name: Fill in
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          sums=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS")
+          sum() {
+            local sha
+            sha=$(awk -v f="$1" '$2 == f { print $1 }' <<< "$sums")
+            [ -n "$sha" ] || { echo "::error::SHA256SUMS has no line for $1" >&2; return 1; }
+            echo "$sha"
+          }
+          arm64=$(sum "wikistow-desktop-$VERSION-macos-arm64.zip")
+          x64=$(sum "wikistow-desktop-$VERSION-macos-x64.zip")
+          sed -e "s/@VERSION@/$VERSION/" -e "s/@SHA256_ARM64@/$arm64/" -e "s/@SHA256_X64@/$x64/" \
+            apps/desktop/packaging/homebrew/wikistow.rb > "$RUNNER_TEMP/wikistow.rb"
+          if grep -n @ "$RUNNER_TEMP/wikistow.rb"; then
+            echo "::error::The cask has a placeholder nothing filled in"
+            exit 1
+          fi
+          ruby -c "$RUNNER_TEMP/wikistow.rb"
+          cat "$RUNNER_TEMP/wikistow.rb"
+      - name: Publish
+        env:
+          VERSION: ${{ inputs.version }}
+          HOMEBREW_TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_KEY" ]; then
+            echo "::warning::HOMEBREW_TAP_KEY is empty, so the cask wasn't published: the homebrew environment holds it (docs/releasing.md)."
+            exit 0
+          fi
+          ssh_dir="$RUNNER_TEMP/ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$HOMEBREW_TAP_KEY" > "$ssh_dir/key" && chmod 600 "$ssh_dir/key"
+          # GitHub's published host key.
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+          git clone git@github.com:skint007/homebrew-wikistow.git "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          cp "$RUNNER_TEMP/wikistow.rb" "$RUNNER_TEMP/tap/Casks/wikistow.rb"
+          cd "$RUNNER_TEMP/tap"
+          git add Casks/wikistow.rb
+          if git diff --cached --quiet; then
+            echo "The tap already has $VERSION."
+          else
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "wikistow $VERSION"
+            git push origin HEAD
+          fi
+          rm -rf "$ssh_dir"

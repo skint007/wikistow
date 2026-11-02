@@ -41,7 +41,7 @@ export const linkKey = (link: { target: string }) => foldTitle(link.target);
  * A payload's table as key → page ID. Empty when it has none, or one in a
  * shape this app doesn't know.
  */
-export function linkTableOf(payload: PagePayload): ReadonlyMap<string, PageId> {
+export function linkTableOf(payload: Pick<PagePayload, 'extensions'>): ReadonlyMap<string, PageId> {
   const parsed = LinkTable.safeParse(payload.extensions[LINKS_NAMESPACE]);
   return new Map(parsed.success ? parsed.data.links.map((link) => [link.key, link.pageId]) : []);
 }
@@ -65,7 +65,7 @@ export function withoutLinkTable(payload: PagePayload): PagePayload {
  */
 export async function linksInUse(
   payload: PagePayload,
-  read: ReadWikilinks = readHere,
+  read: ReadWikilinks = readWikilinksHere,
 ): Promise<PagePayload> {
   const parsed = LinkTable.safeParse(payload.extensions[LINKS_NAMESPACE]);
   if (!parsed.success) return payload;
@@ -195,8 +195,8 @@ export type LinkWrite = {
 /** Reads a page's wikilinks as `tableWikilinks` does, maybe somewhere it can end. */
 export type ReadWikilinks = (markdown: string) => Promise<PlacedWikilink[]>;
 
-// Reading them here, on this thread.
-const readHere: ReadWikilinks = async (markdown) => tableWikilinks(markdown);
+/** Reads a page's wikilinks here, on this thread (`tableWikilinks`). */
+export const readWikilinksHere: ReadWikilinks = async (markdown) => tableWikilinks(markdown);
 
 /** A payload as `writeLinks` wrote it. */
 export type Linked = {
@@ -277,7 +277,7 @@ export async function writeLinks(payload: PagePayload, write: LinkWrite): Promis
     kept: false,
   });
   if (newer && carries && write.audience === 'draft') return as(payload);
-  const read = write.read ?? readHere;
+  const read = write.read ?? readWikilinksHere;
   let links: PlacedWikilink[];
   try {
     links = (await read(payload.markdown)).filter((link) => !link.embed && link.target !== '');

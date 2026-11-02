@@ -1,4 +1,5 @@
 import {
+  DIAGRAM_LANGUAGE,
   mayReferOtherPages,
   parsePropertyReference,
   QUERY_LANGUAGE,
@@ -23,8 +24,6 @@ import {
 } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
 import { claimedBlock } from '@wikistow/plugin-sdk';
-import { Check, Copy } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { ReaderBlock, textOf } from '../plugins/blocks';
 import { usePlugins } from '../plugins/runtime';
 import { markdownSyntaxes } from '../registries';
@@ -40,6 +39,8 @@ import {
 import { usePageIndex } from '../data/page-index';
 import { OtherPagesContext, PageBody, PageProperties, type PageBodyContext } from './body-context';
 import { BodyLink } from './body-link';
+import { CopyCode } from './copy-code';
+import { DiagramBlock } from './diagram';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
 import { otherPages } from './other-pages';
 import { pageReader } from './page-reader';
@@ -132,8 +133,9 @@ const Table: NonNullable<Components['table']> = ({ node: _node, ...props }) => (
 
 /**
  * A code block under its language as written, or `text` for none, as the
- * visual editor shows it; or the view of a running plugin that claims it,
- * which keeps what a reader entered in it while the page around it changes.
+ * visual editor shows it; a diagram (`DiagramBlock`); or the view of a
+ * running plugin that claims it, which keeps what a reader entered in it
+ * while the page around it changes.
  * Only the reader's label has a button that copies the code.
  */
 const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
@@ -172,6 +174,7 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
       />
     );
   }
+  if (language === DIAGRAM_LANGUAGE) return <DiagramBlock source={textOf(code)} pre={props} />;
   // A fence a running plugin claims is its view; without the plugin, its text.
   const block = language ? blocks.get(language) : undefined;
   if (block && body) {
@@ -234,28 +237,6 @@ function WrittenCode({
       </div>
       <pre {...pre} />
     </div>
-  );
-}
-
-/** Copies a code block's text, as written, showing a check for a moment once it's copied. */
-function CopyCode({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return (
-    <Button
-      type="button"
-      size="icon-xs"
-      variant="ghost"
-      aria-label={copied ? 'Copied' : 'Copy code'}
-      data-hint="Copy code"
-      onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}
-    >
-      {copied ? <Check strokeWidth={1.75} /> : <Copy strokeWidth={1.75} />}
-    </Button>
   );
 }
 
@@ -365,7 +346,11 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
       <PageProperties value={properties}>
         <OtherPagesContext value={others}>
           {frontmatter !== null && (
-            <PropertiesBox frontmatter={frontmatter} scope={bodyLinkScope(context)} />
+            <PropertiesBox
+              frontmatter={frontmatter}
+              scope={bodyLinkScope(context)}
+              page={attachments.page}
+            />
           )}
           {read.isPending ? (
             <StillReading />

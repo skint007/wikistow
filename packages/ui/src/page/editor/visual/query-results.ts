@@ -2,7 +2,8 @@
 // decision 7): under its code, which stays as written. A block's view adds
 // an element outside its text and says what the block holds; the surface
 // draws each result into its element with a React portal, so the table has
-// the app's router and queries, and the document never changes.
+// the app's router and queries, and the document never changes. Diagrams
+// (ADR 0010) use one of these too, for their drawings.
 
 /** One query block's place for its result, and its text now. */
 export type QueryResult = { key: number; element: HTMLElement; source: string };

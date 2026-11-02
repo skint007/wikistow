@@ -6,12 +6,15 @@ export * as workshopTools from './workshop-tools.ts';
 export * from './api/client.ts';
 export * from './change.ts';
 export * from './cover.ts';
+export * from './diagram.ts';
 export { deviceTag } from './device-seal.ts';
 export * from './encoding.ts';
 export * from './enrollment.ts';
 export * from './envelope.ts';
 export * from './errors.ts';
 export * from './export.ts';
+export * from './import.ts';
+export * from './import-archive.ts';
 export * from './folder-keys.ts';
 export * from './identity.ts';
 export * from './metadata.ts';
@@ -39,6 +42,7 @@ export * from './tree.ts';
 export * from './tree-changes.ts';
 export * from './vault.ts';
 export * as pageOperations from './operations/pages.ts';
+export * as trashOperations from './operations/trash.ts';
 export {
   agentContactsMark,
   closeSession,
@@ -64,6 +68,7 @@ export * as publicLinkOperations from './operations/public-links.ts';
 export * as ownerOperations from './operations/owners.ts';
 export * as searchOperations from './operations/search.ts';
 export * as exportOperations from './operations/export.ts';
+export * as importOperations from './operations/import.ts';
 export { lookupPeople, spaceKeys, type SpaceKeys } from './operations/keys.ts';
 export * from './operations/vault.ts';
 export * from './cli-text.ts';
