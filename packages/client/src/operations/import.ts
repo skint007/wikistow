@@ -2,17 +2,19 @@ import { pageRoutes, type FolderId, type PageId, type SpaceId } from '@wikistow/
 import { ApiError } from '../api/client.ts';
 import { utf8 } from '../encoding.ts';
 import {
+  importFrom,
   importKeyOf,
   importMark,
   leftAsWritten,
   noteLinks,
   rewriteNote,
   wikilinkTarget,
-  type JoplinExport,
-  type JoplinNote,
+  type ImportSource,
+  type LinkRewrites,
   type NoteLink,
+  type SourceNote,
 } from '../import.ts';
-import { linkablePages, pageIndex } from '../links.ts';
+import { foldTitle, linkablePages, pageIndex, pagesTitled } from '../links.ts';
 import { pace } from '../pace.ts';
 import { newPayload, PageTooLarge, revisePayload, type AttachmentRef } from '../payload.ts';
 import {
@@ -34,8 +36,11 @@ export type ImportScope = { spaceId: SpaceId; folderId?: FolderId };
 /** Folders made, then pages made empty, then each page saved and published. */
 export type ImportProgress = { phase: 'folders' | 'pages' | 'saving'; done: number; total: number };
 
-/** A note left out, by where it is in the export, and why. */
-export type ImportSkipped = { path: string; reason: 'encrypted' | 'too-large' };
+/**
+ * A note or file left out, by where it is in the export, and why: a vault's
+ * file no imported note links to or embeds is `unused`.
+ */
+export type ImportSkipped = { path: string; reason: 'encrypted' | 'too-large' | 'unused' };
 
 /** What an import made, and what it couldn't. */
 export type ImportSummary = {
@@ -68,20 +73,24 @@ const CHUNK = 100;
 const FOLDER_NAME_LENGTH = 200;
 
 const folderName = (name: string) => name.trim().slice(0, FOLDER_NAME_LENGTH).trim() || 'Untitled';
-const titleOf = (note: JoplinNote) => note.title || 'Untitled';
+const titleOf = (note: SourceNote) => note.title || 'Untitled';
 
 // Where an earlier run put something: its folder, and its key.
 const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\0${key}`;
 
 /**
- * Import a Joplin export (`readJoplinExport`) into `scope`: a folder for
- * each notebook, mirroring them, and a published page for each note,
- * titled as in Joplin. First every folder, then every page, empty, so each
- * link has a page to resolve to; then each page's attachments are uploaded
- * and its body saved with its link table, as `page draft` does, and it is
- * published. A link to another note becomes a wikilink, with as many of
- * the folders above its page as it takes to name it alone (`wikilinkTarget`),
- * and a file's URL becomes `attachment:ID` on the page that names it.
+ * Import a Joplin export (`readJoplinExport`) or an Obsidian vault
+ * (`readObsidianVault`) into `scope`: a folder for each notebook or vault
+ * folder, mirroring them, and a published page for each note, titled as
+ * there. First every folder, then every page, empty, so each link has a
+ * page to resolve to; then each page's attachments are uploaded and its
+ * body saved with its link table, as `page draft` does, and it is
+ * published. A Markdown link to another note becomes a wikilink, with as
+ * many of the folders above its page as it takes to name it alone
+ * (`wikilinkTarget`); a vault's wikilink changes so only when it wouldn't
+ * name its page as written. A file's URL becomes `attachment:ID` on the
+ * page that names it, and so does a vault's embed of it. A vault's files
+ * that no imported note names are left out and reported.
  *
  * Each folder and page keeps its note's key (`importMark`), so running the
  * same import again into the same place changes nothing: a folder or page
@@ -97,16 +106,16 @@ const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\
  * is left out, and so are encrypted notes; any other failure fails the
  * import, and running it again goes on from there.
  */
-export async function importJoplin(
+export async function importNotes(
   ctx: ClientContext,
   {
     scope,
-    joplin,
+    source,
     onProgress,
     signal,
   }: {
     scope: ImportScope;
-    joplin: JoplinExport;
+    source: ImportSource;
     onProgress?: (progress: ImportProgress) => void;
     signal?: AbortSignal;
   },
@@ -118,6 +127,7 @@ export async function importJoplin(
     if (signal?.aborted || ctx.revisions.generation !== generation) throw new ImportStopped();
   };
   const { spaceId } = scope;
+  const from = importFrom(source.format);
   const root = scope.folderId ?? null;
   const structure = await loadStructure(ctx, spaceId);
   live();
@@ -132,29 +142,29 @@ export async function importJoplin(
   const earlierFolders = new Map<string, FolderId>();
   for (const folder of structure.folders) {
     const opened = folder.metadata?.opened;
-    const key = opened?.kind === 'current' ? importKeyOf(opened.metadata.extensions) : null;
+    const key = opened?.kind === 'current' ? importKeyOf(opened.metadata.extensions, from) : null;
     if (key !== null) earlierFolders.set(placedAt(folder.parentId, key), folder.id);
   }
   const folderOf = new Map<string, FolderId>();
   const parentOf = (key: string | null) => (key === null ? root : (folderOf.get(key) ?? root));
   let folders = 0;
-  const { notebooks } = joplin;
-  onProgress?.({ phase: 'folders', done: 0, total: notebooks.length });
-  for (const [i, notebook] of notebooks.entries()) {
-    const parentId = parentOf(notebook.parent);
-    let folderId = earlierFolders.get(placedAt(parentId, notebook.key));
+  const { folders: sourceFolders } = source;
+  onProgress?.({ phase: 'folders', done: 0, total: sourceFolders.length });
+  for (const [i, folder] of sourceFolders.entries()) {
+    const parentId = parentOf(folder.parent);
+    let folderId = earlierFolders.get(placedAt(parentId, folder.key));
     if (folderId === undefined) {
       folderId = await createFolder(ctx, {
         spaceId,
         parentId,
-        name: folderName(notebook.name),
-        extensions: importMark(notebook.key),
+        name: folderName(folder.name),
+        extensions: importMark(from, folder.key),
       });
       folders++;
       live();
     }
-    folderOf.set(notebook.key, folderId);
-    onProgress?.({ phase: 'folders', done: i + 1, total: notebooks.length });
+    folderOf.set(folder.key, folderId);
+    onProgress?.({ phase: 'folders', done: i + 1, total: sourceFolders.length });
   }
 
   // Pages an earlier run made, in the folders this one fills.
@@ -168,7 +178,7 @@ export async function importJoplin(
     for (const page of chunk) {
       const version = versions.get(page.id);
       if (version?.opened.kind !== 'current' || page.draftHead === null) continue;
-      const key = importKeyOf(version.opened.payload.extensions);
+      const key = importKeyOf(version.opened.payload.extensions, from);
       if (key === null) continue;
       // Published once, it is done: one unpublished since was unpublished by someone.
       const done =
@@ -177,15 +187,15 @@ export async function importJoplin(
     }
   }
 
-  const skipped: ImportSkipped[] = joplin.encryptedNotes.map((path) => ({
+  const skipped: ImportSkipped[] = source.encryptedNotes.map((path) => ({
     path,
     reason: 'encrypted',
   }));
-  const { notes } = joplin;
-  const placed: { note: JoplinNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
+  const { notes } = source;
+  const placed: { note: SourceNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
   const pageOf = new Map<string, PageId>();
   // The draft an earlier run saved, by note: what it holds says what that run left.
-  const savedBefore = new Map<string, string>();
+  const savedBefore = new Map<string, { markdown: string; attachments: AttachmentRef[] }>();
   let existing = 0;
   onProgress?.({ phase: 'pages', done: 0, total: notes.length });
   for (const [i, note] of notes.entries()) {
@@ -198,7 +208,7 @@ export async function importJoplin(
       if (earlier) {
         pageId = earlier.pageId;
         const { opened } = earlier.draft;
-        if (opened.kind === 'current') savedBefore.set(note.key, opened.payload.markdown);
+        if (opened.kind === 'current') savedBefore.set(note.key, opened.payload);
         if (earlier.done) existing++;
         else placed.push({ note, pageId, draft: earlier.draft });
       } else {
@@ -206,7 +216,7 @@ export async function importJoplin(
           spaceId,
           parentId,
           title: titleOf(note),
-          extensions: importMark(note.key),
+          extensions: importMark(from, note.key),
         });
         live();
         placed.push({ note, pageId, draft: null });
@@ -231,6 +241,10 @@ export async function importJoplin(
     const target = page && wikilinkTarget(page, linkable, index);
     return page?.title && target ? { target, title: page.title } : undefined;
   };
+  const resolves: LinkRewrites['resolves'] = (target, key) => {
+    const found = pagesTitled(target, linkable, index);
+    return found.length === 1 && (key === null || found[0] === pageOf.get(key));
+  };
 
   const summary: ImportSummary = {
     folders,
@@ -239,7 +253,7 @@ export async function importJoplin(
     attachments: 0,
     unresolved: [],
     skipped,
-    encrypted: joplin.encrypted,
+    encrypted: source.encrypted,
   };
   // Each note's links, and those left as written: by this run as it saves
   // the note, or by an earlier one, as its saved draft still holds them.
@@ -247,11 +261,22 @@ export async function importJoplin(
   const unresolvedOf = new Map<string, string[]>();
   for (const note of notes) {
     if (!pageOf.has(note.key)) continue;
-    const links = noteLinks(note, joplin.target);
+    const links = noteLinks(note, source);
     linksOf.set(note.key, links);
     const saved = savedBefore.get(note.key);
-    if (saved !== undefined) unresolvedOf.set(note.key, leftAsWritten(note, links, saved));
+    if (saved !== undefined) {
+      unresolvedOf.set(note.key, leftAsWritten(note, links, saved, { resolves }));
+    }
     await pace();
+  }
+  // A vault's files belong to the pages that name them: the rest are left out.
+  if (source.format === 'obsidian') {
+    const named = new Set(
+      [...linksOf.values()].flat().flatMap((link) => ('key' in link && link.key ? [link.key] : [])),
+    );
+    for (const key of source.files.keys()) {
+      if (!named.has(key)) skipped.push({ path: key, reason: 'unused' });
+    }
   }
   onProgress?.({ phase: 'saving', done: 0, total: placed.length });
   for (const [i, { note, pageId, draft }] of placed.entries()) {
@@ -265,8 +290,8 @@ export async function importJoplin(
     if (!saved) {
       const links = linksOf.get(note.key) ?? [];
       const attached = new Map<string, AttachmentRef>();
-      for (const key of filesOf(links, joplin)) {
-        const resource = joplin.resources.get(key);
+      for (const key of filesOf(links, source)) {
+        const resource = source.files.get(key);
         if (!resource?.file) continue;
         const bytes = await resource.file.read();
         try {
@@ -283,21 +308,33 @@ export async function importJoplin(
         }
         live();
       }
+      const attachments = [...attached.values()];
+      // The page's attachments once saved: an embed names one by its name.
+      const onPage = [...(opened?.attachments ?? []), ...attachments];
       const { markdown, unresolved } = rewriteNote(note, links, {
         wikilink,
-        attachment: (key) => attached.get(key)?.id,
+        attachment: (key) => {
+          const ref = attached.get(key);
+          const name = ref && foldTitle(ref.name);
+          return (
+            ref && {
+              id: ref.id,
+              alone: onPage.filter((a) => foldTitle(a.name) === name).length === 1,
+            }
+          );
+        },
+        resolves,
       });
-      const attachments = [...attached.values()];
       const payload = draft
         ? revisePayload(draft.opened, {
             markdown,
-            attachments: [...(opened?.attachments ?? []), ...attachments],
+            attachments: onPage,
           })
         : newPayload({
             title: titleOf(note),
             markdown,
             attachments,
-            extensions: importMark(note.key),
+            extensions: importMark(from, note.key),
           });
       try {
         await saveDraft(ctx, {
@@ -335,11 +372,13 @@ export async function importJoplin(
  * most as many as a version lists (`MAX_ATTACHMENTS`). Links to the rest
  * stay as written.
  */
-function filesOf(links: readonly NoteLink[], joplin: JoplinExport): Set<string> {
+function filesOf(links: readonly NoteLink[], source: ImportSource): Set<string> {
   const files = new Set<string>();
   for (const link of links) {
     if (files.size === pageRoutes.MAX_ATTACHMENTS) break;
-    if (link.kind === 'resource' && joplin.resources.get(link.key)?.file) files.add(link.key);
+    if ((link.kind === 'resource' || link.kind === 'file') && source.files.get(link.key)?.file) {
+      files.add(link.key);
+    }
   }
   return files;
 }

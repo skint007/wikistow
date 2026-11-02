@@ -479,7 +479,7 @@ The alternatives (J, Tab bar; K, Dock + sheet; L, Floating button) remain in [la
 
 ## Import
 
-**Import…**, in the space menu and in each folder's menu below **Export…**, for people who can edit and publish there, brings in a Joplin export (`shell/import-dialog.tsx`). The dialog explains where to export in Joplin, that a JEX keeps notebook names exactly and that encrypted notes must be decrypted first, and has **Choose a JEX or zip file…** and **Choose an export folder…**. Once read it says what it found ("Found 16 notes in 5 notebooks, with 2 attachments.") with **Import**; while importing, a stage and count over a progress bar, and Cancel stops it. At the end it says what it made, then lists **Links left as they were** and **Notes left out**, each by where it is in the export, in a scrolling list. The rules are in the implementation spec's **Import**. Moving an Obsidian note still means pasting its Markdown into a page, or having an agent push it with the CLI.
+**Import…**, in the space menu and in each folder's menu below **Export…**, for people who can edit and publish there, brings in an Obsidian vault or a Joplin export (`shell/import-dialog.tsx`). The dialog says to choose a vault's folder or a zip of it, where to export in Joplin, that a JEX keeps notebook names exactly and that encrypted notes must be decrypted first, and has **Choose a JEX or zip file…** and **Choose a folder…**. Files that don't say which app they came from get **Where are these notes from?**, with **An Obsidian vault** and **A Joplin export**. Once read it says what it found ("Found 16 notes in 5 notebooks, with 2 attachments.", or "Found an Obsidian vault: 6 notes in 3 folders, with 5 other files.") with **Import**; while importing, a stage and count over a progress bar, and Cancel stops it. At the end it says what it made, then lists **Links left as they were** and **Notes and files left out**, each by where it is in the export, in a scrolling list. The rules are in the implementation spec's **Import**.
 
 ## Open items
 
@@ -498,4 +498,4 @@ None.
 
 - Phone layout: I, Drawer. See [Narrow screens](#narrow-screens).
 - Banner presets: Sunrise, Ocean, Meadow, Lavender, Dusk, Stone.
-- Obsidian import: dropped. Notes move by paste or agent push.
+- Obsidian import: dropped. Notes move by paste or agent push. (Reversed on 2026-11-02 by #258: Import… reads a vault.)

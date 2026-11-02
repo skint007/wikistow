@@ -1,12 +1,15 @@
-import { kilobytes, type importOperations, type JoplinExport } from '@wikistow/client';
+import { kilobytes, type importOperations, type ImportSource } from '@wikistow/client';
 import { pageRoutes } from '@wikistow/contracts';
 
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** What a Joplin export holds, as the dialog says it before importing. */
-export function foundStatus({ notes, notebooks, resources, encrypted }: JoplinExport): string {
-  const found = `Found ${count(notes.length, 'note')} in ${count(notebooks.length, 'notebook')}, with ${count(resources.size, 'attachment')}.`;
+/** What an export or vault holds, as the dialog says it before importing. */
+export function foundStatus({ format, notes, folders, files, encrypted }: ImportSource): string {
+  const found =
+    format === 'obsidian'
+      ? `Found an Obsidian vault: ${count(notes.length, 'note')} in ${count(folders.length, 'folder')}, with ${count(files.size, 'other file')}.`
+      : `Found ${count(notes.length, 'note')} in ${count(folders.length, 'notebook')}, with ${count(files.size, 'attachment')}.`;
   return encrypted === 0
     ? found
     : `${found} ${count(encrypted, 'item is', 'items are')} still encrypted and can’t be imported.`;
@@ -28,8 +31,10 @@ export function doneStatus(summary: importOperations.ImportSummary): string {
     : `${made} ${count(existing, 'page was', 'pages were')} already imported, and left as ${existing === 1 ? 'it was' : 'they were'}.`;
 }
 
-/** Why a note was left out, in words. */
+/** Why a note or file was left out, in words. */
 export const skipReason = (reason: importOperations.ImportSkipped['reason']) =>
   reason === 'encrypted'
     ? 'encrypted: decrypt it in Joplin first'
-    : `too large: a page holds at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)}`;
+    : reason === 'unused'
+      ? 'no imported note links to it or embeds it'
+      : `too large: a page holds at most ${kilobytes(pageRoutes.MAX_MARKDOWN_BYTES)}`;
