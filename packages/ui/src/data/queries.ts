@@ -103,14 +103,16 @@ export const revisionQuery = (
 ) =>
   queryOptions({
     queryKey: [PLAIN, 'revision', page.spaceId, page.pageId, audience, revisionId],
-    // Kept versions open from the device, online too; offline, one that isn't is `NotKept`.
-    queryFn: () =>
-      orKept(
-        () => pageOperations.openRevisionOf(ctx, page, audience, revisionId),
-        () => {
-          throw new keptOperations.NotKept();
-        },
-      ),
+    // Kept versions open from the device, online and offline, before the
+    // server is asked; offline, one that isn't kept is `NotKept`.
+    queryFn: async () => {
+      try {
+        return await pageOperations.openRevisionOf(ctx, page, audience, revisionId);
+      } catch (error) {
+        if (!connection.get().online && noAnswer(error)) throw new keptOperations.NotKept();
+        throw error;
+      }
+    },
     staleTime: Infinity,
   });
 

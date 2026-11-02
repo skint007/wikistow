@@ -548,17 +548,19 @@ export type KeeperSource = {
 export function serverSource(ctx: ClientContext): KeeperSource {
   return {
     async spaces() {
-      const [spaces, order, { shares }] = await Promise.all([
+      const [spaces, order, opened] = await Promise.all([
         loadSpaces(ctx),
         loadSpaceOrder(ctx),
-        ctx.api.call(sharingRoutes.sharedWithMe),
+        // Shared with me as its page shows it, or null if it fails.
+        sharedWithMe(ctx).catch(() => null),
       ]);
-      // Shared with me as its page shows it. One space failing its checks
-      // there mustn't stop the keeping: the list kept before stays.
-      const shared = await sharedWithMe(ctx).catch(
-        () => ctx.keptContent?.spaceList()?.shared ?? [],
-      );
-      const ids = new Set([...spaces.map((s) => s.id), ...shares.map((s) => s.share.spaceId)]);
+      // One shared space failing its checks there mustn't stop the keeping:
+      // the list kept before stays, and the shared spaces come from the route.
+      const shared = opened ?? ctx.keptContent?.spaceList()?.shared ?? [];
+      const sharedIn = opened
+        ? opened.map((item) => item.share.spaceId)
+        : (await ctx.api.call(sharingRoutes.sharedWithMe)).shares.map((s) => s.share.spaceId);
+      const ids = new Set([...spaces.map((s) => s.id), ...sharedIn]);
       return { list: { spaces, order, shared }, ids: [...ids] };
     },
     async tree(spaceId) {
@@ -799,14 +801,12 @@ export function notKeptIn(ctx: ClientContext, spaceId: SpaceId): Set<PageId> {
   return new Set(space.tree.pages.filter((page) => !shown.has(page.id)).map((page) => page.id));
 }
 
-const RANK = { reader: 0, editor: 1, owner: 2 } as const;
-
 /**
  * What opening a kept page says of it (`loadPage`), worked out from its
- * space's tree as kept: its heads, and this person's role there, the
- * highest the space and the shares above the page give. What only the
- * server knows (how many versions were published, an agent's edit) is left
- * at nothing.
+ * space's tree as kept: its heads, and this person's role there, as the
+ * server works it out: the nearest share at or above the page, else the
+ * space's own. What only the server knows (how many versions were
+ * published, an agent's edit) is left at nothing.
  */
 export function keptPageInfo(
   ctx: ClientContext,
@@ -818,29 +818,26 @@ export function keptPageInfo(
     const page = tree && kept?.shownPages(tree).find((p) => p.id === pageId);
     if (!tree || !page) continue;
     const parents = new Map(tree.folders.map((folder) => [folder.id, folder.parentId]));
-    const above = new Set<FolderId>();
-    for (let id = page.parentId; id !== null && !above.has(id); id = parents.get(id) ?? null) {
-      above.add(id);
+    const seen = new Set<FolderId>();
+    let grant: Pick<KeptTree['shares'][number], 'role' | 'canPublish'> | undefined;
+    for (let id = page.parentId; id !== null && !seen.has(id); id = parents.get(id) ?? null) {
+      seen.add(id);
+      grant = tree.shares.find((share) => share.rootId === id);
+      if (grant) break;
     }
-    const grants = [
-      ...(tree.space ? [tree.space] : []),
-      ...tree.shares.filter((share) => share.rootId === null || above.has(share.rootId)),
-    ];
-    if (grants.length === 0) continue;
-    const role = grants.reduce((best, grant) =>
-      RANK[grant.role] > RANK[best.role] ? grant : best,
-    ).role;
+    grant ??= tree.shares.find((share) => share.rootId === null) ?? tree.space ?? undefined;
+    if (!grant) continue;
     return {
       pageId,
       spaceId,
       parentId: page.parentId,
       permissionVersion: page.permissionVersion,
-      role,
-      canPublish: grants.some((grant) => grant.canPublish),
+      role: grant.role,
+      canPublish: grant.canPublish,
       heads: {
         draftHead: page.draftHead,
         publishedHead: page.publishedHead,
-        publishedCount: page.publishedHead === null ? 0 : 1,
+        publishedCount: 0,
         draftChanges: page.draftChanges,
       },
       agentEdit: null,

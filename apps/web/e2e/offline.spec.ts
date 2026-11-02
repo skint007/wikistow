@@ -34,6 +34,10 @@ test('pages opened here read and search offline', async ({ page, context, freshP
   await expect(page.getByText(/^2 pages, /)).toBeVisible({ timeout: 30_000 });
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
+  // Loaded afresh, the tab keeps its vault open but nothing in memory: what
+  // opens offline comes from the device.
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
 
   await context.setOffline(true);
   await page.getByRole('treeitem', { name: 'Bean soup' }).click();
