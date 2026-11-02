@@ -12,13 +12,15 @@ import {
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
 import { TitlebarViews } from '../plugins/regions';
+import { isApple } from './search-model';
 
 /**
  * The desktop window's titlebar (#74), over the top of every screen: the
  * window has no system frame. Its empty part moves the window, and
  * double-clicking it maximizes, as the system's would. It holds plugins'
  * buttons (`app.titlebar`), a menu for what the old menu bar did, and the
- * window's buttons. Nothing in a browser.
+ * window's buttons. On a Mac the system draws its window buttons at the
+ * left end, and the menu bar does what the menu does. Nothing in a browser.
  */
 export function Titlebar() {
   return desktop && <DesktopTitlebar desktop={desktop} />;
@@ -35,7 +37,7 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
     document.documentElement.dataset.titlebar = '';
     return () => void delete document.documentElement.dataset.titlebar;
   }, []);
-  const restores = state.maximized || state.fullScreen;
+  const mac = isApple();
   return (
     <div
       data-region="titlebar"
@@ -43,16 +45,35 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
       aria-label="Window"
       className="fixed inset-x-0 top-0 z-40 flex h-(--titlebar-height) items-center bg-background select-none [app-region:drag]"
     >
-      {/* Centred over the rail. A narrow window's top bar has the name already. */}
+      {/* Centred over the rail. A narrow window's top bar has the name already. A Mac's window buttons take its place. */}
       <span
         aria-hidden
-        className="w-[70px] text-center text-[13px] font-extrabold max-[899px]:invisible"
+        className={cn(
+          'w-[70px] text-center text-[13px] font-extrabold',
+          mac ? 'invisible' : 'max-[899px]:invisible',
+        )}
       >
         Wiki<span className="text-primary">Stow</span>
       </span>
       <div className="ml-auto flex h-full items-center gap-1 pr-1">
         <TitlebarViews />
       </div>
+      {!mac && <WindowButtons state={state} act={act} />}
+    </div>
+  );
+}
+
+/** The window menu and the minimize, maximize and close buttons, which a Mac has from the system. */
+function WindowButtons({
+  state,
+  act,
+}: {
+  state: WindowState;
+  act: (action: WindowAction) => () => void;
+}) {
+  const restores = state.maximized || state.fullScreen;
+  return (
+    <>
       <WindowMenu fullScreen={state.fullScreen} act={act} />
       <button type="button" aria-label="Minimize" onClick={act('minimize')} className={BUTTON}>
         <Minus className="size-4" strokeWidth={1.75} />
@@ -79,7 +100,7 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
       >
         <X className="size-4" strokeWidth={1.75} />
       </button>
-    </div>
+    </>
   );
 }
 

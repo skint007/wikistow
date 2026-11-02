@@ -12,6 +12,7 @@ import {
   draftPage,
   listSpaces,
   pageHistory,
+  pageLinks,
   publishPage,
   publishTo,
   readPage,
@@ -123,6 +124,7 @@ const COMMANDS = {
     positionals: 1,
   },
   'page history': { options: {}, positionals: 1 },
+  'page links': { options: {}, positionals: 1 },
   'page download-attachment': {
     options: { draft: { type: 'boolean' }, revision: { type: 'string' }, out: { type: 'string' } },
     positionals: 2,
@@ -634,5 +636,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
     }
     case 'page history':
       return pageHistory(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
+    case 'page links':
+      return pageLinks(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
   }
 }

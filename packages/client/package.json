@@ -17,6 +17,7 @@
     "./links": "./src/links.ts",
     "./markdown": "./src/markdown/index.ts",
     "./reader": "./src/reader/index.ts",
+    "./reader/math": "./src/reader/math.ts",
     "./testing": "./test/support/testing.ts"
   },
   "scripts": {
@@ -25,13 +26,18 @@
   "dependencies": {
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
+    "hast-util-from-html": "2.0.3",
+    "hast-util-sanitize": "5.0.2",
+    "katex": "0.18.10",
     "libsodium-wrappers-sumo": "^0.8.4",
     "lowlight": "3.3.0",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm": "3.1.0",
+    "mdast-util-math": "3.0.0",
     "mdast-util-to-hast": "13.2.1",
     "micromark": "4.0.3",
     "micromark-extension-gfm": "3.0.0",
+    "micromark-extension-math": "3.1.0",
     "micromark-util-decode-string": "2.0.1",
     "rehype-raw": "7.0.0",
     "rehype-sanitize": "6.0.0",

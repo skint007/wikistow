@@ -40,6 +40,7 @@ export * from './tree.ts';
 export * from './tree-changes.ts';
 export * from './vault.ts';
 export * as pageOperations from './operations/pages.ts';
+export * as trashOperations from './operations/trash.ts';
 export {
   agentContactsMark,
   closeSession,

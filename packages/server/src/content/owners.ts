@@ -651,7 +651,7 @@ export async function removeOwner(
  * (`endPublicationsFrom`), it drops out of everyone's saved order, and
  * its pages' public links end, with their copies.
  * Once the space's row is gone, the tree trigger tells everyone who saw
- * it. As in `deleteNode`, the space is locked first, then its shares, then
+ * it. As in `trashNode`, the space is locked first, then its shares, then
  * its nodes, and blob files are removed after the commit.
  */
 export async function deleteSpace(

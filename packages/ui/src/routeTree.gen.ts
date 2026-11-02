@@ -23,6 +23,7 @@ import { Route as AppDesktopSignInRouteImport } from './routes/_app/desktop-sign
 import { Route as AppWhatsNewRouteImport } from './routes/_app/whats-new'
 import { Route as AppVaultIndexRouteImport } from './routes/_app/_vault/index'
 import { Route as AppVaultSharedRouteImport } from './routes/_app/_vault/shared'
+import { Route as AppVaultTrashRouteImport } from './routes/_app/_vault/trash'
 import { Route as AppVaultWorkshopRouteImport } from './routes/_app/_vault/workshop'
 import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AppAdminInvitationsRouteImport } from './routes/_app/admin/invitations'
@@ -109,6 +110,11 @@ const AppVaultIndexRoute = AppVaultIndexRouteImport.update({
 const AppVaultSharedRoute = AppVaultSharedRouteImport.update({
   id: '/shared',
   path: '/shared',
+  getParentRoute: () => AppVaultRoute,
+} as any)
+const AppVaultTrashRoute = AppVaultTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
   getParentRoute: () => AppVaultRoute,
 } as any)
 const AppVaultWorkshopRoute = AppVaultWorkshopRouteImport.update({
@@ -224,6 +230,7 @@ export interface FileRoutesByFullPath {
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
   '/shared': typeof AppVaultSharedRoute
+  '/trash': typeof AppVaultTrashRoute
   '/workshop': typeof AppVaultWorkshopRoute
   '/admin/invitations': typeof AppAdminInvitationsRoute
   '/admin/settings': typeof AppAdminSettingsRoute
@@ -256,6 +263,7 @@ export interface FileRoutesByTo {
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
   '/shared': typeof AppVaultSharedRoute
+  '/trash': typeof AppVaultTrashRoute
   '/workshop': typeof AppVaultWorkshopRoute
   '/admin/invitations': typeof AppAdminInvitationsRoute
   '/admin/settings': typeof AppAdminSettingsRoute
@@ -290,6 +298,7 @@ export interface FileRoutesById {
   '/_app/desktop-sign-in': typeof AppDesktopSignInRoute
   '/_app/whats-new': typeof AppWhatsNewRoute
   '/_app/_vault/shared': typeof AppVaultSharedRoute
+  '/_app/_vault/trash': typeof AppVaultTrashRoute
   '/_app/_vault/workshop': typeof AppVaultWorkshopRoute
   '/_app/admin/invitations': typeof AppAdminInvitationsRoute
   '/_app/admin/settings': typeof AppAdminSettingsRoute
@@ -326,6 +335,7 @@ export interface FileRouteTypes {
     | '/desktop-sign-in'
     | '/whats-new'
     | '/shared'
+    | '/trash'
     | '/workshop'
     | '/admin/invitations'
     | '/admin/settings'
@@ -358,6 +368,7 @@ export interface FileRouteTypes {
     | '/desktop-sign-in'
     | '/whats-new'
     | '/shared'
+    | '/trash'
     | '/workshop'
     | '/admin/invitations'
     | '/admin/settings'
@@ -391,6 +402,7 @@ export interface FileRouteTypes {
     | '/_app/desktop-sign-in'
     | '/_app/whats-new'
     | '/_app/_vault/shared'
+    | '/_app/_vault/trash'
     | '/_app/_vault/workshop'
     | '/_app/admin/invitations'
     | '/_app/admin/settings'
@@ -522,6 +534,13 @@ declare module '@tanstack/react-router' {
       path: '/shared'
       fullPath: '/shared'
       preLoaderRoute: typeof AppVaultSharedRouteImport
+      parentRoute: typeof AppVaultRoute
+    }
+    '/_app/_vault/trash': {
+      id: '/_app/_vault/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof AppVaultTrashRouteImport
       parentRoute: typeof AppVaultRoute
     }
     '/_app/_vault/workshop': {
@@ -683,6 +702,7 @@ const AppVaultSSpaceIdRouteWithChildren =
 
 interface AppVaultRouteChildren {
   AppVaultSharedRoute: typeof AppVaultSharedRoute
+  AppVaultTrashRoute: typeof AppVaultTrashRoute
   AppVaultWorkshopRoute: typeof AppVaultWorkshopRoute
   AppVaultIndexRoute: typeof AppVaultIndexRoute
   AppVaultAgentsGuideRoute: typeof AppVaultAgentsGuideRoute
@@ -693,6 +713,7 @@ interface AppVaultRouteChildren {
 
 const AppVaultRouteChildren: AppVaultRouteChildren = {
   AppVaultSharedRoute: AppVaultSharedRoute,
+  AppVaultTrashRoute: AppVaultTrashRoute,
   AppVaultWorkshopRoute: AppVaultWorkshopRoute,
   AppVaultIndexRoute: AppVaultIndexRoute,
   AppVaultAgentsGuideRoute: AppVaultAgentsGuideRoute,

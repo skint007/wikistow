@@ -205,17 +205,20 @@ describe('the fidelity check', () => {
     const visual = (body: string) => fidelityOf(body, t).visual;
     for (const body of [
       '> [!note] Title\n> body\n',
-      'Speed is $v = d / t$ here.\n',
       'Hidden %%note%% text\n',
       '#project starts a line\n',
       '==marked== starts a line\n',
       '[a][r]\n\n[r]: https://example.test\n',
     ])
       expect(visual(body), body).toBe(false);
-    // Text Markdown writes back the same stays visual.
+    // Text Markdown writes back the same stays visual, as does math, a
+    // price beside it too.
     for (const body of [
       'A #tag mid-line, $5 and $10, ==marked== and ^block\n',
       '> [!NOTE]\n> body\n',
+      'Speed is $v = d / t$ here.\n',
+      'It costs \\$5, so $x^2$ more.\n',
+      '$$\n\\sum_{i=1}^n i\n$$\n',
     ])
       expect(visual(body), body).toBe(true);
   });

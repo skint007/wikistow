@@ -8,6 +8,7 @@ import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
+import { openVault, PAGE_REF } from './page-view.ts';
 
 // The page editor, mounted for real: which editor it shows, and the text
 // it gives back, as the session pushes text in and the person switches.
@@ -47,6 +48,7 @@ afterEach(() => {
 });
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+openVault();
 
 function mount(initial: string, mode: 'source' | 'visual'): Mounted {
   window.localStorage.setItem('wikistow.editor', mode);
@@ -67,6 +69,7 @@ function mount(initial: string, mode: 'source' | 'visual'): Mounted {
         links={links}
         attachments={{ list: [], url: async () => null }}
         onFiles={() => {}}
+        page={PAGE_REF}
       />,
     ),
   );

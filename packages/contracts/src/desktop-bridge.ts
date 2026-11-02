@@ -86,10 +86,10 @@ export type DesktopUpdate = {
   installed: string;
   /** The newest stable release, as `0.4.0`. */
   version: string;
-  /** Its release page, with the notes and the downloads. */
+  /** Its release page, with the notes and the downloads; for a Windows install, its installer. */
   url: string;
   /** How this copy was installed (`install-source`), or null when the app can't tell. */
-  source: 'aur' | 'deb' | 'rpm' | null;
+  source: 'aur' | 'deb' | 'rpm' | 'windows' | 'mac' | null;
 };
 
 /** Whether the desktop window fills the screen, for its titlebar's buttons (#74). */
@@ -134,8 +134,9 @@ export type DesktopBridge = {
   signedOut(): Promise<void>;
   /**
    * Whether this computer has a secret store the app trusts (GNOME Keyring
-   * or KWallet). Only then does it keep the session between launches, or
-   * offer to remember the vault's unlock.
+   * or KWallet on Linux, DPAPI on Windows, the Keychain on macOS). Only then
+   * does it keep the session between launches, or offer to remember the
+   * vault's unlock.
    */
   secureStorage(): Promise<boolean>;
   /** Unlock this account's vault at every launch, until a lock or sign-out. */

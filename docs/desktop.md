@@ -1,12 +1,12 @@
 # WikiStow desktop app
 
-The desktop app is the same WikiStow you use in the browser, packaged for Linux on x86_64. The Arch package runs on Arch's system Electron (`electron44`), so it is only the app's code. Debian, Ubuntu and Fedora don't package that Electron, so the `.deb` and `.rpm` bring their own copy.
+The desktop app is the same WikiStow you use in the browser, packaged for Linux on x86_64, for Windows on x64 and Arm, and for macOS. The Arch package runs on Arch's system Electron (`electron44`), so it is only the app's code. Debian, Ubuntu and Fedora don't package that Electron, so the `.deb` and `.rpm` bring their own copy, as the Windows and Mac apps do.
 
 ## Install
 
-Each [GitHub Release](https://github.com/skint007/wikistow/releases) has the app as a `.deb`, an `.rpm`, and `wikistow-desktop-<version>.tar.gz`, the archive the Arch package installs ([releasing](releasing.md#the-desktop-downloads)). Once it's installed, start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`.
+Each [GitHub Release](https://github.com/skint007/wikistow/releases) has the app as a `.deb`, an `.rpm`, `wikistow-desktop-<version>.tar.gz`, the archive the Arch package installs, a Windows installer for each architecture, and a zip for each kind of Mac ([releasing](releasing.md#the-desktop-downloads)). On Linux, once it's installed, start **WikiStow** from your app launcher, or run `wikistow-desktop`. The launcher is named that way because the agent CLI already owns `wikistow`. On Windows, see [Windows](#windows); on a Mac, see [macOS](#macos).
 
-The app never updates itself. How you update it depends on the package, as below. When a newer release is out, the app tells you (see [Updates](#updates)). Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` as they were. To remove those too, delete that folder yourself.
+The app never updates itself. How you update it depends on the package, as below. When a newer release is out, the app tells you (see [Updates](#updates)). Updating, or removing the package, leaves your sign-in, settings and plugins in `~/.config/WikiStow` (on Windows, `%APPDATA%\WikiStow Desktop`, apart from the CLI's `%APPDATA%\wikistow`; on a Mac, `~/Library/Application Support/WikiStow`) as they were. To remove those too, delete that folder yourself.
 
 ### Arch Linux
 
@@ -44,15 +44,61 @@ These packages carry their own Electron, so your distribution's security updates
 
 Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is installed setuid root, as Google Chrome's package does. Chromium uses it where it can't sandbox the app with user namespaces, as on Ubuntu 24.04 and later.
 
+### Windows
+
+The app runs on Windows 10 and 11 on x64, and Windows 11 on Arm. Download the installer for your computer from the [latest release](https://github.com/skint007/wikistow/releases/latest): `wikistow-desktop-<version>-x64-setup.exe` for most PCs, or `wikistow-desktop-<version>-arm64-setup.exe` for Windows on Arm, such as a Snapdragon laptop. **Settings → System → About** shows which you have, under **System type**. The x64 app also runs on Windows 11 on Arm, more slowly.
+
+The installer isn't signed yet, so the first time Windows shows **Windows protected your PC**. Choose **More info**, check that the app is the installer you downloaded and the publisher is **Unknown publisher**, then choose **Run anyway**. To check the download first, compare `Get-FileHash .\wikistow-desktop-<version>-x64-setup.exe` in PowerShell with its line in the release's `SHA256SUMS`.
+
+It installs for you alone, with no administrator prompt, into `%LOCALAPPDATA%\Programs\WikiStow Desktop`, beside the CLI's `%LOCALAPPDATA%\Programs\wikistow` if you have it. It adds **WikiStow** to the Start menu, registers `wikistow://` links for signing in, and lists the app under **Settings → Apps** (**Installed apps** on Windows 11, **Apps & features** on Windows 10), where **Uninstall** removes it.
+
+To update, download the new release's installer and run it; it replaces the old version. Close WikiStow first, or the installer asks you to. Windows shows the SmartScreen prompt again for each new installer.
+
+### macOS
+
+The Mac app runs on macOS 13 Ventura or newer, with one download for each kind of Mac: `wikistow-desktop-<version>-macos-arm64.zip` for Apple silicon (M1 and later) and `wikistow-desktop-<version>-macos-x64.zip` for Intel. Releases after 0.21.0 have them. Install it with Homebrew, or download it yourself.
+
+With [Homebrew](https://brew.sh), from WikiStow's own tap, which picks the download for your Mac and checks it:
+
+```sh
+brew install --cask skint007/wikistow/wikistow
+```
+
+`brew upgrade wikistow` updates it, and `brew uninstall --cask wikistow` removes it. `brew uninstall --zap --cask wikistow` also deletes your sign-in, settings and plugins.
+
+Or download the zip for your Mac and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download with `shasum -a 256 -c --ignore-missing SHA256SUMS`, open the zip, and drag **WikiStow** into **Applications**. To update, do the same with the new release's zip and replace the old app. To remove it, drag it to the Trash.
+
+#### The first time it opens
+
+The app isn't signed by an Apple developer or notarized, so macOS won't open it until you allow it, whether it came from Homebrew or the release page. Both mark the download as coming from the internet. The first time:
+
+1. Open **WikiStow** from Applications. macOS says "“WikiStow.app” Not Opened", as Apple could not verify it is free of malware, and offers **Done** or **Move to Trash**. Choose **Done**.
+2. Open **System Settings → Privacy & Security**. Under Security, beside "“WikiStow.app” was blocked to protect your Mac", choose **Open Anyway**, and confirm with your password or Touch ID.
+3. Open WikiStow again and choose **Open Anyway** once more. From then on it opens like any other app.
+
+Each update is a new download, so macOS asks again the first time it opens. Instead of those steps, you can take away the mark in Terminal after installing or updating, which tells macOS you trust it:
+
+```sh
+xattr -d com.apple.quarantine /Applications/WikiStow.app
+```
+
+The app is signed ad hoc, which Apple silicon needs before it runs anything, but that names nobody: the checksum is what shows the download matches what the release published.
+
+On a Mac the app keeps your sign-in, settings and plugins in `~/Library/Application Support/WikiStow`.
+
 ### How it was installed
 
-Each package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`.
+Each Linux package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`.
+
+The Windows installer writes `windows` to `resources\install-source`, beside the app's `app.asar`. The install folder is yours to change, so that file only decides what the update notice says.
+
+The Mac app carries its own, `WikiStow.app/Contents/Resources/install-source`, beside its `app.asar`, which says `mac`, however it was installed.
 
 ### Updates
 
-When a newer stable release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; when the app can't tell how it was installed, it opens the release page. The link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
+When a newer stable release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; on Windows, the new installer, which the link downloads in your browser, x64 or Arm as the app you have is; on a Mac it is the new zip, or `brew upgrade wikistow`; when the app can't tell how it was installed, it opens the release page. Otherwise the link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
 
-The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikistow/releases/latest`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. GitHub's latest release is never a prerelease, so the app only offers stable releases; running a prerelease such as `0.4.0-rc.1`, you're offered `0.4.0` once it's out. The app keeps the last answer in `~/.config/WikiStow/update.json`, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
+The app asks GitHub for the latest release (`api.github.com/repos/skint007/wikistow/releases/latest`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. GitHub's latest release is never a prerelease, so the app only offers stable releases; running a prerelease such as `0.4.0-rc.1`, you're offered `0.4.0` once it's out. The app keeps the last answer in `update.json` in its data folder, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
 
 ## The window
 
@@ -74,19 +120,41 @@ What the old menu bar did is in **Window menu**, and these keys still work:
 
 Cut, copy, paste, undo, redo and select all work in both editors with their usual keys. Ctrl+Shift+Alt+P still restarts the app without plugins. If the window's page ever stops, the app asks whether to reload it or close, since the window has no frame of its own to close it by.
 
-This is tested on X11. On Wayland, moving, double-clicking and resizing depend on the compositor, as they do for any app that draws its own titlebar.
+This is tested on X11 and on Windows 11. On Wayland, moving, double-clicking and resizing depend on the compositor, as they do for any app that draws its own titlebar. On Windows, dragging the titlebar to the top or a side of the screen snaps the window there, and Windows+Arrow keys snap it too. Snap layouts, the grid shown when you hover over a maximize button, only come with Windows' own window buttons, so they don't show here; Windows+Z still opens them.
+
+### On a Mac
+
+The window has the system's close, minimize and zoom buttons at the left of WikiStow's titlebar, in place of its own buttons and **Window menu** (⋯). The rest of the titlebar works as above. The app has a menu bar, as Mac apps do: **WikiStow** (About, Hide, Quit), **Edit**, **View** and **Window**. The keys are Cmd in place of Ctrl:
+
+| Keys | Does |
+| --- | --- |
+| Cmd+R or Cmd+Shift+R | Reload. With changes not saved yet, it asks first. |
+| Cmd+= and Cmd+- | Zoom in and out |
+| Cmd+0 | Actual size |
+| Ctrl+Cmd+F | Full screen, and back |
+| Alt+Cmd+I | Developer tools |
+| Cmd+M | Minimize |
+| Cmd+H | Hide WikiStow |
+| Cmd+W | Close the window, which quits |
+| Cmd+Q | Quit, which closes the window first |
+
+Cut, copy, paste, undo, redo and select all are Cmd+X, C, V, Z, Shift+Z and A, through the Edit menu. Ctrl+Shift+Alt+P restarts the app without plugins, as elsewhere. Closing the window quits the app, rather than leaving it running with no window as many Mac apps do.
 
 ## Signing in
 
-The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it; allow it.
+The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it, as Edge does with "This site is trying to open WikiStow"; choose **Open**. On Linux the app's launcher entry claims those links, on Windows the installer does, and on a Mac the app does once it has opened.
 
 Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps → Review** in the browser.
 
 ## The keyring
 
-With GNOME Keyring or KWallet running, the app keeps its sign-in between launches, sealed by the keyring. The unlock page also offers **Remember on this computer**, which opens your vault when the app starts. Locking the vault or signing out forgets the unlock.
+On Windows the app seals what it keeps with Windows' own data protection (DPAPI), under a key tied to your Windows account, so there is nothing to set up, and it keeps what this section describes as a keyring would. Another person signed in to the same PC can't open it; programs you run can, as with a keyring.
 
-The app also keeps your search index in `~/.config/WikiStow/search-index`, encrypted with a key only your unlocked vault has, so the first search after a launch only reads the pages that changed since. Beside it, `trust-marks` keeps, encrypted the same way, the newest contacts record and key versions the app has seen, so it still warns after a relaunch if the server serves older ones. Signing out, or signing in again, deletes both.
+On a Mac the app keeps its key in your login Keychain, as **WikiStow Safe Storage**, and everything below works as with a Linux keyring. The first launch adds the key without asking. The app is signed ad hoc, so each update counts as a different app to the Keychain: the first launch after an update asks for your Mac password to let WikiStow use its key there, before its window opens. Enter it and choose **Always Allow**. With **Deny**, the app keeps nothing and signs in at every launch, as with no keyring. Removing the key in Keychain Access makes the next launch sign in again.
+
+On Linux, with GNOME Keyring or KWallet running, the app keeps its sign-in between launches, sealed by the keyring. The unlock page also offers **Remember on this computer**, which opens your vault when the app starts. Locking the vault or signing out forgets the unlock.
+
+The app also keeps your search index in `search-index` in its data folder, encrypted with a key only your unlocked vault has, so the first search after a launch only reads the pages that changed since. Beside it, `trust-marks` keeps, encrypted the same way, the newest contacts record and key versions the app has seen, so it still warns after a relaunch if the server serves older ones. Signing out, or signing in again, deletes both.
 
 Without a keyring the app keeps nothing secret, nor these files. Each launch signs in through the browser again and asks for your vault passphrase. That is on purpose: Electron's fallback store seals data with a key every program on the computer knows, so the app never uses it. Quitting signs that launch's session out, so they don't pile up on the server. If the app crashes, or the server doesn't answer within 3 seconds, the session stays; sign it out under **Settings → Desktop apps**.
 
@@ -129,13 +197,23 @@ Then make it the handler:
 xdg-mime default wikistow-dev.desktop x-scheme-handler/wikistow
 ```
 
+On a Mac, a development build doesn't receive `wikistow://` links: they go to an installed WikiStow.app, which hands them to no other copy. To try signing in, build the app and open that instead. On a Mac, from `apps/desktop` after the build above, with `arm64` or `x64`:
+
+```sh
+node scripts/asar.ts
+scripts/macos-app.sh "$(node ../../scripts/version.ts)" arm64 out/macos
+open out/macos/WikiStow.app
+```
+
+The launch check CI runs on that app: `MAC_APP="$PWD/out/macos/WikiStow.app" pnpm exec playwright test`.
+
 ## Releasing
 
 The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
 
 1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build. Every package installs that same build.
-2. Keep the AUR key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment.
-3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history. With a `.deb` or `.rpm`, install the older release's package with `sudo apt install --allow-downgrades ./<file>.deb` or `sudo dnf downgrade ./<file>.rpm`. It stays until you install a newer one.
+2. Keep the AUR key, the Homebrew tap's key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment, and the tap's in its `homebrew` environment.
+3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history. With a `.deb` or `.rpm`, install the older release's package with `sudo apt install --allow-downgrades ./<file>.deb` or `sudo dnf downgrade ./<file>.rpm`. It stays until you install a newer one. On Windows, run the older release's installer, which replaces the app the same way. On a Mac, replace WikiStow in Applications with the older release's zip. Homebrew can't hold a cask back, so don't run `brew upgrade` until the fix ships.
 
 The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. The `.deb` and `.rpm` are `wikistow-desktop` at the release's version, with package release `1`. A prerelease such as `0.3.0-rc.1` becomes `0.3.0~rc.1` there, which apt and dnf sort before `0.3.0`. Later releases must keep versions increasing.
 

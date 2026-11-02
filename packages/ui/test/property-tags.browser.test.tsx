@@ -23,6 +23,7 @@ import { afterEach, expect, it } from 'vite-plus/test';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { searchIndexQuery } from '../src/data/queries.ts';
 import { PropertiesBox, PropertiesEditor } from '../src/page/properties-box.tsx';
+import { openProperties } from './page-view.ts';
 import type { LinkScope } from '../src/page/property-value.tsx';
 import { SearchDialog } from '../src/shell/search-dialog.tsx';
 import { linkedSearch, SearchOpener } from '../src/shell/search-link.tsx';
@@ -74,6 +75,8 @@ function indexOf(pages: Record<string, string>) {
   }
   return index;
 }
+
+const page = { spaceId: SPACE, pageId: PageId.parse('bean-soup') };
 
 const scope: LinkScope = {
   spaceId: 'home',
@@ -134,6 +137,7 @@ async function mount(ui: ReactNode) {
     act(() => root.unmount());
     container.remove();
   };
+  await openProperties(container);
   await expect.poll(() => container.querySelector('dl')).not.toBeNull();
   return { container, router };
 }
@@ -145,6 +149,7 @@ function Draft({ initial, blocks }: { initial: string; blocks: string[] }) {
     <PropertiesEditor
       frontmatter={block}
       scope={scope}
+      page={page}
       onChange={(next) => {
         blocks.push(next);
         setBlock(next);
@@ -182,6 +187,7 @@ it('opens a tag’s search from its pill on the published view, staying on the p
         '---\nTags: [soup, "soup kitchen", [a, b], "", "#"]\nTAG: winter\ncategory: [soup]\nnote: soup\n---\n'
       }
       scope={scope}
+      page={page}
     />,
   );
   // The tags, whatever their key's case, and Obsidian's older `tag`, a tag
