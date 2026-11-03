@@ -18,17 +18,26 @@ import {
 import { pageQuery } from '../data/queries';
 import type { Version } from '../page/publish-dialog';
 import { pageViewModel } from '../page/view-model';
+import { useNeedsConnection } from './needs-connection';
 import { useClient } from '../vault/store';
 
-/** One item of a row's menu, the same in its ⋯ menu and its right-click menu. */
-export type MenuAction = { label: string; onSelect: () => void; destructive: boolean };
+/**
+ * One item of a row's menu, the same in its ⋯ menu and its right-click
+ * menu. All but Open need the server (`offline`: works offline).
+ */
+export type MenuAction = {
+  label: string;
+  onSelect: () => void;
+  destructive: boolean;
+  offline: boolean;
+};
 
 /** What opening a page loads: the person's role there, publish rights, and its heads. */
 export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
 /** An item, or nothing where the person can't do it. */
 const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
-  onSelect && { label, onSelect, destructive };
+  onSelect && { label, onSelect, destructive, offline: label === 'Open' };
 
 /**
  * A folder's actions: for everyone, Open and Export; for editors, what they
@@ -128,8 +137,14 @@ function Items({
   actions: MenuAction[];
   Item: typeof DropdownMenuItem | typeof ContextMenuItem;
 }) {
-  return actions.map(({ label, onSelect, destructive }) => (
-    <Item key={label} variant={destructive ? 'destructive' : 'default'} onSelect={onSelect}>
+  // Offline, what needs the server says so (ADR 0009, decision 8).
+  const needs = useNeedsConnection();
+  return actions.map(({ label, onSelect, destructive, offline }) => (
+    <Item
+      key={label}
+      variant={destructive ? 'destructive' : 'default'}
+      {...(offline ? { onSelect } : needs.select(onSelect))}
+    >
       {label}
     </Item>
   ));

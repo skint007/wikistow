@@ -4,9 +4,11 @@ import {
   FolderId,
   MetadataRevisionId,
   PageId,
+  PublicIdentity,
   RevisionId,
   RevisionRecord,
   RevisionRecordV2,
+  Share,
   ShareId,
   SpaceId,
   pageRoutes,
@@ -23,19 +25,21 @@ import type { Region } from '../regions.ts';
 import { keptSealer, type KeptSealer, type KeptStore } from '../kept-store.ts';
 import type { PrivateIdentity } from '../identity.ts';
 import type { InstallationId } from '../ids.ts';
-import { fetchRevisions, type PageRef, type Wanted } from './pages.ts';
+import { fetchRevisions, pageLabels, type PageRef, type Wanted } from './pages.ts';
+import { sharedWithMe, type SharedItem } from './sharing.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import { unreachable } from './search.ts';
 import type { ClientContext } from './session.ts';
-import { loadSpaceOrder, loadSpaces, loadStructure } from './spaces.ts';
+import { loadSpaceOrder, loadSpaces, loadStructure, type loadTree } from './spaces.ts';
 
 /** A space's tree as last listed: its folders' names and looks, and its pages' heads, no titles. */
 export type KeptTree = Awaited<ReturnType<typeof loadStructure>>;
 
-/** The spaces this person holds, with their names, and their order, as last listed. */
+/** The spaces this person holds, with their names, their order, and Shared with me, as last listed. */
 export type KeptSpaceList = {
   spaces: Awaited<ReturnType<typeof loadSpaces>>;
   order: Awaited<ReturnType<typeof loadSpaceOrder>>;
+  shared: SharedItem[];
 };
 
 /**
@@ -144,6 +148,18 @@ const KeptSpaceListJson = z.strictObject({
     }),
   ),
   order: structureRoutes.spaceOrder.response,
+  shared: z.array(
+    z.strictObject({
+      share: Share,
+      role: sharingRoutes.ShareRole,
+      canPublish: z.boolean(),
+      folderId: FolderId.nullable(),
+      root: KeptMetadata.nullable(),
+      sharedBy: z
+        .strictObject({ identity: PublicIdentity, label: z.string().nullable() })
+        .nullable(),
+    }),
+  ),
 }) satisfies z.ZodType<KeptSpaceList, unknown>;
 
 /** The index item: the spaces kept, and the list as last loaded. */
@@ -265,6 +281,18 @@ export class KeptContent {
   /** Whether `revisionId` is kept. */
   hasVersion(revisionId: RevisionId): boolean {
     return this.#versions.has(revisionId);
+  }
+
+  /**
+   * The pages of `tree` whose version this person sees is kept: what
+   * offline shows of the space (ADR 0009, decision 4). The draft for an
+   * editor, else the publication.
+   */
+  shownPages(tree: KeptTree): KeptTree['pages'] {
+    return tree.pages.filter((page) => {
+      const head = page.draftHead ?? page.publishedHead;
+      return head !== null && this.hasVersion(head);
+    });
   }
 
   /**
@@ -520,13 +548,21 @@ export type KeeperSource = {
 export function serverSource(ctx: ClientContext): KeeperSource {
   return {
     async spaces() {
-      const [spaces, order, { shares }] = await Promise.all([
+      const [spaces, order, opened] = await Promise.all([
         loadSpaces(ctx),
         loadSpaceOrder(ctx),
-        ctx.api.call(sharingRoutes.sharedWithMe),
+        // Shared with me as its page shows it, or null if it fails.
+        // With the session's space keys, not worked out afresh at every run.
+        sharedWithMe(ctx, { refresh: false }).catch(() => null),
       ]);
-      const ids = new Set([...spaces.map((s) => s.id), ...shares.map((s) => s.share.spaceId)]);
-      return { list: { spaces, order }, ids: [...ids] };
+      // One shared space failing its checks there mustn't stop the keeping:
+      // the list kept before stays, and the shared spaces come from the route.
+      const shared = opened ?? ctx.keptContent?.spaceList()?.shared ?? [];
+      const sharedIn = opened
+        ? opened.map((item) => item.share.spaceId)
+        : (await ctx.api.call(sharingRoutes.sharedWithMe)).shares.map((s) => s.share.spaceId);
+      const ids = new Set([...spaces.map((s) => s.id), ...sharedIn]);
+      return { list: { spaces, order, shared }, ids: [...ids] };
     },
     async tree(spaceId) {
       try {
@@ -707,4 +743,107 @@ async function keepPages(
     keeping.push({ pageId: page.id, versions });
   }
   return keeping;
+}
+
+// Reading what's kept, offline (ADR 0009, decision 4): the same shapes the
+// server's answers load as, from the lists, trees and versions last kept.
+
+/**
+ * What was asked for isn't kept on this device, as a page never opened here
+ * with **Pages I open**, or nothing is kept at all.
+ */
+export class NotKept extends Error {
+  constructor() {
+    super('Not kept on this device');
+    this.name = 'NotKept';
+  }
+}
+
+/** The space list, its order and Shared with me, as last kept (`loadSpaces`, `sharedWithMe`). */
+export function keptSpaceList(ctx: ClientContext): KeptSpaceList {
+  const list = ctx.keptContent?.spaceList();
+  if (!list) throw new NotKept();
+  return list;
+}
+
+/** What the tree shows for a kept page whose version doesn't open. */
+const UNLABELLED = { title: null, emoji: null, icon: null, symbol: null, region: null };
+
+/**
+ * A space's tree as last kept, in `loadTree`'s shape: its folders, and its
+ * pages whose shown version is kept, each labelled from that version. The
+ * other pages are left out, as this device can't name them.
+ */
+export async function keptTree(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+): Promise<Awaited<ReturnType<typeof loadTree>>> {
+  const kept = ctx.keptContent;
+  const space = kept?.space(spaceId);
+  if (!kept || !space) throw new NotKept();
+  const pages = kept.shownPages(space.tree);
+  const labels = await pageLabels(ctx, spaceId, pages);
+  return {
+    ...space.tree,
+    pages: pages.map((page) => ({ ...page, ...(labels.get(page.id) ?? UNLABELLED) })),
+  };
+}
+
+/**
+ * The pages of a space this device lists but keeps no shown version of, by
+ * ID: links to them read as not kept, rather than missing. Empty if the
+ * space isn't kept.
+ */
+export function notKeptIn(ctx: ClientContext, spaceId: SpaceId): Set<PageId> {
+  const kept = ctx.keptContent;
+  const space = kept?.space(spaceId);
+  if (!kept || !space) return new Set();
+  const shown = new Set(kept.shownPages(space.tree).map((page) => page.id));
+  return new Set(space.tree.pages.filter((page) => !shown.has(page.id)).map((page) => page.id));
+}
+
+/**
+ * What opening a kept page says of it (`loadPage`), worked out from its
+ * space's tree as kept: its heads, and this person's role there, as the
+ * server works it out: the nearest share at or above the page, else the
+ * space's own. What only the server knows (how many versions were
+ * published, an agent's edit) is left at nothing.
+ */
+export function keptPageInfo(
+  ctx: ClientContext,
+  pageId: PageId,
+): z.output<typeof pageRoutes.PageInfo> {
+  const kept = ctx.keptContent;
+  for (const spaceId of kept?.spaceIds() ?? []) {
+    const tree = kept?.space(spaceId)?.tree;
+    const page = tree && kept?.shownPages(tree).find((p) => p.id === pageId);
+    if (!tree || !page) continue;
+    const parents = new Map(tree.folders.map((folder) => [folder.id, folder.parentId]));
+    const seen = new Set<FolderId>();
+    let grant: Pick<KeptTree['shares'][number], 'role' | 'canPublish'> | undefined;
+    for (let id = page.parentId; id !== null && !seen.has(id); id = parents.get(id) ?? null) {
+      seen.add(id);
+      grant = tree.shares.find((share) => share.rootId === id);
+      if (grant) break;
+    }
+    grant ??= tree.shares.find((share) => share.rootId === null) ?? tree.space ?? undefined;
+    if (!grant) continue;
+    return {
+      pageId,
+      spaceId,
+      parentId: page.parentId,
+      permissionVersion: page.permissionVersion,
+      role: grant.role,
+      canPublish: grant.canPublish,
+      heads: {
+        draftHead: page.draftHead,
+        publishedHead: page.publishedHead,
+        publishedCount: 0,
+        draftChanges: page.draftChanges,
+      },
+      agentEdit: null,
+      readerHistoryFrom: null,
+    };
+  }
+  throw new NotKept();
 }

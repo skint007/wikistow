@@ -7,6 +7,7 @@ import { serverTrouble, type ServerTrouble } from '../api';
 import { desktop, desktopServerQuery } from '../desktop';
 import { errorMessage } from '../errors';
 import { useSignOut } from './rail';
+import { connection } from '../data/connection';
 
 const TITLES: Record<ServerTrouble, string> = {
   unreachable: 'Can’t reach the server',
@@ -50,8 +51,12 @@ export function SessionError({ error }: ErrorComponentProps) {
           disabled={trying}
           onClick={() => {
             setTrying(true);
-            // Runs the routes' checks again, and clears this screen when they pass.
-            void router.invalidate().finally(() => setTrying(false));
+            // Runs the routes' checks again, and clears this screen when they pass:
+            // offline, once the server answers again (ADR 0009, decision 4).
+            void connection
+              .check()
+              .then(() => router.invalidate())
+              .finally(() => setTrying(false));
           }}
         >
           Try again

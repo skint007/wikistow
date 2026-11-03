@@ -182,6 +182,8 @@ export type DesktopBridge = {
   searchIndex(): Promise<Uint8Array | null>;
   /** Keep this sealed search index, in place of the one kept. */
   keepSearchIndex(sealed: Uint8Array): Promise<void>;
+  /** Delete the search index kept, as with **Pages I open** nothing keeps it (ADR 0009, decision 9). */
+  dropSearchIndex(): Promise<void>;
   /**
    * The contacts and No going back marks kept from an earlier launch, as the
    * pages sealed them (`KeptMarks`), or null. Kept and deleted as the search
@@ -286,6 +288,7 @@ export const DESKTOP_CHANNELS = {
   forgetVault: 'wikistow:forget-vault',
   searchIndex: 'wikistow:search-index',
   keepSearchIndex: 'wikistow:keep-search-index',
+  dropSearchIndex: 'wikistow:drop-search-index',
   trustMarks: 'wikistow:trust-marks',
   keepTrustMarks: 'wikistow:keep-trust-marks',
   keptItems: 'wikistow:kept-items',

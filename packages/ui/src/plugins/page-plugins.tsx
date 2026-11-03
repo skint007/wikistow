@@ -24,6 +24,8 @@ import {
   type PluginPanel,
   type ShownPage,
 } from './runtime';
+import { desktop } from '../desktop';
+import { useNeedsConnection } from '../shell/needs-connection';
 
 /**
  * The page toolbar's plugin menu: each running plugin's commands, run on
@@ -36,6 +38,7 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
   const panels = regions['page.panel'];
   const [open, setOpen] = useState<PluginPanel | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const needs = useNeedsConnection();
   const { pageId, spaceId } = shown.page;
   const { version, revision } = shown;
 
@@ -61,6 +64,8 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
     open && panels.find((panel) => panel.pluginId === open.pluginId && panel.id === open.id);
 
   if (commands.length === 0 && panels.length === 0) return null;
+  // A browser's plugins load from the server; the desktop's run from disk (ADR 0009, decision 8).
+  const select = (run: () => void) => (desktop ? { onSelect: run } : needs.select(run));
   return (
     <>
       <DropdownMenu>
@@ -72,7 +77,10 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
         <DropdownMenuContent align="end" aria-label="Plugins">
           {panels.length > 0 && <DropdownMenuLabel>Panels</DropdownMenuLabel>}
           {panels.map((panel) => (
-            <DropdownMenuItem key={`${panel.pluginId}:${panel.id}`} onSelect={() => setOpen(panel)}>
+            <DropdownMenuItem
+              key={`${panel.pluginId}:${panel.id}`}
+              {...select(() => setOpen(panel))}
+            >
               {panel.title}
             </DropdownMenuItem>
           ))}
@@ -81,13 +89,13 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
           {commands.map((command) => (
             <DropdownMenuItem
               key={`${command.pluginId}:${command.id}`}
-              onSelect={() => {
+              {...select(() => {
                 setNotice(null);
                 runtime.runCommand(command.pluginId, command.id, shown).catch((error: unknown) => {
                   const message = error instanceof Error ? error.message : 'It failed';
                   setNotice(`${nameOf(command.pluginId)}: ${command.title} failed. ${message}`);
                 });
-              }}
+              })}
             >
               {command.title}
             </DropdownMenuItem>

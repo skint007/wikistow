@@ -26,6 +26,7 @@ const bridge: DesktopBridge = {
   forgetVault: () => call(DESKTOP_CHANNELS.forgetVault),
   searchIndex: () => call(DESKTOP_CHANNELS.searchIndex),
   keepSearchIndex: (sealed) => call(DESKTOP_CHANNELS.keepSearchIndex, sealed),
+  dropSearchIndex: () => call(DESKTOP_CHANNELS.dropSearchIndex),
   trustMarks: () => call(DESKTOP_CHANNELS.trustMarks),
   keepTrustMarks: (sealed) => call(DESKTOP_CHANNELS.keepTrustMarks, sealed),
   keptItems: (folder) => call(DESKTOP_CHANNELS.keptItems, folder),

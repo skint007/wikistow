@@ -13,6 +13,7 @@ import {
 import { runCommand } from '../commands/command';
 import { confirmAdder } from '../commands/sharing-commands';
 import { requirementsHere } from '../commands/ui-commands';
+import { noAnswer } from '../data/connection';
 import { ownerToConfirmQuery, refreshAccess, spacesQuery } from '../data/queries';
 import { useClient } from '../vault/store';
 import { nameOf } from './names';
@@ -47,8 +48,10 @@ export function OwnerConfirm({ spaceId }: { spaceId: SpaceId }) {
   const later = usePutOff(ctx, spaceId);
   const { busy, error, run } = useAction();
   const close = () => putOffConfirming(ctx, spaceId);
-  // The space shows no owner controls until this check works out.
-  if (check.isError) {
+  // The space shows no owner controls until this check works out. With no
+  // answer from the server it isn't asked: offline, owner actions wait
+  // anyway (ADR 0009, decision 8), and it is checked again once back.
+  if (check.isError && !noAnswer(check.error)) {
     return (
       <Dialog open={!later} onOpenChange={(open) => !open && close()}>
         <DialogContent>

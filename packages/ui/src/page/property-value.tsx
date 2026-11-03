@@ -29,7 +29,7 @@ import { linkHint } from '../desktop';
 import { filterQuery, SearchLink } from '../shell/search-link';
 import type { PageBodyContext } from './body-context';
 import { propertyLabel } from './property-model';
-import { wikilinkView } from './wikilink-model';
+import { NOT_KEPT_HINT, wikilinkView } from './wikilink-model';
 
 // A property's value as the rows show it (ADR 0006): each type its own way,
 // and only ever text or a link, never HTML made from the value.
@@ -85,6 +85,8 @@ export type LinkScope = {
   links: ReadonlyMap<string, string>;
   /** The viewer edits the page, and so sees links that don't resolve as such. */
   editor: boolean;
+  /** Offline, the space's pages this device doesn't keep (`WikilinkScope`). */
+  notKept?: ReadonlySet<string> | undefined;
 };
 
 /** The link scope of a page body (`PageBody`). */
@@ -93,12 +95,14 @@ export const bodyLinkScope = ({
   pages,
   links,
   editing,
+  notKept,
 }: PageBodyContext): LinkScope => ({
   spaceId: attachments.page.spaceId,
   selfId: attachments.page.pageId,
   pages,
   links,
   editor: editing !== null,
+  notKept,
 });
 
 const CHIP = 'inline rounded-row bg-primary-soft px-1.5 py-px font-bold text-primary-ink';
@@ -115,6 +119,7 @@ export function wikilinkValueView(value: string, scope: LinkScope) {
       selfId: scope.selfId,
       attachments: [],
       editor: scope.editor,
+      notKept: scope.notKept,
     })
   );
 }
@@ -152,9 +157,14 @@ export function WikilinkChip({
         </Link>
       );
     case 'missing':
+    case 'not-kept':
     case 'ambiguous': {
       const hint =
-        view.kind === 'missing' ? 'No page has this title' : 'More than one page has this title';
+        view.kind === 'missing'
+          ? 'No page has this title'
+          : view.kind === 'not-kept'
+            ? NOT_KEPT_HINT
+            : 'More than one page has this title';
       // Above it, as a link's hint is (`linkHint`), where the pointer doesn't cover
       // it. In a button that edits or opens the value too: it reads as a link, as
       // a missing wikilink's Create this page does.

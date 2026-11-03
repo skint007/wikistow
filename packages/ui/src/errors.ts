@@ -1,4 +1,4 @@
-import { CryptoError } from '@wikistow/client';
+import { CryptoError, keptOperations } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 
 const MESSAGES: Partial<Record<string, string>> = {
@@ -124,6 +124,9 @@ export const stopMessage = (error: unknown): string | undefined =>
 /** A short message for anything the API or Better Auth throws. */
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return SERVER[error.code] ?? MESSAGES[error.code] ?? error.message;
+  if (error instanceof keptOperations.NotKept) {
+    return 'This isn’t kept on this device, so it can’t be shown until you’re back online.';
+  }
   if (typeof error === 'object' && error !== null) {
     const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
     if (code && MESSAGES[code]) return MESSAGES[code];
@@ -145,10 +148,22 @@ export function errorMessage(error: unknown): string {
  * A short message for a page that couldn't be opened. It reads the same
  * whether the page doesn't exist or wasn't shared, as the server's answer does.
  */
-export const pageOpenMessage = (error: unknown): string =>
-  error instanceof ApiError && error.code === 'not-found'
-    ? 'This page doesn’t exist, or it hasn’t been shared with you.'
-    : errorMessage(error);
+export function pageOpenMessage(
+  error: unknown,
+  /** Whether choosing Every page would keep it: Pages I open, where pages are kept between launches. */
+  { everyPageWouldKeep = false } = {},
+): string {
+  if (error instanceof ApiError && error.code === 'not-found') {
+    return 'This page doesn’t exist, or it hasn’t been shared with you.';
+  }
+  // Offline, a page not kept here (ADR 0009, decision 4).
+  if (error instanceof keptOperations.NotKept) {
+    return everyPageWouldKeep
+      ? 'This page isn’t kept on this device. To keep every page for offline, choose Every page for Keep for offline in Settings.'
+      : 'This page isn’t kept on this device yet, so it opens once you’re back online.';
+  }
+  return errorMessage(error);
+}
 
 /** Better Auth answers `{ data, error }`; turn its error into a thrown one. */
 export function unwrap<T>(result: { data: T | null; error: unknown }): T {

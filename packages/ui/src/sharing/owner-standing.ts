@@ -2,6 +2,7 @@ import type { ClientContext, SpaceId } from '@wikistow/client';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { requirementsHere } from '../commands/ui-commands';
+import { noAnswer } from '../data/connection';
 import { ownerToConfirmQuery, spacesQuery } from '../data/queries';
 import { useClient } from '../vault/store';
 
@@ -24,16 +25,19 @@ export function useOwnerStanding(spaceId: SpaceId): OwnerStanding {
 /**
  * An owner's standing from the check for an adder they haven't confirmed.
  * Only a check that came back with nobody to confirm makes them `owner`; a
- * failed one can't show they confirmed, so leaves them `unconfirmed`.
+ * failed one can't show they confirmed, so leaves them `unconfirmed`. One
+ * the server gave no answer to, as offline, is still `checking`: owner
+ * actions wait for the server anyway (ADR 0009, decision 8), and there is
+ * nothing to confirm until it answers.
  */
 export function standingFrom(
-  adder: Pick<UseQueryResult<unknown>, 'status' | 'data'>,
+  adder: Pick<UseQueryResult<unknown>, 'status' | 'data' | 'error'>,
 ): Exclude<OwnerStanding, null> {
   switch (adder.status) {
     case 'pending':
       return 'checking';
     case 'error':
-      return 'unconfirmed';
+      return noAnswer(adder.error) ? 'checking' : 'unconfirmed';
     case 'success':
       return adder.data ? 'unconfirmed' : 'owner';
   }

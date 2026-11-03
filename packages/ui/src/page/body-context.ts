@@ -15,6 +15,8 @@ export type PageBodyContext = {
    * page in its folder, where `create` says one can be made.
    */
   editing: { parentId: FolderId | null; create: boolean } | null;
+  /** Offline, the space's pages this device doesn't keep, which links to read as such. */
+  notKept?: ReadonlySet<string> | undefined;
 };
 
 export const PageBody = createContext<PageBodyContext | null>(null);

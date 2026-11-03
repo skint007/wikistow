@@ -43,6 +43,7 @@ import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession } from './use-draft-session';
+import { useOffline } from '../data/connection';
 
 export type DraftEditorHandle = {
   /**
@@ -414,6 +415,8 @@ function useLinkAssist({
   const pages = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
   const [choosing, setChoosing] = useState<{ key: string; target: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Making a page needs the server (ADR 0009, decision 8).
+  const offline = useOffline();
 
   const assist = useMemo<LinkAssist>(() => {
     const parentId = tree?.pages.find((p) => p.id === page.pageId)?.parentId ?? null;
@@ -441,9 +444,9 @@ function useLinkAssist({
         }
       },
       // Not at the top of a space whose own name failed its checks: nothing
-      // can be made there.
+      // can be made there. Nor offline.
       create:
-        parentId === null && !tree?.space?.metadata
+        offline || (parentId === null && !tree?.space?.metadata)
           ? null
           : (title) => {
               setError(null);
@@ -470,7 +473,7 @@ function useLinkAssist({
       pick: (key, pageId) => void session.chooseLink(key, PageId.parse(pageId)),
       choose: setChoosing,
     };
-  }, [ctx, page, pages, queryClient, session, table, tree]);
+  }, [ctx, page, pages, queryClient, session, table, tree, offline]);
 
   const scope = { pages: pages ?? [], selfId: page.pageId };
   const chooser = {

@@ -46,6 +46,9 @@ import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
 import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../desktop';
 import { forgetKept } from '../data/kept-store';
+import { connection } from '../data/connection';
+import { useNeedsConnection } from './needs-connection';
+import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { usePlugins } from '../plugins/runtime';
@@ -73,6 +76,7 @@ export function Rail({
   onSearch: () => void;
 }) {
   const vault = useVault();
+  const needs = useNeedsConnection();
   return (
     <nav
       aria-label="Spaces and navigation"
@@ -80,6 +84,7 @@ export function Rail({
       // Scrolls itself when the window is too short for every item.
       className="flex h-full flex-col items-center gap-2 overflow-y-auto py-3.5"
     >
+      <OfflinePill />
       {vault.status === 'unlocked' ? (
         <>
           <SpaceTiles vault={vault} onNavigate={onNavigate} />
@@ -98,8 +103,9 @@ export function Rail({
           <SharedLinkHere vault={vault} onNavigate={onNavigate} />
           <Link
             to="/trash"
-            onClick={onNavigate}
-            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
+            // Its list and everything in it are the server's (ADR 0009, decision 8).
+            {...needs.click(() => onNavigate?.())}
+            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none aria-disabled:opacity-50"
             activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
           >
             <Trash2 className="size-4" strokeWidth={1.75} />
@@ -111,8 +117,8 @@ export function Rail({
       )}
       <Link
         to="/agents"
-        onClick={onNavigate}
-        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
+        {...needs.click(() => onNavigate?.())}
+        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none aria-disabled:opacity-50"
         activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
       >
         <Bot className="size-4" strokeWidth={1.75} />
@@ -224,6 +230,7 @@ function SpaceTiles({
   const { data: order } = useQuery(spaceOrderQuery(vault.ctx));
   const params = useParams({ strict: false });
   const [creating, setCreating] = useState(false);
+  const needs = useNeedsConnection();
   // The tile being dragged, and the place it would land: before the tile at that index.
   const [dragging, setDragging] = useState<{ from: number; to: number | null } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -295,12 +302,12 @@ function SpaceTiles({
           const movable = index >= first;
           const items = [
             movable && index > first && (
-              <ContextMenuItem key="up" onSelect={() => void move(index, index - 1)}>
+              <ContextMenuItem key="up" {...needs.select(() => void move(index, index - 1))}>
                 Move up
               </ContextMenuItem>
             ),
             movable && index < spaces.length - 1 && (
-              <ContextMenuItem key="down" onSelect={() => void move(index, index + 2)}>
+              <ContextMenuItem key="down" {...needs.select(() => void move(index, index + 2))}>
                 Move down
               </ContextMenuItem>
             ),
@@ -314,7 +321,8 @@ function SpaceTiles({
               aria-current={active ? 'page' : undefined}
               data-hint={plainText(name)}
               data-hint-side="right"
-              draggable={movable}
+              // The order is the server's to keep (ADR 0009, decision 8).
+              draggable={movable && !needs.offline}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData(SPACE_DRAG_TYPE, '');
@@ -352,9 +360,9 @@ function SpaceTiles({
       </ul>
       <button
         type="button"
-        onClick={() => setCreating(true)}
+        {...needs.click(() => setCreating(true))}
         aria-label="New space"
-        className="grid size-11 place-items-center rounded-tile border-2 border-dashed border-border text-muted-foreground hover:tint active:tint-strong"
+        className="grid size-11 place-items-center rounded-tile border-2 border-dashed border-border text-muted-foreground hover:tint active:tint-strong aria-disabled:opacity-50"
       >
         <Plus className="size-4" strokeWidth={1.75} />
       </button>
@@ -466,6 +474,14 @@ export function useSignOut() {
   // showing the sign-in page over it.
   const signOut = useCallback(async () => {
     setFailed(null);
+    // Offline, the desktop app offers to sign out on this computer instead
+    // (ADR 0009, decision 10); a browser's Sign out waits (`AccountMenu`).
+    // The server is asked first, as it may be back since the last check.
+    await connection.check();
+    if (!connection.get().online) {
+      if (desktop) setFailed('gone');
+      return;
+    }
     // Unsaved edits are saved first, or the person chose to drop them.
     if (!(await vaultStore.requestLock())) return;
     const outcome = await authClient.signOut().then(
@@ -497,6 +513,7 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
   const { data: update } = useQuery(desktopUpdateQuery);
   const navigate = useNavigate();
   const vault = useVault();
+  const needs = useNeedsConnection();
   if (!me) return null;
 
   return (
@@ -530,7 +547,12 @@ function AccountMenu({ onSignOut }: { onSignOut: () => Promise<void> }) {
             <Lock strokeWidth={1.75} /> Lock vault
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onSelect={() => void onSignOut()}>
+        <DropdownMenuItem
+          // The desktop app signs out on this computer offline (`useSignOut`).
+          {...(desktop
+            ? { onSelect: () => void onSignOut() }
+            : needs.select(() => void onSignOut()))}
+        >
           <LogOut strokeWidth={1.75} /> Sign out
         </DropdownMenuItem>
         <DropdownMenuSeparator />

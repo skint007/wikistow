@@ -38,6 +38,7 @@ import { rememberOpenVault } from '../../../vault/open';
 import { PLAIN, useVault } from '../../../vault/store';
 import { useDeviceSwitch } from '../../../shell/device-switch';
 import { forgetInBrowser, useRememberedInBrowser } from '../../../vault/tab-unlock';
+import { useNeedsConnection } from '../../../shell/needs-connection';
 
 export const Route = createFileRoute('/_app/settings/')({ component: Settings });
 
@@ -711,6 +712,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateS
 
 /** How many desktop apps are signed in, with Review opening the list to sign each out. */
 function DesktopApps() {
+  // Signing a desktop app out is the server's to do (ADR 0009, decision 8).
+  const needs = useNeedsConnection();
   const { data, error } = useQuery(desktopSessionsQuery);
   const [reviewing, setReviewing] = useState(false);
   const sessions = data?.sessions;
@@ -730,7 +733,7 @@ function DesktopApps() {
         }
         action={
           count > 0 && (
-            <Button size="sm" variant="outline" onClick={() => setReviewing(true)}>
+            <Button size="sm" variant="outline" {...needs.click(() => setReviewing(true))}>
               Review
             </Button>
           )

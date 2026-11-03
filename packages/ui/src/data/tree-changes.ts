@@ -2,6 +2,7 @@ import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/cl
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
+import { useOffline } from './connection';
 import { keepChanged } from './keeper';
 import {
   publicLinksQuery,
@@ -24,13 +25,28 @@ import {
  * listening, so a dozen tabs don't hold a dozen connections, and its trees
  * load again when it is back in view, as every query does
  * (`refetchOnWindowFocus`); the index, which doesn't, then lists every
- * space again, once.
+ * space again, once. Offline it stops listening too, and what is shown reads
+ * what's kept at once; back online
+ * (ADR 0009, decision 4) it starts again as when back in view, after what's
+ * shown loads again (`refetchOnReconnect`).
  */
 export function useTreeChanges(ctx: ClientContext | null) {
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(onVisibility, () => document.visibilityState === 'visible');
+  const offline = useOffline();
   useEffect(() => {
-    if (!ctx || !visible) return;
+    if (!ctx) return;
+    // Gone offline: the trees and lists shown read what's kept at once, so
+    // the sidebar shows the kept pages only (ADR 0009, decision 4).
+    if (offline) {
+      void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
+      void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
+      void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
+      // The index too, which then holds the kept pages only.
+      searchIndexChanged(queryClient);
+      return;
+    }
+    if (!visible) return;
     // Trees load again when the tab is back in view, being stale at once;
     // the index is told it may have missed changes anywhere.
     searchIndexChanged(queryClient);
@@ -60,7 +76,7 @@ export function useTreeChanges(ctx: ClientContext | null) {
       },
     });
     return () => stop.abort();
-  }, [ctx, visible, queryClient]);
+  }, [ctx, visible, offline, queryClient]);
 }
 
 function onVisibility(changed: () => void) {

@@ -2,6 +2,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '../errors';
+import { connection } from '../data/connection';
 
 type Loading = Pick<
   UseQueryResult,
@@ -76,7 +77,10 @@ function FailedLine({ what, failed }: { what: string; failed: readonly Loading[]
         aria-disabled={retrying}
         className="aria-disabled:cursor-wait aria-disabled:opacity-50"
         onClick={() => {
-          if (!retrying) failed.forEach((query) => void query.refetch());
+          // Offline, the server is asked first (ADR 0009, decision 4).
+          if (!retrying) {
+            void connection.check().then(() => failed.forEach((query) => void query.refetch()));
+          }
         }}
       >
         Try again

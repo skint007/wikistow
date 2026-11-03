@@ -61,7 +61,8 @@ export function pageViewModel({
   const published = heads.publishedHead;
   const publishedPill = (current: boolean): Pill => ({
     kind: 'published',
-    label: `Published v${heads.publishedCount}`,
+    // Offline the count isn't known (0), and isn't shown.
+    label: heads.publishedCount > 0 ? `Published v${heads.publishedCount}` : 'Published',
     current,
   });
 

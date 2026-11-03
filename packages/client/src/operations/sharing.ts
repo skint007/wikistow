@@ -919,15 +919,18 @@ export type SharedItem = {
  * share's published key, and who shared it. Nothing above a share root.
  * An agent's share is named by the folder it was picked at instead.
  */
-export async function sharedWithMe(ctx: ClientContext): Promise<SharedItem[]> {
+export async function sharedWithMe(
+  ctx: ClientContext,
+  /** Work each space out afresh, as the page does; the keeper takes the session's (`spaceKeys`). */
+  { refresh = true }: { refresh?: boolean } = {},
+): Promise<SharedItem[]> {
   const { shares } = await ctx.api.call(sharingRoutes.sharedWithMe);
   // Each space is worked out afresh once, however many of its shares are listed.
   const spaces = new Map<SpaceId, Promise<SpaceKeys>>();
   const items: SharedItem[] = [];
   for (const { share, role, canPublish, root } of shares) {
     let fresh = spaces.get(share.spaceId);
-    if (!fresh)
-      spaces.set(share.spaceId, (fresh = spaceKeys(ctx, share.spaceId, { refresh: true })));
+    if (!fresh) spaces.set(share.spaceId, (fresh = spaceKeys(ctx, share.spaceId, { refresh })));
     const keys = await fresh;
     // Only the server knows an agent's picks (section 9.4), so for an agent
     // the folder is the one its name record is for.

@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { onSignedOutElsewhere } from '../data/kept-store';
+import { OfflinePill } from './offline-pill';
 import { useTreeChanges } from '../data/tree-changes';
 import { desktopUpdateQuery } from '../desktop';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
@@ -127,6 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="font-extrabold">
               Wiki<span className="text-primary">Stow</span>
             </span>
+            <OfflinePill />
             {vault.status === 'unlocked' && (
               <button
                 type="button"

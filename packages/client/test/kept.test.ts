@@ -17,6 +17,7 @@ import {
   newPayload,
   pageOperations,
   PageId,
+  searchOperations,
   RevisionCache,
   RevisionId,
   SpaceId,
@@ -116,7 +117,7 @@ function fakeServer(identity: PrivateIdentity) {
       async spaces() {
         const ids = [...trees.keys()];
         return {
-          list: { spaces: [], order: { homeId: ids[0] ?? null, spaceIds: ids } },
+          list: { spaces: [], order: { homeId: ids[0] ?? null, spaceIds: ids }, shared: [] },
           ids,
         };
       },
@@ -330,5 +331,59 @@ describe('keeping pages for offline', () => {
     await expect(keeping).rejects.toBeInstanceOf(keptOperations.KeepingStopped);
     // Only the space list, written before it stopped.
     expect(await store.items.list()).toHaveLength(1);
+  });
+
+  it('reads what is kept with no server: trees, page info and search (step 3)', async () => {
+    const identity = person();
+    const store = memoryKeptStore();
+    const server = fakeServer(identity);
+    const spaceId = newId(SpaceId);
+    const recipes = server.addPage(spaceId, 'Recipes');
+    const notes = server.addPage(spaceId, 'Notes');
+    const ctx = await session(identity, store);
+    // The person owns the space, and opened Recipes here only.
+    const source = {
+      ...server.source,
+      tree: async (id: SpaceId) => {
+        const tree = await server.source.tree(id);
+        return (
+          tree && {
+            ...tree,
+            space: {
+              id,
+              role: 'owner' as const,
+              canPublish: true,
+              permissionVersion: 1,
+              metadata: null,
+            },
+          }
+        );
+      },
+    };
+    await keptOperations.keep(ctx, {
+      scope: 'opened',
+      source,
+      opened: [{ spaceId, pageId: recipes.pageId }],
+    });
+
+    // A later session, whose API throws if asked.
+    const later = await session(identity, store);
+    const tree = await keptOperations.keptTree(later, spaceId);
+    expect(tree.pages.map((page) => [page.id, page.title])).toEqual([
+      [recipes.pageId, `Recipes draft ${SECRET}`],
+    ]);
+    expect([...keptOperations.notKeptIn(later, spaceId)]).toEqual([notes.pageId]);
+    const info = keptOperations.keptPageInfo(later, recipes.pageId);
+    expect(info).toMatchObject({
+      spaceId,
+      role: 'owner',
+      canPublish: true,
+      heads: { draftHead: recipes.draft.revisionId, publishedHead: recipes.published.revisionId },
+    });
+    expect(() => keptOperations.keptPageInfo(later, notes.pageId)).toThrow(keptOperations.NotKept);
+
+    const index = await searchOperations.indexSpaces(later, { from: 'kept' });
+    expect(index.search('Recipes').map(({ doc }) => doc.pageId)).toEqual([recipes.pageId]);
+    expect(index.search('Notes')).toEqual([]);
   });
 });

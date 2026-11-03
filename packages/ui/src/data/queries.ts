@@ -1,6 +1,7 @@
 import {
   agentOperations,
   groupOperations,
+  keptOperations,
   ownerOperations,
   pageOperations,
   publicationOperations,
@@ -16,38 +17,76 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { hashKey, queryOptions, type QueryClient } from '@tanstack/react-query';
-import type { DesktopBridge } from '@wikistow/contracts';
-import { desktop } from '../desktop';
 import { PLAIN } from '../vault/store';
 import { readIndexLinks } from '../page/page-reader';
+import { connection, noAnswer } from './connection';
+import { searchIndexFile } from './index-file';
 import { keepChanged } from './keeper';
 
 // Everything here is decrypted or describes encrypted content, so every key
 // starts with PLAIN and locking the vault drops it all.
 
+/**
+ * `online`'s answer, or when the server doesn't answer, `kept`'s, read from
+ * what this device keeps (ADR 0009, decision 4). Offline, the server isn't
+ * tried, and with nothing kept, `kept` throws `NotKept`; when it was tried
+ * and nothing is kept, its failure stands.
+ */
+async function orKept<T>(online: () => Promise<T>, kept: () => T | Promise<T>): Promise<T> {
+  if (!connection.get().online) return kept();
+  try {
+    return await online();
+  } catch (error) {
+    if (!noAnswer(error)) throw error;
+    try {
+      return await kept();
+    } catch (failure) {
+      throw failure instanceof keptOperations.NotKept ? error : failure;
+    }
+  }
+}
+
 export const spacesQuery = (ctx: ClientContext) =>
   queryOptions({
     queryKey: [PLAIN, 'spaces'],
-    queryFn: () => spaceOperations.loadSpaces(ctx),
+    queryFn: () =>
+      orKept(
+        () => spaceOperations.loadSpaces(ctx),
+        () => keptOperations.keptSpaceList(ctx).spaces,
+      ),
   });
 
 /** The home space and saved order, under the spaces' key so refreshing those refreshes it. */
 export const spaceOrderQuery = (ctx: ClientContext) =>
   queryOptions({
     queryKey: [PLAIN, 'spaces', 'order'],
-    queryFn: () => spaceOperations.loadSpaceOrder(ctx),
+    queryFn: () =>
+      orKept(
+        () => spaceOperations.loadSpaceOrder(ctx),
+        () => keptOperations.keptSpaceList(ctx).order,
+      ),
   });
 
+/** A space's tree; offline, its kept pages only (`keptTree`). */
 export const treeQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({
     queryKey: [PLAIN, 'tree', spaceId],
-    queryFn: () => spaceOperations.loadTree(ctx, spaceId),
+    queryFn: () =>
+      orKept(
+        () => spaceOperations.loadTree(ctx, spaceId),
+        () => keptOperations.keptTree(ctx, spaceId),
+      ),
   });
 
+/** What opening a page says of it; offline, worked out from its kept space (`keptPageInfo`). */
 export const pageQuery = (ctx: ClientContext, pageId: PageId) =>
   queryOptions({
     queryKey: [PLAIN, 'page', pageId],
-    queryFn: () => pageOperations.loadPage(ctx, pageId),
+    queryFn: () =>
+      orKept(
+        () => pageOperations.loadPage(ctx, pageId),
+        () => keptOperations.keptPageInfo(ctx, pageId),
+      ),
   });
 
 /**
@@ -64,7 +103,16 @@ export const revisionQuery = (
 ) =>
   queryOptions({
     queryKey: [PLAIN, 'revision', page.spaceId, page.pageId, audience, revisionId],
-    queryFn: () => pageOperations.openRevisionOf(ctx, page, audience, revisionId),
+    // Kept versions open from the device, online and offline, before the
+    // server is asked; offline, one that isn't kept is `NotKept`.
+    queryFn: async () => {
+      try {
+        return await pageOperations.openRevisionOf(ctx, page, audience, revisionId);
+      } catch (error) {
+        if (!connection.get().online && noAnswer(error)) throw new keptOperations.NotKept();
+        throw error;
+      }
+    },
     staleTime: Infinity,
   });
 
@@ -176,11 +224,15 @@ export const trashQuery = (ctx: ClientContext) =>
     queryFn: () => trashOperations.loadTrash(ctx),
   });
 
-/** Shares this person is a member of, with their root's name and who shared them. */
+/** Shares this person is a member of, with their root's name and who shared them; offline, as last kept. */
 export const sharedWithMeQuery = (ctx: ClientContext) =>
   queryOptions({
     queryKey: [PLAIN, 'shared-with-me'],
-    queryFn: () => sharingOperations.sharedWithMe(ctx),
+    queryFn: () =>
+      orKept(
+        () => sharingOperations.sharedWithMe(ctx),
+        () => keptOperations.keptSpaceList(ctx).shared,
+      ),
   });
 
 /** The owner to confirm before acting as an owner of the space, or null (protocol section 6.5). */
@@ -210,23 +262,29 @@ export const searchProgressKey = [PLAIN, 'search-progress'] as const;
 /** The search index (`usePageIndex`), one for the whole app. */
 export const searchIndexKey = [PLAIN, 'search-index'] as const;
 
-// The running build's version, set by the web app's Vite config. Only the
-// desktop app's path reads it, so tests without the define never do.
+// The running build's version, set by the web app's Vite config. Only read
+// where the index is kept (`searchIndexFile`), so tests without the define never do.
 declare const __APP_VERSION__: string;
 
 /**
  * Every page this person can read, indexed for search on this device. The
  * first time, built from the trees, opening only the pages whose version
- * changed since the index the desktop app kept, sealed for this person and
- * build (`sealKept`). After that, each change this person makes, or the
+ * changed since the index this device kept, sealed for this person and
+ * build (`sealKept`, `searchIndexFile`). After that, each change this person makes, or the
  * server tells of (`searchIndexChanged`), updates the one in memory
  * (`updateIndex`): only the spaces named are listed again, and every one
  * if none are, as when it is shown again a minute old. Only pages whose
  * version changed are opened and indexed again, and an update that finds
  * nothing changed leaves the same index. Locking drops it with everything
  * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
- * grant. The desktop app keeps it once this person's saves pause, and at
+ * grant. Where it is kept, it is kept once this person's saves pause, and at
  * once after any other change it lets a version go for (`keepLater`).
+ *
+ * Offline (ADR 0009, decision 9), it is built from the pages kept on this
+ * device alone, taking what the index shown read of them, so with **Pages
+ * I open** it holds only those. It isn't kept, it stays as it is while
+ * offline, and what changed waits until the server answers: back online,
+ * an update lists every space (`useTreeChanges`).
  *
  * Not built again when the window is focused: coming back into view tells
  * it what it may have missed (`useTreeChanges`), and one update follows.
@@ -235,30 +293,55 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
   queryOptions({
     queryKey: searchIndexKey,
     queryFn: async ({ signal }) => {
+      const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
+      // Offline, one built from what's kept stays as it is until the server answers.
+      if (shown && !connection.get().online && fromKept.has(shown)) return shown;
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       const onProgress = (progress: searchOperations.IndexProgress) =>
         queryClient.setQueryData(searchProgressKey, progress);
-      // The desktop app keeps one between launches only with a trusted secret store.
-      const device = desktop && (await desktop.secureStorage().catch(() => false)) ? desktop : null;
-      const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
+      const file = await searchIndexFile().catch(() => null);
       const changes = takeChanges(queryClient);
       const { generation } = ctx.revisions;
       let index: searchOperations.PageIndex;
+      // Built from what's kept alone, as offline: not kept again.
+      let partial = false;
       try {
-        if (shown) {
+        if (shown && connection.get().online) {
           index = await searchOperations.updateIndex(ctx, shown, changes, {
             signal,
             onProgress,
             readLinks: readIndexLinks,
           });
         } else {
-          const sealed = await device?.searchIndex().catch(() => null);
-          index = await searchOperations.indexSpaces(ctx, {
-            kept: sealed ? searchOperations.openKept(ctx, sealed, __APP_VERSION__) : null,
-            signal,
-            onProgress,
-            readLinks: readIndexLinks,
-          });
+          // What an index read before stands in for the versions it read: the
+          // one shown, going offline, else the one this device kept.
+          const sealed = shown ? null : await file?.read().catch(() => null);
+          const kept = shown
+            ? searchOperations.keptPages(shown)
+            : sealed
+              ? searchOperations.openKept(ctx, sealed, __APP_VERSION__)
+              : null;
+          const build = (from: 'server' | 'kept') =>
+            searchOperations.indexSpaces(ctx, {
+              kept,
+              from,
+              signal,
+              onProgress,
+              readLinks: readIndexLinks,
+            });
+          partial = !connection.get().online;
+          try {
+            index = await build(partial ? 'kept' : 'server');
+          } catch (error) {
+            if (partial || !noAnswer(error)) throw error;
+            partial = true;
+            index = await build('kept');
+          }
+          // Back online, every space is listed again.
+          if (partial) {
+            fromKept.add(index);
+            changed(queryClient, 'all');
+          }
         }
       } catch (error) {
         // Followed by the next update instead, unless the vault locked or
@@ -270,11 +353,11 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
         }
         throw error;
       }
-      if (device && index !== shown) {
+      if (file && !partial && index !== shown) {
         // What the file held of a version let go goes at once, as from
         // memory, but for this person's own drafts saved over.
         const now = !shown || searchOperations.letGo(shown, index, changes.saved);
-        keepLater(queryClient, ctx, device, now);
+        keepLater(queryClient, ctx, now);
       }
       return index;
     },
@@ -283,10 +366,13 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     refetchOnWindowFocus: false,
   });
 
+/** Indexes built from what's kept alone, offline: never kept, and updated from the server once back. */
+const fromKept = new WeakSet<searchOperations.PageIndex>();
+
 /** How long changes gather, while something shows the index, before it follows them together. */
 export const GATHER_MS = 300;
 
-/** How long the desktop app waits for changes to pause before keeping the index, and at most. */
+/** How long this device waits for changes to pause before keeping the index, and at most. */
 export const KEEP_MS = 5_000;
 export const KEEP_AT_MOST_MS = 60_000;
 
@@ -446,8 +532,9 @@ function follow(queryClient: QueryClient) {
 
 /**
  * Once the index has stopped changing for `KEEP_MS`, or `KEEP_AT_MOST_MS`
- * after it first changed, the desktop app keeps it, sealed for this person
- * and build: once for a burst of changes, not once each. With `now`, as
+ * after it first changed, this device keeps it, sealed for this person and
+ * build, where it keeps it then (`searchIndexFile`), so not after a switch
+ * to **Pages I open**: once for a burst of changes, not once each. With `now`, as
  * for an index built afresh or one that let go of a version other than a
  * draft this person saved over (`letGo`), at once, so the file holds
  * nothing longer than memory does. Failing to keep it only means reading more pages at the next
@@ -455,12 +542,7 @@ function follow(queryClient: QueryClient) {
  * vault locked or access changed meanwhile, nothing is kept, and nothing
  * here holds on to the index till then.
  */
-function keepLater(
-  queryClient: QueryClient,
-  ctx: ClientContext,
-  device: DesktopBridge,
-  now: boolean,
-) {
+function keepLater(queryClient: QueryClient, ctx: ClientContext, now: boolean) {
   const state = followingOf(queryClient);
   // A write due at once stays so: it keeps the index then shown, this one.
   if (state.keeping?.now) return;
@@ -469,24 +551,26 @@ function keepLater(
   if (state.keeping) clearTimeout(state.keeping.timer);
   // Locking, or `refreshAccess`, clears the cache, which moves this on.
   const { generation } = ctx.revisions;
-  const keep = () => {
+  const keep = async () => {
     state.keeping = null;
+    const file = await searchIndexFile();
     const index = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
-    if (!index || ctx.revisions.generation !== generation) return;
-    try {
-      const sealed = searchOperations.sealKept(
-        ctx,
-        searchOperations.keptPages(index),
-        __APP_VERSION__,
-      );
-      void device.keepSearchIndex(sealed).catch(() => {});
-    } catch {
-      // Locked meanwhile: nothing to keep.
-    }
+    if (!file || !index || ctx.revisions.generation !== generation) return;
+    // Throws if the vault locked meanwhile: nothing to keep.
+    const sealed = searchOperations.sealKept(
+      ctx,
+      searchOperations.keptPages(index),
+      __APP_VERSION__,
+    );
+    await file.write(sealed);
   };
   // Even at once, after React Query takes it as the index shown.
   const wait = now ? 0 : Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - at));
-  state.keeping = { since: now ? at : since, now, timer: setTimeout(keep, wait) };
+  state.keeping = {
+    since: now ? at : since,
+    now,
+    timer: setTimeout(() => void keep().catch(() => {}), wait),
+  };
 }
 
 /**

@@ -164,6 +164,25 @@ function desktopKeptStore(bridge: DesktopBridge, secure: boolean): KeptStore {
   };
 }
 
+const SEARCH_INDEX = 'search-index';
+
+/**
+ * The browser's search index, kept in the same database (ADR 0009,
+ * decision 9), sealed by the pages (`sealKept`). Deleted with it at sign-out.
+ */
+export const browserSearchIndex = {
+  read: async () => {
+    const kept = await transact('meta', 'readonly', (s) => s.get(SEARCH_INDEX));
+    return kept instanceof Uint8Array ? kept : null;
+  },
+  write: async (sealed: Uint8Array) => {
+    await transact('meta', 'readwrite', (s) => void s.put(sealed, SEARCH_INDEX));
+  },
+  drop: async () => {
+    await transact('meta', 'readwrite', (s) => void s.delete(SEARCH_INDEX));
+  },
+};
+
 let kept: Promise<{ store: KeptStore; onDisk: boolean }> | null = null;
 
 /**

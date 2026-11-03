@@ -397,29 +397,40 @@ export const nameOf = (loaded: LoadedMetadata | null) =>
  * `PageIndex.linksTo`, read with it; without, none, as search needs none.
  * If the cache is cleared (the vault locks, or access changes) or `signal`
  * aborts, it stops with `IndexAbandoned` and what it built is dropped.
+ *
+ * With `from: 'kept'`, as offline (ADR 0009, decision 9), it asks the
+ * server nothing: it covers the spaces kept on the device, as last listed,
+ * and only their pages whose version is kept (`ctx.keptContent`).
  */
 export async function indexSpaces(
   ctx: ClientContext,
   {
     spaceIds,
     kept,
+    from = 'server',
     onProgress,
     signal,
     readLinks,
   }: {
     spaceIds?: readonly SpaceId[];
     kept?: KeptPages | null;
+    from?: 'server' | 'kept';
     onProgress?: (progress: IndexProgress) => void;
     signal?: AbortSignal;
     readLinks?: ReadWikilinks;
   } = {},
 ): Promise<PageIndex> {
   const live = liveness(ctx, signal);
-  const listed = spaceIds === undefined;
-  const ids = spaceIds ?? (await readableSpaces(ctx));
-  live();
+  let spaces: Awaited<ReturnType<typeof loadSpaces>>;
+  if (from === 'kept') {
+    spaces = keptSpaces(ctx, spaceIds);
+  } else {
+    const ids = spaceIds ?? (await readableSpaces(ctx));
+    live();
+    spaces = await loadSpaces(ctx, ids, spaceIds === undefined);
+  }
   const index = new PageIndex();
-  await readPages(ctx, await loadSpaces(ctx, ids, listed), {
+  await readPages(ctx, spaces, {
     reuse: (spaceId, page, head) => {
       const found = kept?.get(head);
       return found?.spaceId === spaceId && found.pageId === page ? found : undefined;
@@ -585,6 +596,19 @@ async function loadSpaces(ctx: ClientContext, ids: readonly SpaceId[], skipGone:
     }),
   );
   return spaces.filter((space) => space !== null);
+}
+
+/**
+ * The trees of the spaces kept on the device (those of `ids`), as last
+ * listed, with only the pages whose shown version is kept.
+ */
+function keptSpaces(ctx: ClientContext, ids: readonly SpaceId[] | undefined) {
+  const kept = ctx.keptContent;
+  if (!kept) return [];
+  return (ids ?? kept.spaceIds()).flatMap((spaceId) => {
+    const tree = kept.space(spaceId)?.tree;
+    return tree ? [{ spaceId, ...tree, pages: kept.shownPages(tree) }] : [];
+  });
 }
 
 /**
