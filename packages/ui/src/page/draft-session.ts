@@ -344,8 +344,12 @@ export class DraftSession {
       });
       saved = { revisionId, basedOn, written, region };
       this.#known.add(revisionId);
-      this.#base = revisionId;
-      this.#region = { region, generation };
+      // A save into this device's queue keeps its base, and one sent from
+      // there may have landed meanwhile (`landed`): that one stays the base.
+      if (this.#base === basedOn) {
+        this.#base = revisionId;
+        this.#region = { region, generation };
+      }
       // A link may now name its page's current title. Show it, unless the
       // person typed on meanwhile: then the next save builds on the table
       // that went with the text on screen, and renames it again.

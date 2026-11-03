@@ -42,7 +42,7 @@ import { QueryTable } from './query-table';
 import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
-import { useDraftSession } from './use-draft-session';
+import { useDraftSession, type Queued } from './use-draft-session';
 import { useNotKept } from '../data/connection';
 import { pageChange, queueQuery } from '../data/offline-changes';
 
@@ -121,15 +121,18 @@ export function DraftEditor({
   /** The region `payload` was opened in, which its link table was worked out for. */
   region: Region;
   /** The change waiting on this device that `payload` is, if any (`useDraftSession`). */
-  queued?: { version: number; theirs: RevisionId | null } | null;
-  /** Throw away local edits and load the draft as it is now. */
-  onReload: () => void;
+  queued?: Queued | null;
+  /**
+   * Throw away local edits and load the draft as it is now. `keepQueued`
+   * when theirs is a change another window saved on this device.
+   */
+  onReload: (options: { keepQueued: boolean }) => void;
   /** Attachments kept out of the list because something else manages them (the banner, the icon). */
   hiddenAttachments?: readonly string[];
   ref?: Ref<DraftEditorHandle>;
 }) {
   const surface = useRef<EditorSurfaceHandle>(null);
-  const { session, snapshot } = useDraftSession({
+  const { session, snapshot, conflictWithDevice } = useDraftSession({
     ctx,
     page,
     base,
@@ -225,7 +228,11 @@ export function DraftEditor({
               <Button size="sm" onClick={() => void session.saveMineOnTop()}>
                 Save mine on top
               </Button>
-              <Button size="sm" variant="outline" onClick={onReload}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onReload({ keepQueued: conflictWithDevice() })}
+              >
                 Discard mine and view theirs
               </Button>
             </div>

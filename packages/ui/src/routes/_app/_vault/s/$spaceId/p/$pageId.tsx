@@ -61,6 +61,7 @@ import { bodyTop, CoverBand, PageBadge } from '../../../../../../page/cover/cove
 import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
 import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
+import type { Queued } from '../../../../../../page/use-draft-session';
 import { DetachDialog } from '../../../../../../page/detach-dialog';
 import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
@@ -267,7 +268,7 @@ type DraftFrom = {
   base: RevisionId;
   payload: PagePayload;
   region: Region;
-  queued: { version: number; theirs: RevisionId | null } | null;
+  queued: Queued | null;
 };
 type Info = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
@@ -442,9 +443,10 @@ function PageBody({
     flushDraft: async () => editor.current?.flush(),
   };
   const done = () => act(() => runCommand(finishEditing, page, commandEnv));
-  // Discard mine and view theirs: the change waiting on this device goes too.
-  const viewTheirs = async () => {
-    if (change) {
+  // Discard mine and view theirs: the change waiting on this device goes
+  // too, unless it is theirs, saved by another window.
+  const viewTheirs = async ({ keepQueued }: { keepQueued: boolean }) => {
+    if (change && !keepQueued) {
       await queueOf(ctx)?.discard(page.pageId);
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
     }
@@ -468,6 +470,7 @@ function PageBody({
             OWNER_REGION,
           queued: {
             version: change.version,
+            sending: change.sending?.revisionId ?? null,
             // Someone saved since it was based: it opens as the conflict it came back as.
             theirs:
               change.failure?.kind === 'conflict' && info.heads.draftHead !== change.basedOn
@@ -965,7 +968,7 @@ function PageBody({
               payload={draftFrom.payload}
               region={draftFrom.region}
               queued={draftFrom.queued}
-              onReload={() => void viewTheirs()}
+              onReload={(options) => void viewTheirs(options)}
               hiddenAttachments={coverParts}
             />
           )}

@@ -9,7 +9,7 @@ import {
   type PagePayload,
   type Region,
 } from '@wikistow/client';
-import { noAnswer } from '@wikistow/client/api';
+import { ApiError, noAnswer } from '@wikistow/client/api';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
@@ -46,21 +46,24 @@ export function useDraftSession({
   region: Region;
   /**
    * The change waiting on this device that `payload` is, if any (ADR 0009,
-   * decision 7): its version, and the draft someone else saved since, when
-   * it came back as a conflict.
+   * decision 7): its version, the draft someone else saved since, when it
+   * came back as a conflict, and the ID it is being sent under, if any,
+   * which is this session's own.
    */
-  queued?: { version: number; theirs: RevisionId | null } | null;
+  queued?: Queued | null;
   surface: { readonly current: EditorSurfaceHandle | null };
 }) {
   const queryClient = useQueryClient();
-  const [session] = useState(
-    () =>
-      new DraftSession(
-        { base, payload, region, theirs: queued?.theirs ?? null },
-        appPorts(ctx, page, queryClient, queued?.version ?? null),
-        surface,
-      ),
-  );
+  const [{ session, device }] = useState(() => {
+    const device = { otherWindow: false };
+    const session = new DraftSession(
+      { base, payload, region, theirs: queued?.theirs ?? null },
+      appPorts(ctx, page, queryClient, queued?.version ?? null, device),
+      surface,
+    );
+    if (queued?.sending) session.own(queued.sending);
+    return { session, device };
+  });
   const snapshot = useSyncExternalStore(session.subscribe, session.snapshot);
 
   useEffect(() => {
@@ -121,8 +124,18 @@ export function useDraftSession({
   // in flight may already be the head, so look again once it's answered.
   useEffect(() => session.noticeHead(head), [session, head, snapshot.status]);
 
-  return { session, snapshot };
+  /**
+   * Whether the conflict on screen is with a change another tab or window
+   * saved into this device's queue: then theirs is that change, which
+   * Discard mine keeps.
+   */
+  const conflictWithDevice = useCallback(() => device.otherWindow, [device]);
+
+  return { session, snapshot, conflictWithDevice };
 }
+
+/** The change waiting on this device that a draft view opens with (`useDraftSession`). */
+export type Queued = { version: number; theirs: RevisionId | null; sending: RevisionId | null };
 
 // The draft on screen for each page, for work from outside the editor.
 const openDrafts = new Map<PageId, DraftSession>();
@@ -164,6 +177,8 @@ function appPorts(
   queryClient: QueryClient,
   /** The version of the page's queued change this session last saw, if it has one. */
   queuedVersion: number | null,
+  /** Set while a conflict is with a change another window saved here. */
+  device: { otherWindow: boolean },
 ): DraftPorts {
   const tree = treeQuery(ctx, page.spaceId);
   const info = pageQuery(ctx, page.pageId);
@@ -176,13 +191,18 @@ function appPorts(
     // kept there under the ID it was sent with, to be sent again.
     async saveDraft(input) {
       if (queue && (await savesOnDevice(ctx, page.pageId))) {
-        seen = await queue.saveDraft({
-          page,
-          basedOn: input.basedOn,
-          region: input.tableRegion ?? input.basedOnRegion ?? null,
-          payload: input.payload,
-          seen,
-        });
+        try {
+          seen = await queue.saveDraft({
+            page,
+            basedOn: input.basedOn,
+            region: input.tableRegion ?? input.basedOnRegion ?? null,
+            payload: input.payload,
+            seen,
+          });
+        } catch (error) {
+          device.otherWindow = error instanceof ApiError && error.code === 'stale-head';
+          throw error;
+        }
         return onDevice(input);
       }
       const revisionId = newId(RevisionId);
@@ -211,6 +231,7 @@ function appPorts(
     uploadAttachment: (file) => attachFile(ctx, page, file),
     // After a conflict with a change another window saved, this one's goes on top of it.
     async draftHead() {
+      device.otherWindow = false;
       const entry = await queue?.entry(page.pageId);
       if (entry?.kind === 'page' && !entry.failure) {
         seen = entry.version;

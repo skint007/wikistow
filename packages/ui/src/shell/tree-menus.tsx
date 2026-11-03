@@ -18,7 +18,8 @@ import {
 import { pageQuery } from '../data/queries';
 import type { Version } from '../page/publish-dialog';
 import { pageViewModel } from '../page/view-model';
-import { useNeedsConnection } from './needs-connection';
+import { SENDS_FIRST, useNeedsConnection } from './needs-connection';
+import { pageChange, queueQuery } from '../data/offline-changes';
 import { useClient } from '../vault/store';
 
 /**
@@ -31,6 +32,8 @@ export type MenuAction = {
   onSelect: () => void;
   destructive: boolean;
   offline: boolean;
+  /** Waits until the page's change made offline is sent (ADR 0009, decision 8). */
+  sendsFirst: boolean;
 };
 
 /** What opening a page loads: the person's role there, publish rights, and its heads. */
@@ -38,7 +41,13 @@ export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
 /** An item, or nothing where the person can't do it. */
 const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
-  onSelect && { label, onSelect, destructive, offline: OFFLINE.has(label) };
+  onSelect && {
+    label,
+    onSelect,
+    destructive,
+    offline: OFFLINE.has(label),
+    sendsFirst: label === 'Move to…' || label === 'Copy to…',
+  };
 
 const OFFLINE = new Set(['Open', 'New page here', 'New folder here']);
 
@@ -136,17 +145,22 @@ function pageActions(
 function Items({
   actions,
   Item,
+  changed = false,
 }: {
   actions: MenuAction[];
   Item: typeof DropdownMenuItem | typeof ContextMenuItem;
+  /** The page has a change made offline not sent yet. */
+  changed?: boolean;
 }) {
-  // Offline, what needs the server says so (ADR 0009, decision 8).
+  // Offline, what needs the server says so (ADR 0009, decision 8), and
+  // moves and copies wait for the page's change made offline.
   const needs = useNeedsConnection();
-  return actions.map(({ label, onSelect, destructive, offline }) => (
+  const held = useNeedsConnection(changed ? SENDS_FIRST : null);
+  return actions.map(({ label, onSelect, destructive, offline, sendsFirst }) => (
     <Item
       key={label}
       variant={destructive ? 'destructive' : 'default'}
-      {...(offline ? { onSelect } : needs.select(onSelect))}
+      {...(offline ? { onSelect } : (sendsFirst ? held : needs).select(onSelect))}
     >
       {label}
     </Item>
@@ -222,12 +236,17 @@ export function PageMenuItems({
 }) {
   const ctx = useClient();
   const { data: info, isPending } = useQuery(pageQuery(ctx, pageId));
+  const { data: entries } = useQuery(queueQuery(ctx));
   // Open stays the same item as the rest load, so a menu opened from the keyboard keeps its focus.
   return (
     <>
       <ContextMenuItem onSelect={onOpen}>Open</ContextMenuItem>
       {info ? (
-        <Items actions={pageActions(info, sharer, onAction)} Item={ContextMenuItem} />
+        <Items
+          actions={pageActions(info, sharer, onAction)}
+          Item={ContextMenuItem}
+          changed={pageChange(entries, pageId) !== null}
+        />
       ) : (
         isPending && <ContextMenuItem disabled>Loading…</ContextMenuItem>
       )}
