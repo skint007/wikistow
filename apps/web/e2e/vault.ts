@@ -118,9 +118,12 @@ export async function expectSource(page: Page, expected: string | RegExp) {
   await (typeof expected === 'string' ? poll.toBe(expected) : poll.toMatch(expected));
 }
 
-/** The draft's save status, apart from the editor's own (why a page stays in source mode). */
+/**
+ * The draft's save status, apart from the editor's own (why a page stays in
+ * source mode). Offline it says "Saved on this device".
+ */
 export const saveStatus = (page: Page) =>
-  page.getByRole('status').filter({ hasText: /saved|Saving/ });
+  page.getByRole('status').filter({ hasText: /saved|Saving|Saved on this device/ });
 
 export async function waitForSave(page: Page) {
   await expect(saveStatus(page)).toHaveText('All changes saved', { timeout: 15_000 });

@@ -949,7 +949,9 @@ function PageBody({
               publish here can detach it, so it can be edited here.
             </p>
           )}
-          {error && <Missing message={errorMessage(error)} />}
+          {/* A page made offline has no version to fail to open, though one read
+              of the queue from before it was made may have tried. */}
+          {error && !change?.newPage && <Missing message={errorMessage(error)} />}
           {opened?.kind === 'newer-format' && (
             <Missing message="This version was written by a newer version of WikiStow. Update to open it." />
           )}

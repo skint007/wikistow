@@ -124,11 +124,11 @@ _Avoid_: Recycle bin, archive.
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 
 **Kept for offline**
-What a device holds, sealed for one person, so pages open with no connection: the published version and, for editors, the draft of each kept page, the images they show, and the trees, with titles only for kept pages. The desktop keeps every page; the browser the pages opened on it, or every page if asked. Accepted in ADR 0009: kept and kept current while online (step 2), and read when the server doesn't answer (step 3).
+What a device holds, sealed for one person, so pages open with no connection: the published version and, for editors, the draft of each kept page, the images they show, and the trees, with titles only for kept pages. The desktop keeps every page; the browser the pages opened on it, or every page if asked. Accepted in ADR 0009: kept and kept current while online (step 2), read when the server doesn't answer (step 3), and the version an offline change is based on kept until it is resolved (step 6).
 _Avoid_: Cached, synced.
 
 **Offline change**
-A draft, new page or new folder made while the app couldn't reach the server. It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Accepted in ADR 0009, not built yet.
+A draft, new page or new folder made while the app couldn't reach the server. It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
 _Avoid_: Outbox, pending sync.
 
 **Template**
