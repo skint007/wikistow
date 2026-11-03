@@ -272,9 +272,32 @@ export async function createFolder(
     extensions?: NodeMetadata['extensions'];
   },
 ): Promise<FolderId> {
-  const folderId = newId(FolderIdSchema);
   const made = newFolderMetadata(name, look, picture);
-  const content = { ...made, extensions: { ...made.extensions, ...extensions } };
+  const metadata = { ...made, extensions: { ...made.extensions, ...extensions } };
+  const folderId = newId(FolderIdSchema);
+  await createFolderAs(ctx, { spaceId, parentId, folderId, metadata });
+  return folderId;
+}
+
+/**
+ * A new folder `folderId` holding `metadata` (`newFolderMetadata`), as for
+ * one made offline (ADR 0009, decision 7): sent again, it is refused as
+ * `duplicate` once it was made.
+ */
+export async function createFolderAs(
+  ctx: ClientContext,
+  {
+    spaceId,
+    parentId,
+    folderId,
+    metadata: content,
+  }: {
+    spaceId: SpaceId;
+    parentId: FolderId | null;
+    folderId: FolderId;
+    metadata: NodeMetadata;
+  },
+): Promise<void> {
   await withFreshKeys(ctx, spaceId, async (keys) => {
     const { permissionVersion, share, region } = await newNodeTarget(ctx, spaceId, parentId);
     const { metadata, envelopes, wrap } = sealMetadataV2({
@@ -295,7 +318,6 @@ export async function createFolder(
       body: { folderId, parentId, permissionVersion, metadata, envelopes, wrap },
     });
   });
-  return folderId;
 }
 
 /**

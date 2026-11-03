@@ -45,7 +45,7 @@ import { runCommand } from '../commands/command';
 import { lockVault, requirementsHere } from '../commands/ui-commands';
 import { authClient } from '../auth/client';
 import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../desktop';
-import { forgetKept } from '../data/kept-store';
+import { changesNotSent, forgetKept, signOutWarning } from '../data/kept-store';
 import { connection } from '../data/connection';
 import { useNeedsConnection } from './needs-connection';
 import { OfflinePill } from './offline-pill';
@@ -449,6 +449,12 @@ function NewSpaceDialog({
 const notWikiStow = (error: { status: number }) =>
   error.status === 404 || !['code', 'message', 'error'].some((key) => key in error);
 
+/** Whether to go on signing out, asked first if changes made offline would go with it. */
+async function keepsChanges(): Promise<boolean> {
+  const waiting = await changesNotSent();
+  return !waiting || window.confirm(signOutWarning(waiting.count));
+}
+
 /**
  * Sign out, and why the last try failed: the server refused it (`refused`),
  * or no WikiStow answered (`gone`, #257): no answer at all, or one that
@@ -482,6 +488,8 @@ export function useSignOut() {
       if (desktop) setFailed('gone');
       return;
     }
+    // Changes made offline and not sent yet go with the session: it asks first.
+    if (!(await keepsChanges())) return;
     // Unsaved edits are saved first, or the person chose to drop them.
     if (!(await vaultStore.requestLock())) return;
     const outcome = await authClient.signOut().then(
@@ -496,6 +504,7 @@ export function useSignOut() {
     await leave();
   }, [leave]);
   const signOutHere = useCallback(async () => {
+    if (!(await keepsChanges())) return;
     // Nothing is saved first: the server that would take it is gone.
     vaultStore.lock();
     await desktop?.signOutHere();

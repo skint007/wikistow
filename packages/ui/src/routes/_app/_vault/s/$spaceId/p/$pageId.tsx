@@ -3,12 +3,15 @@ import {
   coverOf,
   linkablePages,
   linkTableOf,
+  OWNER_REGION,
   pageOperations,
   PageId,
   publicationOperations,
   RevisionId,
   type FolderId,
   type OpenedPayload,
+  type PagePayload,
+  type Region,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -58,6 +61,7 @@ import { bodyTop, CoverBand, PageBadge } from '../../../../../../page/cover/cove
 import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
 import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
+import type { Queued } from '../../../../../../page/use-draft-session';
 import { DetachDialog } from '../../../../../../page/detach-dialog';
 import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
@@ -93,7 +97,8 @@ import { usePlugins, type ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
-import { useNeedsConnection } from '../../../../../../shell/needs-connection';
+import { SENDS_FIRST, useNeedsConnection } from '../../../../../../shell/needs-connection';
+import { pageChange, queueOf, queueQuery } from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
@@ -257,6 +262,14 @@ function PageView() {
 }
 
 type Found = Extract<ReturnType<typeof pageViewModel>, { found: true }>;
+
+/** What the draft view opens with (`DraftEditor`). */
+type DraftFrom = {
+  base: RevisionId;
+  payload: PagePayload;
+  region: Region;
+  queued: Queued | null;
+};
 type Info = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
 function PageBody({
@@ -290,12 +303,18 @@ function PageBody({
   // the one shown, which a change made while reading moves on in this view.
   const [openedDraft] = useState(() => RevisionId.parse(model.revision));
   const revisionId = model.view === 'draft' ? openedDraft : RevisionId.parse(model.revision);
+  // The page's change waiting on this device, if any (ADR 0009, decision 7).
+  const { data: entries, isSuccess: queueRead } = useQuery(queueQuery(ctx));
+  const change = pageChange(entries, page.pageId);
   const { data: revision, error } = useQuery({
     ...revisionQuery(ctx, page, model.view, revisionId),
     // Opened before the page loads again, it shows at once; else the one before stays meanwhile.
     placeholderData: keepPreviousData,
+    // A page made offline has no version on the server until it is made.
+    enabled: queueRead && !change?.newPage,
   });
-  // Kept for offline from its first opening here, with Pages I open (ADR 0009).
+  // Kept for offline from its first opening here, with Pages I open (ADR
+  // 0009); a page made offline once it is made (`useOfflineChanges`).
   const revisionShown = revision !== undefined;
   useEffect(() => {
     if (revisionShown) pageOpened(ctx, { spaceId: page.spaceId, pageId: page.pageId });
@@ -336,6 +355,9 @@ function PageBody({
   // Offline, what needs the server says so (ADR 0009, decision 8), and the
   // page says when its space was last listed, which it is shown as of.
   const needs = useNeedsConnection();
+  // Back online, publishing, moving and copying wait for the page's change
+  // made offline, so they never act on the draft from before it.
+  const sendsFirst = useNeedsConnection(change ? SENDS_FIRST : null);
   const listedAt = needs.offline ? ctx.keptContent?.space(page.spaceId)?.listedAt : undefined;
   // Offline, links to the space's pages this device doesn't keep say so.
   const notKept = useNotKept(ctx, page.spaceId);
@@ -362,8 +384,19 @@ function PageBody({
         pinned,
         publicLink: linked,
         offline: needs.offline,
+        changed: change !== null,
       }),
-    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked, needs.offline],
+    [
+      info.role,
+      info.canPublish,
+      info.heads,
+      model.view,
+      revisionId,
+      pinned,
+      linked,
+      needs.offline,
+      change,
+    ],
   );
 
   const go = (view: 'draft' | 'published') =>
@@ -422,9 +455,52 @@ function PageBody({
     flushDraft: async () => editor.current?.flush(),
   };
   const done = () => act(() => runCommand(finishEditing, page, commandEnv));
+  // Discard mine and view theirs: the change waiting on this device goes
+  // too, unless it is theirs, saved by another window.
+  const viewTheirs = async ({ keepQueued }: { keepQueued: boolean }) => {
+    if (change && !keepQueued) {
+      await queueOf(ctx)?.discard(page.pageId);
+      await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+    }
+    await onReopen();
+  };
 
   const opened: OpenedPayload | undefined = revision?.opened;
-  const payload = opened?.kind === 'current' ? opened.payload : null;
+  // What the draft view opens, once: the page's change waiting on this
+  // device, as typed, else its draft. Kept as it opened, as the editor
+  // holds that text from then on, through the change being sent.
+  const [draftFrom, setDraftFrom] = useState<DraftFrom | null>(null);
+  if (model.view === 'draft' && draftFrom === null && queueRead) {
+    const opening = change
+      ? {
+          base: change.basedOn ?? change.newPage?.revisionId ?? revisionId,
+          payload: change.payload,
+          region:
+            change.region ??
+            revision?.region ??
+            tree?.pages.find((p) => p.id === page.pageId)?.region ??
+            OWNER_REGION,
+          queued: {
+            version: change.version,
+            sending: change.sending?.revisionId ?? null,
+            // Someone saved since it was based: it opens as the conflict it came back as.
+            theirs:
+              change.failure?.kind === 'conflict' && info.heads.draftHead !== change.basedOn
+                ? info.heads.draftHead
+                : null,
+          },
+        }
+      : revision && opened?.kind === 'current'
+        ? { base: revisionId, payload: opened.payload, region: revision.region, queued: null }
+        : null;
+    if (opening) setDraftFrom(opening);
+  }
+  const payload =
+    model.view === 'draft'
+      ? (draftFrom?.payload ?? null)
+      : opened?.kind === 'current'
+        ? opened.payload
+        : null;
   const canEdit = info.role !== 'reader';
   const { publishedHead } = info.heads;
   const title = pageTitle(payload?.title ?? null);
@@ -588,7 +664,8 @@ function PageBody({
               {model.actions.edit && (
                 <Button
                   size="sm"
-                  {...needs.click(() => void act(() => runCommand(editPage, page, commandEnv)))}
+                  // Drafts are saved on this device offline (ADR 0009, decision 7).
+                  onClick={() => void act(() => runCommand(editPage, page, commandEnv))}
                 >
                   <Pencil strokeWidth={1.75} /> Edit
                 </Button>
@@ -618,7 +695,7 @@ function PageBody({
                 </Button>
               )}
               {model.actions.publish && (
-                <Button size="sm" disabled={busy} {...needs.click(() => void publish())}>
+                <Button size="sm" disabled={busy} {...sendsFirst.click(() => void publish())}>
                   <Check strokeWidth={1.75} /> Publish
                 </Button>
               )}
@@ -661,18 +738,18 @@ function PageBody({
                       </>
                     )}
                     {canEdit && (
-                      <DropdownMenuItem {...needs.select(() => setMoving('move'))}>
+                      <DropdownMenuItem {...sendsFirst.select(() => setMoving('move'))}>
                         Move to…
                       </DropdownMenuItem>
                     )}
                     {canEdit && (
-                      <DropdownMenuItem {...needs.select(() => setMoving('copy'))}>
+                      <DropdownMenuItem {...sendsFirst.select(() => setMoving('copy'))}>
                         Copy to…
                       </DropdownMenuItem>
                     )}
                     {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
                     {canEdit && info.canPublish && (
-                      <DropdownMenuItem {...needs.select(() => setPublishing(true))}>
+                      <DropdownMenuItem {...sendsFirst.select(() => setPublishing(true))}>
                         Publish to another space…
                       </DropdownMenuItem>
                     )}
@@ -876,67 +953,74 @@ function PageBody({
             )}
           </Pills>
           <ReadingNotices state={queued} />
+          {model.view === 'published' && change && (
+            <p role="note" className="text-sm text-muted-foreground">
+              Changed on this device, not saved yet.
+            </p>
+          )}
           {canEdit && provenance && info.heads.draftHead === null && !model.actions.detach && (
             <p className="text-sm text-muted-foreground">
               This page is a copy of another page, published to it from there. Someone who can
               publish here can detach it, so it can be edited here.
             </p>
           )}
-          {error && <Missing message={errorMessage(error)} />}
+          {/* A page made offline has no version to fail to open, though one read
+              of the queue from before it was made may have tried. */}
+          {error && !change?.newPage && <Missing message={errorMessage(error)} />}
           {opened?.kind === 'newer-format' && (
             <Missing message="This version was written by a newer version of WikiStow. Update to open it." />
           )}
-          {revision &&
-            payload &&
-            (model.view === 'draft' ? (
-              <DraftEditor
-                ref={editor}
-                ctx={ctx}
-                page={page}
-                base={revisionId}
-                head={info.heads.draftHead}
-                payload={payload}
-                region={revision.region}
-                onReload={() => void onReopen()}
-                hiddenAttachments={coverParts}
-              />
-            ) : (
-              <>
-                {contents && (
-                  <TableOfContents
-                    headings={headings}
-                    card={card}
-                    collapsed
-                    className="@min-[960px]:hidden"
+          {model.view === 'draft' && draftFrom && (
+            <DraftEditor
+              ref={editor}
+              ctx={ctx}
+              page={page}
+              base={draftFrom.base}
+              head={info.heads.draftHead}
+              payload={draftFrom.payload}
+              region={draftFrom.region}
+              queued={draftFrom.queued}
+              onReload={(options) => void viewTheirs(options)}
+              hiddenAttachments={coverParts}
+            />
+          )}
+          {revision && payload && model.view === 'published' && (
+            <>
+              {contents && (
+                <TableOfContents
+                  headings={headings}
+                  card={card}
+                  collapsed
+                  className="@min-[960px]:hidden"
+                />
+              )}
+              <div ref={setShownBody} className="contents">
+                <ReadingChanges value={readingHere}>
+                  <Markdown
+                    source={shownMarkdown ?? payload.markdown}
+                    attachments={{
+                      ctx,
+                      page,
+                      audience: 'published',
+                      attachments: payload.attachments,
+                    }}
+                    pages={linkable}
+                    links={linkTableOf(payload)}
+                    notKept={notKept}
+                    editing={
+                      canEdit
+                        ? {
+                            parentId: info.parentId,
+                            // Offline, a missing link's page is made from the draft view, which knows what is kept.
+                            create: !needs.offline && (info.parentId !== null || topOpened),
+                          }
+                        : null
+                    }
                   />
-                )}
-                <div ref={setShownBody} className="contents">
-                  <ReadingChanges value={readingHere}>
-                    <Markdown
-                      source={shownMarkdown ?? payload.markdown}
-                      attachments={{
-                        ctx,
-                        page,
-                        audience: 'published',
-                        attachments: payload.attachments,
-                      }}
-                      pages={linkable}
-                      links={linkTableOf(payload)}
-                      notKept={notKept}
-                      editing={
-                        canEdit
-                          ? {
-                              parentId: info.parentId,
-                              // Making a page needs the server (ADR 0009, decision 8).
-                              create: !needs.offline && (info.parentId !== null || topOpened),
-                            }
-                          : null
-                      }
-                    />
-                  </ReadingChanges>
-                </div>
-              </>
-            ))}
+                </ReadingChanges>
+              </div>
+            </>
+          )}
           {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
           {plugins.regions['page.footer'].length > 0 && (
             <div data-region="page.footer" className="grid gap-3">

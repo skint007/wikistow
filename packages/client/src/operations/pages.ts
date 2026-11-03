@@ -198,7 +198,10 @@ const writePage = <T>(
 /**
  * A new page with its first draft, at the space root or inside a folder,
  * with a link table worked out from `tree`, the space as the caller sees
- * it, or loaded if its links need one.
+ * it, or loaded if its links need one. The page's ID and its first
+ * draft's are new, or `pageId` and `revisionId`, as for a page made
+ * offline (ADR 0009, decision 7): sent again under the same IDs, it is
+ * refused as `duplicate` once it was made.
  */
 export async function createPage(
   ctx: ClientContext,
@@ -209,6 +212,9 @@ export async function createPage(
     markdown = '',
     extensions = {},
     tree,
+    pageId = newId(PageIdSchema),
+    revisionId,
+    linkChoices,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
@@ -216,9 +222,12 @@ export async function createPage(
     markdown?: string;
     extensions?: PagePayload['extensions'];
     tree?: LinkTree;
+    pageId?: PageId;
+    revisionId?: RevisionId;
+    /** The pages picked for ambiguous links, by key (`LinkWrite.chosen`). */
+    linkChoices?: ReadonlyMap<string, PageId>;
   },
 ): Promise<PageId> {
-  const pageId = newId(PageIdSchema);
   const linkTree = linkTreeFor(ctx, spaceId, tree);
   // Before reading its links, which takes longest on a page too large to save.
   const content = newPayload({ title, markdown, extensions });
@@ -231,6 +240,7 @@ export async function createPage(
       region: target.region,
       tree: linkTree,
       published: publicationsFor(ctx, spaceId),
+      ...(linkChoices && linkChoices.size > 0 ? { chosen: linkChoices } : {}),
     });
     const commit = commitFor(
       ctx,
@@ -242,6 +252,7 @@ export async function createPage(
         payload,
         region: target.region,
         target,
+        ...(revisionId && { revisionId }),
       },
     );
     await ctx.api.call(pageRoutes.createPage, {
@@ -790,6 +801,9 @@ function current(revision: OpenedRevision): PagePayload {
  * larger than a version may hold is refused before anything else
  * (`PageTooLarge`). No draft holds what changes made while reading changed
  * (`wikistow.change`), which only their publication says (ADR 0008).
+ * The version's ID is new, or `revisionId`, as for a save whose answer was
+ * lost: sent again under it, the server answers `duplicate` once it landed
+ * (ADR 0009, decision 7).
  */
 export async function saveDraft(
   ctx: ClientContext,
@@ -803,6 +817,7 @@ export async function saveDraft(
     tableRegion,
     linkChoices,
     read,
+    revisionId: given,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -813,6 +828,7 @@ export async function saveDraft(
     tableRegion?: Region;
     linkChoices?: ReadonlyMap<string, PageId>;
     read?: ReadWikilinks;
+    revisionId?: RevisionId;
   },
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
@@ -855,6 +871,7 @@ export async function saveDraft(
         payload: linked,
         region,
         target,
+        ...(given && { revisionId: given }),
       });
       const result = await ctx.api.call(pageRoutes.saveDraft, {
         params: { pageId: page.pageId },

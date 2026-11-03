@@ -19,6 +19,23 @@ const headOf = async (page: PageRef) => {
 };
 
 /**
+ * Refuse while the page's draft has a change saved on this device only
+ * (ADR 0009, decision 7): the editor's saved revision is then the server's
+ * draft from before it, which a plugin would read and write over.
+ */
+async function sentFirst(page: PageRef) {
+  const entry = await session()
+    .keptContent?.queue.entry(PageId.parse(page.pageId))
+    .catch(() => null);
+  if (entry) {
+    throw new PluginError(
+      'unsupported',
+      'This draft has changes saved on this device only. Try again once they are sent.',
+    );
+  }
+}
+
+/**
  * The drafts open in this window's editor, which plugins change through the
  * editor, and the page handles the app's own plugins get for the page shown.
  */
@@ -49,6 +66,7 @@ export function editorDrafts() {
     const draft = openDrafts.get(page.pageId);
     if (!draft) return null;
     await draft.flush();
+    await sentFirst(page);
     const head = draft.saved();
     if (head === null || (base !== null && base !== head)) {
       throw new PluginError('conflict', 'This draft changed since that revision; read it again');
@@ -100,6 +118,7 @@ export function editorDrafts() {
             } finally {
               if (savingFor.get(pageId) === id) savingFor.delete(pageId);
             }
+            await sentFirst(shown.page);
             const revision = draft.saved() ?? (await headOf(shown.page));
             const version = await readShown(caller, session(), shown.page, {
               version: 'draft',

@@ -7,7 +7,7 @@ import {
 } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { ChevronDown, ChevronRight, FolderPlus, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, CloudUpload, FolderPlus, Plus } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { submitData } from '@/components/form/submit';
 import { IconImage } from '@/components/icon-image';
@@ -33,6 +33,7 @@ import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { makeFolder, makePage, queueQuery } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
@@ -247,6 +248,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const { data: links } = useQuery(publicLinksQuery(ctx, spaceId));
   const publicPages = useMemo(() => new Set(links?.map((link) => link.pageId)), [links]);
+  // Pages and folders with a change made offline, not sent yet (ADR 0009, decision 7).
+  const { data: queued } = useQuery(queueQuery(ctx));
+  const onDevice = useMemo(() => new Set(queued?.map((entry) => entry.id)), [queued]);
   const params = useParams({ strict: false });
   const navigate = useNavigate();
   const [expanded, setExpanded] = useExpandedFolders(spaceId);
@@ -443,7 +447,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           <div className="flex flex-1">
             <Button
               className="flex-1 rounded-l-control rounded-r-none"
-              {...needs.click(() => setCreating({ kind: 'page', parentId: null }))}
+              // Made on this device offline (ADR 0009, decision 7).
+              onClick={() => setCreating({ kind: 'page', parentId: null })}
             >
               <Plus strokeWidth={1.75} /> New page
             </Button>
@@ -469,7 +474,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             size="icon"
             aria-label="New folder"
             className="rounded-control"
-            {...needs.click(() => setCreating({ kind: 'folder', parentId: null }))}
+            onClick={() => setCreating({ kind: 'folder', parentId: null })}
           >
             <FolderPlus strokeWidth={1.75} />
           </Button>
@@ -550,7 +555,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   aria-expanded={row.expanded}
                   aria-selected={shown}
                   onClick={() => openFolder(row.id)}
-                  draggable={canEditAt(row.id) && !needs.offline}
+                  draggable={canEditAt(row.id) && !needs.offline && !onDevice.has(row.id)}
                   onDragStart={(event) =>
                     startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                   }
@@ -593,6 +598,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   <span className="min-w-0 flex-1 truncate font-extrabold">
                     <Name>{row.name}</Name>
                   </span>
+                  {onDevice.has(row.id) && <OnDeviceMarker />}
                   <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
                     {row.count}
                   </span>
@@ -628,7 +634,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 {...common}
                 aria-selected={selected}
                 onClick={() => openPage(row.id)}
-                draggable={canEditAt(row.parentId) && !needs.offline}
+                // Moves wait for a change made offline to be sent (ADR 0009, decision 8).
+                draggable={canEditAt(row.parentId) && !needs.offline && !onDevice.has(row.id)}
                 onDragStart={(event) =>
                   startDrag(event, { id: row.id, kind: 'page', name: row.title })
                 }
@@ -648,6 +655,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   <Name>{row.title}</Name>
                 </span>
                 {publicPages.has(row.id) && <PublicMarker />}
+                {onDevice.has(row.id) && <OnDeviceMarker />}
                 {canEditAt(row.parentId) && row.unpublished && (
                   <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
                     <span className="sr-only">Unpublished changes</span>
@@ -788,6 +796,17 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   );
 }
 
+/** A page or folder whose change made offline is saved on this device, not sent yet. */
+function OnDeviceMarker() {
+  const hint = 'Saved on this device, not sent yet';
+  return (
+    <span data-hint={hint} className="shrink-0 text-muted-foreground">
+      <CloudUpload aria-hidden className="size-3.5" strokeWidth={1.75} />
+      <span className="sr-only">{hint}</span>
+    </span>
+  );
+}
+
 function isInside(tree: Tree, folderId: FolderId | null, ancestor: FolderId): boolean {
   if (folderId === null) return false;
   if (folderId === ancestor) return true;
@@ -831,7 +850,7 @@ function CreateDialog({
     setError(null);
     try {
       if (creating.kind === 'folder') {
-        const folderId = await spaceOperations.createFolder(ctx, {
+        const folderId = await makeFolder(ctx, {
           spaceId,
           parentId: creating.parentId,
           name: name.trim(),
@@ -840,7 +859,7 @@ function CreateDialog({
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
-        const pageId = await pageOperations.createPage(ctx, {
+        const pageId = await makePage(ctx, {
           spaceId,
           parentId: creating.parentId,
           title: name.trim(),

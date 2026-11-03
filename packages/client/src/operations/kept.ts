@@ -9,7 +9,6 @@ import {
   RevisionRecord,
   RevisionRecordV2,
   Share,
-  ShareId,
   SpaceId,
   pageRoutes,
   sharingRoutes,
@@ -21,11 +20,12 @@ import { decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { parseMetadata } from '../metadata.ts';
 import { Format, parsePayload, type PagePayload } from '../payload.ts';
-import type { Region } from '../regions.ts';
+import { RegionJson } from '../regions.ts';
 import { keptSealer, type KeptSealer, type KeptStore } from '../kept-store.ts';
 import type { PrivateIdentity } from '../identity.ts';
 import type { InstallationId } from '../ids.ts';
 import { fetchRevisions, pageLabels, type PageRef, type Wanted } from './pages.ts';
+import { OfflineQueue } from './queue.ts';
 import { sharedWithMe, type SharedItem } from './sharing.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import { unreachable } from './search.ts';
@@ -73,10 +73,7 @@ export type KeepProgress = { pages: number; total: number };
 // person's key, so a bad item is one damaged or from an older format, and is
 // read as nothing kept.
 
-const KeptRegion = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('owner') }),
-  z.strictObject({ kind: z.literal('share'), spaceId: SpaceId, shareId: ShareId }),
-]) satisfies z.ZodType<Region>;
+const KeptRegion = RegionJson;
 
 const KeptMetadata = z
   .strictObject({
@@ -202,10 +199,12 @@ function filesOf(payload: PagePayload) {
  * reads for something not kept never reach the store. Another tab may change
  * the store meanwhile; reading what it let go gives nothing, so the caller
  * goes to the server, and the keeper reads the index again before each run.
- * Stops writing once the session ends (`close`).
+ * Stops writing once the session ends (`close`). Its `queue` holds the
+ * changes made offline, sealed the same way.
  */
 export class KeptContent {
   readonly store: KeptStore;
+  readonly queue: OfflineQueue;
   readonly #sealer: KeptSealer;
   #spaces = new Map<SpaceId, KeptSpace>();
   #list: KeptSpaceList | null = null;
@@ -221,6 +220,7 @@ export class KeptContent {
   private constructor(store: KeptStore, sealer: KeptSealer) {
     this.store = store;
     this.#sealer = sealer;
+    this.queue = new OfflineQueue(store, sealer);
   }
 
   /** What `store` keeps for this person on this server. Nothing readable counts as nothing kept. */
@@ -351,9 +351,12 @@ export class KeptContent {
     return this.#blobs.has(blobHash);
   }
 
-  /** A kept attachment's blob, as the server served it, or null if it isn't kept. */
+  /**
+   * A kept attachment's blob, as the server served it, or one added offline
+   * that waits in the queue, or null if neither holds it.
+   */
   async blob(blobHash: string): Promise<Uint8Array | null> {
-    if (!this.#blobs.has(blobHash)) return null;
+    if (!this.#blobs.has(blobHash)) return this.queue.blob(blobHash);
     return this.#readBytes(blobItem(blobHash));
   }
 
@@ -472,6 +475,7 @@ export class KeptContent {
   /** Stop writing: the session ended. What's kept stays, sealed. */
   close(): void {
     this.#closed = true;
+    this.queue.close();
     this.#recent.clear();
     this.#recentBytes = 0;
   }
@@ -592,7 +596,9 @@ const CHUNK = 100;
  * each page listed; **Pages I open** only those opened here, `opened` among
  * them. Then let go: a version replaced, a page out of scope or no longer
  * listed, a space gone or closed to this person, with the blobs nothing
- * kept lists. Trees and the space list are kept as listed.
+ * kept lists. Trees and the space list are kept as listed. A page with a
+ * change queued keeps the version the change is based on, with its files,
+ * whatever the listing says, until the change is resolved (decision 3).
  *
  * Runs with nothing else changing what's kept (`KeptStore.exclusive`). Stops
  * with `KeepingStopped` if the vault locks, access changes (the revision
@@ -628,15 +634,25 @@ export async function keep(
   };
   await kept.store.exclusive(async () => {
     await kept.reload();
+    const bases = await kept.queue.bases();
     live();
+    // What a queued change needs of `before`, a space as kept: those pages,
+    // with only the versions their changes are based on.
+    const needed = (before: KeptSpace | undefined) =>
+      [...(before?.pages.values() ?? [])].flatMap((page) => {
+        const base = bases.get(page.pageId);
+        const versions = page.versions.filter((version) => version.id === base);
+        return versions.length > 0 ? [{ ...page, versions }] : [];
+      });
     let ids: SpaceId[];
     if (spaces === 'all') {
       const listed = await source.spaces();
       live();
       await kept.keepList(listed.list);
       ids = listed.ids;
-      for (const spaceId of kept.spaceIds())
-        if (!ids.includes(spaceId)) await kept.dropSpace(spaceId);
+      for (const spaceId of kept.spaceIds()) {
+        if (!ids.includes(spaceId)) await letGoOf(kept, spaceId, needed(kept.space(spaceId)));
+      }
     } else {
       ids = [...new Set([...spaces, ...opened.map((page) => page.spaceId)])];
     }
@@ -645,7 +661,7 @@ export async function keep(
       const tree = await source.tree(spaceId);
       live();
       if (!tree) {
-        await kept.dropSpace(spaceId);
+        await letGoOf(kept, spaceId, needed(kept.space(spaceId)));
         continue;
       }
       const openedHere = new Set(opened.filter((p) => p.spaceId === spaceId).map((p) => p.pageId));
@@ -670,12 +686,30 @@ export async function keep(
         progress.pages += chunk.length;
         onProgress?.({ ...progress });
       }
+      // A queued change's base stays, beside the page's heads now.
+      for (const page of needed(kept.space(spaceId))) {
+        const now = pages.get(page.pageId);
+        const versions = now?.versions ?? [];
+        const missing = page.versions.filter((v) => !versions.some((kept) => kept.id === v.id));
+        pages.set(page.pageId, { ...page, ...now, versions: [...versions, ...missing] });
+      }
       live();
       await kept.keepSpace(spaceId, { listedAt: new Date().toISOString(), tree, pages });
     }
     live();
     await kept.collect();
   });
+}
+
+/**
+ * Let go of a space no longer listed, or closed to this person, but for
+ * the pages `needed` by changes queued for them, kept as they were.
+ */
+async function letGoOf(kept: KeptContent, spaceId: SpaceId, needed: KeptPage[]) {
+  const space = kept.space(spaceId);
+  if (!space || needed.length === 0) return kept.dropSpace(spaceId);
+  const pages = new Map(needed.map((page) => [page.pageId, page]));
+  await kept.keepSpace(spaceId, { ...space, pages });
 }
 
 /** Each of `pages`' heads kept, those not kept yet opened and kept with their images. */

@@ -42,8 +42,9 @@ import { QueryTable } from './query-table';
 import type { PropertyKeys } from './properties-box';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
-import { useDraftSession } from './use-draft-session';
-import { useOffline } from '../data/connection';
+import { useDraftSession, type Queued } from './use-draft-session';
+import { useNotKept } from '../data/connection';
+import { pageChange, queueQuery } from '../data/offline-changes';
 
 export type DraftEditorHandle = {
   /**
@@ -105,6 +106,7 @@ export function DraftEditor({
   head,
   payload,
   region,
+  queued = null,
   onReload,
   hiddenAttachments = NONE,
   ref,
@@ -118,22 +120,31 @@ export function DraftEditor({
   payload: PagePayload;
   /** The region `payload` was opened in, which its link table was worked out for. */
   region: Region;
-  /** Throw away local edits and load the draft as it is now. */
-  onReload: () => void;
+  /** The change waiting on this device that `payload` is, if any (`useDraftSession`). */
+  queued?: Queued | null;
+  /**
+   * Throw away local edits and load the draft as it is now. `keepQueued`
+   * when theirs is a change another window saved on this device.
+   */
+  onReload: (options: { keepQueued: boolean }) => void;
   /** Attachments kept out of the list because something else manages them (the banner, the icon). */
   hiddenAttachments?: readonly string[];
   ref?: Ref<DraftEditorHandle>;
 }) {
   const surface = useRef<EditorSurfaceHandle>(null);
-  const { session, snapshot } = useDraftSession({
+  const { session, snapshot, conflictWithDevice } = useDraftSession({
     ctx,
     page,
     base,
     head,
     payload,
     region,
+    queued,
     surface,
   });
+  // Saved into this device's queue, not yet on the server (ADR 0009, decision 7).
+  const { data: entries } = useQuery(queueQuery(ctx));
+  const onDevice = pageChange(entries, page.pageId) !== null;
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const propertyKeys = usePropertyKeys(ctx, page);
   const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
@@ -217,7 +228,11 @@ export function DraftEditor({
               <Button size="sm" onClick={() => void session.saveMineOnTop()}>
                 Save mine on top
               </Button>
-              <Button size="sm" variant="outline" onClick={onReload}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onReload({ keepQueued: conflictWithDevice() })}
+              >
                 Discard mine and view theirs
               </Button>
             </div>
@@ -257,7 +272,9 @@ export function DraftEditor({
         onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
         status={
           <span role="status" aria-live="polite">
-            {STATUS_TEXT[snapshot.status]}
+            {snapshot.status === 'saved' && onDevice
+              ? 'Saved on this device'
+              : STATUS_TEXT[snapshot.status]}
           </span>
         }
       />
@@ -415,8 +432,11 @@ function useLinkAssist({
   const pages = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
   const [choosing, setChoosing] = useState<{ key: string; target: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Making a page needs the server (ADR 0009, decision 8).
-  const offline = useOffline();
+  // Offline, a page is made on this device, but not for a missing link
+  // while some of the space's pages aren't kept: it may name one of them
+  // (ADR 0009, decision 4).
+  const notKept = useNotKept(ctx, page.spaceId);
+  const unsure = notKept !== undefined && notKept.size > 0;
 
   const assist = useMemo<LinkAssist>(() => {
     const parentId = tree?.pages.find((p) => p.id === page.pageId)?.parentId ?? null;
@@ -444,9 +464,9 @@ function useLinkAssist({
         }
       },
       // Not at the top of a space whose own name failed its checks: nothing
-      // can be made there. Nor offline.
+      // can be made there.
       create:
-        offline || (parentId === null && !tree?.space?.metadata)
+        unsure || (parentId === null && !tree?.space?.metadata)
           ? null
           : (title) => {
               setError(null);
@@ -473,7 +493,7 @@ function useLinkAssist({
       pick: (key, pageId) => void session.chooseLink(key, PageId.parse(pageId)),
       choose: setChoosing,
     };
-  }, [ctx, page, pages, queryClient, session, table, tree, offline]);
+  }, [ctx, page, pages, queryClient, session, table, tree, unsure]);
 
   const scope = { pages: pages ?? [], selfId: page.pageId };
   const chooser = {

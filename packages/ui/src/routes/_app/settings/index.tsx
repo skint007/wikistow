@@ -272,6 +272,8 @@ function KeepForOffline() {
               : usage && `${keptPages(usage.pages)}, ${keptSize(usage.bytes)}. `}
             Pages stay readable on this device after someone removes your access, until the app is
             back online.
+            {onIPhoneOrIPad() &&
+              ' Add WikiStow to your home screen before relying on it offline: Safari deletes a site’s storage after seven days without a visit. Changes made offline in Safari are sent only from Safari.'}
           </>
         )
       }
@@ -288,6 +290,18 @@ function KeepForOffline() {
     />
   );
 }
+
+/**
+ * Safari on an iPhone or iPad, where a site's storage goes after seven days
+ * without a visit and an app on the home screen has storage of its own
+ * (ADR 0009, decision 6). An iPad asks for the Mac site, so it is the Mac
+ * that has a touch screen.
+ */
+const onIPhoneOrIPad = () =>
+  !desktop &&
+  typeof navigator !== 'undefined' &&
+  (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1));
 
 const keptPages = (pages: number) =>
   pages === 1 ? '1 page' : `${pages.toLocaleString('en')} pages`;

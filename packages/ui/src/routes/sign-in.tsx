@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { safeRedirect } from '@/lib/redirect';
 import { installationQuery, meQuery } from '../api';
 import { authClient } from '../auth/client';
+import { changesNotSent } from '../data/kept-store';
 import { desktop, desktopServerQuery } from '../desktop';
 import { errorMessage, unwrap } from '../errors';
 
@@ -68,12 +69,33 @@ function SignIn() {
       title={step === 'password' ? 'Sign in' : 'Two-factor code'}
       description={step === 'code' ? 'Enter the code from your authenticator app.' : confirmation}
     >
-      {step === 'password' ? (
-        <PasswordStep onCode={() => setStep('code')} onDone={done} />
-      ) : (
-        <CodeStep onDone={done} onRestart={() => setStep('password')} />
-      )}
+      <div className="grid gap-4">
+        <ChangesNotSent />
+        {step === 'password' ? (
+          <PasswordStep onCode={() => setStep('code')} onDone={done} />
+        ) : (
+          <CodeStep onDone={done} onRestart={() => setStep('password')} />
+        )}
+      </div>
     </AuthCard>
+  );
+}
+
+/**
+ * Before a sign-in as someone else deletes them (ADR 0009, decision 10):
+ * the changes made offline this device holds that haven't been sent, by
+ * whose they are.
+ */
+function ChangesNotSent() {
+  const { data: waiting } = useQuery({ queryKey: ['changes-not-sent'], queryFn: changesNotSent });
+  if (!waiting) return null;
+  const { count, name } = waiting;
+  return (
+    <FormMessage tone="notice">
+      This device has {count === 1 ? '1 change' : `${count} changes`} {name} made offline that{' '}
+      {count === 1 ? 'hasn’t' : 'haven’t'} been saved yet. Signing in as someone else deletes{' '}
+      {count === 1 ? 'it' : 'them'}.
+    </FormMessage>
   );
 }
 
@@ -221,6 +243,7 @@ function DesktopSignIn({ onDone }: { onDone: () => Promise<void> }) {
       description="WikiStow opens your browser to sign in, then brings you back here."
     >
       <form onSubmit={submit} noValidate className="grid gap-4">
+        <ChangesNotSent />
         <Field
           id="server"
           label="Server"

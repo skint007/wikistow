@@ -52,6 +52,17 @@ export interface KeptStore {
    * changing what it keeps meanwhile. Not reentrant.
    */
   exclusive<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * Run `work` with no other user changing the queue meanwhile. Apart from
+   * `exclusive`, which the keeper holds for as long as it runs, so a change
+   * saved offline never waits for it. Not reentrant.
+   */
+  queueExclusive<T>(work: () => Promise<T>): Promise<T>;
+  /**
+   * Run `work`, the queue's sending, unless another user is sending it
+   * already: then false, at once. One sender at a time (ADR 0009, decision 7).
+   */
+  sending(work: () => Promise<void>): Promise<boolean>;
 }
 
 function memoryItems(): KeptItems & { clear(): void } {
@@ -76,6 +87,21 @@ export function inTurn() {
     const done = queue.then(work);
     queue = done.catch(() => {});
     return done;
+  };
+}
+
+/** `work` unless it is running already, as `KeptStore.sending` does within one page. */
+export function onlyOnce() {
+  let running = false;
+  return async (work: () => Promise<void>): Promise<boolean> => {
+    if (running) return false;
+    running = true;
+    try {
+      await work();
+      return true;
+    } finally {
+      running = false;
+    }
   };
 }
 
@@ -107,6 +133,8 @@ export function memoryKeptStore(): KeptStore {
       account = null;
     },
     exclusive: inTurn(),
+    queueExclusive: inTurn(),
+    sending: onlyOnce(),
   };
 }
 

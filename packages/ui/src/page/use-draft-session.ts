@@ -1,15 +1,19 @@
 import {
   draftLinkTargets,
+  newId,
+  OWNER_REGION,
   pageOperations,
+  RevisionId,
   type ClientContext,
   type PageId,
   type PagePayload,
   type Region,
-  type RevisionId,
 } from '@wikistow/client';
+import { ApiError, noAnswer } from '@wikistow/client/api';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { attachFile, onSent, queueOf, savesOnDevice } from '../data/offline-changes';
 import { pageQuery, searchIndexChanged, treeQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { pluginRuntime } from '../plugins/runtime';
@@ -28,6 +32,7 @@ export function useDraftSession({
   head,
   payload,
   region,
+  queued,
   surface,
 }: {
   ctx: ClientContext;
@@ -39,18 +44,39 @@ export function useDraftSession({
   payload: PagePayload;
   /** The region `payload` was opened in, which its link table was worked out for. */
   region: Region;
+  /**
+   * The change waiting on this device that `payload` is, if any (ADR 0009,
+   * decision 7): its version, the draft someone else saved since, when it
+   * came back as a conflict, and the ID it is being sent under, if any,
+   * which is this session's own.
+   */
+  queued?: Queued | null;
   surface: { readonly current: EditorSurfaceHandle | null };
 }) {
   const queryClient = useQueryClient();
-  const [session] = useState(
-    () => new DraftSession({ base, payload, region }, appPorts(ctx, page, queryClient), surface),
-  );
+  const [{ session, device }] = useState(() => {
+    const device = { otherWindow: false };
+    const session = new DraftSession(
+      { base, payload, region, theirs: queued?.theirs ?? null },
+      appPorts(ctx, page, queryClient, queued?.version ?? null, device),
+      surface,
+    );
+    if (queued?.sending) session.own(queued.sending);
+    return { session, device };
+  });
   const snapshot = useSyncExternalStore(session.subscribe, session.snapshot);
 
   useEffect(() => {
     session.open();
     openDrafts.set(page.pageId, session);
+    // What this device's queue sends of the page is this session's own.
+    const stop = onSent((sent) => {
+      if (sent.pageId !== page.pageId) return;
+      if (sent.kind === 'recorded') session.own(sent.revisionId);
+      else session.landed(sent.revisionId);
+    });
     return () => {
+      stop();
       if (openDrafts.get(page.pageId) === session) openDrafts.delete(page.pageId);
       session.close();
     };
@@ -98,8 +124,18 @@ export function useDraftSession({
   // in flight may already be the head, so look again once it's answered.
   useEffect(() => session.noticeHead(head), [session, head, snapshot.status]);
 
-  return { session, snapshot };
+  /**
+   * Whether the conflict on screen is with a change another tab or window
+   * saved into this device's queue: then theirs is that change, which
+   * Discard mine keeps.
+   */
+  const conflictWithDevice = useCallback(() => device.otherWindow, [device]);
+
+  return { session, snapshot, conflictWithDevice };
 }
+
+/** The change waiting on this device that a draft view opens with (`useDraftSession`). */
+export type Queued = { version: number; theirs: RevisionId | null; sending: RevisionId | null };
 
 // The draft on screen for each page, for work from outside the editor.
 const openDrafts = new Map<PageId, DraftSession>();
@@ -109,29 +145,125 @@ const openDrafts = new Map<PageId, DraftSession>();
  * what the person typed there first, so it lands before the change and the
  * change, based on an older draft, is refused as stale rather than written
  * over it. Answers why it can't go ahead if their edit still can't be
- * saved, such as a conflict they haven't resolved; null otherwise.
+ * saved, such as a conflict they haven't resolved, or the page has a change
+ * saved on this device only (ADR 0009, decision 8); null otherwise.
  */
 export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
   const session = openDrafts.get(pageId);
-  if (!session) return null;
-  await session.flush().catch(() => {});
-  return session.hasUnsaved()
-    ? 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.'
+  if (session) {
+    await session.flush().catch(() => {});
+    if (session.hasUnsaved())
+      return 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.';
+  }
+  // Saved on this device only, it would come back as a conflict with this change.
+  const vault = vaultStore.get();
+  const queued =
+    vault.status === 'unlocked' &&
+    (await queueOf(vault.ctx)
+      ?.entry(pageId)
+      .catch(() => null));
+  return queued
+    ? 'Your own edit to this page is saved on this device only. Try again once it is sent.'
     : null;
 }
+
+/**
+ * A save into this device's queue (ADR 0009, decision 7) as the session
+ * takes it: on the draft it was based on, as typed, its links worked out
+ * once it is sent.
+ */
+const onDevice = (input: Parameters<DraftPorts['saveDraft']>[0]): pageOperations.Written => ({
+  revisionId: input.basedOn,
+  repaired: false,
+  region: input.basedOnRegion ?? input.tableRegion ?? OWNER_REGION,
+  payload: input.payload,
+  inUse: input.payload,
+  renamed: [],
+  linksKept: true,
+});
 
 function appPorts(
   ctx: ClientContext,
   page: pageOperations.PageRef,
   queryClient: QueryClient,
+  /** The version of the page's queued change this session last saw, if it has one. */
+  queuedVersion: number | null,
+  /** Set while a conflict is with a change another window saved here. */
+  device: { otherWindow: boolean },
 ): DraftPorts {
   const tree = treeQuery(ctx, page.spaceId);
   const info = pageQuery(ctx, page.pageId);
+  const queue = queueOf(ctx);
+  // An entry gone since, when its change was sent, is made afresh by the next save into it.
+  let seen = queuedVersion;
+  // What the person chose to save theirs on top of, for the next save into the queue.
+  let onTop: RevisionId | null = null;
   return {
-    saveDraft: (input) => pageOperations.saveDraft(ctx, { page, read: readWikilinks, ...input }),
+    // Offline, or while the page has a change waiting, saves go into the
+    // queue, online too, until it is sent. A save that gets no answer is
+    // kept there under the ID it was sent with, to be sent again.
+    async saveDraft(input) {
+      if (queue && (await savesOnDevice(ctx, page.pageId))) {
+        try {
+          seen = await queue.saveDraft({
+            page,
+            basedOn: input.basedOn,
+            region: input.tableRegion ?? input.basedOnRegion ?? null,
+            payload: input.payload,
+            seen,
+            onTop: onTop === input.basedOn,
+            ...(input.linkChoices && { linkChoices: input.linkChoices }),
+          });
+          onTop = null;
+        } catch (error) {
+          device.otherWindow = error instanceof ApiError && error.code === 'stale-head';
+          throw error;
+        }
+        return onDevice(input);
+      }
+      const revisionId = newId(RevisionId);
+      try {
+        // Files added while the page's changes went into the queue are there
+        // only: they go up first.
+        await queue?.upload(ctx, page, input.payload.attachments);
+        const written = await pageOperations.saveDraft(ctx, {
+          page,
+          read: readWikilinks,
+          ...input,
+          revisionId,
+        });
+        void queue?.sent(input.payload.attachments).catch(() => {});
+        return written;
+      } catch (error) {
+        if (!queue || !noAnswer(error)) throw error;
+        seen = await queue.lost({
+          page,
+          basedOn: input.basedOn,
+          region: input.tableRegion ?? input.basedOnRegion ?? null,
+          payload: input.payload,
+          revisionId,
+          ...(input.linkChoices && { linkChoices: input.linkChoices }),
+        });
+        return onDevice(input);
+      }
+    },
+    onTopOf: (revisionId) => {
+      onTop = revisionId;
+    },
     readLinks: readOpeningLinks,
-    uploadAttachment: (file) => pageOperations.uploadAttachment(ctx, page, file),
-    draftHead: async () => (await pageOperations.loadPage(ctx, page.pageId)).heads.draftHead,
+    // Offline, or with a change waiting, as for a page not made yet, a file
+    // is sealed for the draft now and kept with the change until it is sent.
+    uploadAttachment: (file) => attachFile(ctx, page, file),
+    // After a conflict with a change another window saved, this one's goes on top of it.
+    async draftHead() {
+      device.otherWindow = false;
+      const entry = await queue?.entry(page.pageId);
+      if (entry?.kind === 'page' && !entry.failure) {
+        seen = entry.version;
+        return entry.basedOn ?? entry.newPage?.revisionId ?? null;
+      }
+      return (await queryClient.fetchQuery({ ...info, staleTime: 0 })).heads.draftHead;
+    },
     generation: () => ctx.revisions.generation,
     epoch: vaultStore.epoch,
     tree: () => queryClient.getQueryData(tree.queryKey),

@@ -13,14 +13,14 @@ export function asOf(at: Date, now = new Date()): string {
  * **Offline** (ADR 0009, decision 4), on the rail and on phones the top
  * bar, while the server doesn't answer, with what that means as its hint:
  * what's shown is what this device kept, as of when the app last heard
- * from the server.
+ * from the server, and changes wait on the device until it answers.
  */
 export function OfflinePill({ className }: { className?: string }) {
   const connection = useConnection();
   if (connection.online) return null;
   const hint = `Showing what this device kept${
     connection.heardAt ? `, as of ${asOf(connection.heardAt)}` : ''
-  }. Anything that needs the server waits until you’re back online.`;
+  }. Changes are saved on this device and sent when you’re back online.`;
   return (
     <span
       role="status"

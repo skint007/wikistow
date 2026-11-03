@@ -14,7 +14,9 @@ import {
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { onSignedOutElsewhere } from '../data/kept-store';
 import { OfflinePill } from './offline-pill';
+import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
+import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
@@ -51,7 +53,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const ctx = vault.status === 'unlocked' ? vault.ctx : null;
   // A session opened offline is confirmed first once the server answers.
   useConfirmSession();
-  useTreeChanges(useSessionConfirmed(ctx) ? ctx : null);
+  const confirmed = useSessionConfirmed(ctx);
+  useTreeChanges(confirmed ? ctx : null);
+  // Changes made offline go once the server answers and the session is confirmed.
+  useOfflineChanges(ctx, confirmed);
   // Another tab signing out deletes what's kept: this one stops keeping first.
   useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
@@ -181,6 +186,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SafeModeBanner />
         <RestoreNotice />
         {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
+        {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}
         {signOutFailed && (
           <div
             role="alert"

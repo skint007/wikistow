@@ -9,7 +9,7 @@ import {
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { errorMessage } from '../errors';
-import { NEEDS_CONNECTION } from '../shell/needs-connection';
+import { NEEDS_CONNECTION, SENDS_FIRST } from '../shell/needs-connection';
 import type { PageHeads, View, Viewer } from './view-model';
 
 // Changes made while reading a page (#212): a task ticked, or a value a
@@ -52,7 +52,8 @@ export const PUBLIC_LINK_HINT = 'This page has a public link: open the draft to 
  * even when it is now, as it stays that one once a tick publishes. Each publish ends a public page's copy, which Publish asks about
  * first (ADR 0005), so a tick there would end it without asking. Readers
  * are told nothing, as nothing would let them. A tick publishes, so
- * `offline`, it waits for the server (ADR 0009, decision 8).
+ * `offline`, it waits for the server (ADR 0009, decision 8), and with a
+ * change made offline not sent yet (`changed`), for that.
  */
 export function readingRights({
   viewer,
@@ -62,6 +63,7 @@ export function readingRights({
   pinned = false,
   publicLink,
   offline = false,
+  changed = false,
 }: {
   viewer: Viewer;
   heads: PageHeads;
@@ -70,9 +72,11 @@ export function readingRights({
   pinned?: boolean;
   publicLink: boolean | null;
   offline?: boolean;
+  changed?: boolean;
 }): ReadingRights {
   if (view !== 'published' || viewer.role === 'reader') return { allowed: false, hint: null };
   if (offline) return { allowed: false, hint: NEEDS_CONNECTION };
+  if (changed) return { allowed: false, hint: SENDS_FIRST };
   if (heads.draftHead === null)
     return {
       allowed: false,

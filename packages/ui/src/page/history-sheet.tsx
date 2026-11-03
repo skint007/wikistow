@@ -19,7 +19,9 @@ import {
   treeQuery,
   versionChangesQuery,
 } from '../data/queries';
+import { pageChange, queueQuery } from '../data/offline-changes';
 import { errorMessage } from '../errors';
+import { SENDS_FIRST, useNeedsConnection } from '../shell/needs-connection';
 import { readWikilinks } from './page-reader';
 
 const when = (iso: string) =>
@@ -60,6 +62,9 @@ export function HistorySheet({
   const { data: versions } = useQuery({ ...historyQuery(ctx, page), enabled: open });
   // Where readers' history starts, which editors are told and readers aren't.
   const { data: info } = useQuery(pageQuery(ctx, page.pageId));
+  // Restoring waits for the page's change made offline (ADR 0009, decision 8).
+  const { data: entries } = useQuery(queueQuery(ctx));
+  const sendsFirst = useNeedsConnection(pageChange(entries, page.pageId) ? SENDS_FIRST : null);
   const readersFrom = info?.readerHistoryFrom ?? null;
   const unpublished = info?.role !== 'reader' && info?.heads.publishedHead === null;
   const navigate = useNavigate();
@@ -217,7 +222,7 @@ export function HistorySheet({
                           size="sm"
                           variant="outline"
                           disabled={restoring !== null}
-                          onClick={() => void restore(version.revisionId)}
+                          {...sendsFirst.click(() => void restore(version.revisionId))}
                         >
                           {restoring === version.revisionId ? 'Restoring…' : 'Restore as draft'}
                         </Button>

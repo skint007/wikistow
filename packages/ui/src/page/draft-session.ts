@@ -41,6 +41,8 @@ export type DraftPorts = {
   }): Promise<AttachmentRef>;
   /** The page's draft head as the server has it now. */
   draftHead(): Promise<RevisionId | null>;
+  /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
+  onTopOf?(revisionId: RevisionId): void;
   /** The revision cache's generation; a region opened in an earlier one may be stale. */
   generation(): number;
   /** The vault's epoch, which a lock moves on. */
@@ -138,8 +140,13 @@ export class DraftSession {
   readonly #listeners = new Set<() => void>();
 
   constructor(
-    /** The draft as opened, and the region it was opened in. */
-    opened: { base: RevisionId; payload: PagePayload; region: Region },
+    /**
+     * The draft as opened, and the region it was opened in. With `theirs`,
+     * the draft someone else saved over `base` meanwhile, `payload` is an
+     * edit not saved over it, as a change made offline that came back as a
+     * conflict (ADR 0009, decision 7): the session opens stopped at it.
+     */
+    opened: { base: RevisionId; payload: PagePayload; region: Region; theirs?: RevisionId | null },
     ports: DraftPorts,
     surface: { readonly current: EditorSurfaceHandle | null },
     timing?: { debounceMs: number; maxWaitMs: number },
@@ -170,6 +177,10 @@ export class DraftSession {
       tooLarge: null,
       saveError: undefined,
     };
+    if (opened.theirs) {
+      this.#theirs = opened.theirs;
+      this.#autosave.hold(() => this.#current());
+    }
   }
 
   /**
@@ -335,8 +346,12 @@ export class DraftSession {
       });
       saved = { revisionId, basedOn, written, region };
       this.#known.add(revisionId);
-      this.#base = revisionId;
-      this.#region = { region, generation };
+      // A save into this device's queue keeps its base, and one sent from
+      // there may have landed meanwhile (`landed`): that one stays the base.
+      if (this.#base === basedOn) {
+        this.#base = revisionId;
+        this.#region = { region, generation };
+      }
       // A link may now name its page's current title. Show it, unless the
       // person typed on meanwhile: then the next save builds on the table
       // that went with the text on screen, and renames it again.
@@ -403,6 +418,24 @@ export class DraftSession {
     return this.#unreported || this.#autosave.unsaved() !== null;
   }
 
+  /**
+   * `revisionId`, a version of this draft sent from this device's queue, is
+   * this session's own: the page's head naming it isn't a conflict.
+   */
+  own(revisionId: RevisionId) {
+    this.#known.add(revisionId);
+  }
+
+  /**
+   * `revisionId`, sent from this device's queue, landed: the next save goes
+   * on top of it, as after one of this session's own, its region opened afresh.
+   */
+  landed(revisionId: RevisionId) {
+    this.#known.add(revisionId);
+    this.#base = revisionId;
+    this.#region = null;
+  }
+
   /** A save is waiting for its answer, or a file is still uploading. */
   isBusy() {
     return this.#autosave.isSaving() || this.#uploads.size > 0;
@@ -425,6 +458,7 @@ export class DraftSession {
     if (target) {
       this.#base = target;
       this.#known.add(target);
+      this.#ports.onTopOf?.(target);
     }
     // Their draft may be in another region by now: open it fresh.
     this.#region = null;
