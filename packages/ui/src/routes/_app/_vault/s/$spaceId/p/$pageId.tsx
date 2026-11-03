@@ -1,7 +1,6 @@
 import {
   bannerAttachment,
   coverOf,
-  keptOperations,
   linkablePages,
   linkTableOf,
   pageOperations,
@@ -47,6 +46,7 @@ import {
   searchIndexChanged,
   treeQuery,
 } from '../../../../../../data/queries';
+import { useNotKept } from '../../../../../../data/connection';
 import { keepEveryPage, pageOpened } from '../../../../../../data/keeper';
 import { keptStore } from '../../../../../../data/kept-store';
 import { useDeviceSwitch } from '../../../../../../shell/device-switch';
@@ -338,10 +338,7 @@ function PageBody({
   const needs = useNeedsConnection();
   const listedAt = needs.offline ? ctx.keptContent?.space(page.spaceId)?.listedAt : undefined;
   // Offline, links to the space's pages this device doesn't keep say so.
-  const notKept = useMemo(
-    () => (needs.offline && tree ? keptOperations.notKeptIn(ctx, page.spaceId) : undefined),
-    [needs.offline, tree, ctx, page.spaceId],
-  );
+  const notKept = useNotKept(ctx, page.spaceId);
   // The published body as shown, whose headings the table of contents lists.
   const [shownBody, setShownBody] = useState<HTMLElement | null>(null);
   const headings = useHeadings(shownBody);
@@ -802,7 +799,7 @@ function PageBody({
               <button
                 ref={copiesPill}
                 type="button"
-                onClick={() => setShowingCopies(true)}
+                {...needs.click(() => setShowingCopies(true))}
                 className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
               >
                 <span aria-hidden>⇉</span>
@@ -840,7 +837,7 @@ function PageBody({
               (publisher && publishedHead ? (
                 <button
                   type="button"
-                  onClick={onShareLink}
+                  {...needs.click(onShareLink)}
                   className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
                 >
                   <Globe aria-hidden className="size-3.5" strokeWidth={2} />

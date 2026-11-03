@@ -15,6 +15,7 @@ import { usePageIndex } from '../data/page-index';
 import { treeQuery } from '../data/queries';
 import { linkHint } from '../desktop';
 import { PropertyValueView, type LinkScope } from './property-value';
+import { useNotKept } from '../data/connection';
 
 // A query table (`wikistow-query`, ADR 0006 decision 7), as its viewer's
 // app runs it: over their own search index, so only pages they can open,
@@ -56,6 +57,7 @@ export function QueryTable({
   const read = useMemo(() => readQuery(source), [source]);
   const spaceId = SpaceId.parse(scope.spaceId);
   const { index, progress, error } = usePageIndex(scope.ctx, { enabled: read.ok });
+  const notKept = useNotKept(scope.ctx, spaceId);
   const { data: tree, error: treeError } = useQuery({
     ...treeQuery(scope.ctx, spaceId),
     enabled: read.ok,
@@ -77,6 +79,7 @@ export function QueryTable({
       // Values are other pages', whose link tables aren't this one's: by title.
       links: new Map(),
       editor: scope.editor,
+      notKept,
     }),
     [scope.spaceId, scope.pageId, scope.pages, scope.editor],
   );

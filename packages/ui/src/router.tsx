@@ -23,7 +23,13 @@ export function createAppRouter({ history }: { history: RouterHistory }) {
     // Never paused for the browser's idea of offline: offline, queries read
     // what's kept (ADR 0009, decision 4), and the app has its own idea of it.
     defaultOptions: {
-      queries: { retry: false, refetchOnWindowFocus: true, networkMode: 'always' },
+      // `refetchOnReconnect` is off by default with `networkMode: 'always'`.
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        networkMode: 'always',
+      },
       mutations: { networkMode: 'always' },
     },
   });

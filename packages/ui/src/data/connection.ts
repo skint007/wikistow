@@ -1,5 +1,6 @@
+import { keptOperations, type ClientContext, type SpaceId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 /**
  * Whether the server answers (ADR 0009, decision 4). Offline, `heardAt` is
@@ -111,3 +112,16 @@ export const useConnection = () => useSyncExternalStore(connection.subscribe, co
 
 /** Whether the app is offline, kept current. */
 export const useOffline = () => !useConnection().online;
+
+/**
+ * Offline, the pages of `spaceId` this device lists but doesn't keep, which
+ * links read as not kept rather than missing (ADR 0009, decision 4);
+ * undefined online.
+ */
+export function useNotKept(ctx: ClientContext, spaceId: SpaceId): ReadonlySet<string> | undefined {
+  const offline = useOffline();
+  return useMemo(
+    () => (offline ? keptOperations.notKeptIn(ctx, spaceId) : undefined),
+    [offline, ctx, spaceId],
+  );
+}

@@ -46,6 +46,7 @@ test('pages opened here read and search offline', async ({ page, context, freshP
   await expect(offline).toHaveAttribute('data-hint', /^Showing what this device kept, as of /);
   await expect(page.getByText('Beans and stock.')).toBeVisible();
   await expect(page.getByText(/^As of /)).toBeVisible();
+  await expect(page.getByText(/Published$/)).toBeVisible();
 
   await test.step('links between kept pages open', async () => {
     await page.getByRole('link', { name: 'Bread', exact: true }).last().click();
@@ -81,5 +82,7 @@ test('pages opened here read and search offline', async ({ page, context, freshP
   // Told the browser is online again, the app asks the server, which answers.
   await context.setOffline(false);
   await expect(offline).toBeHidden({ timeout: 15_000 });
+  // What's shown loads again: offline, the published count isn't known.
+  await expect(page.getByText(/Published v1$/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');
 });

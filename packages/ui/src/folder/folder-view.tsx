@@ -59,7 +59,7 @@ import {
   type OwnWrite,
 } from './folder-model';
 import { useCellEdits, type CellEdits, type SaveProperty } from './use-cell-edits';
-import { useOffline } from '../data/connection';
+import { useNotKept, useOffline } from '../data/connection';
 
 // A folder's own view (ADR 0006, decision 8; ui-design, Folder view): the
 // pages directly in it as a list or a table of their properties, from the
@@ -414,7 +414,8 @@ const scopeOf = (
   linkable: readonly LinkablePage[] | null,
   links: ReadonlyMap<string, string>,
   editor: boolean,
-): LinkScope => ({ spaceId, selfId: pageId, pages: linkable, links, editor });
+  notKept: ReadonlySet<string> | undefined,
+): LinkScope => ({ spaceId, selfId: pageId, pages: linkable, links, editor, notKept });
 
 /** A page's title as a link that opens it, with its icon, and for editors whether the values are a draft's. */
 function TitleLink({
@@ -535,7 +536,8 @@ function ListItem({
   treePage: TreePage | undefined;
 }) {
   const { links } = useShownRevision(spaceId, entry, undefined, editsDraft(canEdit, treePage));
-  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  const notKept = useNotKept(useClient(), spaceId);
+  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept);
   // Tags link to their search, as the page's rows do.
   const tags = tagProperties(entry.properties);
   const values = columns
@@ -705,7 +707,8 @@ function PageRow({
     }
     return { properties: read, refusals };
   }, [markdown, columns]);
-  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit);
+  const notKept = useNotKept(useClient(), spaceId);
+  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept);
   // Back to the control used, or one in its place: the field it opened from,
   // or a list's Add field once the item removed has gone. Only if nothing
   // else took the focus meanwhile, as the control it had is gone.
