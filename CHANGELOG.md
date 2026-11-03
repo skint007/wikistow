@@ -4,6 +4,26 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.23.0-beta.1 - 2026-11-03
+
+### Highlights
+
+#### Upgrade notes
+
+- This is a beta, on the beta channel only: the `:beta` server image and `wikistow-desktop-beta-bin` / `wikistow-cli-beta-bin` on the AUR. Stable installs stay on 0.22.0.
+
+#### Features
+
+- Pages work offline. The browser keeps the pages you open, and the desktop app every page, sealed on the device. Settings → Keep for offline chooses which.
+- With no connection the app still starts, unlocks and shows kept pages, with Offline in the rail and when each page is from. Search and Linked from work over what’s kept.
+- You can edit drafts and make pages and folders offline. Changes are kept on the device and saved once the server answers. A page someone changed meanwhile shows the usual conflict.
+- The browser app can be installed on phones and computers, and loads without a connection once opened online.
+- Import… also takes an Obsidian vault, as its folder or a zip of it. Agents can import one with `wikistow import`.
+
+#### Fixes
+
+- When the server can’t be reached or doesn’t answer as WikiStow, the app shows a screen naming it, with Try again, instead of “Something went wrong!”. In the desktop app, Sign out on this computer gets you to another server.
+
 ### Changes
 
 #### App
