@@ -28,6 +28,7 @@ import {
   uploadBlob,
   type PageRef,
 } from './pages.ts';
+import type { SavedVersion } from './search.ts';
 import type { ClientContext } from './session.ts';
 import { createFolderAs, type loadTree } from './spaces.ts';
 
@@ -82,6 +83,8 @@ const QueuedPageJson = z.strictObject({
   /** Counts up with each save into the entry. */
   version: z.number().int(),
   sending: Sending.nullable(),
+  /** The pages the person picked for ambiguous links, by key (`LinkWrite.chosen`). */
+  picks: z.record(z.string(), PageId),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -246,13 +249,16 @@ export class OfflineQueue {
     region,
     payload,
     seen,
+    linkChoices,
   }: {
     page: PageRef;
     basedOn: RevisionId;
     region: Region | null;
     payload: PagePayload;
     seen: number | null;
+    linkChoices?: ReadonlyMap<string, PageId>;
   }): Promise<number> {
+    const picks = Object.fromEntries(linkChoices ?? []);
     const { entry, made } = await this.#store.queueExclusive(async () => {
       const before = await this.#page(page.pageId);
       if (before && before.version !== seen) {
@@ -263,6 +269,7 @@ export class OfflineQueue {
         ? {
             ...before,
             payload,
+            picks,
             version: before.version + 1,
             ...(rebased && { basedOn, failure: null }),
           }
@@ -276,6 +283,7 @@ export class OfflineQueue {
             payload,
             version: 1,
             sending: null,
+            picks,
             failure: null,
             at: this.#at(),
           };
@@ -298,12 +306,14 @@ export class OfflineQueue {
     region,
     payload,
     revisionId,
+    linkChoices,
   }: {
     page: PageRef;
     basedOn: RevisionId;
     region: Region | null;
     payload: PagePayload;
     revisionId: RevisionId;
+    linkChoices?: ReadonlyMap<string, PageId>;
   }): Promise<number> {
     const entry = await this.#store.queueExclusive(async () => {
       const before = await this.#page(page.pageId);
@@ -318,6 +328,7 @@ export class OfflineQueue {
         payload,
         version: 1,
         sending: { revisionId, version: 1, payload, partial: false },
+        picks: Object.fromEntries(linkChoices ?? []),
         failure: null,
         at: this.#at(),
       };
@@ -360,6 +371,7 @@ export class OfflineQueue {
       payload,
       version: 1,
       sending: sent ? { revisionId, version: 1, payload, partial: false } : null,
+      picks: {},
       failure: null,
       at: this.#at(),
     };
@@ -423,23 +435,25 @@ export class OfflineQueue {
   }
 
   /**
-   * Delete `entry`, and the files it names that no other entry does. Only
-   * from within `queueExclusive`.
+   * Delete `entry`, and every file no other entry names: its own, and any
+   * added offline and taken out again before sending. Only from within
+   * `queueExclusive`.
    */
   async #remove(entry: QueueEntry) {
-    const names = [this.#entryName(entry.id)];
-    if (entry.kind === 'page') {
-      const others = (await this.entries()).filter((other) => other.id !== entry.id);
-      const files = (page: QueuedPage) =>
-        [...page.payload.attachments, ...(page.sending?.payload.attachments ?? [])].map(
-          (ref) => ref.blobHash,
-        );
-      const named = new Set(others.flatMap((other) => (other.kind === 'page' ? files(other) : [])));
-      for (const blobHash of new Set(files(entry))) {
-        if (!named.has(blobHash)) names.push(this.#blobName(blobHash));
-      }
-    }
-    await this.#store.queue.remove(names);
+    const others = (await this.entries()).filter((other) => other.id !== entry.id);
+    const named = new Set(
+      others.flatMap((other) =>
+        other.kind === 'page'
+          ? [...other.payload.attachments, ...(other.sending?.payload.attachments ?? [])].map(
+              (ref) => this.#blobName(ref.blobHash),
+            )
+          : [],
+      ),
+    );
+    const files = (await this.#store.queue.list())
+      .map((item) => item.name)
+      .filter((name) => name.startsWith(BLOB) && !named.has(name));
+    await this.#store.queue.remove([this.#entryName(entry.id), ...files]);
   }
 
   /** Forget a change, as the person chose. */
@@ -638,6 +652,7 @@ export class OfflineQueue {
           revisionId: attempt.revisionId,
           // Its table's entries go only where it was worked out for.
           ...(entry.region && { tableRegion: entry.region }),
+          linkChoices: new Map(Object.entries(entry.picks)),
           ...(read && { read }),
         });
       }
@@ -696,6 +711,26 @@ export class OfflineQueue {
       );
     });
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
+  }
+
+  /**
+   * The drafts waiting here for pages the server has, as `updateIndex` takes
+   * a saved draft: on the draft they are based on, as typed (decision 9).
+   */
+  async drafts(): Promise<SavedVersion[]> {
+    return (await this.entries()).flatMap((entry) =>
+      entry.kind === 'page' && entry.basedOn
+        ? [
+            {
+              spaceId: entry.spaceId,
+              pageId: entry.id,
+              basedOn: entry.basedOn,
+              revisionId: entry.basedOn,
+              payload: entry.payload,
+            },
+          ]
+        : [],
+    );
   }
 
   /**
