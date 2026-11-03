@@ -280,10 +280,11 @@ declare const __APP_VERSION__: string;
  * grant. Where it is kept, it is kept once this person's saves pause, and at
  * once after any other change it lets a version go for (`keepLater`).
  *
- * Offline (ADR 0009, decision 9), the index shown stays as it is, and what
- * changed waits until the server answers. With none shown, it is built from
- * the pages kept on this device alone, and isn't kept; back online, an
- * update lists every space (`useTreeChanges`).
+ * Offline (ADR 0009, decision 9), it is built from the pages kept on this
+ * device alone, taking what the index shown read of them, so with **Pages
+ * I open** it holds only those. It isn't kept, it stays as it is while
+ * offline, and what changed waits until the server answers: back online,
+ * an update lists every space (`useTreeChanges`).
  *
  * Not built again when the window is focused: coming back into view tells
  * it what it may have missed (`useTreeChanges`), and one update follows.
@@ -293,7 +294,8 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     queryKey: searchIndexKey,
     queryFn: async ({ signal }) => {
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
-      if (shown && !connection.get().online) return shown;
+      // Offline, one built from what's kept stays as it is until the server answers.
+      if (shown && !connection.get().online && fromKept.has(shown)) return shown;
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       const onProgress = (progress: searchOperations.IndexProgress) =>
         queryClient.setQueryData(searchProgressKey, progress);
@@ -304,15 +306,21 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
       // Built from what's kept alone, as offline: not kept again.
       let partial = false;
       try {
-        if (shown) {
+        if (shown && connection.get().online) {
           index = await searchOperations.updateIndex(ctx, shown, changes, {
             signal,
             onProgress,
             readLinks: readIndexLinks,
           });
         } else {
-          const sealed = await file?.read().catch(() => null);
-          const kept = sealed ? searchOperations.openKept(ctx, sealed, __APP_VERSION__) : null;
+          // What an index read before stands in for the versions it read: the
+          // one shown, going offline, else the one this device kept.
+          const sealed = shown ? null : await file?.read().catch(() => null);
+          const kept = shown
+            ? searchOperations.keptPages(shown)
+            : sealed
+              ? searchOperations.openKept(ctx, sealed, __APP_VERSION__)
+              : null;
           const build = (from: 'server' | 'kept') =>
             searchOperations.indexSpaces(ctx, {
               kept,
@@ -330,7 +338,10 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
             index = await build('kept');
           }
           // Back online, every space is listed again.
-          if (partial) changed(queryClient, 'all');
+          if (partial) {
+            fromKept.add(index);
+            changed(queryClient, 'all');
+          }
         }
       } catch (error) {
         // Followed by the next update instead, unless the vault locked or
@@ -354,6 +365,9 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+
+/** Indexes built from what's kept alone, offline: never kept, and updated from the server once back. */
+const fromKept = new WeakSet<searchOperations.PageIndex>();
 
 /** How long changes gather, while something shows the index, before it follows them together. */
 export const GATHER_MS = 300;

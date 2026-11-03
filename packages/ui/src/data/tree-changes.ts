@@ -42,6 +42,8 @@ export function useTreeChanges(ctx: ClientContext | null) {
       void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
       void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
       void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
+      // The index too, which then holds the kept pages only.
+      searchIndexChanged(queryClient);
       return;
     }
     if (!visible) return;
