@@ -8,6 +8,7 @@ import {
 } from '@wikistow/contracts';
 import { queryOptions } from '@tanstack/react-query';
 import { connection, noAnswer } from './data/connection';
+import { forgetKeptMe, keepMe, keptMe } from './data/kept-store';
 
 // How long a read waits for the answer's headers before it counts as no
 // answer (ADR 0009, decision 4): a home server that's down often drops
@@ -120,16 +121,25 @@ export function serverTrouble(error: unknown): ServerTrouble | null {
 
 /**
  * The signed-in account, or null when there is no usable session (signed
- * out, suspended, or email unverified). Any other failure throws, which
- * `/_app` shows as `SessionError`.
+ * out, suspended, or email unverified). With no answer from the server, the
+ * answer this device kept, so the app goes on offline (ADR 0009, decision
+ * 5). Any other failure, or no answer and none kept, throws, which `/_app`
+ * shows as `SessionError`.
  */
 export const meQuery = queryOptions({
   queryKey: ['me'],
   queryFn: async () => {
     try {
-      return await api.call(accountRoutes.me);
+      const me = await api.call(accountRoutes.me);
+      await keepMe(me);
+      return me;
     } catch (error) {
-      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return null;
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        await forgetKeptMe();
+        return null;
+      }
+      const kept = noAnswer(error) ? await keptMe() : null;
+      if (kept) return kept;
       throw error;
     }
   },

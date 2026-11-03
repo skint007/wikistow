@@ -19,7 +19,9 @@ import { picksOffRecord } from '../agents/model';
 import { resealAgents } from '../commands/agent-commands';
 import { runCommand } from '../commands/command';
 import { requirementsHere } from '../commands/ui-commands';
+import { useOffline } from '../data/connection';
 import { spacesQuery } from '../data/queries';
+import { useSessionConfirmed } from '../vault/confirm';
 import { PLAIN, useClient } from '../vault/store';
 import { GiveAccessDialog } from './give-access-dialog';
 import { nameOf } from './names';
@@ -125,7 +127,12 @@ const agentWorkQuery = (ctx: ClientContext) =>
 export function PendingOwnerWork() {
   const ctx = useClient();
   const queryClient = useQueryClient();
-  const { data } = useQuery(pendingOwnerWorkQuery(ctx, queryClient));
+  // A vault opened offline waits for the server, and for what that unlock
+  // skipped (ADR 0009, decision 5), rather than finding every space unchecked.
+  const confirmed = useSessionConfirmed(ctx);
+  const offline = useOffline();
+  const ready = confirmed && !offline;
+  const { data } = useQuery({ ...pendingOwnerWorkQuery(ctx, queryClient), enabled: ready });
   // After the owner work, so the two don't write the contacts record at once.
   const { data: agents } = useQuery({ ...agentWorkQuery(ctx), enabled: data !== undefined });
   const [dismissed, setDismissed] = useState(false);

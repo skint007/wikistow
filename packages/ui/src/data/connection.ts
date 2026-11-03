@@ -1,5 +1,5 @@
 import { keptOperations, type ClientContext, type SpaceId } from '@wikistow/client';
-import { ApiError } from '@wikistow/client/api';
+import { noAnswer } from '@wikistow/client/api';
 import { useMemo, useSyncExternalStore } from 'react';
 
 /**
@@ -11,15 +11,7 @@ export type Connection = { online: true } | { online: false; heardAt: Date | nul
 /** How often an offline app asks the server whether it is back. */
 export const PROBE_MS = 30_000;
 
-/**
- * Whether `error` means no answer from the server: none at all, or a 5xx
- * that isn't WikiStow's own JSON error, as a proxy or tunnel gives when the
- * server behind it is down (Cloudflare's 521 to 530 among them). The
- * server's own refusal, a 5xx among them, is an answer.
- */
-export const noAnswer = (error: unknown): boolean =>
-  error instanceof ApiError &&
-  (error.code === 'network' || (error.status >= 500 && error.code === 'unreadable-response'));
+export { noAnswer };
 
 let state: Connection = { online: true };
 let heardAt: Date | null = null;

@@ -20,6 +20,7 @@ import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
 import { Rail, UpdateDot, useSignOut } from './rail';
+import { useConfirmSession, useSessionConfirmed } from '../vault/confirm';
 import { useVault, vaultStore } from '../vault/store';
 import { TrashNotice } from '../page/trash-notice';
 import { RestoreNotice } from './restore-notice';
@@ -47,7 +48,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const slot = useMemo(() => ({ setSpace, closeDrawer: () => setDrawer(false) }), []);
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
-  useTreeChanges(vault.status === 'unlocked' ? vault.ctx : null);
+  const ctx = vault.status === 'unlocked' ? vault.ctx : null;
+  // A session opened offline is confirmed first once the server answers.
+  useConfirmSession();
+  useTreeChanges(useSessionConfirmed(ctx) ? ctx : null);
   // Another tab signing out deletes what's kept: this one stops keeping first.
   useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();

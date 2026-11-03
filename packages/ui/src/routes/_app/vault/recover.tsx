@@ -9,7 +9,7 @@ import { api } from '../../../api';
 import { useReauth } from '../../../auth/reauth';
 import { desktop } from '../../../desktop';
 import { vaultMessage } from '../../../vault/messages';
-import { startSession } from '../../../vault/open';
+import { keepChangedWrapper, startSession } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { forgetInBrowser } from '../../../vault/tab-unlock';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
@@ -85,7 +85,7 @@ function NewPassphrase({ vault }: { vault: UnlockedVault }) {
     try {
       const passphrase = await readPassphrase(form);
       if ('error' in passphrase) return setError(passphrase.error);
-      await withReauth(() =>
+      const changed = await withReauth(() =>
         changeVaultPassphrase({
           api,
           crypto: workerVaultCrypto,
@@ -93,6 +93,8 @@ function NewPassphrase({ vault }: { vault: UnlockedVault }) {
           passphrase: passphrase.value,
         }),
       );
+      // Unlocking offline takes the new passphrase from now on (ADR 0009, decision 5).
+      await keepChangedWrapper(changed);
       // A browser remembering the unlock asks for the new passphrase next visit.
       if (!desktop) await forgetInBrowser();
       vaultStore.unlock(await startSession(vault), vault);
