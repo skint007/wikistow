@@ -23,20 +23,25 @@ test('pages opened here read and search offline', async ({ page, context, freshP
     await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   }
 
-  // Both are kept once the keeper has followed the last publication: it
-  // starts soon after the server tells of it, and holds the kept store's
-  // lock while it runs.
-  await page.waitForTimeout(1_000);
-  await expect
-    .poll(() => page.evaluate(async () => (await navigator.locks.query()).held?.length ?? 0))
-    .toBe(0);
-  await page.getByRole('link', { name: 'Settings' }).click();
-  await expect(page.getByText(/^2 pages, /)).toBeVisible({ timeout: 30_000 });
-  await page.goBack();
-  await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
   // Loaded afresh, the tab keeps its vault open but nothing in memory: what
-  // opens offline comes from the device.
+  // opens offline comes from the device. Unlocking lists every space for
+  // the keeper, which holds the kept store's lock while it runs: once it
+  // has been held and let go, both pages are kept as published.
+  await page.addInitScript(() => {
+    setInterval(() => {
+      void navigator.locks.query().then(({ held = [] }) => {
+        const keeping = document.documentElement.dataset;
+        if (held.length > 0) keeping['keeping'] = 'running';
+        else if (keeping['keeping'] === 'running') keeping['keeping'] = 'done';
+      });
+    }, 10);
+  });
   await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-keeping', 'done', { timeout: 30_000 });
+  await page.getByRole('link', { name: 'Settings' }).click();
+  await expect(page.getByText(/^2 pages, /)).toBeVisible();
+  await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
 
   await context.setOffline(true);
