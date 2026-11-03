@@ -33,10 +33,10 @@ export interface KeptBytes {
  * Everything a device keeps for offline use (ADR 0009, decision 2): the
  * kept pages, trees and images (`items`), the changes made offline
  * (`queue`), and, unsealed beside them, the account they belong to and
- * what unlocking offline reads (`unlock`). The
- * desktop app keeps them in its `kept` and `queue` folders, the browser in
- * the `wikistow-kept` IndexedDB database, tests and a desktop app without
- * a keyring in memory (`memoryKeptStore`).
+ * what unlocking offline reads (`unlock`). The desktop app keeps them in
+ * its `kept`, `queue` and `unlock` folders and `kept-account` file, the
+ * browser in the `wikistow-kept` IndexedDB database, tests and a desktop
+ * app without a keyring (all but the queue) in memory (`memoryKeptStore`).
  */
 export interface KeptStore {
   readonly items: KeptItems;
