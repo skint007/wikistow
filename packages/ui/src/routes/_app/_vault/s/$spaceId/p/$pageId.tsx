@@ -313,8 +313,9 @@ function PageBody({
     // A page made offline has no version on the server until it is made.
     enabled: queueRead && !change?.newPage,
   });
-  // Kept for offline from its first opening here, with Pages I open (ADR 0009).
-  const revisionShown = revision !== undefined;
+  // Kept for offline from its first opening here, with Pages I open (ADR
+  // 0009); a page made offline once it is made, as the keeper waits until then.
+  const revisionShown = revision !== undefined || !!change?.newPage;
   useEffect(() => {
     if (revisionShown) pageOpened(ctx, { spaceId: page.spaceId, pageId: page.pageId });
   }, [ctx, revisionShown, page.spaceId, page.pageId]);
@@ -383,8 +384,19 @@ function PageBody({
         pinned,
         publicLink: linked,
         offline: needs.offline,
+        changed: change !== null,
       }),
-    [info.role, info.canPublish, info.heads, model.view, revisionId, pinned, linked, needs.offline],
+    [
+      info.role,
+      info.canPublish,
+      info.heads,
+      model.view,
+      revisionId,
+      pinned,
+      linked,
+      needs.offline,
+      change,
+    ],
   );
 
   const go = (view: 'draft' | 'published') =>

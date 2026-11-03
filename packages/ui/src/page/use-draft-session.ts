@@ -151,8 +151,17 @@ export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
   const session = openDrafts.get(pageId);
   if (!session) return null;
   await session.flush().catch(() => {});
-  return session.hasUnsaved()
-    ? 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.'
+  if (session.hasUnsaved())
+    return 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.';
+  // Saved on this device only, it would come back as a conflict with this change.
+  const vault = vaultStore.get();
+  const queued =
+    vault.status === 'unlocked' &&
+    (await queueOf(vault.ctx)
+      ?.entry(pageId)
+      .catch(() => null));
+  return queued
+    ? 'Your own edit to this page is saved on this device only. Try again once it is sent.'
     : null;
 }
 
