@@ -49,9 +49,9 @@ export function useConfirmSession() {
 
 /**
  * Whether `ctx` is confirmed: opened online, or confirmed since. Until it
- * is, the app follows no changes from the server and keeps no pages
- * (`useTreeChanges`), and owner work waits, as those come after confirming
- * (decision 4). What's on screen loads again meanwhile.
+ * is, the app neither follows changes from the server nor keeps every
+ * space current (`useTreeChanges`), and owner work waits, as those come
+ * after confirming (decision 4). What's on screen loads again meanwhile.
  */
 export function useSessionConfirmed(ctx: ClientContext | null): boolean {
   useSyncExternalStore(

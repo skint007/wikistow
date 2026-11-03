@@ -165,7 +165,7 @@ export async function openSession(
  * the installation ID this device kept in `content`, and the contacts record
  * kept with its mark in `kept`, checked as a served record is
  * (`openKeptContacts`), which stops the session if it fails. Null if the
- * device kept neither, so it can't open offline. The session reads what's
+ * device kept no installation ID, so it can't open offline. The session reads what's
  * kept; nothing is signed or written until it is back online, where
  * `confirmSession` runs what this skipped. `vaultVersion` is the version of
  * the wrapper the vault opened against, or that a remembered unlock was
