@@ -25,7 +25,8 @@ import {
  * listening, so a dozen tabs don't hold a dozen connections, and its trees
  * load again when it is back in view, as every query does
  * (`refetchOnWindowFocus`); the index, which doesn't, then lists every
- * space again, once. Offline it stops listening too, and back online
+ * space again, once. Offline it stops listening too, and what is shown reads
+ * what's kept at once; back online
  * (ADR 0009, decision 4) it starts again as when back in view, after what's
  * shown loads again (`refetchOnReconnect`).
  */
@@ -34,7 +35,16 @@ export function useTreeChanges(ctx: ClientContext | null) {
   const visible = useSyncExternalStore(onVisibility, () => document.visibilityState === 'visible');
   const offline = useOffline();
   useEffect(() => {
-    if (!ctx || !visible || offline) return;
+    if (!ctx) return;
+    // Gone offline: the trees and lists shown read what's kept at once, so
+    // the sidebar shows the kept pages only (ADR 0009, decision 4).
+    if (offline) {
+      void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
+      void queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
+      void queryClient.invalidateQueries({ queryKey: sharedWithMeQuery(ctx).queryKey });
+      return;
+    }
+    if (!visible) return;
     // Trees load again when the tab is back in view, being stale at once;
     // the index is told it may have missed changes anywhere.
     searchIndexChanged(queryClient);
