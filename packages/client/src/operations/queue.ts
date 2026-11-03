@@ -813,11 +813,12 @@ export class OfflineQueue {
 }
 
 /**
- * Why the server refused a send, or null for no answer, which leaves the
- * change to be sent when it answers.
+ * Why the server refused a send, or null for no answer or no session,
+ * which leaves the change to be sent when it answers, or after signing in.
  */
 function failureOf(error: unknown): QueueFailure | null {
-  if (noAnswer(error)) return null;
+  // A session that ended waits for the next one, which sends it (decision 10).
+  if (noAnswer(error) || (error instanceof ApiError && error.status === 401)) return null;
   const code = error instanceof ApiError || error instanceof CryptoError ? error.code : null;
   if (code === 'stale-head') return { kind: 'conflict' };
   if (code === 'not-found' || code === 'forbidden') return { kind: 'gone' };

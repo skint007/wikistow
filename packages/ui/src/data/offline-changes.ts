@@ -22,7 +22,7 @@ import { desktop } from '../desktop';
 import { readWikilinks } from '../page/page-reader';
 import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
-import { keepChanged } from './keeper';
+import { keepChanged, pageOpened } from './keeper';
 import { pageQuery, searchIndexChanged, treeQuery } from './queries';
 
 // Changes made offline (ADR 0009, decision 7), as the app follows and sends them.
@@ -185,6 +185,8 @@ function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
   void queryClient.invalidateQueries({ queryKey: pageQuery(ctx, PageId.parse(id)).queryKey });
   if (event.kind === 'landed') {
     for (const session of sessions) session(event);
+    // A change made here was opened here: kept from now on with Pages I open.
+    pageOpened(ctx, { spaceId: event.spaceId, pageId: event.pageId });
     searchIndexChanged(queryClient, { spaceIds: [event.spaceId] });
     keepChanged(ctx, { spaces: [event.spaceId] });
   }

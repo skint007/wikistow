@@ -314,8 +314,8 @@ function PageBody({
     enabled: queueRead && !change?.newPage,
   });
   // Kept for offline from its first opening here, with Pages I open (ADR
-  // 0009); a page made offline once it is made, as the keeper waits until then.
-  const revisionShown = revision !== undefined || !!change?.newPage;
+  // 0009); a page made offline once it is made (`useOfflineChanges`).
+  const revisionShown = revision !== undefined;
   useEffect(() => {
     if (revisionShown) pageOpened(ctx, { spaceId: page.spaceId, pageId: page.pageId });
   }, [ctx, revisionShown, page.spaceId, page.pageId]);

@@ -145,14 +145,16 @@ const openDrafts = new Map<PageId, DraftSession>();
  * what the person typed there first, so it lands before the change and the
  * change, based on an older draft, is refused as stale rather than written
  * over it. Answers why it can't go ahead if their edit still can't be
- * saved, such as a conflict they haven't resolved; null otherwise.
+ * saved, such as a conflict they haven't resolved, or the page has a change
+ * saved on this device only (ADR 0009, decision 8); null otherwise.
  */
 export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
   const session = openDrafts.get(pageId);
-  if (!session) return null;
-  await session.flush().catch(() => {});
-  if (session.hasUnsaved())
-    return 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.';
+  if (session) {
+    await session.flush().catch(() => {});
+    if (session.hasUnsaved())
+      return 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.';
+  }
   // Saved on this device only, it would come back as a conflict with this change.
   const vault = vaultStore.get();
   const queued =
