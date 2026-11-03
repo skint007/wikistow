@@ -1011,7 +1011,7 @@ function PageBody({
                       canEdit
                         ? {
                             parentId: info.parentId,
-                            // Making a page needs the server (ADR 0009, decision 8).
+                            // Offline, a missing link's page is made from the draft view, which knows what is kept.
                             create: !needs.offline && (info.parentId !== null || topOpened),
                           }
                         : null
