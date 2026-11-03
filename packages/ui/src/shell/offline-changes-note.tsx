@@ -85,7 +85,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
               <Name>{nameOf(entry)}</Name>
             </span>{' '}
             {entry.failure?.kind === 'gone'
-              ? entry.kind === 'folder'
+              ? entry.kind === 'folder' || entry.newPage
                 ? 'The folder this was made in was deleted, or you lost access to it, while you were offline.'
                 : 'This page was deleted, or you lost access to it, while you were offline.'
               : `Couldn’t be saved. ${entry.failure?.kind === 'refused' ? entry.failure.message : ''}`}

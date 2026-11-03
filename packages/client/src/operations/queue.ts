@@ -165,9 +165,10 @@ export class OfflineQueue {
   readonly #store: KeptStore;
   readonly #sealer: KeptSealer;
   readonly #listeners = new Set<(event: QueueEvent) => void>();
-  // Each page whose change landed and went, by the version that landed, so
-  // a save already on its way into the change goes on top of that.
-  readonly #landedOn = new Map<PageId, RevisionId>();
+  // Each page whose change landed and went: the draft that change was based
+  // on, and the version that landed, so a save already on its way into it,
+  // on that same base, goes on top of what landed.
+  readonly #landedOn = new Map<PageId, { base: RevisionId; landed: RevisionId }>();
   #closed = false;
   #last = 0;
 
@@ -268,8 +269,10 @@ export class OfflineQueue {
         throw new ApiError(409, 'stale-head', 'This page was changed in another window');
       }
       const rebased = before?.failure?.kind === 'conflict' && before.basedOn !== basedOn;
-      // The change the caller saw landed and went just now: this goes on top of it.
-      const landed = !before && seen !== null ? this.#landedOn.get(page.pageId) : undefined;
+      // The change the caller saw landed and went just now: this goes on top
+      // of it, if the caller hadn't heard yet and is still on its base.
+      const went = before ? undefined : this.#landedOn.get(page.pageId);
+      const landed = went?.base === basedOn ? went.landed : undefined;
       const entry: QueuedPage = before
         ? {
             ...before,
@@ -726,7 +729,8 @@ export class OfflineQueue {
       const current = await this.#page(entry.id);
       if (!current) return;
       if (current.version === sent.version && !sent.partial) {
-        this.#landedOn.set(entry.id, sent.revisionId);
+        const base = current.basedOn ?? current.newPage?.revisionId;
+        if (base) this.#landedOn.set(entry.id, { base, landed: sent.revisionId });
         return this.#remove(current);
       }
       await this.#write({ ...current, newPage: null, basedOn: sent.revisionId, sending: null });
