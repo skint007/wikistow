@@ -125,8 +125,8 @@ export async function unlockWith(
 }
 
 /**
- * After the passphrase changed on this device (recovery): keep the new
- * wrapper, so an offline unlock takes the new passphrase.
+ * After the vault was made, or its passphrase changed (recovery), on this
+ * device: keep its wrapper, so an offline unlock takes that passphrase.
  */
 export async function keepChangedWrapper(changed: Parameters<typeof keepWrapper>[1]) {
   const content = await keptContent();

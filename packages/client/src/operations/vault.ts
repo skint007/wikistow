@@ -72,11 +72,19 @@ export function prepareVault({
   return crypto.create({ accountId, passphrase, ...(kdf ? { kdf } : {}) });
 }
 
-/** Store a prepared vault and its identity on the server. Safe to repeat. */
-export async function registerVault(api: ApiClient, prepared: PreparedVault): Promise<void> {
-  await api.call(vaultRoutes.createVault, {
+/**
+ * Store a prepared vault and its identity on the server. Safe to repeat.
+ * Returns the wrapper stored and its version, which a device keeps to
+ * unlock offline.
+ */
+export async function registerVault(
+  api: ApiClient,
+  prepared: PreparedVault,
+): Promise<{ wrapper: VaultWrapper; version: number }> {
+  const { version } = await api.call(vaultRoutes.createVault, {
     body: { identity: prepared.identity.public, wrapper: prepared.wrapper },
   });
+  return { wrapper: prepared.wrapper, version };
 }
 
 /** Unlock with the passphrase or the recovery key. */

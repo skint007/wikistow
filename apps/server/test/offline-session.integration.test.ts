@@ -18,7 +18,7 @@ import {
   type ContactsChange,
   type KeptFile,
 } from '@wikistow/client';
-import { FAST_KDF } from '@wikistow/client/testing';
+import { directoryEntry, FAST_KDF } from '@wikistow/client/testing';
 import { contactsRoutes } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
@@ -34,6 +34,10 @@ const acceptIn = (spaceId: SpaceId): ContactsChange => {
   const owner = generateIdentity({ kind: 'human', id: newId(IdentityId) }).public;
   return { kind: 'accept-owner', spaceId, owner: { id: owner.id, keyHash: keyHash(owner) } };
 };
+
+// A person the device pinned, whose new key another device confirms while it is offline.
+const fern = generateIdentity({ kind: 'human', id: newId(IdentityId) });
+const fernAgain = generateIdentity({ kind: 'human', id: fern.public.id, keyVersion: 2 });
 
 function memoryFile(): KeptFile {
   let kept: Uint8Array | null = null;
@@ -60,7 +64,8 @@ async function keptDevice() {
   const file = memoryFile();
   const content = memoryKeptStore();
   const online = await openSession(alice.api, alice.vault, { kept: file, content });
-  await saveContacts(online, [acceptIn(newId(SpaceId))]);
+  online.trust.use(directoryEntry(fern.public, 'Fern'));
+  await saveContacts(online);
   const who = { identity: alice.vault.identity, installationId: online.installationId };
   await expect.poll(async () => (await KeptMarks.open(file, who)).contactsMark?.version).toBe(2);
   const opened = await openKeptSession(noServer, alice.vault, {
@@ -85,13 +90,18 @@ async function keptDevice() {
 }
 
 describe('a session opened offline', () => {
-  it('opens from the record kept with its mark, and is confirmed once the server answers', async () => {
-    const { online, opened, backOnline } = await keptDevice();
+  it('opens from the record kept with its mark, and takes the newer one once the server answers', async () => {
+    const { alice, online, opened, backOnline } = await keptDevice();
     expect(opened.contacts.book.mark).toEqual(online.contacts.book.mark);
     expect(opened.contacts.book.payloads).toEqual(online.contacts.book.payloads);
     expect(opened.unconfirmed).toEqual({ vaultVersion: 1 });
+    // Meanwhile another device confirms Fern's new key.
+    const phone = await openSession(alice.api, alice.vault);
+    phone.trust.confirmKey(directoryEntry(fernAgain.public, 'Fern'));
+    await saveContacts(phone);
     expect(await confirmSession(backOnline)).toBe('confirmed');
     expect(backOnline.unconfirmed).toBeUndefined();
+    expect(backOnline.trust.check(fernAgain.public).kind).toBe('pinned');
   });
 
   it('is checked against the mark back online, and ends after a passphrase change elsewhere', async () => {

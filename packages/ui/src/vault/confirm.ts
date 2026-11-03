@@ -1,6 +1,6 @@
 import { confirmSession, CryptoError, type ClientContext } from '@wikistow/client';
-import { useEffect, useSyncExternalStore } from 'react';
-import { useConnection } from '../data/connection';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { PROBE_MS, useConnection } from '../data/connection';
 import { useVault, vaultStore } from './store';
 
 // Sessions being confirmed, so each runs once at a time.
@@ -14,16 +14,19 @@ let confirmed = 0;
  * passphrase changed elsewhere, ends the session: the vault locks as Lock
  * vault does, saving what can be saved first and forgetting a remembered
  * unlock, so the new passphrase is asked for. So does a contacts record
- * that fails its checks, which the next online unlock then reports. With
- * no answer again, it waits for the next one.
+ * that fails against the mark, which the next online unlock then reports.
+ * With no answer again, it waits for the next one; any other failure, or
+ * a lock an edit that can't be saved keeps off, is tried again shortly.
  */
 export function useConfirmSession() {
   const vault = useVault();
   const { online } = useConnection();
   const ctx = vault.status === 'unlocked' ? vault.ctx : null;
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!ctx?.unconfirmed || !online || confirming.has(ctx)) return;
     confirming.add(ctx);
+    let retry: ReturnType<typeof setTimeout> | undefined;
     void confirmSession(ctx)
       .then(async (outcome) => {
         // As an idle lock: nobody is asked, and an edit that can't be saved keeps it open.
@@ -36,14 +39,19 @@ export function useConfirmSession() {
         confirming.delete(ctx);
         confirmed += 1;
         for (const listener of listeners) listener();
+        if (ctx.unconfirmed && vaultStore.get().status === 'unlocked') {
+          retry = setTimeout(() => setAttempt((count) => count + 1), PROBE_MS);
+        }
       });
-  }, [ctx, online]);
+    return () => clearTimeout(retry);
+  }, [ctx, online, attempt]);
 }
 
 /**
  * Whether `ctx` is confirmed: opened online, or confirmed since. Until it
- * is, the app doesn't list the spaces from the server (`useTreeChanges`),
- * which comes after confirming (decision 4).
+ * is, the app follows no changes from the server and keeps no pages
+ * (`useTreeChanges`), and owner work waits, as those come after confirming
+ * (decision 4). What's on screen loads again meanwhile.
  */
 export function useSessionConfirmed(ctx: ClientContext | null): boolean {
   useSyncExternalStore(

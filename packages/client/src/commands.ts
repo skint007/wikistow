@@ -155,7 +155,10 @@ const vaultRegister = defineCommand({
   id: 'vault.register',
   requires: ['account'],
   input: z.object({ prepared: Prepared }),
-  run: ({ account }, { prepared }) => registerVault(account.api, prepared),
+  // The wrapper stays out of the command's result.
+  run: async ({ account }, { prepared }) => {
+    await registerVault(account.api, prepared);
+  },
 });
 
 const vaultUnlock = defineCommand({

@@ -237,7 +237,12 @@ export async function confirmSession(
   const book = await readContacts(owner, unseen ? null : ctx.contacts.book.mark);
   ctx.contacts.book = book;
   ctx.kept?.keepContacts(book);
-  ctx.trust.load(book.payloads);
+  // Pins from the record served now, as an online unlock takes them: a key
+  // another device confirmed meanwhile replaces the one kept.
+  const trust = new TrustStore(installationId);
+  trust.pinSelf(ctx.identity);
+  trust.load(book.payloads);
+  ctx.trust = trust;
   delete ctx.unconfirmed;
   return 'confirmed';
 }
