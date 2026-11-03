@@ -2,6 +2,7 @@ import {
   inTurn,
   keptUnlock,
   onlyOnce,
+  queueOperations,
   memoryKeptStore,
   type KeptAccount,
   type KeptBytes,
@@ -346,6 +347,31 @@ export async function forgetKeptMe(): Promise<void> {
     // Nothing kept to forget.
   }
 }
+
+/**
+ * How many changes made offline this device holds that haven't been sent,
+ * and whose they are, read before any vault opens, for the warnings before
+ * signing out, or in as someone else (ADR 0009, decision 10). Null for none.
+ */
+export async function changesNotSent(): Promise<{ count: number; name: string } | null> {
+  try {
+    if (!(await keptHere())) return null;
+    const { store } = await keptStore();
+    const [count, account] = await Promise.all([
+      queueOperations.queuedChanges(store),
+      store.account(),
+    ]);
+    return count > 0 && account ? { count, name: account.name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What signing out warns of first, when changes made offline would go with it. */
+export const signOutWarning = (count: number) =>
+  count === 1
+    ? '1 change you made offline hasn’t been saved yet. Signing out deletes it.'
+    : `${count} changes you made offline haven’t been saved yet. Signing out deletes them.`;
 
 const SIGNED_OUT = 'signed-out';
 
