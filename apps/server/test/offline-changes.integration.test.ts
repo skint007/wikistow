@@ -96,9 +96,16 @@ describe('changes made offline', () => {
       payload: { ...made.payload, attachments: [ref] },
       seen: made.version,
     });
+    // A file attached since the last save, which no entry names yet, stays for the next.
+    const next = await queue.attach(ctx, at, {
+      name: 'later.txt',
+      mediaType: 'text/plain',
+      bytes: utf8('stove'),
+    });
 
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
+    expect(await queue.blob(next.blobHash)).not.toBeNull();
     const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
     expect(tree.folders.map((f) => f.id)).toContain(folder.id);
     expect(tree.pages.find((p) => p.id === made.id)?.parentId).toBe(folder.id);

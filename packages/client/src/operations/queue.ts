@@ -165,6 +165,9 @@ export class OfflineQueue {
   readonly #store: KeptStore;
   readonly #sealer: KeptSealer;
   readonly #listeners = new Set<(event: QueueEvent) => void>();
+  // Each page whose change landed and went, by the version that landed, so
+  // a save already on its way into the change goes on top of that.
+  readonly #landedOn = new Map<PageId, RevisionId>();
   #closed = false;
   #last = 0;
 
@@ -265,6 +268,8 @@ export class OfflineQueue {
         throw new ApiError(409, 'stale-head', 'This page was changed in another window');
       }
       const rebased = before?.failure?.kind === 'conflict' && before.basedOn !== basedOn;
+      // The change the caller saw landed and went just now: this goes on top of it.
+      const landed = !before && seen !== null ? this.#landedOn.get(page.pageId) : undefined;
       const entry: QueuedPage = before
         ? {
             ...before,
@@ -278,7 +283,7 @@ export class OfflineQueue {
             id: page.pageId,
             spaceId: page.spaceId,
             newPage: null,
-            basedOn,
+            basedOn: landed ?? basedOn,
             region,
             payload,
             version: 1,
@@ -435,25 +440,58 @@ export class OfflineQueue {
   }
 
   /**
-   * Delete `entry`, and every file no other entry names: its own, and any
-   * added offline and taken out again before sending. Only from within
-   * `queueExclusive`.
+   * Delete `entry`, and the files it names that no other entry does. A file
+   * added since its last save, which no entry names yet, stays for the save
+   * about to name it. Only from within `queueExclusive`.
    */
   async #remove(entry: QueueEntry) {
+    const files = (page: QueuedPage) =>
+      [...page.payload.attachments, ...(page.sending?.payload.attachments ?? [])].map(
+        (ref) => ref.blobHash,
+      );
     const others = (await this.entries()).filter((other) => other.id !== entry.id);
-    const named = new Set(
-      others.flatMap((other) =>
-        other.kind === 'page'
-          ? [...other.payload.attachments, ...(other.sending?.payload.attachments ?? [])].map(
-              (ref) => this.#blobName(ref.blobHash),
-            )
-          : [],
-      ),
-    );
-    const files = (await this.#store.queue.list())
-      .map((item) => item.name)
-      .filter((name) => name.startsWith(BLOB) && !named.has(name));
-    await this.#store.queue.remove([this.#entryName(entry.id), ...files]);
+    const named = new Set(others.flatMap((other) => (other.kind === 'page' ? files(other) : [])));
+    const own = entry.kind === 'page' ? [...new Set(files(entry))] : [];
+    const names = own.filter((blobHash) => !named.has(blobHash)).map((h) => this.#blobName(h));
+    await this.#store.queue.remove([this.#entryName(entry.id), ...names]);
+  }
+
+  /** Those of `refs` whose files this queue holds, added offline and not sent yet. */
+  async held(refs: readonly AttachmentRef[]): Promise<AttachmentRef[]> {
+    if (refs.length === 0) return [];
+    const names = new Set((await this.#store.queue.list()).map((item) => item.name));
+    return refs.filter((ref) => names.has(this.#blobName(ref.blobHash)));
+  }
+
+  /**
+   * Upload the files of `refs` this queue holds for `page`'s draft, before a
+   * save that names them: staged uploads last a day on the server.
+   */
+  async upload(ctx: ClientContext, page: PageRef, refs: readonly AttachmentRef[]): Promise<void> {
+    for (const ref of await this.held(refs)) {
+      const blob = await this.blob(ref.blobHash);
+      if (blob) await uploadBlob(ctx, page, 'draft', blob);
+    }
+  }
+
+  /**
+   * After a save from the draft view landed online naming `refs`: let go of
+   * their files here, unless an entry names them.
+   */
+  async sent(refs: readonly AttachmentRef[]): Promise<void> {
+    const held = await this.held(refs);
+    if (held.length === 0) return;
+    await this.#store.queueExclusive(async () => {
+      const named = new Set(
+        (await this.entries()).flatMap((entry) =>
+          entry.kind === 'page' ? entry.payload.attachments.map((ref) => ref.blobHash) : [],
+        ),
+      );
+      const names = held
+        .filter((ref) => !named.has(ref.blobHash))
+        .map((ref) => this.#blobName(ref.blobHash));
+      await this.#store.queue.remove(names);
+    });
   }
 
   /** Forget a change, as the person chose. */
@@ -637,14 +675,12 @@ export class OfflineQueue {
           extensions,
           pageId: entry.id,
           revisionId: attempt.revisionId,
+          linkChoices: new Map(Object.entries(entry.picks)),
         });
       } else if (entry.basedOn) {
         // Uploads are staged for a day: those of the files added offline go
         // up again before each save that names them.
-        for (const ref of attempt.payload.attachments) {
-          const blob = await this.blob(ref.blobHash);
-          if (blob) await uploadBlob(ctx, page, 'draft', blob);
-        }
+        await this.upload(ctx, page, attempt.payload.attachments);
         await saveDraft(ctx, {
           page,
           basedOn: entry.basedOn,
@@ -689,7 +725,10 @@ export class OfflineQueue {
     await this.#store.queueExclusive(async () => {
       const current = await this.#page(entry.id);
       if (!current) return;
-      if (current.version === sent.version && !sent.partial) return this.#remove(current);
+      if (current.version === sent.version && !sent.partial) {
+        this.#landedOn.set(entry.id, sent.revisionId);
+        return this.#remove(current);
+      }
       await this.#write({ ...current, newPage: null, basedOn: sent.revisionId, sending: null });
     });
     this.#emit({

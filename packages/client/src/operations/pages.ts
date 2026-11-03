@@ -214,6 +214,7 @@ export async function createPage(
     tree,
     pageId = newId(PageIdSchema),
     revisionId,
+    linkChoices,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
@@ -223,6 +224,8 @@ export async function createPage(
     tree?: LinkTree;
     pageId?: PageId;
     revisionId?: RevisionId;
+    /** The pages picked for ambiguous links, by key (`LinkWrite.chosen`). */
+    linkChoices?: ReadonlyMap<string, PageId>;
   },
 ): Promise<PageId> {
   const linkTree = linkTreeFor(ctx, spaceId, tree);
@@ -237,6 +240,7 @@ export async function createPage(
       region: target.region,
       tree: linkTree,
       published: publicationsFor(ctx, spaceId),
+      ...(linkChoices && linkChoices.size > 0 ? { chosen: linkChoices } : {}),
     });
     const commit = commitFor(
       ctx,
