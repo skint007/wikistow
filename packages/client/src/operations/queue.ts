@@ -236,9 +236,9 @@ export class OfflineQueue {
    * page's entry if it has one, keeping its base, unless the person chose
    * to save theirs on top of someone else's after a conflict: then `basedOn`.
    * Otherwise a new entry on top of `basedOn`. `seen` is the entry's version
-   * the caller last saw: an entry another tab or window saved into since is
-   * a conflict (`stale-head`), as the server would answer. Returns the
-   * entry's version now.
+   * the caller last saw, or null if it saw none: an entry another tab or
+   * window saved into since, or made, is a conflict (`stale-head`), as the
+   * server would answer. Returns the entry's version now.
    */
   async saveDraft({
     page,
@@ -255,7 +255,7 @@ export class OfflineQueue {
   }): Promise<number> {
     const { entry, made } = await this.#store.queueExclusive(async () => {
       const before = await this.#page(page.pageId);
-      if (before && seen !== null && before.version !== seen) {
+      if (before && before.version !== seen) {
         throw new ApiError(409, 'stale-head', 'This page was changed in another window');
       }
       const rebased = before?.failure?.kind === 'conflict' && before.basedOn !== basedOn;
@@ -332,14 +332,16 @@ export class OfflineQueue {
   /**
    * A new page in `spaceId`, under `parentId`, which may be a folder made
    * offline, holding `payload`. Its ID and its first draft's are made now,
-   * or are `pageId` and `revisionId`, as for one whose request got no answer.
+   * or are `pageId` and `revisionId`. A `revisionId` given is one a request
+   * that got no answer already used for `payload`: it is recorded as being
+   * sent, so what is typed into the page later goes on top of it.
    */
   async newPage({
     spaceId,
     parentId,
     payload,
     pageId = newId(PageId),
-    revisionId = newId(RevisionId),
+    revisionId: sent,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
@@ -347,6 +349,7 @@ export class OfflineQueue {
     pageId?: PageId;
     revisionId?: RevisionId;
   }): Promise<QueuedPage> {
+    const revisionId = sent ?? newId(RevisionId);
     const entry: QueuedPage = {
       kind: 'page',
       id: pageId,
@@ -356,7 +359,7 @@ export class OfflineQueue {
       region: null,
       payload,
       version: 1,
-      sending: null,
+      sending: sent ? { revisionId, version: 1, payload, partial: false } : null,
       failure: null,
       at: this.#at(),
     };
@@ -633,6 +636,8 @@ export class OfflineQueue {
           basedOn: entry.basedOn,
           payload: attempt.payload,
           revisionId: attempt.revisionId,
+          // Its table's entries go only where it was worked out for.
+          ...(entry.region && { tableRegion: entry.region }),
           ...(read && { read }),
         });
       }

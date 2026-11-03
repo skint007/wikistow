@@ -5,10 +5,13 @@
 import {
   createApiClient,
   memoryKeptStore,
+  newId,
   newFolderMetadata,
   newPayload,
   openSession,
+  PageId,
   pageOperations as pages,
+  RevisionId,
   spaceOperations as spaces,
   trashOperations as trash,
   utf8,
@@ -91,7 +94,7 @@ describe('changes made offline', () => {
       basedOn: made.newPage.revisionId,
       region: null,
       payload: { ...made.payload, attachments: [ref] },
-      seen: null,
+      seen: made.version,
     });
 
     expect(await queue.send(ctx)).toBe('sent');
@@ -156,6 +159,32 @@ describe('changes made offline', () => {
     expect((await draft(at)).markdown).toBe('only once');
     const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
     expect(tree.pages.filter((p) => p.id === made.id)).toHaveLength(1);
+
+    // The app's own create got no answer (`makePage`): the page is queued
+    // under the IDs it sent, and what is typed into it later goes on top.
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    await pages.createPage(ctx, { spaceId, parentId: null, title: 'Typed', pageId, revisionId });
+    const lost = await queue.newPage({
+      spaceId,
+      parentId: null,
+      payload: newPayload({ title: 'Typed', markdown: '' }),
+      pageId,
+      revisionId,
+    });
+    const typed = { spaceId, pageId };
+    await queue.saveDraft({
+      page: typed,
+      basedOn: revisionId,
+      region: null,
+      payload: { ...lost.payload, markdown: 'typed offline' },
+      seen: 1,
+    });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    const sent = await draft(typed);
+    expect(sent.markdown).toBe('typed offline');
+    expect(sent.basedOn).toBe(revisionId);
   });
 
   it('wait as a conflict when someone saved since, and go on top once the person chooses', async () => {
