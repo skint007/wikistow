@@ -555,7 +555,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   aria-expanded={row.expanded}
                   aria-selected={shown}
                   onClick={() => openFolder(row.id)}
-                  draggable={canEditAt(row.id) && !needs.offline}
+                  draggable={canEditAt(row.id) && !needs.offline && !onDevice.has(row.id)}
                   onDragStart={(event) =>
                     startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                   }
@@ -634,7 +634,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 {...common}
                 aria-selected={selected}
                 onClick={() => openPage(row.id)}
-                draggable={canEditAt(row.parentId) && !needs.offline}
+                // Moves wait for a change made offline to be sent (ADR 0009, decision 8).
+                draggable={canEditAt(row.parentId) && !needs.offline && !onDevice.has(row.id)}
                 onDragStart={(event) =>
                   startDrag(event, { id: row.id, kind: 'page', name: row.title })
                 }

@@ -193,6 +193,9 @@ function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
 /** How long the queue waits after a change before sending it, as typing goes on. */
 const SEND_AFTER_MS = 1_000;
 
+/** How long a tab waits to try again while another tab or window sends the queue. */
+const BUSY_MS = 30_000;
+
 /**
  * While the vault is open: follow the queue, here and in the browser's
  * other tabs, and send it while the app is online and its session is
@@ -243,17 +246,19 @@ export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean)
         do {
           again = false;
           // `'offline'` waits for the connection, which this effect follows.
-          await queue.send(ctx, { read: readWikilinks }).catch(() => {});
+          const sent = await queue.send(ctx, { read: readWikilinks }).catch(() => null);
+          // Another tab or window is sending: try again later, in case it closes.
+          if (sent === 'busy') later(BUSY_MS);
         } while (again);
       } finally {
         running = false;
       }
     };
-    void send();
-    const later = () => {
+    const later = (wait = SEND_AFTER_MS) => {
       clearTimeout(timer);
-      timer = setTimeout(() => void send(), SEND_AFTER_MS);
+      timer = setTimeout(() => void send(), wait);
     };
+    void send();
     const stop = queue.subscribe((event) => {
       if (event.kind === 'saved' || event.kind === 'changed') later();
     });

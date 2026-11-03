@@ -382,6 +382,8 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
           }
           // Back online, every space is listed again.
           if (partial) {
+            // Drafts saved on this device go in as written, as saves do.
+            index = await withQueuedDrafts(ctx, index, signal);
             fromKept.add(index);
             changed(queryClient, 'all');
           }
@@ -408,6 +410,29 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+
+/**
+ * `index` with the drafts waiting on this device for pages it holds, at the
+ * draft they are based on (ADR 0009, decision 7): offline, they are the
+ * page's draft. A page made offline goes in once it is made.
+ */
+async function withQueuedDrafts(
+  ctx: ClientContext,
+  index: searchOperations.PageIndex,
+  signal: AbortSignal,
+): Promise<searchOperations.PageIndex> {
+  const drafts = (await ctx.keptContent?.queue.drafts().catch(() => null)) ?? [];
+  const saved = drafts.filter(
+    (draft) => index.page(draft.spaceId, draft.pageId)?.revisionId === draft.basedOn,
+  );
+  if (saved.length === 0) return index;
+  return searchOperations.updateIndex(
+    ctx,
+    index,
+    { spaces: [], saved },
+    { signal, readLinks: readIndexLinks },
+  );
+}
 
 /** Indexes built from what's kept alone, offline: never kept, and updated from the server once back. */
 const fromKept = new WeakSet<searchOperations.PageIndex>();

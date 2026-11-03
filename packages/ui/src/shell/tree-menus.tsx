@@ -46,10 +46,13 @@ const action = (label: string, onSelect: (() => void) | undefined, destructive =
     onSelect,
     destructive,
     offline: OFFLINE.has(label),
-    sendsFirst: label === 'Move to…' || label === 'Copy to…',
+    sendsFirst: SENDS_FIRST_LABELS.has(label),
   };
 
 const OFFLINE = new Set(['Open', 'New page here', 'New folder here']);
+
+// What acts on the page's draft, and so waits for its change made offline.
+const SENDS_FIRST_LABELS = new Set(['Move to…', 'Copy to…', 'Publish to another space…']);
 
 /**
  * A folder's actions: for everyone, Open and Export; for editors, what they

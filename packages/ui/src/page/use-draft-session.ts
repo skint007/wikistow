@@ -198,6 +198,7 @@ function appPorts(
             region: input.tableRegion ?? input.basedOnRegion ?? null,
             payload: input.payload,
             seen,
+            ...(input.linkChoices && { linkChoices: input.linkChoices }),
           });
         } catch (error) {
           device.otherWindow = error instanceof ApiError && error.code === 'stale-head';
@@ -221,6 +222,7 @@ function appPorts(
           region: input.tableRegion ?? input.basedOnRegion ?? null,
           payload: input.payload,
           revisionId,
+          ...(input.linkChoices && { linkChoices: input.linkChoices }),
         });
         return onDevice(input);
       }

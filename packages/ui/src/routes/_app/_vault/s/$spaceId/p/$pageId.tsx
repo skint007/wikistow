@@ -737,7 +737,7 @@ function PageBody({
                     )}
                     {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
                     {canEdit && info.canPublish && (
-                      <DropdownMenuItem {...needs.select(() => setPublishing(true))}>
+                      <DropdownMenuItem {...sendsFirst.select(() => setPublishing(true))}>
                         Publish to another space…
                       </DropdownMenuItem>
                     )}
