@@ -271,9 +271,11 @@ export class OfflineQueue {
       if (before && before.version !== seen) {
         throw new ApiError(409, 'stale-head', 'This page was changed in another window');
       }
+      // Only a page the server has: one made offline goes on top of nothing.
       const rebased =
         (onTop || before?.failure?.kind === 'conflict') &&
         before !== null &&
+        before.newPage === null &&
         before.basedOn !== basedOn;
       // The change the caller saw landed and went just now: this goes on top
       // of it, if the caller hadn't heard yet and is still on its base.
