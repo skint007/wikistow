@@ -42,6 +42,8 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
     (entry): entry is queueOperations.QueuedPage => entry.failure?.kind === 'conflict',
   );
   const others = stopped.filter((entry) => entry.failure?.kind !== 'conflict');
+  const copy = (entry: queueOperations.QueuedPage) =>
+    navigator.clipboard.writeText(queueOperations.changeText(entry.payload));
   const act = async (work: () => Promise<unknown>) => {
     setError(null);
     try {
@@ -62,9 +64,9 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
             {plural(conflicts.length, 'page', 'pages')} changed while you were offline{' '}
             {conflicts.length === 1 ? 'needs' : 'need'} a choice
           </p>
-          <ul className="grid gap-1">
+          <ul className="grid gap-2">
             {conflicts.map((entry) => (
-              <li key={entry.id}>
+              <li key={entry.id} className="grid gap-1">
                 <Link
                   to="/s/$spaceId/p/$pageId"
                   params={{ spaceId: entry.spaceId, pageId: entry.id }}
@@ -73,6 +75,26 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
                 >
                   <Name>{nameOf(entry)}</Name>
                 </Link>
+                {/* For a page that went, or can't be edited, since: Try again says so. */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void act(() => queue.retry(entry.id))}
+                  >
+                    Try again
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void act(() => copy(entry))}>
+                    Copy text
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void act(() => queue.discard(entry.id))}
+                  >
+                    Discard
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
@@ -104,15 +126,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
               </Button>
             )}
             {entry.kind === 'page' && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  void act(() =>
-                    navigator.clipboard.writeText(queueOperations.changeText(entry.payload)),
-                  )
-                }
-              >
+              <Button size="sm" variant="outline" onClick={() => void act(() => copy(entry))}>
                 Copy text
               </Button>
             )}
