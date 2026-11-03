@@ -552,7 +552,8 @@ export function serverSource(ctx: ClientContext): KeeperSource {
         loadSpaces(ctx),
         loadSpaceOrder(ctx),
         // Shared with me as its page shows it, or null if it fails.
-        sharedWithMe(ctx).catch(() => null),
+        // With the session's space keys, not worked out afresh at every run.
+        sharedWithMe(ctx, { refresh: false }).catch(() => null),
       ]);
       // One shared space failing its checks there mustn't stop the keeping:
       // the list kept before stays, and the shared spaces come from the route.

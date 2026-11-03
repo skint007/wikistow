@@ -81,7 +81,7 @@ export function QueryTable({
       editor: scope.editor,
       notKept,
     }),
-    [scope.spaceId, scope.pageId, scope.pages, scope.editor],
+    [scope.spaceId, scope.pageId, scope.pages, scope.editor, notKept],
   );
 
   if (!read.ok) return failed(read.error);
