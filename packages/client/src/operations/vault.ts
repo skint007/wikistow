@@ -1,5 +1,7 @@
 import { vaultRoutes, type AccountId, type VaultWrapper } from '@wikistow/contracts';
-import type { ApiClient } from '../api/client.ts';
+import { noAnswer, type ApiClient } from '../api/client.ts';
+import type { KeptStore } from '../kept-store.ts';
+import { keptUnlock } from '../kept-unlock.ts';
 import { generateIdentity, type PrivateIdentity } from '../identity.ts';
 import { IdentityId, newId } from '../ids.ts';
 import {
@@ -70,11 +72,19 @@ export function prepareVault({
   return crypto.create({ accountId, passphrase, ...(kdf ? { kdf } : {}) });
 }
 
-/** Store a prepared vault and its identity on the server. Safe to repeat. */
-export async function registerVault(api: ApiClient, prepared: PreparedVault): Promise<void> {
-  await api.call(vaultRoutes.createVault, {
+/**
+ * Store a prepared vault and its identity on the server. Safe to repeat.
+ * Returns the wrapper stored and its version, which a device keeps to
+ * unlock offline.
+ */
+export async function registerVault(
+  api: ApiClient,
+  prepared: PreparedVault,
+): Promise<{ wrapper: VaultWrapper; version: number }> {
+  const { version } = await api.call(vaultRoutes.createVault, {
     body: { identity: prepared.identity.public, wrapper: prepared.wrapper },
   });
+  return { wrapper: prepared.wrapper, version };
 }
 
 /** Unlock with the passphrase or the recovery key. */
@@ -92,8 +102,41 @@ export async function openVault({
 }
 
 /**
+ * The wrapper to unlock with (ADR 0009, decision 5): the server's, which is
+ * kept in `kept` for unlocking offline, or, when the server doesn't answer,
+ * the one kept, with when it was kept (`keptAt`). With none kept, the
+ * server's failure stands.
+ */
+export async function vaultWrapper(
+  api: ApiClient,
+  kept: KeptStore | null,
+): Promise<{ wrapper: VaultWrapper; version: number; keptAt: string | null }> {
+  try {
+    const served = await api.call(vaultRoutes.getVault);
+    if (kept) await keepWrapper(kept, served);
+    return { ...served, keptAt: null };
+  } catch (error) {
+    const found = kept && noAnswer(error) ? await keptUnlock(kept).vault() : null;
+    if (!found) throw error;
+    return found;
+  }
+}
+
+/** Keep the wrapper the server serves now, for unlocking offline. Failing only means an older one stays. */
+export function keepWrapper(
+  kept: KeptStore,
+  { wrapper, version }: { wrapper: VaultWrapper; version: number },
+): Promise<void> {
+  return keptUnlock(kept)
+    .keepVault({ wrapper, version, keptAt: new Date().toISOString() })
+    .catch(() => {});
+}
+
+/**
  * Set a new passphrase, for example right after unlocking with the recovery
  * key. Only the passphrase wrapper changes; pages are not re-encrypted.
+ * Returns the new wrapper and its version, which a device keeps to unlock
+ * offline.
  */
 export async function changeVaultPassphrase({
   api,
@@ -107,7 +150,7 @@ export async function changeVaultPassphrase({
   vault: UnlockedVault;
   passphrase: string;
   kdf?: KdfParams;
-}): Promise<void> {
+}): Promise<{ wrapper: VaultWrapper; version: number }> {
   const { wrapper, version } = await api.call(vaultRoutes.getVault);
   const next = await crypto.changePassphrase({
     vault,
@@ -115,5 +158,8 @@ export async function changeVaultPassphrase({
     passphrase,
     ...(kdf ? { kdf } : {}),
   });
-  await api.call(vaultRoutes.replaceVault, { body: { wrapper: next, expectedVersion: version } });
+  const replaced = await api.call(vaultRoutes.replaceVault, {
+    body: { wrapper: next, expectedVersion: version },
+  });
+  return { wrapper: next, version: replaced.version };
 }

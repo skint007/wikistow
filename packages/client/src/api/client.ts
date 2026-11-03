@@ -40,6 +40,16 @@ export const outcomeUnknown = (error: unknown): boolean =>
   error instanceof ApiError &&
   (error.code === 'network' || error.code === 'unreadable-response' || error.status >= 500);
 
+/**
+ * Whether `error` means no answer from the server (ADR 0009, decision 4):
+ * none at all, or a 5xx that isn't WikiStow's own JSON error, as a proxy or
+ * tunnel gives when the server behind it is down (Cloudflare's 521 to 530
+ * among them). The server's own refusal, a 5xx among them, is an answer.
+ */
+export const noAnswer = (error: unknown): boolean =>
+  error instanceof ApiError &&
+  (error.code === 'network' || (error.status >= 500 && error.code === 'unreadable-response'));
+
 type Part<S, K extends string> = S extends z.ZodType
   ? { [P in K]: z.input<S> }
   : { [P in K]?: never };

@@ -6,9 +6,9 @@ import type { FolderKeyring, HeldKeyVersion } from './folder-keys.ts';
 /**
  * Where a client keeps its No going back marks (section 6.8): for each
  * `(spaceId, shareId)`, the highest key version it has opened that counts for
- * writing. The CLI, and the desktop app with a trusted keyring, keep them in
- * their local file, next to the contacts mark (`KeptMarks`); the browser keeps
- * them in memory, for one session.
+ * writing. The CLI, the desktop app with a trusted keyring, and the browser
+ * keep them between sessions, next to the contacts mark (`KeptMarks`); a
+ * desktop app without one keeps them in memory, for one session.
  */
 export interface KeyVersionMarks {
   /** The mark for one share, or 0 when there is none. */
@@ -17,7 +17,7 @@ export interface KeyVersionMarks {
   raise(spaceId: SpaceId, shareId: ShareId, keyVersion: number): void;
 }
 
-/** Marks kept in memory: the browser's, for one session. */
+/** Marks kept in memory, for one session: a desktop app's without a trusted keyring, and tests'. */
 export class MemoryKeyVersionMarks implements KeyVersionMarks {
   readonly #marks = new Map<string, number>();
 

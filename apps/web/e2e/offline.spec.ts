@@ -1,15 +1,21 @@
 import { expect, test } from './fixtures';
-import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './vault';
+import { adminTab, fillSource, memberWithVault, newPage, PASSPHRASE, waitForSave } from './vault';
 
 /**
  * Pages opened on this browser stay readable when the server stops
- * answering (ADR 0009, decisions 4, 8 and 9): the app says it is offline,
- * opens the kept pages and follows links between them, searches them, and
- * says "Needs the connection" on what waits for the server. Back online,
- * it says so once the server answers. The vault was unlocked online:
- * unlocking offline is a later step.
+ * answering (ADR 0009, decisions 4, 5, 8 and 9): the app says it is
+ * offline, opens the kept pages and follows links between them, searches
+ * them, and says "Needs the connection" on what waits for the server. It
+ * loads again offline, and the vault opens from what the tab kept, or
+ * with the passphrase against the wrapper kept. Back online, it says so
+ * once the server answers, and the session goes on.
  */
-test('pages opened here read and search offline', async ({ page, context, freshPage, admin }) => {
+test('pages opened here read, search and unlock offline', async ({
+  page,
+  context,
+  freshPage,
+  admin,
+}) => {
   test.setTimeout(180_000);
   await memberWithVault(page, await adminTab(freshPage, admin.email));
   for (const [title, text] of [
@@ -31,7 +37,7 @@ test('pages opened here read and search offline', async ({ page, context, freshP
     setInterval(() => {
       void navigator.locks.query().then(({ held = [] }) => {
         const keeping = document.documentElement.dataset;
-        if (held.length > 0) keeping['keeping'] = 'running';
+        if (held.some((lock) => lock.name === 'wikistow-kept')) keeping['keeping'] = 'running';
         else if (keeping['keeping'] === 'running') keeping['keeping'] = 'done';
       });
     }, 10);
@@ -44,6 +50,8 @@ test('pages opened here read and search offline', async ({ page, context, freshP
   await page.goBack();
   await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
 
+  // The service worker has kept the app, so it loads offline too.
+  await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
   await page.getByRole('treeitem', { name: 'Bean soup' }).click();
   const offline = page.getByRole('status').filter({ hasText: 'Offline' });
@@ -84,10 +92,35 @@ test('pages opened here read and search offline', async ({ page, context, freshP
     await page.keyboard.press('Escape');
   });
 
+  await test.step('loaded again offline, the vault opens as the tab kept it', async () => {
+    await page.reload();
+    await expect(offline).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
+    await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
+  });
+
+  await test.step('locked, it unlocks offline with the passphrase', async () => {
+    await page.getByRole('button', { name: 'Account' }).click();
+    await page.getByRole('menuitem', { name: 'Lock vault' }).click();
+    await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+    await page.getByLabel('Vault passphrase').fill('not the passphrase at all');
+    await page.getByRole('button', { name: 'Unlock' }).click();
+    await expect(page.getByText(/This device last unlocked online on /)).toBeVisible();
+    await page.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await page.getByRole('button', { name: 'Unlock' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
+    await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
+    await page.getByRole('treeitem', { name: 'Bean soup' }).click();
+    await expect(page.getByText('Beans and stock.')).toBeVisible();
+  });
+
   // Told the browser is online again, the app asks the server, which answers.
   await context.setOffline(false);
   await expect(offline).toBeHidden({ timeout: 15_000 });
   // What's shown loads again: offline, the published count isn't known.
   await expect(page.getByText(/Published v1$/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');
+  // What the offline unlock skipped holds, so the vault stays open.
+  await page.getByRole('treeitem', { name: 'Bread' }).click();
+  await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
 });

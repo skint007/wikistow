@@ -47,7 +47,10 @@ function fixture() {
     installationId,
     identity: owner.identity,
     trust: owner.trust,
-    contacts: { book: { record: null, payloads: newContactsPayloads(), mark: null }, pending: [] },
+    contacts: {
+      book: { record: null, sealed: null, payloads: newContactsPayloads(), mark: null },
+      pending: [],
+    },
     keyring: new FolderKeyring(),
     revisions: new RevisionCache(),
     marks: new MemoryKeyVersionMarks(),

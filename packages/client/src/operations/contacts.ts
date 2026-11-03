@@ -1,7 +1,12 @@
 // The person's contacts record on the server (protocol section 8): read and
 // checked once per session, and written by compare-and-swap, re-applying
 // this device's changes on top of anything newer, never overwriting it.
-import { contactsRoutes, type ContactsRecord, type InstallationId } from '@wikistow/contracts';
+import {
+  contactsRoutes,
+  type ContactsRecord,
+  type InstallationId,
+  SealedContacts,
+} from '@wikistow/contracts';
 import { ApiError, type ApiClient } from '../api/client.ts';
 import {
   applyContactsChange,
@@ -20,13 +25,15 @@ import type { PrivateIdentity, PublicIdentity } from '../identity.ts';
 
 /**
  * The newest contacts record this session has accepted, and its payloads.
- * `mark` is the session's contacts mark: the browser keeps it in memory
- * only, so it catches a rollback within one session (section 8.5, Q2); the
- * desktop app, with a trusted keyring, keeps it between launches too
- * (`KeptMarks`).
+ * `mark` is the session's contacts mark: the browser, and the desktop app
+ * with a trusted keyring, keep it between sessions with the record
+ * (`KeptMarks`); a desktop app without one keeps it for one session
+ * (section 8.5, Q2).
  */
 export type ContactsBook = {
   record: ContactsRecord | null;
+  /** The record as served or written, sealed, which a device keeps to open a session offline. */
+  sealed: SealedContacts | null;
   payloads: ContactsPayloads;
   mark: ContactsMark | null;
 };
@@ -50,7 +57,7 @@ export async function readContacts(
   });
   if (served.record === null) {
     if (mark) throw new CryptoError('contacts-rollback', 'The server has no contacts record now');
-    return { record: null, payloads: newContactsPayloads(), mark: null };
+    return { record: null, sealed: null, payloads: newContactsPayloads(), mark: null };
   }
   const opened = openContacts({
     reader: identity,
@@ -72,8 +79,38 @@ export async function readContacts(
   }
   return {
     record: opened.record,
+    sealed: served.record,
     payloads: { shared: opened.shared, private: opened.private },
     mark: { version: opened.record.version, contactsHash: contactsHash(opened.record) },
+  };
+}
+
+/**
+ * The person's own record as this device kept it with its mark
+ * (`KeptMarks`), for a session opened with no answer from the server (ADR
+ * 0009, decision 5): checked as a served record is, and it must be the one
+ * the mark names. With neither kept, the person has no record yet. Throws a
+ * `CryptoError` as `readContacts` does, on which the session must not open.
+ */
+export function openKeptContacts(
+  { installationId, identity }: Omit<Owner, 'api'>,
+  mark: ContactsMark | null,
+  sealed: unknown,
+): ContactsBook {
+  if (!mark || sealed === null) {
+    if (mark) throw new CryptoError('contacts-rollback', 'This device kept no contacts record');
+    return { record: null, sealed: null, payloads: newContactsPayloads(), mark: null };
+  }
+  const opened = openContacts({ reader: identity, owner: identity.public, installationId, sealed });
+  if (!opened.private) throw new CryptoError('malformed', 'The private part is missing');
+  if (compareContactsMark(mark, opened.record) !== 'same') {
+    throw new CryptoError('contacts-fork', 'The kept record isn’t the one its mark names');
+  }
+  return {
+    record: opened.record,
+    sealed: SealedContacts.parse(sealed),
+    payloads: { shared: opened.shared, private: opened.private },
+    mark,
   };
 }
 
@@ -117,6 +154,7 @@ export async function readPersonContacts(
   }
   return {
     record: opened.record,
+    sealed: served.record,
     payloads: { shared: opened.shared, private: newContactsPayloads().private },
     mark: { version: opened.record.version, contactsHash: contactsHash(opened.record) },
   };
@@ -164,6 +202,7 @@ export async function writeContacts(
     }
     const written: ContactsBook = {
       record: sealed.record,
+      sealed,
       payloads: next,
       mark: { version: sealed.record.version, contactsHash: contactsHash(sealed.record) },
     };

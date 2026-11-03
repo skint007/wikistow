@@ -16,7 +16,7 @@ import { AuthCard, FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { api, meQuery } from '../../../api';
 import { vaultMessage } from '../../../vault/messages';
-import { startSession } from '../../../vault/open';
+import { keepChangedWrapper, startSession } from '../../../vault/open';
 import { confirmPassphrase } from '../../../vault/passphrase';
 import { vaultStore } from '../../../vault/store';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
@@ -163,7 +163,8 @@ function SaveRecoveryKey({ prepared }: { prepared: PreparedVault }) {
     setBusy(true);
     setError(null);
     try {
-      await registerVault(api, prepared);
+      // Kept, so the vault unlocks offline from the start (ADR 0009, decision 5).
+      await keepChangedWrapper(await registerVault(api, prepared));
       const ctx = await startSession(prepared.vault);
       await spaceOperations.createSpace(ctx, { name: 'Personal', emoji: '🏠' });
       vaultStore.unlock(ctx, prepared.vault);

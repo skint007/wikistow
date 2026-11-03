@@ -85,7 +85,7 @@ test('a sign-in with two-factor turned on asks for a code', async ({ freshPage, 
   await expectSignedIn(other);
 });
 
-test('a session check the server doesn’t answer shows its own screen, with Try again', async ({
+test('a session check the server doesn’t answer as WikiStow shows its own screen, with Try again', async ({
   page,
   admin,
 }) => {
@@ -106,13 +106,11 @@ test('a session check the server doesn’t answer shows its own screen, with Try
   // Only the desktop app has a session of its own to forget.
   await expect(page.getByRole('button', { name: 'Sign out on this computer' })).toHaveCount(0);
 
+  // With no answer at all, the app goes on offline with the answer it kept
+  // (ADR 0009, decision 5), back where it was.
   await page.unroute('**/api/me');
   await page.route('**/api/me', (route) => route.abort());
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.getByRole('heading', { name: 'Can’t reach the server' })).toBeVisible();
-
-  await page.unroute('**/api/me');
-  await page.getByRole('button', { name: 'Try again' }).click();
-  // Back in the app, where it was.
   await expect(account).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Offline' })).toBeVisible();
 });

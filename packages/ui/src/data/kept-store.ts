@@ -1,10 +1,14 @@
 import {
   inTurn,
+  keptUnlock,
   memoryKeptStore,
   type KeptAccount,
+  type KeptBytes,
+  type KeptFile,
   type KeptItem,
   type KeptItems,
   type KeptStore,
+  type MeAnswer,
 } from '@wikistow/client';
 import type { DesktopBridge, KeptFolder } from '@wikistow/contracts';
 import { desktop } from '../desktop';
@@ -100,12 +104,27 @@ function browserItems(store: 'items' | 'queue'): KeptItems {
   };
 }
 
+// What unlocking offline reads, unsealed, beside the account in `meta`.
+const browserUnlock: KeptBytes = {
+  read: async (name) => {
+    const kept = await transact('meta', 'readonly', (s) => s.get(`unlock ${name}`));
+    return kept instanceof Uint8Array ? kept : null;
+  },
+  write: async (name, bytes) => {
+    await transact('meta', 'readwrite', (s) => void s.put(bytes, `unlock ${name}`));
+  },
+  remove: async (name) => {
+    await transact('meta', 'readwrite', (s) => void s.delete(`unlock ${name}`));
+  },
+};
+
 /** The browser's store: the `wikistow-kept` database, which its tabs share. */
 function browserKeptStore(): KeptStore {
   const turn = inTurn();
   return {
     items: browserItems('items'),
     queue: browserItems('queue'),
+    unlock: browserUnlock,
     account: async () => {
       const kept = await transact('meta', 'readonly', (s) => s.get(ACCOUNT));
       return kept && typeof kept === 'object' && 'id' in kept && 'name' in kept
@@ -135,6 +154,14 @@ function browserKeptStore(): KeptStore {
   };
 }
 
+function bridgeBytes(bridge: DesktopBridge, folder: KeptFolder): KeptBytes {
+  return {
+    read: (name) => bridge.keptItem(folder, name),
+    write: (name, bytes) => bridge.keepItem(folder, name, bytes),
+    remove: (name) => bridge.dropKeptItems(folder, [name]),
+  };
+}
+
 function bridgeItems(bridge: DesktopBridge, folder: KeptFolder): KeptItems {
   return {
     read: (name) => bridge.keptItem(folder, name),
@@ -145,15 +172,16 @@ function bridgeItems(bridge: DesktopBridge, folder: KeptFolder): KeptItems {
 }
 
 /**
- * The desktop app's store: its `kept` and `queue` folders. Without a
- * trusted keyring, pages are kept only in memory, until the app quits; the
- * queue is kept on disk either way.
+ * The desktop app's store: its `kept`, `queue` and `unlock` folders.
+ * Without a trusted keyring, pages and what unlocking reads are kept only
+ * in memory, until the app quits; the queue is kept on disk either way.
  */
 function desktopKeptStore(bridge: DesktopBridge, secure: boolean): KeptStore {
   const memory = memoryKeptStore();
   return {
     items: secure ? bridgeItems(bridge, 'kept') : memory.items,
     queue: bridgeItems(bridge, 'queue'),
+    unlock: secure ? bridgeBytes(bridge, 'unlock') : memory.unlock,
     account: () => bridge.keptAccount(),
     keepAccount: (account) => bridge.keepKeptAccount(account),
     clear: async () => {
@@ -181,6 +209,28 @@ export const browserSearchIndex = {
   drop: async () => {
     await transact('meta', 'readwrite', (s) => void s.delete(SEARCH_INDEX));
   },
+};
+
+const TRUST_MARKS = 'trust-marks';
+
+/**
+ * The browser's trust marks and contacts record (`KeptMarks`), kept in the
+ * same database (ADR 0009, decision 2), sealed by the pages. Tabs write
+ * them in turn under a Web Lock, each taking in what the others kept.
+ * Deleted with the database at sign-out.
+ */
+export const browserTrustMarks: KeptFile = {
+  read: async () => {
+    const kept = await transact('meta', 'readonly', (s) => s.get(TRUST_MARKS));
+    return kept instanceof Uint8Array ? kept : null;
+  },
+  write: async (sealed) => {
+    await transact('meta', 'readwrite', (s) => void s.put(sealed, TRUST_MARKS));
+  },
+  exclusive: (work) =>
+    typeof navigator !== 'undefined' && navigator.locks
+      ? navigator.locks.request(`${DATABASE}-${TRUST_MARKS}`, work)
+      : work(),
 };
 
 let kept: Promise<{ store: KeptStore; onDisk: boolean }> | null = null;
@@ -221,6 +271,67 @@ export async function keptFor(account: KeptAccount): Promise<void> {
   }
 }
 
+/**
+ * Whether this device may keep anything already: the desktop app's bridge
+ * always, a browser only once its database exists. Opening it to ask would
+ * make it, as on the sign-in page after signing out.
+ */
+async function keptHere(): Promise<boolean> {
+  if (desktop) return true;
+  const databases = await indexedDB.databases?.().catch(() => null);
+  return databases?.some((db) => db.name === DATABASE) ?? false;
+}
+
+/**
+ * The last `/api/me` answer this device kept, for going on offline (ADR
+ * 0009, decision 5), if it is for the account everything kept belongs to.
+ */
+export async function keptMe(): Promise<MeAnswer | null> {
+  try {
+    if (!(await keptHere())) return null;
+    const { store } = await keptStore();
+    const [me, account] = await Promise.all([keptUnlock(store).me(), store.account()]);
+    return me && me.account.id === account?.id ? me : null;
+  } catch {
+    return null;
+  }
+}
+
+let keptAnswer: string | null = null;
+
+/**
+ * Keep `me`, the server's answer, for going on offline, once what's kept
+ * is this account's (`keptFor`). Failing only means an older answer stays.
+ */
+export async function keepMe(me: MeAnswer): Promise<void> {
+  const json = JSON.stringify(me);
+  if (json === keptAnswer) return;
+  try {
+    await keptFor(me.account);
+    const { store } = await keptStore();
+    await keptUnlock(store).keepMe(me);
+    keptAnswer = json;
+  } catch {
+    // Kept at the next answer.
+  }
+}
+
+/**
+ * The server says there is no session: a start with no answer goes no
+ * further than sign-in, rather than on offline. Everything else kept
+ * stays, sealed, for the same account's next sign-in (decision 10).
+ */
+export async function forgetKeptMe(): Promise<void> {
+  keptAnswer = null;
+  try {
+    if (!(await keptHere())) return;
+    const { store } = await keptStore();
+    await keptUnlock(store).forgetMe();
+  } catch {
+    // Nothing kept to forget.
+  }
+}
+
 const SIGNED_OUT = 'signed-out';
 
 /**
@@ -231,6 +342,7 @@ const SIGNED_OUT = 'signed-out';
  */
 export async function forgetKept(): Promise<void> {
   checked = null;
+  keptAnswer = null;
   if (!desktop && typeof BroadcastChannel !== 'undefined') {
     const channel = new BroadcastChannel(DATABASE);
     channel.postMessage(SIGNED_OUT);

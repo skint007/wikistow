@@ -155,7 +155,10 @@ const vaultRegister = defineCommand({
   id: 'vault.register',
   requires: ['account'],
   input: z.object({ prepared: Prepared }),
-  run: ({ account }, { prepared }) => registerVault(account.api, prepared),
+  // The wrapper stays out of the command's result.
+  run: async ({ account }, { prepared }) => {
+    await registerVault(account.api, prepared);
+  },
 });
 
 const vaultUnlock = defineCommand({
@@ -174,8 +177,10 @@ const vaultChangePassphrase = defineCommand({
   id: 'vault.changePassphrase',
   requires: ['vault'],
   input: Passphrase,
-  run: ({ vault }, { passphrase }) =>
-    changeVaultPassphrase({ ...vault, vault: vault.unlocked, passphrase }),
+  // The new wrapper stays out of the command's result.
+  run: async ({ vault }, { passphrase }) => {
+    await changeVaultPassphrase({ ...vault, vault: vault.unlocked, passphrase });
+  },
 });
 
 const spaceList = defineCommand({

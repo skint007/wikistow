@@ -1,4 +1,4 @@
-import { systemRoutes, type InstallationId, type SpaceId } from '@wikistow/contracts';
+import { systemRoutes, vaultRoutes, type InstallationId, type SpaceId } from '@wikistow/contracts';
 import type { ApiClient } from '../api/client.ts';
 import {
   applyContactsChange,
@@ -12,12 +12,19 @@ import { FolderKeyring } from '../folder-keys.ts';
 import { keyHash, type PrivateIdentity, type PublicIdentity } from '../identity.ts';
 import { KeptMarks, type KeptFile } from '../kept-marks.ts';
 import type { KeptStore } from '../kept-store.ts';
+import { keptUnlock } from '../kept-unlock.ts';
 import { MemoryKeyVersionMarks, type KeyVersionMarks } from '../key-versions.ts';
 import { unseenRestore } from '../restore.ts';
 import { RevisionCache } from '../revision-cache.ts';
 import { TrustStore } from '../trust.ts';
 import type { UnlockedVault } from '../vault.ts';
-import { readContacts, readPersonContacts, writeContacts, type ContactsBook } from './contacts.ts';
+import {
+  openKeptContacts,
+  readContacts,
+  readPersonContacts,
+  writeContacts,
+  type ContactsBook,
+} from './contacts.ts';
 import { KeptContent } from './kept.ts';
 import type { SpaceKeys } from './keys.ts';
 
@@ -42,13 +49,14 @@ export type ClientContext = {
   /** Opened revisions in memory only, dropped when access changes or the session locks. */
   revisions: RevisionCache;
   /**
-   * The No going back marks (section 6.8): kept for one session, or between
-   * launches by the desktop app with a trusted keyring (`kept`).
+   * The No going back marks (section 6.8): kept between sessions where the
+   * device keeps them (`kept`), else for one session.
    */
   marks: KeyVersionMarks;
   /**
    * What this device keeps between sessions, if it keeps anything: `marks`
-   * and the contacts mark, which follows `contacts.book` (`openSession`).
+   * and the contacts mark with its record, which follow `contacts.book`
+   * (`openSession`).
    */
   kept?: KeptMarks;
   /**
@@ -59,6 +67,12 @@ export type ClientContext = {
   keptContent?: KeptContent;
   /** Each space as this session last worked it out (`spaceKeys`). */
   spaces: Map<SpaceId, Promise<SpaceKeys>>;
+  /**
+   * Set while a session opened with no answer from the server waits for
+   * one: the vault version it unlocked against, which `confirmSession`
+   * checks with the rest of what opening skipped (ADR 0009, decision 5).
+   */
+  unconfirmed?: { vaultVersion: number };
   /**
    * Set when this session is an agent's (`openAgentSession`): the person it
    * acts for, at the key it pinned at enrollment, its own entry in that
@@ -99,13 +113,15 @@ export class MemoryAgentPins implements AgentPins {
  * fails its checks stops the session, since nothing may be sealed or signed
  * until the person resolves it (section 8.5).
  *
- * With `kept`, the desktop app's file, the session starts from the contacts
- * mark and No going back marks kept there and keeps them as they rise
+ * With `kept`, the device's file (the browser's, or the desktop app's with
+ * a trusted keyring), the session starts from the contacts mark and No
+ * going back marks kept there and keeps them as they rise, with the record
  * (`KeptMarks`). After a restore of the server those marks haven't seen,
  * they are dropped first, so what the server serves now is the starting
- * point (`unseenRestore`); the app tells the person itself. Without `kept`,
- * as in the browser, each session starts with none. With `content`, the
- * session reads and keeps pages there (`keptContent`).
+ * point (`unseenRestore`); the app tells the person itself. Without `kept`
+ * each session starts with none. With `content`, the session reads and
+ * keeps pages there (`keptContent`), and keeps the installation ID for
+ * opening offline (`openKeptSession`).
  */
 export async function openSession(
   api: ApiClient,
@@ -120,10 +136,15 @@ export async function openSession(
   trust.pinSelf(vault.identity);
   const owner = { api, installationId, identity: vault.identity };
   const book = await readContacts(owner, kept?.contactsMark ?? null);
-  kept?.keepContactsMark(book.mark);
+  kept?.keepContacts(book);
   trust.load(book.payloads);
   const keptContent =
     content && (await KeptContent.open(content, { identity: vault.identity, installationId }));
+  // For a session opened offline later (`openKeptSession`).
+  if (content)
+    await keptUnlock(content)
+      .keepInstallationId(installationId)
+      .catch(() => {});
   return {
     api,
     installationId,
@@ -137,6 +158,96 @@ export async function openSession(
     ...(keptContent && { keptContent }),
     spaces: new Map(),
   };
+}
+
+/**
+ * Open a session with no answer from the server (ADR 0009, decision 5): from
+ * the installation ID this device kept in `content`, and the contacts record
+ * kept with its mark in `kept`, checked as a served record is
+ * (`openKeptContacts`), which stops the session if it fails. Null if the
+ * device kept no installation ID, so it can't open offline. The session reads what's
+ * kept; nothing is signed or written until it is back online, where
+ * `confirmSession` runs what this skipped. `vaultVersion` is the version of
+ * the wrapper the vault opened against, or that a remembered unlock was
+ * taken at.
+ */
+export async function openKeptSession(
+  api: ApiClient,
+  vault: UnlockedVault,
+  {
+    kept: file,
+    content,
+    vaultVersion,
+  }: { kept: KeptFile; content: KeptStore; vaultVersion: number },
+): Promise<ClientContext | null> {
+  const installationId = await keptUnlock(content).installationId();
+  if (!installationId) return null;
+  const kept = await KeptMarks.open(file, { identity: vault.identity, installationId });
+  const owner = { installationId, identity: vault.identity };
+  const book = openKeptContacts(owner, kept.contactsMark, kept.contactsRecord);
+  const trust = new TrustStore(installationId);
+  trust.pinSelf(vault.identity);
+  trust.load(book.payloads);
+  const keptContent = await KeptContent.open(content, { identity: vault.identity, installationId });
+  return {
+    api,
+    installationId,
+    identity: vault.identity,
+    trust,
+    contacts: { book, pending: [] },
+    keyring: new FolderKeyring(),
+    revisions: new RevisionCache(),
+    marks: kept,
+    kept,
+    keptContent,
+    spaces: new Map(),
+    unconfirmed: { vaultVersion },
+  };
+}
+
+/**
+ * Once the server answers again, run what opening a session offline skipped
+ * (ADR 0009, decision 5): the installation, the vault's version, and the
+ * contacts record against the session's mark. Another installation means
+ * nothing kept opens for it, and a newer vault version that the passphrase
+ * changed elsewhere: either ends the session, which the app does by
+ * locking. A restore not seen starts the marks over, as `openSession` does.
+ * The wrapper served is kept for the next offline unlock. A record that
+ * fails its checks throws a `CryptoError`, and the session must stop.
+ * Otherwise the session is confirmed and goes on as one opened online.
+ */
+export async function confirmSession(
+  ctx: ClientContext,
+): Promise<'confirmed' | 'other-installation' | 'passphrase-changed'> {
+  const unconfirmed = ctx.unconfirmed;
+  if (!unconfirmed) return 'confirmed';
+  const { installationId, restore } = await ctx.api.call(systemRoutes.installation);
+  if (installationId !== ctx.installationId) return 'other-installation';
+  const served = await ctx.api.call(vaultRoutes.getVault);
+  const store = ctx.keptContent?.store;
+  if (store) {
+    await keptUnlock(store)
+      .keepVault({ ...served, keptAt: new Date().toISOString() })
+      .catch(() => {});
+  }
+  if (served.version !== unconfirmed.vaultVersion) return 'passphrase-changed';
+  const unseen = ctx.kept && unseenRestore(restore, ctx.kept.restoredAt);
+  if (unseen) ctx.kept?.startOver(unseen.restoredAt);
+  const owner = { api: ctx.api, installationId, identity: ctx.identity };
+  const book = await readContacts(owner, unseen ? null : ctx.contacts.book.mark);
+  ctx.contacts.book = book;
+  ctx.kept?.keepContacts(book);
+  // Pins from the record served now, as an online unlock takes them: a key
+  // another device confirmed meanwhile replaces the one kept.
+  const trust = new TrustStore(installationId);
+  trust.pinSelf(ctx.identity);
+  trust.load(book.payloads);
+  ctx.trust = trust;
+  // Spaces worked out meanwhile under the kept pins are worked out again
+  // under these, as after a contacts write (`forgetSpaces`).
+  ctx.spaces.clear();
+  delete ctx.unconfirmed;
+  return 'confirmed';
 }
 
 /**
@@ -324,7 +435,7 @@ async function writeQueued(
         all,
         confirmed ? { holds: confirmed } : {},
       );
-      ctx.kept?.keepContactsMark(ctx.contacts.book.mark);
+      ctx.kept?.keepContacts(ctx.contacts.book);
       break;
     } catch (error) {
       const kept =
@@ -364,7 +475,7 @@ async function withoutConflictingPins(
   const dropped = changes.filter(conflicts);
   if (dropped.length === 0) return null;
   ctx.contacts.book = stored;
-  ctx.kept?.keepContactsMark(stored.mark);
+  ctx.kept?.keepContacts(stored);
   ctx.trust.reload(
     stored.payloads,
     dropped.flatMap((change) => (change.kind === 'pin' ? [change.pin.identity] : [])),
