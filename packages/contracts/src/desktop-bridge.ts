@@ -93,11 +93,14 @@ export type DesktopUpdate = {
 };
 
 /**
- * Where the pages keep sealed items for offline use (ADR 0009): `kept` for
- * pages, trees and images, `queue` for changes made offline.
+ * Where the pages keep items for offline use (ADR 0009): `kept` for pages,
+ * trees and images, `queue` for changes made offline, both sealed, and
+ * `unlock` for what unlocking offline reads before the vault opens (the
+ * last `/api/me` answer, the vault wrapper and the installation ID), which
+ * isn't.
  */
-export type KeptFolder = 'kept' | 'queue';
-export const KEPT_FOLDERS = ['kept', 'queue'] as const satisfies readonly KeptFolder[];
+export type KeptFolder = 'kept' | 'queue' | 'unlock';
+export const KEPT_FOLDERS = ['kept', 'queue', 'unlock'] as const satisfies readonly KeptFolder[];
 
 /**
  * A kept item's name: base64url (`deviceTag`), so no name leaves its folder.
@@ -193,9 +196,9 @@ export type DesktopBridge = {
   /** Keep these sealed marks, in place of the ones kept. */
   keepTrustMarks(sealed: Uint8Array): Promise<void>;
   /**
-   * The items kept in `folder` (ADR 0009). The `kept` folder holds items
-   * only with a trusted secret store, and lists none without; the `queue`
-   * folder holds them either way.
+   * The items kept in `folder` (ADR 0009). The `kept` and `unlock` folders
+   * hold items only with a trusted secret store, and list none without; the
+   * `queue` folder holds them either way.
    */
   keptItems(folder: KeptFolder): Promise<KeptItem[]>;
   /** The sealed item `name` in `folder`, or null if there is none. */
@@ -207,7 +210,7 @@ export type DesktopBridge = {
   /** The account the kept items belong to, or null. */
   keptAccount(): Promise<KeptAccount | null>;
   keepKeptAccount(account: KeptAccount): Promise<void>;
-  /** Delete everything kept for offline: both folders and the account. */
+  /** Delete everything kept for offline: every folder and the account. */
   clearKept(): Promise<void>;
   /** The plugins on this computer, and whether safe mode is on. */
   plugins(): Promise<PluginsState>;

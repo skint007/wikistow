@@ -29,6 +29,7 @@ export * from './markdown/index.ts';
 export * from './key-versions.ts';
 export { KeptMarks, type KeptFile } from './kept-marks.ts';
 export * from './kept-store.ts';
+export * from './kept-unlock.ts';
 export * from './payload.ts';
 export * from './plugin-approvals.ts';
 export * from './regions.ts';
@@ -47,8 +48,10 @@ export * as trashOperations from './operations/trash.ts';
 export {
   agentContactsMark,
   closeSession,
+  confirmSession,
   MemoryAgentPins,
   openAgentSession,
+  openKeptSession,
   openSession,
   saveContacts,
   type AgentPins,

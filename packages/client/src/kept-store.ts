@@ -20,9 +20,20 @@ export interface KeptItems {
 }
 
 /**
+ * Unsealed items, by fixed names, which a device keeps for unlocking offline
+ * (`keptUnlock`): they are read before any vault opens, and hold no content.
+ */
+export interface KeptBytes {
+  read(name: string): Promise<Uint8Array | null>;
+  write(name: string, bytes: Uint8Array): Promise<void>;
+  remove(name: string): Promise<void>;
+}
+
+/**
  * Everything a device keeps for offline use (ADR 0009, decision 2): the
  * kept pages, trees and images (`items`), the changes made offline
- * (`queue`), and, unsealed beside them, the account they belong to. The
+ * (`queue`), and, unsealed beside them, the account they belong to and
+ * what unlocking offline reads (`unlock`). The
  * desktop app keeps them in its `kept` and `queue` folders, the browser in
  * the `wikistow-kept` IndexedDB database, tests and a desktop app without
  * a keyring in memory (`memoryKeptStore`).
@@ -30,10 +41,11 @@ export interface KeptItems {
 export interface KeptStore {
   readonly items: KeptItems;
   readonly queue: KeptItems;
+  readonly unlock: KeptBytes;
   /** The account the kept items belong to, or null if none was kept. */
   account(): Promise<KeptAccount | null>;
   keepAccount(account: KeptAccount): Promise<void>;
-  /** Delete everything kept: items, queue and account. */
+  /** Delete everything kept: items, queue, account and what unlocking reads. */
   clear(): Promise<void>;
   /**
    * Run `work` with nothing else in this store's other users (tabs, say)
@@ -74,10 +86,16 @@ export function inTurn() {
 export function memoryKeptStore(): KeptStore {
   const kept = memoryItems();
   const queue = memoryItems();
+  const unlock = memoryItems();
   let account: KeptAccount | null = null;
   return {
     items: kept,
     queue,
+    unlock: {
+      read: (name) => unlock.read(name),
+      write: (name, bytes) => unlock.write(name, bytes),
+      remove: (name) => unlock.remove([name]),
+    },
     account: async () => account,
     keepAccount: async (next) => {
       account = { ...next };
@@ -85,6 +103,7 @@ export function memoryKeptStore(): KeptStore {
     clear: async () => {
       kept.clear();
       queue.clear();
+      unlock.clear();
       account = null;
     },
     exclusive: inTurn(),

@@ -160,10 +160,12 @@ const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.ge
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
 const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
 // What the pages keep for offline use (ADR 0009): pages, trees and images
-// in `kept`, changes made offline in `queue`, and whose they are.
+// in `kept`, changes made offline in `queue`, what unlocking offline reads
+// in `unlock`, and whose they are.
 const keptFolders = {
   kept: keptFolder(join(app.getPath('userData'), 'kept')),
   queue: keptFolder(join(app.getPath('userData'), 'queue')),
+  unlock: keptFolder(join(app.getPath('userData'), 'unlock')),
 };
 const keptAccountFile = keptFile(join(app.getPath('userData'), 'kept-account'));
 const place = windowPlace(app.getPath('userData'));
@@ -178,13 +180,17 @@ async function removeSignInKept() {
 }
 
 /**
- * Delete what the pages kept sealed that needs a trusted keyring: the
- * search index, the trust marks and the pages kept for offline. Changes
- * made offline, and whose they are, stay: they are kept with or without a
- * keyring, and are never lost to one that didn't open.
+ * Delete what the pages kept that needs a trusted keyring: the search
+ * index, the trust marks, the pages kept for offline and what unlocking
+ * offline reads. Changes made offline, and whose they are, stay: they are
+ * kept with or without a keyring, and are never lost to one that didn't open.
  */
 async function removeKept() {
-  await Promise.all([removeSignInKept(), keptFolders.kept.clear()]).catch(() => {});
+  await Promise.all([
+    removeSignInKept(),
+    keptFolders.kept.clear(),
+    keptFolders.unlock.clear(),
+  ]).catch(() => {});
 }
 
 /** Delete everything the pages kept, as signing out does. */
@@ -820,8 +826,9 @@ void app.whenReady().then(async () => {
   handle('keepTrustMarks', async (sealed) => {
     if (store?.secure) await trustMarks.write(z.instanceof(Uint8Array).parse(sealed));
   });
-  // Pages are kept on disk only with a trusted keyring, as the session is;
-  // changes made offline, and whose they are, either way (ADR 0009).
+  // Pages, and what unlocking offline reads, are kept on disk only with a
+  // trusted keyring, as the session is; changes made offline, and whose
+  // they are, either way (ADR 0009).
   const keptIn = (folder: unknown) => {
     const name = z.enum(KEPT_FOLDERS).parse(folder);
     return name === 'queue' || store?.secure ? keptFolders[name] : null;
