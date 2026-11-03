@@ -208,12 +208,17 @@ function appPorts(
       }
       const revisionId = newId(RevisionId);
       try {
-        return await pageOperations.saveDraft(ctx, {
+        // Files added while the page's changes went into the queue are there
+        // only: they go up first.
+        await queue?.upload(ctx, page, input.payload.attachments);
+        const written = await pageOperations.saveDraft(ctx, {
           page,
           read: readWikilinks,
           ...input,
           revisionId,
         });
+        void queue?.sent(input.payload.attachments).catch(() => {});
+        return written;
       } catch (error) {
         if (!queue || !noAnswer(error)) throw error;
         seen = await queue.lost({
