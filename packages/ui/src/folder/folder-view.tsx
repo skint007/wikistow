@@ -124,7 +124,6 @@ export function FolderView({
   );
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
   const edits = useCellEdits(spaceId, save);
-  const offline = useOffline();
 
   if (!tree) return <FolderCard>{null}</FolderCard>;
   const folder = tree.folders.find((f) => f.id === folderId);
@@ -148,8 +147,7 @@ export function FolderView({
       ? { name: opened.metadata.name, ...folderLook(opened.metadata) }
       : { name: 'Unreadable folder', emoji: '⚠️', tint: 'orange' };
   const role = shareCovering(tree, folderId)?.role ?? tree.space?.role;
-  // A cell's edit saves the page's draft: offline, the table only reads (ADR 0009, decision 8).
-  const canEdit = (role === 'editor' || role === 'owner') && !offline;
+  const canEdit = role === 'editor' || role === 'owner';
   const crumbs = crumbsOf(tree, folder.parentId);
   const shownColumns = columns.filter((column) => !column.hidden);
   const pagesHere = tree.pages.filter((p) => p.parentId === folderId).length;
@@ -675,6 +673,8 @@ function PageRow({
 }) {
   const row = useRef<HTMLTableRowElement>(null);
   const editable = editsDraft(canEdit, treePage);
+  // A cell's edit saves the page's draft: offline, the table only reads (ADR 0009, decision 8).
+  const offline = useOffline();
   const own = edits.own.get(entry.pageId);
   const { shown, payload, links } = useShownRevision(spaceId, entry, own, editable);
   const read = shown.markdown ?? payload?.markdown ?? null;
@@ -741,7 +741,7 @@ function PageRow({
         const value = valueIn(entry.properties, column);
         const problem = edits.problem(entry.pageId, column.key);
         let cell: ReactNode;
-        if (!editable || properties === null || version === null) {
+        if (!editable || offline || properties === null || version === null) {
           cell = value ? (
             <PropertyValueView
               property={value}

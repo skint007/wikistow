@@ -23,6 +23,15 @@ const BEFORE_VAULT = new Set<string>([
   contactsRoutes.getContacts.path,
 ]);
 const BLOBS = pageRoutes.BLOB_DOWNLOAD_PATH.replace(':hash', '');
+// Reads sent as POST, for the many versions they ask for.
+const BATCH_READS = new Set<string>([
+  pageRoutes.fetchRevisions.path,
+  pageRoutes.trashRevisions.path,
+]);
+
+/** Whether a request only reads: a GET, or one of the batch reads. */
+const reads = (path: string, init: RequestInit) =>
+  (init.method ?? 'GET') === 'GET' || BATCH_READS.has(path);
 
 // Writes waiting for an answer, which going offline gives up, as lost answers.
 const writes = new Set<AbortController>();
@@ -35,7 +44,7 @@ connection.subscribe(() => {
 /** `fetch`, giving up on a read with no answer in time, and on a write once offline. */
 async function withDeadline(url: string, init: RequestInit): Promise<Response> {
   const path = new URL(url, 'http://app').pathname;
-  const reading = (init.method ?? 'GET') === 'GET';
+  const reading = reads(path, init);
   const deadline = !reading
     ? null
     : BEFORE_VAULT.has(path)
@@ -62,7 +71,9 @@ async function withDeadline(url: string, init: RequestInit): Promise<Response> {
  * first, so one that answers again after a moment's outage takes it.
  */
 async function connected(url: string, init: RequestInit): Promise<Response> {
-  if (!connection.get().online && (init.method ?? 'GET') !== 'GET') await connection.check();
+  if (!connection.get().online && !reads(new URL(url, 'http://app').pathname, init)) {
+    await connection.check();
+  }
   if (!connection.get().online) throw new TypeError('Offline');
   let response: Response;
   try {

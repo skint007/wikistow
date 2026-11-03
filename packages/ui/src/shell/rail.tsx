@@ -362,7 +362,7 @@ function SpaceTiles({
         type="button"
         {...needs.click(() => setCreating(true))}
         aria-label="New space"
-        className="grid size-11 place-items-center rounded-tile border-2 border-dashed border-border text-muted-foreground hover:tint active:tint-strong"
+        className="grid size-11 place-items-center rounded-tile border-2 border-dashed border-border text-muted-foreground hover:tint active:tint-strong aria-disabled:opacity-50"
       >
         <Plus className="size-4" strokeWidth={1.75} />
       </button>
@@ -476,6 +476,8 @@ export function useSignOut() {
     setFailed(null);
     // Offline, the desktop app offers to sign out on this computer instead
     // (ADR 0009, decision 10); a browser's Sign out waits (`AccountMenu`).
+    // The server is asked first, as it may be back since the last check.
+    await connection.check();
     if (!connection.get().online) {
       if (desktop) setFailed('gone');
       return;
