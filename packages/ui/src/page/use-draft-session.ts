@@ -185,6 +185,8 @@ function appPorts(
   const queue = queueOf(ctx);
   // An entry gone since, when its change was sent, is made afresh by the next save into it.
   let seen = queuedVersion;
+  // What the person chose to save theirs on top of, for the next save into the queue.
+  let onTop: RevisionId | null = null;
   return {
     // Offline, or while the page has a change waiting, saves go into the
     // queue, online too, until it is sent. A save that gets no answer is
@@ -198,8 +200,10 @@ function appPorts(
             region: input.tableRegion ?? input.basedOnRegion ?? null,
             payload: input.payload,
             seen,
+            onTop: onTop === input.basedOn,
             ...(input.linkChoices && { linkChoices: input.linkChoices }),
           });
+          onTop = null;
         } catch (error) {
           device.otherWindow = error instanceof ApiError && error.code === 'stale-head';
           throw error;
@@ -231,6 +235,9 @@ function appPorts(
         });
         return onDevice(input);
       }
+    },
+    onTopOf: (revisionId) => {
+      onTop = revisionId;
     },
     readLinks: readOpeningLinks,
     // Offline, or with a change waiting, as for a page not made yet, a file

@@ -241,7 +241,8 @@ export class OfflineQueue {
   /**
    * Save `payload`, the draft of `page` as typed, on this device. Into the
    * page's entry if it has one, keeping its base, unless the person chose
-   * to save theirs on top of someone else's after a conflict: then `basedOn`.
+   * to save theirs on top of someone else's after a conflict (`onTop`, or
+   * an entry stopped as one): then `basedOn`.
    * Otherwise a new entry on top of `basedOn`. `seen` is the entry's version
    * the caller last saw, or null if it saw none: an entry another tab or
    * window saved into since, or made, is a conflict (`stale-head`), as the
@@ -253,6 +254,7 @@ export class OfflineQueue {
     region,
     payload,
     seen,
+    onTop = false,
     linkChoices,
   }: {
     page: PageRef;
@@ -260,6 +262,7 @@ export class OfflineQueue {
     region: Region | null;
     payload: PagePayload;
     seen: number | null;
+    onTop?: boolean;
     linkChoices?: ReadonlyMap<string, PageId>;
   }): Promise<number> {
     const picks = Object.fromEntries(linkChoices ?? []);
@@ -268,7 +271,10 @@ export class OfflineQueue {
       if (before && before.version !== seen) {
         throw new ApiError(409, 'stale-head', 'This page was changed in another window');
       }
-      const rebased = before?.failure?.kind === 'conflict' && before.basedOn !== basedOn;
+      const rebased =
+        (onTop || before?.failure?.kind === 'conflict') &&
+        before !== null &&
+        before.basedOn !== basedOn;
       // The change the caller saw landed and went just now: this goes on top
       // of it, if the caller hadn't heard yet and is still on its base.
       const went = before ? undefined : this.#landedOn.get(page.pageId);
@@ -279,7 +285,8 @@ export class OfflineQueue {
             payload,
             picks,
             version: before.version + 1,
-            ...(rebased && { basedOn, failure: null }),
+            // What was being sent on the old base is the person's no more.
+            ...(rebased && { basedOn, failure: null, sending: null }),
           }
         : {
             kind: 'page',
@@ -749,9 +756,10 @@ export class OfflineQueue {
     await this.#store.queueExclusive(async () => {
       const current = await this.entry(entry.id);
       if (!current) return;
-      await this.#write(
-        current.kind === 'page' ? { ...current, failure, sending: null } : { ...current, failure },
-      );
+      if (current.kind === 'folder') return this.#write({ ...current, failure });
+      // Put on top of theirs meanwhile (Save mine on top): sent next, on that.
+      const rebased = entry.kind === 'page' && current.basedOn !== entry.basedOn;
+      await this.#write({ ...current, failure: rebased ? null : failure, sending: null });
     });
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
   }

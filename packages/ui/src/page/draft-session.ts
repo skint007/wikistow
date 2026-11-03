@@ -41,6 +41,8 @@ export type DraftPorts = {
   }): Promise<AttachmentRef>;
   /** The page's draft head as the server has it now. */
   draftHead(): Promise<RevisionId | null>;
+  /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
+  onTopOf?(revisionId: RevisionId): void;
   /** The revision cache's generation; a region opened in an earlier one may be stale. */
   generation(): number;
   /** The vault's epoch, which a lock moves on. */
@@ -456,6 +458,7 @@ export class DraftSession {
     if (target) {
       this.#base = target;
       this.#known.add(target);
+      this.#ports.onTopOf?.(target);
     }
     // Their draft may be in another region by now: open it fresh.
     this.#region = null;

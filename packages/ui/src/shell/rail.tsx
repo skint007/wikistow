@@ -449,6 +449,12 @@ function NewSpaceDialog({
 const notWikiStow = (error: { status: number }) =>
   error.status === 404 || !['code', 'message', 'error'].some((key) => key in error);
 
+/** Whether to go on signing out, asked first if changes made offline would go with it. */
+async function keepsChanges(): Promise<boolean> {
+  const waiting = await changesNotSent();
+  return !waiting || window.confirm(signOutWarning(waiting.count));
+}
+
 /**
  * Sign out, and why the last try failed: the server refused it (`refused`),
  * or no WikiStow answered (`gone`, #257): no answer at all, or one that
@@ -458,12 +464,6 @@ const notWikiStow = (error: { status: number }) =>
  * for the unlock page and closes the phone drawer, unmounting the menu it
  * was started from.
  */
-/** Whether to go on signing out, asked first if changes made offline would go with it. */
-async function keepsChanges(): Promise<boolean> {
-  const waiting = await changesNotSent();
-  return !waiting || window.confirm(signOutWarning(waiting.count));
-}
-
 export function useSignOut() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();

@@ -228,6 +228,32 @@ describe('changes made offline', () => {
     expect(now.basedOn).toBe(theirs);
   });
 
+  it('go on top of theirs when the person chose so before the change was sent', async () => {
+    const { ctx, queue, page, based, head, draft, payload } = await device();
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('mine'),
+      seen: null,
+    });
+    await pages.editDraft(ctx, page, { markdown: 'theirs' });
+    const theirs = await head();
+    if (!theirs) throw new Error('No draft');
+    // The draft view saw their draft first, and the person chose Save mine on top.
+    await queue.saveDraft({
+      page,
+      basedOn: theirs,
+      region: null,
+      payload: payload('mine'),
+      seen: 1,
+      onTop: true,
+    });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await draft()).basedOn).toBe(theirs);
+  });
+
   it('wait as gone for a page put in the trash, sent once restored, or saved as a new page', async () => {
     const { ctx, queue, spaceId, page, based, draft, payload } = await device();
     const ref = await queue.attach(ctx, page, {
