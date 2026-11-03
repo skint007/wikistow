@@ -72,6 +72,7 @@ export * as publicLinkOperations from './operations/public-links.ts';
 export * as ownerOperations from './operations/owners.ts';
 export * as searchOperations from './operations/search.ts';
 export * as keptOperations from './operations/kept.ts';
+export * as queueOperations from './operations/queue.ts';
 export * as exportOperations from './operations/export.ts';
 export * as importOperations from './operations/import.ts';
 export { lookupPeople, spaceKeys, type SpaceKeys } from './operations/keys.ts';

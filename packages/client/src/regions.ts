@@ -1,4 +1,5 @@
-import type { ShareId, SpaceId } from '@wikistow/contracts';
+import { ShareId, SpaceId } from '@wikistow/contracts';
+import { z } from 'zod';
 import { CryptoError } from './errors.ts';
 
 /**
@@ -9,6 +10,12 @@ import { CryptoError } from './errors.ts';
 export type Region = { kind: 'owner' } | { kind: 'share'; spaceId: SpaceId; shareId: ShareId };
 
 export const OWNER_REGION: Region = { kind: 'owner' };
+
+/** A region as a device keeps it (ADR 0009), read back as checked here. */
+export const RegionJson = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('owner') }),
+  z.strictObject({ kind: z.literal('share'), spaceId: SpaceId, shareId: ShareId }),
+]) satisfies z.ZodType<Region>;
 
 export const sameRegion = (a: Region, b: Region): boolean =>
   a.kind === 'owner'

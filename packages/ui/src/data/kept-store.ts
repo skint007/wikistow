@@ -1,6 +1,7 @@
 import {
   inTurn,
   keptUnlock,
+  onlyOnce,
   memoryKeptStore,
   type KeptAccount,
   type KeptBytes,
@@ -118,9 +119,13 @@ const browserUnlock: KeptBytes = {
   },
 };
 
+const hasLocks = () => typeof navigator !== 'undefined' && navigator.locks !== undefined;
+
 /** The browser's store: the `wikistow-kept` database, which its tabs share. */
 function browserKeptStore(): KeptStore {
   const turn = inTurn();
+  const queueTurn = inTurn();
+  const sendingHere = onlyOnce();
   return {
     items: browserItems('items'),
     queue: browserItems('queue'),
@@ -147,10 +152,18 @@ function browserKeptStore(): KeptStore {
       });
     },
     // Tabs take turns through a Web Lock where there is one.
-    exclusive: (work) =>
-      typeof navigator !== 'undefined' && navigator.locks
-        ? navigator.locks.request(DATABASE, work)
-        : turn(work),
+    exclusive: (work) => (hasLocks() ? navigator.locks.request(DATABASE, work) : turn(work)),
+    queueExclusive: (work) =>
+      hasLocks() ? navigator.locks.request(`${DATABASE}-queue`, work) : queueTurn(work),
+    // One tab sends; the others find the lock taken and leave it.
+    sending: (work) =>
+      hasLocks()
+        ? navigator.locks.request(`${DATABASE}-sending`, { ifAvailable: true }, async (lock) => {
+            if (!lock) return false;
+            await work();
+            return true;
+          })
+        : sendingHere(work),
   };
 }
 
@@ -189,6 +202,8 @@ function desktopKeptStore(bridge: DesktopBridge, secure: boolean): KeptStore {
       await bridge.clearKept();
     },
     exclusive: (work) => memory.exclusive(work),
+    queueExclusive: (work) => memory.queueExclusive(work),
+    sending: (work) => memory.sending(work),
   };
 }
 
