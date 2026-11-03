@@ -142,7 +142,7 @@ describe('changes made offline', () => {
       basedOn: based,
       region: null,
       payload: payload('and more'),
-      seen: 1,
+      seen: waiting?.kind === 'page' ? waiting.version : null,
     });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
@@ -185,7 +185,7 @@ describe('changes made offline', () => {
       basedOn: revisionId,
       region: null,
       payload: { ...lost.payload, markdown: 'typed offline' },
-      seen: 1,
+      seen: lost.version,
     });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
@@ -219,7 +219,7 @@ describe('changes made offline', () => {
       basedOn: theirs,
       region: null,
       payload: payload('mine'),
-      seen: 1,
+      seen: stopped?.kind === 'page' ? stopped.version : null,
     });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
@@ -230,7 +230,7 @@ describe('changes made offline', () => {
 
   it('go on top of theirs when the person chose so before the change was sent', async () => {
     const { ctx, queue, page, based, head, draft, payload } = await device();
-    await queue.saveDraft({
+    const first = await queue.saveDraft({
       page,
       basedOn: based,
       region: null,
@@ -246,7 +246,7 @@ describe('changes made offline', () => {
       basedOn: theirs,
       region: null,
       payload: payload('mine'),
-      seen: 1,
+      seen: first,
       onTop: true,
     });
     expect(await queue.send(ctx)).toBe('sent');

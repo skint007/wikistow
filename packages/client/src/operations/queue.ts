@@ -119,6 +119,9 @@ export type QueueEvent =
   | { kind: 'recorded'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId }
   | { kind: 'landed'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId };
 
+// How long after a change landed a save on its base still goes on top of it.
+const LANDING_MS = 10_000;
+
 // Entries and their files share the queue's store. Names start with what
 // they are, so they can be counted before anyone unlocks.
 const ENTRY = 'e';
@@ -168,7 +171,7 @@ export class OfflineQueue {
   // Each page whose change landed and went: the draft that change was based
   // on, and the version that landed, so a save already on its way into it,
   // on that same base, goes on top of what landed.
-  readonly #landedOn = new Map<PageId, { base: RevisionId; landed: RevisionId }>();
+  readonly #landedOn = new Map<PageId, { base: RevisionId; landed: RevisionId; at: number }>();
   #closed = false;
   #last = 0;
 
@@ -195,6 +198,12 @@ export class OfflineQueue {
 
   #entryName = (id: string) => ENTRY + this.#sealer.name(`queued ${id}`);
   #blobName = (blobHash: string) => BLOB + this.#sealer.name(`queued blob ${blobHash}`);
+
+  // A new entry's first version: never one an entry for the page had before,
+  // so a window that saw an entry that went can't take a new one for it.
+  #firstVersion() {
+    return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  }
 
   // Each later than the one before, so entries keep the order they were made in.
   #at() {
@@ -280,7 +289,9 @@ export class OfflineQueue {
       // The change the caller saw landed and went just now: this goes on top
       // of it, if the caller hadn't heard yet and is still on its base.
       const went = before ? undefined : this.#landedOn.get(page.pageId);
-      const landed = went?.base === basedOn ? went.landed : undefined;
+      this.#landedOn.delete(page.pageId);
+      const landed =
+        went?.base === basedOn && Date.now() - went.at < LANDING_MS ? went.landed : undefined;
       const entry: QueuedPage = before
         ? {
             ...before,
@@ -298,7 +309,7 @@ export class OfflineQueue {
             basedOn: landed ?? basedOn,
             region,
             payload,
-            version: 1,
+            version: this.#firstVersion(),
             sending: null,
             picks,
             failure: null,
@@ -332,6 +343,7 @@ export class OfflineQueue {
     revisionId: RevisionId;
     linkChoices?: ReadonlyMap<string, PageId>;
   }): Promise<number> {
+    const first = this.#firstVersion();
     const entry = await this.#store.queueExclusive(async () => {
       const before = await this.#page(page.pageId);
       if (before) return before;
@@ -343,8 +355,8 @@ export class OfflineQueue {
         basedOn,
         region,
         payload,
-        version: 1,
-        sending: { revisionId, version: 1, payload, partial: false },
+        version: first,
+        sending: { revisionId, version: first, payload, partial: false },
         picks: Object.fromEntries(linkChoices ?? []),
         failure: null,
         at: this.#at(),
@@ -378,6 +390,7 @@ export class OfflineQueue {
     revisionId?: RevisionId;
   }): Promise<QueuedPage> {
     const revisionId = sent ?? newId(RevisionId);
+    const first = this.#firstVersion();
     const entry: QueuedPage = {
       kind: 'page',
       id: pageId,
@@ -386,8 +399,8 @@ export class OfflineQueue {
       basedOn: null,
       region: null,
       payload,
-      version: 1,
-      sending: sent ? { revisionId, version: 1, payload, partial: false } : null,
+      version: first,
+      sending: sent ? { revisionId, version: first, payload, partial: false } : null,
       picks: {},
       failure: null,
       at: this.#at(),
@@ -739,7 +752,7 @@ export class OfflineQueue {
       if (!current) return;
       if (current.version === sent.version && !sent.partial) {
         const base = current.basedOn ?? current.newPage?.revisionId;
-        if (base) this.#landedOn.set(entry.id, { base, landed: sent.revisionId });
+        if (base) this.#landedOn.set(entry.id, { base, landed: sent.revisionId, at: Date.now() });
         return this.#remove(current);
       }
       await this.#write({ ...current, newPage: null, basedOn: sent.revisionId, sending: null });
