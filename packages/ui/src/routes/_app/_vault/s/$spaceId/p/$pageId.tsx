@@ -47,7 +47,9 @@ import {
   searchIndexChanged,
   treeQuery,
 } from '../../../../../../data/queries';
-import { pageOpened } from '../../../../../../data/keeper';
+import { keepEveryPage, pageOpened } from '../../../../../../data/keeper';
+import { keptStore } from '../../../../../../data/kept-store';
+import { useDeviceSwitch } from '../../../../../../shell/device-switch';
 import { PLAIN } from '../../../../../../vault/store';
 import { errorMessage, pageOpenMessage } from '../../../../../../errors';
 import { decryptedQuery } from '../../../../../../page/attachments';
@@ -116,6 +118,12 @@ function PageView() {
   const queryClient = useQueryClient();
   const page = { spaceId, pageId };
   const { data: info, error } = useQuery(pageQuery(ctx, pageId));
+  // Offline, a page not kept suggests Every page only where that would keep it.
+  const everyPage = useDeviceSwitch(keepEveryPage());
+  const { data: onDisk } = useQuery({
+    queryKey: ['kept-on-disk'],
+    queryFn: async () => (await keptStore()).onDisk,
+  });
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   useChatPage(spaceId, pageId, tree?.pages.find((p) => p.id === pageId)?.title ?? null);
   // Bumped to open the draft afresh: after "view theirs", or a restore.
@@ -169,7 +177,9 @@ function PageView() {
   if (error)
     return (
       <PageCard>
-        <Missing message={pageOpenMessage(error)} />
+        <Missing
+          message={pageOpenMessage(error, { everyPageWouldKeep: !everyPage && onDisk === true })}
+        />
       </PageCard>
     );
   if (!info || (unpublishedCopy && !history)) return <PageCard>{null}</PageCard>;

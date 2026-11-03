@@ -148,13 +148,19 @@ export function errorMessage(error: unknown): string {
  * A short message for a page that couldn't be opened. It reads the same
  * whether the page doesn't exist or wasn't shared, as the server's answer does.
  */
-export function pageOpenMessage(error: unknown): string {
+export function pageOpenMessage(
+  error: unknown,
+  /** Whether choosing Every page would keep it: Pages I open, where pages are kept between launches. */
+  { everyPageWouldKeep = false } = {},
+): string {
   if (error instanceof ApiError && error.code === 'not-found') {
     return 'This page doesn’t exist, or it hasn’t been shared with you.';
   }
-  // Offline, a page never kept here (ADR 0009, decision 4).
+  // Offline, a page not kept here (ADR 0009, decision 4).
   if (error instanceof keptOperations.NotKept) {
-    return 'This page isn’t kept on this device. To keep every page for offline, choose Every page for Keep for offline in Settings.';
+    return everyPageWouldKeep
+      ? 'This page isn’t kept on this device. To keep every page for offline, choose Every page for Keep for offline in Settings.'
+      : 'This page isn’t kept on this device yet, so it opens once you’re back online.';
   }
   return errorMessage(error);
 }
