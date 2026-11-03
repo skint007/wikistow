@@ -56,10 +56,13 @@ async function withDeadline(url: string, init: RequestInit): Promise<Response> {
 
 /**
  * `withDeadline`, telling `connection` whether the server answered. While
- * offline nothing is sent: reads come from what's kept, without trying the
- * server for each, and the probe finds out when it is back.
+ * offline no read is sent: reads come from what's kept, without trying the
+ * server for each, and the probe finds out when it is back. A write, which
+ * the person just asked for (Try again on a save, say), asks the server
+ * first, so one that answers again after a moment's outage takes it.
  */
 async function connected(url: string, init: RequestInit): Promise<Response> {
+  if (!connection.get().online && (init.method ?? 'GET') !== 'GET') await connection.check();
   if (!connection.get().online) throw new TypeError('Offline');
   let response: Response;
   try {

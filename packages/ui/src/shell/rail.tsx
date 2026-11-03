@@ -76,6 +76,7 @@ export function Rail({
   onSearch: () => void;
 }) {
   const vault = useVault();
+  const needs = useNeedsConnection();
   return (
     <nav
       aria-label="Spaces and navigation"
@@ -102,8 +103,9 @@ export function Rail({
           <SharedLinkHere vault={vault} onNavigate={onNavigate} />
           <Link
             to="/trash"
-            onClick={onNavigate}
-            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
+            // Its list and everything in it are the server's (ADR 0009, decision 8).
+            {...needs.click(() => onNavigate?.())}
+            className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none aria-disabled:opacity-50"
             activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
           >
             <Trash2 className="size-4" strokeWidth={1.75} />
@@ -115,8 +117,8 @@ export function Rail({
       )}
       <Link
         to="/agents"
-        onClick={onNavigate}
-        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
+        {...needs.click(() => onNavigate?.())}
+        className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none aria-disabled:opacity-50"
         activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
       >
         <Bot className="size-4" strokeWidth={1.75} />
