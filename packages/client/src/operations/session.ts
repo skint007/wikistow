@@ -243,6 +243,9 @@ export async function confirmSession(
   trust.pinSelf(ctx.identity);
   trust.load(book.payloads);
   ctx.trust = trust;
+  // Spaces worked out meanwhile under the kept pins are worked out again
+  // under these, as after a contacts write (`forgetSpaces`).
+  ctx.spaces.clear();
   delete ctx.unconfirmed;
   return 'confirmed';
 }

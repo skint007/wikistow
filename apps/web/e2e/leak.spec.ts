@@ -258,4 +258,8 @@ test('the browser stores no page content or key material', async ({ page, freshP
   await expect(page).toHaveURL(/\/sign-in/);
   const signedOut = await browserStorage(page);
   expect(signedOut.indexedDb).toEqual([]);
+  // The sign-in page, asking whether anyone is signed in, makes nothing again.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  expect((await browserStorage(page)).indexedDb).toEqual([]);
 });

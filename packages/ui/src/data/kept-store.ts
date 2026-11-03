@@ -272,11 +272,23 @@ export async function keptFor(account: KeptAccount): Promise<void> {
 }
 
 /**
+ * Whether this device may keep anything already: the desktop app's bridge
+ * always, a browser only once its database exists. Opening it to ask would
+ * make it, as on the sign-in page after signing out.
+ */
+async function keptHere(): Promise<boolean> {
+  if (desktop) return true;
+  const databases = await indexedDB.databases?.().catch(() => null);
+  return databases?.some((db) => db.name === DATABASE) ?? false;
+}
+
+/**
  * The last `/api/me` answer this device kept, for going on offline (ADR
  * 0009, decision 5), if it is for the account everything kept belongs to.
  */
 export async function keptMe(): Promise<MeAnswer | null> {
   try {
+    if (!(await keptHere())) return null;
     const { store } = await keptStore();
     const [me, account] = await Promise.all([keptUnlock(store).me(), store.account()]);
     return me && me.account.id === account?.id ? me : null;
@@ -312,6 +324,7 @@ export async function keepMe(me: MeAnswer): Promise<void> {
 export async function forgetKeptMe(): Promise<void> {
   keptAnswer = null;
   try {
+    if (!(await keptHere())) return;
     const { store } = await keptStore();
     await keptUnlock(store).forgetMe();
   } catch {
