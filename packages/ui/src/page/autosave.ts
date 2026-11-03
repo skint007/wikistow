@@ -104,6 +104,16 @@ export class Autosave<T> {
     return this.#run(true);
   }
 
+  /**
+   * `value` is an edit someone else's save stopped before it could be saved,
+   * as a change made offline that came back as a conflict: unsaved, and
+   * stopped at once, until `resume()`.
+   */
+  hold(value: T) {
+    this.#pending = { value };
+    this.conflict();
+  }
+
   /** Someone else saved first: stop saving, keeping any edit, until `resume()`. */
   conflict() {
     this.#clearTimer();

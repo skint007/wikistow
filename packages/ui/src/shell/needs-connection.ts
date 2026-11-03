@@ -3,12 +3,12 @@ import { useOffline } from '../data/connection';
 /** What a control that waits for the server says offline (ADR 0009, decision 8). */
 export const NEEDS_CONNECTION = 'Needs the connection';
 
-/** A control waiting for the server: dimmed, saying why in its hint, and doing nothing. */
-const WAITING = {
-  'aria-disabled': true,
-  'data-hint': NEEDS_CONNECTION,
-  'aria-description': NEEDS_CONNECTION,
-} as const;
+/** What a control that waits for a page's offline change to be sent says (ADR 0009, decision 8). */
+export const SENDS_FIRST = 'Waits until your change made offline is sent';
+
+/** A control waiting, dimmed, saying why in its hint, and doing nothing. */
+const waiting = (hint: string) =>
+  ({ 'aria-disabled': true, 'data-hint': hint, 'aria-description': hint }) as const;
 
 const stay = (event: { preventDefault(): void }) => event.preventDefault();
 
@@ -18,15 +18,17 @@ const stay = (event: { preventDefault(): void }) => event.preventDefault();
  * (`aria-disabled`, which keeps the hint showing on hover, as `disabled`
  * wouldn't), and does nothing when pressed. Spread `click(…)` on a button
  * in place of `onClick`, and `select(…)` on a menu item in place of
- * `onSelect`, which offline keeps the menu open.
+ * `onSelect`, which offline keeps the menu open. With `held`, why the
+ * controls wait online too, as for a page with a change not sent yet.
  */
-export function useNeedsConnection() {
+export function useNeedsConnection(held: string | null = null) {
   const offline = useOffline();
+  const hint = offline ? NEEDS_CONNECTION : held;
   return {
     offline,
     click: <E extends { preventDefault(): void }>(onClick: (event: E) => void) =>
-      offline ? { ...WAITING, onClick: stay } : { onClick },
+      hint ? { ...waiting(hint), onClick: stay } : { onClick },
     select: (onSelect: (event: Event) => void) =>
-      offline ? { ...WAITING, onSelect: stay } : { onSelect },
+      hint ? { ...waiting(hint), onSelect: stay } : { onSelect },
   };
 }

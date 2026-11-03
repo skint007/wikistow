@@ -33,6 +33,7 @@ import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { makeFolder, makePage } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
@@ -443,7 +444,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           <div className="flex flex-1">
             <Button
               className="flex-1 rounded-l-control rounded-r-none"
-              {...needs.click(() => setCreating({ kind: 'page', parentId: null }))}
+              // Made on this device offline (ADR 0009, decision 7).
+              onClick={() => setCreating({ kind: 'page', parentId: null })}
             >
               <Plus strokeWidth={1.75} /> New page
             </Button>
@@ -469,7 +471,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             size="icon"
             aria-label="New folder"
             className="rounded-control"
-            {...needs.click(() => setCreating({ kind: 'folder', parentId: null }))}
+            onClick={() => setCreating({ kind: 'folder', parentId: null })}
           >
             <FolderPlus strokeWidth={1.75} />
           </Button>
@@ -831,7 +833,7 @@ function CreateDialog({
     setError(null);
     try {
       if (creating.kind === 'folder') {
-        const folderId = await spaceOperations.createFolder(ctx, {
+        const folderId = await makeFolder(ctx, {
           spaceId,
           parentId: creating.parentId,
           name: name.trim(),
@@ -840,7 +842,7 @@ function CreateDialog({
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
-        const pageId = await pageOperations.createPage(ctx, {
+        const pageId = await makePage(ctx, {
           spaceId,
           parentId: creating.parentId,
           title: name.trim(),

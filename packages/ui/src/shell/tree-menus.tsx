@@ -23,7 +23,8 @@ import { useClient } from '../vault/store';
 
 /**
  * One item of a row's menu, the same in its ⋯ menu and its right-click
- * menu. All but Open need the server (`offline`: works offline).
+ * menu. All but Open and making a page or folder need the server
+ * (`offline`: works offline, ADR 0009, decisions 7 and 8).
  */
 export type MenuAction = {
   label: string;
@@ -37,7 +38,9 @@ export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
 /** An item, or nothing where the person can't do it. */
 const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
-  onSelect && { label, onSelect, destructive, offline: label === 'Open' };
+  onSelect && { label, onSelect, destructive, offline: OFFLINE.has(label) };
+
+const OFFLINE = new Set(['Open', 'New page here', 'New folder here']);
 
 /**
  * A folder's actions: for everyone, Open and Export; for editors, what they

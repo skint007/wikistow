@@ -12,6 +12,7 @@ import {
 } from '@wikistow/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type RefObject } from 'react';
+import { attachFile } from '../../data/offline-changes';
 import { uploadMessage } from '../messages';
 import { vaultStore } from '../../vault/store';
 import { ATTACHMENT_SCHEME, forgetDecrypted } from '../attachments';
@@ -94,7 +95,7 @@ export function useCoverEditor({
     const work = (async () => {
       try {
         handle.checkSize();
-        const ref = await pageOperations.uploadAttachment(ctx, page, await bannerImage(file));
+        const ref = await attachFile(ctx, page, await bannerImage(file));
         if (vaultStore.epoch() !== epoch || bannerChoices.current !== choices) return;
         apply({ banner: { kind: 'image', attachmentId: ref.id, focal: 50 } }, ref);
       } catch (caught) {
@@ -119,7 +120,7 @@ export function useCoverEditor({
     const work = (async () => {
       try {
         handle.checkSize();
-        const ref = await pageOperations.uploadAttachment(ctx, page, await iconImage(file));
+        const ref = await attachFile(ctx, page, await iconImage(file));
         if (vaultStore.epoch() !== epoch || iconChoices.current !== choices) return;
         apply({ icon: { attachmentId: ref.id }, symbol: null }, ref);
       } catch (caught) {

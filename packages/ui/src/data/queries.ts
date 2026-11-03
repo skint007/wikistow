@@ -6,6 +6,7 @@ import {
   pageOperations,
   publicationOperations,
   publicLinkOperations,
+  queueOperations,
   searchOperations,
   sharingOperations,
   spaceKeys,
@@ -67,26 +68,47 @@ export const spaceOrderQuery = (ctx: ClientContext) =>
       ),
   });
 
-/** A space's tree; offline, its kept pages only (`keptTree`). */
+/** The changes waiting on this device (ADR 0009, decision 7), none where it keeps no queue. */
+const queued = async (ctx: ClientContext) =>
+  (await ctx.keptContent?.queue.entries().catch(() => null)) ?? [];
+
+/**
+ * A space's tree; offline, its kept pages only (`keptTree`). With the
+ * changes waiting on this device: folders and pages made offline, and
+ * pages labelled from a draft saved here (`withQueued`).
+ */
 export const treeQuery = (ctx: ClientContext, spaceId: SpaceId) =>
   queryOptions({
     queryKey: [PLAIN, 'tree', spaceId],
-    queryFn: () =>
-      orKept(
-        () => spaceOperations.loadTree(ctx, spaceId),
-        () => keptOperations.keptTree(ctx, spaceId),
-      ),
+    queryFn: async () => {
+      const [tree, entries] = await Promise.all([
+        orKept(
+          () => spaceOperations.loadTree(ctx, spaceId),
+          () => keptOperations.keptTree(ctx, spaceId),
+        ),
+        queued(ctx),
+      ]);
+      return queueOperations.withQueued(tree, spaceId, entries);
+    },
   });
 
-/** What opening a page says of it; offline, worked out from its kept space (`keptPageInfo`). */
+/**
+ * What opening a page says of it; offline, worked out from its kept space
+ * (`keptPageInfo`), and for a page made offline, from its change until it
+ * is made (`queuedPageInfo`).
+ */
 export const pageQuery = (ctx: ClientContext, pageId: PageId) =>
   queryOptions({
     queryKey: [PLAIN, 'page', pageId],
-    queryFn: () =>
-      orKept(
+    queryFn: async () => {
+      const entry = await ctx.keptContent?.queue.entry(pageId).catch(() => null);
+      const made = entry?.kind === 'page' && queueOperations.queuedPageInfo(entry);
+      if (made) return made;
+      return orKept(
         () => pageOperations.loadPage(ctx, pageId),
         () => keptOperations.keptPageInfo(ctx, pageId),
-      ),
+      );
+    },
   });
 
 /**
@@ -294,8 +316,29 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
     queryKey: searchIndexKey,
     queryFn: async ({ signal }) => {
       const shown = queryClient.getQueryData<searchOperations.PageIndex>(searchIndexKey);
-      // Offline, one built from what's kept stays as it is until the server answers.
-      if (shown && !connection.get().online && fromKept.has(shown)) return shown;
+      // Offline, one built from what's kept stays as it is until the server
+      // answers, but for drafts saved on this device, which go in as written
+      // (ADR 0009, decision 7): they need nothing from the server.
+      if (shown && !connection.get().online && fromKept.has(shown)) {
+        const changes = takeChanges(queryClient);
+        const saved = changes.saved ?? [];
+        const held = saved.filter(
+          (save) => shown.page(save.spaceId, save.pageId)?.revisionId === save.basedOn,
+        );
+        noteBack(queryClient, {
+          spaces: changes.spaces,
+          saved: saved.filter((save) => !held.includes(save)),
+        });
+        if (held.length === 0) return shown;
+        const index = await searchOperations.updateIndex(
+          ctx,
+          shown,
+          { spaces: [], saved: held },
+          { signal, readLinks: readIndexLinks },
+        );
+        fromKept.add(index);
+        return index;
+      }
       queryClient.setQueryData(searchProgressKey, { pages: 0, total: 0 });
       const onProgress = (progress: searchOperations.IndexProgress) =>
         queryClient.setQueryData(searchProgressKey, progress);

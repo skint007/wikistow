@@ -138,8 +138,13 @@ export class DraftSession {
   readonly #listeners = new Set<() => void>();
 
   constructor(
-    /** The draft as opened, and the region it was opened in. */
-    opened: { base: RevisionId; payload: PagePayload; region: Region },
+    /**
+     * The draft as opened, and the region it was opened in. With `theirs`,
+     * the draft someone else saved over `base` meanwhile, `payload` is an
+     * edit not saved over it, as a change made offline that came back as a
+     * conflict (ADR 0009, decision 7): the session opens stopped at it.
+     */
+    opened: { base: RevisionId; payload: PagePayload; region: Region; theirs?: RevisionId | null },
     ports: DraftPorts,
     surface: { readonly current: EditorSurfaceHandle | null },
     timing?: { debounceMs: number; maxWaitMs: number },
@@ -170,6 +175,10 @@ export class DraftSession {
       tooLarge: null,
       saveError: undefined,
     };
+    if (opened.theirs) {
+      this.#theirs = opened.theirs;
+      this.#autosave.hold(() => this.#current());
+    }
   }
 
   /**
@@ -401,6 +410,24 @@ export class DraftSession {
 
   hasUnsaved() {
     return this.#unreported || this.#autosave.unsaved() !== null;
+  }
+
+  /**
+   * `revisionId`, a version of this draft sent from this device's queue, is
+   * this session's own: the page's head naming it isn't a conflict.
+   */
+  own(revisionId: RevisionId) {
+    this.#known.add(revisionId);
+  }
+
+  /**
+   * `revisionId`, sent from this device's queue, landed: the next save goes
+   * on top of it, as after one of this session's own, its region opened afresh.
+   */
+  landed(revisionId: RevisionId) {
+    this.#known.add(revisionId);
+    this.#base = revisionId;
+    this.#region = null;
   }
 
   /** A save is waiting for its answer, or a file is still uploading. */
