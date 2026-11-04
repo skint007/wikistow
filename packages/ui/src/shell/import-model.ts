@@ -22,6 +22,15 @@ export function importStatus({ phase, done, total }: importOperations.ImportProg
   return `${what}: ${done.toLocaleString()} of ${total.toLocaleString()}`;
 }
 
+/** What an import stopped partway left, as the dialog says it. */
+export function stoppedStatus(unfinished: number): string {
+  return unfinished === 0
+    ? 'Import stopped. Import again to finish: what is already imported stays as it is.'
+    : unfinished === 1
+      ? 'Import stopped. 1 page is still an empty draft. Import again to finish it: what is already imported stays as it is.'
+      : `Import stopped. ${unfinished.toLocaleString()} pages are still empty drafts. Import again to finish them: what is already imported stays as it is.`;
+}
+
 /** What an import made, as the dialog says it once it has finished. */
 export function doneStatus(summary: importOperations.ImportSummary): string {
   const { folders, pages, existing, attachments } = summary;

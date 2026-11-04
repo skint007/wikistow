@@ -50,6 +50,8 @@ function DialogContent({
   labelledBy,
   describedBy,
   locked = false,
+  closesOnBackdrop = true,
+  onDismiss,
 }: {
   className?: string;
   /** Classes for the dialog box itself, such as its width; `className` styles its padded body. */
@@ -62,9 +64,21 @@ function DialogContent({
   describedBy?: string | undefined;
   /** While work in it runs: Escape, the backdrop and the close button don't close it. */
   locked?: boolean;
+  /** False when a click outside it, easily made by mistake, shouldn't close it. */
+  closesOnBackdrop?: boolean;
+  /**
+   * Set while closing needs asking first: Escape, the close button and the
+   * backdrop call this instead of closing it.
+   */
+  onDismiss?: (() => void) | undefined;
 }) {
   const { open, onOpenChange, titleId, descriptionId } = useDialog();
   const [dialog, setDialog] = React.useState<HTMLDialogElement | null>(null);
+  const dismiss = () => {
+    if (locked) return;
+    if (onDismiss) onDismiss();
+    else onOpenChange(false);
+  };
 
   React.useEffect(() => {
     if (!dialog) return;
@@ -79,20 +93,25 @@ function DialogContent({
       aria-labelledby={labelledBy ?? titleId}
       aria-describedby={describedBy ?? descriptionId}
       onCancel={(event) => {
-        if (locked) event.preventDefault();
+        if (!locked && !onDismiss) return;
+        event.preventDefault();
+        dismiss();
       }}
       // Escape and form[method=dialog] close it natively; keep React in step.
-      // A browser may close it past a refused Escape, so a locked one reopens.
+      // A browser may close it past a refused Escape, so a locked one reopens,
+      // and so does one that asks first.
       // The event comes a task after close(), so it's stale if the dialog has
       // opened again since, as when New page follows Create folder at once.
       onClose={(event) => {
         if (event.currentTarget.open) return;
-        if (locked && open) event.currentTarget.showModal();
-        else onOpenChange(false);
+        if ((locked || onDismiss) && open) {
+          event.currentTarget.showModal();
+          if (!locked) onDismiss?.();
+        } else onOpenChange(false);
       }}
       // A click on the backdrop lands on the <dialog> itself.
       onClick={(event) => {
-        if (event.target === event.currentTarget && !locked) onOpenChange(false);
+        if (event.target === event.currentTarget && closesOnBackdrop) dismiss();
       }}
       className={cn(
         // Its body scrolls, not the box: a menu in it, positioned against the
@@ -121,7 +140,7 @@ function DialogContent({
       {open && showCloseButton && !locked && (
         <button
           type="button"
-          onClick={() => onOpenChange(false)}
+          onClick={dismiss}
           className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-control text-muted-foreground hover:tint hover:text-foreground active:tint-strong [&_svg]:size-4"
         >
           <XIcon />
