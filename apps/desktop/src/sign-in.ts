@@ -42,6 +42,18 @@ export function handoffCode(
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * The launch argument that is a link for this app, `wikistow:…`, or
+ * `wikistow-beta:…` for the beta, if any. `handoffCode` checks the rest.
+ */
+export function linkArgument(
+  argv: readonly string[],
+  which: desktopRoutes.DesktopApp = 'stable',
+): string | undefined {
+  const scheme = new URL(desktopRoutes.DESKTOP_LINKS[which]).protocol;
+  return argv.find((arg) => arg.toLowerCase().startsWith(scheme));
+}
+
 /** A fresh verifier, and the challenge the browser page sends for it. */
 export function newVerifier(): { verifier: string; challenge: string } {
   const verifier = randomBytes(32).toString('base64url');
