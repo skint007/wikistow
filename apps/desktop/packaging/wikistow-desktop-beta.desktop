@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=WikiStow Beta
+Comment=Your family's encrypted wiki, beta channel
+Exec=wikistow-desktop-beta %U
+Icon=wikistow-desktop-beta
+Terminal=false
+Categories=Office;
+MimeType=x-scheme-handler/wikistow-beta;
+StartupWMClass=wikistow-desktop-beta

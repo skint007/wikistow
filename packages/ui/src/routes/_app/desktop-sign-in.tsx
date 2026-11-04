@@ -18,12 +18,17 @@ import { errorMessage } from '../../errors';
  * Approving needs a recent sign-in, so it asks for the password first.
  */
 export const Route = createFileRoute('/_app/desktop-sign-in')({
-  validateSearch: z.object({ challenge: desktopRoutes.Challenge.optional().catch(undefined) }),
+  validateSearch: z.object({
+    challenge: desktopRoutes.Challenge.optional().catch(undefined),
+    // The beta app, beside the stable one, takes `wikistow-beta://` links.
+    app: desktopRoutes.DesktopApp.optional().catch(undefined),
+  }),
   component: DesktopSignIn,
 });
 
 function DesktopSignIn() {
-  const { challenge } = Route.useSearch();
+  const { challenge, app = 'stable' } = Route.useSearch();
+  const appName = app === 'beta' ? 'WikiStow Beta' : 'WikiStow';
   const { data: me } = useQuery(meQuery);
   const withReauth = useReauth();
   const [link, setLink] = useState<string | null>(null);
@@ -47,7 +52,7 @@ function DesktopSignIn() {
       const { code } = await withReauth(() =>
         api.call(desktopRoutes.approveHandoff, { body: { challenge } }),
       );
-      const next = `${desktopRoutes.DESKTOP_LINK}?code=${code}`;
+      const next = `${desktopRoutes.DESKTOP_LINKS[app]}?code=${code}`;
       setLink(next);
       window.location.assign(next);
     } catch (caught) {
@@ -61,11 +66,11 @@ function DesktopSignIn() {
     return (
       <AuthCard
         title="Back to the desktop app"
-        description="Your browser should have opened WikiStow. You can close this tab."
+        description={`Your browser should have opened ${appName}. You can close this tab.`}
       >
         <div className="grid gap-2 text-sm">
           <a href={link} data-testid="desktop-link" className="text-primary underline">
-            Open WikiStow
+            Open {appName}
           </a>
           <p className="text-muted-foreground">
             Never share this link. It signs whoever started the sign-in into your account.

@@ -7,4 +7,4 @@ Icon=wikistow-desktop
 Terminal=false
 Categories=Office;
 MimeType=x-scheme-handler/wikistow;
-StartupWMClass=WikiStow
+StartupWMClass=wikistow-desktop

@@ -26,4 +26,9 @@ describe('handoffCode', () => {
     expect(handoffCode(`wikistow://signed-in/?code=${code}`)).toBe(code);
     expect(handoffCode(`wikistow://signed-in/other?code=${code}`)).toBeNull();
   });
+  it('takes only its own app’s link, so the beta and stable apps never take each other’s', () => {
+    expect(handoffCode(`wikistow-beta://signed-in?code=${code}`, 'beta')).toBe(code);
+    expect(handoffCode(`wikistow-beta://signed-in?code=${code}`)).toBeNull();
+    expect(handoffCode(`wikistow://signed-in?code=${code}`, 'beta')).toBeNull();
+  });
 });

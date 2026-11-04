@@ -124,8 +124,12 @@ jobs:
           name="wikistow-desktop-$version"
           mkdir -p "release/$name"
           cp apps/desktop/out/app.asar LICENSE "release/$name/"
+          # The beta's launcher entry and icons too: the AUR's beta package
+          # installs the same archive under the beta's names.
           cp apps/desktop/packaging/wikistow-desktop apps/desktop/packaging/wikistow-desktop.desktop \
             apps/desktop/packaging/wikistow-desktop.png apps/desktop/packaging/wikistow-desktop.svg \
+            apps/desktop/packaging/wikistow-desktop-beta.desktop \
+            apps/desktop/packaging/wikistow-desktop-beta.png apps/desktop/packaging/wikistow-desktop-beta.svg \
             "release/$name/"
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
