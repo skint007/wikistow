@@ -52,6 +52,7 @@ import { shortcut } from './shortcuts.ts';
 import {
   checkServer,
   handoffCode,
+  linkArgument,
   newVerifier,
   redeem,
   serverOrigin,
@@ -707,7 +708,7 @@ app.on('open-url', (event, url) => {
 app.on('second-instance', (_event, argv) => {
   if (window?.isMinimized()) window.restore();
   window?.focus();
-  const link = argv.find((arg) => arg.startsWith('wikistow:'));
+  const link = linkArgument(argv, which);
   if (link) void linkArrived(link);
   // Asked for while a plugin holds the window: this launch only hands it over.
   if (argv.includes('--safe-mode') && !safeMode) setSafeMode(true);
