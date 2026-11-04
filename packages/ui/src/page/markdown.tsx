@@ -345,12 +345,15 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
     <PageBody value={context}>
       <PageProperties value={properties}>
         <OtherPagesContext value={others}>
+          {/* Find on page leaves the page's properties out (#276). */}
           {frontmatter !== null && (
-            <PropertiesBox
-              frontmatter={frontmatter}
-              scope={bodyLinkScope(context)}
-              page={attachments.page}
-            />
+            <div data-find="skip" className="contents">
+              <PropertiesBox
+                frontmatter={frontmatter}
+                scope={bodyLinkScope(context)}
+                page={attachments.page}
+              />
+            </div>
           )}
           {read.isPending ? (
             <StillReading />

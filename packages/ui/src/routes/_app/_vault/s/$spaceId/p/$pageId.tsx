@@ -56,6 +56,8 @@ import { useDeviceSwitch } from '../../../../../../shell/device-switch';
 import { PLAIN } from '../../../../../../vault/store';
 import { errorMessage, pageOpenMessage } from '../../../../../../errors';
 import { decryptedQuery } from '../../../../../../page/attachments';
+import { FindBar, PageFind, PageFindContext } from '../../../../../../page/find/find-bar';
+import { pageText } from '../../../../../../page/find/page-text';
 import { BannerPicker } from '../../../../../../page/cover/banner-picker';
 import { bodyTop, CoverBand, PageBadge } from '../../../../../../page/cover/cover-band';
 import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
@@ -366,6 +368,17 @@ function PageBody({
   const headings = useHeadings(shownBody);
   // The page's card, whose scrolling says which heading is being read.
   const [card, setCard] = useState<HTMLElement | null>(null);
+  // Find on page (#276): the page as read is searched in its title and
+  // body (`data-find-root`); the draft view's editor gives itself.
+  const [find] = useState(() => new PageFind());
+  const reader = useMemo(
+    () =>
+      card && model.view === 'published'
+        ? pageText(() => [...card.querySelectorAll('[data-find-root]')])
+        : null,
+    [card, model.view],
+  );
+  useEffect(() => (reader ? find.add(reader) : undefined), [find, reader]);
   const contents = model.view === 'published' && headings.length > 1;
   // The latest publication as shown, with the changes made while reading it.
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
@@ -617,7 +630,7 @@ function PageBody({
   };
 
   return (
-    <PageCard ref={setCard}>
+    <PageCard ref={setCard} find={find}>
       <CoverBand
         banner={shown?.cover.banner ?? { kind: 'theme' }}
         attachments={{ ctx, page, audience: model.view, attachments: shown?.attachments ?? [] }}
@@ -704,76 +717,83 @@ function PageBody({
                   <Unlink strokeWidth={1.75} /> Detach to edit…
                 </Button>
               )}
-              {(sharer || canEdit) && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    ref={menuButton}
-                    aria-label="Page actions"
-                    className="grid size-8 place-items-center rounded-control hover:tint active:tint-strong"
-                  >
-                    <MoreHorizontal className="size-4" strokeWidth={1.75} />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    onCloseAutoFocus={(event) => {
-                      if (fromMenu.current) event.preventDefault();
-                      fromMenu.current = false;
+              {/* Everyone has it, for Find on page, which phones have no key for. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  ref={menuButton}
+                  aria-label="Page actions"
+                  className="grid size-8 place-items-center rounded-control hover:tint active:tint-strong"
+                >
+                  <MoreHorizontal className="size-4" strokeWidth={1.75} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  onCloseAutoFocus={(event) => {
+                    if (fromMenu.current) event.preventDefault();
+                    fromMenu.current = false;
+                  }}
+                >
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      fromMenu.current = true;
+                      find.open(menuButton.current);
                     }}
                   >
-                    {/* On phones the toolbar has no room for Banner. */}
-                    {editingCover && (
-                      <>
-                        <DropdownMenuItem
-                          className="min-[900px]:hidden"
-                          onSelect={() => openFromMenu(changeBanner)}
-                        >
-                          Change banner
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="min-[900px]:hidden"
-                          onSelect={() => openFromMenu(changeEmoji)}
-                        >
-                          {icon ? 'Change image' : symbol ? 'Change icon' : 'Change emoji'}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    {canEdit && (
-                      <DropdownMenuItem {...sendsFirst.select(() => setMoving('move'))}>
-                        Move to…
-                      </DropdownMenuItem>
-                    )}
-                    {canEdit && (
-                      <DropdownMenuItem {...sendsFirst.select(() => setMoving('copy'))}>
-                        Copy to…
-                      </DropdownMenuItem>
-                    )}
-                    {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
-                    {canEdit && info.canPublish && (
-                      <DropdownMenuItem {...sendsFirst.select(() => setPublishing(true))}>
-                        Publish to another space…
-                      </DropdownMenuItem>
-                    )}
-                    {publishedHead && info.canPublish && (
-                      <DropdownMenuItem {...needs.select(onShareLink)}>
-                        Share public link…
-                      </DropdownMenuItem>
-                    )}
-                    {publishedHead && info.canPublish && (
-                      <DropdownMenuItem {...needs.select(() => setUnpublishing(true))}>
-                        Unpublish…
-                      </DropdownMenuItem>
-                    )}
-                    {sharer && (
+                    Find on page
+                  </DropdownMenuItem>
+                  {/* On phones the toolbar has no room for Banner. */}
+                  {editingCover && (
+                    <>
                       <DropdownMenuItem
-                        variant="destructive"
-                        {...needs.select(() => setDeleting(true))}
+                        className="min-[900px]:hidden"
+                        onSelect={() => openFromMenu(changeBanner)}
                       >
-                        Delete page
+                        Change banner
                       </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+                      <DropdownMenuItem
+                        className="min-[900px]:hidden"
+                        onSelect={() => openFromMenu(changeEmoji)}
+                      >
+                        {icon ? 'Change image' : symbol ? 'Change icon' : 'Change emoji'}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {canEdit && (
+                    <DropdownMenuItem {...sendsFirst.select(() => setMoving('move'))}>
+                      Move to…
+                    </DropdownMenuItem>
+                  )}
+                  {canEdit && (
+                    <DropdownMenuItem {...sendsFirst.select(() => setMoving('copy'))}>
+                      Copy to…
+                    </DropdownMenuItem>
+                  )}
+                  {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
+                  {canEdit && info.canPublish && (
+                    <DropdownMenuItem {...sendsFirst.select(() => setPublishing(true))}>
+                      Publish to another space…
+                    </DropdownMenuItem>
+                  )}
+                  {publishedHead && info.canPublish && (
+                    <DropdownMenuItem {...needs.select(onShareLink)}>
+                      Share public link…
+                    </DropdownMenuItem>
+                  )}
+                  {publishedHead && info.canPublish && (
+                    <DropdownMenuItem {...needs.select(() => setUnpublishing(true))}>
+                      Unpublish…
+                    </DropdownMenuItem>
+                  )}
+                  {sharer && (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      {...needs.select(() => setDeleting(true))}
+                    >
+                      Delete page
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </PopoverAnchor>
           {editingCover && shown && (
@@ -846,7 +866,7 @@ function PageBody({
             </p>
           )}
           {model.view === 'published' && (
-            <h1 className="text-[32px] leading-tight font-extrabold">
+            <h1 data-find-root className="text-[32px] leading-tight font-extrabold">
               <Name>{pageTitle(payload?.title ?? null)}</Name>
             </h1>
           )}
@@ -994,7 +1014,7 @@ function PageBody({
                   className="@min-[960px]:hidden"
                 />
               )}
-              <div ref={setShownBody} className="contents">
+              <div ref={setShownBody} data-find-root className="contents">
                 <ReadingChanges value={readingHere}>
                   <Markdown
                     source={shownMarkdown ?? payload.markdown}
@@ -1225,14 +1245,30 @@ function Pills({
  * placed in it, such as `sr-only` text, which would otherwise stretch the
  * window to wherever it sits in a long page.
  */
-function PageCard({ children, ref }: { children: React.ReactNode; ref?: React.Ref<HTMLElement> }) {
+function PageCard({
+  children,
+  find,
+  ref,
+}: {
+  children: React.ReactNode;
+  /** Find on page for what it shows, with its bar over the page (#276). */
+  find?: PageFind;
+  ref?: React.Ref<HTMLElement>;
+}) {
   return (
     <article
       ref={ref}
       data-region="page"
       className="@container relative flex h-full min-h-0 flex-col overflow-y-auto rounded-card bg-card shadow-card"
     >
-      {children}
+      {find ? (
+        <PageFindContext value={find}>
+          <FindBar find={find} />
+          {children}
+        </PageFindContext>
+      ) : (
+        children
+      )}
     </article>
   );
 }

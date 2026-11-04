@@ -396,4 +396,23 @@
     @apply text-xs;
     content: attr(data-note);
   }
+  /* Find on page's matches (page/find), the current one in full, its text black (6.6:1
+   * on the light palette's amber, more on the dark ones'): decorations in the visual
+   * editor, highlights over the page as read. Apart, as a browser without `::highlight()` drops
+   * a rule naming it. The source editor's match these (source/find.ts). */
+  .find-match {
+    border-radius: 2px;
+    background-color: color-mix(in oklab, var(--draft-dot) 30%, transparent);
+  }
+  .find-match.find-current {
+    background-color: var(--draft-dot);
+    color: black;
+  }
+  ::highlight(find-match) {
+    background-color: color-mix(in oklab, var(--draft-dot) 30%, transparent);
+  }
+  ::highlight(find-current) {
+    background-color: var(--draft-dot);
+    color: black;
+  }
 }

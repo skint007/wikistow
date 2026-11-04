@@ -1,10 +1,11 @@
-import { insertNewline } from '@codemirror/commands';
+import { insertNewline, undo } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
 import { act, createRef, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import CodeMirrorSurface from '../src/page/editor/source/codemirror.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
+import type { Found } from '../src/page/find/match.ts';
 
 // The real source surface, in Chromium: the text that leaves it is the
 // page's exact bytes.
@@ -191,6 +192,76 @@ describe('the source surface', () => {
       expect(m.handle.read()).toBe(
         'Before ![photo.png](attachment:a)typed at the spot \n\nElsewhere and here',
       );
+    });
+  });
+
+  describe('Find on page', () => {
+    const finding = (m: Mounted) => {
+      const found: Found[] = [];
+      const findable = m.handle.findable;
+      if (!findable) throw new Error('The source surface finds nothing');
+      const session = findable.open((f) => found.push(f));
+      return { session, last: () => found.at(-1) };
+    };
+    const selected = (m: Mounted) => {
+      const { from, to } = m.view.state.selection.main;
+      return m.view.state.sliceDoc(from, to);
+    };
+    const marked = (m: Mounted) =>
+      [...m.view.contentDOM.querySelectorAll('.cm-find-match')].map((span) => span.textContent);
+
+    it('marks every match and selects the first after the cursor, going round them', () => {
+      const m = mount('Rose\r\nrose and ROSE\r\n');
+      act(() => m.view.dispatch({ selection: { anchor: 3 } }));
+      const { session, last } = finding(m);
+      act(() => session.search({ text: 'rose', matchCase: false }));
+      expect(last()).toEqual({ count: 3, current: 1 });
+      expect(marked(m)).toEqual(['Rose', 'rose', 'ROSE']);
+      expect(selected(m)).toBe('rose');
+      act(() => session.step(1));
+      act(() => session.step(1));
+      expect(last()).toEqual({ count: 3, current: 0 });
+      act(() => session.search({ text: 'ROSE', matchCase: true }));
+      expect(last()).toEqual({ count: 1, current: 0 });
+      // The cursor moved off it: nothing is current, until a step.
+      act(() => m.view.dispatch({ selection: { anchor: 0 } }));
+      expect(last()).toEqual({ count: 1, current: null });
+      act(() => session.end());
+      expect(marked(m)).toEqual([]);
+      expect(m.changes).toEqual([]);
+    });
+
+    it('counts again as the text is edited', () => {
+      const m = mount('one pea\n');
+      const { session, last } = finding(m);
+      act(() => session.search({ text: 'pea', matchCase: false }));
+      act(() => m.view.dispatch({ changes: { from: 0, insert: 'pea and ' } }));
+      expect(last()?.count).toBe(2);
+    });
+
+    it('replaces the current match and goes to the next, each an edit undone alone', () => {
+      const m = mount('cat, cat\r\ncat\r\n');
+      const { session, last } = finding(m);
+      act(() => session.search({ text: 'cat', matchCase: false }));
+      act(() => session.replace('dog'));
+      expect(m.handle.read()).toBe('dog, cat\r\ncat\r\n');
+      expect(last()).toEqual({ count: 2, current: 0 });
+      expect(m.changes.at(-1)).toBe('dog, cat\r\ncat\r\n');
+      act(() => void undo(m.view));
+      expect(m.handle.read()).toBe('cat, cat\r\ncat\r\n');
+    });
+
+    it('replaces every match as one edit, line breaks kept', () => {
+      const m = mount('cat, Cat\r\ncat\r\n');
+      const { session, last } = finding(m);
+      act(() => session.search({ text: 'cat', matchCase: false }));
+      let count = 0;
+      act(() => void (count = session.replaceAll('a\nb')));
+      expect(count).toBe(3);
+      expect(m.handle.read()).toBe('a\r\nb, a\r\nb\r\na\r\nb\r\n');
+      expect(last()).toEqual({ count: 0, current: null });
+      act(() => void undo(m.view));
+      expect(m.handle.read()).toBe('cat, Cat\r\ncat\r\n');
     });
   });
 });

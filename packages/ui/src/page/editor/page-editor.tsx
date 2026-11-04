@@ -22,6 +22,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { emptyProperties, joinPage } from '../properties';
 import { PropertiesEditor, type PropertyKeys } from '../properties-box';
+import type { Findable } from '../find/findable';
+import { useFindTarget } from '../find/find-bar';
 import { pastedFiles } from './pasted-files';
 import { preloadSourceEditor, SourceEditor } from './source-editor';
 import { lineBreakOf, type EditorSurfaceHandle, type EditorSurfaceProps } from './surface';
@@ -150,8 +152,17 @@ export function PageEditor({
   // In split, the side the person was in last, where Insert in page puts its code.
   const lastSide = useRef<'source' | 'visual'>('visual');
   const synced = useRef(0);
+  // What Find on page searches: the editor the page's text is in, or in
+  // split, the side the person was in last.
+  const [findIn, setFindIn] = useState<Findable | null>(null);
+  const [refind] = useState(() => () => {
+    const side = modeNow.current === 'split' && lastSide.current === 'source' ? mirror : surface;
+    setFindIn(side.current?.findable ?? null);
+  });
+  useFindTarget(findIn);
   const [attach] = useState(() => (handle: EditorSurfaceHandle | null) => {
     surface.current = handle;
+    refind();
     if (!handle) return;
     // In split, the source's text still being checked goes in once it is.
     if (modeNow.current !== 'split' || given.current === null) {
@@ -167,6 +178,7 @@ export function PageEditor({
   });
   const [attachMirror] = useState(() => (handle: EditorSurfaceHandle | null) => {
     mirror.current = handle;
+    refind();
     if (handle && handle.read() !== body.current) handle.replace(body.current);
   });
   const setMode = (next: Shown) => {
@@ -178,6 +190,7 @@ export function PageEditor({
     }
     modeNow.current = next;
     setShown(next);
+    refind();
   };
   const [note, setNote] = useState<string | null>(null);
   const asked = useRef(0);
@@ -579,6 +592,7 @@ export function PageEditor({
               onFocusCapture={() => {
                 lastSide.current = 'source';
                 takeVisual();
+                refind();
               }}
             >
               <SourceEditor {...(mode === 'source' ? surfaceProps : mirrorProps)} />
@@ -592,6 +606,7 @@ export function PageEditor({
               onFocusCapture={() => {
                 lastSide.current = 'visual';
                 syncNow();
+                refind();
               }}
               className={cn('min-h-0 min-w-0', mode === 'split' && note && 'opacity-60')}
             >

@@ -44,7 +44,7 @@ import { APP_NAMES, desktopApp, windowIcon } from './install.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile, keptFolder } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
-import { macMenu } from './mac-menu.ts';
+import { macMenu, type MenuAction } from './mac-menu.ts';
 import { libraryPlugins } from './plugins/library.ts';
 import { desktopPlugins, pluginAddress } from './plugins/plugins.ts';
 import { sealedByKeyring, secretFile, type Cipher, type Secrets } from './secrets.ts';
@@ -596,9 +596,10 @@ const windowState = (window: BrowserWindow): WindowState => ({
   fullScreen: window.isFullScreen(),
 });
 
-/** What a shortcut or a Mac's menu asks for: quitting, or `windowAction`. */
-function act(action: WindowAction | 'quit') {
+/** What a shortcut or a Mac's menu asks for: quitting, Find on page, or `windowAction`. */
+function act(action: MenuAction) {
   if (action === 'quit') app.quit();
+  else if (action === 'find') window?.webContents.send(DESKTOP_CHANNELS.onFind);
   else windowAction(action);
 }
 

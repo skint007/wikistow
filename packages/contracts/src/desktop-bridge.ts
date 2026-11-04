@@ -273,9 +273,14 @@ export type DesktopBridge = {
   /**
    * Hear of each change to `windowState`, as the window is maximized,
    * restored or put in full screen, however that happened. The returned
-   * function stops it. The one call main makes to the page, not the other way.
+   * function stops it. One of the two calls main makes to the page, not the other way.
    */
   onWindowState(listener: (state: WindowState) => void): () => void;
+  /**
+   * Hear each Find… picked from a Mac's Edit menu, which opens Find on page
+   * (#276). Cmd+F itself goes to the page first. The returned function stops it.
+   */
+  onFind(listener: () => void): () => void;
 };
 
 /** The IPC channels behind `DesktopBridge`, one per method. */
@@ -318,6 +323,7 @@ export const DESKTOP_CHANNELS = {
   windowAction: 'wikistow:window-action',
   windowState: 'wikistow:window-state',
   onWindowState: 'wikistow:window-state-changed',
+  onFind: 'wikistow:find',
 } as const satisfies Record<keyof DesktopBridge, string>;
 
 /** What a channel answers: the value, or the message for a failure. */
