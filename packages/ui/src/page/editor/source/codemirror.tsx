@@ -15,11 +15,13 @@ import {
   keymap,
 } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import type { Found } from '../../find/match';
 import { textEdits } from '../../link-renames';
 import { lineBreakFor, type EditorSurfaceProps } from '../surface';
 import { referenceCompletions, wikilinkCompletions } from './completion';
 import { multipleCursors } from './cursors';
+import { sourceFind, sourceFindable } from './find';
 import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
@@ -59,6 +61,14 @@ export default function CodeMirrorSurface({
     latest.current = { onChange, links, onFiles, properties, otherPages };
   });
   const text = useRef(initial);
+  // Who hears what Find on page finds, while it searches here.
+  const findReport = useRef<((found: Found) => void) | null>(null);
+  const [findable] = useState(() =>
+    sourceFindable(
+      () => view.current,
+      (report) => (findReport.current = report),
+    ),
+  );
 
   useLayoutEffect(() => {
     const element = host.current;
@@ -74,6 +84,7 @@ export default function CodeMirrorSurface({
           // special character, and is kept byte for byte.
           lineBreak: lineBreakFor(text.current, lineBreak),
           latest: () => latest.current,
+          finding: () => findReport.current,
           changed: (markdown) => {
             text.current = markdown;
             latest.current.onChange(markdown);
@@ -98,6 +109,7 @@ export default function CodeMirrorSurface({
   useImperativeHandle(
     ref,
     () => ({
+      findable,
       read: () => view.current?.state.sliceDoc() ?? text.current,
       replace(markdown) {
         text.current = markdown;
@@ -144,7 +156,7 @@ export default function CodeMirrorSurface({
         editor.focus();
       },
     }),
-    [],
+    [findable],
   );
 
   return (
@@ -158,10 +170,12 @@ export default function CodeMirrorSurface({
 function extensions({
   lineBreak,
   latest,
+  finding,
   changed,
 }: {
   lineBreak: string;
   latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties' | 'otherPages'>;
+  finding: () => ((found: Found) => void) | null;
   changed: (markdown: string) => void;
 }): Extension {
   const assist = () => latest().links;
@@ -192,6 +206,7 @@ function extensions({
     selectionWraps,
     typingLines,
     multipleCursors,
+    sourceFind(finding),
     keymap.of([
       { key: 'Enter', run: insertNewline },
       ...completionKeymap,

@@ -21,12 +21,14 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { createPortal } from 'react-dom';
+import type { Found } from '../../find/match';
 import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
+import { visualFind, visualFindable } from './find';
 import { formatKeys } from './formatting';
 import { codeHighlights } from './highlight';
 import { propertiesChanged, propertyReferences } from './property-references';
@@ -474,6 +476,18 @@ function Surface({
       ),
   );
   const [format] = useState(() => new FormatWatch());
+  // Who hears what Find on page finds, while it searches here.
+  const findReport = useRef<((found: Found) => void) | null>(null);
+  const [findable] = useState(() =>
+    visualFindable(
+      () => {
+        // None once it's going, as the page closes with the bar open.
+        const view = editor.current?.action((ctx) => ctx.get(editorViewCtx));
+        return view && !view.isDestroyed ? view : null;
+      },
+      (report) => (findReport.current = report),
+    ),
+  );
 
   useEditor((root) => {
     const generation = ++made.current;
@@ -508,6 +522,7 @@ function Surface({
         format.plugin,
         formatKeys,
         wrapSelection,
+        visualFind(() => findReport.current),
       ].flat(),
       view: {
         attributes: {
@@ -576,13 +591,14 @@ function Surface({
   useImperativeHandle(
     ref,
     () => ({
+      findable,
       read: surface.read,
       replace: surface.show,
       caret: surface.caret,
       focus: surface.focus,
       insertCode: surface.insertCode,
     }),
-    [surface],
+    [surface, findable],
   );
 
   // It fills the box the page editor gives it, the toolbar along its top

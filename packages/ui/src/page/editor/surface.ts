@@ -1,6 +1,7 @@
 import type { AttachmentRef, LinkablePage, PropertyData, PropertyValue } from '@wikistow/client';
 import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
+import type { Findable } from '../find/findable';
 
 // An editor surface is one way of editing a page's Markdown body: the
 // source editor or the visual one. The draft session around it owns
@@ -138,4 +139,6 @@ export type EditorSurfaceHandle = {
    * selected, and focus there, the cursor after it. Reported as an edit.
    */
   insertCode?(code: string): void;
+  /** Find on page in it, once it's there (#276). */
+  findable?: Findable;
 };

@@ -4,6 +4,22 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- Ctrl+F (Cmd+F on a Mac), or Find on page in a page’s menu, finds text on the page you’re on, and while you edit, replaces it.
+
+### Changes
+
+#### App
+
+- Find on page: Ctrl+F (Cmd+F on a Mac), or **Find on page** in the page’s menu, opens a find bar over a page. It highlights every match in the page’s title and body as you type and says which one you’re on. Enter and Shift+Enter go to the next match and the one before, and Escape closes the bar, leaving the match selected. While editing, in the source or the visual editor, **Replace** and **Replace all** change matches as ordinary edits you can undo. It leaves out the page’s properties, and text in diagrams and plugin blocks. The page’s menu now shows for readers too. (#277)
+
+#### Desktop
+
+- The Mac app’s Edit menu has **Find…** (Cmd+F), which opens Find on page. (#277)
+
 ## 0.23.0-beta.4 - 2026-11-04
 
 ### Highlights

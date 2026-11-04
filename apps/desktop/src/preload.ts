@@ -58,6 +58,11 @@ const bridge: DesktopBridge = {
     ipcRenderer.on(DESKTOP_CHANNELS.onWindowState, heard);
     return () => void ipcRenderer.off(DESKTOP_CHANNELS.onWindowState, heard);
   },
+  onFind: (listener) => {
+    const heard = () => listener();
+    ipcRenderer.on(DESKTOP_CHANNELS.onFind, heard);
+    return () => void ipcRenderer.off(DESKTOP_CHANNELS.onFind, heard);
+  },
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

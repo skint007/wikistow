@@ -1,5 +1,6 @@
 import { splitFrontmatter, type AttachmentRef, type LinkablePage } from '@wikistow/client';
 import { joinBackward } from '@milkdown/kit/prose/commands';
+import { undo } from '@milkdown/kit/prose/history';
 import { Fragment, Slice, type Node } from '@milkdown/kit/prose/model';
 import { AllSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { act, createRef, StrictMode } from 'react';
@@ -7,6 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
+import type { Found } from '../src/page/find/match.ts';
 import { transformer, writingLiterals } from '../src/page/editor/visual/config.ts';
 import { fidelityOf, withLf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
@@ -714,5 +716,64 @@ describe('the visual surface', () => {
       m.unmount();
       expect(m.uploads[1]?.place('![bed.png](attachment:a1)')).toBe(false);
     });
+  });
+});
+
+describe('Find on page in the visual surface', () => {
+  const finding = (m: Mounted) => {
+    const found: Found[] = [];
+    const findable = m.handle.findable;
+    if (!findable) throw new Error('The visual surface finds nothing');
+    const session = findable.open((f) => found.push(f));
+    return { session, last: () => found.at(-1) };
+  };
+  const selected = (m: Mounted) => {
+    const { state } = viewOf(m.dom);
+    return state.doc.textBetween(state.selection.from, state.selection.to);
+  };
+  const marked = (m: Mounted) =>
+    [...m.dom.querySelectorAll('.find-match')].map((span) => span.textContent);
+
+  it('marks every match in the text shown, across formatting but not from block to block', async () => {
+    const m = await mount('Plant **tom**atoes.\n\n- Tomatoes\n- in [[Plan]] tomato\n\n`tomato`\n');
+    const { session, last } = finding(m);
+    act(() => session.search({ text: 'tomato', matchCase: false }));
+    expect(last()).toEqual({ count: 4, current: 0 });
+    expect(selected(m)).toBe('tomato');
+    expect(marked(m).join('|')).toBe('tom|ato|Tomato|tomato|tomato');
+    act(() => session.search({ text: 'atoes. Tomatoes', matchCase: false }));
+    expect(last()?.count).toBe(0);
+    act(() => session.search({ text: 'Tomato', matchCase: true }));
+    expect(last()).toEqual({ count: 1, current: 0 });
+    act(() => session.step(-1));
+    expect(last()).toEqual({ count: 1, current: 0 });
+    act(() => session.end());
+    expect(marked(m)).toEqual([]);
+    // Finding is no edit.
+    expect(m.handle.read()).toBe(
+      'Plant **tom**atoes.\n\n- Tomatoes\n- in [[Plan]] tomato\n\n`tomato`\n',
+    );
+  });
+
+  it('replaces the current match and goes on to the next, and every match as one edit', async () => {
+    const text = 'A cat, a **cat**.\n\nThe cat.\n';
+    const m = await mount(text);
+    const { session, last } = finding(m);
+    act(() => session.search({ text: 'cat', matchCase: false }));
+    act(() => session.replace('dog'));
+    expect(m.handle.read()).toBe('A dog, a **cat**.\n\nThe cat.\n');
+    expect(last()).toEqual({ count: 2, current: 0 });
+    expect(selected(m)).toBe('cat');
+    let count = 0;
+    act(() => void (count = session.replaceAll('hen')));
+    expect(count).toBe(2);
+    expect(m.handle.read()).toBe('A dog, a **hen**.\n\nThe hen.\n');
+    const view = viewOf(m.dom);
+    act(() => void undo(view.state, view.dispatch));
+    expect(m.handle.read()).toBe('A dog, a **cat**.\n\nThe cat.\n');
+    act(() => void undo(view.state, view.dispatch));
+    expect(m.handle.read()).toBe(text);
+    // The edits went out as edits.
+    await expect.poll(() => m.changes.length).toBeGreaterThan(0);
   });
 });
