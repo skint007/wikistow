@@ -123,7 +123,12 @@ export async function importNotes(
   } catch (error) {
     await finish(agent).catch(() => {});
     if (error instanceof importOperations.ImportStopped) {
-      throw new CliError('cancelled', 'Stopped; run the same import again to finish it');
+      const { unfinished } = error;
+      const left =
+        unfinished === 0
+          ? ''
+          : ` with ${unfinished} ${unfinished === 1 ? 'page' : 'pages'} still empty`;
+      throw new CliError('cancelled', `Stopped${left}; run the same import again to finish it`);
     }
     throw error;
   } finally {

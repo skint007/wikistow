@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- The Import dialog stays open when you click outside it. While it imports, Cancel, Escape and the close button ask Stop importing? first, and a stopped import says how many pages are still empty drafts, which importing again finishes. A spinner shows while it works. The CLI's `wikistow import` also gives that count when stopped. (#274)
+
 ## 0.23.0-beta.3 - 2026-11-04
 
 ### Highlights

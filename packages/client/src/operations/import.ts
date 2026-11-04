@@ -59,11 +59,17 @@ export type ImportSummary = {
   encrypted: number;
 };
 
-/** The vault locked, access changed, or the caller gave up while importing. */
+/**
+ * The vault locked, access changed, or the caller gave up while importing.
+ * `unfinished` pages were made and left empty, unpublished drafts: running
+ * the same import again into the same place finishes them.
+ */
 export class ImportStopped extends Error {
-  constructor() {
+  readonly unfinished: number;
+  constructor(unfinished = 0) {
     super('Import stopped');
     this.name = 'ImportStopped';
+    this.unfinished = unfinished;
   }
 }
 
@@ -120,11 +126,15 @@ export async function importNotes(
     signal?: AbortSignal;
   },
 ): Promise<ImportSummary> {
+  // Pages made, or left by an earlier run, to save and publish, and how many of them are done.
+  const placed: { note: SourceNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
+  let finished = 0;
+  const stopped = () => new ImportStopped(placed.length - finished);
   // Hundreds of notes take longer than the server's write limits allow at once.
-  ctx = patient(ctx, () => new ImportStopped(), signal);
+  ctx = patient(ctx, stopped, signal);
   const generation = ctx.revisions.generation;
   const live = () => {
-    if (signal?.aborted || ctx.revisions.generation !== generation) throw new ImportStopped();
+    if (signal?.aborted || ctx.revisions.generation !== generation) throw stopped();
   };
   const { spaceId } = scope;
   const from = importFrom(source.format);
@@ -192,7 +202,6 @@ export async function importNotes(
     reason: 'encrypted',
   }));
   const { notes } = source;
-  const placed: { note: SourceNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
   const pageOf = new Map<string, PageId>();
   // The draft an earlier run saved, by note: what it holds says what that run left.
   const savedBefore = new Map<string, { markdown: string; attachments: AttachmentRef[] }>();
@@ -356,8 +365,9 @@ export async function importNotes(
     if (!tooLarge) {
       heads.publishedHead = (await publishPage(ctx, page, { tree })).revisionId;
       summary.pages.push({ path: note.path, pageId, title: titleOf(note) });
-      live();
     }
+    finished++;
+    live();
     onProgress?.({ phase: 'saving', done: i + 1, total: placed.length });
     await pace();
   }

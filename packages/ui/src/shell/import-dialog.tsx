@@ -10,6 +10,7 @@ import {
   type ImportSource,
   type SpaceId,
 } from '@wikistow/client';
+import { LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,7 @@ import {
 import { errorMessage } from '../errors';
 import { ErrorLine } from '../sharing/use-action';
 import { useClient } from '../vault/store';
-import { doneStatus, foundStatus, importStatus, skipReason } from './import-model';
+import { doneStatus, foundStatus, importStatus, skipReason, stoppedStatus } from './import-model';
 
 /**
  * The largest JEX or zip the browser reads: it holds the whole file, and a
@@ -40,8 +41,14 @@ type Stage =
   | { kind: 'reading' }
   /** Files with no mark of either app: the person says which. */
   | { kind: 'ask'; files: ImportFile[] }
-  | { kind: 'found'; source: ImportSource }
-  | { kind: 'importing'; progress: importOperations.ImportProgress | null }
+  /** `stopped` says what an import stopped by the person left, to run again. */
+  | { kind: 'found'; source: ImportSource; stopped?: string }
+  | {
+      kind: 'importing';
+      progress: importOperations.ImportProgress | null;
+      /** Asking whether to stop, or stopped and waiting for the step running to end. */
+      stop?: 'asking' | 'stopping';
+    }
   | { kind: 'done'; summary: importOperations.ImportSummary };
 
 /** A picked folder's files, its own name taken off their paths, as an export's. */
@@ -65,10 +72,13 @@ function folderFiles(list: FileList): ImportFile[] {
  * Front Matter export as its folder or a zip of it. It reads the files
  * first, asks which app they came from when they don't say, and says what
  * it found, then makes the folders and pages (`importNotes`), showing how
- * far it has got, and stops at the next step
- * if Cancel is pressed or the dialog closed. Running it again finishes an
- * import cut short and changes nothing already imported. At the end it says
- * what it made, and lists links it couldn't rewrite and notes left out.
+ * far it has got. A click outside never closes it. While importing,
+ * Cancel, Escape and the close button ask first, since stopping leaves the
+ * pages not saved yet as empty drafts; stopped, it says how many, and stays
+ * open to import again, which finishes an import cut short and changes
+ * nothing already imported. The import also stops, silently, if the dialog
+ * goes (leaving the space, or locking). At the end it says what it made,
+ * and lists links it couldn't rewrite and notes left out.
  */
 export function ImportDialog({
   spaceId,
@@ -86,13 +96,17 @@ export function ImportDialog({
   const running = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
   const opened = importing === null ? null : `${importing.folderId}`;
   useEffect(() => {
     if (opened === null) return;
     setStage({ kind: 'choose' });
     setError(null);
-    // Closing the dialog, or leaving the space, stops the import.
-    return () => running.current?.abort();
+    // Closing the dialog, or leaving the space, stops the import, with nothing to say so.
+    return () => {
+      running.current?.abort();
+      running.current = null;
+    };
   }, [opened]);
   useEffect(() => {
     // Not in React's attribute types: set on the element itself.
@@ -132,13 +146,25 @@ export function ImportDialog({
         scope: { spaceId, ...(target.folderId === null ? {} : { folderId: target.folderId }) },
         source,
         onProgress: (progress) => {
-          if (!controller.signal.aborted) setStage({ kind: 'importing', progress });
+          // An answer pending to Stop importing? stays: progress only moves on under it.
+          if (!controller.signal.aborted) {
+            setStage((now) => ({
+              ...(now.kind === 'importing' ? now : {}),
+              kind: 'importing',
+              progress,
+            }));
+          }
         },
         signal: controller.signal,
       });
-      setStage({ kind: 'done', summary });
+      if (running.current === controller) setStage({ kind: 'done', summary });
     } catch (caught) {
-      if (controller.signal.aborted || caught instanceof importOperations.ImportStopped) return;
+      // Gone with the dialog: nobody to tell.
+      if (running.current !== controller) return;
+      if (caught instanceof importOperations.ImportStopped) {
+        setStage({ kind: 'found', source, stopped: stoppedStatus(caught.unfinished) });
+        return;
+      }
       setError(`${errorMessage(caught)} Import again to finish: what is already there stays.`);
       setStage({ kind: 'found', source });
     } finally {
@@ -147,10 +173,32 @@ export function ImportDialog({
   };
 
   const busy = stage.kind === 'reading' || stage.kind === 'importing';
-  const { progress } = stage.kind === 'importing' ? stage : { progress: null };
+  const { progress, stop } =
+    stage.kind === 'importing' ? stage : { progress: null, stop: undefined };
+  // Asked whether to stop, the safe answer has the focus, for Enter.
+  const asking = stop === 'asking';
+  useEffect(() => {
+    if (asking) keepButton.current?.focus();
+  }, [asking]);
+  const ask = () => {
+    if (stage.kind === 'importing' && !stage.stop) setStage({ ...stage, stop: 'asking' });
+  };
+  const keepGoing = () => {
+    if (stage.kind === 'importing' && stage.stop === 'asking')
+      setStage({ kind: 'importing', progress: stage.progress });
+  };
+  const stopNow = () => {
+    if (stage.kind !== 'importing') return;
+    setStage({ ...stage, stop: 'stopping' });
+    running.current?.abort();
+  };
   return (
     <Dialog open={importing !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="grid gap-4">
+      <DialogContent
+        className="grid gap-4"
+        closesOnBackdrop={false}
+        onDismiss={stage.kind === 'importing' ? (stop === 'asking' ? keepGoing : ask) : undefined}
+      >
         <DialogHeader>
           <DialogTitle>
             Import into “<Name>{importing?.name ?? ''}</Name>”
@@ -214,7 +262,8 @@ export function ImportDialog({
               }}
             />
             {stage.kind === 'reading' && (
-              <p role="status" className="text-sm font-bold">
+              <p role="status" className="flex items-center gap-2 text-sm font-bold">
+                <Spinner />
                 Reading the files…
               </p>
             )}
@@ -244,13 +293,14 @@ export function ImportDialog({
         )}
         {stage.kind === 'found' && (
           <p role="status" className="text-sm font-bold">
-            {foundStatus(stage.source)}
+            {stage.stopped ?? foundStatus(stage.source)}
           </p>
         )}
         {stage.kind === 'importing' && (
           <div className="grid gap-2">
-            <p role="status" className="text-sm font-bold">
-              {progress ? importStatus(progress) : 'Starting…'}
+            <p role="status" className="flex items-center gap-2 text-sm font-bold">
+              <Spinner />
+              {stop === 'stopping' ? 'Stopping…' : progress ? importStatus(progress) : 'Starting…'}
             </p>
             <div
               role="progressbar"
@@ -268,27 +318,61 @@ export function ImportDialog({
                 }}
               />
             </div>
+            {stop === 'asking' && (
+              <div className="grid gap-1">
+                <p className="text-sm font-bold">Stop importing?</p>
+                <p className="text-sm text-muted-foreground">
+                  Pages not saved yet stay empty drafts. Import again later to finish them.
+                </p>
+              </div>
+            )}
           </div>
         )}
         {stage.kind === 'done' && <Report summary={stage.summary} />}
         <ErrorLine error={error} />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {stage.kind === 'done' ? 'Close' : 'Cancel'}
-          </Button>
-          {(stage.kind === 'found' || stage.kind === 'importing') && (
-            <Button
-              disabled={busy}
-              onClick={() =>
-                importing && stage.kind === 'found' && void start(importing, stage.source)
-              }
-            >
-              {busy ? 'Importing…' : 'Import'}
+        {stop === 'asking' ? (
+          <DialogFooter>
+            <Button variant="outline" onClick={stopNow}>
+              Stop importing
             </Button>
-          )}
-        </DialogFooter>
+            {/* The safe answer, as Enter or Escape gives it. */}
+            <Button ref={keepButton} onClick={keepGoing}>
+              Keep importing
+            </Button>
+          </DialogFooter>
+        ) : (
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={stop === 'stopping'}
+              onClick={() => (stage.kind === 'importing' ? ask() : onOpenChange(false))}
+            >
+              {stage.kind === 'done' ? 'Close' : 'Cancel'}
+            </Button>
+            {(stage.kind === 'found' || stage.kind === 'importing') && (
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  importing && stage.kind === 'found' && void start(importing, stage.source)
+                }
+              >
+                {busy ? 'Importing…' : 'Import'}
+              </Button>
+            )}
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Says work is going on; holds still with reduced motion. */
+function Spinner() {
+  return (
+    <LoaderCircle
+      aria-hidden
+      className="size-4 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
+    />
   );
 }
 
