@@ -6,6 +6,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### Development
+
+- The source editor's completion tests wait for a list Enter can accept. Just after a keystroke, CodeMirror shows the last list disabled, and Enter then made a new line. (#PR)
+
+### Changes
+
 #### Desktop
 
 - The beta desktop app signs in: it takes the browser's `wikistow-beta://` link, which it ignored in 0.23.0-beta.2. (#271)

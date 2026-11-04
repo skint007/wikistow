@@ -15,7 +15,7 @@ import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface
 import { PropertiesBox, PropertiesEditor, type PropertyKeys } from '../src/page/properties-box.tsx';
 import type { LinkScope } from '../src/page/property-value.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
-import { openProperties, openVault, PAGE_REF } from './page-view.ts';
+import { openProperties, openVault, PAGE_REF, sourceCompletions } from './page-view.ts';
 
 // The property rows, mounted for real: what they show, and that an edit
 // through them changes only the edited value's characters in the block.
@@ -452,12 +452,7 @@ describe('completing a reference', () => {
     const { container, ref } = await pageEditor(page, 'source');
     await focusEditor(ref);
     await userEvent.keyboard('{Control>}{End}{/Control}{ArrowUp}{End}`=se');
-    const labels = () =>
-      [...container.querySelectorAll('div')].flatMap((div) =>
-        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-          (l) => l.textContent,
-        ),
-      );
+    const labels = () => sourceCompletions(container);
     await expect.poll(labels).toEqual(['servings']);
     await userEvent.keyboard('{Enter} people');
     await expect
@@ -475,12 +470,7 @@ describe('completing a reference', () => {
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(13) + 'i',
     );
-    const labels = () =>
-      [...container.querySelectorAll('div')].flatMap((div) =>
-        [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-          (l) => l.textContent,
-        ),
-      );
+    const labels = () => sourceCompletions(container);
     await expect.poll(labels).toEqual(['servings']);
     await userEvent.keyboard('{Enter}');
     await expect
@@ -498,15 +488,7 @@ describe('completing a reference', () => {
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(8) + 'o',
     );
-    await expect
-      .poll(() =>
-        [...container.querySelectorAll('div')].flatMap((div) =>
-          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-            (l) => l.textContent,
-          ),
-        ),
-      )
-      .toEqual(['cook_time']);
+    await expect.poll(() => sourceCompletions(container)).toEqual(['cook_time']);
     await userEvent.keyboard('{Enter}');
     await expect
       .poll(() => ref.current?.read())
@@ -522,15 +504,7 @@ describe('completing a reference', () => {
     await userEvent.keyboard(
       '{Control>}{End}{/Control}{ArrowUp}{Home}' + '{ArrowRight}'.repeat(9) + '`=co',
     );
-    await expect
-      .poll(() =>
-        [...container.querySelectorAll('div')].flatMap((div) =>
-          [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-            (l) => l.textContent,
-          ),
-        ),
-      )
-      .toEqual(['cook_time']);
+    await expect.poll(() => sourceCompletions(container)).toEqual(['cook_time']);
     await userEvent.keyboard('{Enter}');
     await expect
       .poll(() => ref.current?.read())
@@ -555,11 +529,7 @@ describe('completing a reference', () => {
       );
       const shown = () =>
         mode === 'source'
-          ? [...container.querySelectorAll('div')].flatMap((div) =>
-              [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-                (l) => l.textContent,
-              ),
-            )
+          ? sourceCompletions(container)
           : [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
               (option) => option.firstChild?.textContent,
             );
@@ -583,11 +553,7 @@ describe('completing a reference', () => {
       );
       const shown = () =>
         mode === 'source'
-          ? [...container.querySelectorAll('div')].flatMap((div) =>
-              [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map(
-                (l) => l.textContent,
-              ),
-            )
+          ? sourceCompletions(container)
           : [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
               (option) => option.firstChild?.textContent,
             );
