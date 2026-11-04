@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- The source editor's completion tests wait for a list Enter can accept. Just after a keystroke, CodeMirror shows the last list disabled, and Enter then made a new line. (#PR)
+- The source editor's completion tests wait for a list Enter can accept. Just after a keystroke, CodeMirror shows the last list disabled, and Enter then made a new line. (#273)
 
 ### Changes
 
