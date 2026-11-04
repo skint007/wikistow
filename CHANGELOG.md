@@ -4,6 +4,18 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.23.0-beta.4 - 2026-11-04
+
+### Highlights
+
+#### Upgrade notes
+
+- This is a beta, on the beta channel only: the `:beta` server image and `wikistow-desktop-beta-bin` / `wikistow-cli-beta-bin` on the AUR. Stable installs stay on 0.22.0.
+
+#### Fixes
+
+- A click outside the Import dialog no longer closes it, which stopped an import partway and left its pages empty. Stopping now asks first, and says how many pages are still empty drafts: import again to finish them.
+
 ### Changes
 
 #### App
