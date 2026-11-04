@@ -65,7 +65,7 @@ Each new version goes out as a beta first, then as a stable release once it has 
 
 A stable release is cut from `main` as it is then, so whatever merged after the last beta ships in it untried. Promote right after the last beta, or cut another beta first. A fix to an older stable release still goes on a `release/` branch ([below](#cut-a-release)), which neither channel's newest moves for.
 
-The two AUR packages of each kind install the same files and conflict, so a computer has one or the other: installing `wikistow-desktop-bin` asks to remove `wikistow-desktop-beta-bin`, and the other way round. Settings and sign-in stay.
+The desktop app's two AUR packages install side by side: the beta goes under names of its own (`/usr/lib/wikistow-desktop-beta`, `wikistow-desktop-beta`, **WikiStow Beta** with a violet icon), with its own data folder, keyring key and `wikistow-beta://` sign-in link ([desktop](desktop.md#arch-linux)). The CLI's two install the same files and conflict, so a computer has one or the other.
 
 ## Cut a release
 
@@ -176,6 +176,7 @@ sha256sum -c --ignore-missing SHA256SUMS
 | `wikistow-desktop` | `/usr/bin/wikistow-desktop`, which runs the app on the system `electron44` |
 | `wikistow-desktop.desktop` | `/usr/share/applications/wikistow-desktop.desktop` |
 | `wikistow-desktop.svg`, `wikistow-desktop.png` | The app's icons |
+| `wikistow-desktop-beta.desktop`, `wikistow-desktop-beta.svg`, `wikistow-desktop-beta.png` | The same for the AUR's beta app, under `wikistow-desktop-beta` names |
 | `LICENSE` | `/usr/share/licenses/wikistow-desktop-bin/LICENSE` |
 
 The archive is built the same way every time, from the commit's files and time.
@@ -263,7 +264,7 @@ The tap `skint007/homebrew-wikistow` holds the cask, so `brew install --cask ski
 
 Two packages follow each stable release: `wikistow-desktop-bin` installs the desktop archive, and `wikistow-cli-bin` the CLI's Linux binary for its architecture, x86_64 or aarch64, with `LICENSE`. Their packaging sources are `aur/wikistow-desktop-bin/PKGBUILD` and `aur/wikistow-cli-bin/PKGBUILD`. Change them through a pull request like any other file. Their versions and checksums are only where publishing starts; it replaces them.
 
-Their beta twins, `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`, follow every release from `main` ([beta and stable](#beta-and-stable)). They have no sources of their own: publishing takes the same PKGBUILDs and renames the package, adds "(beta channel)" to its description, and sets `_channel=beta`. The desktop package writes `_channel` to `/usr/lib/wikistow-desktop/channel`, so the app offers betas. The stable channel's job refuses a beta version.
+Their beta twins, `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`, follow every release from `main` ([beta and stable](#beta-and-stable)). They have no sources of their own: publishing takes the same PKGBUILDs and renames the package, adds "(beta channel)" to its description, and sets `_channel=beta`. The desktop package writes `_channel` to its folder's `channel`, so the app offers betas. With `_channel=beta` it installs under the beta's names instead of the stable app's, so the two sit side by side; the app knows it is the beta from running in `/usr/lib/wikistow-desktop-beta` (`apps/desktop/src/install.ts`). Release archives have the beta's files from 0.23.0-beta.2 on, so publishing an older release to the beta channel again fails. The stable channel's job refuses a beta version.
 
 `.github/workflows/aur.yml` publishes both, once the release's files are up, in a job for each. Each job sets its PKGBUILD's version, `pkgrel` and checksums from the release's `SHA256SUMS`, builds the package as a user who isn't root, checking what it downloads against them, and generates `.SRCINFO`. The runner is x86_64, so the build downloads only the x86_64 binary; the aarch64 checksum comes from `SHA256SUMS` alone. Then it pushes only those two files to `ssh://aur@aur.archlinux.org/<package>.git`, as `AUR_USERNAME` with `AUR_EMAIL`. A push that would change nothing is skipped. The AUR creates a package on its first push. One package failing doesn't stop the other.
 

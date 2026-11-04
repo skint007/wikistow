@@ -10,8 +10,18 @@ const Base64Url32 = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
  * `/desktop-sign-in?challenge=<SHA-256 of it>`. The person, signed in there,
  * approves, and the browser opens `wikistow://signed-in?code=…`. The app then
  * redeems the code with its verifier for a desktop session of its own.
+ *
+ * The AUR's beta app installs beside the stable one, so it claims links of
+ * its own: it adds `&app=beta`, and the browser opens
+ * `wikistow-beta://signed-in?code=…` instead.
  */
-export const DESKTOP_LINK = 'wikistow://signed-in';
+export const DESKTOP_LINKS = {
+  stable: 'wikistow://signed-in',
+  beta: 'wikistow-beta://signed-in',
+} as const;
+/** Which desktop app started the sign-in: the beta, or by default the stable one. */
+export const DesktopApp = z.enum(['stable', 'beta']);
+export type DesktopApp = z.infer<typeof DesktopApp>;
 
 export const Challenge = Base64Url32;
 export const HandoffCode = Base64Url32;

@@ -40,6 +40,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
 import { contextMenu } from './context-menu.ts';
+import { APP_NAMES, desktopApp, windowIcon } from './install.ts';
 import { cookieChange, forward } from './forward.ts';
 import { keptFile, keptFolder } from './kept-file.ts';
 import { PluginFolderError } from './plugins/folder.ts';
@@ -75,15 +76,28 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+// The stable app, or the AUR's beta installed beside it under names of its
+// own (install.ts).
+const which = desktopApp(app.getAppPath());
+const names = APP_NAMES[which];
+// The name also keys the keyring: the beta's key is `WikiStow Beta Safe Storage`.
+app.setName(names.name);
+
 // The launcher entry the Linux desktop shows for these windows, which also
-// claims `wikistow://` links (packaging/wikistow-desktop.desktop).
-if (process.platform === 'linux') app.setDesktopName('wikistow-desktop.desktop');
+// claims `wikistow://` links, or the beta's `wikistow-beta://` ones
+// (packaging/wikistow-desktop.desktop, wikistow-desktop-beta.desktop). Its
+// name is the windows' class too.
+if (process.platform === 'linux') app.setDesktopName(names.entry);
 
 // On Windows the app's data would be %APPDATA%\WikiStow, which is the CLI's
 // %APPDATA%\wikistow as Windows ignores case, so it gets a folder of its own.
-// Set before anything reads it, the single-instance lock included.
-if (process.platform === 'win32' && !app.commandLine.hasSwitch('user-data-dir')) {
-  app.setPath('userData', join(app.getPath('appData'), 'WikiStow Desktop'));
+// The beta keeps its own data, apart from the stable app's, and so its own
+// single-instance lock. Set before anything reads it, the lock included.
+if (!app.commandLine.hasSwitch('user-data-dir')) {
+  if (which === 'beta') app.setPath('userData', join(app.getPath('appData'), names.name));
+  else if (process.platform === 'win32') {
+    app.setPath('userData', join(app.getPath('appData'), 'WikiStow Desktop'));
+  }
 }
 
 // A second launch, such as the browser opening a `wikistow://` link, hands
@@ -370,9 +384,12 @@ async function signIn(input: unknown): Promise<void> {
     );
     pending = waiting;
   });
-  await shell.openExternal(`${origin}/desktop-sign-in?challenge=${challenge}`).catch(() => {
-    pending?.done({ ok: false, message: 'Couldn’t open your browser.' });
-  });
+  const asBeta = which === 'beta' ? '&app=beta' : '';
+  await shell
+    .openExternal(`${origin}/desktop-sign-in?challenge=${challenge}${asBeta}`)
+    .catch(() => {
+      pending?.done({ ok: false, message: 'Couldn’t open your browser.' });
+    });
   const outcome = await result;
   if (!outcome.ok) throw new SignInError(outcome.message);
 }
@@ -384,7 +401,7 @@ async function signIn(input: unknown): Promise<void> {
  * can cancel it instead.
  */
 async function linkArrived(link: string) {
-  const code = handoffCode(link);
+  const code = handoffCode(link, which);
   const waiting = pending;
   if (!code || !waiting || waiting.redeeming) return;
   waiting.redeeming = true;
@@ -413,8 +430,8 @@ function openWindow() {
   const kept = place.read();
   window = new BrowserWindow({
     ...kept.bounds,
-    title: 'WikiStow',
-    icon: join(app.getAppPath(), 'packaging', 'wikistow-desktop.png'),
+    title: names.name,
+    icon: windowIcon(app.getAppPath(), which),
     // The page's titlebar stands in for the frame (shell/titlebar.tsx). Its
     // empty part moves the window and double-clicking it maximizes; the
     // window still resizes from a few pixels inside each edge. A Mac's

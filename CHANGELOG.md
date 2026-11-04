@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Releases and packaging
+
+- The AUR's `wikistow-desktop-beta-bin` installs beside `wikistow-desktop-bin` instead of replacing it. It is **WikiStow Beta** in the launcher, with a violet icon, and keeps its own sign-in, settings and data in `~/.config/WikiStow Beta`. It signs in through `wikistow-beta://` links, which the server's sign-in page now sends when the beta asks. If you had the beta before, its sign-in and settings stay with the stable app's in `~/.config/WikiStow`: sign in to the beta again. (#PR)
+
 ## 0.23.0-beta.1 - 2026-11-03
 
 ### Highlights

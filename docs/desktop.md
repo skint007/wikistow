@@ -26,7 +26,7 @@ makepkg -si
 
 `pacman -Syu` alone doesn't update AUR packages. Your AUR helper's update, such as `yay -Syu`, does. Without a helper, run `git pull` in that folder and `makepkg -si` again.
 
-To try each release before it's stable, install [`wikistow-desktop-beta-bin`](https://aur.archlinux.org/packages/wikistow-desktop-beta-bin) instead. It takes betas and stable releases alike, and its update notice offers betas ([releasing](releasing.md#beta-and-stable)). It and `wikistow-desktop-bin` replace each other, keeping your settings and sign-in. The CLI has `wikistow-cli-beta-bin` too.
+To try each release before it's stable, install [`wikistow-desktop-beta-bin`](https://aur.archlinux.org/packages/wikistow-desktop-beta-bin). It takes betas and stable releases alike, and its update notice offers betas ([releasing](releasing.md#beta-and-stable)). It installs beside `wikistow-desktop-bin`, so you can have both: start **WikiStow Beta** from your app launcher, with a violet icon, or run `wikistow-desktop-beta`. The beta is an app of its own. It keeps its sign-in, settings and plugins in `~/.config/WikiStow Beta`, its key in the keyring as **WikiStow Beta Safe Storage**, and its extra switches in `~/.config/wikistow-desktop-beta-flags.conf`, so you sign in to it separately, and both can run at once. It signs in through `wikistow-beta://` links, which servers handle from 0.23.0-beta.2 on; with an older server, the browser opens the stable app instead, and the beta can't sign in. The CLI has `wikistow-cli-beta-bin` too, which still replaces `wikistow-cli-bin`.
 
 ### Debian, Ubuntu and Fedora
 
@@ -144,7 +144,7 @@ Cut, copy, paste, undo, redo and select all are Cmd+X, C, V, Z, Shift+Z and A, t
 
 ## Signing in
 
-The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link. The first time, your browser may ask whether to open it, as Edge does with "This site is trying to open WikiStow"; choose **Open**. On Linux the app's launcher entry claims those links, on Windows the installer does, and on a Mac the app does once it has opened.
+The app asks for your server's address, such as `https://wiki.example.com`, then opens your browser. Sign in there as usual and choose **Sign in to the desktop app**. The browser hands the app back to you through a `wikistow://` link (`wikistow-beta://` for the [beta](#arch-linux)). The first time, your browser may ask whether to open it, as Edge does with "This site is trying to open WikiStow"; choose **Open**. On Linux the app's launcher entry claims those links, on Windows the installer does, and on a Mac the app does once it has opened.
 
 Each computer gets its own desktop session. You can see them, and sign any of them out, under **Settings → Desktop apps → Review** in the browser.
 
@@ -166,7 +166,7 @@ Drafts you edit, and pages and folders you make, while the server doesn't answer
 
 Without a keyring the app keeps nothing secret, nor these files, apart from `kept-account` and `queue`: the pages it opens are kept in memory until it quits, it can't start offline, and Settings says **Keep for offline** needs a keyring. Each launch signs in through the browser again and asks for your vault passphrase. That is on purpose: Electron's fallback store seals data with a key every program on the computer knows, so the app never uses it. Quitting signs that launch's session out, so they don't pile up on the server. If the app crashes, or the server doesn't answer within 3 seconds, the session stays; sign it out under **Settings → Desktop apps**.
 
-On KDE the app uses KWallet. Anywhere else it looks for a Secret Service, such as GNOME Keyring, so Hyprland, Sway or i3 work too once GNOME Keyring runs. To pick one yourself, add a switch such as `--password-store=gnome-libsecret` to `~/.config/wikistow-desktop-flags.conf`. `--password-store=basic` means no keyring.
+On KDE the app uses KWallet. Anywhere else it looks for a Secret Service, such as GNOME Keyring, so Hyprland, Sway or i3 work too once GNOME Keyring runs. To pick one yourself, add a switch such as `--password-store=gnome-libsecret` to `~/.config/wikistow-desktop-flags.conf` (`wikistow-desktop-beta-flags.conf` for the beta). `--password-store=basic` means no keyring.
 
 The app keeps its key in the keyring under its own name. In KWallet that is **WikiStow Safe Storage** in the **WikiStow Keys** folder. Earlier versions used the entry every Chromium-based app shares there, `Chromium Safe Storage` in `Chromium Keys`, so any of those apps could open the app's secrets without a prompt. Leave that entry alone: browsers and other apps may still use it. In GNOME Keyring the key was always the app's own, marked for WikiStow. It is labelled **WikiStow Safe Storage**, or `Chromium Safe Storage` if an earlier version made it.
 

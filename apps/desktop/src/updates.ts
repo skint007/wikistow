@@ -9,6 +9,7 @@ import { net } from 'electron';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { packagedFolder } from './install.ts';
 import { channelOf, isPrerelease, newer, newestFor, parse, type Channel } from './versions.ts';
 
 /** The newest releases by date, enough to hold the newest of each channel. */
@@ -18,8 +19,6 @@ const DOWNLOAD = 'https://github.com/skint007/wikistow/releases/download/';
 const CHECK_MS = 6 * 60 * 60_000;
 /** How long one check may take, so the first answer never keeps the menu waiting long. */
 const ANSWER_MS = 10_000;
-/** Where every Linux package installs the app, with its `install-source` (docs/desktop.md). */
-const PACKAGED = '/usr/lib/wikistow-desktop';
 
 const Releases = z.array(
   z.object({
@@ -38,8 +37,9 @@ const Source = z.enum(['aur', 'deb', 'rpm', 'windows', 'mac']);
  */
 async function installSource(appPath: string): Promise<DesktopUpdate['source']> {
   const linux = process.platform === 'linux';
-  if (linux && !appPath.startsWith(`${PACKAGED}/`)) return null;
-  const file = join(linux ? PACKAGED : dirname(appPath), 'install-source');
+  const packaged = packagedFolder(appPath);
+  if (linux && !packaged) return null;
+  const file = join(packaged ?? dirname(appPath), 'install-source');
   const word = await readFile(file, 'utf8').catch(() => '');
   const source = Source.safeParse(word.trim());
   return source.success ? source.data : null;
@@ -47,8 +47,9 @@ async function installSource(appPath: string): Promise<DesktopUpdate['source']> 
 
 /** The channel the Linux package says, from its `channel` beside `install-source`, or null. */
 async function packagedChannel(appPath: string): Promise<string | null> {
-  if (process.platform !== 'linux' || !appPath.startsWith(`${PACKAGED}/`)) return null;
-  return readFile(join(PACKAGED, 'channel'), 'utf8').catch(() => null);
+  const packaged = packagedFolder(appPath);
+  if (!packaged) return null;
+  return readFile(join(packaged, 'channel'), 'utf8').catch(() => null);
 }
 
 /** Where the notice sends the person: the installer for this computer on Windows, else the release page. */
