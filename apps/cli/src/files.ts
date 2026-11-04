@@ -20,6 +20,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { dirname, join, win32 } from 'node:path';
 import { CliError } from './exit.ts';
+import { PROGRAM } from './program.ts';
 
 /**
  * Windows has no Unix owners or modes to check. There the CLI's files sit
@@ -31,7 +32,8 @@ export const WINDOWS = process.platform === 'win32';
 /**
  * Where the CLI keeps its files: `$XDG_CONFIG_HOME/wikistow`, or
  * `~/.config/wikistow` when that is unset or not an absolute path, as the
- * XDG spec says. On Windows, `%APPDATA%\wikistow`. None of these variables
+ * XDG spec says. On Windows, `%APPDATA%\wikistow`. The beta, `wikistow-beta`,
+ * keeps its own in `wikistow-beta` (program.ts). None of these variables
  * holds a secret: only where to look.
  */
 export function configDir(env: Readonly<Record<string, string | undefined>>): string {
@@ -40,15 +42,15 @@ export function configDir(env: Readonly<Record<string, string | undefined>>): st
     if (!appData || !win32.isAbsolute(appData)) {
       throw new CliError('usage', 'Set APPDATA to an absolute path');
     }
-    return win32.join(appData, 'wikistow');
+    return win32.join(appData, PROGRAM);
   }
   const xdg = env.XDG_CONFIG_HOME;
-  if (xdg?.startsWith('/')) return join(xdg, 'wikistow');
+  if (xdg?.startsWith('/')) return join(xdg, PROGRAM);
   const home = env.HOME;
   if (!home?.startsWith('/')) {
     throw new CliError('usage', 'Set HOME or XDG_CONFIG_HOME to an absolute path');
   }
-  return join(home, '.config', 'wikistow');
+  return join(home, '.config', PROGRAM);
 }
 
 const uid = () => process.getuid?.() ?? -1;
@@ -130,7 +132,7 @@ export function checkPrivateDir(dir: string): void {
   if (!stats) {
     throw new CliError(
       'not-enrolled',
-      `${dir} does not exist: this CLI is not enrolled; run wikistow agent enroll`,
+      `${dir} does not exist: this CLI is not enrolled; run ${PROGRAM} agent enroll`,
     );
   }
   requirePrivate(dir, stats, 'directory');

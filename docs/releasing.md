@@ -65,7 +65,7 @@ Each new version goes out as a beta first, then as a stable release once it has 
 
 A stable release is cut from `main` as it is then, so whatever merged after the last beta ships in it untried. Promote right after the last beta, or cut another beta first. A fix to an older stable release still goes on a `release/` branch ([below](#cut-a-release)), which neither channel's newest moves for.
 
-The desktop app's two AUR packages install side by side: the beta goes under names of its own (`/usr/lib/wikistow-desktop-beta`, `wikistow-desktop-beta`, **WikiStow Beta** with a violet icon), with its own data folder, keyring key and `wikistow-beta://` sign-in link ([desktop](desktop.md#arch-linux)). The CLI's two install the same files and conflict, so a computer has one or the other.
+The desktop app's two AUR packages install side by side: the beta goes under names of its own (`/usr/lib/wikistow-desktop-beta`, `wikistow-desktop-beta`, **WikiStow Beta** with a violet icon), with its own data folder, keyring key and `wikistow-beta://` sign-in link ([desktop](desktop.md#arch-linux)). The CLI's two do as well: the beta installs as `wikistow-beta`, which keeps its files in `~/.config/wikistow-beta` and so enrolls as an agent of its own, and its help and skill name `wikistow-beta` (`apps/cli/src/program.ts`).
 
 ## Cut a release
 

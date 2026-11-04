@@ -3,6 +3,7 @@
 import { forTerminal, isUtf8Locale, toAsciiJson } from '@wikistow/client';
 import type { Failure } from './exit.ts';
 import { WINDOWS } from './files.ts';
+import { PROGRAM } from './program.ts';
 
 export interface Io {
   readonly stdout: { write(text: string): void; readonly isTTY: boolean };
@@ -125,7 +126,7 @@ export class Printer {
     }
     // The message is the CLI's own, with any path in it as given; the reason is foreign.
     const reason = failure.reason ? ` (${this.foreign(failure.reason)})` : '';
-    this.note(`wikistow: ${failure.message}${reason} [${this.foreign(failure.code)}]`);
+    this.note(`${PROGRAM}: ${failure.message}${reason} [${this.foreign(failure.code)}]`);
     if (failure.detail) {
       for (const [name, value] of Object.entries(failure.detail)) {
         this.note(`  ${name}: ${this.foreign(String(value))}`);
