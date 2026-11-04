@@ -27,6 +27,7 @@ import { importNotes } from './commands/import.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { WINDOWS } from './files.ts';
+import { PROGRAM } from './program.ts';
 import { COMMAND_HELP, USAGE, VERSION } from './help.ts';
 import { Printer, type Io } from './io.ts';
 import { SYSTEM_STORE, systemTool } from './secret-store.ts';
@@ -147,7 +148,7 @@ function commandOf(argv: readonly string[]): { name: CommandName; rest: string[]
     const name = words.slice(0, length).join(' ');
     if (isCommand(name)) return { name, rest: argv.slice(length) };
   }
-  throw new CliError('usage', 'Unknown command; see wikistow --help');
+  throw new CliError('usage', `Unknown command; see ${PROGRAM} --help`);
 }
 
 type Values = Record<string, string | boolean | undefined>;
@@ -204,7 +205,7 @@ function unlockOf(values: Values): UnlockOptions {
   if (WINDOWS && fd !== null && Number(fd) !== 0) {
     throw new CliError(
       'usage',
-      'On Windows, --passphrase-fd takes only 0, standard input; see wikistow --help',
+      `On Windows, --passphrase-fd takes only 0, standard input; see ${PROGRAM} --help`,
     );
   }
   return {
@@ -255,7 +256,7 @@ function separated(args: readonly string[], options: Options, wanted: number): s
         positionals.push(arg);
         continue;
       }
-      throw new CliError('usage', `Unknown option --${name}; see wikistow --help`);
+      throw new CliError('usage', `Unknown option --${name}; see ${PROGRAM} --help`);
     }
     if (option.type === 'boolean') {
       if (value.length > 0) throw new CliError('usage', `--${name} takes no value`);
@@ -283,7 +284,9 @@ function parse(argv: readonly string[]) {
     }) as { values: Values; positionals: string[] };
   } catch (cause) {
     // `separated` has refused every mistake it can name already.
-    throw new CliError('usage', 'Unknown option or missing value; see wikistow --help', { cause });
+    throw new CliError('usage', `Unknown option or missing value; see ${PROGRAM} --help`, {
+      cause,
+    });
   }
   const { values, positionals } = parsed;
   // Help is decided from the parsed options, so a value such as --title -h
@@ -292,7 +295,7 @@ function parse(argv: readonly string[]) {
   if (positionals.length !== spec.positionals) {
     throw new CliError(
       'usage',
-      `${name} takes ${spec.positionals || 'no'} argument${spec.positionals === 1 ? '' : 's'}; see wikistow --help`,
+      `${name} takes ${spec.positionals || 'no'} argument${spec.positionals === 1 ? '' : 's'}; see ${PROGRAM} --help`,
     );
   }
   const key = optional(values, 'idempotency-key');
@@ -345,7 +348,7 @@ export async function run(
     return first === undefined ? EXIT.usage : EXIT.ok;
   }
   if (first === '--version') {
-    io.stdout.write(`wikistow ${VERSION}\n`);
+    io.stdout.write(`${PROGRAM} ${VERSION}\n`);
     return EXIT.ok;
   }
   const all: Deps = {

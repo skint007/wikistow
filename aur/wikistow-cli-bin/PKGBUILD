@@ -12,6 +12,13 @@ _version=0.6.0
 # The beta channel's wikistow-cli-beta-bin is this package, renamed
 # (docs/releasing.md).
 _channel=stable
+# The beta installs beside the stable CLI as wikistow-beta, which the CLI
+# reads from its own name to keep its files apart (apps/cli/src/program.ts).
+if [[ $_channel == beta ]]; then
+    _app=wikistow-beta
+else
+    _app=wikistow
+fi
 pkgname=wikistow-cli-bin
 pkgver=${_version//-/}
 pkgrel=1
@@ -22,8 +29,8 @@ license=('MIT')
 # Bun's runtime is inside the binary; it links only glibc.
 depends=('glibc')
 optdepends=("libsecret: keep an agent's key in the keyring (agent enroll --secret-store)")
-provides=('wikistow-cli')
-conflicts=('wikistow-cli')
+provides=("wikistow-cli${_app#wikistow}")
+conflicts=("wikistow-cli${_app#wikistow}")
 # Stripping would cut off the program Bun appends to its runtime.
 options=('!strip' '!debug')
 _download="https://github.com/skint007/wikistow/releases/download/v$_version"
@@ -35,6 +42,6 @@ sha256sums_x86_64=('SKIP')
 sha256sums_aarch64=('SKIP')
 
 package() {
-    install -Dm755 "wikistow-$_version-$CARCH" "$pkgdir/usr/bin/wikistow"
+    install -Dm755 "wikistow-$_version-$CARCH" "$pkgdir/usr/bin/$_app"
     install -Dm644 "LICENSE-$_version" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

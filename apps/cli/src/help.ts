@@ -1,4 +1,5 @@
-// What `wikistow --help` and `wikistow <command> --help` print: enough for
+// What `wikistow --help` and `wikistow <command> --help` print, naming
+// `wikistow-beta` for the beta (program.ts): enough for
 // an agent to work out the read, draft, attach, publish loop without
 // guessing which revision ID goes where.
 import { kilobytes } from '@wikistow/client';
@@ -6,12 +7,13 @@ import { pageRoutes } from '@wikistow/contracts';
 import packageJson from '../package.json' with { type: 'json' };
 import type { CommandName } from './cli.ts';
 import { WINDOWS } from './files.ts';
+import { PROGRAM } from './program.ts';
 import { SYSTEM_STORE } from './secret-store.ts';
 
 export const VERSION = packageJson.version;
 
 /** The CLI's directory (`configDir`), as a person would type it. */
-const DIR = WINDOWS ? '%APPDATA%\\wikistow' : '~/.config/wikistow';
+const DIR = WINDOWS ? `%APPDATA%\\${PROGRAM}` : `~/.config/${PROGRAM}`;
 const SEP = WINDOWS ? '\\' : '/';
 
 /** `--secret-tool` names another secret-tool, so it is only for the Secret Service. */
@@ -79,9 +81,9 @@ const RETRYING = `Retrying a change:
   until a day after its answer came back, as long as the server keeps KEY.
 `;
 
-export const USAGE = `Usage: wikistow <command> [options]
-       wikistow <command> --help     what one command does, in detail
-       wikistow --version
+export const USAGE = `Usage: ${PROGRAM} <command> [options]
+       ${PROGRAM} <command> --help     what one command does, in detail
+       ${PROGRAM} --version
 
 Commands:
   agent enroll --server URL ${SECRET_STORE}
@@ -134,8 +136,8 @@ ${
   WINDOWS
     ? `  --passphrase-fd 0         read the key file's passphrase from standard input,
                             from a file or a secret manager, never a terminal:
-                            Get-Content FILE | wikistow ... in PowerShell (ASCII
-                            only in Windows PowerShell 5.1), wikistow ... < FILE
+                            Get-Content FILE | ${PROGRAM} ... in PowerShell (ASCII
+                            only in Windows PowerShell 5.1), ${PROGRAM} ... < FILE
                             in cmd. Windows passes no other file descriptor, so
                             not with --file - or agent enroll. Don't write the
                             passphrase itself in the command: history keeps it`
@@ -151,7 +153,7 @@ ${
 ${RETRYING}
 IDs may start with - or --: one that is no option is taken as an ID where
 one is wanted, and every word after a lone -- is an ID, as in
-  wikistow page read --json -- --AbCdEfGhIjKlMnOpQrSt
+  ${PROGRAM} page read --json -- --AbCdEfGhIjKlMnOpQrSt
 
 Secrets are never read from arguments or the environment.${PIPES}
 
@@ -192,7 +194,7 @@ The original stays as it is.`
       : `Copy the folder, with every folder and page in it this agent can see,
 as new ones, into a folder of this space or another. The original stays
 as it is.`;
-  return `Usage: wikistow ${noun} copy ${ID} [--space SPACE_ID] [--folder FOLDER_ID]
+  return `Usage: ${PROGRAM} ${noun} copy ${ID} [--space SPACE_ID] [--folder FOLDER_ID]
 
 ${what}
 
@@ -265,7 +267,7 @@ unknown.
 
 /** Each command's own help. */
 export const COMMAND_HELP = {
-  'agent enroll': `Usage: wikistow agent enroll --server URL ${SECRET_STORE}
+  'agent enroll': `Usage: ${PROGRAM} agent enroll --server URL ${SECRET_STORE}
                            [--fingerprint-answer-from-stdin]
 
 Enroll this CLI as an agent of a WikiStow person. It prints a lookup code;
@@ -297,52 +299,52 @@ the CLI: ulimit -c 0 in its shell, or LimitCORE=0 in its systemd unit.
 `
 }To enroll again, move the whole ${DIR} directory away first.
 `,
-  'agent status': `Usage: wikistow agent status
+  'agent status': `Usage: ${PROGRAM} agent status
 
 Who this agent is, checked with the server: its name, its person, its
 shares and how it unlocks.
 `,
-  whoami: `Usage: wikistow whoami
+  whoami: `Usage: ${PROGRAM} whoami
 
 The same as agent status.
 `,
-  'agent secret-store': `Usage: wikistow agent secret-store enable|disable${SECRET_TOOL}
+  'agent secret-store': `Usage: ${PROGRAM} agent secret-store enable|disable${SECRET_TOOL}
 
 enable keeps an unlock secret in ${STORE_PLACE} (asking for the
 passphrase first); disable removes it, so only the passphrase unlocks the
 agent. See agent enroll --help.
 `,
-  skill: `Usage: wikistow skill
+  skill: `Usage: ${PROGRAM} skill
 
 Print a skill for this agent's harness: a SKILL.md in the Agent Skills
 format. It tells the agent to leave changes as drafts unless its person
 asks for them to be published, to put new pages in the person's Personal
 space, and to read this help for the rest. Write it to a folder named
-wikistow where the harness looks for skills, for example${
+${PROGRAM} where the harness looks for skills, for example${
     WINDOWS
       ? ` in PowerShell
 (Windows PowerShell's > writes UTF-16):
-  mkdir -Force ~\\.claude\\skills\\wikistow
-  wikistow skill | Out-File -Encoding ascii ~\\.claude\\skills\\wikistow\\SKILL.md`
+  mkdir -Force ~\\.claude\\skills\\${PROGRAM}
+  ${PROGRAM} skill | Out-File -Encoding ascii ~\\.claude\\skills\\${PROGRAM}\\SKILL.md`
       : `:
-  mkdir -p ~/.claude/skills/wikistow
-  wikistow skill > ~/.claude/skills/wikistow/SKILL.md`
+  mkdir -p ~/.claude/skills/${PROGRAM}
+  ${PROGRAM} skill > ~/.claude/skills/${PROGRAM}/SKILL.md`
   }
 Edit that copy to change what it says. It names the version that printed
 it: print it again after an update. With --json: {"skill":"..."}
 `,
-  'spaces list': `Usage: wikistow spaces list
+  'spaces list': `Usage: ${PROGRAM} spaces list
 
 Each share this agent was given: its space ID, the folder ID it starts at
 (null for a whole space), the role, whether it may publish, and its name.
 `,
-  tree: `Usage: wikistow tree --space SPACE_ID
+  tree: `Usage: ${PROGRAM} tree --space SPACE_ID
 
 The folders and pages this agent can see in the space. With --json, each
 page lists its id, title, permissionVersion, draftHead (null for readers)
 and publishedHead (null until it is published).
 `,
-  search: `Usage: wikistow search QUERY [--space SPACE_ID]
+  search: `Usage: ${PROGRAM} search QUERY [--space SPACE_ID]
 
 The pages this agent can read whose title or text holds every word of
 QUERY, best first; the last word also matches the start of a longer one.
@@ -361,7 +363,7 @@ publication. No match is not a failure: results is empty. Without --json,
 one line per page: its ID, title, [draft] or [unpublished], and snippet.
 Quote a QUERY of several words; put one that starts with -- after a lone --.
 `,
-  export: `Usage: wikistow export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
+  export: `Usage: ${PROGRAM} export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
 
 Write every page this agent can read as Markdown files in DIR, which must
 be empty or not exist yet, and open to you alone${WINDOWS ? '' : ' (mode 700)'}. Each page is
@@ -405,7 +407,7 @@ A left-out attachment's path is where it would have been: its page's
 links still name it there. A lost connection, an expired session or a
 server error fails the export instead.
 `,
-  import: `Usage: wikistow import PATH [--space SPACE_ID] [--folder FOLDER_ID]
+  import: `Usage: ${PROGRAM} import PATH [--space SPACE_ID] [--folder FOLDER_ID]
                        [--from obsidian|joplin]
 
 Import notes from Obsidian or Joplin. PATH is an Obsidian vault's folder
@@ -460,7 +462,7 @@ For a page an earlier run saved, it lists the links its draft still
 holds as written. encrypted counts the export's encrypted items.
 `,
   'folder copy': copyHelp('folder'),
-  'page read': `Usage: wikistow page read PAGE_ID [--draft] [--revision REVISION_ID]
+  'page read': `Usage: ${PROGRAM} page read PAGE_ID [--draft] [--revision REVISION_ID]
 
 One version's title, Markdown and attachments. Without --draft, the
 published version: exit 4 with code "unpublished" if there is none. With
@@ -471,7 +473,7 @@ permissionVersion changes whenever who can read the page changes: give it
 to page publish to publish only to the readers there were when you looked.
 Without --json, the Markdown alone is printed.
 `,
-  'folder create': `Usage: wikistow folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
+  'folder create': `Usage: ${PROGRAM} folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
 
 A new folder named NAME, where this agent may edit, with the look WikiStow's
 New folder starts with. Prints its folder ID. --parent puts it in that
@@ -483,7 +485,7 @@ to 200 characters. A folder may share its name with another beside it, so
 look in tree before making one again without a KEY.
 
 ${RETRYING}`,
-  'page create': `Usage: wikistow page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
+  'page create': `Usage: ${PROGRAM} page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
 
 A new page in a folder this agent may edit, with the Markdown as its first
 draft. Prints the page ID and its draft head. --space saves looking up
@@ -494,7 +496,7 @@ ${FILE}
 ${LINKS}
 
 ${RETRYING}`,
-  'page draft': `Usage: wikistow page draft PAGE_ID --base REVISION_ID --file PATH|- [--title TITLE]
+  'page draft': `Usage: ${PROGRAM} page draft PAGE_ID --base REVISION_ID --file PATH|- [--title TITLE]
 
 Replace the draft's whole Markdown (and its title, with --title), keeping
 its attachments. --base is the current draft head: the heads.draftHead of
@@ -507,7 +509,7 @@ ${FILE}
 ${LINKS}
 
 ${RETRYING}`,
-  'page attach': `Usage: wikistow page attach PAGE_ID --file PATH|- [--name NAME] [--media-type TYPE] [--base REVISION_ID]
+  'page attach': `Usage: ${PROGRAM} page attach PAGE_ID --file PATH|- [--name NAME] [--media-type TYPE] [--base REVISION_ID]
 
 Encrypt and upload a file, and list it on a new draft on top of the draft
 head (or --base, which must be the draft head). Prints the attachment and
@@ -522,7 +524,7 @@ and "linksKept" is true in --json. So it is on a retry of a run by a CLI
 from before link tables, which didn't check them.
 
 ${RETRYING}`,
-  'page publish': `Usage: wikistow page publish PAGE_ID --revision REVISION_ID --base-published PUBLISHED_ID|none
+  'page publish': `Usage: ${PROGRAM} page publish PAGE_ID --revision REVISION_ID --base-published PUBLISHED_ID|none
                              [--permission-version N]
 
 Publish exactly the draft --revision names, in place of exactly the
@@ -539,7 +541,7 @@ with code "permission-version". Look again before deciding to publish.
 Without it, the page is published to whoever can read it now.
 
 ${RETRYING}`,
-  'page unpublish': `Usage: wikistow page unpublish PAGE_ID --base-published PUBLISHED_ID
+  'page unpublish': `Usage: ${PROGRAM} page unpublish PAGE_ID --base-published PUBLISHED_ID
 
 Hide the page from its readers: they lose it and its published history.
 Editors keep the draft and every version, and the next publish starts a
@@ -555,7 +557,7 @@ spaces stay there, for their readers.
 If no answer came back, run it again as it was. If that publication was
 the last one unpublished, it is done, and reported done again.
 `,
-  'page publish-to': `Usage: wikistow page publish-to PAGE_ID --space SPACE_ID [--folder FOLDER_ID]
+  'page publish-to': `Usage: ${PROGRAM} page publish-to PAGE_ID --space SPACE_ID [--folder FOLDER_ID]
                                 --revision REVISION_ID [--draft]
                                 (--preview | --base-copy PUBLISHED_ID|none
                                              --attachments all|none|ID,...
@@ -619,7 +621,7 @@ landed, --base-copy no longer matches, so it is refused with exit 3, and
 of this same version, with its title and text. That is the word of
 whoever published it there, which nothing checks.
 `,
-  'page download-attachment': `Usage: wikistow page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
+  'page download-attachment': `Usage: ${PROGRAM} page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
 
 Decrypt one attachment of a version and write it to PATH, which must not
 exist yet, or to standard output for - (not a terminal, and not with
@@ -628,11 +630,11 @@ the draft with --draft, or --revision. Attachment IDs are listed under
 attachments by page read --json.${PIPES}
 `,
   'page copy': copyHelp('page'),
-  'page history': `Usage: wikistow page history PAGE_ID
+  'page history': `Usage: ${PROGRAM} page history PAGE_ID
 
 The published versions, newest first, and who published each.
 `,
-  'page links': `Usage: wikistow page links PAGE_ID
+  'page links': `Usage: ${PROGRAM} page links PAGE_ID
 
 The pages in the page's space that link to it, by title, from the pages
 this agent can read. A page counts when a wikilink in its body, a property

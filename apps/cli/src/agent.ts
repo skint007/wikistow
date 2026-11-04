@@ -18,6 +18,7 @@ import { configDir, readPrivateFile, WINDOWS } from './files.ts';
 import type { Io } from './io.ts';
 import { Journal } from './journal.ts';
 import { openKeyFile, parseKeyFile, type KeyFile, type Secrets, type Unlock } from './keyfile.ts';
+import { PROGRAM } from './program.ts';
 import { REMEDIES, systemStore, type SecretStore } from './secret-store.ts';
 import { LocalState } from './state.ts';
 
@@ -72,7 +73,7 @@ export function readKeyFile(io: Io): { dir: string; file: KeyFile } {
   const dir = configDir(io.env);
   const bytes = readPrivateFile(join(dir, KEY_FILE));
   if (!bytes) {
-    throw new CliError('not-enrolled', 'This CLI is not enrolled; run `wikistow agent enroll`');
+    throw new CliError('not-enrolled', `This CLI is not enrolled; run \`${PROGRAM} agent enroll\``);
   }
   return { dir, file: parseKeyFile(bytes) };
 }

@@ -1,11 +1,13 @@
-// What `wikistow skill` prints: a SKILL.md, in the Agent Skills format, for
-// an agent's harness. It holds how this agent should behave, and leaves the
-// commands themselves to --help, so the two can't drift apart. It stays
+// What `wikistow skill` prints (`wikistow-beta skill` for the beta,
+// program.ts): a SKILL.md, in the Agent Skills format, for an agent's
+// harness. It holds how this agent should behave, and leaves the commands
+// themselves to --help, so the two can't drift apart. It stays
 // ASCII: Windows' help saves it with PowerShell's Out-File -Encoding ascii.
 import { VERSION } from './help.ts';
+import { PROGRAM } from './program.ts';
 
 export const SKILL = `---
-name: wikistow
+name: ${PROGRAM}
 description: Use when looking up, saving or editing the person's notes in WikiStow, their wiki, or moving notes (such as Obsidian's) into it.
 metadata:
   wikistow-version: "${VERSION}"
@@ -13,10 +15,10 @@ metadata:
 
 # WikiStow
 
-Work in the wiki through the \`wikistow\` CLI, enrolled as this agent with its
+Work in the wiki through the \`${PROGRAM}\` CLI, enrolled as this agent with its
 own grants. Its help is the reference for commands, IDs, output and exit
-statuses: read \`wikistow --help\` once per session, and
-\`wikistow <command> --help\` before a command's first use. Give every command
+statuses: read \`${PROGRAM} --help\` once per session, and
+\`${PROGRAM} <command> --help\` before a command's first use. Give every command
 \`--json\`.
 
 ## Leave changes as drafts
@@ -42,7 +44,7 @@ that one rather than making a second.
 notes related to one.
 
 For an Obsidian vault (its folder or a zip) or a Joplin export (a JEX
-file, or a Markdown + Front Matter folder or zip), use \`wikistow import\`,
+file, or a Markdown + Front Matter folder or zip), use \`${PROGRAM} import\`,
 and only when the person asks for that import: it publishes every page it
 makes. Run it again after any failure; it never makes a page twice. To
 move in other notes kept in folders, make the folders first with

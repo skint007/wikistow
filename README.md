@@ -24,7 +24,7 @@ It's one file, with nothing else to install. On Linux (x86_64 or arm64, with gli
 curl -fsSL https://github.com/skint007/wikistow/releases/latest/download/install.sh | sh
 ```
 
-That puts `wikistow` in `~/.local/bin`, and adds that folder to `PATH` in your shell's startup file if it isn't there. Run it again to update. On Arch Linux, you can install `wikistow-cli-bin` from the AUR instead. Either installs beside the desktop app, whose command is `wikistow-desktop`.
+That puts `wikistow` in `~/.local/bin`, and adds that folder to `PATH` in your shell's startup file if it isn't there. Run it again to update. On Arch Linux, you can install `wikistow-cli-bin` from the AUR instead. Its beta, `wikistow-cli-beta-bin`, installs beside it as `wikistow-beta`, with its own enrollment in `~/.config/wikistow-beta`. Either installs beside the desktop app, whose command is `wikistow-desktop`.
 
 On Windows, in PowerShell:
 
