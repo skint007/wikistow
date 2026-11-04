@@ -4,11 +4,25 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.23.0-beta.2 - 2026-11-04
+
+### Highlights
+
+#### Upgrade notes
+
+- This is a beta, on the beta channel only: the `:beta` server image and `wikistow-desktop-beta-bin` / `wikistow-cli-beta-bin` on the AUR. Stable installs stay on 0.22.0.
+- The beta desktop app from the AUR now installs beside the stable one, as WikiStow Beta with a violet icon. It keeps its own sign-in and settings, so sign in to it again. It signs in only to servers from this release on.
+
+#### Maintenance
+
+- The desktop app runs on Electron 44.10.2.
+
 ### Changes
 
 #### Releases and packaging
 
 - The AUR's `wikistow-desktop-beta-bin` installs beside `wikistow-desktop-bin` instead of replacing it. It is **WikiStow Beta** in the launcher, with a violet icon, and keeps its own sign-in, settings and data in `~/.config/WikiStow Beta`. It signs in through `wikistow-beta://` links, which the server's sign-in page now sends when the beta asks. If you had the beta before, its sign-in and settings stay with the stable app's in `~/.config/WikiStow`: sign in to the beta again. (#268)
+- Electron 44.10.2, from 44.10.1. (#269)
 
 ## 0.23.0-beta.1 - 2026-11-03
 
