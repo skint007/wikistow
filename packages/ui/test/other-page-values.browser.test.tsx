@@ -24,7 +24,7 @@ import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface
 import { Markdown } from '../src/page/markdown.tsx';
 import { otherPages } from '../src/page/other-pages.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
-import { openVault, PAGE_REF } from './page-view.ts';
+import { openVault, PAGE_REF, sourceCompletions } from './page-view.ts';
 
 // References to other pages' values (`` `=[[Page]].key` ``, ADR 0006
 // decision 5), as the reader and the editors show them: from the viewer's
@@ -274,11 +274,6 @@ async function pageEditor(initial: string, mode: 'source' | 'visual') {
   return { container, ref };
 }
 
-const sourceLabels = (container: HTMLElement) =>
-  [...container.querySelectorAll('div')].flatMap((div) =>
-    [...(div.shadowRoot?.querySelectorAll('.cm-completionLabel') ?? [])].map((l) => l.textContent),
-  );
-
 const visualOptions = (label: string) =>
   [...document.querySelectorAll(`[role=listbox][aria-label="${label}"] [role=option]`)].map(
     (option) => option.firstChild?.textContent,
@@ -316,9 +311,9 @@ describe('completing a reference to another page’s value', () => {
     const { container, ref } = await pageEditor('Bake \n', 'source');
     act(() => ref.current?.focus());
     await userEvent.keyboard('{Control>}{End}{/Control}{ArrowUp}{End}`=[[[[Garl');
-    await expect.poll(() => sourceLabels(container)).toEqual(['Garlic bread']);
+    await expect.poll(() => sourceCompletions(container)).toEqual(['Garlic bread']);
     await userEvent.keyboard('{Enter}.co');
-    await expect.poll(() => sourceLabels(container)).toEqual(['cook_time']);
+    await expect.poll(() => sourceCompletions(container)).toEqual(['cook_time']);
     await userEvent.keyboard('{Enter} min');
     await expect.poll(() => ref.current?.read()).toBe('Bake `=[[Garlic bread]].cook_time` min\n');
   });

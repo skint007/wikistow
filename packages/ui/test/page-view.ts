@@ -20,3 +20,17 @@ export async function openProperties(container: ParentNode) {
   if (toggle.getAttribute('aria-expanded') !== 'true') await userEvent.click(toggle);
   await expect.poll(() => toggle.getAttribute('aria-expanded')).toBe('true');
 }
+
+/**
+ * The source editor's completion labels, from an open list that Enter can
+ * accept. While a source answers a newer keystroke, CodeMirror keeps showing
+ * the last list but disables it, and Enter then makes a new line instead.
+ */
+export const sourceCompletions = (container: ParentNode) =>
+  [...container.querySelectorAll('div')].flatMap((div) =>
+    [
+      ...(div.shadowRoot?.querySelectorAll(
+        '.cm-tooltip-autocomplete:not(.cm-tooltip-autocomplete-disabled) .cm-completionLabel',
+      ) ?? []),
+    ].map((label) => label.textContent),
+  );

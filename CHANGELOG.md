@@ -14,6 +14,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - The AUR's `wikistow-cli-beta-bin` installs beside `wikistow-cli-bin` instead of replacing it, as the command `wikistow-beta`. It keeps its files in `~/.config/wikistow-beta`, so enroll it as an agent of its own, and its help, messages and `skill` name `wikistow-beta`. If you had the beta CLI before, its command is now `wikistow-beta` and it starts unenrolled: its old enrollment stays in `~/.config/wikistow`, which the stable `wikistow` uses. (#270)
 
+#### Development
+
+- The source editor's completion tests wait for a list Enter can accept. Just after a keystroke, CodeMirror shows the last list disabled, and Enter then made a new line. (#273)
+
 ## 0.23.0-beta.2 - 2026-11-04
 
 ### Highlights
