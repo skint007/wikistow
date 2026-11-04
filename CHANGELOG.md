@@ -4,6 +4,19 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.23.0-beta.3 - 2026-11-04
+
+### Highlights
+
+#### Upgrade notes
+
+- This is a beta, on the beta channel only: the `:beta` server image and `wikistow-desktop-beta-bin` / `wikistow-cli-beta-bin` on the AUR. Stable installs stay on 0.22.0.
+- The beta CLI from the AUR now installs beside the stable one as `wikistow-beta`, with its own enrollment. Enroll it again with `wikistow-beta agent enroll`.
+
+#### Fixes
+
+- The beta desktop app can sign in: 0.23.0-beta.2 ignored the link the browser hands back.
+
 ### Changes
 
 #### Desktop
