@@ -25,5 +25,8 @@ export default defineConfig({
     reuseExistingServer: false,
     stdout: 'pipe',
     timeout: 60_000,
+    // SIGTERM, so the server drops its database (e2e/serve.ts). Unset,
+    // Playwright SIGKILLs it and the database is left behind.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
   },
 });
