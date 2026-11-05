@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Development
+
+- Test runs no longer leave Postgres databases behind. The Playwright configs stop the e2e server with `SIGTERM`, so it drops its database; before, Playwright `SIGKILL`ed it. Test databases carry their creation time in their name, and each run first drops those of its kind left more than a day ago, by a run that was killed, if nothing is connected to them. (#279)
+
 ## 0.23.0-beta.5 - 2026-11-04
 
 ### Highlights
