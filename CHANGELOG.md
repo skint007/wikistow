@@ -4,10 +4,68 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.23.0 - 2026-11-06
+
+### Highlights
+
+#### Upgrade notes
+
+- New versions now go out as a beta first. To try them early, use the `:beta` server image, or `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin` from the AUR, which install beside the stable app and CLI as WikiStow Beta and `wikistow-beta`.
+
+#### Features
+
+- Pages work offline. The browser keeps the pages you open, and the desktop app every page, sealed on the device. Settings → Keep for offline chooses which.
+- With no connection the app still starts, unlocks and shows kept pages, with Offline in the rail and when each page is from. Search and Linked from work over what’s kept.
+- You can edit drafts and make pages and folders offline. Changes are kept on the device and saved once the server answers. A page someone changed meanwhile shows the usual conflict.
+- The browser app can be installed on phones and computers, and loads without a connection once opened online.
+- Import… also takes an Obsidian vault, as its folder or a zip of it. Agents can import one with `wikistow import`.
+- Ctrl+F (Cmd+F on a Mac), or Find on page in a page’s menu, finds text on the page you’re on, and while you edit, replaces it.
+
+#### Fixes
+
+- When the server can’t be reached or doesn’t answer as WikiStow, the app shows a screen naming it, with Try again, instead of “Something went wrong!”. In the desktop app, Sign out on this computer gets you to another server.
+- A click outside the Import dialog no longer closes it, which stopped an import partway and left its pages empty. Stopping now asks first, and says how many pages are still empty drafts: import again to finish them.
+
+#### Maintenance
+
+- The desktop app runs on Electron 44.10.2.
+
 ### Changes
+
+#### App
+
+- The browser app can be installed on phones and computers, and once opened online it loads without a connection. A service worker keeps the app's own files only, never pages or anything from your account. (#261)
+- Import… also reads an Obsidian vault, as its folder or a zip of it: each folder that holds notes becomes a folder, each note a published page titled by its file name, and the files its notes link to or embed attachments of their pages. Links resolve as Obsidian resolves them, and files no note names are listed in the report. (#260)
+- Pages are now kept on the device, sealed for you, for reading offline: in the browser the pages you open, in the desktop app every page. Settings → Keep for offline changes which, and shows how much is kept. Pages kept load from the device instead of the server. Signing out deletes them. (#263)
+- Pages kept on the device stay readable when the server stops answering. The rail shows Offline, each page says when it is from, and search and Linked from work over what’s kept. A page that isn’t kept says so. Anything that needs the server is dimmed and says Needs the connection, and everything loads again once the server answers. (#264)
+- The app starts and unlocks without a connection. With the server away, the browser app loads, opens the vault it kept or asks for your passphrase, and reads the kept pages; the desktop app does the same when it keeps your session in a keyring. If you changed your passphrase on another device, the old one still works offline, and once the server answers the app locks and asks for the new one. The browser now keeps its trust marks between visits, as the desktop app does, so it warns about an older contacts record from the server after a reload too. (#265)
+- You can edit drafts and make pages and folders without a connection. Changes are saved on the device, marked in the sidebar, and sent once the server answers. A page someone changed meanwhile comes back as the usual conflict, and one deleted or out of reach offers Try again, Save as a new page in my space, Copy text or Discard. Signing out, or signing in as someone else, warns first while changes wait. (#266)
+- When the server can’t be reached or doesn’t answer as WikiStow, the app shows a screen of its own that names the server, with Try again, in place of the router’s “Something went wrong!”. (#262)
+- The Import dialog stays open when you click outside it. While it imports, Cancel, Escape and the close button ask Stop importing? first, and a stopped import says how many pages are still empty drafts, which importing again finishes. A spinner shows while it works. The CLI's `wikistow import` also gives that count when stopped. (#274)
+- Find on page: Ctrl+F (Cmd+F on a Mac), or **Find on page** in the page’s menu, opens a find bar over a page. It highlights every match in the page’s title and body as you type and says which one you’re on. Enter and Shift+Enter go to the next match and the one before, and Escape closes the bar, leaving the match selected. While editing, in the source or the visual editor, **Replace** and **Replace all** change matches as ordinary edits you can undo. It leaves out the page’s properties, and text in diagrams and plugin blocks. The page’s menu now shows for readers too. (#277)
+
+#### Desktop
+
+- On the beta channel, the update notice offers betas: a beta build, or one installed with `wikistow-desktop-beta-bin`, is offered the newest release of any kind, and other builds the newest stable one, as before. (#259)
+- When the server is gone, for example because its address moved, that screen and Sign out both offer Sign out on this computer. It forgets the session, the remembered unlock, the kept files and the server here, then asks for a server, so you can sign in to another. The session stays open on the old server until it expires or you sign it out under Settings → Desktop apps. (#262)
+- The beta desktop app signs in through the browser's `wikistow-beta://` link. (#271)
+- The Mac app’s Edit menu has **Find…** (Cmd+F), which opens Find on page. (#277)
+
+#### CLI
+
+- `wikistow import` takes an Obsidian vault too, and `--from obsidian|joplin` for files that don't say which app they came from. (#260)
+
+#### Releases and packaging
+
+- Each version goes out as a beta first, then as a stable release. Every release from `main` also tags its server image `beta` and publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin` to the AUR; stable releases still publish `wikistow-desktop-bin` and `wikistow-cli-bin`. (#259)
+- Each push to `main` also tags its server image `main`, which moves to the newest `main` build, for a test server that follows it. (#256)
+- The AUR's `wikistow-desktop-beta-bin` installs beside `wikistow-desktop-bin` instead of replacing it. It is **WikiStow Beta** in the launcher, with a violet icon, and keeps its own sign-in, settings and data in `~/.config/WikiStow Beta`. It signs in through `wikistow-beta://` links, which the server's sign-in page now sends when the beta asks. (#268)
+- The AUR's `wikistow-cli-beta-bin` installs beside `wikistow-cli-bin` instead of replacing it, as the command `wikistow-beta`. It keeps its files in `~/.config/wikistow-beta`, so enroll it as an agent of its own, and its help, messages and `skill` name `wikistow-beta`. (#270)
+- Electron 44.10.2, from 44.10.1. (#269)
 
 #### Development
 
+- The source editor's completion tests wait for a list Enter can accept. Just after a keystroke, CodeMirror shows the last list disabled, and Enter then made a new line. (#273)
 - Test runs no longer leave Postgres databases behind. The Playwright configs stop the e2e server with `SIGTERM`, so it drops its database; before, Playwright `SIGKILL`ed it. Test databases carry their creation time in their name, and each run first drops those of its kind left more than a day ago, by a run that was killed, if nothing is connected to them. (#279)
 
 ## 0.23.0-beta.5 - 2026-11-04

@@ -1,6 +1,6 @@
 {
   "name": "@wikistow/server-app",
-  "version": "0.23.0-beta.5",
+  "version": "0.23.0",
   "private": true,
   "license": "MIT",
   "type": "module",
