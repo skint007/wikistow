@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- **New page here** and **New folder here** in a folder made offline that isn’t sent yet now save the new page or folder on the device too while online, to be sent after the folder, instead of failing as not found. That covers the moments after the server answers again, before the folder is sent, an unlock made offline the app hasn’t confirmed yet, and a folder whose sending stopped. **Create this page** from a link in a page in that folder does the same.
+
 ## 0.23.0 - 2026-11-06
 
 ### Highlights

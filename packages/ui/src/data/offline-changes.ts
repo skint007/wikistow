@@ -55,9 +55,22 @@ export async function attachFile(
 }
 
 /**
- * A new page with that title, at the space root or in a folder: offline,
- * made on this device, to be made on the server once it answers (decision
- * 7), as is one whose request got no answer, under the IDs it was sent with.
+ * Whether what's made in a folder goes into the queue: offline, or, online
+ * too, while the folder is one made on this device and not sent yet, which
+ * the server doesn't know (decision 7). The queue sends it after the folder.
+ */
+async function makesOnDevice(
+  queue: queueOperations.OfflineQueue,
+  parentId: FolderId | null,
+): Promise<boolean> {
+  return !connection.get().online || (parentId !== null && (await queue.entry(parentId)) !== null);
+}
+
+/**
+ * A new page with that title, at the space root or in a folder: offline, or
+ * in a folder made offline not sent yet (`makesOnDevice`), made on this
+ * device, to be made on the server once it answers (decision 7), as is one
+ * whose request got no answer, under the IDs it was sent with.
  */
 export async function makePage(
   ctx: ClientContext,
@@ -65,7 +78,7 @@ export async function makePage(
 ): Promise<PageId> {
   const queue = queueOf(ctx);
   const payload = newPayload({ title, markdown: '' });
-  if (queue && !connection.get().online) {
+  if (queue && (await makesOnDevice(queue, parentId))) {
     return (await queue.newPage({ spaceId, parentId, payload })).id;
   }
   const pageId = newId(PageId);
@@ -79,7 +92,10 @@ export async function makePage(
   }
 }
 
-/** A new folder, as `makePage` makes a page: offline, made on this device first. */
+/**
+ * A new folder, as `makePage` makes a page: offline, or in a folder made
+ * offline not sent yet, made on this device first.
+ */
 export async function makeFolder(
   ctx: ClientContext,
   {
@@ -99,7 +115,7 @@ export async function makeFolder(
   const queue = queueOf(ctx);
   const metadata = newFolderMetadata(name, look, picture);
   const folderId = newId(FolderId);
-  if (queue && !connection.get().online) {
+  if (queue && (await makesOnDevice(queue, parentId))) {
     return (await queue.newFolder({ spaceId, parentId, metadata, folderId })).id;
   }
   try {
