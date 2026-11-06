@@ -149,21 +149,27 @@ function Items({
   actions,
   Item,
   changed = false,
+  made = false,
 }: {
   actions: MenuAction[];
   Item: typeof DropdownMenuItem | typeof ContextMenuItem;
   /** The page has a change made offline not sent yet. */
   changed?: boolean;
+  /**
+   * The folder was made offline and isn't sent yet, so the server doesn't
+   * know it: all but what works offline waits for it, online too.
+   */
+  made?: boolean;
 }) {
   // Offline, what needs the server says so (ADR 0009, decision 8), and
   // moves and copies wait for the page's change made offline.
   const needs = useNeedsConnection();
-  const held = useNeedsConnection(changed ? SENDS_FIRST : null);
+  const held = useNeedsConnection(changed || made ? SENDS_FIRST : null);
   return actions.map(({ label, onSelect, destructive, offline, sendsFirst }) => (
     <Item
       key={label}
       variant={destructive ? 'destructive' : 'default'}
-      {...(offline ? { onSelect } : (sendsFirst ? held : needs).select(onSelect))}
+      {...(offline ? { onSelect } : (sendsFirst || made ? held : needs).select(onSelect))}
     >
       {label}
     </Item>
@@ -171,7 +177,16 @@ function Items({
 }
 
 /** A folder row's ⋯ button and its menu, shown on hover, and always on touch. */
-export function FolderMenu({ name, actions }: { name: string; actions: MenuAction[] }) {
+export function FolderMenu({
+  name,
+  actions,
+  made = false,
+}: {
+  name: string;
+  actions: MenuAction[];
+  /** Made offline, not sent yet (`Items`). */
+  made?: boolean;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -182,7 +197,7 @@ export function FolderMenu({ name, actions }: { name: string; actions: MenuActio
         <MoreHorizontal className="size-4" strokeWidth={1.75} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-        <Items actions={actions} Item={DropdownMenuItem} />
+        <Items actions={actions} Item={DropdownMenuItem} made={made} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -217,8 +232,15 @@ export function RowMenu({ children, items }: { children: ReactElement; items: Re
 }
 
 /** A folder's actions in its right-click menu. */
-export function FolderMenuItems({ actions }: { actions: MenuAction[] }) {
-  return <Items actions={actions} Item={ContextMenuItem} />;
+export function FolderMenuItems({
+  actions,
+  made = false,
+}: {
+  actions: MenuAction[];
+  /** Made offline, not sent yet (`Items`). */
+  made?: boolean;
+}) {
+  return <Items actions={actions} Item={ContextMenuItem} made={made} />;
 }
 
 /**
