@@ -3,6 +3,7 @@
 // too, since the server doesn't know the folder yet and would refuse them.
 import {
   createApiClient,
+  FolderId,
   FolderKeyring,
   generateIdentity,
   IdentityId,
@@ -87,5 +88,22 @@ describe('making pages and folders online', () => {
       spaceId,
       parentId: trips.id,
     });
+  });
+
+  it('sends them to the server under a folder it has', async () => {
+    const { ctx, queue, asked } = await device();
+    const spaceId = newId(SpaceId);
+    const known = newId(FolderId);
+
+    // The server's refusal is the one the person sees: nothing was queued.
+    await expect(
+      makePage(ctx, { spaceId, parentId: known, title: 'Lisbon' }),
+    ).rejects.toMatchObject({ code: 'not-found' });
+    await expect(
+      makeFolder(ctx, { spaceId, parentId: known, name: 'Photos' }),
+    ).rejects.toMatchObject({ code: 'not-found' });
+
+    expect(asked.length).toBeGreaterThan(0);
+    expect(await queue.entries()).toEqual([]);
   });
 });
