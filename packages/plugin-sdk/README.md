@@ -56,7 +56,7 @@ A theme is styles only: it runs no code and gets no page access. It can't load a
 
 ## Regions
 
-App plugins put interface in these places with `host.ui.register(region, { id, … })`. Each view gets an element to draw into. Several plugins in one place show in the order Settings lists them, then in the order each registered. Nothing replaces the app's own content, but a plugin's CSS can hide or rearrange it through `data-region`. A region this app doesn't have fails with `unsupported`.
+App plugins put interface in these places with `host.ui.register(region, { id, … })`. Each view gets an element to draw into. Several plugins in one place show in the order Settings lists them, then in the order each registered. Nothing replaces the app's own content, but a plugin's CSS can hide or rearrange it through `data-region`. A region this app doesn't have fails with `unsupported`. `REGIONS` in `src/host.ts` lists them, as this table does.
 
 | Region | Registers | Where | On a phone |
 | --- | --- | --- | --- |
@@ -72,5 +72,30 @@ App plugins put interface in these places with `host.ui.register(region, { id, �
 
 The page places' views get `{ page }`, the same handle a command gets; settings sections and titlebar buttons get nothing yet. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
 
-The `data-region` hooks, for CSS: `app` (the whole window), `titlebar` (the desktop app's), `rail`, `topbar` (the phone's top bar), `main` (beside the rail), `sidebar` (a space's page tree), `page` (the page card), `page.cover`, `page.toolbar`, `page.body` (the text and its aside), `page.content` (the page's column: header, title, text, footer), `page.header`, `page.footer` and `page.aside` (these three only while a plugin fills them), `app.view`, `settings` and `safe-mode`. If a plugin hides the way back, Ctrl+Shift+Alt+P restarts the app without plugins.
+The `data-region` hooks, for CSS (`DATA_REGIONS` in `src/host.ts`):
+
+| `data-region` | What it marks |
+| --- | --- |
+| `app` | The whole window |
+| `titlebar` | The desktop app's titlebar |
+| `rail` | The rail |
+| `topbar` | The phone's top bar |
+| `main` | Beside the rail |
+| `sidebar` | A space's page tree |
+| `folder` | A folder's page |
+| `page` | The page card |
+| `page.cover` | Its banner |
+| `page.toolbar` | Its toolbar |
+| `page.body` | The text and its aside |
+| `page.content` | The page's column: header, title, text, footer |
+| `page.header` | Plugins' views above the text, only while a plugin fills it |
+| `page.footer` | Plugins' views below the text, only while a plugin fills it |
+| `page.aside` | The contents and plugins' views beside the text, only while a plugin fills it |
+| `app.view` | A plugin's page |
+| `settings` | Settings |
+| `workshop` | The plugin workshop |
+| `whats-new` | What's new |
+| `safe-mode` | The safe mode banner |
+
+If a plugin hides the way back, Ctrl+Shift+Alt+P restarts the app without plugins.
 

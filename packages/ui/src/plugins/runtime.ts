@@ -5,6 +5,7 @@ import {
   isRegion,
   PLUGIN_API,
   PluginError,
+  REGIONS,
   type AppHost,
   type AppPlugin,
   type Block,
@@ -101,17 +102,22 @@ export type PluginsSnapshot = {
 /** A region's registrations, by their IDs. */
 type Registered = { [R in keyof Regions]: Map<string, Regions[R]> };
 
-const noneRegistered = (): Registered => ({
-  'page.panel': new Map(),
-  'page.toolbar': new Map(),
-  'page.header': new Map(),
-  'page.footer': new Map(),
-  'page.aside': new Map(),
-  'app.view': new Map(),
-  rail: new Map(),
-  'settings.section': new Map(),
-  'app.titlebar': new Map(),
-});
+/**
+ * A record with `make(region)` for every region in the SDK's table, which
+ * must give `T`'s entry for that region.
+ */
+function perRegion<T extends { [R in keyof Regions]: unknown }>(
+  make: (region: keyof Regions) => unknown,
+): T {
+  // TypeScript can't check a record built from a list of names, entry by entry.
+  return Object.fromEntries(
+    Object.keys(REGIONS)
+      .filter(isRegion)
+      .map((r) => [r, make(r)]),
+  ) as T;
+}
+
+const noneRegistered = () => perRegion<Registered>(() => new Map());
 
 type Handlers = {
   [E in keyof PluginEvents]: Set<(event: PluginEvents[E]) => void | Promise<void>>;
@@ -150,8 +156,8 @@ const fileUrl = ({ manifest, key }: InstalledPlugin, file: string) =>
   `/plugins/${manifest.id}/${key}/${file}`;
 
 /** What `entries` registered in each region, in their order. */
-function contributions(entries: Loaded[]): PluginsSnapshot['regions'] {
-  const of = <R extends keyof Regions>(region: R): Contribution<R>[] =>
+const contributions = (entries: Loaded[]) =>
+  perRegion<PluginsSnapshot['regions']>((region) =>
     entries.flatMap(({ plugin, active }) =>
       active
         ? [...active.regions[region].values()].map((item) => ({
@@ -159,19 +165,8 @@ function contributions(entries: Loaded[]): PluginsSnapshot['regions'] {
             pluginId: plugin.manifest.id,
           }))
         : [],
-    );
-  return {
-    'page.panel': of('page.panel'),
-    'page.toolbar': of('page.toolbar'),
-    'page.header': of('page.header'),
-    'page.footer': of('page.footer'),
-    'page.aside': of('page.aside'),
-    'app.view': of('app.view'),
-    rail: of('rail'),
-    'settings.section': of('settings.section'),
-    'app.titlebar': of('app.titlebar'),
-  };
-}
+    ),
+  );
 
 const isAppPlugin = (value: unknown): value is AppPlugin =>
   typeof value === 'object' &&
