@@ -9,8 +9,9 @@ import type { View } from './host.ts';
  */
 export function reactView<Props extends object>(Content: ComponentType<Props>): View<Props> {
   return (element, props) => {
-    // A box of its own: the host clears its element at once, React unmounts later.
-    const box = document.createElement('div');
+    // A box of its own: the host clears its element at once, React unmounts
+    // later. Inline in a claimed span's, which sits in a line of text.
+    const box = document.createElement(element.tagName === 'SPAN' ? 'span' : 'div');
     element.append(box);
     const root = createRoot(box);
     root.render(

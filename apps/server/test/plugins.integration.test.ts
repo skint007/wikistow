@@ -49,11 +49,14 @@ const upload = (person: Person | Browser, files: Files, visibility?: 'shared' | 
 const hashOf = (files: Files) =>
   pluginHash(new Map(Object.entries(files).map(([path, data]) => [path, bytesOf(data)])));
 
-/** The library as `person` sees it, naming hashes `have`, through the API client and its contract. */
-const list = async (person: Person, have: string[] = []) =>
+/**
+ * The library as `person` sees it, naming hashes `have`, through the API
+ * client and its contract, reading manifests as `manifest` says.
+ */
+const list = async (person: Person, have: string[] = [], manifest?: number) =>
   (
     await createApiClient({ fetch: person.browser.fetch }).call(pluginRoutes.listPlugins, {
-      query: { have: pluginRoutes.haveQuery(have) },
+      query: { have: pluginRoutes.haveQuery(have), manifest },
     })
   ).plugins;
 
@@ -285,5 +288,18 @@ describe('the plugin library', () => {
     expect((await upload(ann, v1files, 'private')).status).toBe(201);
     expect(await ids(bob)).not.toContain('diary');
     expect(await onlyMe(ann)).toEqual({ ids: ['diary'] });
+  });
+
+  it('lists a version whose manifest claims inline code only to apps that read it', async () => {
+    const files = plugin(
+      { id: 'stars', ui: 'ui.js', inline: ['rating'] },
+      { 'ui.js': 'export default {};' },
+    );
+    expect((await upload(ann, files)).status).toBe(201);
+    const ids = async (manifest?: number) => (await list(bob, [], manifest)).map(({ id }) => id);
+    // Released apps send no `manifest`, and refuse a whole listing with `inline` in it.
+    expect(await ids()).not.toContain('stars');
+    expect(await ids()).toContain('notes');
+    expect(await ids(pluginRoutes.MANIFEST_READ)).toContain('stars');
   });
 });

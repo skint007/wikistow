@@ -977,7 +977,7 @@ type Range = { from: number; to: number };
 
 // The spans of the document `trs` changed, in its final positions; with
 // `marks`, where marks were added or taken away too.
-function changedRanges(trs: readonly Transaction[], marks = false): Range[] {
+export function changedRanges(trs: readonly Transaction[], marks = false): Range[] {
   let ranges: Range[] = [];
   for (const tr of trs) {
     const { mapping } = tr;

@@ -128,6 +128,7 @@ export function libraryPlugins(data: string, upstream: Upstream) {
     let listed: Promise<LibraryPlugin[]> | null = null;
     const have = new URLSearchParams({
       have: pluginRoutes.haveQuery(approved.map(({ hash }) => hash)),
+      manifest: String(pluginRoutes.MANIFEST_READ),
     });
     const listing = () =>
       (listed ??= get(`/api/plugins?${have}`).then(

@@ -89,10 +89,20 @@ export const MAX_HAVE = 100;
 export const haveQuery = (hashes: readonly string[]) => hashes.slice(0, MAX_HAVE).join(',');
 
 /**
+ * The manifests this app reads, as the listing's `manifest`: from 2, with
+ * `inline` (ADR 0011). Released apps read manifests strictly and send
+ * none, so the listing leaves out the versions whose manifests they would
+ * refuse, which would fail the whole listing for them.
+ */
+export const MANIFEST_READ = 2;
+
+/**
  * Every plugin in the library the caller may see, by ID: every Shared one,
  * their own, and each Only me one with a version whose hash is in `have`,
  * the hashes the caller approved (`haveQuery`). So a plugin that went Only
  * me stays listed, with its newer versions, for the people who installed it.
+ * Only versions whose manifests the caller reads (`MANIFEST_READ`) are
+ * listed, and a plugin with none isn't.
  */
 export const listPlugins = {
   method: 'GET',
@@ -104,6 +114,7 @@ export const listPlugins = {
       .transform((text) => (text === '' ? [] : text.split(',')))
       .pipe(z.array(PluginHash).max(MAX_HAVE))
       .optional(),
+    manifest: z.coerce.number().int().min(1).optional(),
   }),
   response: z.strictObject({ plugins: z.array(LibraryPlugin) }),
 } as const satisfies RouteDef;

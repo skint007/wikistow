@@ -643,6 +643,7 @@ export class Workshop {
       registered: {
         commands: snapshot.commands.map(({ id, title }) => ({ id, title })),
         blocks: [...snapshot.blocks.keys()],
+        inline: [...snapshot.inline.keys()],
         regions: Object.fromEntries(
           Object.entries(snapshot.regions).flatMap(([region, list]) =>
             list.length > 0 ? [[region, list.map(({ id }) => id)]] : [],

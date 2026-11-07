@@ -52,3 +52,16 @@
 .page-tools-product output {
   font-weight: 700;
 }
+
+.page-tools-rating {
+  color: var(--primary);
+  letter-spacing: 0.05em;
+}
+
+.page-tools-rating button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
