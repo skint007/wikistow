@@ -50,9 +50,29 @@ A manifest's `themes` (`{ id, name, base: 'light' | 'dark', stylesheet }`) join 
 
 How they rank: a preview over a chosen plugin theme, over the account's built-in choice. A plugin theme is kept on this computer, or in this browser, only. The account's choice stays what every other device shows. A theme is light or dark by its `base`: it is drawn over Light or Midnight slate, which supply any token it leaves out and the app's dark styles, and it doesn't follow the system's light or dark setting.
 
-The stylesheet is loaded after the app's styles, only while the theme is shown. It sets the app's tokens on `:root, [data-theme]`. `ThemeToken` (`src/theme.ts`) lists them: the palette's colours, `--card-shadow` and `--cover`, then `--font-sans`, `--font-mono`, the radii `--radius-card`, `--radius-tile`, `--radius-control`, `--radius-row`, `--radius-folder`, and `--spacing`, the unit every gap and padding is a multiple of. Their built-in values are in `packages/ui/src/styles/theme.css`. Beyond tokens, it can style the app's places through their `data-region` attributes and a page's text through `.page-body`, the same in the reader and the visual editor.
+The stylesheet is loaded after the app's styles, only while the theme is shown. It sets the app's tokens on `:root, [data-theme]`, listed below and as `ThemeToken` (`src/theme.ts`). Their built-in values are in `packages/ui/src/styles/theme.css`. A token a theme leaves out keeps its base palette's value, and the page's alerts and code colours follow the palette's own colours until a theme sets them. Beyond tokens, it can style the app's places through their `data-region` attributes and a page's text through `.page-body`, the same in the reader and the visual editor. Mermaid diagrams are drawn in the theme's `--primary-soft`, `--primary`, `--card`, `--background`, `--muted`, `--foreground`, `--muted-foreground`, `--note`, `--note-foreground` and `--border`, in the system's fonts.
 
 A theme is styles only: it runs no code and gets no page access. It can't load anything from another host, since the app's Content Security Policy allows styles, fonts and images from its own origin only. Fonts and images go in the plugin folder.
+
+### Tokens
+
+| Tokens | What they style |
+| --- | --- |
+| `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--border`, `--input`, `--ring` | The app's surfaces, their text, borders and the focus ring |
+| `--muted`, `--muted-foreground`, `--subtle-foreground`, `--secondary`, `--secondary-foreground`, `--accent`, `--accent-foreground` | Quiet fills and text, and the hover fill and its text |
+| `--primary`, `--primary-2`, `--primary-foreground`, `--primary-soft`, `--primary-ink` | The brand colour, its gradient start, text on it, its soft fill and text on that |
+| `--strong`, `--strong-foreground`, `--destructive`, `--destructive-foreground`, `--destructive-badge-foreground` | Dark buttons and avatars, and destructive buttons and badges |
+| `--status-published`, `--status-published-foreground`, `--status-draft`, `--status-draft-foreground`, `--draft-dot`, `--update-dot` | Status pills and dots |
+| `--note`, `--note-foreground`, `--table`, `--table-head`, `--tree-guide` | Notes, tables and the sidebar's tree lines |
+| `--glass`, `--glass-foreground`, `--cover` | The banner's toolbar and the palette's own banner |
+| `--folder-green`, `--folder-orange`, `--folder-blue`, `--folder-pink`, `--folder-purple` | Folder tints |
+| `--card-shadow`, `--badge-shadow`, `--slider-shadow`, `--shade`, `--shade-strong`, `--backdrop` | Shadows (`box-shadow` values), the shade over a bright fill when hovered and pressed, and the colour behind a dialog |
+| `--alert-note`, `--alert-tip`, `--alert-important`, `--alert-warning`, `--alert-caution` | A page's alerts: each type's label and edge |
+| `--code-comment`, `--code-keyword`, `--code-string`, `--code-number`, `--code-title`, `--code-deletion` | Highlighted code |
+| `--banner-sunrise`, `--banner-ocean`, `--banner-meadow`, `--banner-lavender`, `--banner-dusk`, `--banner-stone` | The banner presets, the same in every palette |
+| `--font-sans`, `--font-mono` | Type |
+| `--radius-card`, `--radius-tile`, `--radius-control`, `--radius-row`, `--radius-folder` | Corner radii |
+| `--spacing`, `--sidebar-width` | The unit every gap and padding is a multiple of, and the space's sidebar on a wide screen |
 
 ## Regions
 

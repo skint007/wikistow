@@ -10,8 +10,10 @@
  * Theme selection: the theme provider sets data-theme on <html>.
  * Values: light | warm | slate | oled. "System" resolves to light or slate.
  * The choice is an account setting, synced across devices. A plugin theme, chosen on one
- * device, adds its stylesheet over light or slate and sets these tokens; the plugin SDK lists them
- * (`ThemeToken` in packages/plugin-sdk/src/theme.ts), so keep that list in step.
+ * device, adds its stylesheet over light or slate and sets these tokens. Every custom property
+ * set here, apart from `@theme inline`'s utility names, is a token: the plugin SDK lists them
+ * (`ThemeToken` in packages/plugin-sdk/src/theme.ts), and packages/ui/test/theme-tokens.test.ts
+ * checks that list, the SDK's guide and the workshop's prompt against this file.
  */
 
 @import "tailwindcss";
@@ -71,6 +73,11 @@
   --glass: rgba(255, 255, 255, 0.7);
   --glass-foreground: #2d2a26;
   --card-shadow: 0 1px 2px rgba(60, 40, 20, 0.06), 0 4px 16px rgba(60, 40, 20, 0.05);
+
+  --alert-note: #2b5fb4;          /* a GitHub alert's label and edge, by its type */
+  --alert-important: #6d3fc0;
+  --alert-caution: #b02525;
+  --code-title: #2b5fb4;          /* highlighted code's names: functions, types, tags */
 
   --folder-green: #e3f6e9;
   --folder-orange: #ffeedd;
@@ -132,6 +139,11 @@
   --glass-foreground: #e2e8f0;
   --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 24px rgba(0, 0, 0, 0.4);
 
+  --alert-note: #8ab4f8;
+  --alert-important: #c4b5fd;
+  --alert-caution: var(--destructive);
+  --code-title: #8ab4f8;
+
   --folder-green: rgba(74, 222, 128, 0.14);
   --folder-orange: rgba(251, 146, 60, 0.16);
   --folder-blue: rgba(96, 165, 250, 0.17);
@@ -191,6 +203,11 @@
   --glass: rgba(20, 16, 14, 0.66);
   --glass-foreground: #f4ede6;
   --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  --alert-note: #8ab4f8;
+  --alert-important: #c4b5fd;
+  --alert-caution: var(--destructive);
+  --code-title: #8ab4f8;
 
   --folder-green: rgba(74, 222, 128, 0.15);
   --folder-orange: rgba(251, 146, 60, 0.17);
@@ -252,6 +269,11 @@
   --glass-foreground: #f4f4f5;
   --card-shadow: inset 0 0 0 1px #1c1c20;
 
+  --alert-note: #8ab4f8;
+  --alert-important: #c4b5fd;
+  --alert-caution: var(--destructive);
+  --code-title: #8ab4f8;
+
   --folder-green: rgba(74, 222, 128, 0.14);
   --folder-orange: rgba(251, 146, 60, 0.16);
   --folder-blue: rgba(96, 165, 250, 0.17);
@@ -274,6 +296,25 @@
   --banner-lavender: linear-gradient(120deg, #6d5bd0, #a78bfa 50%, #f0c4e4);
   --banner-dusk: linear-gradient(120deg, #1e1b4b, #7c3aed 55%, #f472b6);
   --banner-stone: linear-gradient(120deg, #334155, #64748b 55%, #cbd5e1);
+}
+/* The rest of a page's colours, and the app's shadows and shades: the same in every palette,
+ * or the palette's own colours, until a theme sets them. */
+:root,
+[data-theme] {
+  --alert-tip: var(--status-published-foreground);
+  --alert-warning: var(--status-draft-foreground);
+  --code-comment: var(--subtle-foreground);
+  --code-keyword: var(--primary-ink);
+  --code-string: var(--status-published-foreground);
+  --code-number: var(--status-draft-foreground);
+  --code-deletion: var(--destructive);
+
+  --shade: rgb(0 0 0 / 10%);      /* hover over a bright fill, such as a primary button's */
+  --shade-strong: rgb(0 0 0 / 18%); /* pressed */
+  --badge-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); /* the page's badge, over its banner */
+  --slider-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  --backdrop: rgb(0 0 0 / 50%);   /* behind a dialog */
+  --destructive-badge-foreground: #ffffff; /* text on a destructive badge, such as Suspended */
 }
 /* palettes:end */
 
@@ -339,6 +380,13 @@
   /* ui-rounded matches the mocks on macOS. Elsewhere the stack falls back to the bundled
    * Nunito, imported once in the shared interface: import "@fontsource-variable/nunito"; */
   --font-sans: ui-rounded, "SF Pro Rounded", "Nunito Variable", "Nunito", "Varela Round", "Segoe UI", system-ui, sans-serif;
+  /* Tailwind's own monospace stack, set here like the rest. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* The unit every gap and padding is a multiple of (p-4 is 4 of them), Tailwind's own value. */
+  --spacing: 0.25rem;
+  /* The space's sidebar, beside the page on a wide screen. */
+  --sidebar-width: 280px;
 }
 
 @layer base {

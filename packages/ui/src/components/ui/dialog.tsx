@@ -116,7 +116,7 @@ function DialogContent({
       className={cn(
         // Its body scrolls, not the box: a menu in it, positioned against the
         // box, would be cut off at its edge.
-        'overflow-visible bg-card text-card-foreground border shadow-card backdrop:bg-black/50',
+        'overflow-visible bg-card text-card-foreground border shadow-card backdrop:bg-(--backdrop)',
         side
           ? cn('m-0 h-dvh max-h-dvh w-full max-w-md', side === 'right' ? 'ml-auto' : 'mr-auto')
           : 'm-auto w-full max-w-[calc(100%-2rem)] rounded-card sm:max-w-lg',
