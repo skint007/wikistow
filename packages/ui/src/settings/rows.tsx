@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/button';
 import { desktop } from '../desktop';
-import { useNeedsConnection } from '../shell/needs-connection';
+import { useNeedsConnection } from '../shell/availability';
 
 /** The pill on a setting kept on this device only. Unmarked settings follow the account. */
 export const THIS_DEVICE = desktop ? 'This computer' : 'This browser';

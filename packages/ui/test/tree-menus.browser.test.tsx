@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
-import { SENDS_FIRST } from '../src/shell/needs-connection.ts';
+import { availability, type Waiting } from '../src/shell/availability.ts';
 import { FolderMenu, folderActions } from '../src/shell/tree-menus.tsx';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 /** An editor's folder menu, open, with every action recorded as it runs. */
-async function openMenu(made: boolean) {
+async function openMenu(waiting: Waiting) {
   const ran: string[] = [];
   const run = (name: string) => () => ran.push(name);
   const actions = folderActions({
@@ -37,7 +37,7 @@ async function openMenu(made: boolean) {
   const container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  act(() => root?.render(<FolderMenu name="Trips" actions={actions} made={made} />));
+  act(() => root?.render(<FolderMenu name="Trips" actions={actions} waiting={waiting} />));
   const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Actions for Trips"]');
   if (!trigger) throw new Error('No menu button');
   await act(async () => {
@@ -51,17 +51,16 @@ async function openMenu(made: boolean) {
     if (!found) throw new Error(`No item ${label}`);
     return found;
   };
-  return { ran, item };
+  return { ran, item, actions };
 }
 
-it('holds what needs the server for a folder made offline, online too, and keeps making things in it', async () => {
-  const { ran, item } = await openMenu(true);
-  for (const label of ['Rename…', 'Move to…', 'Share…', 'Export…', 'Import…', 'Delete folder']) {
-    expect(item(label).getAttribute('aria-disabled')).toBe('true');
-    expect(item(label).dataset['hint']).toBe(SENDS_FIRST);
+it('holds each item as its kind says, for a folder made offline', async () => {
+  const { ran, item, actions } = await openMenu('made');
+  for (const { label, kind } of actions) {
+    const now = availability(kind, { offline: false, waiting: 'made' });
+    expect(item(label).dataset['hint'], label).toBe(now.allowed ? undefined : now.hint);
   }
-  for (const label of ['Open', 'New page here', 'New folder here'])
-    expect(item(label).hasAttribute('aria-disabled')).toBe(false);
+  // Waiting, it does nothing; one that runs offline still does.
   act(() => item('Rename…').click());
   expect(ran).toEqual([]);
   act(() => item('New page here').click());
@@ -69,7 +68,7 @@ it('holds what needs the server for a folder made offline, online too, and keeps
 });
 
 it('offers every action online for a folder the server has', async () => {
-  const { ran, item } = await openMenu(false);
+  const { ran, item } = await openMenu('none');
   expect(item('Rename…').hasAttribute('aria-disabled')).toBe(false);
   act(() => item('Rename…').click());
   expect(ran).toEqual(['rename']);

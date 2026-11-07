@@ -44,7 +44,7 @@ import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
 import { useNotKept } from '../data/connection';
-import { pageChange, queueQuery } from '../data/offline-changes';
+import { useAvailability } from '../shell/availability';
 
 export type DraftEditorHandle = {
   /**
@@ -143,8 +143,7 @@ export function DraftEditor({
     surface,
   });
   // Saved into this device's queue, not yet on the server (ADR 0009, decision 7).
-  const { data: entries } = useQuery(queueQuery(ctx));
-  const onDevice = pageChange(entries, page.pageId) !== null;
+  const onDevice = useAvailability().waiting(page.pageId) !== 'none';
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const propertyKeys = usePropertyKeys(ctx, page);
   const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
