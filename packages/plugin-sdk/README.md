@@ -25,7 +25,7 @@ The manifest (`src/manifest.ts` has the schema):
 | `themes` | `{ id, name, base: 'light' \| 'dark', stylesheet }`, for the theme picker. See [Themes](#themes). |
 | `access` | `none`, `read` or `write`: the most page access the person may give it. |
 | `blocks` | Fenced block types it claims, written `plugin:<id>/<block>` (#260). |
-| `inline` | Inline code types it claims, written `` `plugin:<id>/<type> <text>` `` (app plugins). Leave it out if it claims none: an app older than it refuses a manifest that has it. |
+| `inline` | Inline code types it claims, written `` `plugin:<id>/<type> <text>` `` (app plugins). Leave it out if it claims none: an app older than it refuses a manifest that has it, and the library lists such a version only to apps that read it. |
 
 Its trust level comes from what it holds: **theme** (styles only), **script** (`script`, in a worker with no network or DOM, inside a sandboxed frame with an opaque origin, so it has none of the app's storage) or **app** (`ui`, in the app's page with the app's own trust).
 

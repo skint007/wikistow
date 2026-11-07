@@ -1,5 +1,6 @@
 import { pluginRoutes } from '@wikistow/contracts';
 import { checkPlugin, PluginFolderError } from '@wikistow/plugin-sdk/files';
+import type { Manifest } from '@wikistow/plugin-sdk/manifest';
 import { and, desc, eq } from 'drizzle-orm';
 import { ContentError } from '../content/errors.ts';
 import type { Database } from '../db/client.ts';
@@ -145,12 +146,21 @@ export async function uploadPlugin(
   return { pluginId: manifest.id, version: versionOut(version) };
 }
 
+/** Whether an app reading manifests `reads` (`MANIFEST_READ`) takes `manifest`: before 2, one without `inline`. */
+const readable = (manifest: Manifest, reads: number) => reads >= 2 || manifest.inline === undefined;
+
 /**
  * Every plugin in the library `accountId` may see, with its versions,
  * newest first: the Shared ones, their own, and each Only me one with a
- * version whose hash is in `have`, the hashes they approved.
+ * version whose hash is in `have`, the hashes they approved. Only versions
+ * whose manifests the caller reads (`reads`) are listed.
  */
-export async function listPlugins(db: Database, accountId: string, have: readonly string[] = []) {
+export async function listPlugins(
+  db: Database,
+  accountId: string,
+  have: readonly string[] = [],
+  reads = 1,
+) {
   const owned = await db
     .select({
       id: plugins.id,
@@ -164,7 +174,9 @@ export async function listPlugins(db: Database, accountId: string, have: readonl
   const versions = await db.select().from(pluginVersions).orderBy(desc(pluginVersions.createdAt));
   const known = new Set(have);
   return owned.flatMap(({ id, ownerId, ownerName, visibility }) => {
-    const own = versions.filter((version) => version.pluginId === id);
+    const own = versions.filter(
+      (version) => version.pluginId === id && readable(version.manifest, reads),
+    );
     const mine = ownerId === accountId;
     const listed =
       visibility === 'shared' || mine || own.some((version) => known.has(version.hash));

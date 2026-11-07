@@ -39,7 +39,7 @@ export function mountPluginRoutes(
   routes.account(
     pluginRoutes.listPlugins,
     async ({ query }, { principal }) => ({
-      plugins: await listPlugins(db, principal.accountId, query.have),
+      plugins: await listPlugins(db, principal.accountId, query.have, query.manifest),
     }),
     { rateLimit: FETCH_LIMIT },
   );

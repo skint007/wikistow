@@ -26,7 +26,11 @@ const have = (approvals: readonly PluginApproval[]) =>
   pluginRoutes.haveQuery(approvals.map(({ hash }) => hash));
 
 const listLibrary = async (approvals: readonly PluginApproval[]) =>
-  (await api.call(pluginRoutes.listPlugins, { query: { have: have(approvals) } })).plugins;
+  (
+    await api.call(pluginRoutes.listPlugins, {
+      query: { have: have(approvals), manifest: pluginRoutes.MANIFEST_READ },
+    })
+  ).plugins;
 
 /**
  * The server's plugin library (ADR 0002) as the person in `ctx` may see it
