@@ -319,7 +319,7 @@ Groups (`wikistow.md`, Milestone 5 Groups) are built, for people and their agent
 Publication follows the [protocol](protocol.md) section 13. Every action is a named command.
 
 - **Publish to another space…** is in the page menu, for the version in view, draft or published, and in the page's sidebar menu, for someone who can publish the page. Its readers can't copy it elsewhere. The dialog has two steps.
-- **Choose.** A **Space** picker (every space but this one: spaces the person holds whole by name, and spaces they hold only folders of by the shared folder's name, marked "a folder shared with you"), then a **Folder** picker listing only where they can edit and publish there.
+- **Choose.** A **Space** picker (every space but this one: spaces the person holds whole by name, and spaces they hold only folders of by the shared folder's name, marked "a folder shared with you"), then a **Folder** picker listing only where they can edit and publish there, without a folder made offline that isn't sent yet.
 - **Confirm.** Focus moves to the "To Space › Folder." line, or "To the page it was published to before, in …" when this page already has a copy in that space, which stays where it is. It shows:
   - **At least these people can read it there**: for an owner of that space, everyone their app verified holding the folder's keys, and the owners; for anyone else, the owners and themselves, with "and anyone else it's shared with there: only an owner of … can see who". The server could hide someone, so it is a lower bound.
   - **Attachments that go**, each with a checkbox, ticked by default. Each goes copied and encrypted afresh.

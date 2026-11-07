@@ -36,8 +36,9 @@ export type ActionKind =
   | 'restore'
   | 'drag'
   /**
-   * A page or folder moved or copied, or dropped, into this folder. The move
-   * itself waits for the connection: this is about the folder only.
+   * A page or folder moved, copied or dropped into this folder, or a page
+   * published into it from another space. The action itself waits for the
+   * connection: this is about the folder only.
    */
   | 'into'
   /** A task ticked or a property set while reading, which publishes. */
