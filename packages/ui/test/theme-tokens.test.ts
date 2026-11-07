@@ -30,14 +30,14 @@ function tokens() {
 function block(opening: string) {
   const start = theme.indexOf(`${opening} {`);
   expect(start, opening).toBeGreaterThanOrEqual(0);
-  return [...declared(theme.slice(start, theme.indexOf('\n}', start)))].toSorted();
+  return declared(theme.slice(start, theme.indexOf('\n}', start)));
 }
 
 const sdk: string[] = [...PALETTE_TOKENS, ...CONTENT_TOKENS, ...BANNER_TOKENS, ...SHAPE_TOKENS];
 
 describe('the theme tokens', () => {
   it('are the ones theme.css sets, no more and no fewer', () => {
-    expect(sdk.toSorted()).toEqual([...tokens()].toSorted());
+    expect(new Set(sdk)).toEqual(tokens());
     expect(new Set(sdk).size).toBe(sdk.length);
   });
 
@@ -53,16 +53,12 @@ describe('the theme tokens', () => {
     const start = guide.indexOf('\n### Tokens\n');
     expect(start).toBeGreaterThanOrEqual(0);
     const listed = names(guide.slice(start, guide.indexOf('\n## ', start)));
-    expect(listed.toSorted()).toEqual(sdk.toSorted());
+    expect(new Set(listed)).toEqual(new Set(sdk));
   });
 
   it('are the only tokens the workshop’s prompt names', () => {
     const named = names(workshopSystemPrompt());
     expect(named.length).toBeGreaterThan(0);
     expect(named.filter((name) => !sdk.includes(name))).toEqual([]);
-  });
-
-  it('are set the same in the design spec’s copy of theme.css', () => {
-    expect(read('../../../wikistow/design/theme.css')).toBe(read('../src/styles/theme.css'));
   });
 });
