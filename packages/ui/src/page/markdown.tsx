@@ -295,9 +295,18 @@ const TOO_SLOW = 'This page took too long to format, so here it is as written.';
  * the registered syntaxes, with nothing that can run or reach out.
  * Frontmatter is shown above it as property rows (`PropertiesBox`).
  * The body is read in a worker, off the page's thread (`READ_BUDGET_MS`),
- * and only turned into HTML here.
+ * and only turned into HTML here. `bodyIn` draws the body around the
+ * app's own drawing of it, given its text, as the page lets a plugin
+ * replace it (`page.reader`); the properties stay the app's.
  */
-export function Markdown({ source, ...context }: { source: string } & PageBodyContext) {
+export function Markdown({
+  source,
+  bodyIn,
+  ...context
+}: {
+  source: string;
+  bodyIn?: ((own: ReactNode, body: string) => ReactNode) | undefined;
+} & PageBodyContext) {
   const { frontmatter, body } = splitFrontmatter(source);
   const properties = useMemo(() => {
     const read = readProperties(frontmatter);
@@ -380,33 +389,38 @@ export function Markdown({ source, ...context }: { source: string } & PageBodyCo
               />
             </div>
           )}
-          {read.isPending ? (
-            <StillReading />
-          ) : read.isSuccess ? (
-            <AsWritten source={body}>
-              <div className="page-body">
-                <ReactMarkdown
-                  remarkPlugins={[[readTree, read.data]]}
-                  remarkRehypeOptions={{
-                    handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
-                  }}
-                  rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
-                  urlTransform={urlTransform}
-                  components={components}
-                />
-              </div>
-            </AsWritten>
-          ) : (
-            <Written
-              source={body}
-              note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
-            />
+          {(bodyIn ?? asOwn)(
+            read.isPending ? (
+              <StillReading />
+            ) : read.isSuccess ? (
+              <AsWritten source={body}>
+                <div className="page-body">
+                  <ReactMarkdown
+                    remarkPlugins={[[readTree, read.data]]}
+                    remarkRehypeOptions={{
+                      handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                    }}
+                    rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
+                    urlTransform={urlTransform}
+                    components={components}
+                  />
+                </div>
+              </AsWritten>
+            ) : (
+              <Written
+                source={body}
+                note={read.error instanceof MarkdownTimeout ? TOO_SLOW : UNREADABLE}
+              />
+            ),
+            body,
           )}
         </OtherPagesContext>
       </PageProperties>
     </PageBody>
   );
 }
+
+const asOwn = (own: ReactNode) => own;
 
 /** While a body is read: nothing at first, so a quick read doesn't flash, then a note. */
 function StillReading() {

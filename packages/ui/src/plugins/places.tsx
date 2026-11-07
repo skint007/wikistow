@@ -1,7 +1,9 @@
 import type { ClientContext, pageOperations, RevisionId } from '@wikistow/client';
 import type {
   AppViewProps,
+  PageRef,
   PageViewProps,
+  RailViewProps,
   Regions,
   Replacements,
   SettingsViewProps,
@@ -393,8 +395,12 @@ function RailItem({
 
 /** What the app gives each region plugins can replace, where it draws it. */
 export type ReplaceInputs = {
+  rail: Record<never, never>;
+  'space.sidebar': { spaceId: string };
   'space.home': { spaceId: string };
   'folder.view': { spaceId: string; folderId: string };
+  /** The publication shown, and its text as shown, after its frontmatter. */
+  'page.reader': { page: PageRef; revision: string; markdown: string };
 };
 
 /** What a replacing view of region `R` is given. */
@@ -414,6 +420,19 @@ export const REPLACED: {
     bind: (view: Replacements[R]['view'], props: ReplacementProps<R>) => View<null>;
   };
 } = {
+  rail: {
+    part: 'the rail',
+    // It reads nothing of its own: `host.app` gives the spaces it may see.
+    props: async () => NO_RAIL,
+    bind: (view, props) => (element) => view(element, props),
+  },
+  'space.sidebar': {
+    part: 'a space’s page tree',
+    // Only where it reads the whole space, so nothing there goes missing from the sidebar.
+    props: async ({ pages, readsAll }, { spaceId }) =>
+      readsAll(spaceId) ? { spaceId, tree: await pages.tree(spaceId) } : null,
+    bind: (view, props) => (element) => view(element, props),
+  },
   'space.home': {
     part: 'a space’s home page',
     props: async ({ spaces }, { spaceId }) =>
@@ -428,7 +447,19 @@ export const REPLACED: {
     }),
     bind: (view, props) => (element) => view(element, props),
   },
+  'page.reader': {
+    part: 'a page’s text as read',
+    props: async ({ pages, handle }, { page, revision, markdown }) =>
+      (await pages.tree(page.spaceId)).some(
+        (entry) => entry.kind === 'page' && entry.pageId === page.pageId,
+      )
+        ? { page: handle({ page, version: 'published', revision, draft: null }), markdown }
+        : null,
+    bind: (view, props) => (element) => view(element, props),
+  },
 };
+
+const NO_RAIL: RailViewProps = {};
 
 /** What a replacing view was given, for the view and inputs it was read for, bound to it. */
 type Made<R extends keyof Replacements> = {
@@ -443,9 +474,10 @@ type Made<R extends keyof Replacements> = {
  * names, or as the app's own part, `children`, where none does, where the
  * plugin has no page access, and once its view failed, which a note above
  * it says, with Disable. Nothing shows while what the view is given is
- * read. What it is given is read again as `inputs` or the plugin's page
- * access change, and as `stamp` does, such as the tree's update time, and
- * it is drawn again only if that changed.
+ * first read; read again, what showed stays if it was the app's own. What
+ * it is given is read again as `inputs` or the plugin's page access
+ * change, and as `stamp` does, such as the tree's update time, and it is
+ * drawn again only if that changed.
  */
 export function Replaceable<R extends keyof Replacements>({
   name,
@@ -489,8 +521,11 @@ export function Replaceable<R extends keyof Replacements>({
     };
   }, [name, view, pluginId, runtime, key, access, stamp]);
   if (!replacing) return children;
-  const shown = made?.view === replacing.view && made.inputs === key ? made : null;
-  if (!shown) return null;
+  const sameView = made?.view === replacing.view;
+  const shown = sameView && made.inputs === key ? made : null;
+  // The app's own part stays while what the view is given is read again, if
+  // that is what showed: drawn afresh, it would lose its focus and scroll.
+  if (!shown) return sameView && !made.draw ? children : null;
   if (!shown.draw) return children;
   return (
     <ReplacementView

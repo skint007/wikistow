@@ -196,7 +196,14 @@ export class Workshop {
         const running = this.#state.running?.plugin;
         if (!running || this.#holding) return none;
         const manifest = this.#state.appCode ? running.manifest : withoutUi(running.manifest);
-        return { ...none, plugins: [{ ...running, manifest }] };
+        // The samples' whole space, to the manifest's access.
+        const access =
+          manifest.access === 'none'
+            ? {}
+            : {
+                [manifest.id]: [{ spaceId: SAMPLE_SPACE, folderId: null, access: manifest.access }],
+              };
+        return { ...none, plugins: [{ ...running, manifest }], access };
       },
       approve: (version) => this.load(version),
       enable: async (_plugin, on) => {

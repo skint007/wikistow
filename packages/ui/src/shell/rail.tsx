@@ -51,7 +51,7 @@ import { useNeedsConnection } from './availability';
 import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
-import { Place } from '../plugins/places';
+import { Place, Replaceable } from '../plugins/places';
 import { isApple } from './search-model';
 import { SpaceIcon } from './space-look';
 import { RowMenu } from './tree-menus';
@@ -61,20 +61,31 @@ import { takeHeldSearch } from './search-link';
 // The running build's version, set by the web app's Vite config.
 declare const __APP_VERSION__: string;
 
-/**
- * Space tiles, then navigation, then the account. Labels stay visible.
- * `onSignOut` and `onSearch` come from the shell (see `useSignOut`), which
- * outlives the phone drawer this may be in.
- */
-export function Rail({
-  onNavigate,
-  onSignOut,
-  onSearch,
-}: {
+type RailProps = {
   onNavigate?: () => void;
   onSignOut: () => Promise<void>;
   onSearch: () => void;
-}) {
+};
+
+/**
+ * Space tiles, then navigation, then the account. Labels stay visible.
+ * `onSignOut` and `onSearch` come from the shell (see `useSignOut`), which
+ * outlives the phone drawer this may be in. A plugin can draw the rail
+ * instead (`rail`), at every size: then safe mode is the way back to
+ * Settings (its keys, `?safe-mode` in a browser, or Open without plugins
+ * as the vault is unlocked), whose banner links there.
+ */
+export function Rail(props: RailProps) {
+  return (
+    <Replaceable name="rail" inputs={NO_INPUTS}>
+      <OwnRail {...props} />
+    </Replaceable>
+  );
+}
+
+const NO_INPUTS = {};
+
+function OwnRail({ onNavigate, onSignOut, onSearch }: RailProps) {
   const vault = useVault();
   const needs = useNeedsConnection();
   return (

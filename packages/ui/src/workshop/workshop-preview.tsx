@@ -32,6 +32,8 @@ import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Place, Replaceable, type OpenPanel } from '../plugins/places';
 import { useAppPlugins } from '../plugins/app-plugins';
+import type { MarkdownPage } from '../plugins/markdown-drawings';
+import { RenderedMarkdown } from '../plugins/rendered-markdown';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
@@ -101,6 +103,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
             )}
           </section>
           <PluginPlaces workshop={workshop} onOpen={setSelected} />
+          <RenderedMarkdown drawings={workshop.markdown} Reader={SampleMarkdown} />
         </PluginsContext>
       )}
       <Versions workshop={workshop} />
@@ -487,6 +490,14 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
             pages={null}
             links={new Map()}
             editing={null}
+            bodyIn={(own, markdown) => (
+              <Replaceable
+                name="page.reader"
+                inputs={{ page: shown.page, revision: shown.revision, markdown }}
+              >
+                {own}
+              </Replaceable>
+            )}
           />
         )}
       </PageColumns>
@@ -498,12 +509,36 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
 
 const THEME_BANNER: Banner = { kind: 'theme' };
 
+const NO_RAIL = {};
+
 const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${viewId}`;
+
+/** The workshop's reader for its plugin's Markdown (`host.app.renderMarkdown`), as a sample's reader shows it. */
+function SampleMarkdown({ markdown, page }: { markdown: string; page: MarkdownPage }) {
+  const ctx = useClient();
+  return (
+    <Markdown
+      source={markdown}
+      attachments={{
+        ctx,
+        page: { spaceId: page.spaceId, pageId: page.pageId },
+        audience: 'draft',
+        attachments: [],
+      }}
+      pages={null}
+      links={NO_LINKS}
+      editing={null}
+    />
+  );
+}
+
+const NO_LINKS: ReadonlyMap<string, string> = new Map();
 
 /**
  * The plugin's other places, each drawn as the app draws it, opened here:
- * its own pages, which its rail items open too, the samples' space home
- * where it replaces that, its Settings sections and its titlebar buttons. Its `host.app.navigate` stays in the preview: it
+ * its own pages, which its rail items open too, the rail, the samples'
+ * page tree and space home where it replaces those, its Settings sections
+ * and its titlebar buttons. Its `host.app.navigate` stays in the preview: it
  * opens a sample page, or one of the plugin's own pages here, and fails
  * with `unsupported` for anywhere else.
  */
@@ -515,6 +550,8 @@ function PluginPlaces({
   onOpen: (pageId: string) => void;
 }) {
   const { regions, replaced } = usePlugins();
+  // The sample pages, which a replaced page tree is given again as they change.
+  const samples = useSyncExternalStore(workshop.samples.subscribe, workshop.samples.get);
   const [open, setOpen] = useState<string | null>(null);
   const appView = useMemo<AppViewProps>(
     () => ({ openPage: (page) => page.spaceId === SAMPLE_SPACE && onOpen(page.pageId) }),
@@ -551,6 +588,42 @@ function PluginPlaces({
       label: `Page: ${view.title}`,
       draw: () => drawView(view.pluginId, view.id),
     })),
+    // The whole rail, as the app's window shows it beside the page.
+    ...(replaced.rail
+      ? [
+          {
+            key: 'rail.replaced',
+            label: 'The rail',
+            draw: () => (
+              <div className="h-96 w-[70px]">
+                <Replaceable name="rail" inputs={NO_RAIL}>
+                  <p className="text-xs text-muted-foreground">The app’s own rail</p>
+                </Replaceable>
+              </div>
+            ),
+          },
+        ]
+      : []),
+    // The samples' page tree, as the sidebar beside a page shows it.
+    ...(replaced['space.sidebar']
+      ? [
+          {
+            key: 'space.sidebar',
+            label: 'Sidebar',
+            draw: () => (
+              <div className="h-96 w-(--sidebar-width)">
+                <Replaceable
+                  name="space.sidebar"
+                  inputs={{ spaceId: SAMPLE_SPACE }}
+                  stamp={samples}
+                >
+                  <p className="text-sm text-muted-foreground">The app’s own page tree</p>
+                </Replaceable>
+              </div>
+            ),
+          },
+        ]
+      : []),
     // The samples' one space, as a space with no page open shows it.
     ...(replaced['space.home']
       ? [

@@ -154,8 +154,12 @@ type Loaded = {
 /** What a replacing view's plugin reaches, for what the region gives it. */
 export type PluginPages = {
   pages: HostPages;
+  /** The handle a view gets for the page shown, as a page's places give it. */
+  handle: (shown: ShownPage) => PageHandle;
   /** The spaces it has page access in, as `host.app.spaces.list()` gives them. */
   spaces: () => Promise<SpaceSummary[]>;
+  /** Whether its page access covers the whole of a space, not only some folders there. */
+  readsAll: (spaceId: string) => boolean;
 };
 
 const fileUrl = ({ manifest, key }: InstalledPlugin, file: string) =>
@@ -805,7 +809,16 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     pagesOf(pluginId: string): PluginPages | null {
       const active = loaded.get(pluginId)?.active;
       if (!active) return null;
-      return { pages: active.pages, spaces: () => reach.spaces(active.caller) };
+      return {
+        pages: active.pages,
+        handle: (shown) => reach.handle(active.caller, shown),
+        spaces: () => reach.spaces(active.caller),
+        readsAll: (spaceId) =>
+          active.caller.access !== 'none' &&
+          active.caller
+            .scopes()
+            .some((scope) => scope.spaceId === spaceId && scope.folderId === null),
+      };
     },
     /** Run a plugin's command on the page shown. */
     async runCommand(pluginId: string, commandId: string, shown: ShownPage) {
