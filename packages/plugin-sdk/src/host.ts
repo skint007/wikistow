@@ -133,6 +133,70 @@ export type PluginEvent = {
   [E in keyof PluginEvents]: { event: E; payload: PluginEvents[E] };
 }[keyof PluginEvents];
 
+/**
+ * Where the person is in the app. A page's `version` is the one shown,
+ * missing while the page opens or where it can't. `other` is anywhere
+ * else, with the space where that is one of a space's own pages (its
+ * members or groups).
+ */
+export type AppLocation =
+  | { kind: 'space'; spaceId: string }
+  | { kind: 'folder'; spaceId: string; folderId: string }
+  | {
+      kind: 'page';
+      spaceId: string;
+      pageId: string;
+      version?: PageVersion['version'] | undefined;
+    }
+  | { kind: 'plugin'; pluginId: string; viewId: string }
+  | { kind: 'other'; spaceId?: string | undefined };
+
+/**
+ * Where `host.app.navigate` goes: a space, a folder, a page (its draft or
+ * publication, else the one the app opens), or one of the plugin's own
+ * `app.view`s.
+ */
+export type Destination =
+  | { kind: 'space'; spaceId: string }
+  | { kind: 'folder'; spaceId: string; folderId: string }
+  | { kind: 'page'; spaceId: string; pageId: string; version?: PageVersion['version'] | undefined }
+  | { kind: 'plugin'; viewId: string };
+
+/** A space the plugin has page access in. */
+export type SpaceSummary = {
+  spaceId: string;
+  /** Null where it can't be read. */
+  name: string | null;
+  /** Its emoji, or null for one with none, or with an image or a symbol instead. */
+  icon: string | null;
+};
+
+/** What app code gets as `host.app`: where the person is, and the way elsewhere. */
+export interface AppAccess {
+  readonly location: {
+    get(): AppLocation;
+    /** Called as the location changes, as `location.changed` handlers are. */
+    subscribe(listener: (location: AppLocation) => void | Promise<void>): Disposer;
+  };
+  /** Go there, as a link would. Fails with `invalid` for a malformed ID. */
+  navigate(to: Destination): Promise<void>;
+  readonly spaces: {
+    /** The spaces the plugin has any page access in, as the app lists them. */
+    list(): Promise<SpaceSummary[]>;
+  };
+}
+
+/** App code's events: every plugin's, and where the person is. */
+export type AppEvents = PluginEvents & {
+  /** The person went elsewhere in the app, or the version shown of a page changed. */
+  'location.changed': AppLocation;
+};
+
+/** One of app code's events, with its payload. */
+export type AppEvent = {
+  [E in keyof AppEvents]: { event: E; payload: AppEvents[E] };
+}[keyof AppEvents];
+
 export type Disposer = () => void;
 
 /** What every plugin gets. */
@@ -527,6 +591,18 @@ export const isRegion = (name: string): name is keyof Regions => Object.hasOwn(R
 
 /** What an app plugin gets beyond `Host`. */
 export interface AppHost extends Host {
+  /**
+   * Its events, and `location.changed`, which an app older than it lacks:
+   * it fails there, so call `app.location.subscribe` instead.
+   */
+  readonly events: {
+    on<E extends keyof AppEvents>(
+      event: E,
+      handler: (event: AppEvents[E]) => void | Promise<void>,
+    ): Disposer;
+  };
+  /** Where the person is, and the way elsewhere. Missing (undefined) in an app older than it. */
+  readonly app?: AppAccess | undefined;
   readonly ui: {
     register<R extends keyof Regions>(region: R, contribution: Regions[R]): Disposer;
   };

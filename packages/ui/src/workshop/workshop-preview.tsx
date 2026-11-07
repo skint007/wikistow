@@ -10,7 +10,7 @@ import {
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
-import type { AppViewProps } from '@wikistow/plugin-sdk';
+import { PluginError, type AppViewProps } from '@wikistow/plugin-sdk';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -54,6 +54,17 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   const samples = useSyncExternalStore(workshop.samples.subscribe, workshop.samples.get);
   const [selected, setSelected] = useState<string | null>(null);
   const sample = samples.find((page) => page.pageId === selected) ?? samples[0] ?? null;
+  // Where its plugin sees the person: on the sample page shown.
+  const samplePageId = sample?.pageId;
+  useEffect(
+    () =>
+      workshop.location.routed(
+        samplePageId
+          ? { kind: 'page', spaceId: SAMPLE_SPACE, pageId: samplePageId }
+          : { kind: 'other' },
+      ),
+    [workshop, samplePageId],
+  );
   return (
     <div className="grid content-start gap-5">
       <Status workshop={workshop} />
@@ -94,7 +105,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
               </p>
             )}
           </section>
-          <PluginPlaces onOpen={setSelected} />
+          <PluginPlaces workshop={workshop} onOpen={setSelected} />
         </PluginsContext>
       )}
       <Versions workshop={workshop} />
@@ -407,6 +418,16 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
     }),
     [sample.pageId, sample.outside, mode],
   );
+  // The sample shown, as the app's page route tells its plugins of a page.
+  useEffect(
+    () =>
+      workshop.location.showing({
+        page: shown.page,
+        version: shown.version,
+        revision: shown.revision,
+      }),
+    [workshop, shown],
+  );
   const page = useMemo(
     () => ({ spaceId: SpaceId.parse(SAMPLE_SPACE), pageId: PageId.parse(sample.pageId) }),
     [sample.pageId],
@@ -481,12 +502,22 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
 
 const THEME_BANNER: Banner = { kind: 'theme' };
 
+const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${viewId}`;
+
 /**
  * The plugin's other places, each drawn as the app draws it, opened here:
  * its own pages, which its rail items open too, its Settings sections and
- * its titlebar buttons.
+ * its titlebar buttons. Its `host.app.navigate` stays in the preview: it
+ * opens a sample page, or one of the plugin's own pages here, and fails
+ * with `unsupported` for anywhere else.
  */
-function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
+function PluginPlaces({
+  workshop,
+  onOpen,
+}: {
+  workshop: Workshop;
+  onOpen: (pageId: string) => void;
+}) {
   const { regions } = usePlugins();
   const [open, setOpen] = useState<string | null>(null);
   const appView = useMemo<AppViewProps>(
@@ -495,7 +526,24 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
   );
   // The plugin page a rail item opened, which may name one the plugin hasn't registered.
   const [railView, setRailView] = useState<{ pluginId: string; viewId: string } | null>(null);
-  const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${viewId}`;
+  useEffect(
+    () =>
+      workshop.location.navigateWith(async (to) => {
+        if (to.kind === 'plugin') {
+          setRailView({ pluginId: to.pluginId, viewId: to.viewId });
+          setOpen(viewKey(to.pluginId, to.viewId));
+        } else if (
+          to.kind === 'page' &&
+          to.spaceId === SAMPLE_SPACE &&
+          workshop.samples.get().some(({ pageId }) => pageId === to.pageId)
+        ) {
+          onOpen(to.pageId);
+        } else {
+          throw new PluginError('unsupported', 'The preview opens only its sample pages');
+        }
+      }),
+    [workshop, onOpen],
+  );
   const drawView = (pluginId: string, viewId: string) => (
     <div className="grid gap-6">
       <Place name="app.view" pluginId={pluginId} viewId={viewId} props={appView} />
