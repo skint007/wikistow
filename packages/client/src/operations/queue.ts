@@ -166,7 +166,8 @@ function withoutFiles(payload: PagePayload): PagePayload {
  * answer lost on the way is told from a change that never landed.
  *
  * What the app writes goes in through the page writer (`createPageWriter`),
- * which decides what goes here.
+ * which decides what goes here; whatever only reads the queue takes a
+ * `QueueReader`.
  */
 export class OfflineQueue {
   readonly #store: KeptStore;
@@ -825,6 +826,18 @@ export class OfflineQueue {
     return bases;
   }
 }
+
+/**
+ * The queue as whatever only reads it takes it: what's waiting, the files a
+ * change holds, and hearing of changes to it. Writes go through the page writer.
+ */
+export type QueueReader = Pick<
+  OfflineQueue,
+  'entries' | 'entry' | 'drafts' | 'filesHere' | 'subscribe'
+>;
+
+/** What the person can choose for a change waiting: send it again, discard it, or save it as a new page. */
+export type QueueChoices = Pick<OfflineQueue, 'retry' | 'discard' | 'saveAsNewPage'>;
 
 /**
  * Why the server refused a send, or null for no answer or no session,

@@ -7,6 +7,7 @@ import {
   type PageRef,
   type PageVersion,
 } from '@wikistow/plugin-sdk';
+import { queueOf } from '../data/queries';
 import { payloadChanges, pluginError, readShown, session, type Caller } from './pages';
 import type { OpenDraft, ShownPage } from './runtime';
 
@@ -24,8 +25,8 @@ const headOf = async (page: PageRef) => {
  * draft from before it, which a plugin would read and write over.
  */
 async function sentFirst(page: PageRef) {
-  const entry = await session()
-    .keptContent?.queue.entry(PageId.parse(page.pageId))
+  const entry = await queueOf(session())
+    ?.entry(PageId.parse(page.pageId))
     .catch(() => null);
   if (entry) {
     throw new PluginError(

@@ -68,9 +68,19 @@ export const spaceOrderQuery = (ctx: ClientContext) =>
       ),
   });
 
-/** The changes waiting on this device (ADR 0009, decision 7), none where it keeps no queue. */
+/**
+ * This session's queue of changes made offline (ADR 0009, decision 7),
+ * where the device keeps one, for what only reads it. Writes go through
+ * the page writer (`pageWriter`).
+ */
+export const queueOf = (ctx: ClientContext): queueOperations.QueueReader | null =>
+  ctx.keptContent?.queue ?? null;
+
+/** The changes waiting on this device, none where it keeps no queue. */
 const queued = async (ctx: ClientContext) =>
-  (await ctx.keptContent?.queue.entries().catch(() => null)) ?? [];
+  (await queueOf(ctx)
+    ?.entries()
+    .catch(() => null)) ?? [];
 
 /**
  * A space's tree; offline, its kept pages only (`keptTree`). With the
@@ -101,7 +111,9 @@ export const pageQuery = (ctx: ClientContext, pageId: PageId) =>
   queryOptions({
     queryKey: [PLAIN, 'page', pageId],
     queryFn: async () => {
-      const entry = await ctx.keptContent?.queue.entry(pageId).catch(() => null);
+      const entry = await queueOf(ctx)
+        ?.entry(pageId)
+        .catch(() => null);
       const made = entry?.kind === 'page' && queueOperations.queuedPageInfo(entry);
       if (made) return made;
       return orKept(
@@ -421,7 +433,10 @@ async function withQueuedDrafts(
   index: searchOperations.PageIndex,
   signal: AbortSignal,
 ): Promise<searchOperations.PageIndex> {
-  const drafts = (await ctx.keptContent?.queue.drafts().catch(() => null)) ?? [];
+  const drafts =
+    (await queueOf(ctx)
+      ?.drafts()
+      .catch(() => null)) ?? [];
   const saved = drafts.filter(
     (draft) => index.page(draft.spaceId, draft.pageId)?.revisionId === draft.basedOn,
   );

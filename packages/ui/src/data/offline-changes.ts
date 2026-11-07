@@ -17,12 +17,13 @@ import { readWikilinks } from '../page/page-reader';
 import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
 import { keepChanged, pageOpened } from './keeper';
-import { pageQuery, searchIndexChanged, treeQuery } from './queries';
+import { pageQuery, queueOf, searchIndexChanged, treeQuery } from './queries';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
-/** This session's queue, where the device keeps one. */
-export const queueOf = (ctx: ClientContext) => ctx.keptContent?.queue ?? null;
+/** This session's queue, for the person's choices about a change waiting there. */
+export const queueChoices = (ctx: ClientContext): queueOperations.QueueChoices | null =>
+  ctx.keptContent?.queue ?? null;
 
 /**
  * How the app writes drafts, new pages and folders, and files for `ctx`'s
@@ -133,7 +134,7 @@ const BUSY_MS = 30_000;
 export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean) {
   const queryClient = useQueryClient();
   const { online } = useConnection();
-  const queue = ctx && queueOf(ctx);
+  const queue = ctx?.keptContent?.queue ?? null;
   // Following, from the moment the vault opens, online or not.
   useEffect(() => {
     if (!ctx || !queue) return;

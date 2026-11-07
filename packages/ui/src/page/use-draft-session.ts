@@ -11,8 +11,8 @@ import {
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { onSent, pageWriter, queueOf } from '../data/offline-changes';
-import { pageQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { onSent, pageWriter } from '../data/offline-changes';
+import { pageQuery, queueOf, searchIndexChanged, treeQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { pluginRuntime } from '../plugins/runtime';
 import { DraftSession, type DraftPorts } from './draft-session';
