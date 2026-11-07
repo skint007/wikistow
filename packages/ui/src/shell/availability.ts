@@ -35,6 +35,12 @@ export type ActionKind =
   | 'publish'
   | 'restore'
   | 'drag'
+  /**
+   * A page or folder moved, copied or dropped into this folder, or a page
+   * published into it from another space. The action itself waits for the
+   * connection: this is about the folder only.
+   */
+  | 'into'
   /** A task ticked or a property set while reading, which publishes. */
   | 'tick'
   /** The chat's edit to a page, once approved. */
@@ -69,6 +75,9 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   publish: { offline: false, holds: 'changed' },
   restore: { offline: false, holds: 'changed' },
   drag: { offline: false, holds: 'changed' },
+  // A folder made offline isn't on the server yet, so nothing goes into it
+  // there, nor into what is under it, made offline too.
+  into: { offline: true, holds: 'made' },
   tick: { offline: false, holds: 'changed' },
   'chat-edit': { offline: false, holds: 'changed' },
   server: { offline: false, holds: 'made' },

@@ -26,6 +26,7 @@ import { runCommand } from '../commands/command';
 import { moveNode } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { refreshAccess, sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
+import { useAvailability } from '../shell/availability';
 import { THIS_DEVICE } from '../settings/rows';
 import { PreviewTree } from '../sharing/first-share';
 import { isStale } from '../sharing/messages';
@@ -254,8 +255,9 @@ const FOLDER_GONE = 'The folder you picked is no longer available. Choose again.
  * A space, its own first, then where in it: for a move within its own
  * space, where `moveDestinations` allows, from the tree as it is now;
  * otherwise anywhere the person can make pages, but not inside what is
- * copied. Only an owner of the space moves it into another (ADR 0007,
- * decision 2): anyone else is told so, and offered a copy.
+ * copied. Never into a folder made offline that isn't sent yet. Only an
+ * owner of the space moves it into another (ADR 0007, decision 2): anyone
+ * else is told so, and offered a copy.
  */
 function ChooseDestination({
   spaceId,
@@ -318,7 +320,7 @@ function ChooseDestination({
   const treeLoad = useQuery({ ...treeQuery(ctx, toSpace), enabled: space !== undefined });
   const tree = treeLoad.data;
   const within = action === 'move' && toSpace === spaceId;
-  const places = useMemo(() => {
+  const allowed = useMemo(() => {
     if (!tree) return null;
     if (within) return known ? destinationsIn(tree, moving, standing === 'owner') : null;
     // A copy in its own space goes anywhere but inside itself.
@@ -328,6 +330,9 @@ function ChooseDestination({
         : new Set<string>();
     return copyDestinations(moveTreeOf(tree), inside);
   }, [tree, within, known, moving, standing, toSpace, spaceId]);
+  // Not a folder made offline until it is sent: the server doesn't have it.
+  const availability = useAvailability();
+  const places = allowed?.filter((d) => availability.of(d.parentId).can('into')) ?? null;
   // The place picked, by its folder; until the person picks, the first.
   // If a refetch no longer offers it, nothing is picked until they pick again.
   const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.place.parentId);

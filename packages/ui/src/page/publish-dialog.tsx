@@ -26,6 +26,7 @@ import { endPublication, publishElsewhere } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { contentChanged } from '../data/content-changed';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
+import { useAvailability } from '../shell/availability';
 import { isStale } from '../sharing/messages';
 import { nameOf, type Tree } from '../sharing/names';
 import { describePerson, peopleQuery } from '../sharing/people';
@@ -165,7 +166,7 @@ function ChooseDestination({
     enabled: space !== undefined,
   });
   const tree = treeLoad.data;
-  const places = useMemo(
+  const allowed = useMemo(
     () =>
       tree && space
         ? publishPlaces({
@@ -184,6 +185,9 @@ function ChooseDestination({
         : null,
     [tree, space],
   );
+  // Not a folder made offline until it is sent: the server doesn't have it.
+  const availability = useAvailability();
+  const places = allowed?.filter((p) => availability.of(p.parentId).can('into')) ?? null;
   // The place picked, by its folder; until the person picks, the first.
   // If a refetch no longer offers it, nothing is picked until they pick again.
   const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.place.parentId);
