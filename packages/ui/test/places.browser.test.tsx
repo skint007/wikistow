@@ -1,4 +1,4 @@
-import { REGIONS, type PageHandle, type PageViewProps } from '@wikistow/plugin-sdk';
+import type { PageViewProps, View } from '@wikistow/plugin-sdk';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -10,19 +10,14 @@ import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, expect, it } from 'vite-plus/test';
 import { Place } from '../src/plugins/places.tsx';
-import {
-  PluginsContext,
-  type Contribution,
-  type PluginRuntime,
-  type PluginsSnapshot,
-  type ShownPage,
-} from '../src/plugins/runtime.ts';
+import { PluginsContext, type ShownPage } from '../src/plugins/runtime.ts';
+import { testRuntime } from './plugin-runtime.ts';
 
 // A place draws the app's own part first, then plugins' views in the
 // snapshot's order (the order Settings lists plugins, then the order each
 // registered), each with the props the runtime gives it, and a view that
-// fails says so in its place, with Disable (#281). Drawn with a fake
-// runtime, without the page route.
+// fails says so in its place, with Disable (#281). Drawn with a runtime
+// over the in-memory store, without the page route.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -38,48 +33,20 @@ const SHOWN: ShownPage = {
   draft: null,
 };
 
-/** Every region empty but those given. */
-const regions = (some: Partial<PluginsSnapshot['regions']>) => ({
-  ...(Object.fromEntries(
-    Object.keys(REGIONS).map((name) => [name, []]),
-  ) as unknown as PluginsSnapshot['regions']),
-  ...some,
-});
-
-async function draw(asides: Contribution<'page.aside'>[]) {
-  const given = new Map<string, PageViewProps>();
-  const failed: string[] = [];
-  const disabled: string[] = [];
-  const snapshot: Pick<PluginsSnapshot, 'regions' | 'plugins'> = {
-    regions: regions({ 'page.aside': asides }),
-    plugins: [],
-  };
-  const runtime: Pick<
-    PluginRuntime,
-    'get' | 'subscribe' | 'pageViewProps' | 'viewFailed' | 'disable'
-  > = {
-    get: () => snapshot as PluginsSnapshot,
-    subscribe: () => () => {},
-    // The same props while the page shown stays, as the runtime's.
-    pageViewProps(pluginId, viewId, shown) {
-      const key = `${pluginId} ${viewId}`;
-      const handle: PageHandle = {
-        page: shown.page,
-        read: () => Promise.reject(new Error('Not here')),
-        edit: null,
-      };
-      const props = given.get(key) ?? { page: handle };
-      given.set(key, props);
-      return props;
-    },
-    viewFailed: (pluginId) => void failed.push(pluginId),
-    disable: async (pluginId) => void disabled.push(pluginId),
-  };
+/** Plugins in this order, each putting `view` in the page's aside. */
+async function draw(asides: { pluginId: string; view: View<PageViewProps> }[]) {
+  const made = await testRuntime(
+    asides.map(({ pluginId, view }) => ({
+      id: pluginId,
+      activate: (host) => void host.ui.register('page.aside', { id: 'time', view }),
+    })),
+  );
+  const { runtime } = made;
   // The table of contents reads the address, for the section linked to.
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <PluginsContext value={runtime as unknown as PluginRuntime}>
+        <PluginsContext value={runtime}>
           <Place
             name="page.aside"
             shown={SHOWN}
@@ -106,7 +73,7 @@ async function draw(asides: Contribution<'page.aside'>[]) {
     act(() => root.unmount());
     container.remove();
   });
-  return { container, given, failed, disabled };
+  return { container, ...made };
 }
 
 it('draws its own part, then plugin views in order with their props, and says when one fails', async () => {
@@ -115,12 +82,11 @@ it('draws its own part, then plugin views in order with their props, and says wh
     drawn.push({ pluginId, props });
     element.textContent = `${pluginId} here`;
   };
-  const { container, given, failed, disabled } = await draw([
-    { pluginId: 'second', id: 'time', view: view('second') },
-    { pluginId: 'first', id: 'time', view: view('first') },
+  const { container, runtime, store } = await draw([
+    { pluginId: 'second', view: view('second') },
+    { pluginId: 'first', view: view('first') },
     {
       pluginId: 'broken',
-      id: 'time',
       view: () => {
         throw new Error('It broke');
       },
@@ -138,13 +104,19 @@ it('draws its own part, then plugin views in order with their props, and says wh
   // Each view gets what the runtime gave for it, by its place and ID.
   expect(drawn.map(({ pluginId }) => pluginId)).toEqual(['second', 'first']);
   for (const { pluginId, props } of drawn) {
-    expect(props).toBe(given.get(`${pluginId} page.aside:time`));
+    expect(props).toBe(runtime.pageViewProps(pluginId, 'page.aside:time', SHOWN));
     expect(props.page.page).toEqual(SHOWN.page);
   }
-  expect(failed).toEqual(['broken']);
+  const problems = () =>
+    runtime.get().plugins.flatMap(({ plugin, problem }) => (problem ? [plugin.manifest.id] : []));
+  expect(problems()).toEqual(['broken']);
 
   await userEvent.click(aside!.querySelector('button')!);
-  expect(disabled).toEqual(['broken']);
+  await expect
+    .poll(async () =>
+      (await store.list()).plugins?.find(({ manifest }) => manifest.id === 'broken'),
+    )
+    .toMatchObject({ enabled: false });
   // A place with nothing in it draws nothing, not even its wrapper.
   expect(container.querySelector('[data-region="page.header"]')).toBeNull();
 });

@@ -1,18 +1,14 @@
 import { readProperties, splitFrontmatter } from '@wikistow/client';
-import { PluginError, type BlockProps } from '@wikistow/plugin-sdk';
-import { act, useState } from 'react';
+import { PluginError, type AppHost, type BlockProps } from '@wikistow/plugin-sdk';
+import { act, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageProperties } from '../src/page/body-context.ts';
 import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import { applyChanges, type ReadingChange } from '../src/page/reading-changes-model.ts';
 import { ReaderBlock } from '../src/plugins/blocks.tsx';
-import {
-  PluginsContext,
-  type PluginBlock,
-  type PluginRuntime,
-  type PluginsSnapshot,
-} from '../src/plugins/runtime.ts';
+import { PluginsContext } from '../src/plugins/runtime.ts';
+import { testRuntime } from './plugin-runtime.ts';
 
 // A plugin block in the reader sets the page's properties through the
 // page's queue (#212): only a change that applies to the page as shown,
@@ -41,21 +37,29 @@ async function mount() {
     drawn.push(props);
     element.textContent = `Serves ${JSON.stringify(props.properties?.['servings'])}`;
   };
-  const block: PluginBlock = { pluginId: 'test', type: 'servings', view: recording };
+  const hosts: AppHost[] = [];
+  const { runtime } = await testRuntime([
+    {
+      id: 'test',
+      blocks: ['servings'],
+      activate(host) {
+        hosts.push(host);
+        host.blocks.register({ type: 'servings', view: recording });
+      },
+    },
+  ]);
   // The same plugin's view again, as it reloads: another function, drawing the same.
-  const reloaded: PluginBlock = { ...block, view: (element, props) => recording(element, props) };
-  let reload = () => {};
-  const snapshot: Pick<PluginsSnapshot, 'plugins'> = { plugins: [] };
-  const runtime = {
-    get: () => snapshot,
-    subscribe: () => () => {},
-    viewFailed: () => {},
-  } as unknown as PluginRuntime;
+  const reload = () =>
+    hosts[0]?.blocks.register({
+      type: 'servings',
+      view: (element, props) => recording(element, props),
+    });
   let settle = () => {};
   function Page() {
     const [changes, setChanges] = useState<ReadingChange[]>([]);
-    const [shown, setShown] = useState(block);
-    reload = () => setShown(reloaded);
+    const shown = useSyncExternalStore(runtime.subscribe, runtime.get).blocks.get(
+      'plugin:test/servings',
+    );
     settle = () => setChanges([]);
     const markdown = applyChanges(PAGE, changes).markdown;
     const read = readProperties(splitFrontmatter(markdown).frontmatter);
@@ -68,7 +72,7 @@ async function mount() {
       <PluginsContext value={runtime}>
         <ReadingChanges value={{ markdown, rights: { allowed: true }, change }}>
           <PageProperties value={read.ok ? read.properties : null}>
-            <ReaderBlock block={shown} source="" page={{ spaceId: 's', pageId: 'p' }} />
+            {shown && <ReaderBlock block={shown} source="" page={{ spaceId: 's', pageId: 'p' }} />}
           </PageProperties>
         </ReadingChanges>
       </PluginsContext>
@@ -86,7 +90,7 @@ async function mount() {
     container,
     drawn,
     queued,
-    reload: () => act(async () => reload()),
+    reload: () => act(async () => void reload()),
     settle: () => act(async () => settle()),
   };
 }
