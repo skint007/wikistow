@@ -4,27 +4,31 @@ import { useEffect, useState, useSyncExternalStore, type ComponentProps } from '
 import { Button } from '@/components/ui/button';
 import { PLAIN } from '../vault/store';
 import { CopyCode } from './copy-code';
-import { DiagramError, diagramUrl, drawDiagram } from './diagrams';
+import { DiagramError, diagramLook, diagramUrl, drawDiagram, type DiagramLook } from './diagrams';
 
-// Whether the palette shown is a dark one, as its `color-scheme` says,
-// read again whenever the theme changes.
+// The colours of the theme shown, read again whenever the theme changes:
+// another palette, or a plugin theme's stylesheet added, loaded or removed.
 const watchTheme = (change: () => void) => {
   const observer = new MutationObserver(change);
   observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
-  return () => observer.disconnect();
+  observer.observe(document.head, { childList: true });
+  document.addEventListener('load', change, true);
+  return () => {
+    observer.disconnect();
+    document.removeEventListener('load', change, true);
+  };
 };
-const isDark = () => getComputedStyle(document.documentElement).colorScheme === 'dark';
-const useDark = () => useSyncExternalStore(watchTheme, isDark);
+const useLook = () => useSyncExternalStore(watchTheme, diagramLook);
 
 /**
- * A diagram as drawn for this palette, kept as the page's body is, and
+ * A diagram as drawn for this theme, kept as the page's body is, and
  * dropped with the decrypted queries when the vault locks. One that changes
  * where it's shown, as in the editor, shows as it was until drawn again.
  */
-const diagramQuery = (source: string, dark: boolean) =>
+const diagramQuery = (source: string, look: DiagramLook) =>
   queryOptions({
-    queryKey: [PLAIN, 'diagram', dark, source],
-    queryFn: () => drawDiagram(source, dark),
+    queryKey: [PLAIN, 'diagram', look, source],
+    queryFn: () => drawDiagram(source, look),
     staleTime: 'static',
     networkMode: 'always',
     retry: false,
@@ -64,7 +68,7 @@ function DiagramImage({ svg }: { svg: string }) {
  */
 export function DiagramBlock({ source, pre }: { source: string; pre: ComponentProps<'pre'> }) {
   const [written, setWritten] = useState(false);
-  const drawn = useQuery(diagramQuery(source, useDark()));
+  const drawn = useQuery(diagramQuery(source, useLook()));
   const error = drawn.error && failure(drawn.error);
   return (
     <div className="code-block">
@@ -120,7 +124,7 @@ function useSettled<T>(value: T, ms: number): T {
  */
 export function DiagramPreview({ source }: { source: string }) {
   const settled = useSettled(source, 400);
-  const drawn = useQuery(diagramQuery(settled, useDark()));
+  const drawn = useQuery(diagramQuery(settled, useLook()));
   if (drawn.error) {
     return (
       <p role="note" className="px-4 pb-3 text-xs text-muted-foreground">

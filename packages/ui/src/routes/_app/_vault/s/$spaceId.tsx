@@ -32,8 +32,8 @@ function SpaceLayout() {
   return (
     <div
       className={cn(
-        'grid h-full gap-3.5 min-[900px]:grid-cols-[280px_1fr]',
-        chat && 'min-[900px]:grid-cols-[280px_1fr_380px]',
+        'grid h-full gap-3.5 min-[900px]:grid-cols-[var(--sidebar-width)_1fr]',
+        chat && 'min-[900px]:grid-cols-[var(--sidebar-width)_1fr_380px]',
       )}
     >
       <div data-region="sidebar" className="hidden min-h-0 min-[900px]:block">

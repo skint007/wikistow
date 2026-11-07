@@ -6,8 +6,9 @@
 // as text; the app shows it as an image, where nothing in it runs.
 //
 // From the app (window messages):
-//   { type: 'render', id, source, dark }: draw `source`, in the dark theme
-//     if `dark`.
+//   { type: 'render', id, source, look }: draw `source` in the theme's
+//     colours, `look` ({ dark, variables }: Mermaid's theme variables as
+//     plain colours), or in Mermaid's own light theme if `look` is null.
 // To the app (window messages): { type: 'ready' } once loaded, then for
 //   each render { type: 'rendered', id, svg } or { type: 'failed', id, error }.
 (function () {
@@ -24,7 +25,7 @@
   // setting it does nothing, and a section's name also takes its box's
   // colour from the SVG's stylesheet. They take the theme's text colour
   // here, as a style, which beats the stylesheet.
-  function sized(svg, dark) {
+  function sized(svg, look) {
     var xml = svg.replace(/&nbsp;/g, '&#160;');
     var doc = new DOMParser().parseFromString(xml, 'image/svg+xml');
     var root = doc.documentElement;
@@ -36,19 +37,24 @@
     }
     var names = root.querySelectorAll('text.task, text.journey-section');
     for (var i = 0; i < names.length; i++) {
-      names[i].style.setProperty('fill', dark ? '#ccc' : '#333');
+      names[i].style.setProperty('fill', look ? look.variables.textColor : '#333');
     }
     return new XMLSerializer().serializeToString(root);
   }
 
-  function settings(dark) {
+  // An SVG image can't load the app's web fonts: measure and draw in
+  // fonts every system has, and as SVG text, not HTML.
+  var FONTS = 'ui-sans-serif, system-ui, sans-serif';
+
+  function settings(look) {
     return {
       startOnLoad: false,
       securityLevel: 'strict',
-      theme: dark ? 'dark' : 'default',
-      // An SVG image can't load the app's web fonts: measure and draw in
-      // fonts every system has, and as SVG text, not HTML.
-      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      theme: look ? 'base' : 'default',
+      themeVariables: look
+        ? Object.assign({}, look.variables, { darkMode: look.dark, fontFamily: FONTS })
+        : {},
+      fontFamily: FONTS,
       htmlLabels: false,
       flowchart: { htmlLabels: false },
       // A journey's text is HTML in the SVG by default, which a canvas
@@ -58,15 +64,15 @@
   }
 
   // Anything that throws on the way, sizing too, fails this diagram only.
-  function render(id, source, dark) {
+  function render(id, source, look) {
     return Promise.resolve()
       .then(function () {
-        mermaid.initialize(settings(dark));
+        mermaid.initialize(settings(look));
         count += 1;
         return mermaid.render('diagram-' + count, source);
       })
       .then(function (result) {
-        parent.postMessage({ type: 'rendered', id: id, svg: sized(result.svg, dark) }, '*');
+        parent.postMessage({ type: 'rendered', id: id, svg: sized(result.svg, look) }, '*');
       })
       .catch(function (error) {
         parent.postMessage(
@@ -83,7 +89,7 @@
     var data = event.data;
     if (!data || data.type !== 'render' || typeof data.id !== 'number') return;
     queue = queue.then(function () {
-      return render(data.id, String(data.source), Boolean(data.dark));
+      return render(data.id, String(data.source), data.look || null);
     });
   });
 

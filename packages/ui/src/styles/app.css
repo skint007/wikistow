@@ -49,13 +49,14 @@
   --tint: color-mix(in oklab, var(--foreground) var(--tint-pressed), transparent);
   background-image: linear-gradient(var(--tint), var(--tint));
 }
-/* The same for a bright fill, such as a primary Button's: black, so it darkens in every palette,
- * where a dark palette's light tint would barely show. Its text keeps 4.5:1 either way. */
+/* The same for a bright fill, such as a primary Button's: black by default (`--shade`, theme.css),
+ * so it darkens in every palette, where a dark palette's light tint would barely show. Its text
+ * keeps 4.5:1 either way. */
 @utility shade {
-  background-image: linear-gradient(rgb(0 0 0 / 10%), rgb(0 0 0 / 10%));
+  background-image: linear-gradient(var(--shade), var(--shade));
 }
 @utility shade-strong {
-  background-image: linear-gradient(rgb(0 0 0 / 18%), rgb(0 0 0 / 18%));
+  background-image: linear-gradient(var(--shade-strong), var(--shade-strong));
 }
 
 /* The desktop app's titlebar (shell/titlebar.tsx) sits over the top of every screen, so
@@ -187,7 +188,7 @@
     border: 0;
     border-radius: 9999px;
     background: var(--primary);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    box-shadow: var(--slider-shadow);
   }
   input[type='range']::-moz-range-thumb {
     width: 1rem;
@@ -195,7 +196,7 @@
     border: 0;
     border-radius: 9999px;
     background: var(--primary);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    box-shadow: var(--slider-shadow);
   }
 }
 
@@ -233,7 +234,7 @@
   .page-body :is(blockquote, .markdown-alert) {
     @apply rounded-control border-l-4 border-border bg-muted px-4 py-2 text-subtle-foreground;
   }
-  /* GitHub's alerts (see packages/client/src/reader/alerts.ts): a quote in its type's colour, under its label. */
+  /* GitHub's alerts (see packages/client/src/reader/alerts.ts): a quote in its type's colour (`--alert-*`), under its label. */
   .page-body .markdown-alert {
     @apply border-(--alert) text-foreground;
   }
@@ -241,19 +242,19 @@
     @apply mb-1 flex items-center gap-1.5 font-bold text-(--alert);
   }
   .page-body .markdown-alert-note {
-    @apply bg-folder-blue [--alert:#2b5fb4] dark:[--alert:#8ab4f8];
+    @apply bg-folder-blue [--alert:var(--alert-note)];
   }
   .page-body .markdown-alert-tip {
-    @apply bg-status-published [--alert:var(--status-published-foreground)];
+    @apply bg-status-published [--alert:var(--alert-tip)];
   }
   .page-body .markdown-alert-important {
-    @apply bg-folder-purple [--alert:#6d3fc0] dark:[--alert:#c4b5fd];
+    @apply bg-folder-purple [--alert:var(--alert-important)];
   }
   .page-body .markdown-alert-warning {
-    @apply bg-status-draft [--alert:var(--status-draft-foreground)];
+    @apply bg-status-draft [--alert:var(--alert-warning)];
   }
   .page-body .markdown-alert-caution {
-    @apply bg-destructive/10 [--alert:#b02525] dark:[--alert:var(--destructive)];
+    @apply bg-destructive/10 [--alert:var(--alert-caution)];
   }
   .page-body code {
     @apply rounded-row bg-muted px-1.5 py-0.5 font-mono text-[0.9em];
@@ -274,29 +275,29 @@
   .page-body .code-language {
     @apply px-4 pt-2 font-mono text-xs text-subtle-foreground select-none;
   }
-  /* Highlighted code's tokens (see packages/client/src/reader/highlight.ts), in the palette's own colours. */
+  /* Highlighted code's tokens (see packages/client/src/reader/highlight.ts), in the `--code-*` colours. */
   .page-body :is(.hljs-comment, .hljs-quote, .hljs-meta) {
-    @apply text-subtle-foreground;
+    @apply text-(--code-comment);
   }
   .page-body :is(.hljs-comment, .hljs-quote, .hljs-emphasis) {
     @apply italic;
   }
   .page-body :is(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag) {
-    @apply text-primary-ink;
+    @apply text-(--code-keyword);
   }
   .page-body :is(.hljs-string, .hljs-regexp, .hljs-symbol, .hljs-addition) {
-    @apply text-status-published-foreground;
+    @apply text-(--code-string);
   }
   .page-body
     :is(.hljs-number, .hljs-variable, .hljs-template-variable, .hljs-attr, .hljs-attribute) {
-    @apply text-status-draft-foreground;
+    @apply text-(--code-number);
   }
   .page-body
     :is(.hljs-title, .hljs-section, .hljs-name, .hljs-type, .hljs-built_in, .hljs-selector-class) {
-    @apply text-[#2b5fb4] dark:text-[#8ab4f8];
+    @apply text-(--code-title);
   }
   .page-body .hljs-deletion {
-    @apply text-destructive;
+    @apply text-(--code-deletion);
   }
   .page-body .hljs-strong {
     @apply font-bold;
