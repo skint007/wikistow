@@ -14,6 +14,7 @@ import {
   type PluginSession,
   type ShownPage,
 } from '../src/plugins/runtime.ts';
+import { createLocation } from '../src/plugins/location.ts';
 import type { LaunchScript } from '../src/plugins/script-worker.ts';
 import { memoryStore } from '../src/plugins/store.ts';
 
@@ -115,6 +116,8 @@ export async function testRuntime(
     pages: () => noPages,
     handle: (_caller, shown) => shownHandle(shown),
     changed: () => {},
+    location: createLocation(),
+    spaces: async () => [],
     ...reach,
     code: {
       app: async ({ manifest }) => ({

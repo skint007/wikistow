@@ -1,11 +1,11 @@
 import {
   REGIONS,
   isRegion,
+  type AppEvents,
   type BlockProps,
   type Disposer,
   type PageHandle,
   type PageRef,
-  type PluginEvents,
   type Regions,
   type View,
 } from '@wikistow/plugin-sdk';
@@ -16,9 +16,9 @@ import type { BlockProperties } from './block-properties';
 /** Which of a plugin's code registered something: what goes wrong with it is said as that part's. */
 export type Part = 'app' | 'script';
 
-/** One event of type `E`, with its payload: `PluginEvent` when `E` is every event. */
-export type EventOf<E extends keyof PluginEvents> = {
-  [K in E]: { event: K; payload: PluginEvents[K] };
+/** One event of type `E`, with its payload: `AppEvent` when `E` is every event. */
+export type EventOf<E extends keyof AppEvents> = {
+  [K in E]: { event: K; payload: AppEvents[K] };
 }[E];
 
 /** What a script's block shows for its source on a page: its fields as read, and its outputs or why they failed. */
@@ -47,12 +47,12 @@ export type BlockEntry = {
 /** Inline code app code draws, its view drawn as a block's. */
 export type InlineEntry = { type: string; view: View<BlockProps> };
 
-export type HandlerEntry<E extends keyof PluginEvents> = {
+export type HandlerEntry<E extends keyof AppEvents> = {
   part: Part;
   run: (event: EventOf<E>) => Promise<void>;
 };
 
-type Handlers = { [E in keyof PluginEvents]: Set<HandlerEntry<E>> };
+type Handlers = { [E in keyof AppEvents]: Set<HandlerEntry<E>> };
 
 /** A region's contributions, by their IDs. */
 type Contributions = { [R in keyof Regions]: Map<string, Regions[R]> };
@@ -86,7 +86,11 @@ export function createRegistry(changed: () => void) {
   const commands = new Map<string, CommandEntry>();
   const blocks = new Map<string, BlockEntry>();
   const inline = new Map<string, InlineEntry>();
-  const handlers: Handlers = { 'page.shown': new Set(), 'draft.saved': new Set() };
+  const handlers: Handlers = {
+    'page.shown': new Set(),
+    'draft.saved': new Set(),
+    'location.changed': new Set(),
+  };
   const regions = perRegion<Contributions>(() => new Map());
 
   const keyed = <V>(map: Map<string, V>, key: string, value: V): Disposer => {
@@ -107,13 +111,13 @@ export function createRegistry(changed: () => void) {
     /** What `region` holds, in the order it was registered. */
     region: <R extends keyof Regions>(region: R): Iterable<Regions[R]> => regions[region].values(),
     /** Each handler of `event`, to run with it. */
-    handlersOf: <E extends keyof PluginEvents>(event: EventOf<E>) =>
+    handlersOf: <E extends keyof AppEvents>(event: EventOf<E>) =>
       [...handlers[event.event]].map(({ part, run }) => ({ part, run: () => run(event) })),
 
     addCommand: (entry: CommandEntry) => keyed(commands, entry.id, entry),
     addBlock: (entry: BlockEntry) => keyed(blocks, entry.type, entry),
     addInline: (entry: InlineEntry) => keyed(inline, entry.type, entry),
-    addHandler<E extends keyof PluginEvents>(event: E, entry: HandlerEntry<E>): Disposer {
+    addHandler<E extends keyof AppEvents>(event: E, entry: HandlerEntry<E>): Disposer {
       const set: Handlers[E] = handlers[event];
       set.add(entry);
       // Handlers aren't shown anywhere, so nothing is told.

@@ -1,14 +1,16 @@
+import { searchOperations } from '@wikistow/client';
 import { PageId, SpaceId } from '@wikistow/contracts';
 import type { PageRef } from '@wikistow/plugin-sdk';
 import type { QueryClient } from '@tanstack/react-query';
 import { createContext, use } from 'react';
-import { pageQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { pageQuery, searchIndexChanged, spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { PLAIN, vaultStore } from '../vault/store';
 import { desktopStore } from './desktop-store';
 import { editorDrafts } from './drafts';
 import { browserStore } from './library';
-import { pagesFor } from './pages';
+import { createLocation } from './location';
+import { pagesFor, session } from './pages';
 import { createRuntime, type OpenDraft, type PluginSession } from './runtime';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
 import type { AppPluginStore } from './store';
@@ -29,9 +31,13 @@ export const vaultSession: PluginSession = {
  * computer and the library plugins it keeps copies of, in the browser the
  * library plugins the person approved. Settings → Plugins changes them only
  * through `store`. What plugins change shows afresh through `queryClient`.
+ * `location` is where the person is, which the router and the page route
+ * keep current (`router.tsx`).
  */
 export function startAppPlugins(queryClient: QueryClient) {
   const drafts = editorDrafts();
+  // Not `location`, which names the window's here.
+  const where = createLocation();
   const store: AppPluginStore = desktop ? desktopStore(desktop) : browserStore();
   const own = createRuntime(store, {
     session: vaultSession,
@@ -54,6 +60,20 @@ export function startAppPlugins(queryClient: QueryClient) {
       }
       void queryClient.invalidateQueries({ queryKey: treeQuery(vault.ctx, spaceId).queryKey });
       searchIndexChanged(queryClient, { spaceIds: [spaceId] });
+    },
+    location: where,
+    async spaces(caller) {
+      if (caller.access === 'none') return [];
+      const granted = new Set(caller.scopes().map((scope) => scope.spaceId));
+      // The rail's own listing, which it keeps current.
+      const spaces = await queryClient.ensureQueryData(spacesQuery(session()));
+      return spaces
+        .filter((space) => granted.has(space.id))
+        .map(({ id, metadata }) => ({
+          spaceId: id,
+          name: searchOperations.nameOf(metadata),
+          icon: (metadata?.opened.kind === 'current' && metadata.opened.metadata.emoji) || null,
+        }));
     },
   });
   const runtime = {
@@ -89,10 +109,10 @@ export function startAppPlugins(queryClient: QueryClient) {
       { capture: true },
     );
   }
-  return { store, runtime };
+  return { store, runtime, location: where };
 }
 
-/** The app's own plugins: the store of them, and the runtime running them. */
+/** The app's own plugins: the store of them, the runtime running them, and where the person is. */
 export type AppPlugins = ReturnType<typeof startAppPlugins>;
 
 export const AppPluginsContext = createContext<AppPlugins | null>(null);

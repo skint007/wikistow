@@ -14,6 +14,7 @@ import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
 import { pageBlockProperties } from '../plugins/block-properties';
 import { vaultSession } from '../plugins/app-plugins';
+import { createLocation } from '../plugins/location';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
 import type { PluginStore } from '../plugins/store';
 import { tabSafeMode } from '../plugins/safe-mode';
@@ -142,6 +143,12 @@ export class Workshop {
   /** The plugin draft it works on. */
   readonly draftId: string;
   readonly samples = sampleStore();
+  /**
+   * Where the person is in the preview, as its plugin sees it: the sample
+   * page shown, which the preview reports, and navigating, which opens
+   * a sample page or one of the plugin's own pages there and nothing else.
+   */
+  readonly location = createLocation();
   readonly preview: PluginRuntime;
   readonly #bundler = new Bundler();
   #state: WorkshopState = {
@@ -202,6 +209,12 @@ export class Workshop {
       handle: (caller, shown) => this.samples.handle(caller, shown),
       // Nothing it changes is shown outside the preview.
       changed: () => {},
+      location: this.location,
+      // Its one space, the samples', open to the manifest's access.
+      spaces: async (caller) =>
+        caller.access === 'none'
+          ? []
+          : [{ spaceId: SAMPLE_SPACE, name: 'Sample pages', icon: null }],
     });
     this.preview.start();
     // Settings' picker shares the preview: one it shows, or stops, ends this one.

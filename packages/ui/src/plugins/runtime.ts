@@ -5,7 +5,9 @@ import {
   isRegion,
   PLUGIN_API,
   PluginError,
+  type AppEvent,
   type AppHost,
+  type AppLocation,
   type AppPlugin,
   type BlockProps,
   type Disposer,
@@ -15,8 +17,8 @@ import {
   type Pages,
   type PageVersion,
   type PageViewProps,
-  type PluginEvent,
   type Regions,
+  type SpaceSummary,
   type View,
 } from '@wikistow/plugin-sdk';
 import { createContext, use, useSyncExternalStore } from 'react';
@@ -24,6 +26,7 @@ import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
 import { pluginError, writeLimit, type Caller } from './pages';
 import { createRegistry, perRegion, type BlockResults, type Part, type Registry } from './registry';
+import type { PluginLocation } from './location';
 import { inFrame } from './script-frame';
 import { ScriptWorker, type LaunchScript } from './script-worker';
 import { refOf, type AnyPluginStore, type PluginRef } from './store';
@@ -116,7 +119,7 @@ type Active = {
   app: AppPlugin | null;
   worker: ScriptWorker | null;
   /** Each event and page whose handlers run now, with the latest that arrived meanwhile. */
-  running: Map<string, { next: PluginEvent | null }>;
+  running: Map<string, { next: AppEvent | null }>;
 };
 
 type Loaded = {
@@ -144,6 +147,15 @@ const contributions = (entries: Loaded[]) =>
         : [],
     ),
   );
+
+const EVENTS = {
+  'page.shown': true,
+  'draft.saved': true,
+  'location.changed': true,
+} as const satisfies {
+  [E in AppEvent['event']]: true;
+};
+const isEvent = (name: string): name is AppEvent['event'] => Object.hasOwn(EVENTS, name);
 
 const isAppPlugin = (value: unknown): value is AppPlugin =>
   typeof value === 'object' &&
@@ -193,6 +205,14 @@ export type PluginReach = {
    * with `page`, saved that page's draft: what shows them, shown afresh.
    */
   changed(spaceId: string, page?: PageRef): void;
+  /**
+   * Where the person is, which app code reads and navigates through as
+   * `host.app`: its changes are told to plugins as `location.changed`,
+   * and the page it shows as `page.shown`.
+   */
+  location: PluginLocation;
+  /** The spaces the person can open where `caller` has page access, for `host.app.spaces`. */
+  spaces(caller: Caller): Promise<SpaceSummary[]>;
   /** Where plugins' code comes from: `servedCode` unless given. */
   code?: PluginCode;
 };
@@ -297,22 +317,26 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     deliver({ event: 'draft.saved', payload: { page, revision } }, pluginId);
   };
 
-  function deliver(event: PluginEvent, from: string | null = null) {
+  function deliver(event: AppEvent, from: string | null = null) {
     for (const [id, entry] of loaded) {
       const { active } = entry;
       if (!active || id === from) continue;
       if (active.registry.handlersOf(event).length === 0) continue;
-      // One run of its handlers at a time per event and page; the latest waiting replaces the rest.
-      const key = `${event.event}:${event.payload.page.pageId}`;
+      // One run of its handlers at a time per event and page (or for the
+      // location, which names none); the latest waiting replaces the rest.
+      const key =
+        event.event === 'location.changed'
+          ? event.event
+          : `${event.event}:${event.payload.page.pageId}`;
       const running = active.running.get(key);
       if (running) {
         running.next = event;
         continue;
       }
-      const slot: { next: PluginEvent | null } = { next: null };
+      const slot: { next: AppEvent | null } = { next: null };
       active.running.set(key, slot);
       void (async () => {
-        for (let next: PluginEvent | null = event; next; next = slot.next) {
+        for (let next: AppEvent | null = event; next; next = slot.next) {
           slot.next = null;
           const told = next;
           // Its handlers run together, its app code's and its script's alike.
@@ -388,6 +412,15 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     /** Register, unless this activation is over. */
     const whileLive = (register: () => Disposer): Disposer => (live() ? register() : () => {});
     const claims = (type: string) => manifest.blocks.includes(type);
+    const on: AppHost['events']['on'] = (event, handler) => {
+      if (!live()) return () => {};
+      // A plugin built for a newer app may name an event this one lacks.
+      if (!isEvent(event)) throw new PluginError('unsupported', `No event ${String(event)}`);
+      return registry.addHandler(event, {
+        part: 'app',
+        run: async ({ payload }) => handler(payload),
+      });
+    };
     const host: AppHost = {
       api: PLUGIN_API,
       pluginId: id,
@@ -404,14 +437,33 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
             }),
           ),
       },
-      events: {
-        on: (event, handler) =>
-          whileLive(() =>
-            registry.addHandler(event, {
-              part: 'app',
-              run: async ({ payload }) => handler(payload),
-            }),
-          ),
+      events: { on },
+      app: {
+        location: {
+          get: () => reach.location.get(),
+          subscribe: (listener) => on('location.changed', listener),
+        },
+        navigate: async (to) => {
+          if (!live()) throw new PluginError('unloaded', 'The plugin was turned off');
+          try {
+            // Its own pages only: the plugin's ID is the runtime's to give.
+            await reach.location.navigate(
+              to.kind === 'plugin' ? { kind: 'plugin', pluginId: id, viewId: to.viewId } : to,
+            );
+          } catch (error) {
+            throw pluginError(error);
+          }
+        },
+        spaces: {
+          list: async () => {
+            if (!live()) throw new PluginError('unloaded', 'The plugin was turned off');
+            try {
+              return await reach.spaces(caller);
+            } catch (error) {
+              throw pluginError(error);
+            }
+          },
+        },
       },
       blocks: {
         register(block) {
@@ -563,7 +615,25 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   }
 
   let watching = () => {};
+  let following = () => {};
   let stopped = false;
+
+  /** Tell plugins where the person went, and of each page shown, once. */
+  let toldLocation = JSON.stringify(reach.location.get());
+  let toldShown = reach.location.shown();
+  const located = () => {
+    const location: AppLocation = reach.location.get();
+    const key = JSON.stringify(location);
+    if (key !== toldLocation) {
+      toldLocation = key;
+      deliver({ event: 'location.changed', payload: location });
+    }
+    const shown = reach.location.shown();
+    if (shown !== toldShown) {
+      toldShown = shown;
+      if (shown) deliver({ event: 'page.shown', payload: shown });
+    }
+  };
 
   // One at a time, in order: each Settings action asks for one.
   let syncing: Promise<void> = Promise.resolve();
@@ -584,12 +654,14 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         // Listed again: the browser's plugins come and go with the account.
         void refresh();
       });
+      following = reach.location.subscribe(located);
       void refresh();
     },
     /** Unload everything, for good: a workshop's preview, as the workshop ends. */
     stop() {
       stopped = true;
       watching();
+      following();
       epoch += 1;
       for (const entry of [...loaded.values()]) unload(entry);
       emit();
@@ -604,7 +676,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       emit();
     },
     /** Tell every running plugin but `from` of `event`. */
-    deliver: (event: PluginEvent, from: string | null = null) => deliver(event, from),
+    deliver: (event: AppEvent, from: string | null = null) => deliver(event, from),
     /** Turn a running plugin off in its store, from where its view failed. */
     async disable(pluginId: string) {
       const entry = loaded.get(pluginId);

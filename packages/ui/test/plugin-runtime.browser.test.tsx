@@ -1,5 +1,6 @@
 import { PluginError, type AppHost, type PageRef, type PageVersion } from '@wikistow/plugin-sdk';
 import { describe, expect, it } from 'vite-plus/test';
+import { createLocation, type Place } from '../src/plugins/location.ts';
 import type { ShownPage } from '../src/plugins/runtime.ts';
 import { fakeScript, noPages, shownHandle, testRuntime, testSession } from './plugin-runtime.ts';
 
@@ -207,5 +208,68 @@ describe('the plugin runtime', () => {
     await runtime.started('slow');
     expect(runtime.get().commands.map(({ id }) => id)).toEqual(['run-1']);
     expect(runtime.get().regions['page.aside'].map(({ id }) => id)).toEqual(['aside-1']);
+  });
+
+  it('tells app code where the person is as it changes, and each page shown once', async () => {
+    const location = createLocation();
+    const at: string[] = [];
+    const shownTold: string[] = [];
+    const { runtime } = await testRuntime(
+      [
+        {
+          id: 'where',
+          activate(host) {
+            host.app?.location.subscribe((location) => {
+              at.push(JSON.stringify(location));
+            });
+            host.events.on('page.shown', ({ page, version, revision }) => {
+              shownTold.push(`${page.pageId} ${version} ${revision}`);
+            });
+          },
+        },
+      ],
+      { location },
+    );
+    location.routed({ kind: 'page', ...PAGE });
+    const shown = { page: PAGE, version: 'draft', revision: 'r1' } as const;
+    const first = location.showing(shown);
+    const opened = [
+      '{"kind":"page","spaceId":"s","pageId":"p"}',
+      '{"kind":"page","spaceId":"s","pageId":"p","version":"draft"}',
+    ];
+    await expect.poll(() => at).toEqual(opened);
+    // Another revision, in React's order: the old effect ends, then the new one starts.
+    first();
+    const second = location.showing({ ...shown, revision: 'r2' });
+    // The same version shown again, and the router at the same place, tell nothing.
+    const close = location.showing({ ...shown, page: { ...PAGE }, revision: 'r2' });
+    second();
+    location.routed({ kind: 'page', ...PAGE });
+    await expect.poll(() => shownTold).toEqual(['p draft r1', 'p draft r2']);
+    expect(at).toEqual(opened);
+    close();
+    location.routed({ kind: 'plugin', pluginId: 'where', viewId: 'home' });
+    await expect.poll(() => at.at(-1)).toBe('{"kind":"plugin","pluginId":"where","viewId":"home"}');
+    expect(runtime.get().plugins[0]?.problem).toBeNull();
+  });
+
+  it('navigates to a plugin’s own pages by its ID, and refuses an event this app lacks', async () => {
+    const location = createLocation();
+    const went: Place[] = [];
+    location.navigateWith(async (to) => void went.push(to));
+    const hosts: AppHost[] = [];
+    await testRuntime([{ id: 'nav', activate: (host) => void hosts.push(host) }], { location });
+    const [host] = hosts;
+    if (!host?.app) throw new Error('It didn’t start');
+    await host.app.navigate({ kind: 'plugin', viewId: 'home' });
+    await host.app.navigate({ kind: 'page', ...PAGE, version: 'published' });
+    expect(went).toEqual([
+      { kind: 'plugin', pluginId: 'nav', viewId: 'home' },
+      { kind: 'page', ...PAGE, version: 'published' },
+    ]);
+    // @ts-expect-error A plugin built for a newer app may name an event this one lacks.
+    expect(() => host.events.on('space.opened', () => {})).toThrow(
+      expect.objectContaining({ code: 'unsupported' }),
+    );
   });
 });

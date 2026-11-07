@@ -91,6 +91,8 @@ App plugins get these, in every view and in `activate`:
 
 `page.shown` and a new `location.changed` event come from the router, not from a drawn menu. Scripts don't get `host.app`, since they have no interface. They keep `page.shown`.
 
+As built (#282, PR 2): the types are `AppLocation` and `Destination` in `packages/plugin-sdk/src/host.ts`. A `plugin` location names the plugin and its view, and `other` names the space for a space's members and groups. The router gives the place; the version shown, and `page.shown` with its revision, come from the page route's own view once the page has opened, since only it knows which version that is. `location.subscribe` is `location.changed` by another name. In the workshop's preview, which runs a runtime of its own, the location is the sample page shown, `navigate` opens a sample page or one of the plugin's own pages in the preview and fails with `unsupported` for anywhere else, and `spaces.list()` gives the samples' one space.
+
 ### 6. Choosing, failing and the way back
 
 - **Choosing:**

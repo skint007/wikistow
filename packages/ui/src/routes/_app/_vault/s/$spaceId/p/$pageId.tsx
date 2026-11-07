@@ -93,6 +93,7 @@ import { TableOfContents, useHeadings } from '../../../../../../page/table-of-co
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
 import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
+import { useAppPlugins } from '../../../../../../plugins/app-plugins';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, type OpenPanel } from '../../../../../../plugins/places';
 import type { ShownPage } from '../../../../../../plugins/runtime';
@@ -629,6 +630,18 @@ function PageBody({
           }
         : null,
   };
+  // Plugins are told the version shown here, where the router has the page.
+  const { location } = useAppPlugins();
+  useEffect(
+    () =>
+      location.showing({
+        page: { spaceId: page.spaceId, pageId: page.pageId },
+        version: model.view,
+        revision: revisionId,
+      }),
+    // `page` is new each render; its IDs aren't.
+    [location, page.spaceId, page.pageId, model.view, revisionId],
+  );
 
   return (
     <PageCard ref={setCard} find={find}>

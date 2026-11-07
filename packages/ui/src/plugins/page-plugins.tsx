@@ -18,8 +18,7 @@ import { useNeedsConnection } from '../shell/availability';
 /**
  * The page toolbar's plugin menu: each running plugin's commands, run on
  * the page shown, and its panels, which `onOpenPanel` opens in the page's
- * `page.panel` place. Nothing shows without any. It also tells plugins the
- * page was shown.
+ * `page.panel` place. Nothing shows without any.
  */
 export function PagePlugins({
   shown,
@@ -36,7 +35,6 @@ export function PagePlugins({
   const [notice, setNotice] = useState<string | null>(null);
   const needs = useNeedsConnection();
   const { pageId, spaceId } = shown.page;
-  const { version, revision } = shown;
 
   // While the draft is open here, the app's plugins change it through the editor.
   const editing = shown.draft !== null;
@@ -46,13 +44,6 @@ export function PagePlugins({
     return openDraft({ spaceId, pageId }, { ready, flush, saved, fits, revise, selection, insert });
     // The editor's functions are new each render; the editor behind them isn't.
   }, [editing, spaceId, pageId]);
-
-  useEffect(() => {
-    runtime.deliver({
-      event: 'page.shown',
-      payload: { page: { spaceId, pageId }, revision, version },
-    });
-  }, [runtime, spaceId, pageId, revision, version]);
 
   const nameOf = (pluginId: string) => pluginName(plugins, pluginId);
 
