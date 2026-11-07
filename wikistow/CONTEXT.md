@@ -179,15 +179,15 @@ A theme a plugin adds to the theme picker: a stylesheet setting the app's tokens
 _Avoid_: Skin, custom palette.
 
 **Region**
-A documented place in the app's interface that app plugins draw into (the rail, a plugin page, a page's toolbar, header, footer, aside and panel, a settings section), also named by a `data-region` attribute for styles.
-_Avoid_: Slot, extension point (the internal registries).
+A documented place in the app's interface that app plugins draw into (the rail, a plugin page, a page's toolbar, header, footer, aside and panel, a settings section, the editor's toolbar), also named by a `data-region` attribute for styles. Most only take additions beside the app's own content; a **replaceable region** (a space's sidebar and home, a folder's page, a page's reading view, the rail) can show one plugin's view in place of the app's own part, which stays the default and comes back in safe mode or when that view fails. The editors, the ways back to plugin settings, and anywhere keys, trust or audience are decided are never replaceable.
+_Avoid_: Slot, extension point (the internal registries), skin.
 
 **Plugin access**
 The spaces and folders a person lets one plugin read or write for their account, within the person's own access.
 _Avoid_: Grant, which is a share membership or an agent's folder.
 
 **Plugin block**
-A fenced code block in a page that names a plugin, which shows and edits it where that plugin is enabled. Elsewhere it is ordinary code. A script plugin's block is a form: **fields**, whose values are lines of the block's text, and **outputs**, which the script calculates from them and which are never stored.
+A fenced code block in a page that names a plugin, which shows and edits it where that plugin is enabled. Elsewhere it is ordinary code. Its inline counterpart is **claimed inline code**, inline code naming a plugin, kept exactly as written and drawn by the plugin where it runs. A script plugin's block is a form: **fields**, whose values are lines of the block's text, and **outputs**, which the script calculates from them and which are never stored.
 _Avoid_: Page script; pages never carry code.
 
 **Workshop**

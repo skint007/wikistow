@@ -11,6 +11,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - **New page here** and **New folder here** in a folder made offline that isn’t sent yet now save the new page or folder on the device too while online, to be sent after the folder, instead of failing as not found. That covers the moments after the server answers again, before the folder is sent, an unlock made offline the app hasn’t confirmed yet, and a folder whose sending stopped. **Create this page** from a link in a page in that folder does the same. (#291)
 - The rest of that folder’s menu (Rename, Move, Share, Export, Import, Delete and the others) now waits until the folder is sent, saying so, as it already waited offline and as dragging it did, instead of failing as not found. (#291)
 
+#### Development
+
+- ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it. (#292)
+
 ## 0.23.0 - 2026-11-06
 
 ### Highlights
