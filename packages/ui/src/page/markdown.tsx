@@ -23,8 +23,8 @@ import {
   type ReactNode,
 } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
-import { claimedBlock } from '@wikistow/plugin-sdk';
-import { ReaderBlock, textOf } from '../plugins/blocks';
+import { blockLanguage, claimedBlock, claimedInline } from '@wikistow/plugin-sdk';
+import { ReaderBlock, ReaderSpan, textOf } from '../plugins/blocks';
 import { usePlugins } from '../plugins/runtime';
 import { markdownSyntaxes } from '../registries';
 import { PLAIN } from '../vault/store';
@@ -80,8 +80,10 @@ const syntaxHandlers = (held: ReactElement[]): Handlers =>
 
 /**
  * Inline code that is a reference to a value (`` `=servings` ``,
- * `` `=[[Page]].key` ``) becomes a marked span, as a syntax does, which the
- * `span` component draws as `PropertyReferenceView`; other code is code.
+ * `` `=[[Page]].key` ``) or that claims a plugin
+ * (`` `plugin:<id>/<type> …` ``) becomes a marked span, as a syntax does,
+ * which the `span` component draws as `PropertyReferenceView` or
+ * `ClaimedCode`; other code is code.
  */
 const referenceHandler =
   (held: ReactElement[]): NonNullable<Handlers[keyof Handlers]> =>
@@ -91,6 +93,16 @@ const referenceHandler =
       held.push(
         <PropertyReferenceView name={reference.name} page={reference.page} source={node.value} />,
       );
+      return {
+        type: 'element',
+        tagName: 'span',
+        properties: { [SYNTAX]: held.length - 1 },
+        children: [],
+      };
+    }
+    // Claimed by a plugin, perhaps: `ClaimedCode` knows which are running.
+    if (claimedInline(node.value)) {
+      held.push(<ClaimedCode code={node.value} />);
       return {
         type: 'element',
         tagName: 'span',
@@ -108,6 +120,19 @@ const referenceHandler =
 
 // The components below hold page content, plugin blocks among them, so each
 // is the same on every render: a new one would draw everything in it afresh.
+
+/**
+ * Inline code that claims a plugin (`claimedInline`): the view of a
+ * running plugin that draws its type (`ReaderSpan`), else the code it is.
+ */
+function ClaimedCode({ code }: { code: string }) {
+  const { inline } = usePlugins();
+  const body = use(PageBody);
+  const claimed = claimedInline(code);
+  const span = claimed && inline.get(blockLanguage(claimed.pluginId, claimed.type));
+  if (!claimed || !span || !body) return <code>{code.replace(/\r?\n|\r/g, ' ')}</code>;
+  return <ReaderSpan span={span} text={claimed.text} page={body.attachments.page} />;
+}
 
 /** An alert (`remarkAlerts`) starts with its label. */
 const Division: NonNullable<Components['div']> = ({ node: _node, children, ...props }) => {

@@ -37,7 +37,7 @@ export function ReaderBlock({
   source: string;
   page: PageRef;
 }) {
-  const { pluginId, type, view } = block;
+  const { type } = block;
   const { spaceId, pageId } = page;
   const read = use(PageProperties);
   const properties = useMemo(() => blockProperties(read), [read]);
@@ -61,9 +61,44 @@ export function ReaderBlock({
         }
       : null,
   };
+  const host = useDrawing<HTMLDivElement>(block, inputs);
+  return <div ref={host} className="plugin-block" data-plugin-block={type} />;
+}
+
+/**
+ * Inline code a running plugin claims, in the reader (ADR 0011, decision
+ * 7): the plugin's view of the span's text, drawn as a block's is
+ * (`drawBlock`). The span's text can't change here, so `setText` is null.
+ */
+export function ReaderSpan({
+  span,
+  text,
+  page,
+}: {
+  span: PluginBlock;
+  text: string;
+  page: PageRef;
+}) {
+  const inputs: BlockInputs = {
+    runtime: usePluginRuntime(),
+    source: text,
+    page: { spaceId: page.spaceId, pageId: page.pageId },
+    properties: null,
+    setSource: null,
+    setProperty: null,
+  };
+  const host = useDrawing<HTMLSpanElement>(span, inputs);
+  return <span ref={host} className="plugin-inline" data-plugin-inline={span.type} />;
+}
+
+/** The element `block` is drawn into, for `inputs` as they are each render. */
+function useDrawing<E extends HTMLElement>(
+  { pluginId, type, view }: PluginBlock,
+  inputs: BlockInputs,
+) {
   const latest = useRef(inputs);
   latest.current = inputs;
-  const host = useRef<HTMLDivElement>(null);
+  const host = useRef<E>(null);
   const drawing = useRef<BlockDrawing | null>(null);
   // Drawn afresh for another view, as the plugin reloads; the runtime
   // builds its list of blocks again on every change, so not for that.
@@ -79,5 +114,5 @@ export function ReaderBlock({
   }, [pluginId, type, view]);
   // Every render's inputs: the drawing decides whether they draw it again.
   useEffect(() => drawing.current?.update(inputs));
-  return <div ref={host} className="plugin-block" data-plugin-block={type} />;
+  return host;
 }
