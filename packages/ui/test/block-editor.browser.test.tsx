@@ -48,8 +48,9 @@ function recorder() {
     },
   };
   // Only what the visual editor asks of the runtime.
-  const snapshot: Pick<PluginsSnapshot, 'blocks'> = {
+  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = {
     blocks: new Map([['plugin:test/servings', block]]),
+    plugins: [],
   };
   const runtime = {
     get: () => snapshot,
@@ -136,6 +137,43 @@ describe('a plugin block in the visual editor', () => {
     expect(m.changes).toEqual([]);
     expect(m.handle.read()).toBe(PAGE);
   });
+
+  it('shows the failure note for a view that throws as its plugin starts', async () => {
+    const listeners = new Set<() => void>();
+    const emit = () => {
+      for (const listener of listeners) listener();
+    };
+    const failed: string[] = [];
+    let snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = { blocks: new Map(), plugins: [] };
+    const runtime = {
+      get: () => snapshot,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      // As the runtime does, telling its listeners at once.
+      viewFailed: (pluginId: string) => {
+        failed.push(pluginId);
+        emit();
+      },
+    } as unknown as PluginRuntime;
+    const m = mount(PAGE, runtime);
+    // Its code block is shown as text first, then the plugin starts.
+    await expect.poll(() => m.container.querySelector('.code-block')).not.toBeNull();
+    const block: PluginBlock = {
+      pluginId: 'test',
+      type: 'servings',
+      view: () => {
+        throw new Error('No');
+      },
+    };
+    act(() => {
+      snapshot = { blocks: new Map([['plugin:test/servings', block]]), plugins: [] };
+      emit();
+    });
+    await expect.poll(() => m.container.textContent).toContain('test failed here.');
+    expect(failed).toEqual(['test']);
+  });
 });
 
 /** Two script blocks' forms, the first with a field bound to `servings`, as a runtime draws them. */
@@ -160,7 +198,7 @@ function forms() {
       { pluginId: 'test', type: 'product', view: formView(product, async () => ({})) },
     ],
   ]);
-  const snapshot: Pick<PluginsSnapshot, 'blocks'> = { blocks };
+  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = { blocks, plugins: [] };
   return {
     get: () => snapshot,
     subscribe: () => () => {},
