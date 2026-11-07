@@ -36,7 +36,7 @@ export function CoverBand({
 
 /** The 72px badge (56px on phones) overlapping the bottom of the band, clipping whatever the emoji, icon or image draws. */
 export const badgeClass =
-  'absolute -bottom-[26px] left-11 grid size-[72px] place-items-center overflow-hidden rounded-card bg-card text-5xl leading-none shadow-[0_4px_14px_rgba(0,0,0,.18)] max-[899px]:-bottom-5 max-[899px]:left-[18px] max-[899px]:size-14 max-[899px]:text-[36px]';
+  'absolute -bottom-[26px] left-11 grid size-[72px] place-items-center overflow-hidden rounded-card bg-card text-5xl leading-none shadow-(--badge-shadow) max-[899px]:-bottom-5 max-[899px]:left-[18px] max-[899px]:size-14 max-[899px]:text-[36px]';
 
 /** The published view's badge, named for what it shows. */
 export function PageBadge({
