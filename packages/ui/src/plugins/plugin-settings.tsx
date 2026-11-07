@@ -1,6 +1,6 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
 import type { PluginCandidate, PluginScope } from '@wikistow/contracts';
-import type { Manifest, PageAccess, SettingsViewProps, TrustLevel } from '@wikistow/plugin-sdk';
+import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Fragment, useState, type ReactNode } from 'react';
@@ -23,8 +23,9 @@ import { ScopePill, SettingRow } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ConfirmUpload, Library } from './library-settings';
+// This file's own `Place` is a place for page access.
+import { Place as RegionPlace } from './places';
 import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
-import { PluginView } from './views';
 
 export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
   theme: {
@@ -415,8 +416,6 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
   );
 }
 
-const NO_PROPS: SettingsViewProps = {};
-
 /**
  * One installed plugin on the Plugins page: its name, version, trust level,
  * where it came from and on/off, its description and any problem, Remove
@@ -491,20 +490,7 @@ export function PluginRow({
           Remove
         </Button>
       </div>
-      {settingsOpen &&
-        sections.map(({ id, title, view }) => (
-          <section
-            key={id}
-            aria-label={title}
-            className="grid gap-2 rounded-control bg-muted/50 p-3 text-sm"
-          >
-            <div>
-              <h3 className="font-bold">{title}</h3>
-              <p className="text-muted-foreground">From {manifest.name}.</p>
-            </div>
-            <PluginView pluginId={manifest.id} name={manifest.name} view={view} props={NO_PROPS} />
-          </section>
-        ))}
+      {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
         <PageAccessEditor pluginId={manifest.id} most={manifest.access} />
       )}

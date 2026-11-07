@@ -2,13 +2,6 @@ import { Puzzle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -16,27 +9,27 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { PageView, pluginName } from './regions';
-import {
-  pluginRuntime,
-  usePluginRuntime,
-  usePlugins,
-  type PluginPanel,
-  type ShownPage,
-} from './runtime';
+import { panelKey, pluginName, type OpenPanel } from './places';
+import { pluginRuntime, usePluginRuntime, usePlugins, type ShownPage } from './runtime';
 import { desktop } from '../desktop';
 import { useNeedsConnection } from '../shell/needs-connection';
 
 /**
  * The page toolbar's plugin menu: each running plugin's commands, run on
- * the page shown, and its panels, opened beside it. Nothing shows without
- * any. It also tells plugins the page was shown.
+ * the page shown, and its panels, which `onOpenPanel` opens in the page's
+ * `page.panel` place. Nothing shows without any. It also tells plugins the
+ * page was shown.
  */
-export function PagePlugins({ shown }: { shown: ShownPage }) {
+export function PagePlugins({
+  shown,
+  onOpenPanel,
+}: {
+  shown: ShownPage;
+  onOpenPanel: (panel: OpenPanel) => void;
+}) {
   const runtime = usePluginRuntime();
   const { commands, regions, plugins } = usePlugins();
   const panels = regions['page.panel'];
-  const [open, setOpen] = useState<PluginPanel | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const needs = useNeedsConnection();
   const { pageId, spaceId } = shown.page;
@@ -59,9 +52,6 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
   }, [runtime, spaceId, pageId, revision, version]);
 
   const nameOf = (pluginId: string) => pluginName(plugins, pluginId);
-  // A panel whose plugin stopped closes.
-  const showing =
-    open && panels.find((panel) => panel.pluginId === open.pluginId && panel.id === open.id);
 
   if (commands.length === 0 && panels.length === 0) return null;
   // A browser's plugins load from the server; the desktop's run from disk (ADR 0009, decision 8).
@@ -79,7 +69,7 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
           {panels.map((panel) => (
             <DropdownMenuItem
               key={`${panel.pluginId}:${panel.id}`}
-              {...select(() => setOpen(panel))}
+              {...select(() => onOpenPanel(panelKey(panel)))}
             >
               {panel.title}
             </DropdownMenuItem>
@@ -110,23 +100,6 @@ export function PagePlugins({ shown }: { shown: ShownPage }) {
           </button>
         </p>
       )}
-      <Dialog open={Boolean(showing)} onOpenChange={(next) => !next && setOpen(null)}>
-        {showing && (
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{showing.title}</DialogTitle>
-              <DialogDescription>From {nameOf(showing.pluginId)}</DialogDescription>
-            </DialogHeader>
-            <PageView
-              pluginId={showing.pluginId}
-              viewId={`page.panel:${showing.id}`}
-              name={nameOf(showing.pluginId)}
-              view={showing.view}
-              shown={shown}
-            />
-          </DialogContent>
-        )}
-      </Dialog>
     </>
   );
 }

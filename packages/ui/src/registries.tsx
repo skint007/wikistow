@@ -1,23 +1,22 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
-import type { ClientContext, pageOperations, RevisionId } from '@wikistow/client';
 import {
   inlineMathReading,
   mathReading,
   wikilinkReading,
   type SyntaxReading,
 } from '@wikistow/client/reader';
-import { History, type LucideIcon } from 'lucide-react';
 import type { RootContent } from 'mdast';
 import type { ComponentType, ReactElement } from 'react';
 import type { VisualHost } from './page/editor/visual/host';
-import { HistorySheet } from './page/history-sheet';
 import { MathReader } from './page/math';
 import { WikilinkReader } from './page/wikilinks';
 
 /*
  * The static extension points the spec asks for. Core features register
  * here instead of being wired into the page directly, so a plugin API can
- * later expose some of them. Nothing is loaded at run time.
+ * later expose some of them. Nothing is loaded at run time. The page's own
+ * panels are with plugins' in `plugins/places.tsx`: History is the first
+ * `page.panel`.
  */
 
 /**
@@ -81,43 +80,4 @@ export const markdownSyntaxes: readonly MarkdownSyntax[] = [
     Reader: MathReader,
     editorNode: async () => (await import('./page/editor/visual/math-node')).inlineMathEditorNode,
   }),
-];
-
-/** What a page tells each of its panels. */
-export type PagePanelProps = {
-  ctx: ClientContext;
-  page: pageOperations.PageRef;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** The person can change the page: an editor, on a page with a draft. */
-  editor: boolean;
-  /** The publication shown, or null in the draft view. */
-  published: RevisionId | null;
-  /** In the draft view: save what's typed, and open the draft afresh. */
-  draft: { flush: () => Promise<void>; reopen: () => Promise<void> } | null;
-};
-
-/** A panel a page opens from its toolbar. */
-export type PagePanel = {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  Panel: ComponentType<PagePanelProps>;
-};
-
-export const pagePanels: readonly PagePanel[] = [
-  {
-    id: 'history',
-    label: 'History',
-    icon: History,
-    Panel: ({ editor, published, draft, ...props }) => (
-      <HistorySheet
-        {...props}
-        canRestore={editor}
-        showing={published}
-        beforeRestore={draft?.flush}
-        onRestored={draft?.reopen}
-      />
-    ),
-  },
 ];

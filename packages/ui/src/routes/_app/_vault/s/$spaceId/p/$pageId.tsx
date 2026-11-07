@@ -56,7 +56,7 @@ import { useDeviceSwitch } from '../../../../../../shell/device-switch';
 import { PLAIN } from '../../../../../../vault/store';
 import { errorMessage, pageOpenMessage } from '../../../../../../errors';
 import { decryptedQuery } from '../../../../../../page/attachments';
-import { FindBar, PageFind, PageFindContext } from '../../../../../../page/find/find-bar';
+import { PageFind } from '../../../../../../page/find/find-bar';
 import { pageText } from '../../../../../../page/find/page-text';
 import { BannerPicker } from '../../../../../../page/cover/banner-picker';
 import { bodyTop, CoverBand, PageBadge } from '../../../../../../page/cover/cover-band';
@@ -92,10 +92,10 @@ import { LinkedFrom } from '../../../../../../page/linked-from';
 import { TableOfContents, useHeadings } from '../../../../../../page/table-of-contents';
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
-import { pagePanels } from '../../../../../../registries';
+import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
-import { PageViews } from '../../../../../../plugins/regions';
-import { usePlugins, type ShownPage } from '../../../../../../plugins/runtime';
+import { OWN_PANELS, Place, type OpenPanel } from '../../../../../../plugins/places';
+import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
@@ -331,7 +331,7 @@ function PageBody({
   const [picker, setPicker] = useState<'banner' | 'emoji' | null>(null);
   const fromMenu = useRef(false);
   const pickerFocus = useReturnFocus();
-  const [panel, setPanel] = useState<string | null>(null);
+  const [panel, setPanel] = useState<OpenPanel>(null);
   const [deleting, setDeleting] = useState(false);
   const [moving, setMoving] = useState<'move' | 'copy' | null>(null);
   const [unpublishing, setUnpublishing] = useState(false);
@@ -608,8 +608,6 @@ function PageBody({
   });
 
   // The page as plugins see it: their views, commands and panels.
-  const plugins = usePlugins();
-  const asides = plugins.regions['page.aside'].length > 0;
   const pluginShown: ShownPage = {
     page,
     version: model.view,
@@ -640,10 +638,7 @@ function PageBody({
           onOpenChange={(open) => setPicker(open ? 'banner' : null)}
         >
           <PopoverAnchor asChild>
-            <div
-              data-region="page.toolbar"
-              className="glass absolute inset-x-4 top-4 z-10 flex flex-wrap items-center gap-2 rounded-control px-3 py-2 text-sm max-[899px]:inset-x-3 max-[899px]:top-3 max-[899px]:gap-1 max-[899px]:px-2"
-            >
+            <PageToolbar>
               {/* On phones: only the folder, and History and Share as icons, to fit one row. */}
               <nav
                 ref={crumbsNav}
@@ -662,13 +657,13 @@ function PageBody({
                 })}
               </nav>
               <AssistantButton />
-              {pagePanels.map(({ id, label, icon: Icon }) => (
+              {OWN_PANELS.map(({ id, label, icon: Icon }) => (
                 <Button key={id} variant="ghost" size="sm" {...needs.click(() => setPanel(id))}>
                   <Icon strokeWidth={1.75} /> <span className="max-[899px]:sr-only">{label}</span>
                 </Button>
               ))}
-              <PageViews place="page.toolbar" shown={pluginShown} />
-              <PagePlugins shown={pluginShown} />
+              <Place name="page.toolbar" shown={pluginShown} />
+              <PagePlugins shown={pluginShown} onOpenPanel={setPanel} />
               {shareable && (
                 <Button variant="ghost" size="sm" {...needs.click(() => setSharing(true))}>
                   <Share strokeWidth={1.75} /> <span className="max-[899px]:sr-only">Share</span>
@@ -794,7 +789,7 @@ function PageBody({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
+            </PageToolbar>
           </PopoverAnchor>
           {editingCover && shown && (
             <PopoverContent
@@ -845,250 +840,207 @@ function PageBody({
           )
         )}
       </CoverBand>
-      {/* The page's column, as wide as the card, and beside it, where the card is wide enough,
-          its contents and plugins' asides; where it isn't, the asides go below. */}
-      <div
-        data-region="page.body"
-        className={cn(
-          'flex w-full flex-1 flex-wrap gap-10 px-11 pb-10 @min-[960px]:flex-nowrap max-[899px]:px-[18px] max-[899px]:pb-8',
-          bodyTop(emoji !== null || icon !== null || symbol !== null),
-        )}
+      <PageColumns
+        shown={pluginShown}
+        contents={contents ? { headings, card } : null}
+        className={bodyTop(emoji !== null || icon !== null || symbol !== null)}
       >
-        <div data-region="page.content" className="flex min-w-0 flex-1 flex-col gap-4">
-          {plugins.regions['page.header'].length > 0 && (
-            <div data-region="page.header" className="grid gap-3">
-              <PageViews place="page.header" shown={pluginShown} />
-            </div>
+        {actionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
+        {model.view === 'published' && (
+          <h1 data-find-root className="text-[32px] leading-tight font-extrabold">
+            <Name>{pageTitle(payload?.title ?? null)}</Name>
+          </h1>
+        )}
+        <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
+          {listedAt && (
+            <span
+              data-hint="When this device last heard from the server about this space"
+              className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+            >
+              As of {asOf(new Date(listedAt))}
+            </span>
           )}
-          {actionError && (
-            <p role="alert" className="text-sm text-destructive">
-              {actionError}
-            </p>
+          {provenance && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              <span aria-hidden>↗</span>
+              {sourceTitle ? (
+                <span>
+                  Published from “<Name>{sourceTitle}</Name>”
+                </span>
+              ) : (
+                <span>Published from another page</span>
+              )}
+            </span>
           )}
-          {model.view === 'published' && (
-            <h1 data-find-root className="text-[32px] leading-tight font-extrabold">
-              <Name>{pageTitle(payload?.title ?? null)}</Name>
-            </h1>
-          )}
-          <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
-            {listedAt && (
-              <span
-                data-hint="When this device last heard from the server about this space"
-                className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
-              >
-                As of {asOf(new Date(listedAt))}
+          {/* Publishers only: the server tells nobody else where the page went. */}
+          {publisher && copies && !copiesUnknown && (copies.length > 0 || showingCopies) && (
+            <button
+              ref={copiesPill}
+              type="button"
+              {...needs.click(() => setShowingCopies(true))}
+              className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
+            >
+              <span aria-hidden>⇉</span>
+              <span>
+                Published in {copies.length} other {copies.length === 1 ? 'space' : 'spaces'} ›
               </span>
-            )}
-            {provenance && (
-              <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
-                <span aria-hidden>↗</span>
-                {sourceTitle ? (
-                  <span>
-                    Published from “<Name>{sourceTitle}</Name>”
-                  </span>
-                ) : (
-                  <span>Published from another page</span>
-                )}
-              </span>
-            )}
-            {/* Publishers only: the server tells nobody else where the page went. */}
-            {publisher && copies && !copiesUnknown && (copies.length > 0 || showingCopies) && (
+            </button>
+          )}
+          {publisher && copiesUnknown && !needs.offline && (
+            // Said as it changes, so a retry that fails again is heard.
+            <span aria-live="polite">
               <button
                 ref={copiesPill}
                 type="button"
-                {...needs.click(() => setShowingCopies(true))}
+                onClick={() =>
+                  void checkCopies({ cancelRefetch: false }).then(({ isError }) => {
+                    // The pill there is now, or with no copies, the page's menu.
+                    if (!isError) {
+                      requestAnimationFrame(() =>
+                        (copiesPill.current ?? menuButton.current)?.focus(),
+                      );
+                    }
+                  })
+                }
+                className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
+              >
+                {checkingCopies
+                  ? 'Checking where else it’s published…'
+                  : 'Couldn’t check where else it’s published. Try again ›'}
+              </button>
+            </span>
+          )}
+          {/* Everyone who sees the page; only those who can publish it get the link. */}
+          {publicLink &&
+            (publisher && publishedHead ? (
+              <button
+                type="button"
+                {...needs.click(onShareLink)}
                 className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
               >
-                <span aria-hidden>⇉</span>
-                <span>
-                  Published in {copies.length} other {copies.length === 1 ? 'space' : 'spaces'} ›
-                </span>
+                <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                <span>Public link ›</span>
               </button>
-            )}
-            {publisher && copiesUnknown && !needs.offline && (
-              // Said as it changes, so a retry that fails again is heard.
-              <span aria-live="polite">
-                <button
-                  ref={copiesPill}
-                  type="button"
-                  onClick={() =>
-                    void checkCopies({ cancelRefetch: false }).then(({ isError }) => {
-                      // The pill there is now, or with no copies, the page's menu.
-                      if (!isError) {
-                        requestAnimationFrame(() =>
-                          (copiesPill.current ?? menuButton.current)?.focus(),
-                        );
-                      }
-                    })
-                  }
-                  className="rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
-                >
-                  {checkingCopies
-                    ? 'Checking where else it’s published…'
-                    : 'Couldn’t check where else it’s published. Try again ›'}
-                </button>
+            ) : (
+              <span
+                data-hint="Anyone with the link can read this page"
+                className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
+              >
+                <Globe aria-hidden className="size-3.5" strokeWidth={2} />
+                <span>Public link</span>
               </span>
-            )}
-            {/* Everyone who sees the page; only those who can publish it get the link. */}
-            {publicLink &&
-              (publisher && publishedHead ? (
-                <button
-                  type="button"
-                  {...needs.click(onShareLink)}
-                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
-                >
-                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
-                  <span>Public link ›</span>
-                </button>
-              ) : (
-                <span
-                  data-hint="Anyone with the link can read this page"
-                  className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground"
-                >
-                  <Globe aria-hidden className="size-3.5" strokeWidth={2} />
-                  <span>Public link</span>
-                </span>
-              ))}
-            {/* Editors only: the server tells readers of no draft. */}
-            {info.agentEdit && (
-              <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
-                <span aria-hidden>🤖</span>
-                <span>
-                  <span className="sr-only">Draft edited by </span>
-                  <AgentName
-                    ctx={ctx}
-                    agentId={info.agentEdit.agentId}
-                    serverName={info.agentEdit.agentName}
-                    person={agentPersonName(
-                      ctx,
-                      info.agentEdit.personId,
-                      info.agentEdit.personName,
-                    )}
-                    brief
-                    told
-                  />{' '}
-                  · {ago(info.agentEdit.at, new Date())}
-                </span>
+            ))}
+          {/* Editors only: the server tells readers of no draft. */}
+          {info.agentEdit && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              <span aria-hidden>🤖</span>
+              <span>
+                <span className="sr-only">Draft edited by </span>
+                <AgentName
+                  ctx={ctx}
+                  agentId={info.agentEdit.agentId}
+                  serverName={info.agentEdit.agentName}
+                  person={agentPersonName(ctx, info.agentEdit.personId, info.agentEdit.personName)}
+                  brief
+                  told
+                />{' '}
+                · {ago(info.agentEdit.at, new Date())}
               </span>
-            )}
-          </Pills>
-          <ReadingNotices state={queued} />
-          {model.view === 'published' && change && (
-            <p role="note" className="text-sm text-muted-foreground">
-              Changed on this device, not saved yet.
-            </p>
+            </span>
           )}
-          {canEdit && provenance && info.heads.draftHead === null && !model.actions.detach && (
-            <p className="text-sm text-muted-foreground">
-              This page is a copy of another page, published to it from there. Someone who can
-              publish here can detach it, so it can be edited here.
-            </p>
-          )}
-          {/* A page made offline has no version to fail to open, though one read
+        </Pills>
+        <ReadingNotices state={queued} />
+        {model.view === 'published' && change && (
+          <p role="note" className="text-sm text-muted-foreground">
+            Changed on this device, not saved yet.
+          </p>
+        )}
+        {canEdit && provenance && info.heads.draftHead === null && !model.actions.detach && (
+          <p className="text-sm text-muted-foreground">
+            This page is a copy of another page, published to it from there. Someone who can publish
+            here can detach it, so it can be edited here.
+          </p>
+        )}
+        {/* A page made offline has no version to fail to open, though one read
               of the queue from before it was made may have tried. */}
-          {error && !change?.newPage && <Missing message={errorMessage(error)} />}
-          {opened?.kind === 'newer-format' && (
-            <Missing message="This version was written by a newer version of WikiStow. Update to open it." />
-          )}
-          {model.view === 'draft' && draftFrom && (
-            <DraftEditor
-              ref={editor}
-              ctx={ctx}
-              page={page}
-              base={draftFrom.base}
-              head={info.heads.draftHead}
-              payload={draftFrom.payload}
-              region={draftFrom.region}
-              queued={draftFrom.queued}
-              onReload={(options) => void viewTheirs(options)}
-              hiddenAttachments={coverParts}
-            />
-          )}
-          {revision && payload && model.view === 'published' && (
-            <>
-              {contents && (
-                <TableOfContents
-                  headings={headings}
-                  card={card}
-                  collapsed
-                  className="@min-[960px]:hidden"
-                />
-              )}
-              <div ref={setShownBody} data-find-root className="contents">
-                <ReadingChanges value={readingHere}>
-                  <Markdown
-                    source={shownMarkdown ?? payload.markdown}
-                    attachments={{
-                      ctx,
-                      page,
-                      audience: 'published',
-                      attachments: payload.attachments,
-                    }}
-                    pages={linkable}
-                    links={linkTableOf(payload)}
-                    notKept={notKept}
-                    editing={
-                      canEdit
-                        ? {
-                            parentId: info.parentId,
-                            // Offline, a missing link's page is made from the draft view, which knows what is kept.
-                            create: !needs.offline && (info.parentId !== null || topOpened),
-                          }
-                        : null
-                    }
-                  />
-                </ReadingChanges>
-              </div>
-            </>
-          )}
-          {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
-          {plugins.regions['page.footer'].length > 0 && (
-            <div data-region="page.footer" className="grid gap-3">
-              <PageViews place="page.footer" shown={pluginShown} />
-            </div>
-          )}
-        </div>
-        {asides ? (
-          <div
-            data-region="page.aside"
-            className="grid w-full content-start gap-4 @min-[960px]:sticky @min-[960px]:top-6 @min-[960px]:max-h-[calc(100svh-5rem-var(--titlebar-height))] @min-[960px]:w-52 @min-[960px]:shrink-0 @min-[960px]:self-start @min-[960px]:overflow-y-auto"
-          >
+        {error && !change?.newPage && <Missing message={errorMessage(error)} />}
+        {opened?.kind === 'newer-format' && (
+          <Missing message="This version was written by a newer version of WikiStow. Update to open it." />
+        )}
+        {model.view === 'draft' && draftFrom && (
+          <DraftEditor
+            ref={editor}
+            ctx={ctx}
+            page={page}
+            base={draftFrom.base}
+            head={info.heads.draftHead}
+            payload={draftFrom.payload}
+            region={draftFrom.region}
+            queued={draftFrom.queued}
+            onReload={(options) => void viewTheirs(options)}
+            hiddenAttachments={coverParts}
+          />
+        )}
+        {revision && payload && model.view === 'published' && (
+          <>
             {contents && (
               <TableOfContents
                 headings={headings}
                 card={card}
-                className="hidden @min-[960px]:grid"
+                collapsed
+                className="@min-[960px]:hidden"
               />
             )}
-            <PageViews place="page.aside" shown={pluginShown} />
-          </div>
-        ) : (
-          contents && (
-            <TableOfContents
-              headings={headings}
-              card={card}
-              className="sticky top-6 hidden max-h-[calc(100svh-5rem-var(--titlebar-height))] w-52 shrink-0 self-start overflow-y-auto @min-[960px]:grid"
-            />
-          )
+            <div ref={setShownBody} data-find-root className="contents">
+              <ReadingChanges value={readingHere}>
+                <Markdown
+                  source={shownMarkdown ?? payload.markdown}
+                  attachments={{
+                    ctx,
+                    page,
+                    audience: 'published',
+                    attachments: payload.attachments,
+                  }}
+                  pages={linkable}
+                  links={linkTableOf(payload)}
+                  notKept={notKept}
+                  editing={
+                    canEdit
+                      ? {
+                          parentId: info.parentId,
+                          // Offline, a missing link's page is made from the draft view, which knows what is kept.
+                          create: !needs.offline && (info.parentId !== null || topOpened),
+                        }
+                      : null
+                  }
+                />
+              </ReadingChanges>
+            </div>
+          </>
         )}
-      </div>
-      {pagePanels.map(({ id, Panel }) => (
-        <Panel
-          key={id}
-          ctx={ctx}
-          page={page}
-          open={panel === id}
-          onOpenChange={(open) => setPanel(open ? id : null)}
+        {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
+      </PageColumns>
+      <Place
+        name="page.panel"
+        shown={pluginShown}
+        open={panel}
+        onOpenChange={setPanel}
+        own={{
+          ctx,
+          page,
           // A copy of another page has no draft to change until it is detached.
-          editor={canEdit && info.heads.draftHead !== null}
-          published={model.view === 'published' ? revisionId : null}
-          draft={
+          editor: canEdit && info.heads.draftHead !== null,
+          published: model.view === 'published' ? revisionId : null,
+          draft:
             model.view === 'draft'
               ? { flush: async () => editor.current?.flush(), reopen: onReopen }
-              : null
-          }
-        />
-      ))}
+              : null,
+        }}
+      />
       {shareable && (
         <ShareDialog
           spaceId={page.spaceId}
@@ -1235,41 +1187,6 @@ function Pills({
       })}
       {children}
     </div>
-  );
-}
-
-/**
- * The page's card, scrolling within the window; its body fills what the
- * cover band leaves. Its width, not the window's, decides whether the
- * table of contents fits beside the page. It holds what's absolutely
- * placed in it, such as `sr-only` text, which would otherwise stretch the
- * window to wherever it sits in a long page.
- */
-function PageCard({
-  children,
-  find,
-  ref,
-}: {
-  children: React.ReactNode;
-  /** Find on page for what it shows, with its bar over the page (#276). */
-  find?: PageFind;
-  ref?: React.Ref<HTMLElement>;
-}) {
-  return (
-    <article
-      ref={ref}
-      data-region="page"
-      className="@container relative flex h-full min-h-0 flex-col overflow-y-auto rounded-card bg-card shadow-card"
-    >
-      {find ? (
-        <PageFindContext value={find}>
-          <FindBar find={find} />
-          {children}
-        </PageFindContext>
-      ) : (
-        children
-      )}
-    </article>
   );
 }
 
