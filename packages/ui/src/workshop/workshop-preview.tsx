@@ -31,13 +31,8 @@ import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/lib
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Place, type OpenPanel } from '../plugins/places';
-import {
-  pluginRuntime,
-  pluginStore,
-  PluginsContext,
-  usePlugins,
-  type ShownPage,
-} from '../plugins/runtime';
+import { useAppPlugins } from '../plugins/app-plugins';
+import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import type { Workshop } from './workshop';
@@ -203,6 +198,7 @@ function Publish({
   version: WorkshopVersion;
   onNotice: (notice: Notice | null) => void;
 }) {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
   const ctx = useClient();
   const queryClient = useQueryClient();
   const [upload, setUpload] = useState<PluginUpload | null>(null);

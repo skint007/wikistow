@@ -24,7 +24,8 @@ import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
 import { Place as RegionPlace } from './places';
-import { pluginRuntime, pluginStore, usePlugins, type PluginStatus } from './runtime';
+import { useAppPlugins } from './app-plugins';
+import { usePlugins, type PluginStatus } from './runtime';
 import { refOf, type ApprovalRequest, type PluginRef } from './store';
 
 export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
@@ -56,6 +57,7 @@ export const message = (error: unknown) =>
 
 /** Says safe mode is on, with the way out, on the Plugins page wherever plugins come from. */
 export function SafeModeNotice() {
+  const { runtime: pluginRuntime } = useAppPlugins();
   const { safeMode } = usePlugins();
   if (!safeMode) return null;
   return (
@@ -160,6 +162,7 @@ export function InstalledList({
  * folder, or load one for development. Each asks for approval first.
  */
 export function InstallFromFolder() {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { folders } = pluginStore;
@@ -206,6 +209,7 @@ export function InstallFromFolder() {
  * from there on every device, and choose its pages), locked or not.
  */
 export function PluginSettings({ tab, query }: PluginsView) {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
   const { plugins } = usePlugins();
   const vault = useVault();
   const queryClient = useQueryClient();
@@ -554,6 +558,7 @@ function PageAccessList({
   plugin: PluginRef;
   most: PageAccess;
 }) {
+  const { runtime: pluginRuntime } = useAppPlugins();
   const places = usePlaces(ctx);
   const scopes = pluginRuntime.access(plugin.id);
   const [place, setPlace] = useState<string | null>(null);

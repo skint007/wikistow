@@ -10,7 +10,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { panelKey, pluginName, type OpenPanel } from './places';
-import { pluginRuntime, usePluginRuntime, usePlugins, type ShownPage } from './runtime';
+import { useAppPlugins } from './app-plugins';
+import { usePluginRuntime, usePlugins, type ShownPage } from './runtime';
 import { desktop } from '../desktop';
 import { useNeedsConnection } from '../shell/availability';
 
@@ -28,6 +29,8 @@ export function PagePlugins({
   onOpenPanel: (panel: OpenPanel) => void;
 }) {
   const runtime = usePluginRuntime();
+  // The editor is the app's, in the workshop's preview too.
+  const { openDraft } = useAppPlugins().runtime;
   const { commands, regions, plugins } = usePlugins();
   const panels = regions['page.panel'];
   const [notice, setNotice] = useState<string | null>(null);
@@ -40,10 +43,7 @@ export function PagePlugins({
   const { ready, flush, saved, fits, revise, selection, insert } = shown.draft ?? {};
   useEffect(() => {
     if (!editing || !ready || !flush || !saved || !fits || !revise || !selection || !insert) return;
-    return pluginRuntime.openDraft(
-      { spaceId, pageId },
-      { ready, flush, saved, fits, revise, selection, insert },
-    );
+    return openDraft({ spaceId, pageId }, { ready, flush, saved, fits, revise, selection, insert });
     // The editor's functions are new each render; the editor behind them isn't.
   }, [editing, spaceId, pageId]);
 

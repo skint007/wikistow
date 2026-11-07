@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
-import { pluginRuntime, usePlugins } from './runtime';
+import { useAppPlugins } from './app-plugins';
+import { usePlugins } from './runtime';
 
 /**
  * Says the app (or, in a browser, this tab) runs without plugins, drawn by
@@ -9,6 +10,7 @@ import { pluginRuntime, usePlugins } from './runtime';
  */
 export function SafeModeBanner() {
   const { safeMode } = usePlugins();
+  const { runtime } = useAppPlugins();
   if (!safeMode) return null;
   return (
     <div
@@ -20,7 +22,7 @@ export function SafeModeBanner() {
       <Button asChild size="sm" variant="outline">
         <Link to="/settings/plugins">Manage plugins</Link>
       </Button>
-      <Button size="sm" variant="outline" onClick={() => void pluginRuntime.setSafeMode(false)}>
+      <Button size="sm" variant="outline" onClick={() => void runtime.setSafeMode(false)}>
         Turn plugins back on
       </Button>
     </div>

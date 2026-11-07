@@ -16,7 +16,7 @@ import { pageQuery, queueOf, searchIndexChanged, treeQuery } from '../data/queri
 import { vaultStore } from '../vault/store';
 import { connection } from '../data/connection';
 import { availability, waitingOf } from '../shell/availability';
-import { pluginRuntime } from '../plugins/runtime';
+import { useAppPlugins } from '../plugins/app-plugins';
 import { DraftSession, type DraftPorts } from './draft-session';
 import type { EditorSurfaceHandle } from './editor/surface';
 import { readOpeningLinks, readWikilinks } from './page-reader';
@@ -54,11 +54,12 @@ export function useDraftSession({
   surface: { readonly current: EditorSurfaceHandle | null };
 }) {
   const queryClient = useQueryClient();
+  const { editorSaved } = useAppPlugins().runtime;
   const [{ session, drafts }] = useState(() => {
     const drafts = pageWriter(ctx).draft(page, { seen: queued?.version ?? null });
     const session = new DraftSession(
       { base, payload, region, theirs: queued?.theirs ?? null },
-      appPorts(ctx, page, queryClient, drafts),
+      appPorts(ctx, page, queryClient, drafts, editorSaved),
       surface,
     );
     if (queued?.sending) session.own(queued.sending);
@@ -178,6 +179,8 @@ function appPorts(
   queryClient: QueryClient,
   /** Where the session's saves and files go: the server, or this device's queue (ADR 0009, decision 7). */
   drafts: DraftWriter,
+  /** Tells the app's plugins of each save. */
+  editorSaved: (page: pageOperations.PageRef, revision: string) => void,
 ): DraftPorts {
   const tree = treeQuery(ctx, page.spaceId);
   const info = pageQuery(ctx, page.pageId);
@@ -198,7 +201,7 @@ function appPorts(
       return loaded ? draftLinkTargets(loaded, { id: page.pageId }, title) : null;
     },
     async saved({ revisionId, basedOn, payload, written, region, epoch }) {
-      pluginRuntime.editorSaved(page, revisionId);
+      editorSaved(page, revisionId);
       // A tree fetched before this save would land on the patch with the old title.
       const overtaken = queryClient.isFetching({ queryKey: tree.queryKey }) > 0;
       if (overtaken) await queryClient.cancelQueries({ queryKey: tree.queryKey });
