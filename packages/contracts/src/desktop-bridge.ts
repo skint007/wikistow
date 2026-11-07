@@ -1,7 +1,7 @@
 import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/manifest';
-
-/** A space, or a folder and what is under it, that a plugin may read or write for one account. */
-export type PluginScope = { spaceId: string; folderId: string | null; access: 'read' | 'write' };
+// Types only: the preload bundles this file and may load nothing but electron.
+// The package's index exports `PluginScope`.
+import type { PluginScope } from './plugin-installs.ts';
 
 /**
  * A plugin installed on this computer or loaded from a development folder,

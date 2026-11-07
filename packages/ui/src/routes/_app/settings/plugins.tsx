@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { desktop } from '../../../desktop';
-import { LibrarySettings } from '../../../plugins/library-settings';
 import {
   InstallFromFolder,
   PluginSettings,
@@ -90,7 +89,7 @@ function PluginsPage() {
               className="ml-auto w-auto min-w-48 flex-1 rounded-row border-0 bg-muted sm:max-w-64"
             />
           </div>
-          {desktop ? <PluginSettings {...view} /> : <LibrarySettings {...view} />}
+          <PluginSettings {...view} />
         </div>
       </div>
     </div>

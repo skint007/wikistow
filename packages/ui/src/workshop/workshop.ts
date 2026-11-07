@@ -1,18 +1,20 @@
 import { toBase64 } from '@wikistow/client';
 import {
+  installedPlugin,
   pluginDraftRoutes,
   type BuildDiagnostic,
   type PluginUploadFile,
   type WorkshopFile,
   type WorkshopVersion,
 } from '@wikistow/contracts';
-import { MANIFEST_FILE, trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { MANIFEST_FILE, type Manifest } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
 import { pageBlockProperties } from '../plugins/block-properties';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
+import type { PluginStore } from '../plugins/store';
 import { tabSafeMode } from '../plugins/safe-mode';
 import { SCRIPT_BUDGET_MS } from '../plugins/script-worker';
 import { pluginTheme } from '../theme/plugin-theme';
@@ -175,20 +177,27 @@ export class Workshop {
 
   constructor(draftId: string) {
     this.draftId = draftId;
-    this.preview = createRuntime({
+    // The workshop's versions: approving one runs it in the preview, in place of what runs.
+    const versions: PluginStore<number> = {
       list: async () => {
         const safeMode = desktop ? (await desktop.plugins()).safeMode : tabSafeMode.on();
+        const none = { safeMode, plugins: [], access: {}, unavailable: {} };
         const running = this.#state.running?.plugin;
-        if (!running || this.#holding) return { safeMode, plugins: [] };
+        if (!running || this.#holding) return none;
         const manifest = this.#state.appCode ? running.manifest : withoutUi(running.manifest);
-        return { safeMode, plugins: [{ ...running, manifest }] };
+        return { ...none, plugins: [{ ...running, manifest }] };
       },
-      access: async () => ({}),
+      approve: (version) => this.load(version),
+      enable: async (_plugin, on) => {
+        if (!on) await this.unload();
+      },
       // The samples are open to the manifest's access; there is none to choose.
       setAccess: async () => {},
+      remove: () => this.unload(),
+    };
+    this.preview = createRuntime(versions, {
       pages: (caller) => this.samples.pages(caller),
       handle: (caller, shown) => this.samples.handle(caller, shown),
-      disable: () => this.unload(),
     });
     this.preview.start(null);
     // Settings' picker shares the preview: one it shows, or stops, ends this one.
@@ -350,14 +359,13 @@ export class Workshop {
         ? {
             version: number,
             diagnostics: result.diagnostics,
-            plugin: {
+            plugin: installedPlugin({
               manifest: built.manifest,
-              level: trustLevel(built.manifest),
               key: draftKey(built.hash),
               development: null,
               library: false,
               enabled: true,
-            },
+            }),
             hash: built.hash,
           }
         : failedVersion(number, result.diagnostics);

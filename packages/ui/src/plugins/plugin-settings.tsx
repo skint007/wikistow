@@ -18,14 +18,14 @@ import {
 import { Picker } from '@/components/ui/picker';
 import { Switch } from '@/components/ui/switch';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
-import { desktop } from '../desktop';
 import { ScopePill, SettingRow } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
 import { Place as RegionPlace } from './places';
-import { pluginRuntime, usePlugins, type PluginStatus } from './runtime';
+import { pluginRuntime, pluginStore, usePlugins, type PluginStatus } from './runtime';
+import { refOf, type ApprovalRequest, type PluginRef } from './store';
 
 export const LEVELS: Record<TrustLevel, { label: string; trust: string }> = {
   theme: {
@@ -162,8 +162,8 @@ export function InstalledList({
 export function InstallFromFolder() {
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const bridge = desktop;
-  if (!bridge) return null;
+  const { folders } = pluginStore;
+  if (!folders) return null;
   const act = async (run: () => Promise<unknown>) => {
     setError(null);
     try {
@@ -174,7 +174,7 @@ export function InstallFromFolder() {
     await pluginRuntime.refresh();
   };
   const pick = (kind: 'install' | 'development') =>
-    act(async () => setCandidate(await bridge.pickPlugin(kind)));
+    act(async () => setCandidate(await folders.pick(kind)));
   return (
     <>
       <Button size="sm" onClick={() => void pick('install')}>
@@ -191,18 +191,19 @@ export function InstallFromFolder() {
       <Approval
         candidate={candidate}
         onDone={() => setCandidate(null)}
-        onApprove={({ token }) => act(() => bridge.approvePlugin(token))}
+        onApprove={(chosen) => act(() => pluginStore.approve(chosen))}
       />
     </>
   );
 }
 
 /**
- * The Plugins page in the desktop app: the plugins installed from a folder
- * (turn each on or off, reload, remove, share one to the library, which
- * installs it from there on every device, and choose its pages) listed
- * with those installed from the library once the vault is open, and the
- * server's library as the browser shows it. The browser's is `LibrarySettings`.
+ * The Plugins page, through the app's plugin store: the plugins installed
+ * from the library once the vault is open, and the server's library
+ * (`Library`). In the desktop app, whose store also installs from a
+ * folder, the plugins installed that way are listed with them (turn each
+ * on or off, reload, remove, share one to the library, which installs it
+ * from there on every device, and choose its pages), locked or not.
  */
 export function PluginSettings({ tab, query }: PluginsView) {
   const { plugins } = usePlugins();
@@ -212,8 +213,7 @@ export function PluginSettings({ tab, query }: PluginsView) {
   const [sharing, setSharing] = useState<PluginUpload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const bridge = desktop;
-  if (!bridge) return null;
+  const { folders } = pluginStore;
 
   /** Run a change, then list the plugins afresh. A string it returns is said. */
   const act = async (run: () => Promise<unknown>) => {
@@ -228,53 +228,56 @@ export function PluginSettings({ tab, query }: PluginsView) {
     await pluginRuntime.refresh();
   };
 
-  const folder = plugins
-    .filter(({ plugin }) => !plugin.library)
-    .map((status): InstalledItem => {
-      const { manifest, development } = status.plugin;
-      return {
-        key: `folder:${manifest.id}`,
-        text: itemText(manifest),
-        problem: status.problem !== null,
-        row: (
-          <PluginRow
-            status={status}
-            onEnabled={(on) => void act(() => bridge.setPluginEnabled(manifest.id, on))}
-            onRemove={() => void act(() => bridge.removePlugin(manifest.id))}
-            actions={
-              development ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    void act(async () => {
-                      const asks = await bridge.reloadPlugin(manifest.id);
-                      if (asks) setCandidate(asks);
-                    })
-                  }
-                >
-                  Reload
-                </Button>
-              ) : (
-                vault.status === 'unlocked' && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void act(async () =>
-                        setSharing(await readUpload(await bridge.pluginUpload(manifest.id))),
-                      )
-                    }
-                  >
-                    Share to library…
-                  </Button>
-                )
-              )
-            }
-          />
-        ),
-      };
-    });
+  const folder = !folders
+    ? []
+    : plugins
+        .filter(({ plugin }) => !plugin.library)
+        .map((status): InstalledItem => {
+          const { manifest, development } = status.plugin;
+          const ref = refOf(status.plugin);
+          return {
+            key: `folder:${manifest.id}`,
+            text: itemText(manifest),
+            problem: status.problem !== null,
+            row: (
+              <PluginRow
+                status={status}
+                onEnabled={(on) => void act(() => pluginStore.enable(ref, on))}
+                onRemove={() => void act(() => pluginStore.remove(ref))}
+                actions={
+                  development ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void act(async () => {
+                          const asks = await folders.reload(manifest.id);
+                          if (asks) setCandidate(asks);
+                        })
+                      }
+                    >
+                      Reload
+                    </Button>
+                  ) : (
+                    vault.status === 'unlocked' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void act(async () =>
+                            setSharing(await readUpload(await folders.files(manifest.id))),
+                          )
+                        }
+                      >
+                        Share to library…
+                      </Button>
+                    )
+                  )
+                }
+              />
+            ),
+          };
+        });
 
   return (
     <div className="grid gap-4">
@@ -282,7 +285,7 @@ export function PluginSettings({ tab, query }: PluginsView) {
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
       {vault.status === 'unlocked' ? (
         <Library ctx={vault.ctx} tab={tab} query={query} folder={folder} />
-      ) : (
+      ) : folders ? (
         <>
           {tab === 'installed' && <InstalledList items={folder} query={query} />}
           <p className="text-sm text-muted-foreground">
@@ -290,20 +293,24 @@ export function PluginSettings({ tab, query }: PluginsView) {
             Which ones you installed is encrypted.
           </p>
         </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Unlock your vault to see your plugins. Which ones you installed is encrypted.
+        </p>
       )}
       <Approval
         candidate={candidate}
         onDone={() => setCandidate(null)}
-        onApprove={({ token }) => act(() => bridge.approvePlugin(token))}
+        onApprove={(chosen) => act(() => pluginStore.approve(chosen))}
       />
-      {vault.status === 'unlocked' && (
+      {folders && vault.status === 'unlocked' && (
         <ConfirmUpload
           ctx={vault.ctx}
           upload={sharing}
           onDone={() => setSharing(null)}
           onUpload={(upload, visibility) =>
             act(async () => {
-              const { manifest } = await uploadAndInstall(vault.ctx, upload, visibility);
+              const { manifest } = await uploadAndInstall(pluginStore, upload, visibility);
               await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
               return `Shared ${manifest.name} ${manifest.version} to the library and installed it on all your devices.`;
             })
@@ -313,15 +320,6 @@ export function PluginSettings({ tab, query }: PluginsView) {
     </div>
   );
 }
-
-/**
- * What the approval dialog asks about: a plugin folder read for install or
- * development, or a version in the server's library.
- */
-export type ApprovalRequest = Pick<
-  PluginCandidate,
-  'manifest' | 'level' | 'development' | 'hash' | 'replaces'
->;
 
 /**
  * Ask the person to approve a plugin before it runs: its name, version,
@@ -492,7 +490,7 @@ export function PluginRow({
       </div>
       {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
-        <PageAccessEditor pluginId={manifest.id} most={manifest.access} />
+        <PageAccessEditor plugin={refOf(plugin)} most={manifest.access} />
       )}
     </li>
   );
@@ -538,31 +536,31 @@ function usePlaces(ctx: ClientContext): Place[] {
 }
 
 /** Where one plugin may read or write, for the open account. */
-function PageAccessEditor({ pluginId, most }: { pluginId: string; most: PageAccess }) {
+function PageAccessEditor({ plugin, most }: { plugin: PluginRef; most: PageAccess }) {
   const vault = useVault();
   usePlugins();
   if (vault.status !== 'unlocked') {
     return <p className="text-sm text-muted-foreground">Unlock your vault to choose its pages.</p>;
   }
-  return <PageAccessList ctx={vault.ctx} pluginId={pluginId} most={most} />;
+  return <PageAccessList ctx={vault.ctx} plugin={plugin} most={most} />;
 }
 
 function PageAccessList({
   ctx,
-  pluginId,
+  plugin,
   most,
 }: {
   ctx: ClientContext;
-  pluginId: string;
+  plugin: PluginRef;
   most: PageAccess;
 }) {
   const places = usePlaces(ctx);
-  const scopes = pluginRuntime.access(pluginId);
+  const scopes = pluginRuntime.access(plugin.id);
   const [place, setPlace] = useState<string | null>(null);
   const [access, setAccess] = useState<PluginScope['access']>('read');
   const [error, setError] = useState<string | null>(null);
-  const save = (next: PluginScope[]) =>
-    pluginRuntime.setAccess(pluginId, next).catch((failure: unknown) => setError(message(failure)));
+  const save = (next: readonly PluginScope[]) =>
+    pluginRuntime.setAccess(plugin, next).catch((failure: unknown) => setError(message(failure)));
   const labelOf = (scope: PluginScope) =>
     places.find((option) => option.spaceId === scope.spaceId && option.folderId === scope.folderId)
       ?.label ?? 'A place you can no longer open';

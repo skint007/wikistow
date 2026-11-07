@@ -31,7 +31,13 @@ import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/lib
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
 import { Place, type OpenPanel } from '../plugins/places';
-import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
+import {
+  pluginRuntime,
+  pluginStore,
+  PluginsContext,
+  usePlugins,
+  type ShownPage,
+} from '../plugins/runtime';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import type { Workshop } from './workshop';
@@ -209,7 +215,7 @@ function Publish({
     const { manifest } = chosen;
     onNotice(null);
     try {
-      await workshop.oneLargeUpload(() => uploadAndInstall(ctx, chosen, visibility));
+      await workshop.oneLargeUpload(() => uploadAndInstall(pluginStore, chosen, visibility));
       onNotice({
         text: `Published ${manifest.name} ${manifest.version} and installed it on all your devices.`,
         failed: false,

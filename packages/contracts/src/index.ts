@@ -13,6 +13,7 @@ export * from './records/vault.ts';
 export * from './route.ts';
 export * from './security.ts';
 export * from './desktop-bridge.ts';
+export * from './plugin-installs.ts';
 export * as accountRoutes from './routes/accounts.ts';
 export * as aiRoutes from './routes/ai.ts';
 export * as agentRoutes from './routes/agents.ts';

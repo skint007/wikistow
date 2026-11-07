@@ -1,4 +1,4 @@
-import { FolderId, SpaceId } from '@wikistow/contracts';
+import { PluginScope } from '@wikistow/contracts';
 import { PluginId } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import type { PrivateContacts } from './contacts.ts';
@@ -11,18 +11,6 @@ import type { PrivateContacts } from './contacts.ts';
  * installs keep theirs in its `plugins.json` instead.
  */
 export const PLUGINS_NAMESPACE = 'wikistow.plugins';
-
-/**
- * A space (`folderId` null), or a folder and what is under it, that a
- * plugin may read or write: the desktop's `PluginScope`, which the runtime
- * enforces (`packages/ui/src/plugins/pages.ts`).
- */
-export const PluginScope = z.object({
-  spaceId: SpaceId,
-  folderId: FolderId.nullable(),
-  access: z.enum(['read', 'write']),
-});
-export type PluginScope = z.infer<typeof PluginScope>;
 
 /** One approved library plugin. */
 export const PluginApproval = z.object({
