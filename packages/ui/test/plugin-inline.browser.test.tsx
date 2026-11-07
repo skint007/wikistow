@@ -13,6 +13,7 @@ import {
   type PluginsSnapshot,
 } from '../src/plugins/runtime.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
+import { viewOf } from './editor-view.ts';
 import { openVault, PAGE_REF } from './page-view.ts';
 
 // Inline code a plugin claims (ADR 0011, decision 7) in the visual editor:
@@ -90,17 +91,7 @@ describe('a claimed span in the visual editor', () => {
         element.textContent = `★ ${source}`;
       },
     };
-    const snapshot: Pick<PluginsSnapshot, 'blocks' | 'inline' | 'plugins'> = {
-      blocks: new Map(),
-      inline: new Map([['plugin:test/stars', span]]),
-      plugins: [],
-    };
-    // Only what the visual editor asks of the runtime.
-    const runtime = {
-      get: () => snapshot,
-      subscribe: () => () => {},
-      viewFailed: () => {},
-    } as unknown as PluginRuntime;
+    const runtime = runtimeDrawing(new Map([['plugin:test/stars', span]]));
     const page = 'One `plugin:test/stars 3` and ``plugin:test/stars a`b``, as typed.\n';
     const m = mount(page, runtime);
     await expect.poll(() => drawn.map(({ text }) => text)).toEqual(['3', 'a`b']);
@@ -116,6 +107,41 @@ describe('a claimed span in the visual editor', () => {
     expect(drawn).toHaveLength(2);
   });
 });
+
+describe('claimed spans side by side', () => {
+  it('get a space put back between them, as Markdown can’t hold two code spans together', async () => {
+    const page = 'A `plugin:test/stars 1` `plugin:test/stars 2`, `plugin:test/stars 3` `code`.\n';
+    const m = mount(page, runtimeDrawing(new Map()));
+    await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
+    const dom = m.container.querySelector('#page-visual');
+    if (!dom) throw new Error('The visual editor did not mount');
+    const view = viewOf(dom);
+    // Each space between two spans, or a span and code, deleted at once.
+    const spaces: number[] = [];
+    view.state.doc.descendants((node, pos) => {
+      if (node.text === ' ') spaces.push(pos);
+    });
+    expect(spaces).toHaveLength(2);
+    const { tr } = view.state;
+    for (const pos of spaces.reverse()) tr.delete(pos, pos + 1);
+    act(() => view.dispatch(tr));
+    await expect.poll(() => m.handle.read()).toBe(page);
+  });
+});
+
+/** A runtime drawing `inline`, with only what the visual editor asks of it. */
+function runtimeDrawing(inline: PluginsSnapshot['inline']) {
+  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'inline' | 'plugins'> = {
+    blocks: new Map(),
+    inline,
+    plugins: [],
+  };
+  return {
+    get: () => snapshot,
+    subscribe: () => () => {},
+    viewFailed: () => {},
+  } as unknown as PluginRuntime;
+}
 
 const unmounts: (() => void)[] = [];
 afterEach(() => {

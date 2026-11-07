@@ -1,7 +1,8 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
-import type { Node } from '@milkdown/kit/prose/model';
+import type { Mark, Node } from '@milkdown/kit/prose/model';
+import { Plugin } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
-import { $node, $remark, $view } from '@milkdown/kit/utils';
+import { $node, $prose, $remark, $view } from '@milkdown/kit/utils';
 import { blockLanguage, claimedInline, inlineSpan } from '@wikistow/plugin-sdk';
 import type { Literal, Nodes, Root } from 'mdast';
 import type { Options } from 'mdast-util-to-markdown';
@@ -252,11 +253,75 @@ class PluginInlineView implements NodeView {
   }
 }
 
-/** Claimed spans' reading and writing, their node and its view. */
+/** Whether an inline node is written as a code span: a claimed span, or code. */
+const claimed = (node: Node) => node.type.name === 'plugin_inline';
+const writtenAsCode = (node: Node) =>
+  claimed(node) || node.marks.some((mark) => mark.type.spec.code);
+
+/**
+ * A space between a claimed span and code right beside it, as where the
+ * text between them was deleted: Markdown can't hold two code spans side
+ * by side, which would be written, and read again, as one. Only the text
+ * blocks a change reached are looked at.
+ */
+const keptApart = $prose(
+  () =>
+    new Plugin({
+      appendTransaction(transactions, _old, state) {
+        const { doc } = state;
+        const changed: [number, number][] = [];
+        transactions.forEach((tr, i) => {
+          const later = transactions.slice(i + 1);
+          tr.mapping.maps.forEach((map, j) =>
+            map.forEach((_oldFrom, _oldTo, from, to) => {
+              const rest = tr.mapping.slice(j + 1);
+              let range: [number, number] = [rest.map(from, -1), rest.map(to, 1)];
+              for (const next of later)
+                range = [next.mapping.map(range[0], -1), next.mapping.map(range[1], 1)];
+              changed.push(range);
+            }),
+          );
+        });
+        const spaces: { pos: number; marks: readonly Mark[] }[] = [];
+        const seen = new Set<number>();
+        for (const [from, to] of changed) {
+          doc.nodesBetween(
+            Math.max(0, from - 1),
+            Math.min(doc.content.size, to + 1),
+            (node, pos) => {
+              if (!node.isTextblock) return true;
+              if (seen.has(pos)) return false;
+              seen.add(pos);
+              let before: Node | null = null;
+              node.forEach((child, offset) => {
+                if (before && writtenAsCode(before) && writtenAsCode(child)) {
+                  if (claimed(before) || claimed(child)) {
+                    // In the marks both share outside the code, such as italic.
+                    const marks = before.marks.filter((mark) => !mark.type.spec.code);
+                    spaces.push({ pos: pos + 1 + offset, marks });
+                  }
+                }
+                before = child;
+              });
+              return false;
+            },
+          );
+        }
+        if (spaces.length === 0) return null;
+        const tr = state.tr;
+        for (const { pos, marks } of spaces.sort((a, b) => b.pos - a.pos))
+          tr.insert(pos, state.schema.text(' ', marks));
+        return tr;
+      },
+    }),
+);
+
+/** Claimed spans' reading and writing, their node and its view, and spans kept apart from code. */
 export const pluginInlineNode = (host: VisualHost): MilkdownPlugin[] =>
   [
     claimedSpans,
     pluginInlineSchema,
+    keptApart,
     $view(
       pluginInlineSchema,
       () => (node, view, getPos) => new PluginInlineView(node, view, getPos, host),
