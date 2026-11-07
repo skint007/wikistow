@@ -71,7 +71,7 @@ describe('contentChanged', () => {
     );
     expect(loads).toEqual(['history notes', 'page notes', `tree ${home}`, `tree ${work}`]);
     expect(vi.mocked(searchIndexChanged).mock.calls).toEqual([
-      [queryClient, { spaceIds: [home, work] }],
+      [queryClient, { spaces: [home, work] }],
     ]);
   });
 

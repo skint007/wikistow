@@ -58,7 +58,7 @@ export async function contentChanged(
       if (each.pageId) pages.set(each.pageId, { spaceId: each.spaceId, pageId: each.pageId });
     }
   }
-  if (spaces.size > 0) searchIndexChanged(queryClient, { spaceIds: [...spaces] });
+  if (spaces.size > 0) searchIndexChanged(queryClient, { spaces: [...spaces] });
   for (const spaceId of spaces) {
     loads.push(reloadTree(queryClient, treeQuery(ctx, spaceId).queryKey, refetchType));
   }
