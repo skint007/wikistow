@@ -28,6 +28,7 @@ import { markdownSyntaxes } from '../../../registries';
 import { inertHost, type VisualHost } from './host';
 import { isLiteral } from './literals';
 import { leaveLastBlock } from './plugins';
+import { pluginInlineNode } from './plugin-inline';
 import { readAlone } from './read-alone';
 import { schemaChanges } from './schema';
 import {
@@ -458,6 +459,7 @@ export function visualPlugins(host: VisualHost, nodes: readonly SyntaxNode[]): M
     listItemView,
     tableView,
     codeBlockView(host),
+    pluginInlineNode(host),
     quoteView,
     ...syntaxPlugins.flat(),
     ...nodes.flatMap((node) => node(host)),
