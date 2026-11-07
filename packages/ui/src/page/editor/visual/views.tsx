@@ -18,15 +18,9 @@ import { QUOTE_KINDS } from '../../alert-title';
 import { attachmentId } from '../../attachments';
 import { alertIn } from './alerts';
 import { setKind, type QuoteKind } from './formatting';
-import { claimedBlock, PluginError, type BlockProps } from '@wikistow/plugin-sdk';
-import {
-  blockProperties,
-  checkedProperty,
-  setOwn,
-  stillShown,
-  type DrawnProperties,
-} from '../../../plugins/block-properties';
-import { takesPropsInPlace, updateInPlace } from '../../../plugins/in-place';
+import { claimedBlock, type View, type BlockProps } from '@wikistow/plugin-sdk';
+import { drawBlock, type BlockDrawing } from '../../../plugins/block-drawing';
+import { blockProperties } from '../../../plugins/block-properties';
 import type { PluginBlock } from '../../../plugins/runtime';
 import { attachmentById, type VisualHost } from './host';
 import type { QueryResults } from './query-results';
@@ -136,34 +130,6 @@ class TableView implements NodeView {
 
 export const tableView = $view(tableSchema.node, () => () => new TableView());
 
-/**
- * A code block under a picker of its language: `text` for none, then
- * highlight.js's languages, with the block's own label too if it's none of
- * them, kept as written. Choosing one changes only the label. The picker
- * is outside the editable text, its menu outside the editor.
- *
- * A fence a running plugin claims (`plugin:<id>/<block>`) shows that
- * plugin's view instead of its text, in an editor someone sees: the view's
- * changes become the block's text, as the person's own edits. Without the
- * plugin it is this ordinary code block, and turns back into the view as
- * the plugin starts.
- */
-/**
- * A plugin's view drawn for a block: the text it was drawn for or last
- * set, the properties it was drawn with and those it set, whether it could
- * set them, the element and props it was drawn with, for one that takes
- * new props in place, and what undoes it.
- */
-type DrawnBlock = {
-  block: PluginBlock;
-  source: string;
-  properties: DrawnProperties;
-  settable: boolean;
-  element: HTMLElement;
-  props: BlockProps | null;
-  undo: (() => void) | void;
-};
-
 /** The plugin block a code block is drawn as: a running plugin claims it, in an editor someone sees. */
 const drawnAs = (node: Node, host: VisualHost): PluginBlock | undefined =>
   host.page() && node.type.name === 'code_block'
@@ -220,6 +186,18 @@ export const pluginBlockUnits = (host: VisualHost) =>
       }),
   );
 
+/**
+ * A code block under a picker of its language: `text` for none, then
+ * highlight.js's languages, with the block's own label too if it's none of
+ * them, kept as written. Choosing one changes only the label. The picker
+ * is outside the editable text, its menu outside the editor.
+ *
+ * A fence a running plugin claims (`plugin:<id>/<block>`) shows that
+ * plugin's view instead of its text, in an editor someone sees: the view's
+ * changes become the block's text, as the person's own edits. Without the
+ * plugin it is this ordinary code block, and turns back into the view as
+ * the plugin starts.
+ */
 class CodeBlockView implements NodeView {
   readonly dom = document.createElement('div');
   readonly contentDOM = document.createElement('code');
@@ -236,7 +214,8 @@ class CodeBlockView implements NodeView {
   readonly #host: VisualHost;
   readonly #unsubscribe: () => void;
   #node: Node;
-  #drawn: DrawnBlock | null = null;
+  /** The claiming plugin's view drawn in place of the text, and which view it is; no drawing while it is first drawn. */
+  #drawn: { view: View<BlockProps>; drawing: BlockDrawing | null } | null = null;
   /** Its fence names a plugin that isn't drawing it, which its label says. */
   #missing = false;
 
@@ -278,16 +257,11 @@ class CodeBlockView implements NodeView {
     if (pos === undefined || this.#node.textContent === text) return;
     const { state } = this.#view;
     const content = text ? state.schema.text(text) : Fragment.empty;
-    if (this.#drawn) this.#drawn.source = text;
     this.#view.dispatch(state.tr.replaceWith(pos + 1, pos + 1 + this.#node.content.size, content));
   }
 
   #undraw() {
-    try {
-      this.#drawn?.undo?.();
-    } catch {
-      // Its own cleanup failing leaves nothing of the editor's behind.
-    }
+    this.#drawn?.drawing?.destroy();
     this.#drawn = null;
     this.#block.replaceChildren();
   }
@@ -295,6 +269,7 @@ class CodeBlockView implements NodeView {
   /** The claiming plugin's view in place of the text, or the text, as plugins come and go. */
   #drawBlock() {
     const page = this.#host.page();
+    const runtime = this.#host.plugins();
     const block = drawnAs(this.#node, this.#host);
     const missing =
       page !== null && !block && claimedBlock(String(this.#node.attrs.language)) !== null;
@@ -302,71 +277,33 @@ class CodeBlockView implements NodeView {
       this.#missing = missing;
       this.#renderHeader();
     }
-    const source = this.#node.textContent;
-    const properties = blockProperties(this.#host.properties());
-    const settable = this.#host.setProperty() !== null;
-    // The same view, for the same text and properties, but for those it set
-    // itself: the runtime rebuilds its list on every change. One the app
-    // draws, a script's form, takes new properties in place instead, so it
-    // and the field being typed in it stay.
-    const kept = this.#drawn;
-    const inPlace = kept !== null && takesPropsInPlace(kept.block.view);
-    if (
-      kept?.block.view === block?.view &&
-      (!kept ||
-        (kept.source === source &&
-          kept.settable === settable &&
-          (inPlace || stillShown(kept.properties, properties))))
-    ) {
-      // Drawn again with the same values, as for another page's, it takes nothing.
-      const changed = JSON.stringify(kept?.properties.shown) !== JSON.stringify(properties);
-      if (kept && inPlace && kept.props && changed) {
-        kept.properties = { shown: properties, own: new Map() };
-        kept.props = { ...kept.props, properties };
-        updateInPlace(kept.element, kept.props);
-      }
+    const inputs = page &&
+      runtime && {
+        runtime,
+        source: this.#node.textContent,
+        page,
+        properties: blockProperties(this.#host.properties()),
+        setSource: (text: string) => this.#setSource(text),
+        setProperty: this.#host.setProperty(),
+      };
+    // The same view, or still none: the runtime builds its list of blocks
+    // again on every change. A drawn one decides itself whether to draw again.
+    if (this.#drawn?.view === block?.view) {
+      if (inputs) this.#drawn?.drawing?.update(inputs);
       return;
     }
     this.#undraw();
     this.#pre.classList.toggle('hidden', block !== undefined);
-    if (!block || !page) return;
+    if (!block || !inputs) return;
     const element = document.createElement('div');
     this.#block.append(element);
-    const drawn: DrawnBlock = {
-      block,
-      source,
-      properties: { shown: properties, own: new Map() },
-      settable,
-      element,
-      props: null,
-      undo: undefined,
+    // Noted first: a view failing tells the runtime, whose listeners call this again at once.
+    const drawn: { view: View<BlockProps>; drawing: BlockDrawing | null } = {
+      view: block.view,
+      drawing: null,
     };
     this.#drawn = drawn;
-    try {
-      drawn.props = {
-        source,
-        page: { ...page },
-        setSource: (text) => {
-          if (this.#drawn === drawn) this.#setSource(text);
-        },
-        properties,
-        setProperty: settable
-          ? (key, value) => {
-              const checked = checkedProperty(key, value);
-              const set = this.#host.setProperty();
-              if (this.#drawn !== drawn || !set) return;
-              setOwn(drawn.properties, checked.key, checked.value, () => {
-                const made = set(checked.key, checked.value);
-                if (!made.ok) throw new PluginError('invalid', made.reason);
-              });
-            }
-          : null,
-      };
-      drawn.undo = block.view(element, drawn.props);
-    } catch (error) {
-      element.textContent = 'This plugin block failed. Switch to source to edit it as text.';
-      this.#host.plugins()?.viewFailed(block.pluginId, error);
-    }
+    drawn.drawing = drawBlock(element, block, inputs);
   }
 
   #show() {

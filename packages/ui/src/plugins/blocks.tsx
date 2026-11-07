@@ -1,24 +1,12 @@
-import {
-  PluginError,
-  type BlockProps,
-  type PageRef,
-  type PropertyValue,
-} from '@wikistow/plugin-sdk';
+import type { PageRef } from '@wikistow/plugin-sdk';
 import type { Element, ElementContent } from 'hast';
-import { use, useMemo, useRef } from 'react';
+import { use, useEffect, useMemo, useRef } from 'react';
 import { PageProperties } from '../page/body-context';
 import { ReadingChanges } from '../page/reading-changes';
 import { applyChange, type ReadingChange } from '../page/reading-changes-model';
-import {
-  blockProperties,
-  checkedProperty,
-  setOwn,
-  stillShown,
-  type DrawnProperties,
-} from './block-properties';
-import { takesPropsInPlace } from './in-place';
-import { usePluginRuntime, usePlugins, type PluginBlock } from './runtime';
-import { PluginView } from './views';
+import { drawBlock, type BlockDrawing, type BlockInputs } from './block-drawing';
+import { blockProperties } from './block-properties';
+import { usePluginRuntime, type PluginBlock } from './runtime';
 
 /** A fence's text from the reader's tree: its code, without the final line break the tree adds. */
 export function textOf(code: Element): string {
@@ -32,16 +20,13 @@ export function textOf(code: Element): string {
 }
 
 /**
- * A plugin block in the reader: the plugin's view of the fence's text, and
- * of the page's properties as shown. Where the page can change while it's
- * read (`ReadingChanges`), `setProperty` queues a property's change, as a
- * tick is, once it is known to apply to the page as shown; one that can't
- * is refused as the visual editor refuses it, and nothing is queued.
- * Elsewhere it is null, and values entered stay in the view. A view the
- * app draws, a script's form, takes new properties in place; a plugin's
- * own is drawn again as they change, but not for its own change
- * (`stillShown`). Drawn again for another view or runtime, it gets the
- * properties as they are then.
+ * A plugin block in the reader (`drawBlock`): the plugin's view of the
+ * fence's text, and of the page's properties as shown. Where the page can
+ * change while it's read (`ReadingChanges`), `setProperty` queues a
+ * property's change, as a tick is, once it is known to apply to the page
+ * as shown; one that can't is refused as the visual editor refuses it, and
+ * nothing is queued. Elsewhere it is null, and values entered stay in the
+ * view. `setSource` is always null here.
  */
 export function ReaderBlock({
   block,
@@ -52,72 +37,47 @@ export function ReaderBlock({
   source: string;
   page: PageRef;
 }) {
-  const { plugins } = usePlugins();
-  const name = plugins.find(({ plugin }) => plugin.manifest.id === block.pluginId)?.plugin.manifest
-    .name;
+  const { pluginId, type, view } = block;
   const { spaceId, pageId } = page;
   const read = use(PageProperties);
   const properties = useMemo(() => blockProperties(read), [read]);
   const reading = use(ReadingChanges);
   const change = reading?.rights.allowed ? reading.change : null;
-  // The page as shown when a change comes, which it must apply to.
-  const shownNow = useRef(reading?.markdown ?? '');
-  shownNow.current = reading?.markdown ?? '';
+  const shown = reading?.markdown ?? '';
   const runtime = usePluginRuntime();
-  const inPlace = takesPropsInPlace(block.view);
-  // The props the view was drawn with, kept while they still stand for
-  // the page: the same for the same text, page, rights, view and runtime,
-  // and properties changed by none but the view, or any for one that
-  // takes them in place. The same every render that keeps them.
-  const drawn = useRef<{
-    props: BlockProps;
-    properties: DrawnProperties;
-    with: readonly unknown[];
-  } | null>(null);
-  const made = [source, spaceId, pageId, change, block.view, runtime];
-  const kept = drawn.current;
-  if (
-    !kept ||
-    kept.with.some((part, i) => part !== made[i]) ||
-    (!inPlace && !stillShown(kept.properties, properties))
-  ) {
-    const shown: DrawnProperties = { shown: properties, own: new Map() };
-    const setProperty = change
-      ? (key: string, value: PropertyValue) => {
-          const checked = checkedProperty(key, value);
-          // A view drawn over since changes nothing.
-          if (drawn.current?.properties !== shown) return;
-          const made: ReadingChange = { kind: 'property', ...checked };
-          setOwn(shown, checked.key, checked.value, () => {
-            const applies = applyChange(shownNow.current, made);
-            if (!applies.ok) throw new PluginError('invalid', applies.reason);
-            change(made);
-          });
+  const inputs: BlockInputs = {
+    runtime,
+    source,
+    page: { spaceId, pageId },
+    properties,
+    setSource: null,
+    setProperty: change
+      ? (key, value) => {
+          // It must apply to the page as shown when it comes.
+          const made: ReadingChange = { kind: 'property', key, value };
+          const applies = applyChange(shown, made);
+          if (applies.ok) change(made);
+          return applies;
         }
-      : null;
-    drawn.current = {
-      props: { source, page: { spaceId, pageId }, setSource: null, properties, setProperty },
-      properties: shown,
-      with: made,
+      : null,
+  };
+  const latest = useRef(inputs);
+  latest.current = inputs;
+  const host = useRef<HTMLDivElement>(null);
+  const drawing = useRef<BlockDrawing | null>(null);
+  // Drawn afresh for another view, as the plugin reloads; the runtime
+  // builds its list of blocks again on every change, so not for that.
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const drawn = drawBlock(element, { pluginId, type, view }, latest.current);
+    drawing.current = drawn;
+    return () => {
+      drawn.destroy();
+      drawing.current = null;
     };
-  }
-  const props = drawn.current?.props;
-  // What a view the app draws takes in place: the props with the properties now.
-  const live = useMemo(
-    () => (inPlace && props ? { ...props, properties } : undefined),
-    [inPlace, props, properties],
-  );
-  return (
-    <div className="plugin-block" data-plugin-block={block.type}>
-      {props && (
-        <PluginView
-          pluginId={block.pluginId}
-          name={name ?? block.pluginId}
-          view={block.view}
-          props={props}
-          live={live}
-        />
-      )}
-    </div>
-  );
+  }, [pluginId, type, view]);
+  // Every render's inputs: the drawing decides whether they draw it again.
+  useEffect(() => drawing.current?.update(inputs));
+  return <div ref={host} className="plugin-block" data-plugin-block={type} />;
 }
