@@ -11,6 +11,7 @@ import { desktopStore } from './desktop-store';
 import { editorDrafts } from './drafts';
 import { browserStore } from './library';
 import { createLocation } from './location';
+import { createMarkdownDrawings } from './markdown-drawings';
 import { pagesFor, session } from './pages';
 import { createRuntime, type OpenDraft, type PluginSession } from './runtime';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
@@ -33,12 +34,14 @@ export const vaultSession: PluginSession = {
  * library plugins the person approved. Settings → Plugins changes them only
  * through `store`. What plugins change shows afresh through `queryClient`.
  * `location` is where the person is, which the router and the page route
- * keep current (`router.tsx`).
+ * keep current (`router.tsx`). `markdown` holds what plugins draw with
+ * the app's reader, which the shell draws (`RenderedMarkdown`).
  */
 export function startAppPlugins(queryClient: QueryClient) {
   const drafts = editorDrafts();
   // Not `location`, which names the window's here.
   const where = createLocation();
+  const markdown = createMarkdownDrawings();
   const store: AppPluginStore = desktop ? desktopStore(desktop) : browserStore();
   const own = createRuntime(store, {
     session: vaultSession,
@@ -62,6 +65,7 @@ export function startAppPlugins(queryClient: QueryClient) {
       });
     },
     location: where,
+    renderMarkdown: markdown.draw,
     async spaces(caller) {
       if (caller.access === 'none') return [];
       const granted = new Set(caller.scopes().map((scope) => scope.spaceId));
@@ -109,10 +113,13 @@ export function startAppPlugins(queryClient: QueryClient) {
       { capture: true },
     );
   }
-  return { store, runtime, location: where };
+  return { store, runtime, location: where, markdown };
 }
 
-/** The app's own plugins: the store of them, the runtime running them, and where the person is. */
+/**
+ * The app's own plugins: the store of them, the runtime running them,
+ * where the person is, and what they draw with the app's reader.
+ */
 export type AppPlugins = ReturnType<typeof startAppPlugins>;
 
 export const AppPluginsContext = createContext<AppPlugins | null>(null);

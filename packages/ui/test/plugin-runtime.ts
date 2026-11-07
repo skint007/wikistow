@@ -117,6 +117,7 @@ export async function testRuntime(
     changed: () => {},
     location: createLocation(),
     spaces: async () => [],
+    renderMarkdown: () => () => {},
     ...reach,
     code: {
       app: async ({ manifest }) => ({

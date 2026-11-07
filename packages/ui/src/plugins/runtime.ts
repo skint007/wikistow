@@ -35,6 +35,7 @@ import {
   type Registry,
 } from './registry';
 import type { PluginLocation } from './location';
+import { MarkdownPage, type MarkdownDrawing } from './markdown-drawings';
 import { inFrame } from './script-frame';
 import { ScriptWorker, type LaunchScript } from './script-worker';
 import { refOf, type AnyPluginStore, type PluginRef } from './store';
@@ -249,6 +250,11 @@ export type PluginReach = {
   location: PluginLocation;
   /** The spaces the person can open where `caller` has page access, for `host.app.spaces`. */
   spaces(caller: Caller): Promise<SpaceSummary[]>;
+  /**
+   * Draw Markdown into a plugin's element with the app's reader, for
+   * `host.app.renderMarkdown`, where its `pages` can read the page; what undoes it.
+   */
+  renderMarkdown(drawing: MarkdownDrawing): Disposer;
   /** Where plugins' code comes from: `servedCode` unless given. */
   code?: PluginCode;
 };
@@ -510,6 +516,24 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
               throw pluginError(error);
             }
           },
+        },
+        renderMarkdown(element, markdown, { page }) {
+          if (!live()) throw new PluginError('unloaded', 'The plugin was turned off');
+          const read = MarkdownPage.safeParse(page);
+          if (!(element instanceof HTMLElement) || typeof markdown !== 'string' || !read.success)
+            throw new PluginError('invalid', 'Invalid arguments or ID');
+          const undo = reach.renderMarkdown({
+            element,
+            markdown,
+            page: read.data,
+            pages: active.pages,
+          });
+          // Undone as the plugin unloads too, as what it registered is.
+          active.controller.signal.addEventListener('abort', undo, { once: true });
+          return () => {
+            active.controller.signal.removeEventListener('abort', undo);
+            undo();
+          };
         },
       },
       blocks: {

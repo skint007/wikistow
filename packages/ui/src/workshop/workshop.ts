@@ -15,6 +15,7 @@ import { desktop } from '../desktop';
 import { pageBlockProperties } from '../plugins/block-properties';
 import { vaultSession } from '../plugins/app-plugins';
 import { createLocation } from '../plugins/location';
+import { createMarkdownDrawings } from '../plugins/markdown-drawings';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
 import type { PluginStore } from '../plugins/store';
 import { tabSafeMode } from '../plugins/safe-mode';
@@ -149,6 +150,8 @@ export class Workshop {
    * a sample page or one of the plugin's own pages there and nothing else.
    */
   readonly location = createLocation();
+  /** What its plugin draws with the app's reader, which the preview draws (`RenderedMarkdown`). */
+  readonly markdown = createMarkdownDrawings();
   readonly preview: PluginRuntime;
   readonly #bundler = new Bundler();
   #state: WorkshopState = {
@@ -212,6 +215,7 @@ export class Workshop {
       // Nothing it changes is shown outside the preview.
       changed: () => {},
       location: this.location,
+      renderMarkdown: this.markdown.draw,
       // Its one space, the samples', open to the manifest's access.
       spaces: async (caller) =>
         caller.access === 'none'

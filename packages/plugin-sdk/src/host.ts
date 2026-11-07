@@ -200,6 +200,20 @@ export interface AppAccess {
     /** The spaces the plugin has any page access in, as the app lists them. */
     list(): Promise<SpaceSummary[]>;
   };
+  /**
+   * Draw `markdown` into `element` as the app's reader draws a page's
+   * text: wikilinks, blocks, math, diagrams and the rest, with `page`'s
+   * files and links. A `PageVersion` names the version whose files it
+   * shows; a bare `PageRef`, the version shown of that page, else its
+   * latest publication, else its draft. Frontmatter shows as the page's
+   * properties. Where the plugin can't read `page`, a note says so
+   * instead. Returns what undoes it.
+   */
+  renderMarkdown(
+    element: HTMLElement,
+    markdown: string,
+    options: { page: PageRef | PageVersion },
+  ): Disposer;
 }
 
 /** App code's events: every plugin's, and where the person is. */
