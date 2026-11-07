@@ -145,6 +145,20 @@ describe('claimed spans side by side', () => {
   });
 });
 
+describe('claimed spans parted by emphasis or a link', () => {
+  it('are left as they are, as Markdown writes them apart already', async () => {
+    const page =
+      '*`plugin:test/stars 1`*`code` and [`plugin:test/stars 2`](https://x.test)`code` x\n';
+    const m = mount(page, runtimeDrawing(new Map()));
+    await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
+    const dom = m.container.querySelector('#page-visual');
+    if (!dom) throw new Error('The visual editor did not mount');
+    const view = viewOf(dom);
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => m.handle.read()).toBe(page.replace('x\n', 'x!\n'));
+  });
+});
+
 /** A runtime drawing `inline`, with only what the visual editor asks of it. */
 function runtimeDrawing(inline: PluginsSnapshot['inline']) {
   const snapshot: Pick<PluginsSnapshot, 'blocks' | 'inline' | 'plugins'> = {

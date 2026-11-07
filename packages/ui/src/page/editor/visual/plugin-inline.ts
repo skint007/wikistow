@@ -1,5 +1,5 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
-import type { Mark, Node } from '@milkdown/kit/prose/model';
+import { Mark, type Node } from '@milkdown/kit/prose/model';
 import { Plugin } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $node, $prose, $remark, $view } from '@milkdown/kit/utils';
@@ -10,7 +10,7 @@ import type { Processor } from 'unified';
 import { drawBlock, type BlockDrawing, type BlockInputs } from '../../../plugins/block-drawing';
 import type { PluginBlock } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
-import { changedRanges } from './plugins';
+import { changedRanges, EXTERNAL } from './plugins';
 import { readAlone } from './read-alone';
 
 // Inline code a plugin claims (`` `plugin:<id>/<type> <text>` ``, ADR 0011,
@@ -259,16 +259,23 @@ const claimed = (node: Node) => node.type.name === 'plugin_inline';
 const writtenAsCode = (node: Node) =>
   claimed(node) || node.marks.some((mark) => mark.type.spec.code);
 
+/** A node's marks but code, which are written around its code span. */
+const outside = (node: Node) => node.marks.filter((mark) => !mark.type.spec.code);
+
 /**
  * A space between a claimed span and code right beside it, as where the
  * text between them was deleted: Markdown can't hold two code spans side
- * by side, which would be written, and read again, as one. Only the text
- * blocks a change reached, of text or of marks, are looked at.
+ * by side, which would be written, and read again, as one. Where other
+ * marks differ, as emphasis or a link around one of them, what's written
+ * between them parts them already. Only the text blocks the person's
+ * change reached, of text or of marks, are looked at; the page shown
+ * afresh, as from another device, is left as it is.
  */
 const keptApart = $prose(
   () =>
     new Plugin({
       appendTransaction(transactions, _old, state) {
+        if (!transactions.some((tr) => tr.docChanged && !tr.getMeta(EXTERNAL))) return null;
         const { doc } = state;
         const spaces: { pos: number; marks: readonly Mark[] }[] = [];
         const seen = new Set<number>();
@@ -283,13 +290,14 @@ const keptApart = $prose(
               seen.add(pos);
               let before: Node | null = null;
               node.forEach((child, offset) => {
-                if (before && writtenAsCode(before) && writtenAsCode(child)) {
-                  if (claimed(before) || claimed(child)) {
-                    // In the marks both share outside the code, such as italic.
-                    const marks = before.marks.filter((mark) => !mark.type.spec.code);
-                    spaces.push({ pos: pos + 1 + offset, marks });
-                  }
-                }
+                const together =
+                  before &&
+                  writtenAsCode(before) &&
+                  writtenAsCode(child) &&
+                  (claimed(before) || claimed(child)) &&
+                  Mark.sameSet(outside(before), outside(child));
+                // In the marks both have outside the code, such as italic.
+                if (together) spaces.push({ pos: pos + 1 + offset, marks: outside(child) });
                 before = child;
               });
               return false;
