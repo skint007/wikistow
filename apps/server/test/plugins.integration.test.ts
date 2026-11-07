@@ -290,16 +290,24 @@ describe('the plugin library', () => {
     expect(await onlyMe(ann)).toEqual({ ids: ['diary'] });
   });
 
-  it('lists a version whose manifest claims inline code only to apps that read it', async () => {
-    const files = plugin(
+  it('lists a version whose manifest claims inline code or replaces a region only to apps that read it', async () => {
+    const stars = plugin(
       { id: 'stars', ui: 'ui.js', inline: ['rating'] },
       { 'ui.js': 'export default {};' },
     );
-    expect((await upload(ann, files)).status).toBe(201);
+    const home = plugin(
+      { id: 'home', ui: 'ui.js', replaces: ['space.home'] },
+      { 'ui.js': 'export default {};' },
+    );
+    expect((await upload(ann, stars)).status).toBe(201);
+    expect((await upload(ann, home)).status).toBe(201);
     const ids = async (manifest?: number) => (await list(bob, [], manifest)).map(({ id }) => id);
-    // Released apps send no `manifest`, and refuse a whole listing with `inline` in it.
+    // Released apps send no `manifest`, and refuse a whole listing with `inline` or `replaces` in it.
     expect(await ids()).not.toContain('stars');
+    expect(await ids()).not.toContain('home');
     expect(await ids()).toContain('notes');
-    expect(await ids(pluginRoutes.MANIFEST_READ)).toContain('stars');
+    expect(await ids(pluginRoutes.MANIFEST_READ)).toEqual(
+      expect.arrayContaining(['stars', 'home']),
+    );
   });
 });

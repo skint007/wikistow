@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { DATA_REGIONS, REGIONS } from '@wikistow/plugin-sdk';
+import { DATA_REGIONS, REGIONS, type RegionInfo } from '@wikistow/plugin-sdk';
 import { expect, it } from 'vite-plus/test';
 
 // The SDK's README lists the regions and the `data-region` hooks as the
@@ -9,12 +9,14 @@ import { expect, it } from 'vite-plus/test';
 const README = new URL('../../plugin-sdk/README.md', import.meta.url);
 const SOURCE = new URL('../src/', import.meta.url);
 
+const POLICY = { add: 'Add', replace: 'Replace' } as const;
+
 const regionTable = [
-  '| Region | Registers | Where | On a phone |',
-  '| --- | --- | --- | --- |',
+  '| Region | Policy | Registers | Where | On a phone |',
+  '| --- | --- | --- | --- | --- |',
   ...Object.entries(REGIONS).map(
-    ([name, { registers, where, phone }]) =>
-      `| \`${name}\` | \`${registers}\` | ${where} | ${phone} |`,
+    ([name, { policy, registers, where, phone }]: [string, RegionInfo]) =>
+      `| \`${name}\` | ${POLICY[policy]} | ${registers === null ? '—' : `\`${registers}\``} | ${where} | ${phone} |`,
   ),
 ].join('\n');
 

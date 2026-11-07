@@ -66,6 +66,16 @@ export const Manifest = z.strictObject({
     .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
     .max(20)
     .optional(),
+  /**
+   * The regions it draws in place of the app's own part, with
+   * `host.ui.replace` (ADR 0011), which the approval dialog names. Names
+   * this app doesn't know are kept and never drawn, so a plugin built for
+   * a newer app still loads. Left out, not defaulted, as `inline` is.
+   */
+  replaces: z
+    .array(z.string().regex(/^[a-z][a-z0-9.-]{0,39}$/))
+    .max(20)
+    .optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
 
