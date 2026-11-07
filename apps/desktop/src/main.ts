@@ -891,6 +891,7 @@ void app.whenReady().then(async () => {
   });
   handle('approvePlugin', (token) => plugins.approve(token));
   handle('setPluginEnabled', (id, enabled) => plugins.setEnabled(id, enabled));
+  handle('setPluginOwnParts', (id, regions) => plugins.setOwnParts(id, regions));
   handle('reloadPlugin', (id) => plugins.reload(id));
   handle('removePlugin', (id) => plugins.remove(id));
   handle('pluginAccess', async (accountId) => plugins.access(accountId));

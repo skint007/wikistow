@@ -27,6 +27,13 @@ const Stored = z.strictObject({
   hash: z.string().nullable(),
   development: z.string().nullable(),
   enabled: z.boolean(),
+  /**
+   * The regions where the app's own part shows in place of its own (ADR
+   * 0011), kept through updates. Left out while there are none: an app
+   * older than it refuses the file while any are set, as it refuses a
+   * manifest with keys it doesn't know.
+   */
+  ownParts: z.array(z.string().max(40)).max(20).optional(),
   /** What the person approved: more of either asks again. */
   approved: z.strictObject({ access: PageAccess, level: Level }),
 });
@@ -95,6 +102,7 @@ export function desktopPlugins(data: string) {
       development: plugin.development,
       library: false,
       enabled: plugin.enabled,
+      ownParts: plugin.ownParts,
     });
 
   const candidate = (read: PluginFolder, development: string | null): PluginCandidate => {
@@ -163,6 +171,7 @@ export function desktopPlugins(data: string) {
         hash: development ? null : hash,
         development,
         enabled: true,
+        ...(before?.ownParts && { ownParts: before.ownParts }),
         approved: { access: manifest.access, level: trustLevel(manifest) },
       };
       state.plugins = [...state.plugins.filter((plugin) => plugin !== before), next];
@@ -177,6 +186,15 @@ export function desktopPlugins(data: string) {
       const plugin = find(z.string().parse(id));
       if (!plugin) return;
       plugin.enabled = z.boolean().parse(enabled);
+      await save();
+    },
+
+    async setOwnParts(id: unknown, regions: unknown) {
+      const plugin = find(z.string().parse(id));
+      if (!plugin) return;
+      const parts = Stored.shape.ownParts.unwrap().parse(regions);
+      if (parts.length > 0) plugin.ownParts = parts;
+      else delete plugin.ownParts;
       await save();
     },
 

@@ -56,6 +56,13 @@ export const setPluginAccess = async (
 export const setPluginEnabled = async (ctx: ClientContext, pluginId: string, enabled: boolean) =>
   save(ctx, { kind: 'plugin-change', pluginId, set: { enabled } });
 
+/** Set the regions where an installed plugin gives way to the app's own part, on every device. */
+export const setPluginOwnParts = async (
+  ctx: ClientContext,
+  pluginId: string,
+  regions: readonly string[],
+) => save(ctx, { kind: 'plugin-change', pluginId, set: { ownParts: [...regions] } });
+
 /** Remove a plugin's approval, on every device. Pages keep its blocks and data. */
 export const removePlugin = async (ctx: ClientContext, pluginId: string) =>
   save(ctx, { kind: 'plugin-remove', pluginId });

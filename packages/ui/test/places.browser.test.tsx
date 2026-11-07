@@ -1,16 +1,16 @@
-import type { PageViewProps, View } from '@wikistow/plugin-sdk';
+import type { AppHost, PageViewProps, SpaceHomeProps, View } from '@wikistow/plugin-sdk';
 import {
   createMemoryHistory,
   createRootRoute,
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, expect, it } from 'vite-plus/test';
-import { Place } from '../src/plugins/places.tsx';
-import { PluginsContext, type ShownPage } from '../src/plugins/runtime.ts';
+import { Place, Replaceable } from '../src/plugins/places.tsx';
+import { PluginsContext, type PluginRuntime, type ShownPage } from '../src/plugins/runtime.ts';
 import { testRuntime } from './plugin-runtime.ts';
 
 // A place draws the app's own part first, then plugins' views in the
@@ -119,4 +119,102 @@ it('draws its own part, then plugin views in order with their props, and says wh
     .toMatchObject({ enabled: false });
   // A place with nothing in it draws nothing, not even its wrapper.
   expect(container.querySelector('[data-region="page.header"]')).toBeNull();
+});
+
+/** `node`, drawn with `runtime`'s plugins. */
+async function mount(runtime: PluginRuntime, node: ReactNode) {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<PluginsContext value={runtime}>{node}</PluginsContext>));
+  unmounts.push(() => {
+    act(() => root.unmount());
+    container.remove();
+  });
+  return container;
+}
+
+/** A plugin whose manifest replaces a space's home, and draws it with `view`. */
+const homeOf = (id: string, view: View<SpaceHomeProps>) => ({
+  id,
+  replaces: ['space.home'],
+  activate: (host: AppHost) => void host.ui.replace?.('space.home', { id: 'home', view }),
+});
+
+/** A space's home, in `spaceId`, with the app's own part. */
+const home = (spaceId: string) => (
+  <section data-space={spaceId}>
+    <Replaceable name="space.home" inputs={{ spaceId }}>
+      <p>Pick a page</p>
+    </Replaceable>
+  </section>
+);
+
+// Only in a space the plugin has page access in, as `host.app.spaces.list()` names them.
+const inSpaceS = { spaces: async () => [{ spaceId: 's', name: 'S', icon: null }] };
+
+it('draws a replaced region by the first plugin in order the person lets, and the app’s own part elsewhere', async () => {
+  const drawing =
+    (name: string): View<SpaceHomeProps> =>
+    (element, { spaceId }) => {
+      element.textContent = `${name} in ${spaceId}`;
+    };
+  const { runtime, store } = await testRuntime(
+    [homeOf('first', drawing('First')), homeOf('second', drawing('Second'))],
+    inSpaceS,
+  );
+  const container = await mount(
+    runtime,
+    <>
+      {home('s')}
+      {home('t')}
+    </>,
+  );
+  const text = (spaceId: string) =>
+    container.querySelector(`[data-space="${spaceId}"]`)?.textContent;
+  await expect.poll(() => text('s')).toBe('First in s');
+  // No page access there: the app's own.
+  expect(text('t')).toBe('Pick a page');
+
+  // Use the app's own, for the first: the next in order draws it; for both, the app's own.
+  await act(async () => {
+    await store.setOwnParts({ id: 'first', library: true }, ['space.home']);
+    await runtime.refresh();
+  });
+  await expect.poll(() => text('s')).toBe('Second in s');
+  await act(async () => {
+    await store.setOwnParts({ id: 'second', library: true }, ['space.home']);
+    await runtime.refresh();
+  });
+  await expect.poll(() => text('s')).toBe('Pick a page');
+});
+
+it('gives a replaced region back to the app’s own part, with a note, when its view throws or draws nothing', async () => {
+  for (const view of [
+    () => {
+      throw new Error('It broke');
+    },
+    () => {},
+  ] satisfies View<SpaceHomeProps>[]) {
+    const { runtime, store } = await testRuntime([homeOf('broken', view)], inSpaceS);
+    const container = await mount(runtime, home('s'));
+    await expect.poll(() => container.textContent).toBe('broken failed here.DisablePick a page');
+    expect(runtime.get().plugins[0]?.problem).toMatch(/^A view failed: /);
+    await userEvent.click(container.querySelector('button')!);
+    await expect.poll(async () => (await store.list()).plugins?.[0]?.enabled).toBe(false);
+    await expect.poll(() => container.textContent).toBe('Pick a page');
+  }
+});
+
+it('lets a plugin replace only what its manifest names', async () => {
+  const { runtime } = await testRuntime([
+    {
+      id: 'unnamed',
+      activate: (host) => void host.ui.replace?.('folder.view', { id: 'folder', view: () => {} }),
+    },
+  ]);
+  expect(runtime.get().plugins[0]?.problem).toBe(
+    'It failed to start: Its manifest replaces no folder.view',
+  );
+  expect(runtime.get().replaced['folder.view']).toBeNull();
 });

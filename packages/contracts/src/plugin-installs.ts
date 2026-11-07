@@ -18,16 +18,27 @@ export const PluginScope = z.object({
 /** As callers hold it, IDs as plain strings; the stores parse it. */
 export type PluginScope = z.input<typeof PluginScope>;
 
-/** A plugin as the runtime runs it. Its trust level always follows from its manifest. */
+/**
+ * A plugin as the runtime runs it. Its trust level always follows from its
+ * manifest; it replaces wherever its manifest says unless `ownParts` is given.
+ */
 export const installedPlugin = ({
   manifest,
+  ownParts = [],
   ...rest
-}: Omit<InstalledPlugin, 'level'>): InstalledPlugin => ({
+}: Omit<InstalledPlugin, 'level' | 'ownParts'> & {
+  ownParts?: readonly string[] | undefined;
+}): InstalledPlugin => ({
   manifest,
   level: trustLevel(manifest),
+  ownParts,
   ...rest,
 });
 
 /** A library version as the runtime runs it: its files are served under its hash. */
-export const libraryInstall = (manifest: Manifest, hash: string, enabled: boolean) =>
-  installedPlugin({ manifest, key: hash, development: null, library: true, enabled });
+export const libraryInstall = (
+  manifest: Manifest,
+  hash: string,
+  enabled: boolean,
+  ownParts?: readonly string[],
+) => installedPlugin({ manifest, key: hash, development: null, library: true, enabled, ownParts });

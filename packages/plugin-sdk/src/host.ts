@@ -238,6 +238,19 @@ export type SettingsViewProps = Record<string, never>;
 /** What a titlebar button is given: nothing yet. */
 export type TitlebarViewProps = Record<string, never>;
 
+/** What a view drawing a space's home (`space.home`) is given: the space. */
+export type SpaceHomeProps = { spaceId: string };
+
+/**
+ * What a view drawing a folder's page (`folder.view`) is given: the folder,
+ * and what is directly in it, as `host.pages.list` gives it. It is drawn
+ * again when they change.
+ */
+export type FolderViewProps = {
+  folder: { spaceId: string; folderId: string };
+  entries: FolderEntry[];
+};
+
 /** The info string of a fenced block a plugin claims: `plugin:<id>/<block>`. */
 export const blockLanguage = (pluginId: string, type: string) => `plugin:${pluginId}/${type}`;
 
@@ -448,12 +461,13 @@ export interface ScriptHost extends Host {
 }
 
 /**
- * Where an app plugin's interface can go, each with what it registers there
- * (`id` is unique within the plugin and region). Several plugins in one
- * place show in the order Settings lists them, then in the order each
- * registered; nothing replaces the app's own content, which a plugin's CSS
- * may hide through its `data-region`. Each place is shown at every window
- * size; `REGIONS` says where each goes on a phone.
+ * Where an app plugin's interface can go beside the app's own, each with
+ * what it registers there (`id` is unique within the plugin and region).
+ * Several plugins in one place show in the order Settings lists them, then
+ * in the order each registered. Each place is shown at every window size;
+ * `REGIONS` says where each goes on a phone. A plugin's CSS may hide the
+ * app's own content through its `data-region`; the regions in
+ * `Replacements` can be drawn in its place instead.
  */
 export type Regions = {
   /** A sheet beside the page, opened from its toolbar's Plugins menu, like History. */
@@ -490,10 +504,33 @@ export type Regions = {
   'app.titlebar': { id: string; view: View<TitlebarViewProps> };
 };
 
+/**
+ * The regions an app plugin can draw in place of the app's own part, with
+ * `host.ui.replace(region, { id, view })`, where its manifest's `replaces`
+ * names them (ADR 0011). One view draws each: the first installed (in
+ * Settings' order, folder installs first on the desktop) whose plugin the
+ * person hasn't turned back to the app's own there. It
+ * draws only where the plugin has page access, the app's own part showing
+ * elsewhere. A view that throws, or returns having drawn nothing, gives
+ * the region back to the app's own part, with a note naming the plugin.
+ * In safe mode every region is the app's own.
+ */
+export type Replacements = {
+  /** What a space shows with no page open. */
+  'space.home': { id: string; view: View<SpaceHomeProps> };
+  /** A folder's page. */
+  'folder.view': { id: string; view: View<FolderViewProps> };
+};
+
+/** Every region: one plugins add to (`Regions`), or one they can replace (`Replacements`). */
+export type RegionName = keyof Regions | keyof Replacements;
+
 /** What the README's table says of a region. */
 export type RegionInfo = {
-  /** What a plugin registers there, as it is written. */
-  registers: string;
+  /** `add`: plugins' views show beside the app's own. `replace`: one plugin's view can show in its place. */
+  policy: 'add' | 'replace';
+  /** What `host.ui.register` takes there, as it is written; null where it takes only `host.ui.replace`. */
+  registers: string | null;
   /** Where it shows. */
   where: string;
   /** Where it shows on a phone. */
@@ -507,55 +544,86 @@ export type RegionInfo = {
  */
 export const REGIONS = {
   rail: {
+    policy: 'add',
     registers: '{ id, title, icon?, opens }',
     where: "A rail item opening the plugin's `app.view` named `opens`",
     phone: 'In the navigation drawer',
   },
   'app.view': {
+    policy: 'add',
     registers: '{ id, title, view }',
     where: 'A page of its own in the main area; its view gets `openPage(page)`',
     phone: 'The same',
   },
+  'space.home': {
+    policy: 'replace',
+    registers: null,
+    where: 'What a space shows with no page open (Pick a page); its view gets `{ spaceId }`',
+    phone: 'The same',
+  },
+  'folder.view': {
+    policy: 'replace',
+    registers: null,
+    where: "A folder's page; its view gets `{ folder, entries }`, what `host.pages.list` gives",
+    phone: 'The same',
+  },
   'page.toolbar': {
+    policy: 'add',
     registers: '{ id, view }',
     where: "The page's toolbar, before the Plugins menu",
     phone: 'The same; keep it to a button',
   },
   'editor.toolbar': {
+    policy: 'add',
     registers: '{ id, view }',
     where:
       "The editor's format toolbar, in the draft view (a bar of its own over the source editor); its view's `page.editor` is set",
     phone: 'The same; keep it to a button',
   },
   'page.header': {
+    policy: 'add',
     registers: '{ id, view }',
     where: "Above the page's text, under the banner",
     phone: 'The same',
   },
-  'page.footer': { registers: '{ id, view }', where: "Below the page's text", phone: 'The same' },
+  'page.footer': {
+    policy: 'add',
+    registers: '{ id, view }',
+    where: "Below the page's text",
+    phone: 'The same',
+  },
   'page.aside': {
+    policy: 'add',
     registers: '{ id, view }',
     where: 'Beside the text, under its contents, where the page card is 960px wide or more',
     phone: 'Below the page',
   },
   'page.panel': {
+    policy: 'add',
     registers: '{ id, title, view }',
     where: 'A sheet opened from the Plugins menu',
     phone: 'The same',
   },
   'settings.section': {
+    policy: 'add',
     registers: '{ id, title, view }',
     where:
       "Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button",
     phone: 'The same',
   },
   'app.titlebar': {
+    policy: 'add',
     registers: '{ id, view }',
     where:
       "The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers",
     phone: 'Not in the browser, which has no titlebar of its own',
   },
-} as const satisfies { readonly [R in keyof Regions]: RegionInfo };
+} as const satisfies {
+  readonly [R in RegionName]: RegionInfo & {
+    policy: R extends keyof Replacements ? 'replace' : 'add';
+    registers: R extends keyof Regions ? string : null;
+  };
+};
 
 /**
  * The `data-region` attributes a plugin's CSS can style the app through,
@@ -586,8 +654,20 @@ export const DATA_REGIONS = {
   'safe-mode': 'The safe mode banner',
 } as const;
 
-/** Whether `name` is a region, for checking what a plugin asks for. */
-export const isRegion = (name: string): name is keyof Regions => Object.hasOwn(REGIONS, name);
+const regionsWhere = (keep: (info: RegionInfo) => boolean) =>
+  new Set<string>(
+    Object.entries(REGIONS).flatMap(([name, info]: [string, RegionInfo]) =>
+      keep(info) ? [name] : [],
+    ),
+  );
+const ADDED = regionsWhere(({ registers }) => registers !== null);
+const REPLACEABLE = regionsWhere(({ policy }) => policy === 'replace');
+
+/** Whether `name` is a region plugins add to, for checking what a plugin asks for. */
+export const isRegion = (name: string): name is keyof Regions => ADDED.has(name);
+
+/** Whether `name` is a region a plugin can replace. */
+export const isReplaceable = (name: string): name is keyof Replacements => REPLACEABLE.has(name);
 
 /** What an app plugin gets beyond `Host`. */
 export interface AppHost extends Host {
@@ -605,6 +685,13 @@ export interface AppHost extends Host {
   readonly app?: AppAccess | undefined;
   readonly ui: {
     register<R extends keyof Regions>(region: R, contribution: Regions[R]): Disposer;
+    /**
+     * Draw `region` in place of the app's own part (`Replacements`): one its
+     * manifest's `replaces` names, else `invalid`; `unsupported` for one this
+     * app can't replace. Registering it again replaces the view before.
+     * Missing (undefined) in an app older than it.
+     */
+    replace?<R extends keyof Replacements>(region: R, replacement: Replacements[R]): Disposer;
   };
   /** Draw a block type the manifest claims; `invalid` for one it doesn't. */
   readonly blocks: { register(block: Block): Disposer };

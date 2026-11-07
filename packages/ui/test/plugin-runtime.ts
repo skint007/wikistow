@@ -32,6 +32,8 @@ export type TestPlugin = {
   blocks?: string[];
   /** The inline code types its manifest claims. */
   inline?: string[];
+  /** The regions its manifest replaces. */
+  replaces?: string[];
 };
 
 /** A vault session a test opens and locks. */
@@ -92,7 +94,7 @@ export async function testRuntime(
     return plugin;
   };
   const store = memoryStore({
-    plugins: plugins.map(({ id, activate, script, blocks = [], inline }) =>
+    plugins: plugins.map(({ id, activate, script, blocks = [], inline, replaces }) =>
       installedPlugin({
         manifest: Manifest.parse({
           id,
@@ -103,6 +105,7 @@ export async function testRuntime(
           script: script ? 'script.js' : undefined,
           blocks,
           inline,
+          replaces,
         }),
         key: 'one',
         development: null,

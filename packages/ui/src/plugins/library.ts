@@ -125,11 +125,11 @@ export const approvedPlugins = (
   library: readonly LibraryPlugin[],
   approvals: readonly PluginApproval[],
 ): InstalledPlugin[] =>
-  approvals.flatMap(({ id, hash, enabled }) => {
+  approvals.flatMap(({ id, hash, enabled, ownParts }) => {
     const version = library
       .find((plugin) => plugin.id === id)
       ?.versions.find((each) => each.hash === hash);
-    return version ? [libraryInstall(version.manifest, hash, enabled)] : [];
+    return version ? [libraryInstall(version.manifest, hash, enabled, ownParts)] : [];
   });
 
 const openCtx = () => {
@@ -155,9 +155,9 @@ type LibraryFiles = (
 
 /**
  * The library plugins the account approved, kept in its contacts record
- * (ADR 0002) with their on/off and page access, so they follow the person
- * to every device and are known only while the vault is open. `files`
- * says which of them can run here.
+ * (ADR 0002) with their on/off, own parts and page access, so they follow
+ * the person to every device and are known only while the vault is open.
+ * `files` says which of them can run here.
  */
 export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
   return {
@@ -169,7 +169,13 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
       const approvals = pluginOperations.listPluginApprovals(vault.ctx);
       const access = Object.fromEntries(approvals.map(({ id, access }) => [id, access]));
       const held = await files(vault.ctx, approvals);
-      return { safeMode, plugins: null, unavailable: {}, ...held, access };
+      // The record's choices, whichever copy runs: the desktop's main keeps none of them.
+      const plugins =
+        held?.plugins?.map((plugin) => ({
+          ...plugin,
+          ownParts: approvals.find(({ id }) => id === plugin.manifest.id)?.ownParts ?? [],
+        })) ?? null;
+      return { safeMode, unavailable: {}, ...held, plugins, access };
     },
     // A new install is turned on with no page access; for an ID already
     // approved, the new hash replaces the old, keeping access and on/off.
@@ -184,6 +190,9 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
     },
     async setAccess({ id }, scopes) {
       await pluginOperations.setPluginAccess(openCtx(), id, scopes);
+    },
+    async setOwnParts({ id }, regions) {
+      await pluginOperations.setPluginOwnParts(openCtx(), id, regions);
     },
     async remove({ id }) {
       await pluginOperations.removePlugin(openCtx(), id);

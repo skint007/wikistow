@@ -6,9 +6,10 @@ import type { PrivateContacts } from './contacts.ts';
 /**
  * Where a person's contacts record keeps the library plugins they approved
  * (ADR 0002), in the private payload, which only the person can open: per
- * plugin, the hash approved, whether it is on, and its plugin access. They
- * follow the person to every device. The desktop's folder and development
- * installs keep theirs in its `plugins.json` instead.
+ * plugin, the hash approved, whether it is on, its plugin access, and
+ * where it gives way to the app's own part. They follow the person to
+ * every device. The desktop's folder and development installs keep theirs
+ * in its `plugins.json` instead.
  */
 export const PLUGINS_NAMESPACE = 'wikistow.plugins';
 
@@ -19,6 +20,11 @@ export const PluginApproval = z.object({
   hash: z.string().regex(/^[0-9a-f]{64}$/),
   enabled: z.boolean(),
   access: z.array(PluginScope).max(100),
+  /**
+   * The regions where the person uses the app's own part in place of this
+   * plugin's (ADR 0011), on every device. An older app's entry has none.
+   */
+  ownParts: z.array(z.string().max(40)).max(20).default([]),
 });
 export type PluginApproval = z.infer<typeof PluginApproval>;
 
@@ -55,7 +61,7 @@ export function pluginApprovals(own: PrivateContacts): PluginApproval[] {
 export type PluginChange =
   /** Install, or approve again: the whole entry, turned on. */
   | { kind: 'plugin-approve'; approval: PluginApproval }
-  /** Update (a new `hash`), change access, or turn on or off, if the entry is still there. */
+  /** Update (a new `hash`), change access or own parts, or turn on or off, if the entry is still there. */
   | { kind: 'plugin-change'; pluginId: string; set: Partial<Omit<PluginApproval, 'id'>> }
   | { kind: 'plugin-remove'; pluginId: string };
 
