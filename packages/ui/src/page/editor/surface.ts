@@ -122,6 +122,12 @@ export type EditorSurfaceProps = {
   queryTable?: ((source: string) => ReactNode) | undefined;
   /** The page edited, which plugin blocks are drawn for; none in an editor nobody sees. */
   page?: { spaceId: string; pageId: string };
+  /**
+   * Plugins' buttons (`editor.toolbar`): at the end of the visual editor's
+   * format toolbar, or in a bar of their own over the source editor, which
+   * shows only while it has any.
+   */
+  toolbar?: ReactNode;
   ref?: Ref<EditorSurfaceHandle>;
 };
 
@@ -139,6 +145,14 @@ export type EditorSurfaceHandle = {
    * selected, and focus there, the cursor after it. Reported as an edit.
    */
   insertCode?(code: string): void;
+  /** What is selected, as Markdown with LF line breaks, or `''` at a cursor (a plugin's `selection`). */
+  selection?(): string;
+  /**
+   * Put `markdown` in place of what's selected as the person's edit, and
+   * focus there, the cursor after it: the source inserts it, the visual
+   * editor reads it as a paste, its blocks whole (a plugin's `insert`).
+   */
+  insert?(markdown: string): void;
   /** Find on page in it, once it's there (#276). */
   findable?: Findable;
 };

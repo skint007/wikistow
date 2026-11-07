@@ -94,10 +94,20 @@ export function editorDrafts() {
     /**
      * The page handle a plugin gets for `shown`. In the draft view it reads
      * the draft as it is now, what is typed saved first, and an edit must be
-     * on top of the version it last read.
+     * on top of the version it last read. Its `editor` works at the cursor,
+     * as the person types: nothing is saved first, and an insert, like a
+     * paste, is saved with their typing.
      */
     handle(caller: Caller, shown: ShownPage): PageHandle {
       let lastRead: string | null = null;
+      /** The open editor, for the cursor, at the time of the call. */
+      const editorOf = () => {
+        if (!caller.live()) throw unloaded();
+        const draft = openDrafts.get(shown.page.pageId);
+        if (!draft) throw new PluginError('unloaded', 'The draft view was closed');
+        if (!draft.ready()) throw new PluginError('failed', 'The editor is still opening');
+        return draft;
+      };
       return {
         page: { ...shown.page },
         read: async () => {
@@ -145,6 +155,29 @@ export function editorDrafts() {
               } catch (error) {
                 throw pluginError(error);
               }
+            }
+          : null,
+        editor: shown.draft
+          ? {
+              selection: async () => {
+                try {
+                  return editorOf().selection();
+                } catch (error) {
+                  throw pluginError(error);
+                }
+              },
+              insert: async (markdown: string) => {
+                try {
+                  if (typeof markdown !== 'string') {
+                    throw new PluginError('invalid', 'insert takes Markdown text');
+                  }
+                  const draft = editorOf();
+                  caller.write();
+                  draft.insert(markdown);
+                } catch (error) {
+                  throw pluginError(error);
+                }
+              },
             }
           : null,
       };

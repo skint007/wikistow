@@ -68,11 +68,17 @@ export const reportEdits = (edited: () => void) =>
     });
   });
 
-/** `markdown` as the editor's content, open at both ends so a paragraph's text joins the one it lands in. */
-export function sliceOf(ctx: Ctx, markdown: string): Slice | null {
+/**
+ * `markdown` as the editor's content, open at both ends so a paragraph's
+ * text joins the one it lands in. With `whole`, anything but a single
+ * paragraph is closed instead: its blocks go in whole, splitting the text
+ * they land in.
+ */
+export function sliceOf(ctx: Ctx, markdown: string, whole = false): Slice | null {
   try {
     const doc = ctx.get(parserCtx)(withLf(markdown));
-    return Slice.maxOpen(doc.content);
+    const paragraph = doc.childCount === 1 && doc.firstChild?.type.name === 'paragraph';
+    return whole && !paragraph ? new Slice(doc.content, 0, 0) : Slice.maxOpen(doc.content);
   } catch {
     return null;
   }
@@ -147,6 +153,9 @@ function dropIn(tr: Transaction, at: number, slice: Slice): Transaction {
 /** Upload `files` and put them in at the cursor, in place of any selection, as pasted ones go. */
 export type Upload = (files: File[]) => void;
 
+/** Put Markdown in at the cursor, in place of any selection, as a plugin's `insert` does. */
+export type Insert = (markdown: string) => void;
+
 /**
  * Files pasted or dropped go to `onFiles`, and their Markdown in where they
  * landed once they're uploaded, moved along with edits made meanwhile; so
@@ -168,12 +177,15 @@ export type Upload = (files: File[]) => void;
  * which say what's an image or footnote, only of HTML it copied itself
  * (`unstyled`); where that Markdown can't go in, it's read as it would be
  * unmarked, as its HTML. A footnote pasted under a label the page has
- * already is given a free one (`freshFootnotes`).
+ * already is given a free one (`freshFootnotes`). A plugin's Markdown goes
+ * in at the cursor by the `Insert` given to `inserts`, as pasted Markdown
+ * does, but with its blocks whole.
  */
 export const pasting = (
   onFiles: () => EditorSurfaceProps['onFiles'],
   writer: () => Writer | null,
   uploads?: (upload: Upload | null) => void,
+  inserts?: (insert: Insert, live: boolean) => void,
 ) =>
   $prose((ctx) => {
     // Where files uploading and text dropped being checked go
@@ -221,10 +233,16 @@ export const pasting = (
     // the editor keeps it whole (`kept`, as its check found) and the blocks
     // it changes, with those beside them, still write back as they show,
     // read back now whether or not the rest of the page has been.
-    const markdownPaste = (view: EditorView, text: string, kept: boolean, at?: number) => {
+    const markdownPaste = (
+      view: EditorView,
+      text: string,
+      kept: boolean,
+      at?: number,
+      whole = false,
+    ) => {
       const write = writer();
       if (!write || !kept) return null;
-      const slice = sliceOf(ctx, text);
+      const slice = sliceOf(ctx, text, whole);
       if (!slice) return null;
       const { doc, tr } = view.state;
       const fresh = freshFootnotes(slice, doc);
@@ -248,7 +266,7 @@ export const pasting = (
     // Text pasted as Markdown that may be slow to read, put where it was
     // pasted once it's checked (`keptChecked`): as Markdown if it can be,
     // else as `html` would be, or as its text.
-    const checkedPaste = (view: EditorView, text: string, html: string) => {
+    const checkedPaste = (view: EditorView, text: string, html: string, whole = false) => {
       const held = new WeakMap([[view.state.doc, view.state.selection.getBookmark()]]);
       selections.add(held);
       void keptChecked(text).then((kept) => {
@@ -257,7 +275,7 @@ export const pasting = (
         const bookmark = held.get(doc);
         if (destroyed || !view.dom.isConnected || !bookmark) return;
         view.dispatch(tr.setSelection(bookmark.resolve(doc)));
-        const pasted = markdownPaste(view, text, kept);
+        const pasted = markdownPaste(view, text, kept, undefined, whole);
         if (pasted) view.dispatch(pasted.scrollIntoView());
         else if (html) view.pasteHTML(html);
         else view.pasteText(text);
@@ -420,10 +438,25 @@ export const pasting = (
         view.dom.addEventListener('cut', mark);
         view.dom.addEventListener('dragstart', markDrag);
         uploads?.((files) => uploadHere(view, files));
+        // A plugin's Markdown (`PageHandle.editor`), as a paste of it goes in,
+        // but with its blocks whole (`sliceOf`), so a block it inserts after
+        // some text stays a block.
+        const insert: Insert = (markdown) => {
+          if (view.state.selection.$from.parent.type.spec.code) view.pasteText(markdown);
+          else if (markdown.length >= BLOCK_TIMED) checkedPaste(view, markdown, '', true);
+          else {
+            const tr = markdownPaste(view, markdown, keptHere(markdown), undefined, true);
+            if (tr) view.dispatch(tr.scrollIntoView());
+            else view.pasteText(markdown);
+          }
+          view.focus();
+        };
+        inserts?.(insert, true);
         return {
           destroy() {
             destroyed = true;
             uploads?.(null);
+            inserts?.(insert, false);
             view.dom.removeEventListener('copy', mark);
             view.dom.removeEventListener('cut', mark);
             view.dom.removeEventListener('dragstart', markDrag);

@@ -26,6 +26,7 @@ import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
+import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { visualFind, visualFindable } from './find';
@@ -45,6 +46,7 @@ import {
   linkKeys,
   pasting,
   reportEdits,
+  type Insert,
   tableHeaders,
   typedLinks,
   unshownFootnotes,
@@ -201,6 +203,7 @@ function Surface({
   setProperty,
   otherPages,
   queryTable,
+  toolbar,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -273,6 +276,8 @@ function Surface({
   // with the document it made of it: an unchanged document gives it back.
   const editor = useRef<Editor | null>(null);
   const writer = useRef<Writer | null>(null);
+  // How a plugin's Markdown goes in at the cursor, once the editor's made (`pasting`).
+  const inserting = useRef<Insert | null>(null);
   const origin = useRef<{ markdown: string; doc: Node } | null>(null);
   // Work waiting for idle time, whether an edit is yet to be reported, and
   // when the last was.
@@ -465,6 +470,16 @@ function Surface({
         view.focus();
       });
     },
+    selection: (): string => {
+      const live = editor.current;
+      const write = writer.current;
+      if (!live || !write) return '';
+      return selectedMarkdown(
+        live.action((ctx) => ctx.get(editorViewCtx).state),
+        write,
+      );
+    },
+    insert: (markdown: string) => inserting.current?.(markdown),
   }));
   const [completion] = useState(
     () =>
@@ -504,6 +519,11 @@ function Surface({
           () => latest.current.onFiles,
           () => writer.current,
           format.uploads,
+          (insert, live) => {
+            // Strict Mode's first editor goes after the second is made.
+            if (live) inserting.current = insert;
+            else if (inserting.current === insert) inserting.current = null;
+          },
         ),
         typedLinks,
         autolinks,
@@ -597,6 +617,8 @@ function Surface({
       caret: surface.caret,
       focus: surface.focus,
       insertCode: surface.insertCode,
+      selection: surface.selection,
+      insert: surface.insert,
     }),
     [surface, findable],
   );
@@ -606,7 +628,11 @@ function Surface({
   // what's left, so a click below the text lands in it.
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-control border border-input bg-background focus-within:ring-2 focus-within:ring-ring">
-      <FormatToolbar watch={format} attachments={attachments.listed ?? attachments.list} />
+      <FormatToolbar
+        watch={format}
+        attachments={attachments.listed ?? attachments.list}
+        plugins={toolbar}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto [&_.milkdown]:h-full [&>[data-milkdown-root]]:h-full">
         <Milkdown />
         <CompletionListbox completion={completion} />

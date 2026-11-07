@@ -37,6 +37,8 @@ export const METHODS = {
   /** The page handle of the invocation named in the call. */
   'page.read': z.tuple([]),
   'page.edit': z.tuple([z.object(Change)]),
+  'page.selection': z.tuple([]),
+  'page.insert': z.tuple([Markdown]),
 } as const;
 export type Method = keyof typeof METHODS;
 const MethodName = z.custom<Method>(
@@ -137,7 +139,14 @@ export type HostMessage =
       type: 'invoke';
       invocation: number;
       target:
-        | { kind: 'command'; id: string; page: PageRef; editable: boolean }
+        | {
+            kind: 'command';
+            id: string;
+            page: PageRef;
+            editable: boolean;
+            /** It has `editor`: missing from an app older than it. */
+            cursor?: boolean;
+          }
         | ({ kind: 'event' } & PluginEvent)
         /** A block's outputs, from its valid fields' values (the rest are left out). */
         | {

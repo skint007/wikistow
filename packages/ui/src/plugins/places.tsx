@@ -95,6 +95,8 @@ export type PlaceInputs = {
   /** One plugin page, by its plugin and ID. */
   'app.view': { pluginId: string; viewId: string; props: AppViewProps };
   'page.toolbar': { shown: ShownPage };
+  /** In the draft view's editor, whose format toolbar draws it. */
+  'editor.toolbar': { shown: ShownPage };
   'page.header': { shown: ShownPage };
   'page.footer': { shown: ShownPage };
   'page.aside': {
@@ -168,6 +170,18 @@ const PLACES: { [R in keyof Regions]: (drawing: Drawing<R>) => ReactNode } = {
     );
   },
   'page.toolbar': ({ items, shown, nameOf }) => pageViews('page.toolbar', items, shown, nameOf),
+  // A group of their own, set off from the format controls before it, if any.
+  'editor.toolbar': ({ items, shown, nameOf }) =>
+    items.length > 0 && (
+      <div
+        role="group"
+        aria-label="Plugins"
+        data-region="editor.toolbar"
+        className="flex flex-wrap items-center gap-0.5 not-first:ml-1 not-first:border-l not-first:border-input not-first:pl-1.5"
+      >
+        {pageViews('editor.toolbar', items, shown, nameOf)}
+      </div>
+    ),
   'page.header': ({ items, shown, nameOf }) =>
     items.length > 0 && (
       <div data-region="page.header" className="grid gap-3">
@@ -283,7 +297,7 @@ export function Place<R extends keyof Regions>(props: { name: R } & PlaceInputs[
 
 /** Each plugin's view in one of the page's places. */
 const pageViews = (
-  place: 'page.toolbar' | 'page.header' | 'page.footer' | 'page.aside',
+  place: 'page.toolbar' | 'editor.toolbar' | 'page.header' | 'page.footer' | 'page.aside',
   items: Contribution<typeof place>[],
   shown: ShownPage,
   nameOf: (pluginId: string) => string,
