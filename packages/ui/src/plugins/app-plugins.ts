@@ -1,7 +1,7 @@
 import { searchOperations } from '@wikistow/client';
 import { PageId, SpaceId } from '@wikistow/contracts';
 import type { PageRef } from '@wikistow/plugin-sdk';
-import type { QueryClient } from '@tanstack/react-query';
+import type { FetchQueryOptions, QueryClient, QueryKey } from '@tanstack/react-query';
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
 import { spacesQuery, treeQuery } from '../data/queries';
@@ -43,14 +43,23 @@ export function startAppPlugins(queryClient: QueryClient) {
   const where = createLocation();
   const markdown = createMarkdownDrawings();
   const store: AppPluginStore = desktop ? desktopStore(desktop) : browserStore();
+  /**
+   * What `query` holds, read again only once a change marked it (as
+   * `contentChanged` and the tree's changes from the server do), or
+   * joining a read already running: data nothing shows is never reloaded
+   * by itself, and a plugin reading just after its own change gets it.
+   */
+  const latest = <T, K extends QueryKey>(query: FetchQueryOptions<T, Error, T, K>) =>
+    queryClient.fetchQuery({ ...query, staleTime: Infinity });
   const own = createRuntime(store, {
     session: vaultSession,
     pages: (caller) =>
       pagesFor({
         ...caller,
         open: (page, base, change) => drafts.through(caller, page, base, change),
-        // The sidebar's own, which it keeps current.
-        tree: (ctx, spaceId) => queryClient.ensureQueryData(treeQuery(ctx, spaceId)),
+        // The sidebar's own tree, read again once a change marked it,
+        // whether or not anything shows it (`latest`).
+        tree: (ctx, spaceId) => latest(treeQuery(ctx, spaceId)),
       }),
     handle: (caller, shown) => drafts.handle(caller, shown),
     changed(spaceIdText, page) {
@@ -69,8 +78,8 @@ export function startAppPlugins(queryClient: QueryClient) {
     async spaces(caller) {
       if (caller.access === 'none') return [];
       const granted = new Set(caller.scopes().map((scope) => scope.spaceId));
-      // The rail's own listing, which it keeps current.
-      const spaces = await queryClient.ensureQueryData(spacesQuery(session()));
+      // The rail's own listing, as `tree` reads the sidebar's: a plugin may draw the rail instead.
+      const spaces = await latest(spacesQuery(session()));
       return spaces
         .filter((space) => granted.has(space.id))
         .map(({ id, metadata }) => ({
