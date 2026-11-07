@@ -624,6 +624,8 @@ function PageBody({
             saved: () => editor.current?.saved() ?? null,
             fits: (changes) => editor.current?.checkSize(changes),
             revise: (changes) => editor.current?.revise(() => changes),
+            selection: () => editor.current?.selection() ?? '',
+            insert: (markdown) => editor.current?.insert(markdown),
           }
         : null,
   };
@@ -986,6 +988,7 @@ function PageBody({
             queued={draftFrom.queued}
             onReload={(options) => void viewTheirs(options)}
             hiddenAttachments={coverParts}
+            toolbar={<Place name="editor.toolbar" shown={pluginShown} />}
           />
         )}
         {revision && payload && model.view === 'published' && (

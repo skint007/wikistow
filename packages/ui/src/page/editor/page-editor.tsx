@@ -375,24 +375,33 @@ export function PageEditor({
   };
 
   /**
-   * Put inline code, a property reference, where the cursor is in the
-   * editor the person was in last (in split, either side), and turn to it.
-   * While neither takes edits (the visual editor's check of given text
-   * runs), at the body's end.
+   * The editor where the cursor is: the one the person was in last (in
+   * split, either side). Null while neither takes edits, as the visual
+   * editor's check of given text runs.
    */
-  const insertCode = (code: string) => {
+  const atCursor = () => {
     const source =
       modeNow.current === 'split' && (lastSide.current === 'source' || given.current !== null);
-    const target = source ? mirror.current : given.current === null ? surface.current : null;
-    if (target?.insertCode) {
-      target.insertCode(code);
-      return;
-    }
+    return source ? mirror.current : given.current === null ? surface.current : null;
+  };
+
+  /** `markdown` on a line of its own at the body's end, for when no editor takes it at the cursor. */
+  const addAtEnd = (markdown: string) => {
     const text = bodyNow();
     const lineBreak = lineBreakOf(frontmatter.current ?? text);
-    const next = `${text}${text === '' || text.endsWith('\n') ? '' : lineBreak}\`${code}\`${lineBreak}`;
+    const next = `${text}${text === '' || text.endsWith('\n') ? '' : lineBreak}${markdown}${lineBreak}`;
     give(next, false);
     changed(next);
+  };
+
+  /**
+   * Put inline code, a property reference, where the cursor is, and turn
+   * to it; while no editor takes edits, at the body's end.
+   */
+  const insertCode = (code: string) => {
+    const target = atCursor();
+    if (target?.insertCode) target.insertCode(code);
+    else addAtEnd(`\`${code}\``);
   };
 
   // The source editor too, which an edit the visual editor can't write turns to.
@@ -426,6 +435,13 @@ export function PageEditor({
         give(split.body, false);
       },
       focus: () => surface.current?.focus(),
+      selection: () => atCursor()?.selection?.() ?? '',
+      // A plugin's text, at the cursor as a paste goes, or at the body's end.
+      insert(markdown) {
+        const target = atCursor();
+        if (target?.insert) target.insert(markdown);
+        else addAtEnd(markdown);
+      },
     }),
     [],
   );
@@ -479,8 +495,10 @@ export function PageEditor({
     setProperty: setOneProperty,
   };
   // The source beside the visual editor: its edits go there once typing pauses.
+  // Plugins' buttons are in the visual editor's toolbar only.
+  const { toolbar: _toolbar, ...mirrored } = assist;
   const mirrorProps: EditorSurfaceProps = {
-    ...assist,
+    ...mirrored,
     ref: attachMirror,
     initial: body.current,
     onChange: (text) => {

@@ -138,6 +138,12 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
         edit: target.editable
           ? (change) => call<PageVersion>('page.edit', [change], invocation)
           : null,
+        editor: target.cursor
+          ? {
+              selection: () => call<string>('page.selection', [], invocation),
+              insert: (markdown) => call<void>('page.insert', [markdown], invocation),
+            }
+          : null,
       };
       await command.run({ page });
       return;

@@ -26,6 +26,7 @@ import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
+import { insertMarkdown, selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { visualFind, visualFindable } from './find';
@@ -201,6 +202,7 @@ function Surface({
   setProperty,
   otherPages,
   queryTable,
+  toolbar,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -465,6 +467,18 @@ function Surface({
         view.focus();
       });
     },
+    selection: (): string => {
+      const live = editor.current;
+      const write = writer.current;
+      if (!live || !write) return '';
+      return selectedMarkdown(
+        live.action((ctx) => ctx.get(editorViewCtx).state),
+        write,
+      );
+    },
+    insert: (markdown: string) => {
+      editor.current?.action((ctx) => insertMarkdown(ctx.get(editorViewCtx), markdown));
+    },
   }));
   const [completion] = useState(
     () =>
@@ -597,6 +611,8 @@ function Surface({
       caret: surface.caret,
       focus: surface.focus,
       insertCode: surface.insertCode,
+      selection: surface.selection,
+      insert: surface.insert,
     }),
     [surface, findable],
   );
@@ -606,7 +622,11 @@ function Surface({
   // what's left, so a click below the text lands in it.
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-control border border-input bg-background focus-within:ring-2 focus-within:ring-ring">
-      <FormatToolbar watch={format} attachments={attachments.listed ?? attachments.list} />
+      <FormatToolbar
+        watch={format}
+        attachments={attachments.listed ?? attachments.list}
+        plugins={toolbar}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto [&_.milkdown]:h-full [&>[data-milkdown-root]]:h-full">
         <Milkdown />
         <CompletionListbox completion={completion} />

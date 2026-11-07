@@ -37,10 +37,13 @@ export function PagePlugins({
 
   // While the draft is open here, the app's plugins change it through the editor.
   const editing = shown.draft !== null;
-  const { ready, flush, saved, fits, revise } = shown.draft ?? {};
+  const { ready, flush, saved, fits, revise, selection, insert } = shown.draft ?? {};
   useEffect(() => {
-    if (!editing || !ready || !flush || !saved || !fits || !revise) return;
-    return pluginRuntime.openDraft({ spaceId, pageId }, { ready, flush, saved, fits, revise });
+    if (!editing || !ready || !flush || !saved || !fits || !revise || !selection || !insert) return;
+    return pluginRuntime.openDraft(
+      { spaceId, pageId },
+      { ready, flush, saved, fits, revise, selection, insert },
+    );
     // The editor's functions are new each render; the editor behind them isn't.
   }, [editing, spaceId, pageId]);
 

@@ -32,6 +32,12 @@ const handleOf = (page: PageHandle | null) => {
   return page;
 };
 
+const editorOf = (page: PageHandle | null) => {
+  const { editor } = handleOf(page);
+  if (!editor) throw new PluginError('forbidden', 'This page isn’t open in the draft view');
+  return editor;
+};
+
 export type ScriptEvents = {
   /** Its commands, by ID with their titles, changed. */
   commands: (commands: ReadonlyMap<string, string>) => void;
@@ -124,6 +130,14 @@ export class ScriptWorker {
         if (!edit) throw new PluginError('forbidden', 'This page isn’t open in the draft view');
         return edit(change);
       },
+      'page.selection': async (args, page) => {
+        METHODS['page.selection'].parse(args);
+        return editorOf(page).selection();
+      },
+      'page.insert': async (args, page) => {
+        const [markdown] = METHODS['page.insert'].parse(args);
+        return editorOf(page).insert(markdown);
+      },
     };
   }
 
@@ -177,7 +191,13 @@ export class ScriptWorker {
 
   async runCommand(id: string, page: PageHandle): Promise<void> {
     await this.#invoke(
-      { kind: 'command', id, page: { ...page.page }, editable: page.edit !== null },
+      {
+        kind: 'command',
+        id,
+        page: { ...page.page },
+        editable: page.edit !== null,
+        cursor: !!page.editor,
+      },
       page,
     );
   }

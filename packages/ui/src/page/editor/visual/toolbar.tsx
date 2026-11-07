@@ -27,6 +27,7 @@ import {
   useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import {
   DropdownMenu,
@@ -655,14 +656,17 @@ const AttachmentControl = memo(function AttachmentControl({
  * selection has it and taking it off then, a link and an attachment
  * picker (`attachments`, the page's). One stop in the tab order:
  * arrow keys, Home and End move along it, Escape goes back to the text.
- * It stays above the text as that scrolls, and wraps on a narrow window.
+ * Plugins' buttons (`plugins`) come last, each a tab stop of its own. It
+ * stays above the text as that scrolls, and wraps on a narrow window.
  */
 export function FormatToolbar({
   watch,
   attachments,
+  plugins,
 }: {
   watch: FormatWatch;
   attachments: readonly AttachmentRef[];
+  plugins?: ReactNode;
 }) {
   const status = useSyncExternalStore(watch.subscribe, watch.status);
   const bar = useRef<HTMLDivElement>(null);
@@ -758,6 +762,7 @@ export function FormatToolbar({
         tabbable={current === 'attachment'}
         onFocus={setCurrent}
       />
+      {plugins}
     </div>
   );
 }
