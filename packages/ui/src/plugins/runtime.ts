@@ -12,6 +12,7 @@ import {
   type BlockProps,
   type Command,
   type Disposer,
+  type InlineProps,
   type PageHandle,
   type PageRef,
   type Pages,
@@ -77,6 +78,16 @@ export type PluginThemeOption = {
   href: string;
 };
 export type PluginBlock = { pluginId: string; type: string; view: View<BlockProps> };
+
+/**
+ * A claimed span's view as a block's, so it's drawn as blocks are
+ * (`drawBlock`): its text is the block's source, and `setText` its
+ * `setSource`. Made once per registration, as a new view draws afresh.
+ */
+const spanBlockView =
+  (view: View<InlineProps>): View<BlockProps> =>
+  (element, { source, page, setSource }) =>
+    view(element, { text: source, page, setText: setSource });
 export type PluginStatus = { plugin: InstalledPlugin; problem: string | null };
 
 export type PluginsSnapshot = {
@@ -97,6 +108,11 @@ export type PluginsSnapshot = {
   themes: PluginThemeOption[];
   /** Each block type a running plugin draws, by its fence's info string. */
   blocks: ReadonlyMap<string, PluginBlock>;
+  /**
+   * Each inline code type a running plugin draws, by its span's claim
+   * (`plugin:<id>/<type>`), its view drawn as a block's (`spanBlockView`).
+   */
+  inline: ReadonlyMap<string, PluginBlock>;
 };
 
 /** A region's registrations, by their IDs. */
@@ -132,6 +148,8 @@ type Active = {
   commands: Map<string, Command>;
   regions: Registered;
   blocks: Map<string, Block>;
+  /** Inline code types it draws, each view drawn as a block's, made once as it registers. */
+  inline: Map<string, Block>;
   handlers: Handlers;
   app: AppPlugin | null;
   worker: ScriptWorker | null;
@@ -216,6 +234,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     regions: contributions([]),
     themes: [],
     blocks: new Map(),
+    inline: new Map(),
   };
   // Counts unlocks and locks, so an activation that finishes after one is dropped.
   let epoch = 0;
@@ -259,6 +278,16 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
                 ...[...active.scriptBlocks].map(([type, { view }]) => ({ type, view })),
                 ...active.blocks.values(),
               ].map(({ type, view }): [string, PluginBlock] => [
+                blockLanguage(plugin.manifest.id, type),
+                { pluginId: plugin.manifest.id, type, view },
+              ])
+            : [],
+        ),
+      ),
+      inline: new Map(
+        entries.flatMap(({ plugin, active }) =>
+          active
+            ? [...active.inline.values()].map(({ type, view }): [string, PluginBlock] => [
                 blockLanguage(plugin.manifest.id, type),
                 { pluginId: plugin.manifest.id, type, view },
               ])
@@ -399,6 +428,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       commands: new Map(),
       regions: noneRegistered(),
       blocks: new Map(),
+      inline: new Map(),
       handlers: { 'page.shown': new Set(), 'draft.saved': new Set() },
       app: null,
       worker: null,
@@ -451,6 +481,20 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           emit();
           return keep(() => {
             if (active.blocks.get(block.type) === block) active.blocks.delete(block.type);
+          });
+        },
+      },
+      inline: {
+        register({ type, view }) {
+          if (!live()) return () => {};
+          if (!manifest.inline?.includes(type)) {
+            throw new PluginError('invalid', `Its manifest claims no inline code ${type}`);
+          }
+          const drawn: Block = { type, view: spanBlockView(view) };
+          active.inline.set(type, drawn);
+          emit();
+          return keep(() => {
+            if (active.inline.get(type) === drawn) active.inline.delete(type);
           });
         },
       },

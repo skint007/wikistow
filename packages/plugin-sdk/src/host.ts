@@ -219,6 +219,58 @@ export type BlockProps = {
  */
 export type Block = { type: string; view: View<BlockProps> };
 
+/** What a claimed span's view is given. */
+export type InlineProps = {
+  /** The span's text after `plugin:<id>/<type> `, as the reader reads it: a line break is a space. */
+  text: string;
+  /** The page it is in. */
+  page: PageRef;
+  /**
+   * In the visual editor, make `text` the span's text as the person's own
+   * edit, which the draft saves; the view isn't drawn again for it. Null in
+   * the reader.
+   */
+  setText: ((text: string) => void) | null;
+};
+
+/**
+ * Inline code a plugin draws in place of a span it claims (`inline` in its
+ * manifest), written `` `plugin:<id>/<type> <text>` ``, in the reader and
+ * the visual editor. The page's text never changes for it, and without the
+ * plugin the span is ordinary inline code.
+ */
+export type Inline = { type: string; view: View<InlineProps> };
+
+const CLAIMED_INLINE = /^plugin:([a-z][a-z0-9-]{1,39})\/([a-z][a-z0-9-]{0,39})(?: (.*))?$/s;
+
+/**
+ * The plugin, type and text an inline code span claims, from its code (as
+ * Markdown reads it, between the backticks), or null for any other code.
+ */
+export function claimedInline(
+  code: string,
+): { pluginId: string; type: string; text: string } | null {
+  const match = CLAIMED_INLINE.exec(code);
+  return match?.[1] && match[2]
+    ? { pluginId: match[1], type: match[2], text: (match[3] ?? '').replace(/\r\n?|\n/g, ' ') }
+    : null;
+}
+
+/**
+ * The Markdown of a span `pluginId` claims, of `type` holding `text`, with
+ * enough backticks around it for the backticks in it: for a page's text,
+ * or to insert where the person is typing.
+ */
+export function inlineSpan(pluginId: string, type: string, text: string): string {
+  const one = text.replace(/\r\n?|\n/g, ' ');
+  const code = one === '' ? `plugin:${pluginId}/${type}` : `plugin:${pluginId}/${type} ${one}`;
+  const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  // A backtick at the end would close the span early; a space each side is read away.
+  const pad = code.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${code}${pad}${fence}`;
+}
+
 /*
  * Blocks a script fills in (#260): the script declares fields and outputs,
  * the host draws them as a form, and each output's `calculate` runs in the
@@ -443,6 +495,8 @@ export interface AppHost extends Host {
   };
   /** Draw a block type the manifest claims; `invalid` for one it doesn't. */
   readonly blocks: { register(block: Block): Disposer };
+  /** Draw an inline code type the manifest's `inline` claims; `invalid` for one it doesn't. */
+  readonly inline: { register(inline: Inline): Disposer };
 }
 
 export type PluginErrorCode =

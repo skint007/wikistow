@@ -57,6 +57,15 @@ export const Manifest = z.strictObject({
     .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
     .max(20)
     .default([]),
+  /**
+   * The inline code types it claims, written `` `plugin:<id>/<type> <text>` ``
+   * (ADR 0011, decision 7). Left out, not defaulted: released apps read
+   * manifests strictly, and would refuse one with a key they don't know.
+   */
+  inline: z
+    .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
+    .max(20)
+    .optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
 
