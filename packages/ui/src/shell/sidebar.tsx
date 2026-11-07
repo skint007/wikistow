@@ -549,7 +549,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             });
             const shown = params.folderId === row.id;
             return (
-              <RowMenu key={row.id} items={<FolderMenuItems actions={actions} />}>
+              <RowMenu
+                key={row.id}
+                items={<FolderMenuItems actions={actions} made={onDevice.has(row.id)} />}
+              >
                 <li
                   {...common}
                   aria-expanded={row.expanded}
@@ -602,7 +605,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
                     {row.count}
                   </span>
-                  <FolderMenu name={row.name} actions={actions} />
+                  <FolderMenu name={row.name} actions={actions} made={onDevice.has(row.id)} />
                 </li>
               </RowMenu>
             );
