@@ -20,6 +20,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type Ref,
 } from 'react';
 import { Name, plainText } from '@/components/name';
@@ -65,6 +66,10 @@ export type DraftEditorHandle = {
   saved(): RevisionId | null;
   /** The draft's Markdown as the editor has it now, saved or not, an edit not yet reported included. */
   markdown(): string;
+  /** What is selected where the cursor is, as Markdown, or `''` (a plugin's `selection`). */
+  selection(): string;
+  /** Put `markdown` in at the cursor as the person's edit (a plugin's `insert`). */
+  insert(markdown: string): void;
 };
 
 const NONE: readonly string[] = [];
@@ -109,6 +114,7 @@ export function DraftEditor({
   queued = null,
   onReload,
   hiddenAttachments = NONE,
+  toolbar,
   ref,
 }: {
   ctx: ClientContext;
@@ -129,6 +135,8 @@ export function DraftEditor({
   onReload: (options: { keepQueued: boolean }) => void;
   /** Attachments kept out of the list because something else manages them (the banner, the icon). */
   hiddenAttachments?: readonly string[];
+  /** Plugins' buttons for the editor's format toolbar (`editor.toolbar`). */
+  toolbar?: ReactNode;
   ref?: Ref<DraftEditorHandle>;
 }) {
   const surface = useRef<EditorSurfaceHandle>(null);
@@ -193,6 +201,8 @@ export function DraftEditor({
       checkSize: (changes) => session.checkSize(changes),
       saved: () => session.savedRevision(),
       markdown: () => surface.current?.read() ?? markdown.current,
+      selection: () => surface.current?.selection?.() ?? '',
+      insert: (text) => surface.current?.insert?.(text),
     }),
     [session],
   );
@@ -268,6 +278,7 @@ export function DraftEditor({
         propertyKeys={propertyKeys}
         otherPages={others}
         queryTable={queryTable}
+        toolbar={toolbar}
         onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
         status={
           <span role="status" aria-live="polite">

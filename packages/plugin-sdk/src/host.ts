@@ -87,6 +87,30 @@ export interface PageHandle {
    * typed is saved first, and the editor opens the result. Null elsewhere.
    */
   readonly edit: ((change: PageChange) => Promise<PageVersion>) | null;
+  /**
+   * In the draft view, the editor at the person's cursor. Null elsewhere,
+   * and null or missing (undefined) in an app older than it.
+   */
+  readonly editor?: EditorCursor | null | undefined;
+}
+
+/**
+ * Where the person is in the draft view's editor: in split, the side they
+ * were in last. Text in and out has LF line breaks; what goes in takes the
+ * page's own.
+ */
+export interface EditorCursor {
+  /** What is selected, as Markdown, or `''` at a cursor. */
+  selection(): Promise<string>;
+  /**
+   * Put `markdown` in place of the selection, or at the cursor, as the
+   * person's own edit: it can be undone, and saves as typing does. The
+   * source editor inserts the text; the visual editor reads it into the
+   * page, as a paste does, except that anything but a single paragraph
+   * goes in as whole blocks, splitting the text at the cursor, so a block
+   * put after some text stays a block. It counts as a write, as `edit` does.
+   */
+  insert(markdown: string): Promise<void>;
 }
 
 export type Command = {
@@ -372,6 +396,12 @@ export type Regions = {
   'page.panel': { id: string; title: string; view: View<PageViewProps> };
   /** In the page's toolbar, before the Plugins menu: keep it to a button or two. */
   'page.toolbar': { id: string; view: View<PageViewProps> };
+  /**
+   * In the draft view, in the editor's format toolbar (a bar of its own
+   * over the source editor): keep it to a button or two. Its view's
+   * `page.editor` is set.
+   */
+  'editor.toolbar': { id: string; view: View<PageViewProps> };
   /** Above the page's text, under its banner. */
   'page.header': { id: string; view: View<PageViewProps> };
   /** Below the page's text. */
@@ -427,6 +457,12 @@ export const REGIONS = {
     where: "The page's toolbar, before the Plugins menu",
     phone: 'The same; keep it to a button',
   },
+  'editor.toolbar': {
+    registers: '{ id, view }',
+    where:
+      "The editor's format toolbar, in the draft view (a bar of its own over the source editor); its view's `page.editor` is set",
+    phone: 'The same; keep it to a button',
+  },
   'page.header': {
     registers: '{ id, view }',
     where: "Above the page's text, under the banner",
@@ -478,6 +514,7 @@ export const DATA_REGIONS = {
   'page.header': "Plugins' views above the text, only while a plugin fills it",
   'page.footer': "Plugins' views below the text, only while a plugin fills it",
   'page.aside': "The contents and plugins' views beside the text, only while a plugin fills it",
+  'editor.toolbar': "Plugins' buttons in the editor's format toolbar, only while a plugin fills it",
   'app.view': "A plugin's page",
   settings: 'Settings',
   workshop: 'The plugin workshop',

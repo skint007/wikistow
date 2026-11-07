@@ -61,6 +61,10 @@ export type OpenDraft = {
   fits: (changes: PayloadChanges) => void;
   /** Change the draft as the person's own edit, which the editor shows and saves. */
   revise: (changes: PayloadChanges) => void;
+  /** What is selected where the cursor is, as Markdown, or `''`. */
+  selection: () => string;
+  /** Put Markdown in at the cursor as the person's own edit. */
+  insert: (markdown: string) => void;
 };
 
 export type PluginCommand = { pluginId: string; id: string; title: string };

@@ -379,10 +379,14 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
   // What is typed reaches the sample before the plugin reads or edits it.
   useEffect(
     () =>
-      workshop.samples.editing(sample.pageId, () => {
-        const text = editor.current?.read();
-        if (text !== undefined)
-          workshop.typed(sample.pageId, joinPage(frontmatterNow.current, text), sample.outside);
+      workshop.samples.editing(sample.pageId, {
+        handOver: () => {
+          const text = editor.current?.read();
+          if (text !== undefined)
+            workshop.typed(sample.pageId, joinPage(frontmatterNow.current, text), sample.outside);
+        },
+        selection: () => editor.current?.selection?.() ?? '',
+        insert: (markdown) => editor.current?.insert?.(markdown),
       }),
     [workshop, sample.pageId, sample.outside],
   );
@@ -460,6 +464,7 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
               attachments={INERT.attachments()}
               onFiles={() => {}}
               page={shown.page}
+              toolbar={<Place name="editor.toolbar" shown={shown} />}
             />
           </div>
         ) : (

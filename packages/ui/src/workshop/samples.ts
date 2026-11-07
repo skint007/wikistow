@@ -35,6 +35,15 @@ const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
 const elsewhere = () =>
   new PluginError('not-found', 'The workshop’s preview has only its own sample pages');
 
+/** The preview's editor of a sample: what is typed handed over, and its cursor. */
+export type SampleEditor = {
+  handOver: () => void;
+  /** What is selected, as Markdown, or `''`. */
+  selection: () => string;
+  /** Put Markdown in at the cursor, as the person's edit. */
+  insert: (markdown: string) => void;
+};
+
 /** The workshop's sample pages, in the order they were made. */
 export function sampleStore() {
   let samples: Sample[] = [];
@@ -45,9 +54,9 @@ export function sampleStore() {
   };
 
   /** The preview's editor of each sample shown: each hands over what is typed in it. */
-  const editors = new Map<string, () => void>();
+  const editors = new Map<string, SampleEditor>();
   /** What is typed in a sample's editor, into the store first, as the app saves a draft's typing before a plugin reads or edits it. */
-  const flush = (pageId: string) => editors.get(pageId)?.();
+  const flush = (pageId: string) => editors.get(pageId)?.handOver();
 
   const find = (ref: PageRef) =>
     ref.spaceId === SAMPLE_SPACE
@@ -139,11 +148,11 @@ export function sampleStore() {
       return sample;
     },
 
-    /** The preview's editor shows `pageId`, and `flush` hands over what is typed, until the returned function runs. */
-    editing(pageId: string, handOver: () => void) {
-      editors.set(pageId, handOver);
+    /** The preview's editor shows `pageId`, until the returned function runs. */
+    editing(pageId: string, editor: SampleEditor) {
+      editors.set(pageId, editor);
       return () => {
-        if (editors.get(pageId) === handOver) editors.delete(pageId);
+        if (editors.get(pageId) === editor) editors.delete(pageId);
       };
     },
 
@@ -271,6 +280,23 @@ export function sampleStore() {
                 const saved = save(shown.page, lastRead ?? String(sample.revision), change);
                 lastRead = saved.revision;
                 return saved;
+              }
+            : null,
+        // At the cursor in the preview's editor, as in a draft.
+        editor:
+          shown.version === 'draft'
+            ? {
+                selection: async () => {
+                  if (!caller.live()) throw unloaded();
+                  return editors.get(shown.page.pageId)?.selection() ?? '';
+                },
+                insert: async (markdown: string) => {
+                  if (!caller.live()) throw unloaded();
+                  const editor = editors.get(shown.page.pageId);
+                  if (!editor) throw new PluginError('unloaded', 'The preview’s editor was closed');
+                  caller.write();
+                  editor.insert(markdown);
+                },
               }
             : null,
       };

@@ -60,7 +60,8 @@ function mount(initial: string): Mounted {
       </StrictMode>,
     ),
   );
-  const editor = container.firstElementChild?.shadowRoot?.querySelector('.cm-editor');
+  const host = [...container.querySelectorAll('div')].find((div) => div.shadowRoot);
+  const editor = host?.shadowRoot?.querySelector('.cm-editor');
   const view = editor instanceof HTMLElement ? EditorView.findFromDOM(editor) : null;
   if (!ref.current || !view) throw new Error('The editor did not mount');
   const m: Mounted = {

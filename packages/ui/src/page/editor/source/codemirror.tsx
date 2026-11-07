@@ -51,6 +51,7 @@ export default function CodeMirrorSurface({
   lineBreak,
   properties,
   otherPages,
+  toolbar,
   ref,
 }: EditorSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -155,15 +156,39 @@ export default function CodeMirrorSurface({
         });
         editor.focus();
       },
+      selection() {
+        const state = view.current?.state;
+        if (!state) return '';
+        return state.selection.ranges
+          .filter((range) => !range.empty)
+          .map((range) => state.doc.sliceString(range.from, range.to, '\n'))
+          .join('\n');
+      },
+      insert(markdown) {
+        const editor = view.current;
+        if (!editor) return;
+        const { state } = editor;
+        // At each cursor, as a paste goes.
+        editor.dispatch(state.replaceSelection(withLineBreaks(markdown, state.lineBreak)), {
+          scrollIntoView: true,
+          userEvent: 'input.paste',
+        });
+        editor.focus();
+      },
     }),
     [findable],
   );
 
+  // Plugins' buttons, if any, in a bar over the text, as the visual editor's toolbar is.
   return (
-    <div
-      ref={host}
-      className="h-full w-full rounded-control border border-input bg-background font-mono text-sm leading-relaxed focus-within:ring-2 focus-within:ring-ring"
-    />
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-control border border-input bg-background focus-within:ring-2 focus-within:ring-ring">
+      {toolbar && (
+        <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-input px-1.5 py-1 empty:hidden">
+          {toolbar}
+        </div>
+      )}
+      <div ref={host} className="min-h-0 w-full flex-1 font-mono text-sm leading-relaxed" />
+    </div>
   );
 }
 
