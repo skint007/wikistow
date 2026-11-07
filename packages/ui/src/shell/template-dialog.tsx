@@ -27,7 +27,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { meQuery } from '../api';
-import { pageQuery, revisionQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { pageQuery, revisionQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { ErrorLine, useAction } from '../sharing/use-action';
 import { useClient } from '../vault/store';
@@ -269,8 +270,7 @@ function FillTemplate({
         });
       } finally {
         // A page whose attachments failed is made all the same, and listed.
-        searchIndexChanged(queryClient);
-        await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+        await contentChanged(queryClient, ctx, { spaceId });
       }
       onCreated(pageId);
     });

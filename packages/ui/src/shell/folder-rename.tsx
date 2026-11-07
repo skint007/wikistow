@@ -15,7 +15,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Name } from '@/components/name';
-import { searchIndexChanged, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { useClient } from '../vault/store';
 
@@ -92,8 +93,7 @@ function RenameForm({
         changes: { name: name.trim() },
       });
       // Search shows each page's folders.
-      searchIndexChanged(queryClient);
-      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      await contentChanged(queryClient, ctx, { spaceId });
       onDone();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'stale-head') {

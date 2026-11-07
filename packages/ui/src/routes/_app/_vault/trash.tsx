@@ -15,7 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { searchIndexChanged, spacesQuery, trashQuery, treeQuery } from '../../../data/queries';
+import { contentChanged } from '../../../data/content-changed';
+import { spacesQuery, trashQuery } from '../../../data/queries';
 import { errorMessage } from '../../../errors';
 import { useClient } from '../../../vault/store';
 
@@ -69,11 +70,12 @@ function Trash() {
       setSaid({ text: restoreMessage(caught, entries ?? []), failed: true });
     } finally {
       setBusy(false);
-      searchIndexChanged(queryClient, { spaceIds });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
-        ...spaceIds.map((spaceId) =>
-          queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+        contentChanged(
+          queryClient,
+          ctx,
+          spaceIds.map((spaceId) => ({ spaceId })),
         ),
       ]);
     }

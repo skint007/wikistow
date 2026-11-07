@@ -13,9 +13,9 @@ import {
 import { runCommand } from '../commands/command';
 import { detachPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { searchIndexChanged } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
-import { PLAIN, useClient } from '../vault/store';
+import { useClient } from '../vault/store';
 import { detachMessage } from './messages';
 
 /**
@@ -50,12 +50,7 @@ export function DetachDialog({
         });
       } finally {
         // Shown as it is now, whether or not it went through.
-        searchIndexChanged(queryClient);
-        await Promise.all(
-          ['page', 'tree', 'history'].map((kind) =>
-            queryClient.invalidateQueries({ queryKey: [PLAIN, kind] }),
-          ),
-        );
+        await contentChanged(queryClient, ctx, page);
       }
       onOpenChange(false);
       await onDone();

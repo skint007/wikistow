@@ -14,7 +14,8 @@ import {
 import { runCommand } from '../commands/command';
 import { unpublishPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { publishedCopiesQuery, searchIndexChanged, type ListedCopy } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { publishedCopiesQuery, type ListedCopy } from '../data/queries';
 import { PLAIN, useClient } from '../vault/store';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { unpublishMessage } from './messages';
@@ -79,12 +80,7 @@ export function UnpublishDialog({
                 await queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
                 throw caught;
               }
-              searchIndexChanged(queryClient);
-              await Promise.all(
-                ['page', 'tree', 'history'].map((kind) =>
-                  queryClient.invalidateQueries({ queryKey: [PLAIN, kind] }),
-                ),
-              );
+              await contentChanged(queryClient, ctx, page);
               onOpenChange(false);
               await onDone();
             }}

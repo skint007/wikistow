@@ -3,7 +3,8 @@ import { PageId, SpaceId } from '@wikistow/contracts';
 import type { PageRef } from '@wikistow/plugin-sdk';
 import type { QueryClient } from '@tanstack/react-query';
 import { createContext, use } from 'react';
-import { pageQuery, searchIndexChanged, spacesQuery, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { spacesQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { PLAIN, vaultStore } from '../vault/store';
 import { desktopStore } from './desktop-store';
@@ -51,15 +52,12 @@ export function startAppPlugins(queryClient: QueryClient) {
       const vault = vaultStore.get();
       if (vault.status !== 'unlocked') return;
       const spaceId = SpaceId.parse(spaceIdText);
-      if (page) {
-        const pageId = PageId.parse(page.pageId);
-        void queryClient.invalidateQueries({ queryKey: pageQuery(vault.ctx, pageId).queryKey });
-      } else {
-        // Pages it moved show their new place.
-        void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
-      }
-      void queryClient.invalidateQueries({ queryKey: treeQuery(vault.ctx, spaceId).queryKey });
-      searchIndexChanged(queryClient, { spaceIds: [spaceId] });
+      // Pages it moved show their new place.
+      if (!page) void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
+      void contentChanged(queryClient, vault.ctx, {
+        spaceId,
+        pageId: page ? PageId.parse(page.pageId) : null,
+      });
     },
     location: where,
     async spaces(caller) {

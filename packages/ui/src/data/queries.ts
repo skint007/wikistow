@@ -304,8 +304,9 @@ declare const __APP_VERSION__: string;
  * Every page this person can read, indexed for search on this device. The
  * first time, built from the trees, opening only the pages whose version
  * changed since the index this device kept, sealed for this person and
- * build (`sealKept`, `searchIndexFile`). After that, each change this person makes, or the
- * server tells of (`searchIndexChanged`), updates the one in memory
+ * build (`sealKept`, `searchIndexFile`). After that, each change this
+ * person makes (`contentChanged`), or the server tells of
+ * (`searchIndexChanged`), updates the one in memory
  * (`updateIndex`): only the spaces named are listed again, and every one
  * if none are, as when it is shown again a minute old. Only pages whose
  * version changed are opened and indexed again, and an update that finds

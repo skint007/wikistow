@@ -55,18 +55,16 @@ export type DraftPorts = {
    */
   linkTargets(title: string): ReadonlySet<PageId> | null;
   /**
-   * A save landed, with the vault still unlocked since `epoch`: show the
+   * A save landed, with the vault still unlocked since it started: show the
    * version saved (its title, emoji and region) as the page's, and load the
-   * page's heads again. `payload` is what was typed, `written` what the
-   * server holds (links renamed), and `basedOn` the version saved over.
+   * page's heads again. `written` is what the server holds (links renamed),
+   * and `basedOn` the version saved over.
    */
   saved(saved: {
     revisionId: RevisionId;
     basedOn: RevisionId;
-    payload: PagePayload;
     written: PagePayload;
     region: Region;
-    epoch: number;
   }): Promise<void>;
   /** Someone else saved first: load their draft, so the conflict prompt knows it. */
   overtaken(): void;
@@ -373,7 +371,7 @@ export class DraftSession {
     } finally {
       this.#saving = false;
     }
-    if (this.#ports.epoch() === epoch) await this.#ports.saved({ ...saved, payload: next, epoch });
+    if (this.#ports.epoch() === epoch) await this.#ports.saved(saved);
   }
 
   /** Save what's typed now, without waiting for files still uploading. */

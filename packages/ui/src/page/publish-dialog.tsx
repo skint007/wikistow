@@ -24,7 +24,8 @@ import { Picker } from '@/components/ui/picker';
 import { runCommand } from '../commands/command';
 import { endPublication, publishElsewhere } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { searchIndexChanged, sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { isStale } from '../sharing/messages';
 import { nameOf, type Tree } from '../sharing/names';
 import { describePerson, peopleQuery } from '../sharing/people';
@@ -352,14 +353,10 @@ function ConfirmPublication({
         setNotice('Something changed there meanwhile. Check it again, then publish.');
         return;
       }
-      searchIndexChanged(queryClient);
       // Not waited for: it opens every space the page is published in.
       void queryClient.invalidateQueries({ queryKey: [PLAIN, 'published-copies'] });
-      await Promise.all(
-        ['tree', 'page', 'history'].map((kind) =>
-          queryClient.invalidateQueries({ queryKey: [PLAIN, kind] }),
-        ),
-      );
+      const { spaceId, pageId } = confirmed.destination;
+      await contentChanged(queryClient, ctx, [page, { spaceId, pageId }]);
       onDone({ spaceId: confirmed.destination.spaceId, pageId: confirmed.destination.pageId });
     });
 

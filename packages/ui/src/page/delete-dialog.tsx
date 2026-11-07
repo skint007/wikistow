@@ -11,7 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { searchIndexChanged, trashQuery, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { trashQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { useClient } from '../vault/store';
 import { noteTrashed } from './trash-notice';
@@ -74,9 +75,8 @@ export function DeleteButton({
     setError(null);
     try {
       await pageOperations.deleteNode(ctx, { spaceId, nodeId });
-      searchIndexChanged(queryClient);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+        contentChanged(queryClient, ctx, { spaceId }),
         queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
       ]);
       noteTrashed({ ctx, spaceId, nodeId, name });

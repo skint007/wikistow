@@ -1,16 +1,11 @@
-import { watchTreeChanges, type ClientContext, type SpaceId } from '@wikistow/client';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { watchTreeChanges, type ClientContext } from '@wikistow/client';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { PLAIN } from '../vault/store';
 import { useOffline } from './connection';
+import { contentChanged } from './content-changed';
 import { keepChanged } from './keeper';
-import {
-  publicLinksQuery,
-  searchIndexChanged,
-  sharedWithMeQuery,
-  spacesQuery,
-  treeQuery,
-} from './queries';
+import { publicLinksQuery, searchIndexChanged, sharedWithMeQuery, spacesQuery } from './queries';
 
 /**
  * While the vault is open (`ctx`), load a space's tree again when the
@@ -59,12 +54,15 @@ export function useTreeChanges(ctx: ClientContext | null) {
     void watchTreeChanges({
       signal: stop.signal,
       onChange: (spaceIds) => {
+        void contentChanged(
+          queryClient,
+          ctx,
+          spaceIds.map((spaceId) => ({ spaceId })),
+        );
         for (const spaceId of spaceIds) {
-          void reloadTree(queryClient, ctx, spaceId);
           void queryClient.invalidateQueries({ queryKey: publicLinksQuery(ctx, spaceId).queryKey });
         }
         reloadLists();
-        searchIndexChanged(queryClient, { spaceIds });
         keepChanged(ctx, { spaces: spaceIds });
       },
       onMissed: () => {
@@ -82,15 +80,4 @@ export function useTreeChanges(ctx: ClientContext | null) {
 function onVisibility(changed: () => void) {
   document.addEventListener('visibilitychange', changed);
   return () => document.removeEventListener('visibilitychange', changed);
-}
-
-// A load already running may have started before the change, so another
-// follows it. Changes heard meanwhile share that one, rather than each
-// cancelling the load before it, which a steady stream of changes would do
-// forever on a large tree.
-async function reloadTree(queryClient: QueryClient, ctx: ClientContext, spaceId: SpaceId) {
-  const { queryKey } = treeQuery(ctx, spaceId);
-  const running = queryClient.isFetching({ queryKey }) > 0;
-  await queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false });
-  if (running) await queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false });
 }

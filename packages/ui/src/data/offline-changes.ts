@@ -16,8 +16,9 @@ import { desktop } from '../desktop';
 import { readWikilinks } from '../page/page-reader';
 import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
+import { contentChanged } from './content-changed';
 import { keepChanged, pageOpened } from './keeper';
-import { pageQuery, queueOf, searchIndexChanged, treeQuery } from './queries';
+import { pageQuery, queueOf, treeQuery } from './queries';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
@@ -106,16 +107,18 @@ function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
     for (const session of sessions) session(event);
     return;
   }
-  const id = event.kind === 'changed' ? event.id : event.pageId;
-  void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, event.spaceId).queryKey });
-  void queryClient.invalidateQueries({ queryKey: pageQuery(ctx, PageId.parse(id)).queryKey });
-  if (event.kind === 'landed') {
-    for (const session of sessions) session(event);
-    // A change made here was opened here: kept from now on with Pages I open.
-    pageOpened(ctx, { spaceId: event.spaceId, pageId: event.pageId });
-    searchIndexChanged(queryClient, { spaceIds: [event.spaceId] });
-    keepChanged(ctx, { spaces: [event.spaceId] });
+  if (event.kind === 'changed') {
+    void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, event.spaceId).queryKey });
+    void queryClient.invalidateQueries({
+      queryKey: pageQuery(ctx, PageId.parse(event.id)).queryKey,
+    });
+    return;
   }
+  void contentChanged(queryClient, ctx, { spaceId: event.spaceId, pageId: event.pageId });
+  for (const session of sessions) session(event);
+  // A change made here was opened here: kept from now on with Pages I open.
+  pageOpened(ctx, { spaceId: event.spaceId, pageId: event.pageId });
+  keepChanged(ctx, { spaces: [event.spaceId] });
 }
 
 /** How long the queue waits after a change before sending it, as typing goes on. */

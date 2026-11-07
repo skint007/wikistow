@@ -17,7 +17,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { searchIndexChanged, spacesQuery, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { spacesQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { EmojiPopover } from '../page/cover/emoji-picker';
 import { iconImage } from '../page/cover/icon-image';
@@ -127,10 +128,11 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
     if (Object.keys(changes).length === 0) return onDone();
     setBusy(true);
     setError(null);
-    // The rail and pickers read the spaces list; the header and breadcrumbs, the tree.
+    // The rail and pickers read the spaces list; the header and breadcrumbs, the
+    // tree; search, the space's name first in each page's path.
     const refresh = () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+        contentChanged(queryClient, ctx, { spaceId }),
         queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey }),
       ]);
     try {
@@ -140,8 +142,6 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
         current: loaded,
         changes,
       });
-      // Search shows the space's name first in each page's path.
-      if ('name' in changes) searchIndexChanged(queryClient);
       await refresh();
       onDone();
     } catch (caught) {
