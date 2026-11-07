@@ -64,7 +64,6 @@ export type OpenDraft = {
 export type PluginCommand = { pluginId: string; id: string; title: string };
 /** What a plugin registered in a region, with the plugin's ID. */
 export type Contribution<R extends keyof Regions> = Regions[R] & { pluginId: string };
-export type PluginPanel = Contribution<'page.panel'>;
 /** A theme an enabled plugin adds to the theme picker. */
 export type PluginThemeOption = {
   pluginId: string;
@@ -109,7 +108,8 @@ type Registered = { [R in keyof Regions]: Map<string, Regions[R]> };
 function perRegion<T extends { [R in keyof Regions]: unknown }>(
   make: (region: keyof Regions) => unknown,
 ): T {
-  // TypeScript can't check a record built from a list of names, entry by entry.
+  // Unchecked: TypeScript can't type a record built from a list of names entry by entry, so
+  // nothing checks that `make` gives each region the right kind of value.
   return Object.fromEntries(
     Object.keys(REGIONS)
       .filter(isRegion)

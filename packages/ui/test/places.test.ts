@@ -26,8 +26,9 @@ const hookTable = [
 
 it("lists every region and data-region hook in the README as the SDK's tables have them", async () => {
   const readme = await readFile(README, 'utf8');
-  expect(readme).toContain(regionTable);
-  expect(readme).toContain(hookTable);
+  // Each table ends at a blank line, so a row the SDK lacks fails too.
+  expect(readme).toContain(`${regionTable}\n\n`);
+  expect(readme).toContain(`${hookTable}\n\n`);
 });
 
 it('marks the data-region hooks the SDK lists, and only those', async () => {
