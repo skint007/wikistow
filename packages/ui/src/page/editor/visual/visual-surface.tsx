@@ -26,7 +26,7 @@ import type { EditorSurfaceProps } from '../surface';
 import { LinkCompletion } from './completion';
 import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
-import { insertMarkdown, selectedMarkdown } from './at-cursor';
+import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { visualFind, visualFindable } from './find';
@@ -46,6 +46,7 @@ import {
   linkKeys,
   pasting,
   reportEdits,
+  type Insert,
   tableHeaders,
   typedLinks,
   unshownFootnotes,
@@ -275,6 +276,8 @@ function Surface({
   // with the document it made of it: an unchanged document gives it back.
   const editor = useRef<Editor | null>(null);
   const writer = useRef<Writer | null>(null);
+  // How a plugin's Markdown goes in at the cursor, once the editor's made (`pasting`).
+  const inserting = useRef<Insert | null>(null);
   const origin = useRef<{ markdown: string; doc: Node } | null>(null);
   // Work waiting for idle time, whether an edit is yet to be reported, and
   // when the last was.
@@ -476,9 +479,7 @@ function Surface({
         write,
       );
     },
-    insert: (markdown: string) => {
-      editor.current?.action((ctx) => insertMarkdown(ctx.get(editorViewCtx), markdown));
-    },
+    insert: (markdown: string) => inserting.current?.(markdown),
   }));
   const [completion] = useState(
     () =>
@@ -518,6 +519,11 @@ function Surface({
           () => latest.current.onFiles,
           () => writer.current,
           format.uploads,
+          (insert, live) => {
+            // Strict Mode's first editor goes after the second is made.
+            if (live) inserting.current = insert;
+            else if (inserting.current === insert) inserting.current = null;
+          },
         ),
         typedLinks,
         autolinks,

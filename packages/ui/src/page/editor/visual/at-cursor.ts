@@ -1,10 +1,10 @@
 import { Fragment } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
-import type { EditorView } from '@milkdown/kit/prose/view';
 import type { Writer } from './writer';
 
-// What a plugin's page handle reads and writes at the visual editor's
-// cursor (`PageHandle.editor`, ADR 0011 decision 3).
+// What a plugin's page handle reads at the visual editor's cursor
+// (`PageHandle.editor`, ADR 0011 decision 3). What it inserts goes in as
+// a paste does (`pasting` in plugins.ts).
 
 /**
  * What `state` has selected, as Markdown written as the page would write
@@ -34,16 +34,4 @@ export function selectedMarkdown(state: EditorState, write: Writer): string {
   }
   const selected = schema.topNodeType.createAndFill(undefined, blocks);
   return selected ? write.write(selected, false).markdown : text();
-}
-
-/**
- * Put `markdown` in place of the selection as a paste of it goes in: read
- * as Markdown where the editor keeps it whole, else as its text, and as
- * text in a code block. The cursor ends after it.
- */
-export function insertMarkdown(view: EditorView, markdown: string) {
-  const clipboardData = new DataTransfer();
-  clipboardData.setData('text/plain', markdown);
-  view.pasteText(markdown, new ClipboardEvent('paste', { clipboardData }));
-  view.focus();
 }
