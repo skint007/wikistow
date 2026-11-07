@@ -486,16 +486,19 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
     () => ({ openPage: (page) => page.spaceId === SAMPLE_SPACE && onOpen(page.pageId) }),
     [onOpen],
   );
+  // The plugin page a rail item opened, which may name one the plugin hasn't registered.
+  const [railView, setRailView] = useState<{ pluginId: string; viewId: string } | null>(null);
   const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${viewId}`;
+  const drawView = (pluginId: string, viewId: string) => (
+    <div className="grid gap-6">
+      <Place name="app.view" pluginId={pluginId} viewId={viewId} props={appView} />
+    </div>
+  );
   const places = [
     ...regions['app.view'].map((view) => ({
       key: viewKey(view.pluginId, view.id),
       label: `Page: ${view.title}`,
-      draw: () => (
-        <div className="grid gap-6">
-          <Place name="app.view" pluginId={view.pluginId} viewId={view.id} props={appView} />
-        </div>
-      ),
+      draw: () => drawView(view.pluginId, view.id),
     })),
     // Each plugin's sections together, as its row on the Plugins page shows them.
     ...[...new Set(regions['settings.section'].map(({ pluginId }) => pluginId))].map(
@@ -526,14 +529,25 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
   ];
   const rail = regions.rail.length > 0;
   if (places.length === 0 && !rail) return null;
-  const shown = places.find((place) => place.key === open);
+  // A rail item naming a page the plugin lacks shows "Not available", as the app does.
+  const shown =
+    places.find((place) => place.key === open) ??
+    (railView && open === viewKey(railView.pluginId, railView.viewId)
+      ? { key: open, draw: () => drawView(railView.pluginId, railView.viewId) }
+      : undefined);
   return (
     <section aria-label="Its other places" className="grid gap-2">
       <h2 className="text-sm font-bold">Its other places</h2>
       {rail && (
         <div role="group" aria-label="Rail" className="flex flex-wrap items-center gap-1">
           <span className="text-xs text-muted-foreground">Rail</span>
-          <Place name="rail" open={(item) => setOpen(viewKey(item.pluginId, item.opens))} />
+          <Place
+            name="rail"
+            open={({ pluginId, opens }) => {
+              setRailView({ pluginId, viewId: opens });
+              setOpen(viewKey(pluginId, opens));
+            }}
+          />
         </div>
       )}
       <div className="flex flex-wrap gap-1">
