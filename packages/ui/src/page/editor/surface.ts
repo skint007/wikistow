@@ -150,7 +150,7 @@ export type EditorSurfaceHandle = {
   /**
    * Put `markdown` in place of what's selected as the person's edit, and
    * focus there, the cursor after it: the source inserts it, the visual
-   * editor reads it as a paste (a plugin's `insert`).
+   * editor reads it as a paste, its blocks whole (a plugin's `insert`).
    */
   insert?(markdown: string): void;
   /** Find on page in it, once it's there (#276). */
