@@ -1,6 +1,13 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
-import type { PluginCandidate, PluginScope } from '@wikistow/contracts';
-import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk';
+import type { InstalledPlugin, PluginCandidate, PluginScope } from '@wikistow/contracts';
+import {
+  isReplaceable,
+  REGIONS,
+  type Manifest,
+  type PageAccess,
+  type Replacements,
+  type TrustLevel,
+} from '@wikistow/plugin-sdk';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Fragment, useState, type ReactNode } from 'react';
@@ -23,7 +30,7 @@ import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
-import { Place as RegionPlace } from './places';
+import { Place as RegionPlace, REPLACED } from './places';
 import { useAppPlugins } from './app-plugins';
 import { usePlugins, type PluginStatus } from './runtime';
 import { refOf, type ApprovalRequest, type PluginRef } from './store';
@@ -54,6 +61,14 @@ export const ACCESS: Record<PageAccess, string> = {
 
 export const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
+
+const listed = new Intl.ListFormat('en', { type: 'conjunction' });
+
+/** The parts of the app a manifest replaces, by the names this app knows. */
+const replacedParts = (manifest: Manifest) =>
+  (manifest.replaces ?? []).filter(isReplaceable).map((region) => REPLACED[region].part);
+
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** Says safe mode is on, with the way out, on the Plugins page wherever plugins come from. */
 export function SafeModeNotice() {
@@ -287,6 +302,7 @@ export function PluginSettings({ tab, query }: PluginsView) {
     <div className="grid gap-4">
       {error && <FormMessage>{error}</FormMessage>}
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
+      {tab === 'installed' && <ReplacedParts />}
       {vault.status === 'unlocked' ? (
         <Library ctx={vault.ctx} tab={tab} query={query} folder={folder} />
       ) : folders ? (
@@ -365,6 +381,12 @@ export function Approval<T extends ApprovalRequest>({
               <Badge variant="secondary">{level.label}</Badge> {level.trust}
             </p>
             <p>It asks for {ACCESS[candidate.manifest.access]}.</p>
+            {replacedParts(candidate.manifest).length > 0 && (
+              <p>
+                It replaces {listed.format(replacedParts(candidate.manifest))} with its own. You can
+                use the app’s own again in Settings → Plugins.
+              </p>
+            )}
             {candidate.replaces && <Replaces candidate={candidate} />}
             {candidate.development && (
               <p>
@@ -389,6 +411,91 @@ export function Approval<T extends ApprovalRequest>({
         </DialogContent>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * Which plugin draws each part of the app that plugins replace, with **Use
+ * the app's own** (ADR 0011): the first in this list's order that replaces
+ * it, unless the person chose otherwise, kept as its on/off is. Choosing
+ * one plugin's gives the app's own part back from those before it. Not in
+ * safe mode, where nothing replaces anything.
+ */
+function ReplacedParts() {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
+  const { plugins, safeMode } = usePlugins();
+  const [error, setError] = useState<string | null>(null);
+  // In safe mode every part is the app's own, as the notice above says.
+  if (safeMode) return null;
+  const rows = Object.keys(REGIONS)
+    .filter(isReplaceable)
+    .flatMap((region) => {
+      const replacing = plugins
+        .map(({ plugin }) => plugin)
+        .filter(
+          (plugin) =>
+            plugin.enabled && plugin.level === 'app' && plugin.manifest.replaces?.includes(region),
+        );
+      if (replacing.length === 0) return [];
+      const drawing = replacing.find((plugin) => !plugin.ownParts.includes(region)) ?? null;
+      return [{ region, replacing, drawing }];
+    });
+  if (rows.length === 0) return null;
+
+  /** Make `region` the app's own for each of `plugins`, and `chosen`'s if given. */
+  const choose = (region: keyof Replacements, own: InstalledPlugin[], chosen?: InstalledPlugin) =>
+    void (async () => {
+      setError(null);
+      try {
+        for (const plugin of own) {
+          if (!plugin.ownParts.includes(region))
+            await pluginStore.setOwnParts(refOf(plugin), [...plugin.ownParts, region]);
+        }
+        if (chosen)
+          await pluginStore.setOwnParts(
+            refOf(chosen),
+            chosen.ownParts.filter((part) => part !== region),
+          );
+      } catch (failure) {
+        setError(message(failure));
+      }
+      await pluginRuntime.refresh();
+    })();
+
+  return (
+    <section aria-label="Replaced parts" className="grid gap-2 text-sm">
+      <h3 className="font-bold">Parts of the app plugins replace</h3>
+      <ul className="grid gap-2">
+        {rows.map(({ region, replacing, drawing }) => (
+          <li key={region} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-48 flex-1">
+              {capitalized(REPLACED[region].part)}:{' '}
+              {drawing ? `${drawing.manifest.name} draws it.` : 'the app’s own.'}
+            </span>
+            {drawing && (
+              <Button size="sm" variant="outline" onClick={() => choose(region, replacing)}>
+                Use the app’s own
+              </Button>
+            )}
+            {replacing
+              .filter((plugin) => plugin !== drawing)
+              .map((plugin) => (
+                <Button
+                  key={`${plugin.library}:${plugin.manifest.id}`}
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    choose(region, replacing.slice(0, replacing.indexOf(plugin)), plugin)
+                  }
+                >
+                  Use {plugin.manifest.name}’s
+                </Button>
+              ))}
+          </li>
+        ))}
+      </ul>
+      {error && <FormMessage>{error}</FormMessage>}
+    </section>
   );
 }
 
