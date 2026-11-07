@@ -217,10 +217,10 @@ export class KeptContent {
   #recentBytes = 0;
   #closed = false;
 
-  private constructor(store: KeptStore, sealer: KeptSealer) {
+  private constructor(store: KeptStore, sealer: KeptSealer, installationId: InstallationId) {
     this.store = store;
     this.#sealer = sealer;
-    this.queue = new OfflineQueue(store, sealer);
+    this.queue = new OfflineQueue(store, sealer, installationId);
   }
 
   /** What `store` keeps for this person on this server. Nothing readable counts as nothing kept. */
@@ -228,7 +228,7 @@ export class KeptContent {
     store: KeptStore,
     who: { identity: PrivateIdentity; installationId: InstallationId },
   ): Promise<KeptContent> {
-    const kept = new KeptContent(store, keptSealer(who));
+    const kept = new KeptContent(store, keptSealer(who), who.installationId);
     await kept.reload();
     return kept;
   }

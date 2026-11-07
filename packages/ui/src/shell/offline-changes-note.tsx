@@ -12,8 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { queueOf, queueQuery } from '../data/offline-changes';
-import { spaceOrderQuery } from '../data/queries';
+import { queueChoices, queueQuery } from '../data/offline-changes';
+import { queueOf, spaceOrderQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 
 type Entry = queueOperations.QueueEntry;
@@ -36,7 +36,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<queueOperations.QueuedPage | null>(null);
   const stopped = entries?.filter((entry) => entry.failure !== null) ?? [];
-  const queue = queueOf(ctx);
+  const queue = queueChoices(ctx);
   if (stopped.length === 0 || !queue) return null;
   const conflicts = stopped.filter(
     (entry): entry is queueOperations.QueuedPage => entry.failure?.kind === 'conflict',
@@ -176,13 +176,13 @@ function SaveAsNewDialog({
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const queue = queueOf(ctx);
   const { data: files } = useQuery({
     queryKey: ['offline-change-files', entry.id, entry.version],
-    queryFn: () => queue?.filesHere(ctx, entry) ?? null,
+    queryFn: () => queueOf(ctx)?.filesHere(ctx, entry) ?? null,
     gcTime: 0,
   });
   async function save() {
+    const queue = queueChoices(ctx);
     if (!queue) return;
     setBusy(true);
     setError(null);

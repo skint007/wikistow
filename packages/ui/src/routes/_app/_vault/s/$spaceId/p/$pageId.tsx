@@ -100,7 +100,7 @@ import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
 import { SENDS_FIRST, useNeedsConnection } from '../../../../../../shell/needs-connection';
-import { pageChange, queueOf, queueQuery } from '../../../../../../data/offline-changes';
+import { pageChange, queueChoices, queueQuery } from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
@@ -472,7 +472,7 @@ function PageBody({
   // too, unless it is theirs, saved by another window.
   const viewTheirs = async ({ keepQueued }: { keepQueued: boolean }) => {
     if (change && !keepQueued) {
-      await queueOf(ctx)?.discard(page.pageId);
+      await queueChoices(ctx)?.discard(page.pageId);
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
     }
     await onReopen();
