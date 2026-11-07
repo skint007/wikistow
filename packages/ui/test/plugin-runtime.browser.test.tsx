@@ -232,17 +232,21 @@ describe('the plugin runtime', () => {
     );
     location.routed({ kind: 'page', ...PAGE });
     const shown = { page: PAGE, version: 'draft', revision: 'r1' } as const;
-    location.showing(shown);
-    // The same version shown again, as a page's route draws again, and the router at the same place, tell nothing.
-    const close = location.showing({ ...shown, page: { ...PAGE } });
+    const first = location.showing(shown);
+    const opened = [
+      '{"kind":"page","spaceId":"s","pageId":"p"}',
+      '{"kind":"page","spaceId":"s","pageId":"p","version":"draft"}',
+    ];
+    await expect.poll(() => at).toEqual(opened);
+    // Another revision, in React's order: the old effect ends, then the new one starts.
+    first();
+    const second = location.showing({ ...shown, revision: 'r2' });
+    // The same version shown again, and the router at the same place, tell nothing.
+    const close = location.showing({ ...shown, page: { ...PAGE }, revision: 'r2' });
+    second();
     location.routed({ kind: 'page', ...PAGE });
-    await expect
-      .poll(() => at)
-      .toEqual([
-        '{"kind":"page","spaceId":"s","pageId":"p"}',
-        '{"kind":"page","spaceId":"s","pageId":"p","version":"draft"}',
-      ]);
-    expect(shownTold).toEqual(['p draft r1']);
+    await expect.poll(() => shownTold).toEqual(['p draft r1', 'p draft r2']);
+    expect(at).toEqual(opened);
     close();
     location.routed({ kind: 'plugin', pluginId: 'where', viewId: 'home' });
     await expect.poll(() => at.at(-1)).toBe('{"kind":"plugin","pluginId":"where","viewId":"home"}');

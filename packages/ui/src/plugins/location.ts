@@ -66,12 +66,15 @@ export function createLocation() {
         shown = page;
         update();
       }
-      return () => {
-        if (showing !== owner) return;
-        showing = null;
-        shown = null;
-        update();
-      };
+      // Cleared after the moment, so a route that shows another version
+      // (ending one effect, then starting the next) doesn't seem to close.
+      return () =>
+        queueMicrotask(() => {
+          if (showing !== owner) return;
+          showing = null;
+          shown = null;
+          update();
+        });
     },
     /** Navigate with `go` until the returned function runs. */
     navigateWith(go: (to: Place) => Promise<void>) {
