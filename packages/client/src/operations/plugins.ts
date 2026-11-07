@@ -3,9 +3,9 @@
 // operation is one contacts write (`saveContacts`): after a lost race it is
 // re-applied on top of the newer record, so two devices' changes to
 // different plugins both stand, and for one plugin the last write does.
-import { z } from 'zod';
+import type { PluginScope } from '@wikistow/contracts';
 import type { ContactsChange } from '../contacts.ts';
-import { PluginApproval, pluginApprovals, PluginScope } from '../plugin-approvals.ts';
+import { PluginApproval, pluginApprovals } from '../plugin-approvals.ts';
 import { saveContacts, type ClientContext } from './session.ts';
 
 /**
@@ -17,8 +17,6 @@ export const listPluginApprovals = (ctx: ClientContext): PluginApproval[] =>
   pluginApprovals(ctx.contacts.book.payloads.private);
 
 const Access = PluginApproval.shape.access;
-// Scopes as callers hold them, such as the desktop bridge's `PluginScope`; checked here.
-type Scope = z.input<typeof PluginScope>;
 
 async function save(ctx: ClientContext, change: ContactsChange): Promise<PluginApproval[]> {
   await saveContacts(ctx, [change]);
@@ -32,7 +30,7 @@ async function save(ctx: ClientContext, change: ContactsChange): Promise<PluginA
  */
 export const approvePlugin = async (
   ctx: ClientContext,
-  approval: { id: string; hash: string; access: readonly Scope[] },
+  approval: { id: string; hash: string; access: readonly PluginScope[] },
 ) =>
   save(ctx, {
     kind: 'plugin-approve',
@@ -51,7 +49,7 @@ export const updatePlugin = async (ctx: ClientContext, pluginId: string, hash: s
 export const setPluginAccess = async (
   ctx: ClientContext,
   pluginId: string,
-  access: readonly Scope[],
+  access: readonly PluginScope[],
 ) => save(ctx, { kind: 'plugin-change', pluginId, set: { access: Access.parse(access) } });
 
 /** Turn an installed plugin on or off, on every device. */

@@ -1,11 +1,12 @@
 import {
+  libraryInstall,
   pluginRoutes,
   type InstalledPlugin,
   type LibraryApproval,
   type LibraryCopies,
 } from '@wikistow/contracts';
 import { checkPlugin, fileType } from '@wikistow/plugin-sdk/files';
-import { PluginId, trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
+import { PluginId, type Manifest } from '@wikistow/plugin-sdk/manifest';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -137,14 +138,7 @@ export function libraryPlugins(data: string, upstream: Upstream) {
     for (const { id, hash, enabled } of approved) {
       try {
         const manifest = await copy(id, hash, listing);
-        plugins.push({
-          manifest,
-          level: trustLevel(manifest),
-          key: hash,
-          development: null,
-          library: true,
-          enabled,
-        });
+        plugins.push(libraryInstall(manifest, hash, enabled));
       } catch (error) {
         problems[id] =
           error instanceof NotInstalled || error instanceof PluginFolderError

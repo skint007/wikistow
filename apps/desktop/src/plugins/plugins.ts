@@ -1,8 +1,9 @@
-import type {
-  InstalledPlugin,
-  PluginCandidate,
+import {
+  installedPlugin,
   PluginScope,
-  PluginsState,
+  type InstalledPlugin,
+  type PluginCandidate,
+  type PluginsState,
 } from '@wikistow/contracts';
 import { fileType } from '@wikistow/plugin-sdk/files';
 import { asksMore, Manifest, PageAccess, trustLevel } from '@wikistow/plugin-sdk/manifest';
@@ -19,11 +20,6 @@ import {
 } from './folder.ts';
 
 const Level = z.enum(['theme', 'script', 'app']);
-const Scope = z.strictObject({
-  spaceId: z.string().min(1).max(100),
-  folderId: z.string().min(1).max(100).nullable(),
-  access: z.enum(['read', 'write']),
-});
 
 const Stored = z.strictObject({
   manifest: Manifest,
@@ -40,7 +36,7 @@ type Stored = z.infer<typeof Stored>;
 const State = z.strictObject({
   plugins: z.array(Stored),
   /** Page access, by account and then plugin. */
-  access: z.record(z.string(), z.record(z.string(), z.array(Scope))),
+  access: z.record(z.string(), z.record(z.string(), z.array(PluginScope))),
 });
 type State = z.infer<typeof State>;
 
@@ -92,14 +88,14 @@ export function desktopPlugins(data: string) {
   const installed = (plugin: Stored) => join(root, plugin.manifest.id, plugin.hash ?? '');
   const keyOf = (plugin: Stored) => plugin.hash ?? `dev-${reloads.get(plugin.manifest.id) ?? 0}`;
 
-  const view = (plugin: Stored): InstalledPlugin => ({
-    manifest: plugin.manifest,
-    level: trustLevel(plugin.manifest),
-    key: keyOf(plugin),
-    development: plugin.development,
-    library: false,
-    enabled: plugin.enabled,
-  });
+  const view = (plugin: Stored): InstalledPlugin =>
+    installedPlugin({
+      manifest: plugin.manifest,
+      key: keyOf(plugin),
+      development: plugin.development,
+      library: false,
+      enabled: plugin.enabled,
+    });
 
   const candidate = (read: PluginFolder, development: string | null): PluginCandidate => {
     const before = find(read.manifest.id);
@@ -229,7 +225,7 @@ export function desktopPlugins(data: string) {
       const plugin = find(z.string().parse(pluginId));
       if (!plugin) throw new PluginFolderError('That plugin isn’t installed.');
       const mine = (state.access[account] ??= {});
-      mine[plugin.manifest.id] = z.array(Scope).max(100).parse(scopes);
+      mine[plugin.manifest.id] = z.array(PluginScope).max(100).parse(scopes);
       await save();
     },
 
