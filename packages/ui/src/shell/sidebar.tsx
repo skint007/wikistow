@@ -33,7 +33,7 @@ import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
-import { makeFolder, makePage, queueQuery } from '../data/offline-changes';
+import { pageWriter, queueQuery } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
@@ -853,7 +853,7 @@ function CreateDialog({
     setError(null);
     try {
       if (creating.kind === 'folder') {
-        const folderId = await makeFolder(ctx, {
+        const folderId = await pageWriter(ctx).newFolder({
           spaceId,
           parentId: creating.parentId,
           name: name.trim(),
@@ -862,7 +862,7 @@ function CreateDialog({
         });
         onCreatedFolder(folderId, creating.parentId);
       } else {
-        const pageId = await makePage(ctx, {
+        const pageId = await pageWriter(ctx).newPage({
           spaceId,
           parentId: creating.parentId,
           title: name.trim(),
