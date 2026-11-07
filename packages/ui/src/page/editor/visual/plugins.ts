@@ -70,7 +70,7 @@ export const reportEdits = (edited: () => void) =>
 
 /**
  * `markdown` as the editor's content, open at both ends so a paragraph's
- * text joins the one it lands in. With `whole`, anything more than one
+ * text joins the one it lands in. With `whole`, anything but a single
  * paragraph is closed instead: its blocks go in whole, splitting the text
  * they land in.
  */

@@ -106,9 +106,9 @@ export interface EditorCursor {
    * Put `markdown` in place of the selection, or at the cursor, as the
    * person's own edit: it can be undone, and saves as typing does. The
    * source editor inserts the text; the visual editor reads it into the
-   * page, as a paste does, except that more than one paragraph goes in as
-   * whole blocks, splitting the text at the cursor, so a block put after
-   * some text stays a block. It counts as a write, as `edit` does.
+   * page, as a paste does, except that anything but a single paragraph
+   * goes in as whole blocks, splitting the text at the cursor, so a block
+   * put after some text stays a block. It counts as a write, as `edit` does.
    */
   insert(markdown: string): Promise<void>;
 }
