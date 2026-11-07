@@ -176,6 +176,7 @@ const PLACES: { [R in keyof Regions]: (drawing: Drawing<R>) => ReactNode } = {
       <div
         role="group"
         aria-label="Plugins"
+        data-region="editor.toolbar"
         className="flex flex-wrap items-center gap-0.5 not-first:ml-1 not-first:border-l not-first:border-input not-first:pl-1.5"
       >
         {pageViews('editor.toolbar', items, shown, nameOf)}

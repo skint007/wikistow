@@ -82,6 +82,9 @@ const onHold = (reason: string) =>
 const SYNC_MS = 250;
 const SYNC_SHARE = 4;
 
+// Plugins' buttons in the visual editor's toolbar (`editor.toolbar`).
+const PLUGIN_BUTTONS = '[data-region="editor.toolbar"]';
+
 const check = (text: string) => checkFidelity(text).catch(() => NOT_LOADED);
 
 function preferMode(mode: EditorMode) {
@@ -621,7 +624,9 @@ export function PageEditor({
               key="visual"
               // As the pointer comes, before a click, so a key typed there isn't left out.
               onPointerEnter={syncNow}
-              onFocusCapture={() => {
+              onFocusCapture={(event) => {
+                // A plugin's button in its toolbar works where the person was.
+                if (event.target instanceof Element && event.target.closest(PLUGIN_BUTTONS)) return;
                 lastSide.current = 'visual';
                 syncNow();
                 refind();

@@ -89,7 +89,7 @@ export interface PageHandle {
   readonly edit: ((change: PageChange) => Promise<PageVersion>) | null;
   /**
    * In the draft view, the editor at the person's cursor. Null elsewhere,
-   * and missing (undefined) in an app older than it.
+   * and null or missing (undefined) in an app older than it.
    */
   readonly editor?: EditorCursor | null | undefined;
 }
@@ -460,6 +460,7 @@ export const DATA_REGIONS = {
   'page.header': "Plugins' views above the text, only while a plugin fills it",
   'page.footer': "Plugins' views below the text, only while a plugin fills it",
   'page.aside': "The contents and plugins' views beside the text, only while a plugin fills it",
+  'editor.toolbar': "Plugins' buttons in the editor's format toolbar, only while a plugin fills it",
   'app.view': "A plugin's page",
   settings: 'Settings',
   workshop: 'The plugin workshop',
