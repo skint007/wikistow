@@ -95,7 +95,7 @@ import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../p
 import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
 import { useAppPlugins } from '../../../../../../plugins/app-plugins';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
-import { OWN_PANELS, Place, type OpenPanel } from '../../../../../../plugins/places';
+import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
 import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
@@ -1032,6 +1032,15 @@ function PageBody({
                         }
                       : null
                   }
+                  // A plugin may draw the text in place of the app's reader.
+                  bodyIn={(own, body) => (
+                    <Replaceable
+                      name="page.reader"
+                      inputs={{ page, revision: revisionId, markdown: body }}
+                    >
+                      {own}
+                    </Replaceable>
+                  )}
                 />
               </ReadingChanges>
             </div>

@@ -4,10 +4,9 @@ import {
   type PageChange,
   type PageHandle,
   type PageRef,
-  type Pages,
   type PageVersion,
 } from '@wikistow/plugin-sdk';
-import type { Caller } from '../plugins/pages';
+import type { Caller, HostPages } from '../plugins/pages';
 import type { ShownPage } from '../plugins/runtime';
 
 /** The space the workshop's sample pages are in, which no real page is. */
@@ -179,7 +178,7 @@ export function sampleStore() {
      * only, within the access its manifest asks for. Folders and moves
      * aren't in a workshop.
      */
-    pages(caller: Caller): Pages {
+    pages(caller: Caller): HostPages {
       const allow = (needs: 'read' | 'write') => {
         if (!caller.live()) throw unloaded();
         if (caller.access === 'none' || (needs === 'write' && caller.access !== 'write')) {
@@ -208,6 +207,17 @@ export function sampleStore() {
             spaceId: SAMPLE_SPACE,
             pageId: sample.pageId,
             title: sample.title,
+          }));
+        },
+        async tree(spaceId) {
+          allow('read');
+          if (spaceId !== SAMPLE_SPACE) throw elsewhere();
+          return samples.map((sample) => ({
+            kind: 'page',
+            spaceId: SAMPLE_SPACE,
+            pageId: sample.pageId,
+            title: sample.title,
+            parentId: null,
           }));
         },
         async search(text, options) {

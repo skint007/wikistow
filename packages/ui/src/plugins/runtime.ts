@@ -15,7 +15,6 @@ import {
   type InlineProps,
   type PageHandle,
   type PageRef,
-  type Pages,
   type PageVersion,
   type PageViewProps,
   type Regions,
@@ -26,7 +25,7 @@ import {
 import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
-import { pluginError, writeLimit, type Caller } from './pages';
+import { pluginError, writeLimit, type Caller, type HostPages } from './pages';
 import {
   createRegistry,
   perRegion,
@@ -36,6 +35,7 @@ import {
   type Registry,
 } from './registry';
 import type { PluginLocation } from './location';
+import { MarkdownPage, type MarkdownDrawing } from './markdown-drawings';
 import { inFrame } from './script-frame';
 import { ScriptWorker, type LaunchScript } from './script-worker';
 import { refOf, type AnyPluginStore, type PluginRef } from './store';
@@ -132,7 +132,7 @@ type Active = {
   controller: AbortController;
   caller: Caller;
   /** Its `host.pages`. */
-  pages: Pages;
+  pages: HostPages;
   /** What its app code and its script registered. */
   registry: Registry;
   app: AppPlugin | null;
@@ -153,9 +153,13 @@ type Loaded = {
 
 /** What a replacing view's plugin reaches, for what the region gives it. */
 export type PluginPages = {
-  pages: Pages;
+  pages: HostPages;
+  /** The handle a view gets for the page shown, as a page's places give it. */
+  handle: (shown: ShownPage) => PageHandle;
   /** The spaces it has page access in, as `host.app.spaces.list()` gives them. */
   spaces: () => Promise<SpaceSummary[]>;
+  /** Whether its page access covers the whole of a space, not only some folders there. */
+  readsAll: (spaceId: string) => boolean;
 };
 
 const fileUrl = ({ manifest, key }: InstalledPlugin, file: string) =>
@@ -234,7 +238,7 @@ export const servedCode: PluginCode = {
 export type PluginReach = {
   session: PluginSession;
   /** The page operations a plugin gets as `host.pages`. */
-  pages(caller: Caller): Pages;
+  pages(caller: Caller): HostPages;
   /** The handle a command or view gets for the page shown. */
   handle(caller: Caller, shown: ShownPage): PageHandle;
   /**
@@ -250,6 +254,11 @@ export type PluginReach = {
   location: PluginLocation;
   /** The spaces the person can open where `caller` has page access, for `host.app.spaces`. */
   spaces(caller: Caller): Promise<SpaceSummary[]>;
+  /**
+   * Draw Markdown into a plugin's element with the app's reader, for
+   * `host.app.renderMarkdown`, where its `pages` can read the page; what undoes it.
+   */
+  renderMarkdown(drawing: MarkdownDrawing): Disposer;
   /** Where plugins' code comes from: `servedCode` unless given. */
   code?: PluginCode;
 };
@@ -512,6 +521,24 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
             }
           },
         },
+        renderMarkdown(element, markdown, { page }) {
+          if (!live()) throw new PluginError('unloaded', 'The plugin was turned off');
+          const read = MarkdownPage.safeParse(page);
+          if (!(element instanceof HTMLElement) || typeof markdown !== 'string' || !read.success)
+            throw new PluginError('invalid', 'Invalid arguments or ID');
+          const undo = reach.renderMarkdown({
+            element,
+            markdown,
+            page: read.data,
+            pages: active.pages,
+          });
+          // Undone as the plugin unloads too, as what it registered is.
+          active.controller.signal.addEventListener('abort', undo, { once: true });
+          return () => {
+            active.controller.signal.removeEventListener('abort', undo);
+            undo();
+          };
+        },
       },
       blocks: {
         register(block) {
@@ -555,7 +582,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       },
     };
     if (manifest.script) {
-      active.worker = new ScriptWorker(code.script(plugin), host.pages, {
+      active.worker = new ScriptWorker(code.script(plugin), active.pages, {
         command: (commandId, title, runCommand) =>
           whileLive(() =>
             registry.addCommand({ id: commandId, title, part: 'script', run: runCommand }),
@@ -782,7 +809,16 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     pagesOf(pluginId: string): PluginPages | null {
       const active = loaded.get(pluginId)?.active;
       if (!active) return null;
-      return { pages: active.pages, spaces: () => reach.spaces(active.caller) };
+      return {
+        pages: active.pages,
+        handle: (shown) => reach.handle(active.caller, shown),
+        spaces: () => reach.spaces(active.caller),
+        readsAll: (spaceId) =>
+          active.caller.access !== 'none' &&
+          active.caller
+            .scopes()
+            .some((scope) => scope.spaceId === spaceId && scope.folderId === null),
+      };
     },
     /** Run a plugin's command on the page shown. */
     async runCommand(pluginId: string, commandId: string, shown: ShownPage) {

@@ -15,6 +15,7 @@ import { desktop } from '../desktop';
 import { pageBlockProperties } from '../plugins/block-properties';
 import { vaultSession } from '../plugins/app-plugins';
 import { createLocation } from '../plugins/location';
+import { createMarkdownDrawings } from '../plugins/markdown-drawings';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
 import type { PluginStore } from '../plugins/store';
 import { tabSafeMode } from '../plugins/safe-mode';
@@ -149,6 +150,8 @@ export class Workshop {
    * a sample page or one of the plugin's own pages there and nothing else.
    */
   readonly location = createLocation();
+  /** What its plugin draws with the app's reader, which the preview draws (`RenderedMarkdown`). */
+  readonly markdown = createMarkdownDrawings();
   readonly preview: PluginRuntime;
   readonly #bundler = new Bundler();
   #state: WorkshopState = {
@@ -193,7 +196,14 @@ export class Workshop {
         const running = this.#state.running?.plugin;
         if (!running || this.#holding) return none;
         const manifest = this.#state.appCode ? running.manifest : withoutUi(running.manifest);
-        return { ...none, plugins: [{ ...running, manifest }] };
+        // The samples' whole space, to the manifest's access.
+        const access =
+          manifest.access === 'none'
+            ? {}
+            : {
+                [manifest.id]: [{ spaceId: SAMPLE_SPACE, folderId: null, access: manifest.access }],
+              };
+        return { ...none, plugins: [{ ...running, manifest }], access };
       },
       approve: (version) => this.load(version),
       enable: async (_plugin, on) => {
@@ -212,6 +222,7 @@ export class Workshop {
       // Nothing it changes is shown outside the preview.
       changed: () => {},
       location: this.location,
+      renderMarkdown: this.markdown.draw,
       // Its one space, the samples', open to the manifest's access.
       spaces: async (caller) =>
         caller.access === 'none'

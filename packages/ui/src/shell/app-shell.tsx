@@ -18,6 +18,8 @@ import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
 import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
+import { useAppPlugins } from '../plugins/app-plugins';
+import { appReader, RenderedMarkdown } from '../plugins/rendered-markdown';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
 import { openSearch, requirementsHere } from '../commands/ui-commands';
@@ -60,6 +62,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Another tab signing out deletes what's kept: this one stops keeping first.
   useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
+  // What plugins draw with the app's reader, inside the app's own providers.
+  const plugins = useAppPlugins();
+  const [reader] = useState(() => appReader(plugins.location));
   // The avatar's update mark is in the drawer, so the button opening it carries it too.
   const { data: update } = useQuery(desktopUpdateQuery);
   // The session search was opened in: unlocking again starts a new one, closed.
@@ -182,6 +187,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             query={searchFor}
             onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
           />
+        )}
+        {vault.status === 'unlocked' && (
+          <RenderedMarkdown drawings={plugins.markdown} Reader={reader} />
         )}
         <SafeModeBanner />
         <RestoreNotice />

@@ -419,7 +419,7 @@ At `/workshop`, in the browser, on phones and in the desktop app, reached by **B
 - **Problems.** The plugin's runtime problems and errors from its code, in a destructive alert.
 - **Theme across the app.** For a version with themes: **Not shown** and one button per theme, pressed while shown, with a note that nothing is chosen until it is installed and picked in Settings.
 - **Sample pages.** A button per sample and **New sample**, then the sample as a page card: a toolbar with "Sample page" or "A copy of "Title"", **Editor** and **Reader**, the plugin's toolbar views and its **Plugins** menu; its header views, title, text (the visual editor or the reader), footer views, and its asides beside it.
-- **Its other places.** Its rail items as a line of text, and a button per plugin page and settings section, which draws it below.
+- **Its other places.** Its rail items as a line of text, and a button per plugin page and settings section, and for each part of the app it replaces outside a page (the rail, the samples' page tree, the space's home), which draws it below. A replaced page's text shows in the sample's Reader.
 - **Versions.** Newest first: **vN**, name and version or **Didn't build**, **In the preview**, the SHA-256, and **Preview** for one that built, and on the desktop **Export…**.
 - **Draft files.** A button per file, showing its text below.
 

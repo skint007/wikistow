@@ -3,7 +3,6 @@ import {
   type Disposer,
   type PageHandle,
   type PageRef,
-  type Pages,
   type PluginEvent,
   type PluginEvents,
 } from '@wikistow/plugin-sdk';
@@ -15,7 +14,7 @@ import {
   type Method,
   type OutputResult,
 } from '@wikistow/plugin-sdk/protocol';
-import { pluginError } from './pages';
+import { pluginError, type HostPages } from './pages';
 import type { EventOf } from './registry';
 
 /** How long a script's command or event handler may take, from asking to its answer, and its activation. */
@@ -123,12 +122,13 @@ export class ScriptWorker {
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(launch: LaunchScript, pages: Pages, registry: ScriptRegistry) {
+  constructor(launch: LaunchScript, pages: HostPages, registry: ScriptRegistry) {
     this.#launch = launch;
     this.#registry = registry;
     this.#calls = {
       'pages.read': (args) => pages.read(...METHODS['pages.read'].parse(args)),
       'pages.list': (args) => pages.list(...METHODS['pages.list'].parse(args)),
+      'pages.tree': (args) => pages.tree(...METHODS['pages.tree'].parse(args)),
       'pages.search': (args) => pages.search(...METHODS['pages.search'].parse(args)),
       'pages.create': (args) => pages.create(...METHODS['pages.create'].parse(args)),
       'pages.createFolder': (args) =>

@@ -37,6 +37,13 @@ export type FolderEntry =
   | { kind: 'folder'; spaceId: string; folderId: string; name: string | null }
   | { kind: 'page'; spaceId: string; pageId: string; title: string | null };
 
+/**
+ * A folder or page in a space's tree, with the folder it is in: null at
+ * the top of the space, or a folder outside the plugin's access, which
+ * isn't listed.
+ */
+export type TreeEntry = FolderEntry & { parentId: string | null };
+
 export type SearchResult = PageRef & { title: string; draft: boolean };
 
 /** A change to a page: what isn't named stays as it is. */
@@ -51,6 +58,15 @@ export interface Pages {
   /** The draft where the person edits the page, else its published version. */
   read(page: PageRef): Promise<PageVersion>;
   list(folder: FolderRef): Promise<FolderEntry[]>;
+  /**
+   * Every folder and page of a space the plugin can read, in one call, as
+   * the app's own tree shows them: with what was made on this device and
+   * not sent yet, and offline, what this device keeps. Folders come
+   * first, each list in no set order. Empty where it can read nothing
+   * there. Missing (undefined) in an app older than it; in a script it is
+   * always there, and such an app stops the script that calls it.
+   */
+  tree?(spaceId: string): Promise<TreeEntry[]>;
   /**
    * Pages within the plugin's access whose text matches, best first. Words
    * may come with filters on properties, as in the app's search: `tag:soup`,
@@ -184,6 +200,20 @@ export interface AppAccess {
     /** The spaces the plugin has any page access in, as the app lists them. */
     list(): Promise<SpaceSummary[]>;
   };
+  /**
+   * Draw `markdown` into `element` as the app's reader draws a page's
+   * text: wikilinks, blocks, math, diagrams and the rest, with `page`'s
+   * files and links. A `PageVersion` names the version whose files it
+   * shows; a bare `PageRef`, the version shown of that page, else its
+   * latest publication, else its draft. Frontmatter shows as the page's
+   * properties. Where the plugin can't read `page`, a note says so
+   * instead. Returns what undoes it.
+   */
+  renderMarkdown(
+    element: HTMLElement,
+    markdown: string,
+    options: { page: PageRef | PageVersion },
+  ): Disposer;
 }
 
 /** App code's events: every plugin's, and where the person is. */
@@ -237,6 +267,24 @@ export type SettingsViewProps = Record<string, never>;
 
 /** What a titlebar button is given: nothing yet. */
 export type TitlebarViewProps = Record<string, never>;
+
+/** What a view drawing the rail (`rail`) is given: nothing; `host.app` lists spaces and navigates. */
+export type RailViewProps = Record<string, never>;
+
+/**
+ * What a view drawing a space's page tree (`space.sidebar`) is given: the
+ * space, and what `host.pages.tree` gives for it. It is drawn again when
+ * the tree changes.
+ */
+export type SpaceSidebarProps = { spaceId: string; tree: TreeEntry[] };
+
+/**
+ * What a view drawing the text of a page as read (`page.reader`) is
+ * given: the page shown, and its text as shown, after its frontmatter,
+ * with what was changed while reading it, such as a task ticked. It is
+ * drawn again when they change.
+ */
+export type PageReaderProps = { page: PageHandle; markdown: string };
 
 /** What a view drawing a space's home (`space.home`) is given: the space. */
 export type SpaceHomeProps = { spaceId: string };
@@ -455,6 +503,8 @@ export type ScriptBlock<Fields extends Record<string, BlockField>> = {
 
 /** What a script gets: `Host`, and blocks it fills in. */
 export interface ScriptHost extends Host {
+  /** Every page operation: the SDK in the script sends each, `tree` too, whatever the app knows. */
+  readonly pages: Required<Pages>;
   readonly blocks: {
     register<const Fields extends Record<string, BlockField>>(block: ScriptBlock<Fields>): Disposer;
   };
@@ -516,10 +566,23 @@ export type Regions = {
  * In safe mode every region is the app's own.
  */
 export type Replacements = {
+  /** The rail of spaces and links, at every size. Safe mode is the way back to Settings. */
+  rail: { id: string; view: View<RailViewProps> };
+  /**
+   * A space's page tree and its filter, at every size (on a phone, in the
+   * navigation drawer), in a space the plugin can read all of. The space's
+   * name and menu and New page above it stay the app's.
+   */
+  'space.sidebar': { id: string; view: View<SpaceSidebarProps> };
   /** What a space shows with no page open. */
   'space.home': { id: string; view: View<SpaceHomeProps> };
   /** A folder's page. */
   'folder.view': { id: string; view: View<FolderViewProps> };
+  /**
+   * The text of a page as read, its published version: the page's card,
+   * title, cover, toolbar and properties stay the app's.
+   */
+  'page.reader': { id: string; view: View<PageReaderProps> };
 };
 
 /** Every region: one plugins add to (`Regions`), or one they can replace (`Replacements`). */
@@ -544,9 +607,17 @@ export type RegionInfo = {
  */
 export const REGIONS = {
   rail: {
-    policy: 'add',
+    policy: 'replace',
     registers: '{ id, title, icon?, opens }',
-    where: "A rail item opening the plugin's `app.view` named `opens`",
+    where:
+      "A rail item opening the plugin's `app.view` named `opens`; replaced, the whole rail, its view getting `{}`",
+    phone: 'In the navigation drawer',
+  },
+  'space.sidebar': {
+    policy: 'replace',
+    registers: null,
+    where:
+      "A space's page tree, under its name and New page; its view gets `{ spaceId, tree }`, what `host.pages.tree` gives",
     phone: 'In the navigation drawer',
   },
   'app.view': {
@@ -565,6 +636,13 @@ export const REGIONS = {
     policy: 'replace',
     registers: null,
     where: "A folder's page; its view gets `{ folder, entries }`, what `host.pages.list` gives",
+    phone: 'The same',
+  },
+  'page.reader': {
+    policy: 'replace',
+    registers: null,
+    where:
+      'The text of a page as read, under its title and properties; its view gets `{ page, markdown }`',
     phone: 'The same',
   },
   'page.toolbar': {

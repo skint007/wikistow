@@ -46,6 +46,7 @@ import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
 import { useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
+import { Replaceable } from '../plugins/places';
 import { useClient } from '../vault/store';
 import { useExpandedFolders } from './expanded-folders';
 import { ExportDialog, type Exporting } from './export-dialog';
@@ -244,9 +245,14 @@ type Dragging = {
 // Set, empty, on a drag from the tree, since Firefox starts no drag without data.
 const DRAG_TYPE = 'application/x-wikistow-node';
 
+/**
+ * A space's sidebar, at every size, the phone's drawer too: its name and
+ * menu, New page, and its page tree, which a plugin can draw instead
+ * (`space.sidebar`), given the tree again as it changes.
+ */
 export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?: () => void }) {
   const ctx = useClient();
-  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const { data: tree, dataUpdatedAt } = useQuery(treeQuery(ctx, spaceId));
   const { data: links } = useQuery(publicLinksQuery(ctx, spaceId));
   const publicPages = useMemo(() => new Set(links?.map((link) => link.pageId)), [links]);
   // Offline, and pages and folders with a change made offline not sent yet (ADR 0009, decisions 7 and 8).
@@ -480,210 +486,227 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
           </Button>
         </div>
       )}
-      <Input
-        aria-label="Filter pages"
-        placeholder="Filter pages"
-        value={filter}
-        onChange={(event) => setFilter(event.target.value)}
-        className="rounded-row border-0 bg-muted"
-      />
-      <ul
-        role="tree"
-        aria-label={`Pages in ${spaceName === null ? 'folders shared with you' : plainText(spaceName)}`}
-        onKeyDown={onKeyDown}
-        // Between rows, the place last pointed at holds.
-        onDragEnter={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
-        onDragOver={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
-        onDrop={(event) => dragging?.over && drop(event, dragging.over.parentId)}
-        onDragLeave={(event) => {
-          const to = event.relatedTarget;
-          if (!(to instanceof Node) || !event.currentTarget.contains(to)) pointAt(null);
-        }}
-        onDragEnd={() => setDragging(null)}
-        className={cn(
-          // `relative` keeps the rows' sr-only text inside the scroller: placed
-          // by the page instead, it stretched the window to the hidden rows.
-          'relative -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
-          dragging?.over?.parentId === null && 'bg-primary-soft/60 ring-2 ring-primary ring-inset',
-        )}
-      >
-        {rows.map((row) => {
-          const indent = {
-            paddingLeft: `${(row.level - 1) * 20 + (row.kind === 'page' ? 18 : 4)}px`,
-          };
-          const common = {
-            role: 'treeitem',
-            'aria-level': row.level,
-            tabIndex: row.id === focusId ? 0 : -1,
-            ref: (element: HTMLLIElement | null) => {
-              if (element) itemRefs.current.set(row.id, element);
-              else itemRefs.current.delete(row.id);
-            },
-            onFocus: () => setFocused(row.id),
-            onDragEnter: (event: DragEvent) => dragOver(event, dropTarget(row)),
-            onDragOver: (event: DragEvent) => dragOver(event, dropTarget(row)),
-            onDrop: (event: DragEvent) => drop(event, dropTarget(row)),
-          } as const;
-          if (row.kind === 'folder') {
-            // One list for both menus, so they can't differ.
-            const actions = folderActions({
-              onOpen: () => openFolder(row.id),
-              editing: canEditAt(row.id)
-                ? {
-                    onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
-                    onNewFromTemplate: () => setFromTemplate(row.id),
-                    onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
-                    onRename: () => setRenaming(row.id),
-                    onRestyle: () => setRestyling(row.id),
-                    onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
-                    onCopy: () =>
-                      setMoving({ id: row.id, kind: 'folder', name: row.name, action: 'copy' }),
-                    onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
-                    onDelete: sharer ? () => setDeleting(row.id) : undefined,
-                  }
-                : null,
-              onExport: () => setExporting({ folderId: row.id, name: row.name }),
-              onImport: canImportAt(row.id)
-                ? () => setImporting({ folderId: row.id, name: row.name })
-                : undefined,
-            });
-            const shown = params.folderId === row.id;
-            return (
-              <RowMenu
-                key={row.id}
-                items={<FolderMenuItems actions={actions} waiting={availability.waiting(row.id)} />}
-              >
-                <li
-                  {...common}
-                  aria-expanded={row.expanded}
-                  aria-selected={shown}
-                  onClick={() => openFolder(row.id)}
-                  draggable={canEditAt(row.id) && availability.of(row.id).can('drag')}
-                  onDragStart={(event) =>
-                    startDrag(event, { id: row.id, kind: 'folder', name: row.name })
-                  }
-                  className={cn(
-                    'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
-                    shown && 'bg-primary-soft text-primary-ink',
-                    dragging?.over?.parentId === row.id &&
-                      'bg-primary-soft ring-2 ring-primary ring-inset',
-                  )}
-                  style={{ ...indent, paddingLeft: `${(row.level - 1) * 20}px` }}
-                >
-                  {/* Opens or closes the folder in the tree only, for a pointer.
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Replaceable name="space.sidebar" inputs={{ spaceId }} stamp={dataUpdatedAt}>
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <Input
+              aria-label="Filter pages"
+              placeholder="Filter pages"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              className="rounded-row border-0 bg-muted"
+            />
+            <ul
+              role="tree"
+              aria-label={`Pages in ${spaceName === null ? 'folders shared with you' : plainText(spaceName)}`}
+              onKeyDown={onKeyDown}
+              // Between rows, the place last pointed at holds.
+              onDragEnter={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
+              onDragOver={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
+              onDrop={(event) => dragging?.over && drop(event, dragging.over.parentId)}
+              onDragLeave={(event) => {
+                const to = event.relatedTarget;
+                if (!(to instanceof Node) || !event.currentTarget.contains(to)) pointAt(null);
+              }}
+              onDragEnd={() => setDragging(null)}
+              className={cn(
+                // `relative` keeps the rows' sr-only text inside the scroller: placed
+                // by the page instead, it stretched the window to the hidden rows.
+                'relative -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
+                dragging?.over?.parentId === null &&
+                  'bg-primary-soft/60 ring-2 ring-primary ring-inset',
+              )}
+            >
+              {rows.map((row) => {
+                const indent = {
+                  paddingLeft: `${(row.level - 1) * 20 + (row.kind === 'page' ? 18 : 4)}px`,
+                };
+                const common = {
+                  role: 'treeitem',
+                  'aria-level': row.level,
+                  tabIndex: row.id === focusId ? 0 : -1,
+                  ref: (element: HTMLLIElement | null) => {
+                    if (element) itemRefs.current.set(row.id, element);
+                    else itemRefs.current.delete(row.id);
+                  },
+                  onFocus: () => setFocused(row.id),
+                  onDragEnter: (event: DragEvent) => dragOver(event, dropTarget(row)),
+                  onDragOver: (event: DragEvent) => dragOver(event, dropTarget(row)),
+                  onDrop: (event: DragEvent) => drop(event, dropTarget(row)),
+                } as const;
+                if (row.kind === 'folder') {
+                  // One list for both menus, so they can't differ.
+                  const actions = folderActions({
+                    onOpen: () => openFolder(row.id),
+                    editing: canEditAt(row.id)
+                      ? {
+                          onNewPage: () => setCreating({ kind: 'page', parentId: row.id }),
+                          onNewFromTemplate: () => setFromTemplate(row.id),
+                          onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
+                          onRename: () => setRenaming(row.id),
+                          onRestyle: () => setRestyling(row.id),
+                          onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
+                          onCopy: () =>
+                            setMoving({
+                              id: row.id,
+                              kind: 'folder',
+                              name: row.name,
+                              action: 'copy',
+                            }),
+                          onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
+                          onDelete: sharer ? () => setDeleting(row.id) : undefined,
+                        }
+                      : null,
+                    onExport: () => setExporting({ folderId: row.id, name: row.name }),
+                    onImport: canImportAt(row.id)
+                      ? () => setImporting({ folderId: row.id, name: row.name })
+                      : undefined,
+                  });
+                  const shown = params.folderId === row.id;
+                  return (
+                    <RowMenu
+                      key={row.id}
+                      items={
+                        <FolderMenuItems actions={actions} waiting={availability.waiting(row.id)} />
+                      }
+                    >
+                      <li
+                        {...common}
+                        aria-expanded={row.expanded}
+                        aria-selected={shown}
+                        onClick={() => openFolder(row.id)}
+                        draggable={canEditAt(row.id) && availability.of(row.id).can('drag')}
+                        onDragStart={(event) =>
+                          startDrag(event, { id: row.id, kind: 'folder', name: row.name })
+                        }
+                        className={cn(
+                          'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
+                          shown && 'bg-primary-soft text-primary-ink',
+                          dragging?.over?.parentId === row.id &&
+                            'bg-primary-soft ring-2 ring-primary ring-inset',
+                        )}
+                        style={{ ...indent, paddingLeft: `${(row.level - 1) * 20}px` }}
+                      >
+                        {/* Opens or closes the folder in the tree only, for a pointer.
                       Hidden from assistive technology and not a tab stop: the
                       row's arrow keys do the same, and its aria-expanded says it. */}
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    aria-hidden
-                    // The focus stays on the row, whose keys move through the tree.
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggle(row.id);
-                      focusRow(row);
-                    }}
-                    className="-mr-1.5 grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground hover:tint hover:text-foreground active:tint-strong pointer-coarse:size-8"
-                  >
-                    <ChevronRight
-                      aria-hidden
-                      className={cn('size-3.5 transition-transform', row.expanded && 'rotate-90')}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                  <FolderTile
-                    metadata={row.metadata}
-                    emoji={row.emoji}
-                    tint={row.tint}
-                    className="size-7 text-sm"
-                  />
-                  <span className="min-w-0 flex-1 truncate font-extrabold">
-                    <Name>{row.name}</Name>
-                  </span>
-                  {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
-                  <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
-                    {row.count}
-                  </span>
-                  <FolderMenu
-                    name={row.name}
-                    actions={actions}
-                    waiting={availability.waiting(row.id)}
-                  />
-                </li>
-              </RowMenu>
-            );
-          }
-          const selected = params.pageId === row.id;
-          return (
-            <RowMenu
-              key={row.id}
-              items={
-                <PageMenuItems
-                  pageId={row.id}
-                  sharer={sharer}
-                  onOpen={() => openPage(row.id)}
-                  onAction={(action, info) =>
-                    action === 'move' || action === 'copy'
-                      ? setMoving({ id: row.id, kind: 'page', name: row.title, action })
-                      : setPageDialog({
-                          action,
-                          pageId: row.id,
-                          title: row.title,
-                          info,
-                          open: true,
-                        })
-                  }
-                />
-              }
-            >
-              <li
-                {...common}
-                aria-selected={selected}
-                onClick={() => openPage(row.id)}
-                draggable={canEditAt(row.parentId) && availability.of(row.id).can('drag')}
-                onDragStart={(event) =>
-                  startDrag(event, { id: row.id, kind: 'page', name: row.title })
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          aria-hidden
+                          // The focus stays on the row, whose keys move through the tree.
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggle(row.id);
+                            focusRow(row);
+                          }}
+                          className="-mr-1.5 grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground hover:tint hover:text-foreground active:tint-strong pointer-coarse:size-8"
+                        >
+                          <ChevronRight
+                            aria-hidden
+                            className={cn(
+                              'size-3.5 transition-transform',
+                              row.expanded && 'rotate-90',
+                            )}
+                            strokeWidth={1.75}
+                          />
+                        </button>
+                        <FolderTile
+                          metadata={row.metadata}
+                          emoji={row.emoji}
+                          tint={row.tint}
+                          className="size-7 text-sm"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-extrabold">
+                          <Name>{row.name}</Name>
+                        </span>
+                        {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
+                        <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
+                          {row.count}
+                        </span>
+                        <FolderMenu
+                          name={row.name}
+                          actions={actions}
+                          waiting={availability.waiting(row.id)}
+                        />
+                      </li>
+                    </RowMenu>
+                  );
                 }
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
-                  selected && 'bg-primary-soft font-bold text-primary-ink',
-                )}
-                style={indent}
-              >
-                <PageRowIcon
-                  page={{ spaceId, pageId: row.id }}
-                  emoji={row.emoji}
-                  icon={row.icon}
-                  symbol={row.symbol}
-                />
-                <span className="min-w-0 flex-1 truncate">
-                  <Name>{row.title}</Name>
-                </span>
-                {publicPages.has(row.id) && <PublicMarker />}
-                {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
-                {canEditAt(row.parentId) && row.unpublished && (
-                  <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
-                    <span className="sr-only">Unpublished changes</span>
-                  </span>
-                )}
-              </li>
-            </RowMenu>
-          );
-        })}
-        {rows.length === 0 && (
-          <li className="px-2 py-4 text-sm text-muted-foreground">
-            {filter ? 'No pages match.' : 'No pages yet.'}
-          </li>
-        )}
-        <li
-          aria-hidden
-          className="min-h-10 flex-1"
-          onDragEnter={(event) => dragOver(event, null)}
-          onDragOver={(event) => dragOver(event, null)}
-          onDrop={(event) => drop(event, null)}
-        />
-      </ul>
+                const selected = params.pageId === row.id;
+                return (
+                  <RowMenu
+                    key={row.id}
+                    items={
+                      <PageMenuItems
+                        pageId={row.id}
+                        sharer={sharer}
+                        onOpen={() => openPage(row.id)}
+                        onAction={(action, info) =>
+                          action === 'move' || action === 'copy'
+                            ? setMoving({ id: row.id, kind: 'page', name: row.title, action })
+                            : setPageDialog({
+                                action,
+                                pageId: row.id,
+                                title: row.title,
+                                info,
+                                open: true,
+                              })
+                        }
+                      />
+                    }
+                  >
+                    <li
+                      {...common}
+                      aria-selected={selected}
+                      onClick={() => openPage(row.id)}
+                      draggable={canEditAt(row.parentId) && availability.of(row.id).can('drag')}
+                      onDragStart={(event) =>
+                        startDrag(event, { id: row.id, kind: 'page', name: row.title })
+                      }
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
+                        selected && 'bg-primary-soft font-bold text-primary-ink',
+                      )}
+                      style={indent}
+                    >
+                      <PageRowIcon
+                        page={{ spaceId, pageId: row.id }}
+                        emoji={row.emoji}
+                        icon={row.icon}
+                        symbol={row.symbol}
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        <Name>{row.title}</Name>
+                      </span>
+                      {publicPages.has(row.id) && <PublicMarker />}
+                      {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
+                      {canEditAt(row.parentId) && row.unpublished && (
+                        <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
+                          <span className="sr-only">Unpublished changes</span>
+                        </span>
+                      )}
+                    </li>
+                  </RowMenu>
+                );
+              })}
+              {rows.length === 0 && (
+                <li className="px-2 py-4 text-sm text-muted-foreground">
+                  {filter ? 'No pages match.' : 'No pages yet.'}
+                </li>
+              )}
+              <li
+                aria-hidden
+                className="min-h-10 flex-1"
+                onDragEnter={(event) => dragOver(event, null)}
+                onDragOver={(event) => dragOver(event, null)}
+                onDrop={(event) => drop(event, null)}
+              />
+            </ul>
+          </div>
+        </Replaceable>
+      </div>
       {tree.agentActivity && (
         <AgentActivityCard
           ctx={ctx}

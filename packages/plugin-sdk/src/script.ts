@@ -13,6 +13,7 @@ import {
   type ScriptBlock,
   type ScriptHost,
   type SearchResult,
+  type TreeEntry,
   PLUGIN_API,
 } from './host.ts';
 import type { HostMessage, Method, OutputResult, WorkerMessage } from './protocol.ts';
@@ -63,6 +64,7 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
     pages: {
       read: (page) => call<PageVersion>('pages.read', [page]),
       list: (folder) => call<FolderEntry[]>('pages.list', [folder]),
+      tree: (spaceId) => call<TreeEntry[]>('pages.tree', [spaceId]),
       search: (text, options) =>
         call<SearchResult[]>('pages.search', options ? [text, options] : [text]),
       create: (folder, page) => call<PageVersion>('pages.create', [folder, page]),
