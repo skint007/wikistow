@@ -23,6 +23,7 @@ const Change = { title: Title.optional(), markdown: Markdown.optional(), data: J
 export const METHODS = {
   'pages.read': z.tuple([PageRef]),
   'pages.list': z.tuple([FolderRef]),
+  'pages.tree': z.tuple([Id]),
   'pages.search': z.tuple([
     z.string().max(1000),
     z.object({ limit: z.number().int().min(1).max(200).optional() }).optional(),

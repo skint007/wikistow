@@ -15,7 +15,6 @@ import {
   type InlineProps,
   type PageHandle,
   type PageRef,
-  type Pages,
   type PageVersion,
   type PageViewProps,
   type Regions,
@@ -26,7 +25,7 @@ import {
 import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
-import { pluginError, writeLimit, type Caller } from './pages';
+import { pluginError, writeLimit, type Caller, type HostPages } from './pages';
 import {
   createRegistry,
   perRegion,
@@ -132,7 +131,7 @@ type Active = {
   controller: AbortController;
   caller: Caller;
   /** Its `host.pages`. */
-  pages: Pages;
+  pages: HostPages;
   /** What its app code and its script registered. */
   registry: Registry;
   app: AppPlugin | null;
@@ -153,7 +152,7 @@ type Loaded = {
 
 /** What a replacing view's plugin reaches, for what the region gives it. */
 export type PluginPages = {
-  pages: Pages;
+  pages: HostPages;
   /** The spaces it has page access in, as `host.app.spaces.list()` gives them. */
   spaces: () => Promise<SpaceSummary[]>;
 };
@@ -234,7 +233,7 @@ export const servedCode: PluginCode = {
 export type PluginReach = {
   session: PluginSession;
   /** The page operations a plugin gets as `host.pages`. */
-  pages(caller: Caller): Pages;
+  pages(caller: Caller): HostPages;
   /** The handle a command or view gets for the page shown. */
   handle(caller: Caller, shown: ShownPage): PageHandle;
   /**
@@ -555,7 +554,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       },
     };
     if (manifest.script) {
-      active.worker = new ScriptWorker(code.script(plugin), host.pages, {
+      active.worker = new ScriptWorker(code.script(plugin), active.pages, {
         command: (commandId, title, runCommand) =>
           whileLive(() =>
             registry.addCommand({ id: commandId, title, part: 'script', run: runCommand }),

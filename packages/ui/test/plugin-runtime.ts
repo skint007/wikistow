@@ -1,11 +1,5 @@
 import { installedPlugin } from '@wikistow/contracts';
-import {
-  definePlugin,
-  PluginError,
-  type AppHost,
-  type PageHandle,
-  type Pages,
-} from '@wikistow/plugin-sdk';
+import { definePlugin, PluginError, type AppHost, type PageHandle } from '@wikistow/plugin-sdk';
 import { Manifest } from '@wikistow/plugin-sdk/manifest';
 import type { HostMessage, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
 import {
@@ -15,6 +9,7 @@ import {
   type ShownPage,
 } from '../src/plugins/runtime.ts';
 import { createLocation } from '../src/plugins/location.ts';
+import type { HostPages } from '../src/plugins/pages.ts';
 import type { LaunchScript } from '../src/plugins/script-worker.ts';
 import { memoryStore } from '../src/plugins/store.ts';
 
@@ -59,9 +54,10 @@ export type TestSession = ReturnType<typeof testSession>;
 const nowhere = () => Promise.reject(new PluginError('forbidden', 'No pages in this test'));
 
 /** Page operations a plugin can't use. */
-export const noPages: Pages = {
+export const noPages: HostPages = {
   read: nowhere,
   list: nowhere,
+  tree: nowhere,
   search: nowhere,
   create: nowhere,
   createFolder: nowhere,

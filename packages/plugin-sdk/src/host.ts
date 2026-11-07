@@ -37,6 +37,13 @@ export type FolderEntry =
   | { kind: 'folder'; spaceId: string; folderId: string; name: string | null }
   | { kind: 'page'; spaceId: string; pageId: string; title: string | null };
 
+/**
+ * A folder or page in a space's tree, with the folder it is in: null at
+ * the top of the space, or a folder outside the plugin's access, which
+ * isn't listed.
+ */
+export type TreeEntry = FolderEntry & { parentId: string | null };
+
 export type SearchResult = PageRef & { title: string; draft: boolean };
 
 /** A change to a page: what isn't named stays as it is. */
@@ -51,6 +58,15 @@ export interface Pages {
   /** The draft where the person edits the page, else its published version. */
   read(page: PageRef): Promise<PageVersion>;
   list(folder: FolderRef): Promise<FolderEntry[]>;
+  /**
+   * Every folder and page of a space the plugin can read, in one call, as
+   * the app's own tree shows them: with what was made on this device and
+   * not sent yet, and offline, what this device keeps. Folders come
+   * first, each list in no set order. Empty where it can read nothing
+   * there. Missing (undefined) in an app older than it; in a script it is
+   * always there, and such an app stops the script that calls it.
+   */
+  tree?(spaceId: string): Promise<TreeEntry[]>;
   /**
    * Pages within the plugin's access whose text matches, best first. Words
    * may come with filters on properties, as in the app's search: `tag:soup`,
@@ -455,6 +471,8 @@ export type ScriptBlock<Fields extends Record<string, BlockField>> = {
 
 /** What a script gets: `Host`, and blocks it fills in. */
 export interface ScriptHost extends Host {
+  /** Every page operation: the SDK in the script sends each, `tree` too, whatever the app knows. */
+  readonly pages: Required<Pages>;
   readonly blocks: {
     register<const Fields extends Record<string, BlockField>>(block: ScriptBlock<Fields>): Disposer;
   };

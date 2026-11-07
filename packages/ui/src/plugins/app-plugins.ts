@@ -4,7 +4,7 @@ import type { PageRef } from '@wikistow/plugin-sdk';
 import type { QueryClient } from '@tanstack/react-query';
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
-import { spacesQuery } from '../data/queries';
+import { spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { PLAIN, vaultStore } from '../vault/store';
 import { desktopStore } from './desktop-store';
@@ -46,6 +46,8 @@ export function startAppPlugins(queryClient: QueryClient) {
       pagesFor({
         ...caller,
         open: (page, base, change) => drafts.through(caller, page, base, change),
+        // The sidebar's own, which it keeps current.
+        tree: (ctx, spaceId) => queryClient.ensureQueryData(treeQuery(ctx, spaceId)),
       }),
     handle: (caller, shown) => drafts.handle(caller, shown),
     changed(spaceIdText, page) {

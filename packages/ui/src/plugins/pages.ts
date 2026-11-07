@@ -22,6 +22,7 @@ import {
   type PageRef,
   type Pages,
   type PageVersion,
+  type TreeEntry,
 } from '@wikistow/plugin-sdk';
 import { leastAccess } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
@@ -48,13 +49,27 @@ export type Caller = {
   changed: (spaceId: string) => void;
 };
 
-/** A caller whose saves to a page open in this window's draft view go through its editor. */
+/** The page operations as this app gives them: every one, `tree` too. */
+export type HostPages = Required<Pages>;
+
+/** A space's tree as the app shows it. */
+type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
+
+/**
+ * A caller whose saves to a page open in this window's draft view go
+ * through its editor, and whose `tree` is the app's own.
+ */
 export type EditingCaller = Caller & {
   /**
    * Save through the editor if the page is open in this window's draft
    * view, so the person's editor stays current; null if it isn't open.
    */
   open: (page: PageRef, base: string, change: PageChange) => Promise<PageVersion | null>;
+  /**
+   * A space's tree as the sidebar shows it: with what was made on this
+   * device and not sent yet, and offline, what the device keeps.
+   */
+  tree: (ctx: ClientContext, spaceId: SpaceId) => Promise<Tree>;
 };
 
 /** The open session, or `locked`. */
@@ -210,7 +225,7 @@ export function writeLimit() {
  * manifest, and then runs the operation the app itself uses, so the
  * person's own permissions and the server's checks still apply.
  */
-export function pagesFor(caller: EditingCaller): Pages {
+export function pagesFor(caller: EditingCaller): HostPages {
   const { write } = caller;
 
   /** Each node's parent in a space, by IDs alone, listed fresh. */
@@ -219,6 +234,24 @@ export function pagesFor(caller: EditingCaller): Pages {
     return new Map<string, string | null>(
       [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
     );
+  };
+
+  /** The access the plugin has at a node of a space, by each node's parent there. */
+  const accessIn = (
+    scopes: readonly PluginScope[],
+    parents: ReadonlyMap<string, string | null>,
+    nodeId: string | null,
+  ): PageAccess => {
+    // The node, then each folder above it.
+    const above = new Set<string>();
+    for (let id = nodeId; id !== null && !above.has(id); id = parents.get(id) ?? null)
+      above.add(id);
+    let best: PageAccess = 'none';
+    for (const scope of scopes) {
+      if (scope.folderId !== null && !above.has(scope.folderId)) continue;
+      if (scope.access === 'write' || best === 'none') best = scope.access;
+    }
+    return leastAccess(best, caller.access);
   };
 
   /**
@@ -239,16 +272,7 @@ export function pagesFor(caller: EditingCaller): Pages {
     if (nodeId !== null && !parents.has(nodeId)) {
       throw new PluginError('not-found', 'There is no such page or folder');
     }
-    // The node, then each folder above it.
-    const above = new Set<string>();
-    for (let id = nodeId; id !== null && !above.has(id); id = parents.get(id) ?? null)
-      above.add(id);
-    let best: PageAccess = 'none';
-    for (const scope of scopes) {
-      if (scope.folderId !== null && !above.has(scope.folderId)) continue;
-      if (scope.access === 'write' || best === 'none') best = scope.access;
-    }
-    return leastAccess(best, caller.access);
+    return accessIn(scopes, parents, nodeId);
   };
 
   const require = async (
@@ -315,6 +339,38 @@ export function pagesFor(caller: EditingCaller): Pages {
             spaceId,
             pageId: page.id,
             title: page.title,
+          })),
+      ];
+    }),
+
+    tree: guarded(async (ctx, spaceIdText) => {
+      const spaceId = SpaceId.parse(spaceIdText);
+      const scopes = caller.scopes().filter((scope) => scope.spaceId === spaceId);
+      if (scopes.length === 0 || caller.access === 'none') return [];
+      // The app's own tree, so what the sidebar shows is what the plugin gets.
+      const tree = await caller.tree(ctx, spaceId);
+      const parents = new Map<string, string | null>(
+        [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
+      );
+      const readable = (id: string) => accessIn(scopes, parents, id) !== 'none';
+      return [
+        ...tree.folders
+          .filter((folder) => readable(folder.id))
+          .map((folder): TreeEntry => ({
+            kind: 'folder',
+            spaceId,
+            folderId: folder.id,
+            name: searchOperations.nameOf(folder.metadata),
+            parentId: folder.parentId,
+          })),
+        ...tree.pages
+          .filter((page) => readable(page.id))
+          .map((page): TreeEntry => ({
+            kind: 'page',
+            spaceId,
+            pageId: page.id,
+            title: page.title,
+            parentId: page.parentId,
           })),
       ];
     }),
