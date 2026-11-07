@@ -1,4 +1,4 @@
-import { inlineSpan, type BlockProps } from '@wikistow/plugin-sdk';
+import { inlineSpan } from '@wikistow/plugin-sdk';
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
@@ -6,15 +6,11 @@ import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import { transformer } from '../src/page/editor/visual/config.ts';
 import { fidelityOf } from '../src/page/editor/visual/fidelity.ts';
-import {
-  PluginsContext,
-  type PluginBlock,
-  type PluginRuntime,
-  type PluginsSnapshot,
-} from '../src/plugins/runtime.ts';
+import { PluginsContext, type PluginRuntime } from '../src/plugins/runtime.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
 import { openVault, PAGE_REF } from './page-view.ts';
+import { testRuntime } from './plugin-runtime.ts';
 
 // Inline code a plugin claims (ADR 0011, decision 7) in the visual editor:
 // an atom holding the span's Markdown, written back byte for byte however
@@ -82,16 +78,20 @@ describe('a claimed span in the visual editor', () => {
 
   it('is drawn by its plugin, whose setText changes only the span, as the person’s edit', async () => {
     const drawn: { text: string; setText: ((text: string) => void) | null }[] = [];
-    const span: PluginBlock = {
-      pluginId: 'test',
-      type: 'stars',
-      // As the runtime adapts the span's view (`spanBlockView`).
-      view: (element, { source, setSource }: BlockProps) => {
-        drawn.push({ text: source, setText: setSource });
-        element.textContent = `★ ${source}`;
+    const { runtime } = await testRuntime([
+      {
+        id: 'test',
+        inline: ['stars'],
+        activate: (host) =>
+          void host.inline.register({
+            type: 'stars',
+            view: (element, { text, setText }) => {
+              drawn.push({ text, setText });
+              element.textContent = `★ ${text}`;
+            },
+          }),
       },
-    };
-    const runtime = runtimeDrawing(new Map([['plugin:test/stars', span]]));
+    ]);
     const page = 'One `plugin:test/stars 3` and ``plugin:test/stars a`b``, as typed.\n';
     const m = mount(page, runtime);
     await expect.poll(() => drawn.map(({ text }) => text)).toEqual(['3', 'a`b']);
@@ -111,7 +111,7 @@ describe('a claimed span in the visual editor', () => {
 describe('claimed spans side by side', () => {
   it('get a space put back between them, as Markdown can’t hold two code spans together', async () => {
     const page = 'A `plugin:test/stars 1` `plugin:test/stars 2`, `plugin:test/stars 3` `code`.\n';
-    const m = mount(page, runtimeDrawing(new Map()));
+    const m = mount(page, await noPlugins());
     await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
     const dom = m.container.querySelector('#page-visual');
     if (!dom) throw new Error('The visual editor did not mount');
@@ -129,7 +129,7 @@ describe('claimed spans side by side', () => {
   });
 
   it('get one when text right against a span is made code, a change of marks only', async () => {
-    const m = mount('A `plugin:test/stars 1`foo bar.\n', runtimeDrawing(new Map()));
+    const m = mount('A `plugin:test/stars 1`foo bar.\n', await noPlugins());
     await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
     const dom = m.container.querySelector('#page-visual');
     if (!dom) throw new Error('The visual editor did not mount');
@@ -149,7 +149,7 @@ describe('claimed spans parted by emphasis or a link', () => {
   it('are left as they are, as Markdown writes them apart already', async () => {
     const page =
       '*`plugin:test/stars 1`*`code` and [`plugin:test/stars 2`](https://x.test)`code` x\n';
-    const m = mount(page, runtimeDrawing(new Map()));
+    const m = mount(page, await noPlugins());
     await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
     const dom = m.container.querySelector('#page-visual');
     if (!dom) throw new Error('The visual editor did not mount');
@@ -159,19 +159,8 @@ describe('claimed spans parted by emphasis or a link', () => {
   });
 });
 
-/** A runtime drawing `inline`, with only what the visual editor asks of it. */
-function runtimeDrawing(inline: PluginsSnapshot['inline']) {
-  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'inline' | 'plugins'> = {
-    blocks: new Map(),
-    inline,
-    plugins: [],
-  };
-  return {
-    get: () => snapshot,
-    subscribe: () => () => {},
-    viewFailed: () => {},
-  } as unknown as PluginRuntime;
-}
+/** A runtime with no plugins, so claimed spans stay as their Markdown. */
+const noPlugins = async () => (await testRuntime([])).runtime;
 
 const unmounts: (() => void)[] = [];
 afterEach(() => {

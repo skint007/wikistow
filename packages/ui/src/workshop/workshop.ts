@@ -13,6 +13,7 @@ import { api } from '../api';
 import { errorMessage } from '../errors';
 import { desktop } from '../desktop';
 import { pageBlockProperties } from '../plugins/block-properties';
+import { vaultSession } from '../plugins/app-plugins';
 import { createRuntime, type PluginRuntime } from '../plugins/runtime';
 import type { PluginStore } from '../plugins/store';
 import { tabSafeMode } from '../plugins/safe-mode';
@@ -196,10 +197,13 @@ export class Workshop {
       remove: () => this.unload(),
     };
     this.preview = createRuntime(versions, {
+      session: vaultSession,
       pages: (caller) => this.samples.pages(caller),
       handle: (caller, shown) => this.samples.handle(caller, shown),
+      // Nothing it changes is shown outside the preview.
+      changed: () => {},
     });
-    this.preview.start(null);
+    this.preview.start();
     // Settings' picker shares the preview: one it shows, or stops, ends this one.
     this.#unwatchTheme = pluginTheme.subscribe(() => {
       if (this.#theming && pluginTheme.get().preview?.href !== this.#theming) {

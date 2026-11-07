@@ -33,7 +33,7 @@ import { visualFind, visualFindable } from './find';
 import { formatKeys } from './formatting';
 import { codeHighlights } from './highlight';
 import { propertiesChanged, propertyReferences } from './property-references';
-import { usePluginRuntime } from '../../../plugins/runtime';
+import { PluginsContext } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
 import { QueryResults } from './query-results';
 import { DiagramPreview } from '../../diagram';
@@ -238,8 +238,8 @@ function Surface({
       otherPages,
     };
   });
-  // The runtime of the place it is drawn in, for the editor's whole life.
-  const plugins = usePluginRuntime();
+  // The runtime of the place it is drawn in, if any, for the editor's whole life.
+  const plugins = use(PluginsContext);
   const [host] = useState<VisualHost>(() => ({
     links: () => latest.current.links,
     attachments: () => latest.current.attachments,

@@ -3,11 +3,11 @@ import { ApiError } from '@wikistow/client/api';
 import { meQuery } from './api';
 import { connection } from './data/connection';
 import { vaultStore } from './vault/store';
-import { pluginRuntime } from './plugins/runtime';
+import { startAppPlugins, type AppPlugins } from './plugins/app-plugins';
 import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 
-export type RouterContext = { queryClient: QueryClient };
+export type RouterContext = { queryClient: QueryClient; plugins: AppPlugins };
 
 /** The app's router, given a history (browser in the web app, memory in tests). */
 export function createAppRouter({ history }: { history: RouterHistory }) {
@@ -38,11 +38,11 @@ export function createAppRouter({ history }: { history: RouterHistory }) {
     connection.subscribe(() => setOnline(connection.get().online)),
   );
   vaultStore.attach(queryClient);
-  pluginRuntime.start(queryClient);
+  const plugins = startAppPlugins(queryClient);
   return createRouter({
     routeTree,
     history,
-    context: { queryClient },
+    context: { queryClient, plugins },
     defaultPreload: 'intent',
     scrollRestoration: true,
   });

@@ -6,15 +6,10 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
-import { formView } from '../src/plugins/block-form.tsx';
-import {
-  PluginsContext,
-  type PluginBlock,
-  type PluginRuntime,
-  type PluginsSnapshot,
-} from '../src/plugins/runtime.ts';
+import { PluginsContext, type PluginRuntime } from '../src/plugins/runtime.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { openVault, PAGE_REF } from './page-view.ts';
+import { fakeScript, testRuntime, testSession } from './plugin-runtime.ts';
 
 // A plugin block in the visual editor sets the page's properties as the
 // person's edit (#212): the draft's frontmatter changes, only that value,
@@ -36,27 +31,23 @@ const links: LinkAssist = {
   choose: () => {},
 };
 
-/** A block that records each time it is drawn, with the props it got. */
-function recorder() {
+/** A plugin's block that records each time it is drawn, with the props it got. */
+async function recorder() {
   const drawn: BlockProps[] = [];
-  const block: PluginBlock = {
-    pluginId: 'test',
-    type: 'servings',
-    view: (element, props) => {
-      drawn.push(props);
-      element.textContent = `Serves ${JSON.stringify(props.properties?.['servings'])}`;
+  const { runtime } = await testRuntime([
+    {
+      id: 'test',
+      blocks: ['servings'],
+      activate: (host) =>
+        void host.blocks.register({
+          type: 'servings',
+          view: (element, props) => {
+            drawn.push(props);
+            element.textContent = `Serves ${JSON.stringify(props.properties?.['servings'])}`;
+          },
+        }),
     },
-  };
-  // Only what the visual editor asks of the runtime.
-  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = {
-    blocks: new Map([['plugin:test/servings', block]]),
-    plugins: [],
-  };
-  const runtime = {
-    get: () => snapshot,
-    subscribe: () => () => {},
-    viewFailed: () => {},
-  } as unknown as PluginRuntime;
+  ]);
   return { drawn, runtime };
 }
 
@@ -101,7 +92,7 @@ const PAGE = '---\nservings: 4 # people\nnotes: |\n  Fresh.\n---\n```plugin:test
 
 describe('a plugin block in the visual editor', () => {
   it('sets a property as the person’s edit, drawn again for others’ changes but not its own', async () => {
-    const { drawn, runtime } = recorder();
+    const { drawn, runtime } = await recorder();
     const m = mount(PAGE, runtime);
     await expect.poll(() => drawn.length).toBe(1);
     const [first] = drawn;
@@ -127,7 +118,7 @@ describe('a plugin block in the visual editor', () => {
   });
 
   it('refuses what can’t be set in place, and what isn’t a property, changing nothing', async () => {
-    const { drawn, runtime } = recorder();
+    const { drawn, runtime } = await recorder();
     const m = mount(PAGE, runtime);
     await expect.poll(() => drawn.length).toBe(1);
     const set = drawn[0]?.setProperty;
@@ -139,45 +130,34 @@ describe('a plugin block in the visual editor', () => {
   });
 
   it('shows the failure note for a view that throws as its plugin starts', async () => {
-    const listeners = new Set<() => void>();
-    const emit = () => {
-      for (const listener of listeners) listener();
-    };
-    const failed: string[] = [];
-    let snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = { blocks: new Map(), plugins: [] };
-    const runtime = {
-      get: () => snapshot,
-      subscribe: (listener: () => void) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      // As the runtime does, telling its listeners at once.
-      viewFailed: (pluginId: string) => {
-        failed.push(pluginId);
-        emit();
-      },
-    } as unknown as PluginRuntime;
+    // The runtime tells its listeners of the failure at once, while the editor draws.
+    const { runtime, session } = await testRuntime(
+      [
+        {
+          id: 'test',
+          blocks: ['servings'],
+          activate: (host) =>
+            void host.blocks.register({
+              type: 'servings',
+              view: () => {
+                throw new Error('No');
+              },
+            }),
+        },
+      ],
+      { session: testSession(false) },
+    );
     const m = mount(PAGE, runtime);
     // Its code block is shown as text first, then the plugin starts.
     await expect.poll(() => m.container.querySelector('.code-block')).not.toBeNull();
-    const block: PluginBlock = {
-      pluginId: 'test',
-      type: 'servings',
-      view: () => {
-        throw new Error('No');
-      },
-    };
-    act(() => {
-      snapshot = { blocks: new Map([['plugin:test/servings', block]]), plugins: [] };
-      emit();
-    });
+    act(() => session.open());
     await expect.poll(() => m.container.textContent).toContain('test failed here.');
-    expect(failed).toEqual(['test']);
+    expect(runtime.get().plugins.map(({ problem }) => problem)).toEqual(['A view failed: No']);
   });
 });
 
-/** Two script blocks' forms, the first with a field bound to `servings`, as a runtime draws them. */
-function forms() {
+/** A script's two blocks' forms, the first with a field bound to `servings`, as the runtime draws them. */
+async function forms(): Promise<PluginRuntime> {
   const recipe: BlockSpec = {
     type: 'recipe',
     fields: { servings: { type: 'number', label: 'Servings', property: 'servings' } },
@@ -188,22 +168,14 @@ function forms() {
     fields: { quantity: { type: 'number', label: 'Quantity', default: 1 } },
     outputs: {},
   };
-  const blocks = new Map<string, PluginBlock>([
-    [
-      'plugin:test/recipe',
-      { pluginId: 'test', type: 'recipe', view: formView(recipe, async () => ({})) },
-    ],
-    [
-      'plugin:test/product',
-      { pluginId: 'test', type: 'product', view: formView(product, async () => ({})) },
-    ],
+  const script = fakeScript([
+    { type: 'block', block: recipe },
+    { type: 'block', block: product },
   ]);
-  const snapshot: Pick<PluginsSnapshot, 'blocks' | 'plugins'> = { blocks, plugins: [] };
-  return {
-    get: () => snapshot,
-    subscribe: () => () => {},
-    viewFailed: () => {},
-  } as unknown as PluginRuntime;
+  const { runtime } = await testRuntime([
+    { id: 'test', blocks: ['recipe', 'product'], script: script.launch },
+  ]);
+  return runtime;
 }
 
 /** The input labelled `label` in `container`. */
@@ -219,7 +191,7 @@ describe('a script block’s form in the visual editor', () => {
   it('stays as it is, focus and text, when another block’s bound field sets a property', async () => {
     const m = mount(
       '---\nservings: 4\n---\n```plugin:test/recipe\n```\n\n```plugin:test/product\nquantity: 1\n```\n',
-      forms(),
+      await forms(),
     );
     await expect.poll(() => m.container.querySelectorAll('.plugin-block input').length).toBe(2);
     const quantity = field(m.container, 'Quantity');

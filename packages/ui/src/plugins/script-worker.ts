@@ -1,5 +1,6 @@
 import {
   PluginError,
+  type Disposer,
   type PageHandle,
   type PageRef,
   type Pages,
@@ -15,6 +16,7 @@ import {
   type OutputResult,
 } from '@wikistow/plugin-sdk/protocol';
 import { pluginError } from './pages';
+import type { EventOf } from './registry';
 
 /** How long a script's command or event handler may take, from asking to its answer, and its activation. */
 export const SCRIPT_BUDGET_MS = 10_000;
@@ -38,16 +40,26 @@ const editorOf = (page: PageHandle | null) => {
   return editor;
 };
 
-export type ScriptEvents = {
-  /** Its commands, by ID with their titles, changed. */
-  commands: (commands: ReadonlyMap<string, string>) => void;
-  /** The blocks it fills in, by type, changed. */
-  blocks: (blocks: ReadonlyMap<string, BlockSpec>) => void;
-  /** What went wrong with it; `stopped` once it won't start again until re-enabled. */
-  problem: (message: string, stopped: boolean) => void;
-};
-
 type Outputs = Record<string, OutputResult>;
+
+/**
+ * Where a script's registrations go: its activation's registry. Each entry
+ * runs by sending the worker an `invoke` and waiting for its `done`.
+ */
+export type ScriptRegistry = {
+  command(id: string, title: string, run: (page: PageHandle) => Promise<void>): Disposer;
+  /** A block it fills in: `calculate` gives its outputs from its valid fields' values. */
+  block(
+    spec: BlockSpec,
+    calculate: (page: PageRef, values: Record<string, number | string>) => Promise<Outputs>,
+  ): Disposer;
+  listen<E extends keyof PluginEvents>(
+    event: E,
+    run: (event: EventOf<E>) => Promise<void>,
+  ): Disposer;
+  /** What went wrong with it; `stopped` once it won't start again until re-enabled. */
+  problem(message: string, stopped: boolean): void;
+};
 
 /** What a running script tells its `ScriptWorker`, only ever after `LaunchScript` returned. */
 export type ScriptHandlers = {
@@ -83,24 +95,27 @@ type Invocation = {
  * One plugin's script, in a module worker of its own that can make no
  * requests (`LaunchScript`), so its only way out is this class's messages,
  * over the port it is launched with. Every message is checked, and every
- * call's arguments, before the page operations run it.
+ * call's arguments, before the page operations run it. What it registers
+ * goes into its activation's registry (`ScriptRegistry`) as entries that
+ * invoke it, beside what app code registers.
  * A command or event that runs past `SCRIPT_BUDGET_MS`, a crash or a
  * malformed message ends the worker and starts it again; after
  * `FAILURES_ALLOWED` of those in five minutes it stays stopped.
  */
 export class ScriptWorker {
   readonly #launch: LaunchScript;
-  readonly #on: ScriptEvents;
+  readonly #registry: ScriptRegistry;
   readonly #calls: Calls;
   #worker: ScriptPort | null = null;
-  #commands = new Map<string, string>();
+  /** What it registered, each with what takes it out of the registry again. */
+  #commands = new Map<string, Disposer>();
   /** Kept as it starts again, which registers the same blocks: their forms stay. */
-  #blocks = new Map<string, BlockSpec>();
+  #blocks = new Map<string, { spec: BlockSpec; dispose: Disposer }>();
   #calculating: Promise<unknown> = Promise.resolve();
   /** Its activation finished; until then `#started` waits, settled as it does or the worker ends. */
   #ready = false;
   #started = Promise.withResolvers<void>();
-  #listening = new Set<keyof PluginEvents>();
+  #listening = new Map<keyof PluginEvents, Disposer>();
   #invocations = new Map<number, Invocation>();
   #next = 0;
   #failures: number[] = [];
@@ -108,9 +123,9 @@ export class ScriptWorker {
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(launch: LaunchScript, pages: Pages, on: ScriptEvents) {
+  constructor(launch: LaunchScript, pages: Pages, registry: ScriptRegistry) {
     this.#launch = launch;
-    this.#on = on;
+    this.#registry = registry;
     this.#calls = {
       'pages.read': (args) => pages.read(...METHODS['pages.read'].parse(args)),
       'pages.list': (args) => pages.list(...METHODS['pages.list'].parse(args)),
@@ -185,11 +200,7 @@ export class ScriptWorker {
     this.#end(new PluginError('unloaded', 'The plugin was turned off'));
   }
 
-  listens(event: keyof PluginEvents) {
-    return this.#listening.has(event);
-  }
-
-  async runCommand(id: string, page: PageHandle): Promise<void> {
+  async #runCommand(id: string, page: PageHandle): Promise<void> {
     await this.#invoke(
       {
         kind: 'command',
@@ -202,7 +213,7 @@ export class ScriptWorker {
     );
   }
 
-  async deliver(event: PluginEvent): Promise<void> {
+  async #deliver(event: PluginEvent): Promise<void> {
     await this.#invoke({ kind: 'event', ...event }, null);
   }
 
@@ -211,7 +222,7 @@ export class ScriptWorker {
    * so a calculation's second starts when the worker takes it, not while it
    * waits behind another block's.
    */
-  calculate(type: string, page: PageRef, values: Record<string, number | string>) {
+  #calculate(type: string, page: PageRef, values: Record<string, number | string>) {
     const run = this.#calculating.then(async () => {
       // Its start has a budget of its own, which the calculation's mustn't spend.
       while (this.#worker && !this.#ready) await this.#started.promise;
@@ -267,27 +278,45 @@ export class ScriptWorker {
         // Starting it again would fail the same way.
         this.#stopped = true;
         this.#end(new PluginError('failed', message.message));
-        this.#on.problem(`Its script failed to start: ${message.message}`, true);
+        this.#registry.problem(`Its script failed to start: ${message.message}`, true);
         return;
-      case 'register':
-        this.#commands.set(message.command.id, message.command.title);
-        this.#on.commands(new Map(this.#commands));
+      case 'register': {
+        const { id, title } = message.command;
+        this.#commands.get(id)?.();
+        this.#commands.set(
+          id,
+          this.#registry.command(id, title, (page) => this.#runCommand(id, page)),
+        );
         return;
+      }
       case 'unregister':
+        this.#commands.get(message.command)?.();
         this.#commands.delete(message.command);
-        this.#on.commands(new Map(this.#commands));
         return;
-      case 'block':
-        this.#blocks.set(message.block.type, message.block);
-        this.#on.blocks(new Map(this.#blocks));
+      case 'block': {
+        const spec = message.block;
+        const kept = this.#blocks.get(spec.type);
+        // The same block as it starts again: its form stays, and what is entered in it.
+        if (kept && JSON.stringify(kept.spec) === JSON.stringify(spec)) return;
+        kept?.dispose();
+        const dispose = this.#registry.block(spec, (page, values) =>
+          this.#calculate(spec.type, page, values),
+        );
+        this.#blocks.set(spec.type, { spec, dispose });
         return;
+      }
       case 'unblock':
+        this.#blocks.get(message.block)?.dispose();
         this.#blocks.delete(message.block);
-        this.#on.blocks(new Map(this.#blocks));
         return;
       case 'listen':
-        if (message.on) this.#listening.add(message.event);
-        else this.#listening.delete(message.event);
+        if (message.on && !this.#listening.has(message.event)) {
+          const dispose = this.#registry.listen(message.event, (event) => this.#deliver(event));
+          this.#listening.set(message.event, dispose);
+        } else if (!message.on) {
+          this.#listening.get(message.event)?.();
+          this.#listening.delete(message.event);
+        }
         return;
       case 'done': {
         const waiting = this.#invocations.get(message.invocation);
@@ -331,13 +360,13 @@ export class ScriptWorker {
     this.#end(new PluginError(code, reason));
     if (this.#failures.length >= FAILURES_ALLOWED) {
       this.#stopped = true;
-      this.#on.problem(
+      this.#registry.problem(
         `Stopped after ${FAILURES_ALLOWED} failures in five minutes. ${reason}`,
         true,
       );
       return;
     }
-    this.#on.problem(reason, false);
+    this.#registry.problem(reason, false);
     this.start();
   }
 
@@ -351,10 +380,9 @@ export class ScriptWorker {
       reject(error);
     }
     this.#invocations.clear();
+    // Its commands and handlers go until it registers them again; its blocks stay.
+    for (const dispose of [...this.#listening.values(), ...this.#commands.values()]) dispose();
     this.#listening.clear();
-    if (this.#commands.size > 0) {
-      this.#commands.clear();
-      this.#on.commands(new Map());
-    }
+    this.#commands.clear();
   }
 }

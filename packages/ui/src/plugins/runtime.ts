@@ -1,16 +1,13 @@
 import type { PayloadChanges } from '@wikistow/client';
-import { PageId, SpaceId, type InstalledPlugin, type PluginScope } from '@wikistow/contracts';
+import type { InstalledPlugin, PluginScope } from '@wikistow/contracts';
 import {
   blockLanguage,
   isRegion,
   PLUGIN_API,
   PluginError,
-  REGIONS,
   type AppHost,
   type AppPlugin,
-  type Block,
   type BlockProps,
-  type Command,
   type Disposer,
   type InlineProps,
   type PageHandle,
@@ -19,26 +16,17 @@ import {
   type PageVersion,
   type PageViewProps,
   type PluginEvent,
-  type PluginEvents,
   type Regions,
   type View,
 } from '@wikistow/plugin-sdk';
-import type { QueryClient } from '@tanstack/react-query';
 import { createContext, use, useSyncExternalStore } from 'react';
-import { pageQuery, searchIndexChanged, treeQuery } from '../data/queries';
-import { desktop } from '../desktop';
-import { PLAIN, vaultStore } from '../vault/store';
-import { pagesFor, pluginError, writeLimit, type Caller } from './pages';
-import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
-import { formView, readFields, type ReadField } from './block-form';
+import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
-import { editorDrafts } from './drafts';
-import { desktopStore } from './desktop-store';
-import { browserStore } from './library';
-import { isSafeModeKey, tabSafeMode } from './safe-mode';
+import { pluginError, writeLimit, type Caller } from './pages';
+import { createRegistry, perRegion, type BlockResults, type Part, type Registry } from './registry';
 import { inFrame } from './script-frame';
-import { ScriptWorker } from './script-worker';
-import { refOf, type AnyPluginStore, type AppPluginStore, type PluginRef } from './store';
+import { ScriptWorker, type LaunchScript } from './script-worker';
+import { refOf, type AnyPluginStore, type PluginRef } from './store';
 
 /** The page a command runs on or a panel shows, as the page view knows it. */
 export type ShownPage = {
@@ -119,49 +107,15 @@ export type PluginsSnapshot = {
   inline: ReadonlyMap<string, PluginBlock>;
 };
 
-/** A region's registrations, by their IDs. */
-type Registered = { [R in keyof Regions]: Map<string, Regions[R]> };
-
-/**
- * A record with `make(region)` for every region in the SDK's table, which
- * must give `T`'s entry for that region.
- */
-function perRegion<T extends { [R in keyof Regions]: unknown }>(
-  make: (region: keyof Regions) => unknown,
-): T {
-  // Unchecked: TypeScript can't type a record built from a list of names entry by entry, so
-  // nothing checks that `make` gives each region the right kind of value.
-  return Object.fromEntries(
-    Object.keys(REGIONS)
-      .filter(isRegion)
-      .map((r) => [r, make(r)]),
-  ) as T;
-}
-
-const noneRegistered = () => perRegion<Registered>(() => new Map());
-
-type Handlers = {
-  [E in keyof PluginEvents]: Set<(event: PluginEvents[E]) => void | Promise<void>>;
-};
-
 /** One enabled plugin's activation, from unlock to lock or unload. */
 type Active = {
   controller: AbortController;
   caller: Caller;
-  disposers: Set<Disposer>;
-  commands: Map<string, Command>;
-  regions: Registered;
-  blocks: Map<string, Block>;
-  /** Inline code types it draws, each view drawn as a block's, made once as it registers. */
-  inline: Map<string, Block>;
-  handlers: Handlers;
+  /** What its app code and its script registered. */
+  registry: Registry;
   app: AppPlugin | null;
   worker: ScriptWorker | null;
-  /** The script's commands, by ID with their titles. */
-  scriptCommands: ReadonlyMap<string, string>;
-  /** The blocks the script fills in, by type, each with the form drawn for it. */
-  scriptBlocks: ReadonlyMap<string, { spec: BlockSpec; view: View<BlockProps> }>;
-  /** Each event and page whose handler runs now, with the latest that arrived meanwhile. */
+  /** Each event and page whose handlers run now, with the latest that arrived meanwhile. */
   running: Map<string, { next: PluginEvent | null }>;
 };
 
@@ -172,7 +126,7 @@ type Loaded = {
   /** Its latest activation, settled once its app code's `activate` has. */
   starting: Promise<void>;
   /** What went wrong with its app code, and with its script, until it activates again. */
-  problems: { app: string | null; script: string | null };
+  problems: Record<Part, string | null>;
 };
 
 const fileUrl = ({ manifest, key }: InstalledPlugin, file: string) =>
@@ -183,7 +137,7 @@ const contributions = (entries: Loaded[]) =>
   perRegion<PluginsSnapshot['regions']>((region) =>
     entries.flatMap(({ plugin, active }) =>
       active
-        ? [...active.regions[region].values()].map((item) => ({
+        ? [...active.registry.region(region)].map((item) => ({
             ...item,
             pluginId: plugin.manifest.id,
           }))
@@ -197,35 +151,73 @@ const isAppPlugin = (value: unknown): value is AppPlugin =>
   'activate' in value &&
   typeof value.activate === 'function';
 
-const fire = <E extends keyof PluginEvents>(set: Handlers[E], payload: PluginEvents[E]) =>
-  Promise.all([...set].map(async (handler) => handler(payload)));
+/**
+ * The vault session a runtime's plugins run in, which it watches: they run
+ * while one is open, and each lock, unlock or change of account ends what runs.
+ */
+export type PluginSession = {
+  /** The open session, or null while the vault is locked. Another value is another session. */
+  get(): object | null;
+  subscribe(listener: () => void): () => void;
+};
 
-/** What a runtime's plugins reach, apart from where they come from. */
+/** Where a runtime gets a plugin's code. */
+export type PluginCode = {
+  /** Its ui file, loaded: a module whose default export is its `definePlugin(…)`. */
+  app(plugin: InstalledPlugin): Promise<unknown>;
+  /** What starts its script. */
+  script(plugin: InstalledPlugin): LaunchScript;
+};
+
+/** The files the app serves for each plugin, with its script in the sandboxed frame. */
+export const servedCode: PluginCode = {
+  app: (plugin) => {
+    if (!plugin.manifest.ui) return Promise.reject(new Error('It has no ui file'));
+    return import(/* @vite-ignore */ fileUrl(plugin, plugin.manifest.ui));
+  },
+  script: (plugin) => {
+    if (!plugin.manifest.script) throw new Error('It has no script');
+    return inFrame(fileUrl(plugin, plugin.manifest.script), plugin.manifest.id);
+  },
+};
+
+/** What a runtime's plugins run in and reach, apart from where they come from. */
 export type PluginReach = {
+  session: PluginSession;
   /** The page operations a plugin gets as `host.pages`. */
   pages(caller: Caller): Pages;
   /** The handle a command or view gets for the page shown. */
   handle(caller: Caller, shown: ShownPage): PageHandle;
+  /**
+   * A plugin changed a space's tree (a folder made, something moved), or,
+   * with `page`, saved that page's draft: what shows them, shown afresh.
+   */
+  changed(spaceId: string, page?: PageRef): void;
+  /** Where plugins' code comes from: `servedCode` unless given. */
+  code?: PluginCode;
 };
 
 /**
  * The plugins `store` lists, running, and everything they registered,
  * reaching what `reach` gives them. A plugin's styles load while it is
- * listed. Its code runs while the vault is open: unlocking activates it,
- * and locking or signing out ends its worker, aborts its `signal` and
+ * listed. Its code runs while `reach.session` is open: opening activates
+ * it, and locking or signing out ends its worker, aborts its `signal` and
  * drops what it registered, as disabling does. In safe mode nothing loads.
- * `pluginRuntime` runs the plugins installed here (the desktop's) or
- * approved from the library (the browser's); the workshop runs one of its
- * own (#257). The runtime lists again whenever the vault locks or unlocks.
+ * Each activation keeps what its app code and its script register in one
+ * registry, which the snapshot, commands and events read without asking
+ * which registered what. The app's runtime runs the plugins installed here
+ * (the desktop's) or approved from the library (the browser's)
+ * (`app-plugins.ts`); the workshop runs one of its own (#257). The runtime
+ * lists again whenever the session opens, ends or changes.
  */
 export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
+  const { session, code = servedCode } = reach;
   const loaded = new Map<string, Loaded>();
   /** Installed but not running: disabled, or everything in safe mode. Listed for Settings. */
   let idle: InstalledPlugin[] = [];
   /** The open account's page access settings, by plugin. */
   let access: Readonly<Record<string, readonly PluginScope[]>> = {};
   let safeMode = false;
-  let queryClient: QueryClient | null = null;
   const listeners = new Set<() => void>();
   let listed = false;
   let unavailable: Readonly<Record<string, string>> = {};
@@ -240,11 +232,15 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     blocks: new Map(),
     inline: new Map(),
   };
-  // Counts unlocks and locks, so an activation that finishes after one is dropped.
+  // Counts sessions opened and ended, so an activation that finishes after one is dropped.
   let epoch = 0;
 
+  /** The snapshot: what is loaded, and what each activation registered. */
   const emit = () => {
     const entries = [...loaded.values()];
+    const running = entries.flatMap(({ plugin, active }) =>
+      active ? [{ pluginId: plugin.manifest.id, registry: active.registry }] : [],
+    );
     snapshot = {
       listed,
       safeMode,
@@ -256,13 +252,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         })),
         ...idle.map((plugin) => ({ plugin, problem: null })),
       ],
-      commands: entries.flatMap(({ plugin, active }) =>
-        active
-          ? [
-              ...[...active.commands.values()].map(({ id, title }) => ({ id, title })),
-              ...[...active.scriptCommands].map(([id, title]) => ({ id, title })),
-            ].map((command) => ({ pluginId: plugin.manifest.id, ...command }))
-          : [],
+      commands: running.flatMap(({ pluginId, registry }) =>
+        [...registry.commands()].map(({ id, title }) => ({ pluginId, id, title })),
       ),
       regions: contributions(entries),
       themes: entries.flatMap(({ plugin }) =>
@@ -276,61 +267,33 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         })),
       ),
       blocks: new Map(
-        entries.flatMap(({ plugin, active }) =>
-          active
-            ? [
-                ...[...active.scriptBlocks].map(([type, { view }]) => ({ type, view })),
-                ...active.blocks.values(),
-              ].map(({ type, view }): [string, PluginBlock] => [
-                blockLanguage(plugin.manifest.id, type),
-                { pluginId: plugin.manifest.id, type, view },
-              ])
-            : [],
+        running.flatMap(({ pluginId, registry }) =>
+          [...registry.blocks()].map(({ type, view }): [string, PluginBlock] => [
+            blockLanguage(pluginId, type),
+            { pluginId, type, view },
+          ]),
         ),
       ),
       inline: new Map(
-        entries.flatMap(({ plugin, active }) =>
-          active
-            ? [...active.inline.values()].map(({ type, view }): [string, PluginBlock] => [
-                blockLanguage(plugin.manifest.id, type),
-                { pluginId: plugin.manifest.id, type, view },
-              ])
-            : [],
+        running.flatMap(({ pluginId, registry }) =>
+          [...registry.inline()].map(({ type, view }): [string, PluginBlock] => [
+            blockLanguage(pluginId, type),
+            { pluginId, type, view },
+          ]),
         ),
       ),
     };
     for (const listener of listeners) listener();
   };
 
-  const problem = (entry: Loaded, part: 'app' | 'script', message: string) => {
+  const problem = (entry: Loaded, part: Part, message: string) => {
     entry.problems[part] = message;
     emit();
   };
 
-  /** A plugin changed a space's tree: show it afresh. */
-  const changed = (spaceId: string) => {
-    const vault = vaultStore.get();
-    if (!queryClient || vault.status !== 'unlocked') return;
-    void queryClient.invalidateQueries({
-      queryKey: treeQuery(vault.ctx, SpaceId.parse(spaceId)).queryKey,
-    });
-    // Pages it moved show their new place.
-    void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
-    searchIndexChanged(queryClient, { spaceIds: [SpaceId.parse(spaceId)] });
-  };
-
   /** A plugin's draft save: shown afresh, and told to the other plugins. */
   const wrote = (pluginId: string, page: PageRef, revision: string) => {
-    const vault = vaultStore.get();
-    if (queryClient && vault.status === 'unlocked') {
-      const { pageId, spaceId } = {
-        pageId: PageId.parse(page.pageId),
-        spaceId: SpaceId.parse(page.spaceId),
-      };
-      void queryClient.invalidateQueries({ queryKey: pageQuery(vault.ctx, pageId).queryKey });
-      void queryClient.invalidateQueries({ queryKey: treeQuery(vault.ctx, spaceId).queryKey });
-      searchIndexChanged(queryClient, { spaceIds: [spaceId] });
-    }
+    if (session.get()) reach.changed(page.spaceId, page);
     deliver({ event: 'draft.saved', payload: { page, revision } }, pluginId);
   };
 
@@ -338,10 +301,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     for (const [id, entry] of loaded) {
       const { active } = entry;
       if (!active || id === from) continue;
-      const listens =
-        active.handlers[event.event].size > 0 || active.worker?.listens(event.event) === true;
-      if (!listens) continue;
-      // One handler run at a time per event and page; the latest waiting replaces the rest.
+      if (active.registry.handlersOf(event).length === 0) continue;
+      // One run of its handlers at a time per event and page; the latest waiting replaces the rest.
       const key = `${event.event}:${event.payload.page.pageId}`;
       const running = active.running.get(key);
       if (running) {
@@ -353,37 +314,27 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       void (async () => {
         for (let next: PluginEvent | null = event; next; next = slot.next) {
           slot.next = null;
-          try {
-            await handle(active, next);
-          } catch (error) {
-            if (entry.active === active) {
-              const part = active.worker?.listens(next.event) ? 'script' : 'app';
-              problem(
-                entry,
-                part,
-                `Its ${next.event} handler failed: ${pluginError(error).message}`,
-              );
-            }
-          }
+          const told = next;
+          // Its handlers run together, its app code's and its script's alike.
+          await Promise.all(
+            active.registry.handlersOf(told).map(async ({ part, run }) => {
+              try {
+                await run();
+              } catch (error) {
+                if (entry.active !== active) return;
+                problem(
+                  entry,
+                  part,
+                  `Its ${told.event} handler failed: ${pluginError(error).message}`,
+                );
+              }
+            }),
+          );
         }
         active.running.delete(key);
       })();
     }
   }
-
-  const handle = async (active: Active, event: PluginEvent) => {
-    switch (event.event) {
-      case 'page.shown':
-        await fire(active.handlers['page.shown'], event.payload);
-        break;
-      case 'draft.saved':
-        await fire(active.handlers['draft.saved'], event.payload);
-        break;
-    }
-    if (active.worker?.listens(event.event)) await active.worker.deliver(event);
-  };
-
-  const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
 
   /** Each activation's views' last props, by view, with the page and version they are for. */
   const viewProps = new WeakMap<Active, Map<string, { key: string; props: PageViewProps }>>();
@@ -393,17 +344,10 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     if (!active) return;
     entry.active = null;
     active.controller.abort();
-    for (const dispose of active.disposers) {
-      try {
-        dispose();
-      } catch {
-        // Its own cleanup; the registrations go regardless.
-      }
-    }
     try {
       active.app?.deactivate?.();
     } catch {
-      // As above.
+      // Its own cleanup; what it registered goes regardless.
     }
     active.worker?.stop();
   };
@@ -423,68 +367,63 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       live: () => live(),
       write,
       wrote: (page, revision) => wrote(id, page, revision),
-      changed,
+      changed: (spaceId) => {
+        if (session.get()) reach.changed(spaceId);
+      },
     };
     const active: Active = {
       controller: new AbortController(),
       caller,
-      disposers: new Set(),
-      commands: new Map(),
-      regions: noneRegistered(),
-      blocks: new Map(),
-      inline: new Map(),
-      handlers: { 'page.shown': new Set(), 'draft.saved': new Set() },
+      registry: createRegistry(() => {
+        if (live()) emit();
+      }),
       app: null,
       worker: null,
-      scriptCommands: new Map(),
-      scriptBlocks: new Map(),
       running: new Map(),
     };
+    const { registry } = active;
     entry.active = active;
     entry.problems = { app: null, script: null };
     const live = () => entry.active === active && run === epoch;
-    const keep = (dispose: Disposer): Disposer => {
-      const once = () => {
-        if (!active.disposers.delete(once)) return;
-        dispose();
-        if (live()) emit();
-      };
-      active.disposers.add(once);
-      return once;
-    };
+    /** Register, unless this activation is over. */
+    const whileLive = (register: () => Disposer): Disposer => (live() ? register() : () => {});
+    const claims = (type: string) => manifest.blocks.includes(type);
     const host: AppHost = {
       api: PLUGIN_API,
       pluginId: id,
       pages: reach.pages(caller),
       signal: active.controller.signal,
       commands: {
-        register(command) {
-          if (!live()) return () => {};
-          active.commands.set(command.id, command);
-          emit();
-          return keep(() => {
-            if (active.commands.get(command.id) === command) active.commands.delete(command.id);
-          });
-        },
+        register: (command) =>
+          whileLive(() =>
+            registry.addCommand({
+              id: command.id,
+              title: command.title,
+              part: 'app',
+              run: async (page) => command.run({ page }),
+            }),
+          ),
       },
       events: {
-        on(event, handler) {
-          if (!live()) return () => {};
-          const set: Handlers[typeof event] = active.handlers[event];
-          set.add(handler);
-          return keep(() => set.delete(handler));
-        },
+        on: (event, handler) =>
+          whileLive(() =>
+            registry.addHandler(event, {
+              part: 'app',
+              run: async ({ payload }) => handler(payload),
+            }),
+          ),
       },
       blocks: {
         register(block) {
           if (!live()) return () => {};
-          if (!manifest.blocks.includes(block.type)) {
+          if (!claims(block.type)) {
             throw new PluginError('invalid', `Its manifest claims no block ${block.type}`);
           }
-          active.blocks.set(block.type, block);
-          emit();
-          return keep(() => {
-            if (active.blocks.get(block.type) === block) active.blocks.delete(block.type);
+          return registry.addBlock({
+            type: block.type,
+            part: 'app',
+            view: block.view,
+            results: null,
           });
         },
       },
@@ -494,12 +433,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           if (!manifest.inline?.includes(type)) {
             throw new PluginError('invalid', `Its manifest claims no inline code ${type}`);
           }
-          const drawn: Block = { type, view: spanBlockView(view) };
-          active.inline.set(type, drawn);
-          emit();
-          return keep(() => {
-            if (active.inline.get(type) === drawn) active.inline.delete(type);
-          });
+          return registry.addInline({ type, view: spanBlockView(view) });
         },
       },
       ui: {
@@ -508,49 +442,43 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           // A plugin built for a newer app may name a region this one lacks.
           if (!isRegion(region))
             throw new PluginError('unsupported', `No region ${String(region)}`);
-          const registered = active.regions[region];
-          registered.set(contribution.id, contribution);
-          emit();
-          return keep(() => {
-            if (registered.get(contribution.id) === contribution)
-              registered.delete(contribution.id);
-          });
+          return registry.addContribution(region, contribution);
         },
       },
     };
     if (manifest.script) {
-      const script = fileUrl(plugin, manifest.script);
-      active.worker = new ScriptWorker(inFrame(script, manifest.id), host.pages, {
-        commands: (commands) => {
-          active.scriptCommands = commands;
-          if (live()) emit();
-        },
-        blocks: (specs) => {
-          const next = new Map<string, { spec: BlockSpec; view: View<BlockProps> }>();
-          for (const [type, spec] of specs) {
-            if (!manifest.blocks.includes(type)) {
-              if (live()) problem(entry, 'script', `Its manifest claims no block ${type}.`);
-              continue;
-            }
-            // The same form as it starts again, so what is entered in it stays.
-            const kept = active.scriptBlocks.get(type);
-            next.set(
-              type,
-              kept && JSON.stringify(kept.spec) === JSON.stringify(spec)
-                ? kept
-                : {
-                    spec,
-                    view: formView(spec, (page, values) =>
-                      active.worker
-                        ? active.worker.calculate(type, page, values)
-                        : Promise.reject(unloaded()),
-                    ),
-                  },
-            );
+      active.worker = new ScriptWorker(code.script(plugin), host.pages, {
+        command: (commandId, title, runCommand) =>
+          whileLive(() =>
+            registry.addCommand({ id: commandId, title, part: 'script', run: runCommand }),
+          ),
+        block(spec, calculate) {
+          if (!live()) return () => {};
+          if (!claims(spec.type)) {
+            problem(entry, 'script', `Its manifest claims no block ${spec.type}.`);
+            return () => {};
           }
-          active.scriptBlocks = next;
-          if (live()) emit();
+          return registry.addBlock({
+            type: spec.type,
+            part: 'script',
+            view: formView(spec, calculate),
+            async results(page, source, properties) {
+              const fields = readFields(spec, source, properties);
+              const values = Object.fromEntries(
+                Object.entries(fields).flatMap(([field, { value }]) =>
+                  value === null ? [] : [[field, value]],
+                ),
+              );
+              try {
+                return { fields, outputs: await calculate(page, values) };
+              } catch (error) {
+                return { fields, outputs: { error: pluginError(error).message } };
+              }
+            },
+          });
         },
+        listen: (event, deliverTo) =>
+          whileLive(() => registry.addHandler(event, { part: 'script', run: deliverTo })),
         problem: (message) => {
           if (live()) problem(entry, 'script', message);
         },
@@ -559,7 +487,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     }
     if (manifest.ui) {
       try {
-        const module: unknown = await import(/* @vite-ignore */ fileUrl(plugin, manifest.ui));
+        const module = await code.app(plugin);
         const definition =
           typeof module === 'object' && module !== null && 'default' in module
             ? module.default
@@ -592,11 +520,9 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     loaded.delete(entry.plugin.manifest.id);
   };
 
-  const unlocked = () => vaultStore.get().status === 'unlocked';
-
   /**
    * Match what runs to the store's list: load what's new or changed,
-   * unload the rest, and while the vault is open start what isn't running.
+   * unload the rest, and while the session is open start what isn't running.
    */
   async function sync() {
     if (stopped) return;
@@ -617,7 +543,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       if (!next || next.key !== entry.plugin.key || next.library !== entry.plugin.library)
         unload(entry);
     }
-    if (unlocked()) access = state.access;
+    const open = session.get() !== null;
+    if (open) access = state.access;
     for (const plugin of wanted.values()) {
       const entry = loaded.get(plugin.manifest.id) ?? {
         plugin,
@@ -627,7 +554,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         problems: { app: null, script: null },
       };
       loaded.set(plugin.manifest.id, entry);
-      if (unlocked() && !entry.active) entry.starting = activate(entry);
+      if (open && !entry.active) entry.starting = activate(entry);
     }
     idle = plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
     unavailable = state.unavailable;
@@ -643,21 +570,17 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   const refresh = () => (syncing = syncing.then(sync, sync));
 
   return {
-    /** Start, once; with `client`, what plugins change shows afresh. */
-    start(client: QueryClient | null) {
-      queryClient = client;
-      let was = vaultStore.get();
-      watching = vaultStore.subscribe(() => {
-        const now = vaultStore.get();
-        const changed =
-          now.status !== was.status ||
-          (now.status === 'unlocked' && was.status === 'unlocked' && now.ctx !== was.ctx);
+    /** Start, once: list, and watch the session. */
+    start() {
+      let was = session.get();
+      watching = session.subscribe(() => {
+        const now = session.get();
+        if (now === was) return;
         was = now;
-        if (!changed) return;
         epoch += 1;
         for (const entry of loaded.values()) deactivate(entry);
         emit();
-        if (now.status !== 'unlocked') access = {};
+        if (!now) access = {};
         // Listed again: the browser's plugins come and go with the account.
         void refresh();
       });
@@ -675,7 +598,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     access: (pluginId: string) => access[pluginId] ?? [],
     /** Replace a plugin's page access for the open account, in its store. */
     async setAccess(plugin: PluginRef, scopes: readonly PluginScope[]) {
-      if (!unlocked()) return;
+      if (!session.get()) return;
       await store.setAccess(plugin, scopes);
       access = { ...access, [plugin.id]: scopes };
       emit();
@@ -705,26 +628,11 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       page: PageRef,
       source: string,
       properties: BlockProperties = null,
-    ): Promise<{
-      fields: Record<string, ReadField>;
-      outputs: Record<string, OutputResult> | { error: string };
-    } | null> {
+    ): Promise<BlockResults | null> {
       for (const { plugin, active } of loaded.values()) {
-        const worker = active?.worker;
-        if (!worker) continue;
-        for (const [type, { spec }] of active.scriptBlocks) {
-          if (blockLanguage(plugin.manifest.id, type) !== language) continue;
-          const fields = readFields(spec, source, properties);
-          const values = Object.fromEntries(
-            Object.entries(fields).flatMap(([id, { value }]) =>
-              value === null ? [] : [[id, value]],
-            ),
-          );
-          try {
-            return { fields, outputs: await worker.calculate(type, page, values) };
-          } catch (error) {
-            return { fields, outputs: { error: pluginError(error).message } };
-          }
+        for (const { type, results } of active?.registry.blocks() ?? []) {
+          if (results && blockLanguage(plugin.manifest.id, type) === language)
+            return results(page, source, properties);
         }
       }
       return null;
@@ -741,16 +649,12 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     },
     /** Run a plugin's command on the page shown. */
     async runCommand(pluginId: string, commandId: string, shown: ShownPage) {
-      const entry = loaded.get(pluginId);
-      const active = entry?.active;
-      if (!entry || !active) throw new PluginError('unloaded', 'The plugin isn’t running');
-      const page = reach.handle(active.caller, shown);
-      const command = active.commands.get(commandId);
+      const active = loaded.get(pluginId)?.active;
+      if (!active) throw new PluginError('unloaded', 'The plugin isn’t running');
+      const command = active.registry.command(commandId);
+      if (!command) throw new PluginError('unloaded', 'The command is gone');
       try {
-        if (command) await command.run({ page });
-        else if (active.worker && active.scriptCommands.has(commandId))
-          await active.worker.runCommand(commandId, page);
-        else throw new PluginError('unloaded', 'The command is gone');
+        await command.run(reach.handle(active.caller, shown));
       } catch (error) {
         throw pluginError(error);
       }
@@ -788,74 +692,36 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
 
 export type PluginRuntime = ReturnType<typeof createRuntime>;
 
-const drafts = editorDrafts();
-
-/**
- * The app's own plugins and the person's choices for them: in the desktop
- * app those installed on this computer and the library plugins it holds
- * copies of, in the browser the library plugins the person approved.
- * Settings → Plugins changes them only through this.
- */
-export const pluginStore: AppPluginStore = desktop ? desktopStore(desktop) : browserStore();
-
-/** The app's own plugins, running in its page. */
-const ownRuntime = createRuntime(pluginStore, {
-  pages: (caller) =>
-    pagesFor({
-      ...caller,
-      open: (page, base, change) => drafts.through(caller, page, base, change),
-    }),
-  handle: (caller, shown) => drafts.handle(caller, shown),
-});
-
-export const pluginRuntime = {
-  ...ownRuntime,
-  /** Start, once. In a browser tab, Ctrl+Shift+Alt+P turns on safe mode; the desktop's main catches it there. */
-  start(client: QueryClient | null) {
-    ownRuntime.start(client);
-    if (desktop) return;
-    // Captured before anything a plugin adds can stop it.
-    window.addEventListener(
-      'keydown',
-      (event) => {
-        if (!isSafeModeKey(event)) return;
-        event.preventDefault();
-        void pluginRuntime.setSafeMode(true);
-      },
-      { capture: true },
-    );
-  },
-  /**
-   * Turn safe mode on or off. The desktop app restarts its window. A browser
-   * tab reloads to turn it on, so nothing a plugin left in the page stays,
-   * and lists again to turn it off.
-   */
-  async setSafeMode(on: boolean) {
-    if (desktop) return desktop.setSafeMode(on);
-    tabSafeMode.set(on);
-    if (on && pluginRuntime.get().plugins.some(({ plugin }) => plugin.enabled)) location.reload();
-    else await pluginRuntime.refresh();
-  },
-  /** The draft view opened `page` in the editor; plugins change it through `draft` until the returned function runs. */
-  openDraft: (page: PageRef, draft: OpenDraft) => drafts.open(page, draft),
-  /** The editor saved a draft: told to every plugin but one it saved for. */
-  editorSaved(page: PageRef, revision: string) {
-    pluginRuntime.deliver(
-      { event: 'draft.saved', payload: { page, revision } },
-      drafts.savedFor(page),
-    );
-  },
+/** What a place's views draw from without a runtime around them: no plugins. */
+const NONE: PluginsSnapshot = {
+  listed: false,
+  safeMode: false,
+  plugins: [],
+  unavailable: {},
+  commands: [],
+  regions: contributions([]),
+  themes: [],
+  blocks: new Map(),
+  inline: new Map(),
 };
+const noChanges = () => () => {};
+const none = () => NONE;
 
 /**
- * The runtime the views inside it draw from: the app's own, or the
- * workshop's in its preview. Settings and the shell always use the app's.
+ * The runtime the views inside it draw from: the app's own (`AppPlugins`),
+ * or the workshop's in its preview. Without one, as in a test, there are
+ * no plugins.
  */
-export const PluginsContext = createContext<PluginRuntime>(pluginRuntime);
+export const PluginsContext = createContext<PluginRuntime | null>(null);
 
-export const usePluginRuntime = () => use(PluginsContext);
+/** The runtime of the place drawn in, for parts drawn only for a plugin's contribution. */
+export function usePluginRuntime(): PluginRuntime {
+  const runtime = use(PluginsContext);
+  if (!runtime) throw new Error('No plugin runtime here');
+  return runtime;
+}
 
 export const usePlugins = (): PluginsSnapshot => {
   const runtime = use(PluginsContext);
-  return useSyncExternalStore(runtime.subscribe, runtime.get);
+  return useSyncExternalStore(runtime?.subscribe ?? noChanges, runtime?.get ?? none);
 };

@@ -44,7 +44,8 @@ import {
   type InstalledItem,
   type PluginsView,
 } from './plugin-settings';
-import { pluginRuntime, pluginStore, usePlugins } from './runtime';
+import { useAppPlugins } from './app-plugins';
+import { usePlugins } from './runtime';
 import type { LibraryRequest, PluginRef } from './store';
 
 type Visibility = pluginRoutes.PluginVisibility;
@@ -80,6 +81,7 @@ export function Library({
   query,
   folder = [],
 }: PluginsView & { ctx: ClientContext; folder?: InstalledItem[] }) {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
   const queryClient = useQueryClient();
   const { data: library, error: listError } = useQuery(libraryQuery(ctx));
   const { data: onlyMe } = useQuery(privatePluginsQuery);
@@ -502,6 +504,7 @@ export function ConfirmUpload({
   onDone: () => void;
   onUpload: (upload: PluginUpload, visibility: Visibility | undefined) => Promise<void>;
 }) {
+  const { store: pluginStore } = useAppPlugins();
   const { data: library } = useQuery(libraryQuery(ctx));
   const { data: onlyMe, isError } = useQuery(privatePluginsQuery);
   // The person's choice for this upload; until they make one, the plugin's own.
