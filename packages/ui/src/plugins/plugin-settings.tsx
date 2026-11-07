@@ -488,7 +488,7 @@ function ReplacedParts() {
                     choose(region, replacing.slice(0, replacing.indexOf(plugin)), plugin)
                   }
                 >
-                  Use {plugin.manifest.name}’s
+                  Use {plugin.manifest.name}
                 </Button>
               ))}
           </li>
