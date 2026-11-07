@@ -3,6 +3,7 @@ import type { InstalledPlugin, PluginScope } from '@wikistow/contracts';
 import {
   blockLanguage,
   isRegion,
+  isReplaceable,
   PLUGIN_API,
   PluginError,
   type AppEvent,
@@ -18,6 +19,7 @@ import {
   type PageVersion,
   type PageViewProps,
   type Regions,
+  type Replacements,
   type SpaceSummary,
   type View,
 } from '@wikistow/plugin-sdk';
@@ -25,7 +27,14 @@ import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
 import { pluginError, writeLimit, type Caller } from './pages';
-import { createRegistry, perRegion, type BlockResults, type Part, type Registry } from './registry';
+import {
+  createRegistry,
+  perRegion,
+  perReplaceable,
+  type BlockResults,
+  type Part,
+  type Registry,
+} from './registry';
 import type { PluginLocation } from './location';
 import { inFrame } from './script-frame';
 import { ScriptWorker, type LaunchScript } from './script-worker';
@@ -61,6 +70,8 @@ export type OpenDraft = {
 export type PluginCommand = { pluginId: string; id: string; title: string };
 /** What a plugin registered in a region, with the plugin's ID. */
 export type Contribution<R extends keyof Regions> = Regions[R] & { pluginId: string };
+/** The view a plugin draws in place of a region, with the plugin's ID. */
+export type Replacing<R extends keyof Replacements> = Replacements[R] & { pluginId: string };
 /** A theme an enabled plugin adds to the theme picker. */
 export type PluginThemeOption = {
   pluginId: string;
@@ -99,6 +110,12 @@ export type PluginsSnapshot = {
   commands: PluginCommand[];
   /** What running plugins put in each region, in plugin order, then registration order. */
   regions: { [R in keyof Regions]: Contribution<R>[] };
+  /**
+   * The view drawn in place of each replaceable region: the first running
+   * plugin's in plugin order that replaces it, unless the person chose the
+   * app's own there (`ownParts`); null for the app's own part.
+   */
+  replaced: { [R in keyof Replacements]: Replacing<R> | null };
   /** Enabled plugins' themes, whether or not the vault is open: themes are styles. */
   themes: PluginThemeOption[];
   /** Each block type a running plugin draws, by its fence's info string. */
@@ -114,6 +131,8 @@ export type PluginsSnapshot = {
 type Active = {
   controller: AbortController;
   caller: Caller;
+  /** Its `host.pages`. */
+  pages: Pages;
   /** What its app code and its script registered. */
   registry: Registry;
   app: AppPlugin | null;
@@ -132,6 +151,13 @@ type Loaded = {
   problems: Record<Part, string | null>;
 };
 
+/** What a replacing view's plugin reaches, for what the region gives it. */
+export type PluginPages = {
+  pages: Pages;
+  /** The spaces it has page access in, as `host.app.spaces.list()` gives them. */
+  spaces: () => Promise<SpaceSummary[]>;
+};
+
 const fileUrl = ({ manifest, key }: InstalledPlugin, file: string) =>
   `/plugins/${manifest.id}/${key}/${file}`;
 
@@ -147,6 +173,17 @@ const contributions = (entries: Loaded[]) =>
         : [],
     ),
   );
+
+/** Each replaceable region's view, from the first of `entries` that draws it and the person lets. */
+const replacedBy = (entries: Loaded[]) =>
+  perReplaceable<PluginsSnapshot['replaced']>((region) => {
+    for (const { plugin, active } of entries) {
+      if (!active || plugin.ownParts.includes(region)) continue;
+      const replacement = active.registry.replacement(region);
+      if (replacement) return { ...replacement, pluginId: plugin.manifest.id };
+    }
+    return null;
+  });
 
 const EVENTS = {
   'page.shown': true,
@@ -248,16 +285,25 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     unavailable,
     commands: [],
     regions: contributions([]),
+    replaced: replacedBy([]),
     themes: [],
     blocks: new Map(),
     inline: new Map(),
   };
+  /** The plugins' IDs in the store's order, which Settings lists them in. */
+  let order: readonly string[] = [];
+  const rank = (id: string) => {
+    const at = order.indexOf(id);
+    return at === -1 ? order.length : at;
+  };
   // Counts sessions opened and ended, so an activation that finishes after one is dropped.
   let epoch = 0;
 
-  /** The snapshot: what is loaded, and what each activation registered. */
+  /** The snapshot: what is loaded, and what each activation registered, in the store's order. */
   const emit = () => {
-    const entries = [...loaded.values()];
+    const entries = [...loaded.values()].toSorted(
+      (a, b) => rank(a.plugin.manifest.id) - rank(b.plugin.manifest.id),
+    );
     const running = entries.flatMap(({ plugin, active }) =>
       active ? [{ pluginId: plugin.manifest.id, registry: active.registry }] : [],
     );
@@ -271,11 +317,12 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           problem: [problems.app, problems.script].filter(Boolean).join(' ') || null,
         })),
         ...idle.map((plugin) => ({ plugin, problem: null })),
-      ],
+      ].toSorted((a, b) => rank(a.plugin.manifest.id) - rank(b.plugin.manifest.id)),
       commands: running.flatMap(({ pluginId, registry }) =>
         [...registry.commands()].map(({ id, title }) => ({ pluginId, id, title })),
       ),
       regions: contributions(entries),
+      replaced: replacedBy(entries),
       themes: entries.flatMap(({ plugin }) =>
         plugin.manifest.themes.map(({ id, name, base, stylesheet }) => ({
           pluginId: plugin.manifest.id,
@@ -398,6 +445,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     const active: Active = {
       controller: new AbortController(),
       caller,
+      pages: reach.pages(caller),
       registry: createRegistry(() => {
         if (live()) emit();
       }),
@@ -424,7 +472,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     const host: AppHost = {
       api: PLUGIN_API,
       pluginId: id,
-      pages: reach.pages(caller),
+      pages: active.pages,
       signal: active.controller.signal,
       commands: {
         register: (command) =>
@@ -495,6 +543,14 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           if (!isRegion(region))
             throw new PluginError('unsupported', `No region ${String(region)}`);
           return registry.addContribution(region, contribution);
+        },
+        replace(region, replacement) {
+          if (!live()) return () => {};
+          if (!isReplaceable(region))
+            throw new PluginError('unsupported', `No replaceable region ${String(region)}`);
+          if (!manifest.replaces?.includes(region))
+            throw new PluginError('invalid', `Its manifest replaces no ${region}`);
+          return registry.addReplacement(region, replacement);
         },
       },
     };
@@ -582,6 +638,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     if (stopped) return;
     safeMode = state.safeMode;
     const plugins = state.plugins ?? [];
+    order = plugins.map(({ manifest }) => manifest.id);
     const wanted = new Map(
       (safeMode ? [] : plugins.filter((plugin) => plugin.enabled)).map((plugin) => [
         plugin.manifest.id,
@@ -605,6 +662,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         starting: Promise.resolve(),
         problems: { app: null, script: null },
       };
+      // The same files, with the person's choices as they are now.
+      entry.plugin = plugin;
       loaded.set(plugin.manifest.id, entry);
       if (open && !entry.active) entry.starting = activate(entry);
     }
@@ -719,6 +778,12 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       await entry?.starting;
       await entry?.active?.worker?.started();
     },
+    /** What a running plugin's views reach, for what a region it replaces gives them; null once it stopped. */
+    pagesOf(pluginId: string): PluginPages | null {
+      const active = loaded.get(pluginId)?.active;
+      if (!active) return null;
+      return { pages: active.pages, spaces: () => reach.spaces(active.caller) };
+    },
     /** Run a plugin's command on the page shown. */
     async runCommand(pluginId: string, commandId: string, shown: ShownPage) {
       const active = loaded.get(pluginId)?.active;
@@ -772,6 +837,7 @@ const NONE: PluginsSnapshot = {
   unavailable: {},
   commands: [],
   regions: contributions([]),
+  replaced: replacedBy([]),
   themes: [],
   blocks: new Map(),
   inline: new Map(),

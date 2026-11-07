@@ -1,12 +1,14 @@
 import {
   REGIONS,
   isRegion,
+  isReplaceable,
   type AppEvents,
   type BlockProps,
   type Disposer,
   type PageHandle,
   type PageRef,
   type Regions,
+  type Replacements,
   type View,
 } from '@wikistow/plugin-sdk';
 import type { OutputResult } from '@wikistow/plugin-sdk/protocol';
@@ -73,11 +75,25 @@ export function perRegion<T extends { [R in keyof Regions]: unknown }>(
   ) as T;
 }
 
+/** A record with `make(region)` for every region a plugin can replace, as `perRegion` makes one. */
+export function perReplaceable<T extends { [R in keyof Replacements]: unknown }>(
+  make: (region: keyof Replacements) => unknown,
+): T {
+  // Unchecked, as `perRegion` is.
+  return Object.fromEntries(
+    Object.keys(REGIONS)
+      .filter(isReplaceable)
+      .map((r) => [r, make(r)]),
+  ) as T;
+}
+
 /**
  * Everything one activation of a plugin registered, from its app code and
  * its script alike: commands, blocks and inline code by ID, event
- * handlers, and what it put in each region. Each entry runs itself, so whoever reads the registry
- * doesn't ask where an entry came from. `changed` is told of every change.
+ * handlers, what it put in each region, and the one view it draws in place
+ * of each region it replaces. Each entry runs itself, so whoever reads the
+ * registry doesn't ask where an entry came from. `changed` is told of
+ * every change.
  *
  * An ID registered again replaces the entry before it, whichever part
  * registered either; the replaced entry's disposer then does nothing.
@@ -92,6 +108,8 @@ export function createRegistry(changed: () => void) {
     'location.changed': new Set(),
   };
   const regions = perRegion<Contributions>(() => new Map());
+  // A plugin replaces each region with one view at a time.
+  const replacements: { [R in keyof Replacements]?: Replacements[R] } = {};
 
   const keyed = <V>(map: Map<string, V>, key: string, value: V): Disposer => {
     map.set(key, value);
@@ -110,6 +128,9 @@ export function createRegistry(changed: () => void) {
     inline: (): Iterable<InlineEntry> => inline.values(),
     /** What `region` holds, in the order it was registered. */
     region: <R extends keyof Regions>(region: R): Iterable<Regions[R]> => regions[region].values(),
+    /** The view this plugin draws in place of `region`, if any. */
+    replacement: <R extends keyof Replacements>(region: R): Replacements[R] | undefined =>
+      replacements[region],
     /** Each handler of `event`, to run with it. */
     handlersOf: <E extends keyof AppEvents>(event: EventOf<E>) =>
       [...handlers[event.event]].map(({ part, run }) => ({ part, run: () => run(event) })),
@@ -125,6 +146,18 @@ export function createRegistry(changed: () => void) {
     },
     addContribution: <R extends keyof Regions>(region: R, contribution: Regions[R]) =>
       keyed(regions[region], contribution.id, contribution),
+    addReplacement<R extends keyof Replacements>(
+      region: R,
+      replacement: Replacements[R],
+    ): Disposer {
+      replacements[region] = replacement;
+      changed();
+      return () => {
+        if (replacements[region] !== replacement) return;
+        delete replacements[region];
+        changed();
+      };
+    },
   };
 }
 

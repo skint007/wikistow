@@ -30,9 +30,10 @@ import { joinPage } from '../page/properties';
 import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
-import { Place, type OpenPanel } from '../plugins/places';
+import { Place, Replaceable, type OpenPanel } from '../plugins/places';
 import { useAppPlugins } from '../plugins/app-plugins';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
+import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import type { Workshop } from './workshop';
@@ -501,8 +502,8 @@ const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${vi
 
 /**
  * The plugin's other places, each drawn as the app draws it, opened here:
- * its own pages, which its rail items open too, its Settings sections and
- * its titlebar buttons. Its `host.app.navigate` stays in the preview: it
+ * its own pages, which its rail items open too, the samples' space home
+ * where it replaces that, its Settings sections and its titlebar buttons. Its `host.app.navigate` stays in the preview: it
  * opens a sample page, or one of the plugin's own pages here, and fails
  * with `unsupported` for anywhere else.
  */
@@ -513,7 +514,7 @@ function PluginPlaces({
   workshop: Workshop;
   onOpen: (pageId: string) => void;
 }) {
-  const { regions } = usePlugins();
+  const { regions, replaced } = usePlugins();
   const [open, setOpen] = useState<string | null>(null);
   const appView = useMemo<AppViewProps>(
     () => ({ openPage: (page) => page.spaceId === SAMPLE_SPACE && onOpen(page.pageId) }),
@@ -550,6 +551,22 @@ function PluginPlaces({
       label: `Page: ${view.title}`,
       draw: () => drawView(view.pluginId, view.id),
     })),
+    // The samples' one space, as a space with no page open shows it.
+    ...(replaced['space.home']
+      ? [
+          {
+            key: 'space.home',
+            label: 'Space home',
+            draw: () => (
+              <div className="h-96">
+                <Replaceable name="space.home" inputs={{ spaceId: SAMPLE_SPACE }}>
+                  <PickAPage />
+                </Replaceable>
+              </div>
+            ),
+          },
+        ]
+      : []),
     // Each plugin's sections together, as its row on the Plugins page shows them.
     ...[...new Set(regions['settings.section'].map(({ pluginId }) => pluginId))].map(
       (pluginId) => ({

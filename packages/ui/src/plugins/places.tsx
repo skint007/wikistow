@@ -3,13 +3,14 @@ import type {
   AppViewProps,
   PageViewProps,
   Regions,
+  Replacements,
   SettingsViewProps,
   TitlebarViewProps,
   View,
 } from '@wikistow/plugin-sdk';
 import { Link } from '@tanstack/react-router';
 import { History, type LucideIcon } from 'lucide-react';
-import type { ComponentType, ReactNode } from 'react';
+import { use, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -20,13 +21,15 @@ import {
 import { HistorySheet } from '../page/history-sheet';
 import { TableOfContents, type Heading } from '../page/table-of-contents';
 import {
+  PluginsContext,
   usePluginRuntime,
   usePlugins,
   type Contribution,
+  type PluginPages,
   type PluginsSnapshot,
   type ShownPage,
 } from './runtime';
-import { PluginView } from './views';
+import { drawView, FailedNote, PluginView } from './views';
 
 /*
  * Every place plugins draw into, and the one way to draw one: `<Place
@@ -34,8 +37,10 @@ import { PluginView } from './views';
  * running plugins registered there, in the order Settings lists them and
  * then the order each registered (ADR 0001). A plugin's view is mounted
  * by `PluginView`, which says so in its place, with Disable, if it fails.
- * The SDK's `REGIONS` is the plugin-facing side of the same table: what
- * each registers and where it shows.
+ * A region plugins can replace is drawn with `<Replaceable name=…>`
+ * around the app's own part instead (ADR 0011). The SDK's `REGIONS` is
+ * the plugin-facing side of the same table: each region's policy, what
+ * it registers and where it shows.
  */
 
 /** What a page gives its own panels. */
@@ -383,5 +388,169 @@ function RailItem({
     >
       {face}
     </Link>
+  );
+}
+
+/** What the app gives each region plugins can replace, where it draws it. */
+export type ReplaceInputs = {
+  'space.home': { spaceId: string };
+  'folder.view': { spaceId: string; folderId: string };
+};
+
+/** What a replacing view of region `R` is given. */
+type ReplacementProps<R extends keyof Replacements> = Parameters<Replacements[R]['view']>[1];
+
+/**
+ * Each region plugins can replace: the app's part it is, as the approval
+ * dialog and Settings name it, and what a replacing view is given there,
+ * read through the plugin's own page access, or null where it has none
+ * (ADR 0011, decision 4).
+ */
+export const REPLACED: {
+  [R in keyof Replacements]: {
+    part: string;
+    props: (reach: PluginPages, inputs: ReplaceInputs[R]) => Promise<ReplacementProps<R> | null>;
+    /** The view with its props, to draw. */
+    bind: (view: Replacements[R]['view'], props: ReplacementProps<R>) => View<null>;
+  };
+} = {
+  'space.home': {
+    part: 'a space’s home page',
+    props: async ({ spaces }, { spaceId }) =>
+      (await spaces()).some((space) => space.spaceId === spaceId) ? { spaceId } : null,
+    bind: (view, props) => (element) => view(element, props),
+  },
+  'folder.view': {
+    part: 'a folder’s page',
+    props: async ({ pages }, { spaceId, folderId }) => ({
+      folder: { spaceId, folderId },
+      entries: await pages.list({ spaceId, folderId }),
+    }),
+    bind: (view, props) => (element) => view(element, props),
+  },
+};
+
+/** What a replacing view was given, for the view and inputs it was read for, bound to it. */
+type Made<R extends keyof Replacements> = {
+  view: Replacements[R]['view'];
+  inputs: string;
+  props: ReplacementProps<R> | null;
+  draw: View<null> | null;
+};
+
+/**
+ * A region plugins can replace, drawn by the plugin `usePlugins().replaced`
+ * names, or as the app's own part, `children`, where none does, where the
+ * plugin has no page access, and once its view failed, which a note above
+ * it says, with Disable. Nothing shows while what the view is given is
+ * read. What it is given is read again as `inputs` or the plugin's page
+ * access change, and as `stamp` does, such as the tree's update time, and
+ * it is drawn again only if that changed.
+ */
+export function Replaceable<R extends keyof Replacements>({
+  name,
+  inputs,
+  stamp,
+  children,
+}: {
+  name: R;
+  inputs: ReplaceInputs[R];
+  stamp?: unknown;
+  children: ReactNode;
+}) {
+  const { replaced, plugins } = usePlugins();
+  const runtime = use(PluginsContext);
+  const replacing = replaced[name];
+  const view = replacing?.view;
+  const pluginId = replacing?.pluginId;
+  const key = JSON.stringify(inputs);
+  const access = pluginId && runtime ? JSON.stringify(runtime.access(pluginId)) : '';
+  const [made, setMade] = useState<Made<R> | null>(null);
+  useEffect(() => {
+    const reach = pluginId && runtime?.pagesOf(pluginId);
+    if (!view || !reach) return;
+    let current = true;
+    void REPLACED[name]
+      .props(reach, inputs)
+      // Where it can't read what it would be given, the app's own part shows.
+      .catch(() => null)
+      .then((props) => {
+        if (!current) return;
+        setMade((last) =>
+          last?.view === view &&
+          last.inputs === key &&
+          JSON.stringify(last.props) === JSON.stringify(props)
+            ? last
+            : { view, inputs: key, props, draw: props && REPLACED[name].bind(view, props) },
+        );
+      });
+    return () => {
+      current = false;
+    };
+  }, [name, view, pluginId, runtime, key, access, stamp]);
+  if (!replacing) return children;
+  const shown = made?.view === replacing.view && made.inputs === key ? made : null;
+  if (!shown) return null;
+  if (!shown.draw) return children;
+  return (
+    <ReplacementView
+      pluginId={replacing.pluginId}
+      name={pluginName(plugins, replacing.pluginId)}
+      draw={shown.draw}
+    >
+      {children}
+    </ReplacementView>
+  );
+}
+
+/**
+ * A plugin's view, bound to its props, in place of the app's own part,
+ * `children`, which shows instead, under the failure note, if the view
+ * throws or draws nothing. Drawn again, and so tried again, for another
+ * view or props.
+ */
+function ReplacementView({
+  pluginId,
+  name,
+  draw,
+  children,
+}: {
+  pluginId: string;
+  name: string;
+  draw: View<null>;
+  children: ReactNode;
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  const runtime = usePluginRuntime();
+  const [failed, setFailed] = useState<View<null> | null>(null);
+  const failedHere = failed === draw;
+  useEffect(() => {
+    const element = host.current;
+    if (!element || failedHere) return;
+    return drawView(element, {
+      pluginId,
+      name,
+      view: draw,
+      props: null,
+      runtime,
+      fallBack: () => setFailed(() => draw),
+    });
+  }, [draw, runtime, pluginId, name, failedHere]);
+  // Keyed apart: the view's element is emptied as it is undone, after this renders.
+  if (failedHere) {
+    return (
+      <div key="failed" className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
+        <FailedNote name={name} disable={() => void runtime.disable(pluginId)} />
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div
+      key="view"
+      ref={host}
+      data-plugin-view={pluginId}
+      className="h-full min-h-0 overflow-y-auto"
+    />
   );
 }
