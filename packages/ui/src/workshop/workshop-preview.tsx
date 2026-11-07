@@ -54,17 +54,11 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   const samples = useSyncExternalStore(workshop.samples.subscribe, workshop.samples.get);
   const [selected, setSelected] = useState<string | null>(null);
   const sample = samples.find((page) => page.pageId === selected) ?? samples[0] ?? null;
-  // Where its plugin sees the person: on the sample page shown.
-  const samplePageId = sample?.pageId;
-  useEffect(
-    () =>
-      workshop.location.routed(
-        samplePageId
-          ? { kind: 'page', spaceId: SAMPLE_SPACE, pageId: samplePageId }
-          : { kind: 'other' },
-      ),
-    [workshop, samplePageId],
-  );
+  // With no sample shown, its plugin sees the person nowhere in particular.
+  const none = sample === null;
+  useEffect(() => {
+    if (none) workshop.location.routed({ kind: 'other' });
+  }, [workshop, none]);
   return (
     <div className="grid content-start gap-5">
       <Status workshop={workshop} />
@@ -418,16 +412,17 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
     }),
     [sample.pageId, sample.outside, mode],
   );
-  // The sample shown, as the app's page route tells its plugins of a page.
-  useEffect(
-    () =>
-      workshop.location.showing({
-        page: shown.page,
-        version: shown.version,
-        revision: shown.revision,
-      }),
-    [workshop, shown],
-  );
+  // Where its plugin sees the person: on this sample, as the app's router
+  // and page route tell their plugins of a page. Here, not in the preview
+  // around it, whose effects run after this one's.
+  useEffect(() => {
+    workshop.location.routed({ kind: 'page', ...shown.page });
+    return workshop.location.showing({
+      page: shown.page,
+      version: shown.version,
+      revision: shown.revision,
+    });
+  }, [workshop, shown]);
   const page = useMemo(
     () => ({ spaceId: SpaceId.parse(SAMPLE_SPACE), pageId: PageId.parse(sample.pageId) }),
     [sample.pageId],
