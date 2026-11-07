@@ -32,11 +32,12 @@ import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { formView, readFields, type ReadField } from './block-form';
 import type { BlockProperties } from './block-properties';
 import { editorDrafts } from './drafts';
-import { desktopSource } from './desktop-source';
-import { librarySource } from './library';
+import { desktopStore } from './desktop-store';
+import { browserStore } from './library';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
 import { inFrame } from './script-frame';
 import { ScriptWorker } from './script-worker';
+import { refOf, type AnyPluginStore, type AppPluginStore, type PluginRef } from './store';
 
 /** The page a command runs on or a panel shows, as the page view knows it. */
 export type ShownPage = {
@@ -177,46 +178,30 @@ const isAppPlugin = (value: unknown): value is AppPlugin =>
 const fire = <E extends keyof PluginEvents>(set: Handlers[E], payload: PluginEvents[E]) =>
   Promise.all([...set].map(async (handler) => handler(payload)));
 
-/** Where a runtime's plugins come from, and what they reach. */
-export type RuntimeSource = {
-  /**
-   * The plugins here, enabled or not, and whether safe mode is on. Plugins
-   * null: not known now, as the browser's while the vault is locked. The
-   * runtime lists again whenever the vault locks or unlocks.
-   */
-  list(): Promise<{
-    safeMode: boolean;
-    plugins: InstalledPlugin[] | null;
-    /** Plugins it couldn't load, by ID, with why. */
-    unavailable?: Record<string, string>;
-  }>;
-  /** The open account's page access settings, by plugin. */
-  access(): Promise<Record<string, PluginScope[]>>;
-  /** Replace one plugin's page access for the open account. */
-  setAccess(pluginId: string, scopes: PluginScope[]): Promise<void>;
+/** What a runtime's plugins reach, apart from where they come from. */
+export type PluginReach = {
   /** The page operations a plugin gets as `host.pages`. */
   pages(caller: Caller): Pages;
   /** The handle a command or view gets for the page shown. */
   handle(caller: Caller, shown: ShownPage): PageHandle;
-  /** Turn a plugin off, from where its view failed. */
-  disable(pluginId: string): Promise<void>;
 };
 
 /**
- * The plugins `source` lists, running, and everything they registered. A
- * plugin's styles load while it is listed. Its code runs while the vault
- * is open: unlocking activates it, and locking or signing out ends its
- * worker, aborts its `signal` and drops what it registered, as disabling
- * does. In safe mode nothing loads. `pluginRuntime` runs the plugins
- * installed here (the desktop's) or approved from the library (the
- * browser's); the workshop runs one of its own (#257).
+ * The plugins `store` lists, running, and everything they registered,
+ * reaching what `reach` gives them. A plugin's styles load while it is
+ * listed. Its code runs while the vault is open: unlocking activates it,
+ * and locking or signing out ends its worker, aborts its `signal` and
+ * drops what it registered, as disabling does. In safe mode nothing loads.
+ * `pluginRuntime` runs the plugins installed here (the desktop's) or
+ * approved from the library (the browser's); the workshop runs one of its
+ * own (#257). The runtime lists again whenever the vault locks or unlocks.
  */
-export function createRuntime(source: RuntimeSource) {
+export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   const loaded = new Map<string, Loaded>();
   /** Installed but not running: disabled, or everything in safe mode. Listed for Settings. */
   let idle: InstalledPlugin[] = [];
   /** The open account's page access settings, by plugin. */
-  let access: Record<string, PluginScope[]> = {};
+  let access: Readonly<Record<string, readonly PluginScope[]>> = {};
   let safeMode = false;
   let queryClient: QueryClient | null = null;
   const listeners = new Set<() => void>();
@@ -436,7 +421,7 @@ export function createRuntime(source: RuntimeSource) {
     const host: AppHost = {
       api: PLUGIN_API,
       pluginId: id,
-      pages: source.pages(caller),
+      pages: reach.pages(caller),
       signal: active.controller.signal,
       commands: {
         register(command) {
@@ -561,17 +546,13 @@ export function createRuntime(source: RuntimeSource) {
 
   const unlocked = () => vaultStore.get().status === 'unlocked';
 
-  async function readAccess() {
-    access = unlocked() ? await source.access().catch(() => ({})) : {};
-  }
-
   /**
-   * Match what runs to the source's list: load what's new or changed,
+   * Match what runs to the store's list: load what's new or changed,
    * unload the rest, and while the vault is open start what isn't running.
    */
   async function sync() {
     if (stopped) return;
-    const state = await source.list();
+    const state = await store.list();
     if (stopped) return;
     safeMode = state.safeMode;
     const plugins = state.plugins ?? [];
@@ -588,7 +569,7 @@ export function createRuntime(source: RuntimeSource) {
       if (!next || next.key !== entry.plugin.key || next.library !== entry.plugin.library)
         unload(entry);
     }
-    if (unlocked()) await readAccess();
+    if (unlocked()) access = state.access;
     for (const plugin of wanted.values()) {
       const entry = loaded.get(plugin.manifest.id) ?? {
         plugin,
@@ -601,7 +582,7 @@ export function createRuntime(source: RuntimeSource) {
       if (unlocked() && !entry.active) entry.starting = activate(entry);
     }
     idle = plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
-    unavailable = state.unavailable ?? {};
+    unavailable = state.unavailable;
     listed = state.plugins !== null;
     emit();
   }
@@ -644,15 +625,22 @@ export function createRuntime(source: RuntimeSource) {
     },
     refresh,
     access: (pluginId: string) => access[pluginId] ?? [],
-    async setAccess(pluginId: string, scopes: PluginScope[]) {
+    /** Replace a plugin's page access for the open account, in its store. */
+    async setAccess(plugin: PluginRef, scopes: readonly PluginScope[]) {
       if (!unlocked()) return;
-      await source.setAccess(pluginId, scopes);
-      access = { ...access, [pluginId]: scopes };
+      await store.setAccess(plugin, scopes);
+      access = { ...access, [plugin.id]: scopes };
       emit();
     },
     /** Tell every running plugin but `from` of `event`. */
     deliver: (event: PluginEvent, from: string | null = null) => deliver(event, from),
-    disable: (pluginId: string) => source.disable(pluginId),
+    /** Turn a running plugin off in its store, from where its view failed. */
+    async disable(pluginId: string) {
+      const entry = loaded.get(pluginId);
+      if (!entry) return;
+      await store.enable(refOf(entry.plugin), false);
+      await refresh();
+    },
     /** One of a plugin's views failed where it is drawn: said beside the plugin until it starts again. */
     viewFailed(pluginId: string, error: unknown) {
       const entry = loaded.get(pluginId);
@@ -708,7 +696,7 @@ export function createRuntime(source: RuntimeSource) {
       const entry = loaded.get(pluginId);
       const active = entry?.active;
       if (!entry || !active) throw new PluginError('unloaded', 'The plugin isn’t running');
-      const page = source.handle(active.caller, shown);
+      const page = reach.handle(active.caller, shown);
       const command = active.commands.get(commandId);
       try {
         if (command) await command.run({ page });
@@ -736,7 +724,7 @@ export function createRuntime(source: RuntimeSource) {
       viewProps.set(active, views);
       const last = views.get(view);
       if (last?.key === key) return last.props;
-      const props = { page: source.handle(active.caller, shown) };
+      const props = { page: reach.handle(active.caller, shown) };
       views.set(view, { key, props });
       return props;
     },
@@ -754,25 +742,22 @@ export type PluginRuntime = ReturnType<typeof createRuntime>;
 
 const drafts = editorDrafts();
 
-const ownSource = desktop ? desktopSource(desktop) : librarySource;
-
 /**
- * The app's own plugins, running in its page: in the desktop app those
- * installed on this computer and the library plugins it holds copies of,
- * in the browser the library plugins the person approved.
+ * The app's own plugins and the person's choices for them: in the desktop
+ * app those installed on this computer and the library plugins it holds
+ * copies of, in the browser the library plugins the person approved.
+ * Settings → Plugins changes them only through this.
  */
-const ownRuntime = createRuntime({
-  ...ownSource,
+export const pluginStore: AppPluginStore = desktop ? desktopStore(desktop) : browserStore();
+
+/** The app's own plugins, running in its page. */
+const ownRuntime = createRuntime(pluginStore, {
   pages: (caller) =>
     pagesFor({
       ...caller,
       open: (page, base, change) => drafts.through(caller, page, base, change),
     }),
   handle: (caller, shown) => drafts.handle(caller, shown),
-  async disable(pluginId) {
-    await ownSource.disable(pluginId);
-    await pluginRuntime.refresh();
-  },
 });
 
 export const pluginRuntime = {

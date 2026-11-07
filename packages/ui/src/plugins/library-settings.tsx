@@ -1,5 +1,5 @@
-import { pluginOperations, type ClientContext } from '@wikistow/client';
-import { pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
+import type { ClientContext } from '@wikistow/client';
+import { libraryInstall, pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
 import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -20,13 +20,12 @@ import { aiStatusQuery } from '../ai/session';
 import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
-import { useVault } from '../vault/store';
 import { useNewDraft } from '../workshop/drafts';
 import { ChooseFolder, pathInFolder } from './choose-folder';
 import {
-  asInstalled,
   LIBRARY_KEY,
   libraryQuery,
+  libraryRequest,
   privatePluginsQuery,
   readUpload,
   uploadAndInstall,
@@ -42,21 +41,11 @@ import {
   LEVELS,
   matches,
   PluginRow,
-  type ApprovalRequest,
   type InstalledItem,
   type PluginsView,
 } from './plugin-settings';
-import { pluginRuntime, usePlugins } from './runtime';
-
-/** A library version to approve, as a new install or as an update of the one approved. */
-type Request = ApprovalRequest & { id: string; hash: string };
-
-const requestFor = (id: string, version: LibraryVersion): Request => ({
-  ...asInstalled(version, true),
-  id,
-  hash: version.hash,
-  replaces: null,
-});
+import { pluginRuntime, pluginStore, usePlugins } from './runtime';
+import type { LibraryRequest, PluginRef } from './store';
 
 type Visibility = pluginRoutes.PluginVisibility;
 
@@ -73,31 +62,16 @@ const size = (bytes: number) =>
   bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /**
- * The Plugins page in the browser (ADR 0002): the plugins this account
- * installed from the server's library, each on or off with its page access
- * and any update waiting, then the library itself, to install from, upload
- * to (which installs it) and remove from. What is installed is in the
- * account's encrypted contacts record, so it shows only while the vault is open.
- */
-export function LibrarySettings({ tab, query }: PluginsView) {
-  const vault = useVault();
-  if (vault.status !== 'unlocked') {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Unlock your vault to see your plugins. Which ones you installed is encrypted.
-      </p>
-    );
-  }
-  return <Library ctx={vault.ctx} tab={tab} query={query} />;
-}
-
-/**
- * The library plugins this account installed, in the Installed tab, and
- * the library, in the Library tab. In the desktop app the installed ones
- * are listed with its `folder` installs. There a plugin runs from the copy the app keeps,
- * even once the library drops its version, and a folder install of the
- * same ID replaces it on that computer. The desktop shares to the library
- * from an installed plugin, not by choosing a folder.
+ * The library plugins this account installed (ADR 0002), in the Installed
+ * tab, each on or off with its page access and any update waiting, and the
+ * library, in the Library tab, to install from, upload to (which installs
+ * it) and remove from. What is installed is in the account's encrypted
+ * contacts record, so it shows only while the vault is open. In the
+ * desktop app the installed ones are listed with its `folder` installs.
+ * There a plugin runs from the copy the app keeps, even once the library
+ * drops its version, and a folder install of the same ID replaces it on
+ * that computer. The desktop shares to the library from an installed
+ * plugin, not by choosing a folder.
  * The owner of a plugin chooses whether it is Shared or Only me.
  */
 export function Library({
@@ -120,8 +94,8 @@ export function Library({
   useEffect(() => {
     if (library && !listed) void pluginRuntime.refresh();
   }, [library, listed]);
-  const approvals = pluginOperations.listPluginApprovals(ctx);
-  const [request, setRequest] = useState<Request | null>(null);
+  const approvals = pluginStore.approvals();
+  const [request, setRequest] = useState<LibraryRequest | null>(null);
   const [removal, setRemoval] = useState<Removal | null>(null);
   const [upload, setUpload] = useState<PluginUpload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -142,12 +116,7 @@ export function Library({
     await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY });
     await pluginRuntime.refresh();
   };
-  const approve = ({ id, hash }: Request) =>
-    act(async () => {
-      if (approvals.some((approval) => approval.id === id))
-        await pluginOperations.updatePlugin(ctx, id, hash);
-      else await pluginOperations.approvePlugin(ctx, { id, hash, access: [] });
-    });
+  const approve = (chosen: LibraryRequest) => act(() => pluginStore.approve(chosen));
 
   const inLibrary = (id: string) => library?.find((plugin) => plugin.id === id);
   const installed = approvals.flatMap((approval): InstalledItem[] => {
@@ -160,8 +129,10 @@ export function Library({
     const runs = status?.plugin.library && status.plugin.key === approval.hash ? status : null;
     // In the desktop app, a folder install of the same ID runs instead.
     const replaced = status !== undefined && !status.plugin.library;
-    const shown = runs?.plugin ?? (version ? asInstalled(version, true) : null);
+    const shown =
+      runs?.plugin ?? (version ? libraryInstall(version.manifest, version.hash, true) : null);
     const key = `library:${approval.id}`;
+    const ref: PluginRef = { id: approval.id, library: true };
     if (!shown) {
       if (!library) return [];
       const name = newest?.manifest.name ?? approval.id;
@@ -179,14 +150,14 @@ export function Library({
               </p>
               <div className="flex flex-wrap gap-2">
                 {plugin && newest && (
-                  <Button size="sm" onClick={() => setRequest(requestFor(plugin.id, newest))}>
+                  <Button size="sm" onClick={() => setRequest(libraryRequest(newest))}>
                     Install {newest.manifest.version}…
                   </Button>
                 )}
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+                  onClick={() => void act(() => pluginStore.remove(ref))}
                 >
                   Remove
                 </Button>
@@ -207,10 +178,8 @@ export function Library({
         row: (
           <PluginRow
             status={{ plugin: plugged, problem }}
-            onEnabled={(on) =>
-              void act(() => pluginOperations.setPluginEnabled(ctx, approval.id, on))
-            }
-            onRemove={() => void act(() => pluginOperations.removePlugin(ctx, approval.id))}
+            onEnabled={(on) => void act(() => pluginStore.enable(ref, on))}
+            onRemove={() => void act(() => pluginStore.remove(ref))}
             here={!replaced}
             note={
               <>
@@ -229,16 +198,7 @@ export function Library({
               update && (
                 <Button
                   size="sm"
-                  onClick={() =>
-                    setRequest({
-                      ...requestFor(approval.id, update),
-                      replaces: {
-                        version: plugged.manifest.version,
-                        level: plugged.level,
-                        access: plugged.manifest.access,
-                      },
-                    })
-                  }
+                  onClick={() => setRequest(libraryRequest(update, plugged.manifest))}
                 >
                   Update…
                 </Button>
@@ -299,7 +259,7 @@ export function Library({
                   installed={approvals.some((approval) => approval.id === plugin.id)}
                   removable={plugin.mine || admin}
                   visibility={onlyMe?.has(plugin.id) ? 'private' : 'shared'}
-                  onInstall={(version) => setRequest(requestFor(plugin.id, version))}
+                  onInstall={(version) => setRequest(libraryRequest(version))}
                   onChange={
                     ai?.enabled && !safeMode && !newDraft.busy
                       ? async (version) => {
@@ -333,7 +293,7 @@ export function Library({
         onDone={() => setUpload(null)}
         onUpload={(chosen, visibility) =>
           act(async () => {
-            const { manifest } = await uploadAndInstall(ctx, chosen, visibility);
+            const { manifest } = await uploadAndInstall(pluginStore, chosen, visibility);
             return `Uploaded and installed ${manifest.name} ${manifest.version}.`;
           })
         }
@@ -412,7 +372,7 @@ function LibraryRow({
   const [newest] = plugin.versions;
   if (!newest) return null;
   const { manifest } = newest;
-  const level = LEVELS[asInstalled(newest, true).level];
+  const level = LEVELS[trustLevel(manifest)];
   return (
     <li className="grid gap-2 rounded-control border border-border p-3" aria-label={manifest.name}>
       <div className="flex flex-wrap items-center gap-2">
@@ -554,18 +514,13 @@ export function ConfirmUpload({
   const known = onlyMe ?? (isError ? new Set<string>() : null);
   const current = known && (id && known.has(id) ? 'private' : 'shared');
   const visibility = choice && choice.upload === upload ? choice.visibility : (current ?? 'shared');
-  const approved = pluginOperations.listPluginApprovals(ctx).find((each) => each.id === id);
+  const approved = pluginStore.approvals().find((each) => each.id === id);
   const installed = library
     ?.find((plugin) => plugin.id === id)
     ?.versions.find((version) => version.hash === approved?.hash)?.manifest;
   const candidate = upload && {
     ...upload,
-    level: trustLevel(upload.manifest),
-    development: null,
-    replaces:
-      installed && approved?.hash !== upload.hash
-        ? { version: installed.version, level: trustLevel(installed), access: installed.access }
-        : null,
+    ...libraryRequest(upload, installed && approved?.hash !== upload.hash ? installed : null),
   };
   return (
     <Approval
