@@ -31,6 +31,7 @@ import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { usePageIndex } from '../data/page-index';
+import { contentChanged } from '../data/content-changed';
 import { revisionQuery, treeQuery } from '../data/queries';
 import { errorMessage, stopMessage } from '../errors';
 import { decryptedQuery } from './attachments';
@@ -490,9 +491,7 @@ function useLinkAssist({
                   // it, even where a page this draft can't name has the same title.
                   onCreated: async (pageId) => {
                     const pick = () => session.chooseLink(linkKey({ target: title }), pageId);
-                    await queryClient.invalidateQueries({
-                      queryKey: treeQuery(ctx, page.spaceId).queryKey,
-                    });
+                    await contentChanged(queryClient, ctx, { spaceId: page.spaceId });
                     if (!pick()) pickWhenListed(queryClient, pick);
                   },
                 },

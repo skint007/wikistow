@@ -10,7 +10,8 @@ import { X } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
-import { searchIndexChanged, trashQuery, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { trashQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 
 /** Something just moved to the trash, which the notice offers to put back. */
@@ -61,9 +62,8 @@ export function TrashNotice({ ctx }: { ctx: ClientContext }) {
     setError(null);
     try {
       await trashOperations.restoreDeleted(item.ctx, item.nodeId);
-      searchIndexChanged(queryClient, { spaceIds: [item.spaceId] });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: treeQuery(item.ctx, item.spaceId).queryKey }),
+        contentChanged(queryClient, item.ctx, { spaceId: item.spaceId }),
         queryClient.invalidateQueries({ queryKey: trashQuery(item.ctx).queryKey }),
       ]);
       show(null);

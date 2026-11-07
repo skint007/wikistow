@@ -12,13 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { AgentName, agentPersonName } from '../agents/agent-name';
-import {
-  historyQuery,
-  pageQuery,
-  searchIndexChanged,
-  treeQuery,
-  versionChangesQuery,
-} from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { historyQuery, pageQuery, versionChangesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { useAvailability } from '../shell/availability';
 import { readWikilinks } from './page-reader';
@@ -131,11 +126,7 @@ export function HistorySheet({
       await beforeRestore?.();
       await pageOperations.restorePublished(ctx, page, revisionId, { read: readWikilinks });
       await onRestored?.();
-      searchIndexChanged(queryClient);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
-        queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
-      ]);
+      await contentChanged(queryClient, ctx, page);
       onOpenChange(false);
       void navigate({ to: '/s/$spaceId/p/$pageId', params: page, search: { view: 'draft' } });
     } catch (caught) {

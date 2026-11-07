@@ -16,7 +16,8 @@ import { runCommand } from '../commands/command';
 import { copyNode } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
 import { PLAIN, useClient } from '../vault/store';
-import { refreshAccess, searchIndexChanged, spacesQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { refreshAccess, spacesQuery } from '../data/queries';
 import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
 import { describePerson, peopleQuery } from '../sharing/people';
@@ -195,8 +196,7 @@ export function ConfirmCopy({
       if (!made) return;
       const { spaceId, nodeId } = made;
       // Both trees, before opening what it made there.
-      await queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree'] });
-      searchIndexChanged(queryClient, { spaceIds: [sourceSpaceId, spaceId] });
+      await contentChanged(queryClient, ctx, [{ spaceId: sourceSpaceId }, { spaceId }]);
       // Closed first: a dialog left open would be shown again for the space it went to.
       onDone();
       await (node.kind === 'folder'

@@ -11,8 +11,9 @@ import {
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { contentChanged } from '../data/content-changed';
 import { onSent, pageWriter } from '../data/offline-changes';
-import { pageQuery, queueOf, searchIndexChanged, treeQuery } from '../data/queries';
+import { pageQuery, queueOf, treeQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { connection } from '../data/connection';
 import { availability, waitingOf } from '../shell/availability';
@@ -200,40 +201,11 @@ function appPorts(
       const loaded = queryClient.getQueryData(tree.queryKey);
       return loaded ? draftLinkTargets(loaded, { id: page.pageId }, title) : null;
     },
-    async saved({ revisionId, basedOn, payload, written, region, epoch }) {
+    async saved({ revisionId, basedOn, written, region }) {
       editorSaved(page, revisionId);
-      // A tree fetched before this save would land on the patch with the old title.
-      const overtaken = queryClient.isFetching({ queryKey: tree.queryKey }) > 0;
-      if (overtaken) await queryClient.cancelQueries({ queryKey: tree.queryKey });
-      let changedStatus = false;
-      queryClient.setQueryData(tree.queryKey, (loaded) => {
-        if (!loaded) return loaded;
-        return {
-          ...loaded,
-          pages: loaded.pages.map((entry) => {
-            if (entry.id !== page.pageId) return entry;
-            changedStatus = !entry.draftChanges;
-            // Its label, region included, is now the version just saved.
-            return {
-              ...entry,
-              title: payload.title,
-              ...pageOperations.labelCover(payload, 'draft'),
-              region,
-              draftHead: revisionId,
-              draftChanges: true,
-            };
-          }),
-        };
+      await contentChanged(queryClient, ctx, {
+        saved: { ...page, basedOn, revisionId, payload: written, region },
       });
-      searchIndexChanged(queryClient, {
-        saved: { ...page, basedOn, revisionId, payload: written },
-      });
-      // The first edit after publishing changes the tree's unpublished marker.
-      if (changedStatus || overtaken)
-        await queryClient.invalidateQueries({ queryKey: tree.queryKey });
-      if (vaultStore.epoch() === epoch) {
-        await queryClient.invalidateQueries({ queryKey: info.queryKey });
-      }
     },
     overtaken: () => void queryClient.invalidateQueries({ queryKey: info.queryKey }),
   };

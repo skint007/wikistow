@@ -32,7 +32,8 @@ import { Label } from '@/components/ui/label';
 import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
-import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { publicLinksQuery, treeQuery } from '../data/queries';
 import { pageWriter } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
@@ -871,8 +872,7 @@ function CreateDialog({
         });
         onCreatedPage(pageId);
       }
-      searchIndexChanged(queryClient);
-      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      await contentChanged(queryClient, ctx, { spaceId });
       close();
     } catch (caught) {
       setError(errorMessage(caught));

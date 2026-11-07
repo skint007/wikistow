@@ -10,7 +10,7 @@ import {
 } from '@wikistow/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { pageQuery, searchIndexChanged, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
 import { lineBreakOf } from '../page/editor/surface';
 import { readWikilinks } from '../page/page-reader';
 import { joinPage } from '../page/properties';
@@ -112,7 +112,7 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
       });
       if (!result.ok) return fail(id, { kind: 'failed', message: result.reason });
       if (!result.written) return { basedOn };
-      const { revisionId, payload } = result.written;
+      const { revisionId, payload, region } = result.written;
       setOwn((current) =>
         new Map(current).set(
           cell.pageId,
@@ -122,17 +122,9 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
           }),
         ),
       );
-      searchIndexChanged(queryClient, {
-        saved: {
-          spaceId,
-          pageId: cell.pageId,
-          basedOn,
-          revisionId,
-          payload,
-        },
+      void contentChanged(queryClient, ctx, {
+        saved: { spaceId, pageId: cell.pageId, basedOn, revisionId, payload, region },
       });
-      void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-      void queryClient.invalidateQueries({ queryKey: pageQuery(ctx, cell.pageId).queryKey });
       return { basedOn: revisionId };
     } catch (error) {
       return fail(id, cellProblem(error));
@@ -157,7 +149,7 @@ export function useCellEdits(spaceId: SpaceId, save?: SaveProperty) {
     void run.then((settled) => {
       // After a conflict or a failure, the index reads the draft as it is
       // now; each save went in as it landed.
-      if (!settled) searchIndexChanged(queryClient, { spaceIds: [spaceId] });
+      if (!settled) void contentChanged(queryClient, ctx, { spaceId });
       if (line.get(cell.pageId) !== run) return;
       line.delete(cell.pageId);
       setSaving((current) => without(current, cell.pageId));

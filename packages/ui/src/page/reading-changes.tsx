@@ -9,13 +9,8 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { createContext, useCallback, useEffect, useMemo } from 'react';
-import {
-  pageQuery,
-  publicLinksQuery,
-  revisionQuery,
-  searchIndexChanged,
-  treeQuery,
-} from '../data/queries';
+import { contentChanged } from '../data/content-changed';
+import { pageQuery, publicLinksQuery, revisionQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { readWikilinks } from './page-reader';
 import {
@@ -160,14 +155,7 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
       }
       if (published)
         await queryClient.prefetchQuery(revisionQuery(ctx, page, 'published', published));
-      searchIndexChanged(queryClient);
-      await Promise.all([
-        reload(),
-        queryClient.invalidateQueries({
-          queryKey: treeQuery(ctx, spaceId).queryKey,
-          refetchType: 'all',
-        }),
-      ]);
+      await contentChanged(queryClient, ctx, { spaceId, pageId }, { unshown: true });
       return flushed;
     };
     const queue = new ReadingQueue((changes) =>

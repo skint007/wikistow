@@ -46,9 +46,9 @@ import {
   publicLinksQuery,
   publishedCopiesQuery,
   revisionQuery,
-  searchIndexChanged,
   treeQuery,
 } from '../../../../../../data/queries';
+import { contentChanged } from '../../../../../../data/content-changed';
 import { useNotKept } from '../../../../../../data/connection';
 import { keepEveryPage, pageOpened } from '../../../../../../data/keeper';
 import { keptStore } from '../../../../../../data/kept-store';
@@ -436,11 +436,7 @@ function PageBody({
   const publishDraft = async () => {
     await editor.current?.flush();
     const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
-    searchIndexChanged(queryClient);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: pageQuery(ctx, page.pageId).queryKey }),
-      queryClient.invalidateQueries({ queryKey: treeQuery(ctx, page.spaceId).queryKey }),
-    ]);
+    await contentChanged(queryClient, ctx, page);
     return written;
   };
   // A page opened without ?view=draft turns to its publication as soon as

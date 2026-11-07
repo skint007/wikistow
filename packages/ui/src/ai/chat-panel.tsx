@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/ui/picker';
 import { cn } from '@/lib/utils';
 import { AddAgentDialog } from '../agents/add-agent-dialog';
-import { PLAIN, useClient } from '../vault/store';
+import { useClient } from '../vault/store';
 import { saveOpenDraft } from '../page/use-draft-session';
-import { searchIndexChanged } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
 import { usePlugins } from '../plugins/runtime';
 import { WorkshopChat } from '../workshop/workshop-chat';
 import { WorkshopConversation } from '../workshop/workshop-panel';
@@ -88,11 +88,8 @@ function ChooseAgent({ host }: { host: string }) {
     if (!agent) return;
     chatStore.start(
       new AgentChat(ctx, agent, {
-        onChanged: ({ spaceId, pageId }) => {
-          void queryClient.invalidateQueries({ queryKey: [PLAIN, 'tree', spaceId] });
-          if (pageId) void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page', pageId] });
-          searchIndexChanged(queryClient);
-        },
+        onChanged: ({ spaceId, pageId }) =>
+          void contentChanged(queryClient, ctx, { spaceId, pageId }),
       }),
     );
   };

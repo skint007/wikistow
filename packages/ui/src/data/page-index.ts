@@ -25,7 +25,7 @@ export type PageIndexState = {
  * One index serves every caller. While a component uses this (and
  * `enabled`), the index is built if it isn't, and updated after a change
  * to a page, this person's own or one the server tells of
- * (`searchIndexChanged`), or once a minute old when the component mounts.
+ * (`contentChanged`, `searchIndexChanged`), or once a minute old when the component mounts.
  * Each update that changes anything is a new `index` object, so derive
  * from it with `useMemo([index])`, and a component shows changes as they
  * come; one that finds nothing changed keeps the same object. Building it

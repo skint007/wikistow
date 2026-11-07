@@ -5,7 +5,7 @@ import { use, useState } from 'react';
 import { runCommand } from '../commands/command';
 import { createPage } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
-import { searchIndexChanged, treeQuery } from '../data/queries';
+import { contentChanged } from '../data/content-changed';
 import { linkHint } from '../desktop';
 import { errorMessage } from '../errors';
 import { AttachmentImage, AttachmentLink, ATTACHMENT_SCHEME } from './attachments';
@@ -126,10 +126,7 @@ function CreateLink({
           ctx,
           satisfies: requirementsHere({ editor: true }),
           onCreated: async (pageId) => {
-            searchIndexChanged(queryClient);
-            await queryClient.invalidateQueries({
-              queryKey: treeQuery(ctx, page.spaceId).queryKey,
-            });
+            await contentChanged(queryClient, ctx, { spaceId: page.spaceId });
             await navigate({
               to: '/s/$spaceId/p/$pageId',
               params: { spaceId: page.spaceId, pageId },
