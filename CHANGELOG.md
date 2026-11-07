@@ -4,6 +4,23 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.24.0-beta.1 - 2026-11-07
+
+### Highlights
+
+#### Features
+
+- App plugins can draw parts of the app in place of its own: the rail, a space’s home page and page tree, a folder’s page, and the text of a page as read. Settings → Plugins says which plugin draws each part, with Use the app’s own, and safe mode puts every part back.
+- Plugins can work at the cursor in the draft view, reading the selection and inserting Markdown you can undo, and can add buttons to the editor’s toolbar.
+- Plugins can know where you are in the app and take you to a space, folder or page, and can draw inline code such as `plugin:page-tools/rating 4` in the reader and the visual editor.
+- Themes can set the colours of alerts, highlighted code, shadows and the dialog backdrop, and the sidebar’s width. Mermaid diagrams take the theme’s colours.
+
+#### Fixes
+
+- New page here and New folder here in a folder made offline that isn’t sent yet now work online too. The folder’s other actions, and Delete page on a page made offline, wait until it is sent, saying so, instead of failing as not found.
+- Move to…, Copy to… and Publish to another space… no longer offer a folder made offline that isn’t sent yet.
+- A plugin block that fails in the visual editor now shows the same note as in the reader, with Disable.
+
 ### Changes
 
 #### App
@@ -29,6 +46,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it. (#292)
 - Every plugin region is drawn through one `Place` component (`packages/ui/src/plugins/places.tsx`), from one table: `REGIONS` in the plugin SDK. History is the first `page.panel`. The SDK README's region and `data-region` tables are checked against the SDK by a test, and now list the `folder`, `workshop` and `whats-new` hooks. (#296)
+- Each page is saved through one page writer (`packages/client/src/operations/page-writer.ts`), which decides between the device's queue and the server. (#293)
+- What can be done offline or while a change waits is decided in one module, `packages/ui/src/shell/availability.ts`. (#298)
+- Plugins' installs, approvals and access go through one `PluginStore` for the desktop's `plugins.json`, library approvals and the workshop. (#299)
+- One plugin registry per activation, built with `createRuntime(store, …)`; the script worker registers through it. (#302)
+- One `contentChanged` call tells the app's caches and the search index that a page changed. (#304)
+
+#### Desktop
+
+- A folder install set to **Use the app’s own** for a part writes that choice to `plugins.json`, which desktop apps before 0.24.0 refuse. (#305)
 
 ## 0.23.0 - 2026-11-06
 
