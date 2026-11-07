@@ -4,6 +4,7 @@ import {
   PluginError,
   type AppHost,
   type BlockProps,
+  type InlineProps,
   type PanelProps,
   type PageVersion,
 } from '@wikistow/plugin-sdk';
@@ -140,11 +141,48 @@ function Product({ source, setSource }: BlockProps) {
   );
 }
 
+// Inline code `plugin:page-tools/rating 3` shows three stars of five. In
+// the editor each star is a button, which sets the span's text.
+const STARS = [1, 2, 3, 4, 5];
+
+function Rating({ text, setText }: InlineProps) {
+  const [rating, setRating] = useState(() =>
+    Math.min(5, Math.max(0, Math.round(Number(text)) || 0)),
+  );
+  const star = (n: number) => (n <= rating ? '★' : '☆');
+  if (!setText)
+    return (
+      <span className="page-tools-rating" role="img" aria-label={`Rated ${rating} of 5`}>
+        {STARS.map(star).join('')}
+      </span>
+    );
+  return (
+    <span className="page-tools-rating" role="group" aria-label="Rating">
+      {STARS.map((n) => (
+        <button
+          key={n}
+          type="button"
+          aria-label={`${n} of 5`}
+          aria-pressed={n <= rating}
+          onClick={() => {
+            // Its own change isn't drawn again, so it shows here first.
+            setRating(n);
+            setText(String(n));
+          }}
+        >
+          {star(n)}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 export default definePlugin({
   activate(host) {
     const StatsPanel = reactView((props: PanelProps) => <Stats {...props} host={host} />);
     host.ui.register('page.panel', { id: 'stats', title: 'Page stats', view: StatsPanel });
     host.blocks.register({ type: 'product', view: reactView(Product) });
+    host.inline.register({ type: 'rating', view: reactView(Rating) });
     host.commands.register({
       id: 'insert-date',
       title: 'Add today’s date',
