@@ -167,7 +167,7 @@ export type SpaceSummary = {
   spaceId: string;
   /** Null where it can't be read. */
   name: string | null;
-  /** Its emoji, or null for one with none, or with an image or a symbol instead. */
+  /** Its emoji, or null for one without. The app may show an image or a symbol instead. */
   icon: string | null;
 };
 
