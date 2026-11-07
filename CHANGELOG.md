@@ -17,7 +17,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Plugins
 
-- An app plugin can claim inline code, `` `plugin:<id>/<type> <text>` ``, as it claims fenced blocks: its manifest's `inline` lists the types, and `host.inline.register` draws them in the reader and the visual editor. The page's text never changes for it. `page-tools` shows star ratings this way. `GET /api/plugins` takes `manifest=2` from apps that read such manifests, and lists versions with `inline` only to them: released apps refuse a whole listing with one.
+- An app plugin can claim inline code, `` `plugin:<id>/<type> <text>` ``, as it claims fenced blocks: its manifest's `inline` lists the types, and `host.inline.register` draws them in the reader and the visual editor. The page's text never changes for it. `page-tools` shows star ratings this way. `GET /api/plugins` takes `manifest=2` from apps that read such manifests, and lists versions with `inline` only to them: released apps refuse a whole listing with one. (#301)
 - A theme can now set the colours of a page's alerts (`--alert-*`) and highlighted code (`--code-*`), the app's shadows and shades, the dialog backdrop, text on a destructive badge, and the sidebar's width (`--sidebar-width`). They keep today's look until a theme sets them. `ThemeToken` adds them and the banner presets (`--banner-*`), and the SDK guide lists every token. (#294)
 
 #### Development
