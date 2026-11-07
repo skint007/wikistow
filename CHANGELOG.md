@@ -13,7 +13,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it.
+- ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it. (#292)
 
 ## 0.23.0 - 2026-11-06
 
