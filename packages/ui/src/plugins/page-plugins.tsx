@@ -12,7 +12,7 @@ import {
 import { panelKey, pluginName, type OpenPanel } from './places';
 import { pluginRuntime, usePluginRuntime, usePlugins, type ShownPage } from './runtime';
 import { desktop } from '../desktop';
-import { useNeedsConnection } from '../shell/needs-connection';
+import { useNeedsConnection } from '../shell/availability';
 
 /**
  * The page toolbar's plugin menu: each running plugin's commands, run on

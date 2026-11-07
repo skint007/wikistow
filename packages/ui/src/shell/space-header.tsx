@@ -27,7 +27,7 @@ import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
 import { useClient } from '../vault/store';
-import { useNeedsConnection } from './needs-connection';
+import { useNeedsConnection } from './availability';
 import { SpaceIcon, SpaceLookDialog } from './space-look';
 
 /**

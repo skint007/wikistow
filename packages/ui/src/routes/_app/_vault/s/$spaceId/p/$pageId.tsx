@@ -99,7 +99,7 @@ import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
-import { SENDS_FIRST, useNeedsConnection } from '../../../../../../shell/needs-connection';
+import { useAvailability, useNeedsConnection } from '../../../../../../shell/availability';
 import { pageChange, queueChoices, queueQuery } from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
@@ -356,10 +356,11 @@ function PageBody({
   const [actionError, setActionError] = useState<string | null>(null);
   // Offline, what needs the server says so (ADR 0009, decision 8), and the
   // page says when its space was last listed, which it is shown as of.
+  // What acts on this page waits for its change made offline too (`here`).
+  const availability = useAvailability();
+  const waiting = availability.waiting(page.pageId);
+  const here = availability.of(page.pageId);
   const needs = useNeedsConnection();
-  // Back online, publishing, moving and copying wait for the page's change
-  // made offline, so they never act on the draft from before it.
-  const sendsFirst = useNeedsConnection(change ? SENDS_FIRST : null);
   const listedAt = needs.offline ? ctx.keptContent?.space(page.spaceId)?.listedAt : undefined;
   // Offline, links to the space's pages this device doesn't keep say so.
   const notKept = useNotKept(ctx, page.spaceId);
@@ -396,8 +397,8 @@ function PageBody({
         revision: revisionId,
         pinned,
         publicLink: linked,
-        offline: needs.offline,
-        changed: change !== null,
+        offline: availability.offline,
+        waiting,
       }),
     [
       info.role,
@@ -407,8 +408,8 @@ function PageBody({
       revisionId,
       pinned,
       linked,
-      needs.offline,
-      change,
+      availability.offline,
+      waiting,
     ],
   );
 
@@ -703,7 +704,7 @@ function PageBody({
                 </Button>
               )}
               {model.actions.publish && (
-                <Button size="sm" disabled={busy} {...sendsFirst.click(() => void publish())}>
+                <Button size="sm" disabled={busy} {...here.click('publish', () => void publish())}>
                   <Check strokeWidth={1.75} /> Publish
                 </Button>
               )}
@@ -754,35 +755,37 @@ function PageBody({
                     </>
                   )}
                   {canEdit && (
-                    <DropdownMenuItem {...sendsFirst.select(() => setMoving('move'))}>
+                    <DropdownMenuItem {...here.select('move', () => setMoving('move'))}>
                       Move to…
                     </DropdownMenuItem>
                   )}
                   {canEdit && (
-                    <DropdownMenuItem {...sendsFirst.select(() => setMoving('copy'))}>
+                    <DropdownMenuItem {...here.select('copy', () => setMoving('copy'))}>
                       Copy to…
                     </DropdownMenuItem>
                   )}
                   {/* Only someone who can publish a page publishes it elsewhere (section 13). */}
                   {canEdit && info.canPublish && (
-                    <DropdownMenuItem {...sendsFirst.select(() => setPublishing(true))}>
+                    <DropdownMenuItem
+                      {...here.select('publish-elsewhere', () => setPublishing(true))}
+                    >
                       Publish to another space…
                     </DropdownMenuItem>
                   )}
                   {publishedHead && info.canPublish && (
-                    <DropdownMenuItem {...needs.select(onShareLink)}>
+                    <DropdownMenuItem {...here.select('server', onShareLink)}>
                       Share public link…
                     </DropdownMenuItem>
                   )}
                   {publishedHead && info.canPublish && (
-                    <DropdownMenuItem {...needs.select(() => setUnpublishing(true))}>
+                    <DropdownMenuItem {...here.select('server', () => setUnpublishing(true))}>
                       Unpublish…
                     </DropdownMenuItem>
                   )}
                   {sharer && (
                     <DropdownMenuItem
                       variant="destructive"
-                      {...needs.select(() => setDeleting(true))}
+                      {...here.select('server', () => setDeleting(true))}
                     >
                       Delete page
                     </DropdownMenuItem>
@@ -919,7 +922,7 @@ function PageBody({
             (publisher && publishedHead ? (
               <button
                 type="button"
-                {...needs.click(onShareLink)}
+                {...here.click('server', onShareLink)}
                 className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground hover:underline active:tint-strong"
               >
                 <Globe aria-hidden className="size-3.5" strokeWidth={2} />

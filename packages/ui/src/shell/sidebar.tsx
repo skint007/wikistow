@@ -33,7 +33,7 @@ import { Name, plainText } from '@/components/name';
 import { cn } from '@/lib/utils';
 import { AgentActivityCard } from '../agents/activity-card';
 import { publicLinksQuery, searchIndexChanged, treeQuery } from '../data/queries';
-import { pageWriter, queueQuery } from '../data/offline-changes';
+import { pageWriter } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
 import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
@@ -71,7 +71,7 @@ import {
   type PageAction,
   type PageInfo,
 } from './tree-menus';
-import { useNeedsConnection } from './needs-connection';
+import { useAvailability } from './availability';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -248,9 +248,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const { data: links } = useQuery(publicLinksQuery(ctx, spaceId));
   const publicPages = useMemo(() => new Set(links?.map((link) => link.pageId)), [links]);
-  // Pages and folders with a change made offline, not sent yet (ADR 0009, decision 7).
-  const { data: queued } = useQuery(queueQuery(ctx));
-  const onDevice = useMemo(() => new Set(queued?.map((entry) => entry.id)), [queued]);
+  // Offline, and pages and folders with a change made offline not sent yet (ADR 0009, decisions 7 and 8).
+  const availability = useAvailability();
   const params = useParams({ strict: false });
   const navigate = useNavigate();
   const [expanded, setExpanded] = useExpandedFolders(spaceId);
@@ -269,8 +268,6 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const standing = useOwnerStanding(spaceId);
-  // New pages and folders, and moves, need the server (ADR 0009, decision 8).
-  const needs = useNeedsConnection();
   const [focused, setFocused] = useState<string | null>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
 
@@ -463,7 +460,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem {...needs.select(() => setFromTemplate(null))}>
+                <DropdownMenuItem
+                  {...availability.of(null).select('server', () => setFromTemplate(null))}
+                >
                   New page from template…
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -551,14 +550,14 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             return (
               <RowMenu
                 key={row.id}
-                items={<FolderMenuItems actions={actions} made={onDevice.has(row.id)} />}
+                items={<FolderMenuItems actions={actions} waiting={availability.waiting(row.id)} />}
               >
                 <li
                   {...common}
                   aria-expanded={row.expanded}
                   aria-selected={shown}
                   onClick={() => openFolder(row.id)}
-                  draggable={canEditAt(row.id) && !needs.offline && !onDevice.has(row.id)}
+                  draggable={canEditAt(row.id) && availability.of(row.id).can('drag')}
                   onDragStart={(event) =>
                     startDrag(event, { id: row.id, kind: 'folder', name: row.name })
                   }
@@ -601,11 +600,15 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   <span className="min-w-0 flex-1 truncate font-extrabold">
                     <Name>{row.name}</Name>
                   </span>
-                  {onDevice.has(row.id) && <OnDeviceMarker />}
+                  {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
                   <span className="rounded-full bg-muted px-2 text-xs font-bold text-muted-foreground">
                     {row.count}
                   </span>
-                  <FolderMenu name={row.name} actions={actions} made={onDevice.has(row.id)} />
+                  <FolderMenu
+                    name={row.name}
+                    actions={actions}
+                    waiting={availability.waiting(row.id)}
+                  />
                 </li>
               </RowMenu>
             );
@@ -637,8 +640,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 {...common}
                 aria-selected={selected}
                 onClick={() => openPage(row.id)}
-                // Moves wait for a change made offline to be sent (ADR 0009, decision 8).
-                draggable={canEditAt(row.parentId) && !needs.offline && !onDevice.has(row.id)}
+                draggable={canEditAt(row.parentId) && availability.of(row.id).can('drag')}
                 onDragStart={(event) =>
                   startDrag(event, { id: row.id, kind: 'page', name: row.title })
                 }
@@ -658,7 +660,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                   <Name>{row.title}</Name>
                 </span>
                 {publicPages.has(row.id) && <PublicMarker />}
-                {onDevice.has(row.id) && <OnDeviceMarker />}
+                {availability.waiting(row.id) !== 'none' && <OnDeviceMarker />}
                 {canEditAt(row.parentId) && row.unpublished && (
                   <span className="size-[7px] shrink-0 rounded-full bg-draft-dot">
                     <span className="sr-only">Unpublished changes</span>

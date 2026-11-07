@@ -14,6 +14,8 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { onSent, pageWriter } from '../data/offline-changes';
 import { pageQuery, queueOf, searchIndexChanged, treeQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
+import { connection } from '../data/connection';
+import { availability, waitingOf } from '../shell/availability';
 import { pluginRuntime } from '../plugins/runtime';
 import { DraftSession, type DraftPorts } from './draft-session';
 import type { EditorSurfaceHandle } from './editor/surface';
@@ -144,7 +146,8 @@ const openDrafts = new Map<PageId, DraftSession>();
  * change, based on an older draft, is refused as stale rather than written
  * over it. Answers why it can't go ahead if their edit still can't be
  * saved, such as a conflict they haven't resolved, or the page has a change
- * saved on this device only (ADR 0009, decision 8); null otherwise.
+ * saved on this device only, or the app is offline (ADR 0009, decision 8);
+ * null otherwise.
  */
 export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
   const session = openDrafts.get(pageId);
@@ -153,16 +156,20 @@ export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
     if (session.hasUnsaved())
       return 'Your own edit to this page isn’t saved yet. Save it or resolve it in the editor first.';
   }
-  // Saved on this device only, it would come back as a conflict with this change.
+  // Not offline, nor with the page's change saved on this device only,
+  // which would come back as a conflict with this change.
   const vault = vaultStore.get();
-  const queued =
-    vault.status === 'unlocked' &&
-    (await queueOf(vault.ctx)
-      ?.entry(pageId)
-      .catch(() => null));
-  return queued
-    ? 'Your own edit to this page is saved on this device only. Try again once it is sent.'
-    : null;
+  const entry =
+    vault.status === 'unlocked'
+      ? await queueOf(vault.ctx)
+          ?.entry(pageId)
+          .catch(() => null)
+      : null;
+  const now = availability('chat-edit', {
+    offline: !connection.get().online,
+    waiting: waitingOf(entry),
+  });
+  return now.allowed ? null : now.hint;
 }
 
 function appPorts(

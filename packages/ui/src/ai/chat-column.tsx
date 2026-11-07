@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { chatStore, useChatStore } from './chat';
 import { ChatPanel } from './chat-panel';
 import { aiStatusQuery } from './session';
-import { useNeedsConnection } from '../shell/needs-connection';
+import { useNeedsConnection } from '../shell/availability';
 
 /** Wide enough for the chat beside the page, rather than over it. */
 const WIDE = '(min-width: 1200px)';

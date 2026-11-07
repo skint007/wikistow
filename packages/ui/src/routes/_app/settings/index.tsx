@@ -38,7 +38,7 @@ import { rememberOpenVault } from '../../../vault/open';
 import { PLAIN, useVault } from '../../../vault/store';
 import { useDeviceSwitch } from '../../../shell/device-switch';
 import { forgetInBrowser, useRememberedInBrowser } from '../../../vault/tab-unlock';
-import { useNeedsConnection } from '../../../shell/needs-connection';
+import { useNeedsConnection } from '../../../shell/availability';
 
 export const Route = createFileRoute('/_app/settings/')({ component: Settings });
 

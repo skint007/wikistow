@@ -47,7 +47,7 @@ import { authClient } from '../auth/client';
 import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../desktop';
 import { changesNotSent, forgetKept, signOutWarning } from '../data/kept-store';
 import { connection } from '../data/connection';
-import { useNeedsConnection } from './needs-connection';
+import { useNeedsConnection } from './availability';
 import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
@@ -296,7 +296,7 @@ function SpaceTiles({
               data-hint={plainText(name)}
               data-hint-side="right"
               // The order is the server's to keep (ADR 0009, decision 8).
-              draggable={movable && !needs.offline}
+              draggable={movable && needs.can('drag')}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData(SPACE_DRAG_TYPE, '');

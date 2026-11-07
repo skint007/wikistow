@@ -18,41 +18,32 @@ import {
 import { pageQuery } from '../data/queries';
 import type { Version } from '../page/publish-dialog';
 import { pageViewModel } from '../page/view-model';
-import { SENDS_FIRST, useNeedsConnection } from './needs-connection';
-import { pageChange, queueQuery } from '../data/offline-changes';
+import { useOffline } from '../data/connection';
+import { controls, useAvailability, type ActionKind, type Waiting } from './availability';
 import { useClient } from '../vault/store';
 
 /**
  * One item of a row's menu, the same in its ⋯ menu and its right-click
- * menu. All but Open and making a page or folder need the server
- * (`offline`: works offline, ADR 0009, decisions 7 and 8).
+ * menu. Its `kind` decides whether it runs offline or while a change made
+ * offline waits (`availability`).
  */
 export type MenuAction = {
   label: string;
+  kind: ActionKind;
   onSelect: () => void;
   destructive: boolean;
-  offline: boolean;
-  /** Waits until the page's change made offline is sent (ADR 0009, decision 8). */
-  sendsFirst: boolean;
 };
 
 /** What opening a page loads: the person's role there, publish rights, and its heads. */
 export type PageInfo = Awaited<ReturnType<typeof pageOperations.loadPage>>;
 
 /** An item, or nothing where the person can't do it. */
-const action = (label: string, onSelect: (() => void) | undefined, destructive = false) =>
-  onSelect && {
-    label,
-    onSelect,
-    destructive,
-    offline: OFFLINE.has(label),
-    sendsFirst: SENDS_FIRST_LABELS.has(label),
-  };
-
-const OFFLINE = new Set(['Open', 'New page here', 'New folder here']);
-
-// What acts on the page's draft, and so waits for its change made offline.
-const SENDS_FIRST_LABELS = new Set(['Move to…', 'Copy to…', 'Publish to another space…']);
+const action = (
+  label: string,
+  kind: ActionKind,
+  onSelect: (() => void) | undefined,
+  destructive = false,
+) => onSelect && { label, kind, onSelect, destructive };
 
 /**
  * A folder's actions: for everyone, Open and Export; for editors, what they
@@ -80,18 +71,18 @@ export function folderActions({
   onImport: (() => void) | undefined;
 }): MenuAction[] {
   return [
-    action('Open', onOpen),
-    action('New page here', editing?.onNewPage),
-    action('New page from template here', editing?.onNewFromTemplate),
-    action('New folder here', editing?.onNewFolder),
-    action('Rename…', editing?.onRename),
-    action('Emoji and colour…', editing?.onRestyle),
-    action('Move to…', editing?.onMove),
-    action('Copy to…', editing?.onCopy),
-    action('Share…', editing?.onShare),
-    action('Export…', onExport),
-    action('Import…', onImport),
-    action('Delete folder', editing?.onDelete, true),
+    action('Open', 'open', onOpen),
+    action('New page here', 'new-page', editing?.onNewPage),
+    action('New page from template here', 'server', editing?.onNewFromTemplate),
+    action('New folder here', 'new-folder', editing?.onNewFolder),
+    action('Rename…', 'server', editing?.onRename),
+    action('Emoji and colour…', 'server', editing?.onRestyle),
+    action('Move to…', 'move', editing?.onMove),
+    action('Copy to…', 'copy', editing?.onCopy),
+    action('Share…', 'server', editing?.onShare),
+    action('Export…', 'server', onExport),
+    action('Import…', 'server', onImport),
+    action('Delete folder', 'server', editing?.onDelete, true),
   ].filter((item) => item !== undefined);
 }
 
@@ -129,47 +120,43 @@ function pageActions(
   const when = (allowed: boolean, which: PageAction) =>
     allowed ? () => onAction(which, info) : undefined;
   return [
-    action('Move to…', when(canEdit, 'move')),
-    action('Copy to…', when(canEdit, 'copy')),
+    action('Move to…', 'move', when(canEdit, 'move')),
+    action('Copy to…', 'copy', when(canEdit, 'copy')),
     action(
       'Publish to another space…',
+      'publish-elsewhere',
       when(canEdit && info.canPublish && shownVersion(info) !== null, 'publish'),
     ),
     action(
       'Share public link…',
+      'server',
       when(info.heads.publishedHead !== null && info.canPublish, 'public-link'),
     ),
-    action('Unpublish…', when(info.heads.publishedHead !== null && info.canPublish, 'unpublish')),
-    action('Delete page', when(sharer, 'delete'), true),
+    action(
+      'Unpublish…',
+      'server',
+      when(info.heads.publishedHead !== null && info.canPublish, 'unpublish'),
+    ),
+    action('Delete page', 'server', when(sharer, 'delete'), true),
   ].filter((item) => item !== undefined);
 }
 
-/** Each action as an item of either kind of menu. */
+/** Each action as an item of either kind of menu, for an item with `waiting`. */
 function Items({
   actions,
   Item,
-  changed = false,
-  made = false,
+  waiting,
 }: {
   actions: MenuAction[];
   Item: typeof DropdownMenuItem | typeof ContextMenuItem;
-  /** The page has a change made offline not sent yet. */
-  changed?: boolean;
-  /**
-   * The folder was made offline and isn't sent yet, so the server doesn't
-   * know it: all but what works offline waits for it, online too.
-   */
-  made?: boolean;
+  waiting: Waiting;
 }) {
-  // Offline, what needs the server says so (ADR 0009, decision 8), and
-  // moves and copies wait for the page's change made offline.
-  const needs = useNeedsConnection();
-  const held = useNeedsConnection(changed || made ? SENDS_FIRST : null);
-  return actions.map(({ label, onSelect, destructive, offline, sendsFirst }) => (
+  const here = controls(useOffline(), waiting);
+  return actions.map(({ label, kind, onSelect, destructive }) => (
     <Item
       key={label}
       variant={destructive ? 'destructive' : 'default'}
-      {...(offline ? { onSelect } : (sendsFirst || made ? held : needs).select(onSelect))}
+      {...here.select(kind, onSelect)}
     >
       {label}
     </Item>
@@ -180,12 +167,12 @@ function Items({
 export function FolderMenu({
   name,
   actions,
-  made = false,
+  waiting,
 }: {
   name: string;
   actions: MenuAction[];
-  /** Made offline, not sent yet (`Items`). */
-  made?: boolean;
+  /** What waits on this device for the folder (`useAvailability`). */
+  waiting: Waiting;
 }) {
   return (
     <DropdownMenu>
@@ -197,7 +184,7 @@ export function FolderMenu({
         <MoreHorizontal className="size-4" strokeWidth={1.75} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-        <Items actions={actions} Item={DropdownMenuItem} made={made} />
+        <Items actions={actions} Item={DropdownMenuItem} waiting={waiting} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -234,13 +221,13 @@ export function RowMenu({ children, items }: { children: ReactElement; items: Re
 /** A folder's actions in its right-click menu. */
 export function FolderMenuItems({
   actions,
-  made = false,
+  waiting,
 }: {
   actions: MenuAction[];
-  /** Made offline, not sent yet (`Items`). */
-  made?: boolean;
+  /** What waits on this device for the folder (`useAvailability`). */
+  waiting: Waiting;
 }) {
-  return <Items actions={actions} Item={ContextMenuItem} made={made} />;
+  return <Items actions={actions} Item={ContextMenuItem} waiting={waiting} />;
 }
 
 /**
@@ -261,7 +248,7 @@ export function PageMenuItems({
 }) {
   const ctx = useClient();
   const { data: info, isPending } = useQuery(pageQuery(ctx, pageId));
-  const { data: entries } = useQuery(queueQuery(ctx));
+  const { waiting } = useAvailability();
   // Open stays the same item as the rest load, so a menu opened from the keyboard keeps its focus.
   return (
     <>
@@ -270,7 +257,7 @@ export function PageMenuItems({
         <Items
           actions={pageActions(info, sharer, onAction)}
           Item={ContextMenuItem}
-          changed={pageChange(entries, pageId) !== null}
+          waiting={waiting(pageId)}
         />
       ) : (
         isPending && <ContextMenuItem disabled>Loading…</ContextMenuItem>
