@@ -1,5 +1,6 @@
 import type { publicLinkOperations } from '@wikistow/client';
 import { DIAGRAM_HOST_PAGE } from '@wikistow/contracts';
+import type { ThemeToken } from '@wikistow/plugin-sdk';
 import { vaultStore } from '../vault/store';
 
 /** How long Mermaid may take to load in a new frame, a 5.5 MB file on a slow line. */
@@ -29,6 +30,82 @@ export class DiagramError extends Error {}
 type Waiting = { resolve: (svg: string) => void; reject: (error: Error) => void };
 
 /**
+ * Mermaid's theme variables (its `base` theme) a diagram takes from the
+ * theme's tokens. Mermaid works out its other colours from these.
+ */
+const VARIABLES = {
+  // The code block the diagram is drawn on.
+  background: '--muted',
+  primaryColor: '--primary-soft',
+  primaryBorderColor: '--primary',
+  primaryTextColor: '--foreground',
+  secondaryColor: '--card',
+  tertiaryColor: '--background',
+  textColor: '--foreground',
+  lineColor: '--muted-foreground',
+  noteBkgColor: '--note',
+  noteTextColor: '--note-foreground',
+  noteBorderColor: '--border',
+} as const satisfies Record<string, ThemeToken>;
+
+/**
+ * The colours a diagram is drawn in: `VARIABLES` as the theme shown sets
+ * them, and whether it is dark. Null is Mermaid's own light theme, as a
+ * public copy shows it.
+ */
+export type DiagramLook = {
+  dark: boolean;
+  variables: Record<keyof typeof VARIABLES, string>;
+} | null;
+
+let pixel: CanvasRenderingContext2D | null = null;
+
+/**
+ * `colours` painted in turn over white, as one colour in hex: Mermaid reads
+ * only plain colours, and works out shades no translucent one could have.
+ * One the canvas can't read paints nothing.
+ */
+function painted(colours: string[]) {
+  if (!pixel) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    pixel = canvas.getContext('2d', { willReadFrequently: true });
+  }
+  if (!pixel) return '#ffffff';
+  pixel.fillStyle = '#ffffff';
+  pixel.fillRect(0, 0, 1, 1);
+  for (const colour of colours) {
+    pixel.fillStyle = 'transparent';
+    pixel.fillStyle = colour;
+    pixel.fillRect(0, 0, 1, 1);
+  }
+  const rgb = pixel.getImageData(0, 0, 1, 1).data.subarray(0, 3);
+  return `#${Array.from(rgb, (n) => n.toString(16).padStart(2, '0')).join('')}`;
+}
+
+let shown: { key: string; look: DiagramLook } | null = null;
+
+/**
+ * The look of the theme shown, the same object until a token it reads
+ * changes. Each colour is painted over the code block's, on the page card.
+ */
+export function diagramLook(): DiagramLook {
+  const style = getComputedStyle(document.documentElement);
+  const token = (name: ThemeToken) => style.getPropertyValue(name).trim();
+  const dark = style.colorScheme === 'dark';
+  const ground = [token('--card'), token('--muted')];
+  const key = JSON.stringify([dark, ground, Object.values(VARIABLES).map(token)]);
+  if (shown?.key !== key) {
+    const entries = Object.entries(VARIABLES).map(([name, from]) => [
+      name,
+      painted([...ground, token(from)]),
+    ]);
+    shown = { key, look: { dark, variables: Object.fromEntries(entries) } };
+  }
+  return shown.look;
+}
+
+/**
  * The hidden `sandbox="allow-scripts"` frame that draws Mermaid diagrams
  * (ADR 0010). Mermaid needs a document to measure text in and writes
  * styles the app's policy refuses, so it runs there, at an opaque origin
@@ -41,7 +118,7 @@ type Waiting = { resolve: (svg: string) => void; reject: (error: Error) => void 
 class DiagramFrame {
   readonly #iframe = document.createElement('iframe');
   #ready = false;
-  readonly #queue: { id: number; source: string; dark: boolean }[] = [];
+  readonly #queue: { id: number; source: string; look: DiagramLook }[] = [];
   readonly #waiting = new Map<number, Waiting>();
   #next = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -71,21 +148,21 @@ class DiagramFrame {
     this.#arm();
   }
 
-  draw(source: string, dark: boolean): Promise<string> {
+  draw(source: string, look: DiagramLook): Promise<string> {
     const id = this.#next++;
     const drawn = new Promise<string>((resolve, reject) => {
       this.#waiting.set(id, { resolve, reject });
     });
-    if (!this.#ready) this.#queue.push({ id, source, dark });
+    if (!this.#ready) this.#queue.push({ id, source, look });
     else {
-      this.#post({ id, source, dark });
+      this.#post({ id, source, look });
       // The frame draws one at a time: one already going keeps its time.
       if (this.#waiting.size === 1) this.#arm();
     }
     return drawn;
   }
 
-  #post(message: { id: number; source: string; dark: boolean }) {
+  #post(message: { id: number; source: string; look: DiagramLook }) {
     this.#iframe.contentWindow?.postMessage({ type: 'render', ...message }, '*');
   }
 
@@ -123,12 +200,12 @@ vaultStore.subscribe(() => {
 });
 
 /**
- * Draw the Mermaid diagram `source`, in its dark theme if `dark`: its SVG
- * text, sized to its own width and height, for an image (`diagramUrl`).
- * Rejects with a `DiagramError` saying why it didn't draw.
+ * Draw the Mermaid diagram `source` in `look`'s colours: its SVG text,
+ * sized to its own width and height, for an image (`diagramUrl`). Rejects
+ * with a `DiagramError` saying why it didn't draw.
  */
-export const drawDiagram = (source: string, dark: boolean): Promise<string> =>
-  (frame ??= new DiagramFrame()).draw(source, dark);
+export const drawDiagram = (source: string, look: DiagramLook): Promise<string> =>
+  (frame ??= new DiagramFrame()).draw(source, look);
 
 /** A diagram's SVG as an image's address. Revoke it when the image goes. */
 export const diagramUrl = (svg: string) =>
@@ -147,7 +224,7 @@ export async function diagramPng(
 ): Promise<publicLinkOperations.DrawnDiagram | null> {
   let url: string | undefined;
   try {
-    url = diagramUrl(await drawDiagram(source, false));
+    url = diagramUrl(await drawDiagram(source, null));
     const image = new Image();
     image.src = url;
     await image.decode();

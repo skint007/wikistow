@@ -1,8 +1,8 @@
 /*
  * The app's theme tokens: the CSS variables a theme sets on `:root,
- * [data-theme]` and a plugin's views style themselves with. The values are
- * each built-in palette's, in packages/ui/src/styles/theme.css; keep this
- * list in step with it.
+ * [data-theme]` and a plugin's views style themselves with. Their values
+ * are in packages/ui/src/styles/theme.css, the one place they are set;
+ * packages/ui/test/theme-tokens.test.ts checks this list against it.
  */
 
 /** Colours, shadows and the palette's own banner gradient. */
@@ -32,6 +32,7 @@ export const PALETTE_TOKENS = [
   '--strong-foreground',
   '--destructive',
   '--destructive-foreground',
+  '--destructive-badge-foreground',
   '--status-published',
   '--status-published-foreground',
   '--status-draft',
@@ -46,6 +47,11 @@ export const PALETTE_TOKENS = [
   '--glass',
   '--glass-foreground',
   '--card-shadow',
+  '--badge-shadow',
+  '--slider-shadow',
+  '--shade',
+  '--shade-strong',
+  '--backdrop',
   '--folder-green',
   '--folder-orange',
   '--folder-blue',
@@ -54,7 +60,35 @@ export const PALETTE_TOKENS = [
   '--cover',
 ] as const;
 
-/** Type, corner radii and Tailwind's spacing unit, which every gap and padding is a multiple of. */
+/** A page's GitHub alerts (`> [!NOTE]` and the rest), each type's label and edge, and highlighted code's colours. */
+export const CONTENT_TOKENS = [
+  '--alert-note',
+  '--alert-tip',
+  '--alert-important',
+  '--alert-warning',
+  '--alert-caution',
+  '--code-comment',
+  '--code-keyword',
+  '--code-string',
+  '--code-number',
+  '--code-title',
+  '--code-deletion',
+] as const;
+
+/** The banner presets a page can choose, the same in every palette. */
+export const BANNER_TOKENS = [
+  '--banner-sunrise',
+  '--banner-ocean',
+  '--banner-meadow',
+  '--banner-lavender',
+  '--banner-dusk',
+  '--banner-stone',
+] as const;
+
+/**
+ * Type, corner radii, Tailwind's spacing unit, which every gap and padding
+ * is a multiple of, and the space's sidebar width.
+ */
 export const SHAPE_TOKENS = [
   '--font-sans',
   '--font-mono',
@@ -64,6 +98,11 @@ export const SHAPE_TOKENS = [
   '--radius-row',
   '--radius-folder',
   '--spacing',
+  '--sidebar-width',
 ] as const;
 
-export type ThemeToken = (typeof PALETTE_TOKENS)[number] | (typeof SHAPE_TOKENS)[number];
+export type ThemeToken =
+  | (typeof PALETTE_TOKENS)[number]
+  | (typeof CONTENT_TOKENS)[number]
+  | (typeof BANNER_TOKENS)[number]
+  | (typeof SHAPE_TOKENS)[number];

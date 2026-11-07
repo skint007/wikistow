@@ -11,7 +11,7 @@ import {
   type sharingOperations,
 } from '@wikistow/client';
 import { z } from 'zod';
-import { makePage } from '../data/offline-changes';
+import { pageWriter } from '../data/offline-changes';
 import type { Command, CommandEnv } from './command';
 
 /** Where a page command runs: the open session, and who hears how a long one is getting on. */
@@ -84,7 +84,7 @@ const CreatePage = z.object({
  * Create a page with that title, as a private draft at the space root or in
  * a folder, then hand it to `onCreated` (to open it, say). The server checks
  * the person may write there. Offline it is made on this device, and on the
- * server once it answers (`makePage`).
+ * server once it answers (`PageWriter.newPage`).
  */
 export const createPage: Command<
   typeof CreatePage,
@@ -93,7 +93,7 @@ export const createPage: Command<
   id: 'page.create',
   input: CreatePage,
   requires: ['unlocked-vault'],
-  run: async (input, { ctx, onCreated }) => onCreated(await makePage(ctx, input)),
+  run: async (input, { ctx, onCreated }) => onCreated(await pageWriter(ctx).newPage(input)),
 };
 
 const Unpublish = z.object({
