@@ -127,6 +127,22 @@ describe('claimed spans side by side', () => {
     act(() => view.dispatch(tr));
     await expect.poll(() => m.handle.read()).toBe(page);
   });
+
+  it('get one when text right against a span is made code, a change of marks only', async () => {
+    const m = mount('A `plugin:test/stars 1`foo bar.\n', runtimeDrawing(new Map()));
+    await expect.poll(() => m.container.querySelector('#page-visual')).not.toBeNull();
+    const dom = m.container.querySelector('#page-visual');
+    if (!dom) throw new Error('The visual editor did not mount');
+    const view = viewOf(dom);
+    const code = view.state.schema.marks['inlineCode'];
+    let foo = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (node.text?.startsWith('foo')) foo = pos;
+    });
+    if (!code || foo < 0) throw new Error('No foo to make code');
+    act(() => view.dispatch(view.state.tr.addMark(foo, foo + 3, code.create())));
+    await expect.poll(() => m.handle.read()).toBe('A `plugin:test/stars 1` `foo` bar.\n');
+  });
 });
 
 /** A runtime drawing `inline`, with only what the visual editor asks of it. */

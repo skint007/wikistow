@@ -10,6 +10,7 @@ import type { Processor } from 'unified';
 import { drawBlock, type BlockDrawing, type BlockInputs } from '../../../plugins/block-drawing';
 import type { PluginBlock } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
+import { changedRanges } from './plugins';
 import { readAlone } from './read-alone';
 
 // Inline code a plugin claims (`` `plugin:<id>/<type> <text>` ``, ADR 0011,
@@ -262,29 +263,17 @@ const writtenAsCode = (node: Node) =>
  * A space between a claimed span and code right beside it, as where the
  * text between them was deleted: Markdown can't hold two code spans side
  * by side, which would be written, and read again, as one. Only the text
- * blocks a change reached are looked at.
+ * blocks a change reached, of text or of marks, are looked at.
  */
 const keptApart = $prose(
   () =>
     new Plugin({
       appendTransaction(transactions, _old, state) {
         const { doc } = state;
-        const changed: [number, number][] = [];
-        transactions.forEach((tr, i) => {
-          const later = transactions.slice(i + 1);
-          tr.mapping.maps.forEach((map, j) =>
-            map.forEach((_oldFrom, _oldTo, from, to) => {
-              const rest = tr.mapping.slice(j + 1);
-              let range: [number, number] = [rest.map(from, -1), rest.map(to, 1)];
-              for (const next of later)
-                range = [next.mapping.map(range[0], -1), next.mapping.map(range[1], 1)];
-              changed.push(range);
-            }),
-          );
-        });
         const spaces: { pos: number; marks: readonly Mark[] }[] = [];
         const seen = new Set<number>();
-        for (const [from, to] of changed) {
+        // Marks too: text beside a span made code is a change of marks only.
+        for (const { from, to } of changedRanges(transactions, true)) {
           doc.nodesBetween(
             Math.max(0, from - 1),
             Math.min(doc.content.size, to + 1),
