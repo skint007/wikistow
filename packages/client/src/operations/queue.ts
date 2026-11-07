@@ -2,6 +2,7 @@
 // them, sealed, and their sending once the server answers.
 import {
   FolderId,
+  type InstallationId,
   MetadataRevisionId,
   PageId,
   RevisionId,
@@ -163,10 +164,14 @@ function withoutFiles(payload: PagePayload): PagePayload {
  * sealed for their page's draft. Entries go to the server in the order
  * made (`send`), each with the IDs it recorded before its request, so an
  * answer lost on the way is told from a change that never landed.
+ *
+ * What the app writes goes in through the page writer (`createPageWriter`),
+ * which decides what goes here.
  */
 export class OfflineQueue {
   readonly #store: KeptStore;
   readonly #sealer: KeptSealer;
+  readonly #installationId: InstallationId;
   readonly #listeners = new Set<(event: QueueEvent) => void>();
   // Each page whose change landed and went: the draft that change was based
   // on, and the version that landed, so a save already on its way into it,
@@ -175,9 +180,10 @@ export class OfflineQueue {
   #closed = false;
   #last = 0;
 
-  constructor(store: KeptStore, sealer: KeptSealer) {
+  constructor(store: KeptStore, sealer: KeptSealer, installationId: InstallationId) {
     this.#store = store;
     this.#sealer = sealer;
+    this.#installationId = installationId;
   }
 
   /** Hear of each change to the queue made here, until the returned function is called. */
@@ -442,11 +448,14 @@ export class OfflineQueue {
    * section 5.3), and kept here until a save naming it lands.
    */
   async attach(
-    ctx: ClientContext,
     page: PageRef,
     file: { name: string; mediaType: string; bytes: Uint8Array },
   ): Promise<AttachmentRef> {
-    const { ref, blob } = sealAttachment({ target: attachmentTarget(ctx, page, 'draft'), ...file });
+    const { spaceId, pageId } = page;
+    const { ref, blob } = sealAttachment({
+      target: { installationId: this.#installationId, spaceId, pageId, audience: 'draft' },
+      ...file,
+    });
     await this.#keepBlob(ref.blobHash, blob);
     return ref;
   }
@@ -489,13 +498,16 @@ export class OfflineQueue {
   }
 
   /**
-   * Upload the files of `refs` this queue holds for `page`'s draft, before a
-   * save that names them: staged uploads last a day on the server.
+   * Upload (`put`) the files of `refs` this queue holds, before a save of
+   * their page's draft that names them: staged uploads last a day on the server.
    */
-  async upload(ctx: ClientContext, page: PageRef, refs: readonly AttachmentRef[]): Promise<void> {
+  async upload(
+    refs: readonly AttachmentRef[],
+    put: (blob: Uint8Array) => Promise<void>,
+  ): Promise<void> {
     for (const ref of await this.held(refs)) {
       const blob = await this.blob(ref.blobHash);
-      if (blob) await uploadBlob(ctx, page, 'draft', blob);
+      if (blob) await put(blob);
     }
   }
 
@@ -705,7 +717,9 @@ export class OfflineQueue {
       } else if (entry.basedOn) {
         // Uploads are staged for a day: those of the files added offline go
         // up again before each save that names them.
-        await this.upload(ctx, page, attempt.payload.attachments);
+        await this.upload(attempt.payload.attachments, (blob) =>
+          uploadBlob(ctx, page, 'draft', blob),
+        );
         await saveDraft(ctx, {
           page,
           basedOn: entry.basedOn,

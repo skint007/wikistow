@@ -1,20 +1,14 @@
 import {
+  createPageWriter,
   FolderId,
-  newFolderMetadata,
-  newId,
-  newPayload,
   PageId,
-  pageOperations,
   RevisionId,
-  spaceOperations,
+  serverWrites,
   SpaceId,
-  type AttachmentRef,
   type ClientContext,
-  type FolderLook,
-  type FolderPicture,
+  type PageWriter,
   type queueOperations,
 } from '@wikistow/client';
-import { noAnswer } from '@wikistow/client/api';
 import { queryOptions, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { z } from 'zod';
@@ -25,107 +19,22 @@ import { connection, useConnection } from './connection';
 import { keepChanged, pageOpened } from './keeper';
 import { pageQuery, searchIndexChanged, treeQuery } from './queries';
 
-// Changes made offline (ADR 0009, decision 7), as the app follows and sends them.
+// Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
 /** This session's queue, where the device keeps one. */
 export const queueOf = (ctx: ClientContext) => ctx.keptContent?.queue ?? null;
 
 /**
- * Whether a page's changes go into the queue: offline, or while it has a
- * change waiting there, online too, until that is sent (decision 7).
+ * How the app writes drafts, new pages and folders, and files for `ctx`'s
+ * session: to the server, or into the queue while the app is offline
+ * (`connection`) or what's written on has a change waiting.
  */
-export async function savesOnDevice(ctx: ClientContext, pageId: PageId): Promise<boolean> {
-  const queue = queueOf(ctx);
-  return !!queue && (!connection.get().online || (await queue.entry(pageId)) !== null);
-}
-
-/**
- * Encrypt a file for a page's draft and upload it, or, where its changes go
- * into the queue (`savesOnDevice`), keep it there with them until they are
- * sent. Add the returned ref to the draft's attachments to keep it.
- */
-export async function attachFile(
-  ctx: ClientContext,
-  page: pageOperations.PageRef,
-  file: { name: string; mediaType: string; bytes: Uint8Array },
-): Promise<AttachmentRef> {
-  const queue = queueOf(ctx);
-  if (queue && (await savesOnDevice(ctx, page.pageId))) return queue.attach(ctx, page, file);
-  return pageOperations.uploadAttachment(ctx, page, file);
-}
-
-/**
- * Whether what's made in a folder goes into the queue: offline, or, online
- * too, while the folder is one made on this device and not sent yet, which
- * the server doesn't know (decision 7). The queue sends it after the folder.
- */
-async function makesOnDevice(
-  queue: queueOperations.OfflineQueue,
-  parentId: FolderId | null,
-): Promise<boolean> {
-  return !connection.get().online || (parentId !== null && (await queue.entry(parentId)) !== null);
-}
-
-/**
- * A new page with that title, at the space root or in a folder: offline, or
- * in a folder made offline not sent yet (`makesOnDevice`), made on this
- * device, to be made on the server once it answers (decision 7), as is one
- * whose request got no answer, under the IDs it was sent with.
- */
-export async function makePage(
-  ctx: ClientContext,
-  { spaceId, parentId, title }: { spaceId: SpaceId; parentId: FolderId | null; title: string },
-): Promise<PageId> {
-  const queue = queueOf(ctx);
-  const payload = newPayload({ title, markdown: '' });
-  if (queue && (await makesOnDevice(queue, parentId))) {
-    return (await queue.newPage({ spaceId, parentId, payload })).id;
-  }
-  const pageId = newId(PageId);
-  const revisionId = newId(RevisionId);
-  try {
-    return await pageOperations.createPage(ctx, { spaceId, parentId, title, pageId, revisionId });
-  } catch (error) {
-    if (!queue || !noAnswer(error)) throw error;
-    await queue.newPage({ spaceId, parentId, payload, pageId, revisionId });
-    return pageId;
-  }
-}
-
-/**
- * A new folder, as `makePage` makes a page: offline, or in a folder made
- * offline not sent yet, made on this device first.
- */
-export async function makeFolder(
-  ctx: ClientContext,
-  {
-    spaceId,
-    parentId,
-    name,
-    look,
-    picture,
-  }: {
-    spaceId: SpaceId;
-    parentId: FolderId | null;
-    name: string;
-    look?: FolderLook;
-    picture?: FolderPicture;
-  },
-): Promise<FolderId> {
-  const queue = queueOf(ctx);
-  const metadata = newFolderMetadata(name, look, picture);
-  const folderId = newId(FolderId);
-  if (queue && (await makesOnDevice(queue, parentId))) {
-    return (await queue.newFolder({ spaceId, parentId, metadata, folderId })).id;
-  }
-  try {
-    await spaceOperations.createFolderAs(ctx, { spaceId, parentId, folderId, metadata });
-  } catch (error) {
-    if (!queue || !noAnswer(error)) throw error;
-    await queue.newFolder({ spaceId, parentId, metadata, folderId });
-  }
-  return folderId;
-}
+export const pageWriter = (ctx: ClientContext): PageWriter =>
+  createPageWriter({
+    queue: ctx.keptContent?.queue ?? null,
+    server: serverWrites(ctx),
+    isOnline: () => connection.get().online,
+  });
 
 /** Every change waiting on this device, in the order made. */
 export const queueQuery = (ctx: ClientContext) =>

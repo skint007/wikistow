@@ -84,7 +84,7 @@ describe('changes made offline', () => {
     });
     const at = { spaceId, pageId: made.id };
     if (!made.newPage) throw new Error('Not a new page');
-    const ref = await queue.attach(ctx, at, {
+    const ref = await queue.attach(at, {
       name: 'list.txt',
       mediaType: 'text/plain',
       bytes: utf8('tent'),
@@ -97,7 +97,7 @@ describe('changes made offline', () => {
       seen: made.version,
     });
     // A file attached since the last save, which no entry names yet, stays for the next.
-    const next = await queue.attach(ctx, at, {
+    const next = await queue.attach(at, {
       name: 'later.txt',
       mediaType: 'text/plain',
       bytes: utf8('stove'),
@@ -167,7 +167,7 @@ describe('changes made offline', () => {
     const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
     expect(tree.pages.filter((p) => p.id === made.id)).toHaveLength(1);
 
-    // The app's own create got no answer (`makePage`): the page is queued
+    // The app's own create got no answer (`PageWriter.newPage`): the page is queued
     // under the IDs it sent, and what is typed into it later goes on top.
     const pageId = newId(PageId);
     const revisionId = newId(RevisionId);
@@ -256,7 +256,7 @@ describe('changes made offline', () => {
 
   it('wait as gone for a page put in the trash, sent once restored, or saved as a new page', async () => {
     const { ctx, queue, spaceId, page, based, draft, payload } = await device();
-    const ref = await queue.attach(ctx, page, {
+    const ref = await queue.attach(page, {
       name: 'photo.txt',
       mediaType: 'text/plain',
       bytes: utf8('a photo'),
@@ -285,7 +285,7 @@ describe('changes made offline', () => {
     // device (nothing kept it), so it is left out.
     const later = await pages.loadPage(ctx, page.pageId);
     if (!later.heads.draftHead) throw new Error('No draft');
-    const another = await queue.attach(ctx, page, {
+    const another = await queue.attach(page, {
       name: 'another.txt',
       mediaType: 'text/plain',
       bytes: utf8('another photo'),
