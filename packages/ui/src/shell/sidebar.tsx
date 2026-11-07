@@ -400,7 +400,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const startDrag = (event: DragEvent, moving: Moving) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DRAG_TYPE, '');
-    const places = destinationsIn(tree, moving, sharer);
+    // Not into a folder made offline until it is sent, as Move to… offers.
+    const places = destinationsIn(tree, moving, sharer).filter((d) =>
+      availability.of(d.parentId).can('into'),
+    );
     setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
   };
   const pointAt = (over: Destination<FolderId> | null) =>

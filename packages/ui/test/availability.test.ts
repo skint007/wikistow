@@ -27,6 +27,7 @@ const TABLE: Record<ActionKind, [string, string, string, string, string, string]
   publish: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   restore: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   drag: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  into: /*                    */ [OK, OK, HELD, OK, OK, HELD],
   tick: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   'chat-edit': /*             */ [OK, CHAT_SENDS_FIRST, CHAT_SENDS_FIRST, NEEDS, NEEDS, NEEDS],
   server: /*                  */ [OK, OK, HELD, NEEDS, NEEDS, NEEDS],
