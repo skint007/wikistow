@@ -4,6 +4,58 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.24.0 - 2026-11-07
+
+### Highlights
+
+#### Features
+
+- App plugins can draw parts of the app in place of its own: the rail, a space’s home page and page tree, a folder’s page, and the text of a page as read. Settings → Plugins says which plugin draws each part, with Use the app’s own, and safe mode puts every part back.
+- Plugins can work at the cursor in the draft view, reading the selection and inserting Markdown you can undo, and can add buttons to the editor’s toolbar.
+- Plugins can know where you are in the app and take you to a space, folder or page, and can draw inline code such as `plugin:page-tools/rating 4` in the reader and the visual editor.
+- Themes can set the colours of alerts, highlighted code, shadows and the dialog backdrop, and the sidebar’s width. Mermaid diagrams take the theme’s colours.
+
+#### Fixes
+
+- New page here and New folder here in a folder made offline that isn’t sent yet now work online too. The folder’s other actions, and Delete page on a page made offline, wait until it is sent, saying so, instead of failing as not found.
+- Move to…, Copy to… and Publish to another space… no longer offer a folder made offline that isn’t sent yet.
+- A plugin block that fails in the visual editor now shows the same note as in the reader, with Disable.
+
+### Changes
+
+#### App
+
+- **New page here** and **New folder here** in a folder made offline that isn’t sent yet now save the new page or folder on the device too while online, to be sent after the folder, instead of failing as not found. That covers the moments after the server answers again, before the folder is sent, an unlock made offline the app hasn’t confirmed yet, and a folder whose sending stopped. **Create this page** from a link in a page in that folder does the same. (#291)
+- The rest of that folder’s menu (Rename, Move, Share, Export, Import, Delete and the others) now waits until the folder is sent, saying so, as it already waited offline and as dragging it did, instead of failing as not found. (#291)
+- A page made offline does the same: until it is sent, **Delete page** waits, saying so, instead of failing as not found. Approving the chat’s edit to a page offline now says it needs the connection. (#298)
+- **Move to…**, **Copy to…** and **Publish to another space…** no longer offer a folder made offline that isn’t sent yet, and dropping something on it in the sidebar does nothing, instead of failing as not found. It shows up there once it is sent. (#307)
+- The plugin workshop's preview draws its sample pages with the page's own layout, so a plugin's views show where the app puts them. Its rail items are the real ones and open the plugin's page in the preview, and a plugin's Settings sections show together, as in Settings → Plugins. (#296)
+- A plugin block that fails in the visual editor now shows the same note as in the reader, naming the plugin, with **Disable**. (#295)
+- Mermaid diagrams take the theme's colours, a plugin theme's too, instead of Mermaid's own light or dark look. A public copy's diagrams stay as they were. (#294)
+
+#### Plugins
+
+- An app plugin can claim inline code, `` `plugin:<id>/<type> <text>` ``, as it claims fenced blocks: its manifest's `inline` lists the types, and `host.inline.register` draws them in the reader and the visual editor. The page's text never changes for it. `page-tools` shows star ratings this way. `GET /api/plugins` takes `manifest=2` from apps that read such manifests, and lists versions with `inline` only to them: released apps refuse a whole listing with one. (#301)
+- A theme can now set the colours of a page's alerts (`--alert-*`) and highlighted code (`--code-*`), the app's shadows and shades, the dialog backdrop, text on a destructive badge, and the sidebar's width (`--sidebar-width`). They keep today's look until a theme sets them. `ThemeToken` adds them and the banner presets (`--banner-*`), and the SDK guide lists every token. (#294)
+- A plugin can now work at the cursor in the draft view. `page.editor.selection()` gives what is selected as Markdown, and `page.editor.insert(markdown)` puts Markdown there as the person's own edit, which can be undone: as text in the source editor, and in the visual editor read into the page as a paste is, with its blocks whole. A new `editor.toolbar` region puts a plugin's buttons in the editor's format toolbar, and in a bar of their own over the source editor. (#300)
+- App plugins get `host.app`, in `activate` and every view: `location` says where the person is (a space, a folder, a page and its version, a plugin page, or elsewhere) and is told as it changes, also as the new `location.changed` event; `navigate` goes to a space, folder, page or one of the plugin's own pages; and `spaces.list()` gives the spaces the plugin has page access in, with their names and emoji. So a titlebar button or a Settings section can now open a page. `page.shown` now comes as a page opens, whatever draws its toolbar. (#303)
+- An app plugin can draw a space's home page (with no page open) or a folder's page in place of the app's own, where it has page access: its manifest's `replaces` names them, and `host.ui.replace('space.home' | 'folder.view', { id, view })` draws them. The approval dialog says what a plugin replaces. Settings → Plugins says which plugin draws each replaced part, with **Use the app's own**, kept as the plugin's on/off is. A replacing view that fails, or draws nothing, gives the part back to the app's own with a note and **Disable**, and safe mode puts every part back. The library lists versions with `replaces` only to apps that send `manifest=2`. Several plugins in one place now always show in the order Settings lists them, also after one is turned off and on again. (#305)
+- An app plugin can now draw the rail, a space's page tree (the phone's navigation drawer too) or the text of a page as read in place of the app's own, with `host.ui.replace('rail' | 'space.sidebar' | 'page.reader', …)`. The page's title, banner, toolbar and properties stay the app's, as do the space's name, menu and New page above the tree. A plugin draws the tree only in a space it can read all of. A replaced rail hides everything on it, Settings and the account menu among them, so safe mode is the way back: Ctrl+Shift+Alt+P, `?safe-mode` in a browser, or **Open without plugins** when unlocking. `host.pages.tree(spaceId)` gives a space's whole tree within the plugin's page access in one call, including what was made offline and not sent yet, and `host.app.renderMarkdown(element, markdown, { page })` draws Markdown with the app's own reader. (#306)
+
+#### Development
+
+- ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it. (#292)
+- Every plugin region is drawn through one `Place` component (`packages/ui/src/plugins/places.tsx`), from one table: `REGIONS` in the plugin SDK. History is the first `page.panel`. The SDK README's region and `data-region` tables are checked against the SDK by a test, and now list the `folder`, `workshop` and `whats-new` hooks. (#296)
+- Each page is saved through one page writer (`packages/client/src/operations/page-writer.ts`), which decides between the device's queue and the server. (#293)
+- What can be done offline or while a change waits is decided in one module, `packages/ui/src/shell/availability.ts`. (#298)
+- Plugins' installs, approvals and access go through one `PluginStore` for the desktop's `plugins.json`, library approvals and the workshop. (#299)
+- One plugin registry per activation, built with `createRuntime(store, …)`; the script worker registers through it. (#302)
+- One `contentChanged` call tells the app's caches and the search index that a page changed. (#304)
+
+#### Desktop
+
+- A folder install set to **Use the app’s own** for a part writes that choice to `plugins.json`, which desktop apps before 0.24.0 refuse. (#305)
+
 ## 0.24.0-beta.1 - 2026-11-07
 
 ### Highlights
