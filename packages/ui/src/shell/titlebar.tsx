@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
-import { TitlebarViews } from '../plugins/regions';
+import { Place } from '../plugins/places';
 import { isApple } from './search-model';
 
 /**
@@ -56,7 +56,7 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
         Wiki<span className="text-primary">Stow</span>
       </span>
       <div className="ml-auto flex h-full items-center gap-1 pr-1">
-        <TitlebarViews />
+        <Place name="app.titlebar" />
       </div>
       {!mac && <WindowButtons state={state} act={act} />}
     </div>

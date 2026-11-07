@@ -51,7 +51,7 @@ import { useNeedsConnection } from './needs-connection';
 import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
-import { usePlugins } from '../plugins/runtime';
+import { Place } from '../plugins/places';
 import { isApple } from './search-model';
 import { SpaceIcon } from './space-look';
 import { RowMenu } from './tree-menus';
@@ -124,7 +124,7 @@ export function Rail({
         <Bot className="size-4" strokeWidth={1.75} />
         Agents
       </Link>
-      <PluginItems onNavigate={onNavigate} />
+      <Place name="rail" onNavigate={onNavigate} />
       <div className="flex-1" />
       <Link
         to="/settings"
@@ -138,32 +138,6 @@ export function Rail({
       <AccountMenu onSignOut={onSignOut} />
     </nav>
   );
-}
-
-/** Plugins' rail items, each opening its plugin's page. Only while the vault is open. */
-function PluginItems({ onNavigate }: { onNavigate: (() => void) | undefined }) {
-  const { regions } = usePlugins();
-  return regions.rail.map(({ pluginId, id, title, icon, opens }) => (
-    <Link
-      key={`${pluginId}:${id}`}
-      to="/plugin/$pluginId/$viewId"
-      params={{ pluginId, viewId: opens }}
-      onClick={onNavigate}
-      data-hint={title}
-      data-hint-side="right"
-      data-plugin={pluginId}
-      className="flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none"
-      activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
-    >
-      <span
-        aria-hidden
-        className="grid h-4 place-items-center overflow-hidden text-sm leading-none"
-      >
-        {icon ?? title.slice(0, 1)}
-      </span>
-      <span className="w-full truncate text-center">{title}</span>
-    </Link>
-  ));
 }
 
 /**

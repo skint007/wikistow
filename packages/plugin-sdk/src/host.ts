@@ -313,7 +313,7 @@ export interface ScriptHost extends Host {
  * place show in the order Settings lists them, then in the order each
  * registered; nothing replaces the app's own content, which a plugin's CSS
  * may hide through its `data-region`. Each place is shown at every window
- * size; the README says where each goes on a phone.
+ * size; `REGIONS` says where each goes on a phone.
  */
 export type Regions = {
   /** A sheet beside the page, opened from its toolbar's Plugins menu, like History. */
@@ -344,17 +344,94 @@ export type Regions = {
   'app.titlebar': { id: string; view: View<TitlebarViewProps> };
 };
 
-const REGIONS: Record<keyof Regions, true> = {
-  'page.panel': true,
-  'page.toolbar': true,
-  'page.header': true,
-  'page.footer': true,
-  'page.aside': true,
-  'app.view': true,
-  rail: true,
-  'settings.section': true,
-  'app.titlebar': true,
+/** What the README's table says of a region. */
+export type RegionInfo = {
+  /** What a plugin registers there, as it is written. */
+  registers: string;
+  /** Where it shows. */
+  where: string;
+  /** Where it shows on a phone. */
+  phone: string;
 };
+
+/**
+ * Every region, in the README's order, with what its table says of it. The
+ * app draws each one through `Place` (`packages/ui/src/plugins/places.tsx`),
+ * and a test checks the README against this.
+ */
+export const REGIONS = {
+  rail: {
+    registers: '{ id, title, icon?, opens }',
+    where: "A rail item opening the plugin's `app.view` named `opens`",
+    phone: 'In the navigation drawer',
+  },
+  'app.view': {
+    registers: '{ id, title, view }',
+    where: 'A page of its own in the main area; its view gets `openPage(page)`',
+    phone: 'The same',
+  },
+  'page.toolbar': {
+    registers: '{ id, view }',
+    where: "The page's toolbar, before the Plugins menu",
+    phone: 'The same; keep it to a button',
+  },
+  'page.header': {
+    registers: '{ id, view }',
+    where: "Above the page's text, under the banner",
+    phone: 'The same',
+  },
+  'page.footer': { registers: '{ id, view }', where: "Below the page's text", phone: 'The same' },
+  'page.aside': {
+    registers: '{ id, view }',
+    where: 'Beside the text, under its contents, where the page card is 960px wide or more',
+    phone: 'Below the page',
+  },
+  'page.panel': {
+    registers: '{ id, title, view }',
+    where: 'A sheet opened from the Plugins menu',
+    phone: 'The same',
+  },
+  'settings.section': {
+    registers: '{ id, title, view }',
+    where:
+      "Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button",
+    phone: 'The same',
+  },
+  'app.titlebar': {
+    registers: '{ id, view }',
+    where:
+      "The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers",
+    phone: 'Not in the browser, which has no titlebar of its own',
+  },
+} as const satisfies { readonly [R in keyof Regions]: RegionInfo };
+
+/**
+ * The `data-region` attributes a plugin's CSS can style the app through,
+ * each with what it marks, in the README's order. A test checks the README
+ * and the app's own attributes against this.
+ */
+export const DATA_REGIONS = {
+  app: 'The whole window',
+  titlebar: "The desktop app's titlebar",
+  rail: 'The rail',
+  topbar: "The phone's top bar",
+  main: 'Beside the rail',
+  sidebar: "A space's page tree",
+  folder: "A folder's page",
+  page: 'The page card',
+  'page.cover': 'Its banner',
+  'page.toolbar': 'Its toolbar',
+  'page.body': 'The text and its aside',
+  'page.content': "The page's column: header, title, text, footer",
+  'page.header': "Plugins' views above the text, only while a plugin fills it",
+  'page.footer': "Plugins' views below the text, only while a plugin fills it",
+  'page.aside': "The contents and plugins' views beside the text, only while a plugin fills it",
+  'app.view': "A plugin's page",
+  settings: 'Settings',
+  workshop: 'The plugin workshop',
+  'whats-new': "What's new",
+  'safe-mode': 'The safe mode banner',
+} as const;
 
 /** Whether `name` is a region, for checking what a plugin asks for. */
 export const isRegion = (name: string): name is keyof Regions => Object.hasOwn(REGIONS, name);

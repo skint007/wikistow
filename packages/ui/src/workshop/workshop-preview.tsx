@@ -5,11 +5,12 @@ import {
   setProperty,
   SpaceId,
   splitFrontmatter,
+  type Banner,
   type PropertyValue,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
-import type { AppViewProps, SettingsViewProps } from '@wikistow/plugin-sdk';
+import type { AppViewProps } from '@wikistow/plugin-sdk';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -23,13 +24,14 @@ import { lineBreakOf, type EditorSurfaceHandle } from '../page/editor/surface';
 import { VisualEditor } from '../page/editor/visual-editor';
 import { inertHost } from '../page/editor/visual/host';
 import { Markdown } from '../page/markdown';
+import { bodyTop, CoverBand } from '../page/cover/cover-band';
+import { PageCard, PageColumns, PageToolbar } from '../page/page-layout';
 import { joinPage } from '../page/properties';
 import { LIBRARY_KEY, uploadAndInstall, type PluginUpload } from '../plugins/library';
 import { ConfirmUpload } from '../plugins/library-settings';
 import { PagePlugins } from '../plugins/page-plugins';
-import { PageViews, pluginName, TitlebarViews } from '../plugins/regions';
+import { Place, type OpenPanel } from '../plugins/places';
 import { pluginRuntime, PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
-import { PluginView } from '../plugins/views';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import type { Workshop } from './workshop';
@@ -388,7 +390,7 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
     workshop.typed(sample.pageId, joinPage(edit.frontmatter, text), sample.outside);
     return { ok: true } as const;
   };
-  const { regions } = usePlugins();
+  const [panel, setPanel] = useState<OpenPanel>(null);
   const shown = useMemo<ShownPage>(
     () => ({
       page: { spaceId: SAMPLE_SPACE, pageId: sample.pageId },
@@ -403,127 +405,113 @@ function SamplePage({ workshop, sample }: { workshop: Workshop; sample: Sample }
     () => ({ spaceId: SpaceId.parse(SAMPLE_SPACE), pageId: PageId.parse(sample.pageId) }),
     [sample.pageId],
   );
+  const attachments = { ctx, page, audience: 'draft', attachments: [] } as const;
   return (
-    <article
-      data-region="page"
-      aria-label={`Sample page ${sample.title}`}
-      className="grid rounded-card border bg-background"
-    >
-      <div
-        data-region="page.toolbar"
-        className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm"
-      >
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {sample.copyOf ? `A copy of “${sample.copyOf}”` : 'Sample page'}
-        </span>
-        <div role="group" aria-label="Show it" className="flex gap-1">
-          {(['editor', 'reader'] as const).map((choice) => (
-            <Button
-              key={choice}
-              size="sm"
-              variant={mode === choice ? 'secondary' : 'ghost'}
-              aria-pressed={mode === choice}
-              onClick={() => setMode(choice)}
-            >
-              {choice === 'editor' ? 'Editor' : 'Reader'}
-            </Button>
-          ))}
-        </div>
-        <PageViews place="page.toolbar" shown={shown} />
-        <PagePlugins shown={shown} />
-      </div>
-      <div data-region="page.body" className="grid gap-6 p-6 min-[960px]:grid-cols-[1fr_auto]">
-        <div data-region="page.content" className="grid min-w-0 content-start gap-4">
-          {regions['page.header'].length > 0 && (
-            <div data-region="page.header" className="grid gap-2">
-              <PageViews place="page.header" shown={shown} />
-            </div>
-          )}
-          <h2 className="text-2xl font-extrabold">{sample.title}</h2>
-          {mode === 'editor' ? (
-            <div className="min-h-40">
-              <VisualEditor
-                // Changes from outside the editor show afresh; typing doesn't redraw it.
-                key={`${sample.pageId}:${sample.outside}`}
-                ref={editor}
-                initial={body}
-                // As it goes, an editor replaced for a change from outside reports
-                // its last text, which mustn't undo that change.
-                onChange={(text) =>
-                  workshop.typed(
-                    sample.pageId,
-                    joinPage(frontmatterNow.current, text),
-                    sample.outside,
-                  )
-                }
-                properties={properties}
-                setProperty={setOne}
-                links={INERT.links()}
-                attachments={INERT.attachments()}
-                onFiles={() => {}}
-                page={shown.page}
-              />
-            </div>
-          ) : (
-            <Markdown
-              source={sample.markdown}
-              attachments={{ ctx, page, audience: 'draft', attachments: [] }}
-              pages={null}
-              links={new Map()}
-              editing={null}
-            />
-          )}
-          {regions['page.footer'].length > 0 && (
-            <div data-region="page.footer" className="grid gap-2">
-              <PageViews place="page.footer" shown={shown} />
-            </div>
-          )}
-        </div>
-        {regions['page.aside'].length > 0 && (
-          <div data-region="page.aside" className="grid w-60 content-start gap-3">
-            <PageViews place="page.aside" shown={shown} />
+    <PageCard label={`Sample page ${sample.title}`}>
+      <CoverBand banner={THEME_BANNER} attachments={attachments}>
+        <PageToolbar>
+          <span className="min-w-0 flex-1 truncate font-bold">
+            {sample.copyOf ? `A copy of “${sample.copyOf}”` : 'Sample page'}
+          </span>
+          <div role="group" aria-label="Show it" className="flex gap-1">
+            {(['editor', 'reader'] as const).map((choice) => (
+              <Button
+                key={choice}
+                size="sm"
+                variant={mode === choice ? 'secondary' : 'ghost'}
+                aria-pressed={mode === choice}
+                onClick={() => setMode(choice)}
+              >
+                {choice === 'editor' ? 'Editor' : 'Reader'}
+              </Button>
+            ))}
           </div>
+          <Place name="page.toolbar" shown={shown} />
+          <PagePlugins shown={shown} onOpenPanel={setPanel} />
+        </PageToolbar>
+      </CoverBand>
+      <PageColumns shown={shown} contents={null} className={bodyTop(false)}>
+        <h2 className="text-2xl font-extrabold">{sample.title}</h2>
+        {mode === 'editor' ? (
+          <div className="min-h-40">
+            <VisualEditor
+              // Changes from outside the editor show afresh; typing doesn't redraw it.
+              key={`${sample.pageId}:${sample.outside}`}
+              ref={editor}
+              initial={body}
+              // As it goes, an editor replaced for a change from outside reports
+              // its last text, which mustn't undo that change.
+              onChange={(text) =>
+                workshop.typed(
+                  sample.pageId,
+                  joinPage(frontmatterNow.current, text),
+                  sample.outside,
+                )
+              }
+              properties={properties}
+              setProperty={setOne}
+              links={INERT.links()}
+              attachments={INERT.attachments()}
+              onFiles={() => {}}
+              page={shown.page}
+            />
+          </div>
+        ) : (
+          <Markdown
+            source={sample.markdown}
+            attachments={attachments}
+            pages={null}
+            links={new Map()}
+            editing={null}
+          />
         )}
-      </div>
-    </article>
+      </PageColumns>
+      {/* Its panels only: the page's own, such as History, need a page the server has. */}
+      <Place name="page.panel" shown={shown} open={panel} onOpenChange={setPanel} own={null} />
+    </PageCard>
   );
 }
 
-const NO_SETTINGS: SettingsViewProps = {};
+const THEME_BANNER: Banner = { kind: 'theme' };
 
-/** The plugin's own pages, rail items, Settings sections and titlebar buttons, opened here. */
+/**
+ * The plugin's other places, each drawn as the app draws it, opened here:
+ * its own pages, which its rail items open too, its Settings sections and
+ * its titlebar buttons.
+ */
 function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
-  const { regions, plugins } = usePlugins();
+  const { regions } = usePlugins();
   const [open, setOpen] = useState<string | null>(null);
   const appView = useMemo<AppViewProps>(
     () => ({ openPage: (page) => page.spaceId === SAMPLE_SPACE && onOpen(page.pageId) }),
     [onOpen],
   );
+  // The plugin page a rail item opened, which may name one the plugin hasn't registered.
+  const [railView, setRailView] = useState<{ pluginId: string; viewId: string } | null>(null);
+  const viewKey = (pluginId: string, viewId: string) => `app.view:${pluginId}:${viewId}`;
+  const drawView = (pluginId: string, viewId: string) => (
+    <div className="grid gap-6">
+      <Place name="app.view" pluginId={pluginId} viewId={viewId} props={appView} />
+    </div>
+  );
   const places = [
     ...regions['app.view'].map((view) => ({
-      key: `app.view:${view.id}`,
+      key: viewKey(view.pluginId, view.id),
       label: `Page: ${view.title}`,
-      draw: () => (
-        <PluginView
-          pluginId={view.pluginId}
-          name={pluginName(plugins, view.pluginId)}
-          view={view.view}
-          props={appView}
-        />
-      ),
+      draw: () => drawView(view.pluginId, view.id),
     })),
-    ...regions['settings.section'].map((section) => ({
-      key: `settings.section:${section.id}`,
-      label: `Settings: ${section.title}`,
-      draw: () => (
-        <PluginView
-          pluginId={section.pluginId}
-          name={pluginName(plugins, section.pluginId)}
-          view={section.view}
-          props={NO_SETTINGS}
-        />
-      ),
-    })),
+    // Each plugin's sections together, as its row on the Plugins page shows them.
+    ...[...new Set(regions['settings.section'].map(({ pluginId }) => pluginId))].map(
+      (pluginId) => ({
+        key: `settings.section:${pluginId}`,
+        label: 'Settings',
+        draw: () => (
+          <div className="grid gap-2">
+            <Place name="settings.section" pluginId={pluginId} />
+          </div>
+        ),
+      }),
+    ),
     // All its titlebar buttons, as the desktop app's titlebar shows them.
     ...(regions['app.titlebar'].length > 0
       ? [
@@ -532,29 +520,35 @@ function PluginPlaces({ onOpen }: { onOpen: (pageId: string) => void }) {
             label: 'Titlebar',
             draw: () => (
               <div className="flex h-9 items-center justify-end gap-1">
-                <TitlebarViews />
+                <Place name="app.titlebar" />
               </div>
             ),
           },
         ]
       : []),
   ];
-  const rail = regions.rail;
-  if (places.length === 0 && rail.length === 0) return null;
-  const shown = places.find((place) => place.key === open);
+  const rail = regions.rail.length > 0;
+  if (places.length === 0 && !rail) return null;
+  // A rail item naming a page the plugin lacks shows "Not available", as the app does.
+  const shown =
+    places.find((place) => place.key === open) ??
+    (railView && open === viewKey(railView.pluginId, railView.viewId)
+      ? { key: open, draw: () => drawView(railView.pluginId, railView.viewId) }
+      : undefined);
   return (
     <section aria-label="Its other places" className="grid gap-2">
       <h2 className="text-sm font-bold">Its other places</h2>
-      {rail.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Rail:{' '}
-          {rail
-            .map(
-              (item) =>
-                `${item.icon ?? item.title.slice(0, 1)} ${item.title} (opens ${item.opens})`,
-            )
-            .join(', ')}
-        </p>
+      {rail && (
+        <div role="group" aria-label="Rail" className="flex flex-wrap items-center gap-1">
+          <span className="text-xs text-muted-foreground">Rail</span>
+          <Place
+            name="rail"
+            open={({ pluginId, opens }) => {
+              setRailView({ pluginId, viewId: opens });
+              setOpen(viewKey(pluginId, opens));
+            }}
+          />
+        </div>
       )}
       <div className="flex flex-wrap gap-1">
         {places.map((place) => (

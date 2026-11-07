@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - **New page here** and **New folder here** in a folder made offline that isn’t sent yet now save the new page or folder on the device too while online, to be sent after the folder, instead of failing as not found. That covers the moments after the server answers again, before the folder is sent, an unlock made offline the app hasn’t confirmed yet, and a folder whose sending stopped. **Create this page** from a link in a page in that folder does the same. (#291)
 - The rest of that folder’s menu (Rename, Move, Share, Export, Import, Delete and the others) now waits until the folder is sent, saying so, as it already waited offline and as dragging it did, instead of failing as not found. (#291)
+- The plugin workshop's preview draws its sample pages with the page's own layout, so a plugin's views show where the app puts them. Its rail items are the real ones and open the plugin's page in the preview, and a plugin's Settings sections show together, as in Settings → Plugins. (#296)
 - A plugin block that fails in the visual editor now shows the same note as in the reader, naming the plugin, with **Disable**. (#295)
 - Mermaid diagrams take the theme's colours, a plugin theme's too, instead of Mermaid's own light or dark look. A public copy's diagrams stay as they were. (#294)
 
@@ -20,6 +21,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Development
 
 - ADR 0011 (`docs/adr/0011-replaceable-regions.md`) records how plugins grow: some regions become replaceable (a space's sidebar and home, a folder's page, a page's reading view, the rail), app plugins get `host.app` for where the person is, navigation and spaces, plugins can insert Markdown at the cursor and add to the editor's toolbar, and they can claim inline code as they claim fences. It amends ADR 0001, and the glossary's **Region** and **Plugin block** change with it. (#292)
+- Every plugin region is drawn through one `Place` component (`packages/ui/src/plugins/places.tsx`), from one table: `REGIONS` in the plugin SDK. History is the first `page.panel`. The SDK README's region and `data-region` tables are checked against the SDK by a test, and now list the `folder`, `workshop` and `whats-new` hooks. (#296)
 
 ## 0.23.0 - 2026-11-06
 

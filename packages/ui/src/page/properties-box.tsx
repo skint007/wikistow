@@ -96,7 +96,7 @@ const Why = ({ reason }: { reason: string }) => (
  * A page's properties, read-only: a row for each, the first six and then
  * **Show N more**. A block that doesn't read as properties shows as its
  * text, with a line saying why. A block with no properties shows nothing.
- * It sits in the body, not among the `pagePanels`, which open from the
+ * It sits in the body, not among the page's panels, which open from the
  * toolbar.
  */
 export function PropertiesBox({
