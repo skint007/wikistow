@@ -57,6 +57,10 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
       if (plugin.library) await library.enable(plugin, on);
       else await bridge.setPluginEnabled(plugin.id, on);
     },
+    async setOwnParts(plugin, regions) {
+      if (plugin.library) await library.setOwnParts(plugin, regions);
+      else await bridge.setPluginOwnParts(plugin.id, [...regions]);
+    },
     async setAccess(plugin, scopes) {
       if (plugin.library) return library.setAccess(plugin, scopes);
       const account = accountId();

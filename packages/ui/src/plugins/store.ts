@@ -46,8 +46,8 @@ export type PluginListing = {
  * store keeps them where ADR 0001 and ADR 0002 say: `plugins.json` for the
  * desktop's folder and development installs (on/off per computer, page
  * access per account), the account's contacts record for library plugins.
- * A choice kept the same way as on/off, such as ADR 0011's **Use the app's
- * own**, is one more field beside `enabled` in each.
+ * ADR 0011's **Use the app's own** is kept the same way as on/off, as
+ * `ownParts` beside `enabled` in each.
  *
  * `Version` is what the store approves. Approving an installed ID updates
  * it, keeping its page access. A library update keeps on/off too; a folder
@@ -60,6 +60,8 @@ export type PluginStore<Version> = {
   approve(version: Version): Promise<void>;
   enable(plugin: PluginRef, on: boolean): Promise<void>;
   setAccess(plugin: PluginRef, scopes: readonly PluginScope[]): Promise<void>;
+  /** The regions where the app's own part shows in place of the plugin's (`InstalledPlugin.ownParts`). */
+  setOwnParts(plugin: PluginRef, regions: readonly string[]): Promise<void>;
   /** Pages keep its blocks and data. */
   remove(plugin: PluginRef): Promise<void>;
 };
@@ -90,7 +92,8 @@ export type AppPluginStore = PluginStore<PluginCandidate | LibraryRequest> & {
 
 /**
  * A store held in memory, for tests. Approving a plugin installs it, or
- * updates the one of its ID as the library does, keeping on/off and page access.
+ * updates the one of its ID as the library does, keeping on/off, own
+ * parts and page access.
  */
 export function memoryStore({
   plugins = [],
@@ -111,11 +114,16 @@ export function memoryStore({
       const before = held.find(is(refOf(version)));
       held = [
         ...held.filter((plugin) => plugin !== before),
-        { ...version, enabled: before?.enabled ?? true },
+        { ...version, enabled: before?.enabled ?? true, ownParts: before?.ownParts ?? [] },
       ];
     },
     async enable(ref, on) {
       held = held.map((plugin) => (is(ref)(plugin) ? { ...plugin, enabled: on } : plugin));
+    },
+    async setOwnParts(ref, regions) {
+      held = held.map((plugin) =>
+        is(ref)(plugin) ? { ...plugin, ownParts: [...regions] } : plugin,
+      );
     },
     async setAccess(ref, list) {
       scopes = { ...scopes, [ref.id]: [...list] };

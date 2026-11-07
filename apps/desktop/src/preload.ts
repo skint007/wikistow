@@ -40,6 +40,7 @@ const bridge: DesktopBridge = {
   pickPlugin: (kind) => call(DESKTOP_CHANNELS.pickPlugin, kind),
   approvePlugin: (token) => call(DESKTOP_CHANNELS.approvePlugin, token),
   setPluginEnabled: (id, enabled) => call(DESKTOP_CHANNELS.setPluginEnabled, id, enabled),
+  setPluginOwnParts: (id, regions) => call(DESKTOP_CHANNELS.setPluginOwnParts, id, regions),
   reloadPlugin: (id) => call(DESKTOP_CHANNELS.reloadPlugin, id),
   removePlugin: (id) => call(DESKTOP_CHANNELS.removePlugin, id),
   pluginAccess: (accountId) => call(DESKTOP_CHANNELS.pluginAccess, accountId),

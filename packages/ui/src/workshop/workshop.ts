@@ -201,6 +201,8 @@ export class Workshop {
       },
       // The samples are open to the manifest's access; there is none to choose.
       setAccess: async () => {},
+      // The preview draws whatever the version replaces: there is no Settings to choose in.
+      setOwnParts: async () => {},
       remove: () => this.unload(),
     };
     this.preview = createRuntime(versions, {

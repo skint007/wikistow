@@ -21,6 +21,12 @@ export type InstalledPlugin = {
    */
   library: boolean;
   enabled: boolean;
+  /**
+   * The regions where the person chose the app's own part over this
+   * plugin's (ADR 0011, Settings' **Use the app's own**), kept where its
+   * on/off is.
+   */
+  ownParts: readonly string[];
 };
 
 /** A library plugin approved in the account's contacts record, for the desktop to hold a copy of. */
@@ -223,6 +229,8 @@ export type DesktopBridge = {
   /** Install or update the candidate the person approved, enabled. */
   approvePlugin(token: string): Promise<void>;
   setPluginEnabled(id: string, enabled: boolean): Promise<void>;
+  /** The regions where a folder install gives way to the app's own part (`InstalledPlugin.ownParts`). */
+  setPluginOwnParts(id: string, regions: string[]): Promise<void>;
   /**
    * Read a development plugin's folder again. Null when it reloaded; a
    * candidate when it asks for more than was approved.
@@ -310,6 +318,7 @@ export const DESKTOP_CHANNELS = {
   pickPlugin: 'wikistow:pick-plugin',
   approvePlugin: 'wikistow:approve-plugin',
   setPluginEnabled: 'wikistow:set-plugin-enabled',
+  setPluginOwnParts: 'wikistow:set-plugin-own-parts',
   reloadPlugin: 'wikistow:reload-plugin',
   removePlugin: 'wikistow:remove-plugin',
   pluginAccess: 'wikistow:plugin-access',
