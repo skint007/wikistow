@@ -11,7 +11,6 @@ import { linkTableOf, resolveLinked } from './link-table.ts';
 import { pageIndex, type LinkablePage, type PageIndex } from './links.ts';
 import { linkSpans, withHeading, type LinkSpans, type Wikilink } from './markdown/index.ts';
 import type { AttachmentRef, PagePayload } from './payload.ts';
-import { headingSlug } from './reader/heading-ids.ts';
 
 // ---- File names ----
 
@@ -493,10 +492,12 @@ type Edit = {
  *
  * With Markdown links (`style: 'markdown'`), a wikilink naming an exported
  * page becomes a relative link to its file, `[text](../Folder/Page.md)`, its
- * text as the reader shows it and its `#heading` as the heading's anchor
- * (`headingSlug`); `[[#Heading]]` links within the page. An embed of an
- * attachment becomes an image, or a link for any other file. Page embeds,
- * block references and the wikilinks that stay as written are counted.
+ * text as the reader shows it and its `#heading` as GitHub's anchor for
+ * the heading (`headingAnchor`); `[[#Heading]]` links within the page. An
+ * embed of an attachment becomes an image, or a link for any other file. A
+ * wikilink in a link's text stays, since a link can't hold another. Page
+ * embeds, block references and the wikilinks that stay as written are
+ * counted.
  */
 export const exportedMarkdown = (payload: PagePayload, links: ExportLinks): string =>
   finish(exportingMarkdown(payload, links)).markdown;
@@ -619,7 +620,8 @@ function wikilinkEdits(
    */
   function markdownLink(link: PlacedLink, id: string | undefined): Edit | undefined {
     const at = { start: link.start, end: link.end };
-    const anchor = link.heading ? `#${encodeURIComponent(headingSlug(link.heading))}` : '';
+    if (link.inLink) return undefined;
+    const anchor = link.heading ? `#${encodeURIComponent(headingAnchor(link.heading))}` : '';
     if (link.target === '') {
       if (link.embed || anchor === '') return undefined;
       const text = `[${escapeText(link.shown ?? link.heading ?? '')}](${anchor})`;
@@ -645,6 +647,21 @@ function wikilinkEdits(
 }
 
 type PlacedLink = LinkSpans['wikilinks'][number];
+
+/**
+ * The anchor GitHub gives a heading with this text, as github-slugger makes
+ * it: lowercased, everything but letters, marks, numbers, `_`, `-` and
+ * spaces dropped, then each space a dash. The reader's own ids
+ * (`headingId`) differ, as they always have, for a heading such as
+ * "Pros & cons": GitHub's is `pros--cons`. A repeated heading's `-1` isn't
+ * added: a link names the first heading of its text.
+ */
+const headingAnchor = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-');
 
 // Text that can stand after a wikilink's bar and still read back as its text.
 const aliasable = (text: string) => !/[[\]|\r\n`<\\]/.test(text) && text.trim() === text;

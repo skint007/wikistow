@@ -119,7 +119,7 @@ export function ExportDialog({
             </label>
             <p id="export-markdown-links-about" className="text-sm text-muted-foreground">
               Write links between pages as links to their files, for GitHub and editors that don’t
-              read wikilinks. Obsidian opens these too.
+              read wikilinks.
             </p>
           </div>
           <Switch

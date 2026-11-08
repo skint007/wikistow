@@ -14,7 +14,8 @@ type Span = { start: number; end: number };
 
 /** A page's links, where each is written, as export finds them and compares a read-back with. */
 export type LinkSpans = {
-  wikilinks: PlacedWikilink[];
+  /** Each wikilink, and whether it is in a link's text, where no other link can go. */
+  wikilinks: (PlacedWikilink & { inLink?: true })[];
   /**
    * Each link, image, definition and autolink's URL, in order, whether it is
    * an image's, and where its destination is written, or where an autolink
@@ -51,7 +52,7 @@ export function linkSpans(markdown: string): LinkSpans {
   const offset = frontmatter?.length ?? 0;
   const document = parse({ extensions: SYNTAX }).document();
   const events = postprocess(document.write(preprocess()(body, undefined, true)));
-  const wikilinks: PlacedWikilink[] = [];
+  const wikilinks: LinkSpans['wikilinks'] = [];
   const tables: Span[] = [];
   const urls: LinkSpans['urls'] = [];
   const open: string[] = [];
@@ -80,7 +81,16 @@ export function linkSpans(markdown: string): LinkSpans {
         if (node?.unsupported) inert++;
         if (!node || node.unsupported) break;
         const { source, target, heading, shown, embed } = node;
-        wikilinks.push({ source, target, heading, shown, embed, ...span });
+        const inLink = open.includes('label');
+        wikilinks.push({
+          source,
+          target,
+          heading,
+          shown,
+          embed,
+          ...span,
+          ...(inLink && { inLink }),
+        });
         break;
       }
       case 'resource':

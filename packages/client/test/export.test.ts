@@ -174,7 +174,8 @@ describe('writing Markdown links', () => {
     const photo = file('photo.png', 'image/png');
     const manual = file('manual.pdf', 'application/pdf');
     const markdown = [
-      '[[Plan]], [[plan|the plan]], [[Plan#Next steps]], [[#What’s new?]]',
+      '[[Plan]], [[plan|the plan]], [[Plan#Next steps]], [[#What’s new?]], [[Plan#Pros & cons]]',
+      '[see [[Plan]]](https://example.com)',
       '[[A/B]] [[Work/Notes]] [[Home/Notes]]',
       '| [[Plan|in a table]] |\n| - |',
       '![[photo.png|300]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
@@ -222,13 +223,16 @@ describe('writing Markdown links', () => {
     expect(written).toMatchObject({
       markdown: [
         '[Plan](../Work/Plan.md), [the plan](../Work/Plan.md), ' +
-          '[Plan › Next steps](../Work/Plan.md#next-steps), [What’s new?](#whats-new)',
+          '[Plan › Next steps](../Work/Plan.md#next-steps), [What’s new?](#whats-new), ' +
+          '[Plan › Pros \\& cons](../Work/Plan.md#pros--cons)',
+        // A link can't hold another, so this one stays.
+        '[see [[Plan]]](https://example.com)',
         '[A/B](A_B.md) [notes](../Work/notes%20%282%29.md) [Notes](Notes.md)',
         '| [in a table](../Work/Plan.md) |\n| - |',
         '![photo.png](../attachments/photo.png) [manual.pdf](../attachments/manual.pdf) ' +
           '![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
       ].join('\n\n'),
-      wikilinks: 4,
+      wikilinks: 5,
     });
     const twice = { id: 'p-twice', parentId: 'f-work', payload: payload('Twice', '[[notes]]') };
     const other = planExport([space(folders, [...pages, twice])], { links: 'markdown' });

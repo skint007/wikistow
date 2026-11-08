@@ -29,7 +29,7 @@ export function summaryStatus({
     ...(wikilinks === 0
       ? []
       : [
-          `${wikilinks === 1 ? 'One link stays a wikilink' : `${wikilinks.toLocaleString()} links stay wikilinks`}: page embeds, and links to pages that aren’t exported or don’t exist.`,
+          `${wikilinks === 1 ? 'One link stays a wikilink' : `${wikilinks.toLocaleString()} links stay wikilinks`}: page embeds, block references, and links that don’t lead to one page in the export.`,
         ]),
   ];
   return parts.length === 0 ? null : `Downloaded. ${parts.join(' ')}`;
