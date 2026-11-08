@@ -78,8 +78,11 @@ export class WorkshopChat {
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** What was last sent to be kept, to send nothing when nothing changed. */
   #lastKept: string | null = null;
-  /** A save whose answer was lost, which may have landed. */
-  #unsure: string | null = null;
+  /** Saves whose answers were lost since the last that wasn't, any of which may have landed. */
+  #unsure: string[] = [];
+  /** The opening build is done, or something was done here before it was: from then on, changes are kept. */
+  #opened = false;
+  #touched = false;
   /** The revision of what the draft keeps, which the next save follows. */
   #revision = 0;
   /** The last save: they go one at a time. */
@@ -118,16 +121,14 @@ export class WorkshopChat {
       // Kept a moment after each change; at once as a reply ends. What opening
       // makes, the files built again, isn't a change made here: a device that
       // only opens the draft sends nothing. Anything done meanwhile is kept.
-      let opened = false;
-      let touched = false;
       const changed = (now = false) => {
-        if (!opened) touched = true;
+        if (!this.#opened) this.#touched = true;
         this.#changed(now);
       };
       const open = () => {
-        if (opened || workshop.state().opening) return;
-        opened = true;
-        if (touched) this.#changed();
+        if (this.#opened || workshop.state().opening) return;
+        this.#opened = true;
+        if (this.#touched) this.#changed();
         else this.#lastKept = JSON.stringify(this.#record());
       };
       let running = false;
@@ -136,7 +137,7 @@ export class WorkshopChat {
         changed(running && !now);
         running = now;
       });
-      workshop.subscribe(() => (opened ? this.#changed() : open()));
+      workshop.subscribe(() => (this.#opened ? this.#changed() : open()));
       workshop.samples.subscribe(() => changed());
       open();
     });
@@ -200,6 +201,8 @@ export class WorkshopChat {
   #keep() {
     clearTimeout(this.#timer);
     if (this.#keeping.status !== 'kept' || this.session.state().status === 'closed') return;
+    // Ended while opening, with nothing done here: nothing to keep.
+    if (!this.#opened && !this.#touched) return;
     const record = this.#record();
     const text = JSON.stringify(record);
     if (text === this.#lastKept) return;
@@ -232,7 +235,7 @@ export class WorkshopChat {
           if (!stale(error) || !(await this.#landed())) throw error;
           answer = await send();
         }
-        this.#unsure = null;
+        this.#unsure = [];
         this.#revision = answer.revision;
         if (this.#keeping.problem) this.#setKeeping({ ...this.#keeping, problem: null });
       } catch (error) {
@@ -240,7 +243,8 @@ export class WorkshopChat {
           this.#setKeeping({ status: 'stale', problem: null });
           return;
         }
-        this.#unsure = text;
+        // The last few: a long time offline needn't hold every one.
+        this.#unsure = [...this.#unsure, text].slice(-3);
         // Sent again with the next change.
         if (this.#lastKept === text) this.#lastKept = null;
         if (!this.#done) {
@@ -253,13 +257,13 @@ export class WorkshopChat {
     });
   }
 
-  /** Whether the save whose answer was lost is what the draft keeps; then the next follows it. */
+  /** Whether a save whose answer was lost is what the draft keeps; then the next follows it. */
   async #landed() {
-    if (this.#unsure === null) return false;
+    if (this.#unsure.length === 0) return false;
     const now = await api.call(pluginDraftRoutes.getDraftWorkshop, {
       params: { draftId: this.workshop.draftId },
     });
-    if (JSON.stringify(now.workshop) !== this.#unsure) return false;
+    if (!this.#unsure.includes(JSON.stringify(now.workshop))) return false;
     this.#revision = now.revision;
     return true;
   }
