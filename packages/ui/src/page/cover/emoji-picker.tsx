@@ -1,3 +1,4 @@
+import type { SpaceId } from '@wikistow/client';
 import { ImageUp, SmilePlus } from 'lucide-react';
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { IconImage } from '@/components/icon-image';
@@ -12,7 +13,8 @@ import {
 import { cn } from '@/lib/utils';
 import { errorMessage } from '../../errors';
 import { badgeClass } from './cover-band';
-import { ICON_ACCEPT } from './icon-image';
+import { ICON_ACCEPT, iconImage, type IconFile } from './icon-image';
+import { useSpaceImages, type SpaceImage } from './space-images';
 
 const EmojiGrid = lazy(() => import('./emoji-grid'));
 const IconGrid = lazy(() => import('./icon-grid'));
@@ -22,16 +24,19 @@ export type ImageChoice = {
   /** The image in use, as a `blob:` URL, or null for none. */
   current: string | null;
   /**
-   * Prepare and keep a chosen file, such as with `iconImage`. The tab stays
-   * open until it resolves, and shows the message of a rejection.
+   * Keep a chosen image. `icon` makes it ready: it resizes an uploaded file
+   * (`iconImage`), or gives the bytes of one already in the space. The tab
+   * stays open until it resolves, and shows the message of a rejection.
    */
-  onPick: (file: File) => Promise<void>;
+  onPick: (icon: () => Promise<IconFile>) => Promise<void>;
   /** Offers Remove image while there is one. */
   onRemove?: () => void;
   /** The upload button's label while `onPick` runs; Resizing… unless given. */
   working?: string;
   /** Why the image can't change now, such as offline: the tab shows it, and offers nothing. */
   waits?: string | null;
+  /** The space whose folders' and pages' images the tab offers again (`useSpaceImages`). */
+  spaceId: SpaceId;
 };
 
 /** What the picker's Icons tab shows and does: an icon of the icon set, by name. */
@@ -161,11 +166,11 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function pick(file: File) {
+  async function pick(icon: () => Promise<IconFile>) {
     setBusy(true);
     setError(null);
     try {
-      await image.onPick(file);
+      await image.onPick(icon);
       onDone();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -208,6 +213,12 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
           )}
         </div>
       )}
+      <SpaceImages
+        spaceId={image.spaceId}
+        current={image.current}
+        disabled={busy}
+        onPick={(chosen) => void pick(async () => chosen.icon)}
+      />
       <label className={uploadButtonClass}>
         <ImageUp className="size-4" strokeWidth={1.75} />
         {busy ? (image.working ?? 'Resizing…') : 'Upload an image…'}
@@ -218,7 +229,7 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
           disabled={busy}
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) void pick(file);
+            if (file) void pick(() => iconImage(file));
             event.target.value = '';
           }}
         />
@@ -231,6 +242,46 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
       <p className="text-xs text-muted-foreground">
         PNG, JPEG, WebP, GIF or SVG. It’s resized to fit.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The images already in the space, to use again: picking one copies its
+ * bytes, as if its file had been chosen again.
+ */
+function SpaceImages({
+  spaceId,
+  current,
+  disabled,
+  onPick,
+}: {
+  spaceId: SpaceId;
+  current: string | null;
+  disabled: boolean;
+  onPick: (image: SpaceImage) => void;
+}) {
+  const images = useSpaceImages(spaceId, current);
+  if (!images?.length) return null;
+  return (
+    <div role="group" aria-label="In this space" className="grid gap-1.5">
+      <span className="text-xs font-bold text-muted-foreground">In this space</span>
+      <div className="flex flex-wrap gap-1.5">
+        {images.map((spaceImage) => (
+          <button
+            key={spaceImage.url}
+            type="button"
+            disabled={disabled}
+            aria-label={
+              spaceImage.name ? `Use the image of “${spaceImage.name}”` : 'Use this image'
+            }
+            onClick={() => onPick(spaceImage)}
+            className="grid size-10 overflow-hidden rounded-[8px] bg-muted hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:opacity-80 disabled:opacity-50"
+          >
+            <IconImage src={spaceImage.url} fallback={null} />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

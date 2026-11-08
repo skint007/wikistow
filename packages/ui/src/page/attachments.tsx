@@ -62,7 +62,7 @@ export function forgetDecrypted(
   const queryKey = decryptedKey(attachments, ref);
   const url = queryClient.getQueryData<string>(queryKey);
   queryClient.removeQueries({ queryKey, exact: true });
-  if (url) URL.revokeObjectURL(url);
+  if (url) vaultStore.revoke(url);
 }
 
 /**
