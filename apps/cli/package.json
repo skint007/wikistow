@@ -11,12 +11,14 @@
     "build": "vp pack"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
     "@wikistow/client": "workspace:*",
     "@wikistow/contracts": "workspace:*",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@hono/node-server": "2.1.3",
+    "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^26.0.0",
     "@wikistow/server": "workspace:*",
     "@wikistow/server-app": "workspace:*",
