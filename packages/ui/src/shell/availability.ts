@@ -134,7 +134,7 @@ export type MoveAvailability = { route: 'server' | 'device' } | { route: null; h
  * server works out who gains and loses access, or copies it, so it goes
  * online only, never after a change waiting here, nor into a folder made
  * offline. Any other move waits on this device while the app is offline,
- * or while the item, or the folder it goes in, has something waiting: it
+ * while the item has something waiting, or into a folder made offline: it
  * goes after that.
  */
 export function moveAvailability({
