@@ -53,6 +53,8 @@ Naming the draft the changes were saved in, and checking the publication's `base
 
 History opens the published versions it lists to read their labels. It lists the newest 20, with **Show older versions** to list 20 more, and opens only the versions listed. Each version is opened once: through the revision cache, and its label then stays in the query cache while history is open. A version that doesn't open, is in a newer format, or has no valid extension shows no label.
 
+The CLI's `page history` labels versions too, in its text and as `change` in its JSON (#337). It lists every version, so it opens every one, through `versionChanges` in batches of 200.
+
 Readers open the versions in their own history, from `readerHistoryFrom`, whose keys they hold. Each label is checked against that version's own record, never the version before it, so the oldest version a reader sees is labelled like any other.
 
 A label reads "Ticked 3, unticked 1", "Changed servings", or both ("Ticked 1, changed servings"). More than three properties are named as "servings, rating, time and 2 more". A version whose extension counts nothing reads "Changed while reading".
@@ -72,7 +74,6 @@ The extension is inside the encrypted payload, so the server learns nothing new.
 - **Name the publication the changes were made on**, and show the label when that is the version just before in history. This fails when the changes stay in the draft (a public link) and an older app then edits and publishes that draft: the publication before is still the one named. It also needs the version before, which readers don't have for their oldest version. Rejected for decision 2.
 - **Load labels for the whole history.** Simpler UI, but a page ticked daily for a year would download and decrypt 365 versions each time history opens. Rejected for 20 at a time.
 - **Fold runs into one row that adds up their counts.** A box ticked in one version and unticked in the next would read as both, and View and Restore would need to say which version they mean. Rejected for decision 5's row, which keeps the newest version's own label.
-- **Labels in the CLI's `page history`.** The CLI lists records only. Left out; it can come later with the same helper (`changeOf`, #337).
 
 ## Consequences
 

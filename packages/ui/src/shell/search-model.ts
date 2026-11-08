@@ -25,6 +25,12 @@ export const breadcrumb = (path: searchOperations.SearchPage['path']) =>
 export const SEARCH_HELP =
   'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress". Type > for commands.';
 
+/** Whether `query` has something to look for: not yet, as with a filter half typed (`tag:`). */
+export function looksFor(query: string): boolean {
+  const { words, filters } = parseSearch(query);
+  return filters.length > 0 || searchTerms(words).length > 0;
+}
+
 /** What the search dialog says above its results. */
 export function searchStatus({
   index,
@@ -43,9 +49,7 @@ export function searchStatus({
       : 'Finding your pages…';
   }
   if (index.size === 0) return 'There are no pages to search yet.';
-  // Nothing to look for yet, as a filter half typed (`tag:`).
-  const { words, filters } = parseSearch(query);
-  if (filters.length === 0 && searchTerms(words).length === 0) return SEARCH_HELP;
+  if (!looksFor(query)) return SEARCH_HELP;
   if (results === 0) return 'No pages match.';
   return `${results} page${results === 1 ? '' : 's'}`;
 }

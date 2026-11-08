@@ -645,7 +645,15 @@ attachments by page read --json.${PIPES}
   'page copy': copyHelp('page'),
   'page history': `Usage: ${PROGRAM} page history PAGE_ID
 
-The published versions, newest first, and who published each.
+The published versions, newest first, and who published each. A version
+published by changes made while reading (ticking a task, changing a
+property in the reader) says what changed, as WikiStow's history does:
+"Ticked 3, unticked 1". Each version is opened to read that. With --json:
+  {"pageId":"...","versions":[{"revisionId":"...","publishedSeq":N,
+    "publishedAt":"...","basedOn":"...","publisher":{...},
+    "change":{"ticked":N,"unticked":N,"properties":["servings"]}}]}
+change is null for any other version, or one that couldn't be opened.
+properties are the keys whose value changed, as written in the page.
 `,
   'page links': `Usage: ${PROGRAM} page links PAGE_ID
 

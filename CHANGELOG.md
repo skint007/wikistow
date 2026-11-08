@@ -12,12 +12,18 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The search box is a command palette too: type `>` first, or open it with Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, to run what you could do where you are by typing its name. It lists the page's commands, such as Edit page, Publish, Move to… and Find on page, the space's (Export space…, and for owners Share space… and Delete space…), Lock vault, Change theme…, each plugin's settings, and the running plugins' commands under their plugin's name. Letters match in order, best matches first, then the commands you ran last, kept on this device. (#345)
 
 - Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#347)
+- Move pages and folders within their space, by Move to… or by dragging, and publish pages, while offline. They wait on the device and go once the app is back online; a waiting publish can be cancelled from the page. Moves into or out of a shared folder, and publishing a page with a public link, still need the connection. (#354)
 - **Export…** has a **Markdown links** switch, off by default, that writes links between pages as relative links to their files, `[Plan](../Work/Plan.md#next-steps)`, for GitHub and editors that don’t read wikilinks. It says how many links stayed wikilinks, such as page embeds. (#350)
 
 #### Plugins
 
 - Plugins can keep settings for the person, the same on each of their devices: `host.settings` (`get`, `set`, `update`, `on('changed')`), one JSON object of at most 16 KB per plugin, kept encrypted beside the plugin's approval in the account's record, or on the computer for a desktop folder install. A manifest's `settings` declares text, number, on/off and choice fields, which Settings → Plugins draws under the plugin's **Settings**, so scripts get settings without a view. Settings sections get `{ settings }`, `host.app.navigate({ kind: 'settings' })` opens the plugin's own, and the page's Plugins menu has ***Plugin* settings…**. An update keeps them and Remove deletes them. `reading-room` declares its column's width and reading speed. The library lists versions with `settings` only to apps that send `manifest=3`. (#344)
 - A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it. (#349)
+- App plugins can draw the search results their own way: `search.results` is a replaceable region, whose view gets what was typed and the app's own results, and draws only where the plugin can read every result. The search box and `>`'s commands stay the app's, and `host.app.navigate` closes search. (#352)
+
+#### CLI
+
+- `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
 
 #### CLI
 
