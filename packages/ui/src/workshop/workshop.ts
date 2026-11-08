@@ -312,13 +312,18 @@ export class Workshop {
     }
     try {
       if (this.#state.files.size === 0 && this.#state.binary.size === 0) return;
-      const version = await this.build();
-      if (version?.plugin) await this.load(version.version);
+      await this.buildAndPreview();
     } catch (error) {
       this.#set({ problem: message(error) });
     } finally {
       this.#set({ opening: false });
     }
+  }
+
+  /** Build the draft's files into the next version, and preview it if it built. */
+  async buildAndPreview() {
+    const version = await this.build();
+    if (version?.plugin) await this.load(version.version);
   }
 
   #open() {

@@ -821,11 +821,19 @@ function Files({ workshop }: { workshop: Workshop }) {
   const add = async (chosen: File[]) => {
     setProblem(null);
     setAdding(true);
+    let added = false;
     try {
       // One at a time: each is its own upload.
       for (const file of chosen) {
         await workshop.addBinary(`public/${file.name}`, new Uint8Array(await file.arrayBuffer()));
+        added = true;
       }
+    } catch (error) {
+      setProblem(message(error));
+    }
+    try {
+      // Built and previewed at once, as on opening, so Publish carries what was added.
+      if (added) await workshop.buildAndPreview();
     } catch (error) {
       setProblem(message(error));
     } finally {

@@ -22,6 +22,12 @@ const CREATE_LIMIT = { windowSeconds: 600, max: 30 };
 const CREATE_BODY = 6 * 1024 * 1024;
 // One font or image of at most 1 MB, in base64.
 const BINARY_BODY = 2 * 1024 * 1024;
+
+/** A file's base64url as bytes. */
+const bytesOf = ({ path, data }: { path: string; data: string }) => ({
+  path,
+  data: Buffer.from(data, 'base64url'),
+});
 // A build each time a browser previews one, up to 10 MB in base64.
 const BUILD_LIMIT = { windowSeconds: 600, max: 120 };
 const BUILD_BODY = 15 * 1024 * 1024;
@@ -33,12 +39,6 @@ const BUILD_BODY = 15 * 1024 * 1024;
  * font or image the person adds takes one. The library's file route
  * serves the builds (`mountPluginRoutes`).
  */
-/** A file's base64url as bytes. */
-const bytesOf = ({ path, data }: { path: string; data: string }) => ({
-  path,
-  data: Buffer.from(data, 'base64url'),
-});
-
 export function mountPluginDraftRoutes(
   routes: Routes,
   { db, plugins }: { db: Database; plugins: PluginStore },

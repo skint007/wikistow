@@ -88,11 +88,13 @@ plugin_draft_build_files
 | `POST /api/plugin-drafts` | Create a draft, empty, from a library version (`from: { pluginId, hash }`) or from files (`files: [{ path, text }]`, and `binary: [{ path, data }]` for fonts and images in base64url, sent only when there are some), with optional `replaces`. Answers its summary | 30 in 10 minutes, body 6 MB |
 | `GET /api/plugin-drafts/:draftId` | The draft's summary and every text file's text | 120 a minute |
 | `GET /api/plugin-drafts/:draftId/binary-files` | Its fonts and images, `[{ path, data }]` in base64url (#313). Apart from the text, so an app older than them reads a draft as before; the workshop asks only when the summary counts more files than the text | 120 a minute |
-| `POST /api/plugin-drafts/:draftId/binary-files` | Add or replace one font or image, `{ path, data }`, within the limits | 120 a minute, body 2 MB |
+| `POST /api/plugin-drafts/:draftId/binary-files` | Add or replace one font or image, `{ path, data }`, within the limits. The workshop then builds and previews the draft, so **Publish** carries it | 120 a minute, body 2 MB |
 | `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits; `remove` takes fonts and images too | 120 a minute, the app's usual 1 MiB body |
 | `DELETE /api/plugin-drafts/:draftId` | Delete it, with its files and build | 120 a minute |
 | `PUT /api/plugin-drafts/:draftId/build` | Replace the draft's build: every file, as an upload carries them. Answers its hash | 120 in 10 minutes, body 15 MB |
 | `GET /plugins/<id>/draft-<hash>/<path>` | A file of the caller's own draft build with that hash and manifest ID, served by the library's file route | the file route's 2000 a minute |
+
+An app older than #313 reads a draft's text only, so it builds, previews and publishes a draft without its fonts and images, and makes a draft from a version without them; the draft itself keeps them. That is the price of not adding them to `getDraft`'s strict answer.
 
 A route with a body limit above the app's 1 MiB takes the account's one large-body slot for each request (`bodySlots` in `apps/server/src/http/mount.ts`), so the changes route, which carries one file of at most 256 KB, keeps the usual limit, and the model's writes never wait on an upload. The workshop sends its large uploads (a preview's build, Publish) one at a time.
 
