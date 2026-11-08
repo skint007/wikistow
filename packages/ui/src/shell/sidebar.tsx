@@ -41,15 +41,22 @@ import {
   DeletePageDialog,
   deleteNote,
   useDroppedOnDelete,
+  useMovedInto,
 } from '../page/delete-dialog';
-import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
+import {
+  destinationsIn,
+  MoveDialog,
+  moveRoute,
+  useStartMove,
+  type Moving,
+} from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublicLinkDialog, PublicMarker } from '../page/public-link';
 import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
-import { mayDelete, useOwnerStanding } from '../sharing/owner-standing';
+import { mayDelete, movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { Replaceable } from '../plugins/places';
 import { useClient } from '../vault/store';
@@ -271,6 +278,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [fromTemplate, setFromTemplate] = useState<FolderId | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
   const droppedOnDelete = useDroppedOnDelete(deleting);
+  const movedInto = useMovedInto(spaceId, deleting);
   const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
@@ -407,9 +415,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const startDrag = (event: DragEvent, moving: Moving) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DRAG_TYPE, '');
-    // Not into a folder made offline until it is sent, as Move to… offers.
-    const places = destinationsIn(tree, moving, sharer).filter((d) =>
-      availability.of(d.parentId).can('into'),
+    // Where Move to… offers: offline, only within its share (`moveRoute`).
+    const owner = movesAsOwner(standing, availability.offline);
+    const places = destinationsIn(tree, moving, owner).filter(
+      (d) => moveRoute(tree, moving, d.parentId, availability).route !== null,
     );
     setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
   };
@@ -812,7 +821,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             </DialogTitle>
             <DialogDescription>
               {droppedOnDelete ? (
-                deleteNote({ made: true, offline: availability.offline })
+                deleteNote({ made: true, offline: availability.offline, moved: movedInto })
               ) : (
                 <>
                   It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}

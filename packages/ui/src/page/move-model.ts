@@ -49,6 +49,20 @@ export function moveDestinations<F extends string>(
 }
 
 /**
+ * Whether moving `node` under `parentId` takes it across a shared folder's
+ * edge, which changes who can read it (section 10): the share covering
+ * where it is differs from the one where it goes. A shared folder itself
+ * keeps its share wherever it goes, so only where it sits counts.
+ */
+export function crossesShare<F extends string>(
+  tree: Pick<MoveTree<F>, 'shares' | 'folders'>,
+  node: { parentId: F | null },
+  parentId: F | null,
+): boolean {
+  return shareCovering(tree, node.parentId)?.shareId !== shareCovering(tree, parentId)?.shareId;
+}
+
+/**
  * Where a copy, or a move from another space, can go in `tree` (ADR 0007),
  * in path order: anywhere the caller can make pages, by the share that
  * covers it, or by their role in the space outside shares. Nothing in
