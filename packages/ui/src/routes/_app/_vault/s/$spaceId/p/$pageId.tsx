@@ -229,7 +229,8 @@ function PageView() {
     );
 
   // Where the tree has it, which shows a move waiting on this device too (#331).
-  const parentId = tree?.pages.find((p) => p.id === pageId)?.parentId ?? info.parentId;
+  const listed = tree?.pages.find((p) => p.id === pageId);
+  const parentId = listed ? listed.parentId : info.parentId;
   const folder = tree?.folders.find((f) => f.id === parentId);
   const folderName =
     folder?.metadata?.opened.kind === 'current' ? folder.metadata.opened.metadata.name : null;
@@ -416,8 +417,11 @@ function PageBody({
   // A page with a public link isn't changed while it's read, nor before its links are known.
   const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
   const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
-  // A page with a public link, or whose links aren't known, publishes online only (#331).
-  const publishKind: ActionKind = linked === false ? 'publish' : 'publish-linked';
+  // A page with a public link publishes online only (#331). Online, so does
+  // one whose links aren't known yet; offline, a publish waiting checks them
+  // once it is sent.
+  const publishKind: ActionKind =
+    linked === true || (linked === null && !availability.offline) ? 'publish-linked' : 'publish';
   // A publish waiting on this device, which the person can cancel until it is sent.
   const publishWaiting = entries?.find(
     (entry): entry is queueOperations.QueuedPublish =>

@@ -767,7 +767,8 @@ export class OfflineQueue {
       const before = await this.#keyed({ kind: 'move', id });
       await this.#write(
         before?.kind === 'move'
-          ? { ...before, parentId, failure: null }
+          ? // In the order made: after what it may need moved first.
+            { ...before, parentId, failure: null, at: this.#at() }
           : { kind: 'move', id, node, spaceId, name, parentId, failure: null, at: this.#at() },
       );
     });
@@ -1037,10 +1038,11 @@ export class OfflineQueue {
           continue;
         }
         if (parent) continue;
-        // A delete or publish waits while a change to the same item waits
-        // for the person, as its draft goes first.
+        // A delete waits while a change to the same item waits for the
+        // person, as its draft goes first, and a publish while the page's draft does.
         const held = entries.some((other) => other.id === entry.id && other.failure);
-        if ((entry.kind === 'delete' || entry.kind === 'publish') && held) continue;
+        if (entry.kind === 'delete' && held) continue;
+        if (entry.kind === 'publish' && drafts.get(entry.id)?.failure) continue;
         // A publish goes between its draft as it stood and what was typed after.
         if (entry.kind === 'page' && publishesFirst(publishes.get(entry.id), entry)) continue;
         if (entry.kind === 'publish' && entry.draft) {
@@ -1364,6 +1366,10 @@ export class OfflineQueue {
       if (after?.basedOn === change.basedOn && !after.sending) {
         await this.#write({ ...after, basedOn: revisionId });
       }
+      // Files the draft as it stood named, and nothing names now, are let go of.
+      const named = new Set((await this.entries()).flatMap(filesOf));
+      const loose = draft.payload.attachments.filter((ref) => !named.has(ref.blobHash));
+      await this.#store.queue.remove(loose.map((ref) => this.#blobName(ref.blobHash)));
     });
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
   }

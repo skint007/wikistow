@@ -38,7 +38,7 @@ export type ActionKind =
   | 'publish-elsewhere'
   /** Publish, for a page with no public link. */
   | 'publish'
-  /** Publish, for a page with a public link, or whose links aren't known yet (ADR 0005). */
+  /** Publish, for a page with a public link, or online one whose links aren't known yet (ADR 0005). */
   | 'publish-linked'
   | 'restore'
   /** A page or folder dragged in the sidebar, which moves it. */
