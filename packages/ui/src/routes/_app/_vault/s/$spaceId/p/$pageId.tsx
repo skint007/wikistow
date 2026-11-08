@@ -989,6 +989,7 @@ function PageBody({
               onPick: coverEditor.uploadIcon,
               onRemove: coverEditor.removeIcon,
               working: 'Encrypting…',
+              spaceId: page.spaceId,
             }}
             open={picker === 'emoji'}
             onOpenChange={(open) => setPicker(open ? 'emoji' : null)}

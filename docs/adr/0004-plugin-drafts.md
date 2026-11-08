@@ -17,7 +17,7 @@ This ADR settles how that changes. A library plugin is **Shared** or **Only me**
 - An upload installs the plugin for its owner. ADR 0002's uploads installed nothing.
 - The workshop, which ADR 0002 kept out of the browser, comes to the browser and to phones. Its build runs in a worker in the page, in every client. Phones still can't upload a plugin folder, but they can publish a draft, which needs no folder.
 - The file route also serves the caller's own plugin draft builds, as `/plugins/<id>/draft-<hash>/…`, so the browser previews a draft the way it loads a library plugin. The app's CSP doesn't change.
-- On the desktop, main no longer keeps workspaces or builds. Installing a workshop version as a folder install, and the workshop's own **Share to library…**, give way to **Publish**. Folder installs, development loading and export to a folder stay.
+- On the desktop, main no longer keeps workspaces or builds. Installing a workshop version as a folder install, and the workshop's own **Share to library…**, give way to **Publish**. Folder installs, development loading and export to a folder stay. (A browser's development folders, since #317, have a development slot of their own on the server, not a draft's build.)
 
 Nothing here changes what the server can do to a person's plugins: approvals stay in the person's encrypted account record, and the desktop still checks every library download against the approved hash.
 

@@ -29,7 +29,9 @@ import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { ScopePill, SettingRow, THIS_DEVICE } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
+import { ChooseFolder } from './choose-folder';
 import { DeclaredSettings } from './declared-settings';
+import { pickFolder } from './development';
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
 import { Place as RegionPlace, REPLACED } from './places';
@@ -175,15 +177,17 @@ export function InstalledList({
 }
 
 /**
- * The Plugins page's install buttons in the desktop app: install a plugin
- * folder, or load one for development. Each asks for approval first.
+ * The Plugins page's install buttons: in the desktop app, install a plugin
+ * folder, or load one for development; in a computer's browser, with the
+ * vault open, load one for development in this tab. Each asks for approval first.
  */
 export function InstallFromFolder() {
   const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
+  const vault = useVault();
   const [candidate, setCandidate] = useState<PluginCandidate | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { folders } = pluginStore;
-  if (!folders) return null;
+  const { folders, development } = pluginStore;
+  if (!folders && !(development && vault.status === 'unlocked')) return null;
   const act = async (run: () => Promise<unknown>) => {
     setError(null);
     try {
@@ -194,15 +198,37 @@ export function InstallFromFolder() {
     await pluginRuntime.refresh();
   };
   const pick = (kind: 'install' | 'development') =>
-    act(async () => setCandidate(await folders.pick(kind)));
+    act(async () => setCandidate((await folders?.pick(kind)) ?? null));
   return (
     <>
-      <Button size="sm" onClick={() => void pick('install')}>
-        Install plugin…
-      </Button>
-      <Button size="sm" variant="outline" onClick={() => void pick('development')}>
-        Load development folder…
-      </Button>
+      {folders ? (
+        <>
+          <Button size="sm" onClick={() => void pick('install')}>
+            Install plugin…
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => void pick('development')}>
+            Load development folder…
+          </Button>
+        </>
+      ) : (
+        development && (
+          <ChooseFolder
+            label="Load development folder…"
+            name="Development folder"
+            phone="Loading a development folder needs a computer."
+            onFolder={(files) => act(async () => setCandidate(await development.load({ files })))}
+            onPick={
+              development.keepsFolder
+                ? () =>
+                    void act(async () => {
+                      const chosen = await pickFolder();
+                      if (chosen) setCandidate(await development.load(chosen));
+                    })
+                : undefined
+            }
+          />
+        )
+      )}
       {error && (
         <p role="alert" className="basis-full text-sm text-destructive">
           {error}
@@ -214,6 +240,50 @@ export function InstallFromFolder() {
         onApprove={(chosen) => act(() => pluginStore.approve(chosen))}
       />
     </>
+  );
+}
+
+/**
+ * Reload for a development plugin: the desktop and a browser that kept
+ * the folder read it again; any other browser asks for it again.
+ */
+function Reload({
+  pluginId,
+  name,
+  act,
+  onAsks,
+}: {
+  pluginId: string;
+  name: string;
+  act: (run: () => Promise<unknown>) => Promise<void>;
+  onAsks: (candidate: PluginCandidate) => void;
+}) {
+  const { store: pluginStore } = useAppPlugins();
+  const { folders, development } = pluginStore;
+  const reload = (read: () => Promise<PluginCandidate | null> | undefined) =>
+    act(async () => {
+      const asks = await read();
+      if (asks) onAsks(asks);
+    });
+  if (development && !development.keepsFolder)
+    return (
+      <ChooseFolder
+        label="Reload…"
+        name={`${name}’s folder`}
+        phone="Reloading needs a computer."
+        onFolder={(files) => reload(() => development.reload(pluginId, { files }))}
+      />
+    );
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() =>
+        void reload(() => folders?.reload(pluginId) ?? development?.reload(pluginId, null))
+      }
+    >
+      Reload
+    </Button>
   );
 }
 
@@ -249,56 +319,50 @@ export function PluginSettings({ tab, query }: PluginsView) {
     await pluginRuntime.refresh();
   };
 
-  const folder = !folders
-    ? []
-    : plugins
-        .filter(({ plugin }) => !plugin.library)
-        .map((status): InstalledItem => {
-          const { manifest, development } = status.plugin;
-          const ref = refOf(status.plugin);
-          return {
-            key: `folder:${manifest.id}`,
-            text: itemText(manifest),
-            problem: status.problem !== null,
-            row: (
-              <PluginRow
-                status={status}
-                onEnabled={(on) => void act(() => pluginStore.enable(ref, on))}
-                onRemove={() => void act(() => pluginStore.remove(ref))}
-                actions={
-                  development ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        void act(async () => {
-                          const asks = await folders.reload(manifest.id);
-                          if (asks) setCandidate(asks);
-                        })
-                      }
-                    >
-                      Reload
-                    </Button>
-                  ) : (
-                    vault.status === 'unlocked' && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          void act(async () =>
-                            setSharing(await readUpload(await folders.files(manifest.id))),
-                          )
-                        }
-                      >
-                        Share to library…
-                      </Button>
-                    )
-                  )
-                }
-              />
-            ),
-          };
-        });
+  // The desktop's folder installs, or this tab's development folders.
+  const folder = plugins
+    .filter(({ plugin }) => !plugin.library)
+    .map((status): InstalledItem => {
+      const { manifest } = status.plugin;
+      const ref = refOf(status.plugin);
+      return {
+        key: `folder:${manifest.id}`,
+        text: itemText(manifest),
+        problem: status.problem !== null,
+        row: (
+          <PluginRow
+            status={status}
+            onEnabled={(on) => void act(() => pluginStore.enable(ref, on))}
+            onRemove={() => void act(() => pluginStore.remove(ref))}
+            actions={
+              status.plugin.development ? (
+                <Reload
+                  pluginId={manifest.id}
+                  name={manifest.name}
+                  act={act}
+                  onAsks={setCandidate}
+                />
+              ) : (
+                folders &&
+                vault.status === 'unlocked' && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      void act(async () =>
+                        setSharing(await readUpload(await folders.files(manifest.id))),
+                      )
+                    }
+                  >
+                    Share to library…
+                  </Button>
+                )
+              )
+            }
+          />
+        ),
+      };
+    });
 
   return (
     <div className="grid gap-4">
@@ -363,6 +427,9 @@ export function Approval<T extends ApprovalRequest>({
   verb?: string;
   children?: ReactNode;
 }) {
+  const { store: pluginStore } = useAppPlugins();
+  // A browser without the File System Access picker asks for the folder again.
+  const keepsFolder = pluginStore.development?.keepsFolder ?? true;
   const level = candidate ? LEVELS[candidate.level] : null;
   const verb =
     action ?? (candidate?.replaces ? 'Update' : candidate?.development ? 'Load' : 'Install');
@@ -392,8 +459,13 @@ export function Approval<T extends ApprovalRequest>({
             {candidate.replaces && <Replaces candidate={candidate} />}
             {candidate.development && (
               <p>
-                Development: its code is read from {candidate.development} again at each Reload,
-                without asking again unless it asks for more.
+                Development:{' '}
+                {keepsFolder
+                  ? `its code is read from ${candidate.development} again at each Reload`
+                  : `you choose ${candidate.development} again at each Reload`}
+                , without asking again unless it asks for more.
+                {!desktop &&
+                  ' It runs in this tab only, until you close or reload the tab or remove it.'}
               </p>
             )}
             {candidate.hash && (
@@ -586,7 +658,7 @@ export function PluginRow({
         <span className="text-sm text-muted-foreground">{manifest.version}</span>
         <Badge variant="secondary">{LEVELS[level].label}</Badge>
         <Badge variant="outline">{plugin.library ? 'Library' : 'Folder'}</Badge>
-        {!plugin.library && <ScopePill />}
+        {!plugin.library && <ScopePill>{desktop ? THIS_DEVICE : 'This tab'}</ScopePill>}
         {development && <Badge variant="outline">Development</Badge>}
         <span className="flex-1" />
         <span className="flex items-center gap-2 text-sm text-muted-foreground">

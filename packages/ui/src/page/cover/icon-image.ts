@@ -17,6 +17,16 @@ const SMALLER_SIZE = 96;
 /** The files the Image tab offers. */
 export const ICON_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,image/svg+xml';
 
+/** An image ready to keep as an icon, as `iconImage` makes it. */
+export type IconFile = { name: string; mediaType: IconMediaType; bytes: Uint8Array };
+
+/** Icon bytes as a file to keep, named for their type. */
+export const iconFile = (mediaType: IconMediaType, bytes: Uint8Array): IconFile => ({
+  name: `Icon.${mediaType.slice('image/'.length).replace('jpeg', 'jpg')}`,
+  mediaType,
+  bytes,
+});
+
 const SVG_REFUSED = 'That SVG can’t be used. Try a PNG, or another SVG.';
 
 // An `<img>` draws an SVG without running its scripts or loading what it links to.
@@ -101,9 +111,7 @@ async function encode(source: HTMLImageElement | ImageBitmap, size: Size) {
  * metadata the file carried. An SVG is drawn as pixels, never kept as SVG.
  * Throws a message to show for a file it can't use.
  */
-export async function iconImage(
-  file: Blob,
-): Promise<{ name: string; mediaType: IconMediaType; bytes: Uint8Array }> {
+export async function iconImage(file: Blob): Promise<IconFile> {
   if (file.size > BANNER_MAX_UPLOAD) throw new Error('Choose an image under 25 MB.');
   const declared = imageSize(new Uint8Array(await file.arrayBuffer()));
   const svg = !declared && file.type === 'image/svg+xml';
@@ -126,12 +134,7 @@ export async function iconImage(
       const { mediaType, blob } = await encode(source, size);
       if (!blob) throw new Error('This browser can’t resize images.');
       if (blob.size <= ICON_MAX_BYTES) {
-        const extension = mediaType.slice('image/'.length).replace('jpeg', 'jpg');
-        return {
-          name: `Icon.${extension}`,
-          mediaType,
-          bytes: new Uint8Array(await blob.arrayBuffer()),
-        };
+        return iconFile(mediaType, new Uint8Array(await blob.arrayBuffer()));
       }
     }
     throw new Error('That image has too much detail for an icon. Try a simpler one.');
