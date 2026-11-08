@@ -1,6 +1,8 @@
 import type { AiMessage } from '@wikistow/client';
 import { describe, expect, it } from 'vite-plus/test';
+import type { Caller } from '../src/plugins/pages.ts';
 import { COPY_LEFT_OUT, keptMessages } from '../src/workshop/kept.ts';
+import { SAMPLE_SPACE, sampleStore } from '../src/workshop/samples.ts';
 
 // What the workshop keeps of its conversation with the draft (#314): a
 // copy of a real page never goes to the server, wherever the tools put it.
@@ -74,5 +76,28 @@ describe('the kept conversation', () => {
     const plain = conversation.slice(1);
     const again = keptMessages(plain, [], new Set());
     expect(JSON.stringify(again)).toContain(SECRET);
+  });
+});
+
+describe('samples the plugin writes', () => {
+  const caller: Caller = {
+    id: 'calculator',
+    access: 'write',
+    scopes: () => [],
+    live: () => true,
+    write: () => {},
+    wrote: () => {},
+    changed: () => {},
+  };
+  const at = { spaceId: SAMPLE_SPACE, folderId: null };
+
+  it('may hold a copy’s text while one is in the preview, so they count as copies', async () => {
+    const samples = sampleStore();
+    const pages = samples.pages(caller);
+    const before = await pages.create(at, { title: 'Prices', markdown: 'Two at 3.' });
+    samples.put({ title: 'Family recipes', markdown: SECRET, copyOf: 'Family recipes' });
+    const after = await pages.create(at, { title: 'Shopping list', markdown: SECRET });
+    await pages.saveDraft(before, { base: before.revision, markdown: SECRET });
+    expect([...samples.fromCopies()]).toEqual([after.pageId, before.pageId]);
   });
 });

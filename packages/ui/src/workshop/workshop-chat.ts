@@ -184,19 +184,21 @@ export class WorkshopChat {
   /** The workshop as the draft keeps it, now. */
   #record(): KeptWorkshop {
     const { workshop } = this;
+    // Copies of real pages, and samples the plugin wrote while one was here.
+    const copies = new Set([...this.#copies, ...workshop.samples.fromCopies()]);
     return {
       kept: 1,
       messages: keptMessages(
         this.session.state().messages,
         this.#turns.map((turn) => turn.kept),
-        this.#copies,
+        copies,
       ),
       turns: this.#turns.map(({ text, copied }) => ({ text, copied: copied !== null })),
       toldCopy: this.#toldCopy,
       versions: workshop.keptVersions(),
       samples: workshop.samples
         .get()
-        .filter((sample) => sample.copyOf === null && !this.#copies.has(sample.pageId))
+        .filter((sample) => sample.copyOf === null && !copies.has(sample.pageId))
         .map(({ pageId, title, markdown, data }) => ({ pageId, title, markdown, data })),
       made: workshop.samples.made(),
     };
