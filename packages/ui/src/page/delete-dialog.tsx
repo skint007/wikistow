@@ -1,4 +1,5 @@
 import {
+  foldersUnder,
   queueOperations,
   type FolderId,
   type PageId,
@@ -19,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { contentChanged } from '../data/content-changed';
 import { pageChange, pageWriter, queueQuery } from '../data/offline-changes';
-import { trashQuery } from '../data/queries';
+import { trashQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { useOffline } from '../data/connection';
 import { useClient } from '../vault/store';
@@ -95,13 +96,41 @@ export function useDroppedOnDelete(id: FolderId | PageId | null): boolean {
 }
 
 /**
+ * Whether something the server has was moved offline into folder `id`, or
+ * under it: deleting the folder made offline puts that in the trash (#331).
+ */
+export function useMovedInto(spaceId: SpaceId, id: FolderId | null): boolean {
+  const ctx = useClient();
+  const { data: entries } = useQuery(queueQuery(ctx));
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  if (id === null || !tree) return false;
+  const under = foldersUnder(tree.folders, id);
+  const moved = new Set(
+    (entries ?? []).flatMap((entry) => (entry.kind === 'move' ? [entry.id] : [])),
+  );
+  return [...tree.folders, ...tree.pages].some(
+    (node) => moved.has(node.id) && node.parentId !== null && under.has(node.parentId),
+  );
+}
+
+/**
  * What deleting a page or folder does: into the trash, once back online if
  * offline, or for one made offline and not sent, gone for good with what
- * is in it (ADR 0009, decision 7).
+ * is in it (ADR 0009, decision 7), apart from what was `moved` into it.
  */
-export const deleteNote = ({ made, offline }: { made: boolean; offline: boolean }) =>
+export const deleteNote = ({
+  made,
+  offline,
+  moved = false,
+}: {
+  made: boolean;
+  offline: boolean;
+  moved?: boolean;
+}) =>
   made
-    ? 'It was made on this device and isn’t sent yet, so it goes for good, with everything in it.'
+    ? moved
+      ? 'It was made on this device and isn’t sent yet, so it goes for good, with what was made in it. What you moved into it goes to the trash.'
+      : 'It was made on this device and isn’t sent yet, so it goes for good, with everything in it.'
     : offline
       ? `${TRASH_NOTE} You’re offline: it goes to the trash once you’re back online.`
       : TRASH_NOTE;

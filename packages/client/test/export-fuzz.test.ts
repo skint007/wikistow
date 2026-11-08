@@ -306,16 +306,50 @@ function check(spaces: ExportSpace[], plan: ExportPlan) {
   }
 }
 
+/**
+ * With Markdown links, the same files, and every wikilink that leaves the
+ * page names a file written, by its path from the page's folder: each new
+ * link's URL, without its anchor and decoded, is one of the files. Gives
+ * how many links it wrote.
+ */
+function checkMarkdown(spaces: ExportSpace[], plan: ExportPlan, wiki: ExportPlan): number {
+  let written = 0;
+  expect(plan.files.map((f) => f.path)).toEqual(wiki.files.map((f) => f.path));
+  const files = new Set(plan.files.map((f) => f.path));
+  plan.files.forEach((file, n) => {
+    const before = wiki.files[n];
+    if (file.kind !== 'page' || before?.kind !== 'page') return;
+    const page = spaces[file.space]?.pages.find((p) => p.id === file.pageId);
+    if (!page) throw new Error('A page file for no page');
+    const dir = posix.dirname(file.path) === '.' ? '' : posix.dirname(file.path);
+    const urls = urlsOf(file.markdown);
+    const added = urls.length - urlsOf(before.markdown).length;
+    written += added;
+    const left = placedWikilinks(file.markdown).length;
+    expect(left + added, file.markdown).toBe(placedWikilinks(page.payload.markdown).length);
+    for (const url of urls) {
+      if (/^[a-z]+:/i.test(url) || url.startsWith('#')) continue;
+      const path = decodeURIComponent(url.split('#')[0] ?? '');
+      expect(files.has(posix.normalize(posix.join(dir, path))), url).toBe(true);
+    }
+  });
+  return written;
+}
+
 describe('export paths, for random trees', () => {
   it('are safe, unique, and what every link names', { timeout: 120_000 }, () => {
+    let links = 0;
     for (let seed = 1; seed <= 200; seed++) {
       const spaces = randomSpaces(seed);
       const plan = planExport(spaces);
       try {
         check(spaces, plan);
+        links += checkMarkdown(spaces, planExport(spaces, { links: 'markdown' }), plan);
       } catch (error) {
         throw new Error(`Seed ${seed}`, { cause: error });
       }
     }
+    // Most links between pages become Markdown links.
+    expect(links).toBeGreaterThan(500);
   });
 });
