@@ -10,7 +10,7 @@ In short:
 - **Move to…** and **Copy to…** take a page or folder, with everything under it, to any folder or the top of any space where the person can make pages. Copy also works within one space. Moves within one space stay as they are (protocol section 10).
 - Each page brings its current draft and current published version, sealed again for the destination by the person moving it. Folders bring their current name and look. Earlier history doesn't come: a move deletes it with the source.
 - The app makes the destination nodes hidden, uploads their records and attachments in as many requests as it needs, then finishes in one request. For a move, the finish deletes the source in the same transaction. For a move, if a source page changed in the meantime, the finish is refused and the app seals the pages that changed again. If anything else changed, such as a page added to a moved folder, the app starts again from a new preview.
-- A move ends what deleting the source ends: its public links, its publications into other spaces, and the shares, members and agent picks inside it. A copy changes nothing at the source.
+- A move ends what deleting the source ends: its publications into other spaces, and the shares, members and agent picks inside it. Its pages' public links go with them where the person moving them can publish them there, and end otherwise (decision 10). A copy changes nothing at the source.
 
 ## What the code supports today
 
@@ -32,7 +32,7 @@ For each page in the subtree:
 
 For each folder, its current name and look (one metadata version). The space's own name never moves.
 
-Nothing else comes: no earlier drafts or published versions, no publications, no public link, no agent picks, no shares. A move deletes the source's history with the source. This was chosen over sealing every published version again as the mover, which would show one person as the author of all of history and make large pages slow.
+Nothing else comes: no earlier drafts or published versions, no publications, no agent picks, no shares, and for a copy, no public link. A move carries a page's public link over (decision 10). A move deletes the source's history with the source. This was chosen over sealing every published version again as the mover, which would show one person as the author of all of history and make large pages slow.
 
 The new records are ordinary v2 records in the destination space, written and signed by the person moving or copying. The draft has `basedOn: null`. The published version's `basedOn` names the new draft when the source's published version was made from its current draft, or the page had no draft, so a copy shows no unpublished changes where the source had none; otherwise it is `null`, as a publication's are. Neither names a version that isn't in the destination. Nothing inside the page records where it came from: a copy leaves out `wikistow.publication`, which a detached publication's versions can still hold. The audit log records the copy.
 
@@ -73,7 +73,8 @@ Before anything is sealed, the app shows:
 - for a move, who loses access, the same way for the source;
 - pages that will arrive unpublished (decision 2);
 - links that won't work afterwards, wikilinks and address links (decision 5);
-- for a move, what ends: public links, publications into other spaces, shares and their members, and the pages' earlier history.
+- for a move, the public links that go with their pages (decision 10);
+- for a move, what ends: public links that don't go with their pages, saying why, publications into other spaces, shares and their members, and the pages' earlier history.
 
 A move always asks, even on a device where the person turned off confirming moves, because it deletes. A copy shows all but the items for a move. An agent's copy has no preview.
 
@@ -101,7 +102,7 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 - **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. Dragging between spaces in the rail stays out (#338).
 - **CLI:** `wikistow page copy` and `wikistow folder copy`. The CLI acts as its agent (decision 2), so it copies within its picks and never moves between spaces; moves between spaces stay in the app. Moves within one space are `wikistow page move` and `wikistow folder move` (#318).
 - **The live tree** reports the finish in both spaces.
-- **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only.
+- **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only, and `node.public-link-moved` for each public link a move carries over (decision 10).
 
 ### 9. Old addresses (#332, built)
 
@@ -111,9 +112,20 @@ A move gives every node a new ID, so the finish records, in its transaction, whe
 - **Links from pages left behind** open the new place too. A wikilink whose table entry names a moved page does so through the entry's old ID, while no page there has its title, which wins as it does for any entry. Address links reach it through the old address. The link's text and entry stay as they are: a table names only pages of its own space, and an address link in a page body opens apart, in a new tab, so writing the link as one would make it worse. A publication of the linking page keeps the entry where the publisher can open the moved page.
 - **Records last as long as the new node does.** Deleting it for good, or its space, takes them along. While it is in the trash, its old addresses open nothing.
 
+### 10. Public links (#340, built)
+
+A move carries a page's public link (ADR 0005) over to its new page when the page arrives published, which it does where the person moving it can publish there (decision 2). Anywhere else the link ends with the source, as before, and the preview says it ends because they can't publish there.
+
+- **It keeps its id**, so `/p/<id>` keeps working. In the finish's transaction the server points the link's row at the new page, after the records of decision 9 and before the source is deleted. Its copies end, since they were made from the old page, and the public page says it is being updated until someone updates it from the version that arrived published, with the public link dialog's **Update public page** (ADR 0005, decisions 2 and 5). Other public pages' links to it stay links.
+- **The person moving it becomes who turned it on.** Its old sharer may have no access at the destination, and a link stays on only while who turned it on can publish the page (ADR 0005, decision 8). That rule holds at the destination from then on.
+- **The preview** lists the public links that go with their pages, apart from those that end.
+- **Locks.** The finish holds both spaces and the source subtree. Then it takes the mover's account row, then the links, their copies and the target rows, in ADR 0005's order, so a suspension or a staging at the same time waits or sees the change.
+
+A copy makes a new page, which starts with no link.
+
 ### Out of scope
 
-Earlier history; moving a whole space (#339); keeping a page's ID across a move (old addresses are built: decision 9, #332); and copying a page's publications or public link (#340).
+Earlier history; moving a whole space (#339); keeping a page's ID across a move (old addresses are built: decision 9, #332); copying a page's public link (a move carries it over: decision 10, #340); and carrying a page's publications into other spaces over a move, which waits until public links have been used for a while and may not be needed (#340).
 
 ## Considered options
 
