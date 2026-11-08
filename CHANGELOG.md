@@ -4,6 +4,26 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.25.0-beta.1 - 2026-11-08
+
+### Highlights
+
+#### Features
+
+- The search box is a command palette too: type `>` first, or press Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, then type what you want to do.
+- While offline you can rename folders and change their look, delete pages and folders, move them within their space, and publish pages. The changes wait on the device and go once you’re back online.
+- A page or folder moved to another space keeps its old address, which opens the new place, and its public link, at the same address.
+- Owners can move or copy everything in a space into another space, with Move space into… and Copy space into… in the space menu.
+- Drag a page or folder from the sidebar onto another space in the rail to move it there.
+- Export… can write links between pages as relative Markdown links, for GitHub and editors that don’t read wikilinks.
+- Plugins can keep settings, the same on each of your devices, and Settings → Plugins draws the settings a plugin declares. A library plugin can be turned off in one browser or on one computer only.
+- App plugins can draw the search results their own way.
+- The CLI can move pages and folders and rename folders, and its page history says what a change made while reading did, such as “Ticked 3”.
+
+#### Fixes
+
+- Mermaid diagrams now draw in the browser after an offline reload. A diagram that can’t shows its source at once, instead of “Drawing diagram…” for two minutes.
+
 ### Changes
 
 #### App
@@ -24,13 +44,6 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it. (#349)
 - App plugins can draw the search results their own way: `search.results` is a replaceable region, whose view gets what was typed and the app's own results, and draws only where the plugin can read every result. The search box and `>`'s commands stay the app's, and `host.app.navigate` closes search. (#352)
 
-#### CLI
-
-- `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
-
-#### CLI
-
-- `export --links markdown` writes links between pages as relative Markdown links instead of wikilinks, as the web's **Markdown links** does, and counts the wikilinks left (`wikilinks` in `--json`). (#350)
 #### Server
 
 - Agents can rename folders where they may edit, and moves and renames take an `Idempotency-Key`, so a retry after a lost answer gets the first answer back. (#343)
@@ -38,6 +51,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### CLI
 
 - `page move`, `folder move` and `folder rename` move a page or folder within its space and rename a folder, with `--json` and `--idempotency-key`. (#343)
+- `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
+- `export --links markdown` writes links between pages as relative Markdown links instead of wikilinks, as the web's **Markdown links** does, and counts the wikilinks left (`wikilinks` in `--json`). (#350)
 
 ## 0.24.0 - 2026-11-07
 
