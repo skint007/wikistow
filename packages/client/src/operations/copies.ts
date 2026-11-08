@@ -1,6 +1,7 @@
 // Copying a page or folder, with everything under it, under a folder of any
 // space, and moving one into another space, which is a copy that deletes its
 // source (protocol section 10, "Copies, and moves between spaces"; ADR 0007).
+// The source can be everything in a space too (#339), for its owners.
 //
 // `previewCopy` works out what the person confirms, sealing nothing. Then
 // `makeCopy` opens the copy, whose new nodes the server keeps hidden; seals
@@ -111,8 +112,10 @@ export type CopyPreview = {
   copyId: string;
   source: {
     spaceId: SpaceId;
-    nodeId: FolderId | PageId;
-    kind: 'folder' | 'page';
+    /** Null for everything in the space. */
+    nodeId: FolderId | PageId | null;
+    kind: 'folder' | 'page' | 'space';
+    /** The source node's, or for everything in the space, the space's. */
     permissionVersion: number;
   };
   destination: {
@@ -123,7 +126,7 @@ export type CopyPreview = {
   };
   /** Whether published versions come along: only where the person can publish. */
   bringsPublished: boolean;
-  /** Top first, every parent before its children. */
+  /** Top first (for a space, each node at its top), every parent before its children. */
   nodes: CopiedNode[];
   audience: CopyAudience;
   /** For a move, who loses access, by what the source's regions give them. */
@@ -193,16 +196,16 @@ const stopped = () => new CopyStopped();
 
 /**
  * The listed subtree of `nodeId` in `tree`, top first, every parent before
- * its children.
+ * its children. For `null`, everything the tree lists, its top first.
  */
-function subtreeOf(tree: Tree, nodeId: string) {
+function subtreeOf(tree: Tree, nodeId: string | null) {
   const all: ({ kind: 'folder'; node: TreeFolder } | { kind: 'page'; node: TreePage })[] = [
     ...tree.folders.map((node) => ({ kind: 'folder' as const, node })),
     ...tree.pages.map((node) => ({ kind: 'page' as const, node })),
   ];
-  const top = all.find(({ node }) => node.id === nodeId);
-  if (!top) return [];
-  const out = [top];
+  const out = all.filter(({ node }) =>
+    nodeId === null ? node.parentId === null : node.id === nodeId,
+  );
   for (let i = 0; i < out.length; i++) {
     const at = out[i]?.node.id;
     for (const child of all)
@@ -226,7 +229,10 @@ function publishesIn(tree: Tree, region: Region) {
  * Work out copying `nodeId` of `spaceId`, with everything under it that
  * this person's tree lists, under `parentId` of `destination.spaceId` (null
  * for the top of the space), or for `kind: 'move'`, moving it there from
- * another space. Nothing is sealed or sent: the person confirms the
+ * another space. A null `nodeId` is everything in the space, which only an
+ * owner of it copies or moves, and only into another space (#339): each
+ * node at its top goes under `parentId`, and the space stays, empty after a
+ * move. Nothing is sealed or sent: the person confirms the
  * preview, then `makeCopy` makes it. Refuses a move within one space, which
  * is an ordinary move (`forbidden`), a destination inside what is copied
  * (`binding-mismatch`), a move by anyone but an owner of the source space,
@@ -249,7 +255,7 @@ export async function previewCopy(
     ids: idOf,
   }: {
     kind: 'copy' | 'move';
-    source: { spaceId: SpaceId; nodeId: FolderId | PageId };
+    source: { spaceId: SpaceId; nodeId: FolderId | PageId | null };
     destination: { spaceId: SpaceId; parentId: FolderId | null };
     read?: ReadLinks;
     copyId?: string;
@@ -264,15 +270,25 @@ export async function previewCopy(
   if (kind === 'move' && ctx.agent) {
     throw new ApiError(403, 'forbidden', 'Agents copy, and never move');
   }
+  const whole = source.nodeId === null;
+  if (whole && ctx.agent) {
+    throw new ApiError(403, 'forbidden', 'Only an owner of a space copies everything in it');
+  }
   const tree = await loadTree(ctx, source.spaceId);
-  if (kind === 'move' && tree.space?.role !== 'owner') {
+  if ((kind === 'move' || whole) && tree.space?.role !== 'owner') {
     throw new ApiError(403, 'forbidden', 'Only an owner of its space moves it into another');
   }
   const moving = subtreeOf(tree, source.nodeId);
   const [top] = moving;
-  if (!top) throw new ApiError(404, 'not-found', 'There is no such page or folder');
+  if (!top) {
+    throw new ApiError(
+      404,
+      'not-found',
+      whole ? 'There is nothing in this space' : 'There is no such page or folder',
+    );
+  }
   const inside = new Set(moving.map(({ node }) => node.id as string));
-  if (sameSpace && destination.parentId !== null && inside.has(destination.parentId)) {
+  if (sameSpace && (whole || (destination.parentId !== null && inside.has(destination.parentId)))) {
     throw new ApiError(400, 'binding-mismatch', 'Nothing copies into itself');
   }
   const target = await newNodeTarget(ctx, destination.spaceId, destination.parentId);
@@ -286,8 +302,11 @@ export async function previewCopy(
     }),
   );
   const nodes = moving.map(({ kind: k, node }): CopiedNode => {
+    // A top node goes under the destination; for a space, each at its top does.
     const parentId =
-      node.id === source.nodeId ? destination.parentId : (ids.get(node.parentId ?? '') ?? null);
+      node.id === source.nodeId || node.parentId === null
+        ? destination.parentId
+        : (ids.get(node.parentId) ?? null);
     return {
       sourceId: node.id,
       nodeId: ids.get(node.id) as FolderId | PageId,
@@ -311,8 +330,8 @@ export async function previewCopy(
     source: {
       spaceId: source.spaceId,
       nodeId: source.nodeId,
-      kind: top.kind,
-      permissionVersion: top.node.permissionVersion,
+      kind: whole ? 'space' : top.kind,
+      permissionVersion: whole ? (tree.space?.permissionVersion ?? -1) : top.node.permissionVersion,
     },
     destination: {
       spaceId: destination.spaceId,
@@ -559,7 +578,10 @@ async function endsOf(
   };
 }
 
-/** What the copy made: the new top node, and each source node's copy. */
+/**
+ * What the copy made: the new top node (for everything in a space, the
+ * first of its new top nodes), and each source node's copy.
+ */
 export type MadeCopy = {
   spaceId: SpaceId;
   nodeId: FolderId | PageId;
