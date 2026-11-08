@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#336)
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#362)
 
 #### Releases and packaging
 
