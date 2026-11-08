@@ -238,6 +238,17 @@ export function createAuth({
       // its password matched); with no mail, none did.
       after: createAuthMiddleware(async (ctx) => {
         const returned = ctx.context.returned;
+        // The passkey plugin asks only that sign-in "prefer" the check that
+        // it's the person, but a passkey without it is refused (notVerified),
+        // so ask for it outright and the authenticator never leaves it out.
+        if (
+          ctx.path === '/passkey/generate-authenticate-options' &&
+          typeof returned === 'object' &&
+          returned !== null &&
+          !(returned instanceof APIError)
+        ) {
+          return ctx.json({ ...returned, userVerification: 'required' });
+        }
         if (
           ctx.path === '/sign-in/email' &&
           returned instanceof APIError &&
@@ -376,7 +387,8 @@ export function createAuth({
       passkey({
         rpName: 'WikiStow',
         origin: config.publicOrigin,
-        // Discoverable, so sign-in needs no email first, and always checked.
+        // Discoverable, so sign-in needs no email first, and always checked
+        // (sign-in asks for the check in the after-hook above).
         authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
         registration: {
           // Adding one needs a recent sign-in (RECENT_SIGN_IN_AUTH_PATHS, in
