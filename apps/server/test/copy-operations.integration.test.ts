@@ -811,7 +811,9 @@ describe('moving into another space', () => {
       source: { spaceId: w.lib, nodeId: w.notes },
       destination: { spaceId: w.board, parentId: w.pinned },
     });
-    expect(preview.ends?.publicLinks).toEqual([w.plan]);
+    // Alice can publish there, so Plan's public link goes with it.
+    expect(preview.keptLinks).toEqual([w.plan]);
+    expect(preview.ends?.publicLinks).toEqual([]);
     expect(preview.ends?.shares.map((s) => s.members.length)).toEqual([2]);
     // Stay links to Plan, which leaves.
     expect(preview.inbound.map((p) => p.title)).toEqual(['Stay']);

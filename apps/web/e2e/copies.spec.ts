@@ -97,17 +97,31 @@ test('copying and moving pages and folders between spaces', async ({
 
   let oldAddress = '';
   let newAddress = '';
+  let publicLink = '';
   await test.step('the owner moves Shopping into Work, published there and gone here', async () => {
     await openFolder(owner, 'Errands');
     await owner.getByRole('treeitem', { name: 'Shopping' }).click();
     await expect(owner.getByRole('heading', { name: 'Shopping', level: 1 })).toBeVisible();
     oldAddress = new URL(owner.url()).pathname;
     await owner.getByRole('button', { name: 'Page actions' }).click();
+    await owner.getByRole('menuitem', { name: 'Share public link…' }).click();
+    const sharing = owner.getByRole('dialog', { name: /Shopping/ });
+    await sharing.getByRole('button', { name: 'Turn on public link' }).click();
+    await expect(sharing.getByLabel('Public link')).toHaveValue(/\/p\//);
+    publicLink = await sharing.getByLabel('Public link').inputValue();
+    await sharing.getByRole('button', { name: 'Done' }).click();
+
+    await owner.getByRole('button', { name: 'Page actions' }).click();
     await owner.getByRole('menuitem', { name: 'Move to…' }).click();
     const dialog = owner.getByRole('dialog', { name: 'Move “Shopping”' });
     await chooseAndPreview(dialog, 'Work', 'Top of Work');
+    // The owner can publish there, so its public link goes with it.
+    await expect(
+      dialog.getByRole('region', { name: 'Public links that go with it' }),
+    ).toContainText('Shopping');
     const ends = dialog.getByRole('region', { name: 'What the move ends' });
     await expect(ends).toContainText('Every earlier version');
+    await expect(ends).not.toContainText('public link');
     await expect(dialog.getByRole('region', { name: 'Who loses access' })).toContainText('Nobody');
     await dialog.getByRole('button', { name: 'Move', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
@@ -119,6 +133,20 @@ test('copying and moving pages and folders between spaces', async ({
     await openSpace(owner, 'Family');
     await openFolder(owner, 'Errands');
     await expect(owner.getByRole('treeitem', { name: 'Shopping' })).toHaveCount(0);
+  });
+
+  await test.step('its public link keeps working once its public page is updated', async () => {
+    const visit = async () => (await owner.request.get(publicLink)).text();
+    expect(await visit()).toContain('This page is being updated');
+    await owner.goto(newAddress);
+    await owner.getByRole('button', { name: 'Page actions' }).click();
+    await owner.getByRole('menuitem', { name: 'Share public link…' }).click();
+    const sharing = owner.getByRole('dialog', { name: /Shopping/ });
+    await expect(sharing.getByLabel('Public link')).toHaveValue(publicLink);
+    await sharing.getByRole('button', { name: 'Update public page' }).click();
+    await expect(sharing.getByText('The public page is out of date.')).toHaveCount(0);
+    await sharing.getByRole('button', { name: 'Done' }).click();
+    expect(await visit()).toContain('Buy more beans.');
   });
 
   await test.step('its old address, and a link to it left behind, open it in Work', async () => {

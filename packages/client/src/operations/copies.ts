@@ -99,7 +99,7 @@ export type MoveEnds = {
   shares: { shareId: ShareId; rootId: string; members: IdentityId[] }[];
   /** Agents picked for a folder in what moves, by the names the server lists. */
   agentPicks: { agentId: IdentityId; personId: IdentityId; name: string }[];
-  /** Pages whose public link ends. */
+  /** Pages whose public link ends: they arrive unpublished, as this person can't publish there. */
   publicLinks: PageId[];
   /** Pages and the other spaces they are published into, which those publications end in. */
   publications: { pageId: PageId; spaceId: SpaceId }[];
@@ -146,6 +146,13 @@ export type CopyPreview = {
   inbound: { pageId: PageId; title: string | null }[];
   /** For a move, what it ends. */
   ends: MoveEnds | null;
+  /**
+   * For a move, pages whose public link goes with them, keeping its
+   * address: they arrive published, where this person can publish them.
+   * Each public page says it is being updated until someone updates it
+   * from the version that arrives.
+   */
+  keptLinks: PageId[];
 };
 
 /** How far `makeCopy` has got: nodes sealed and sent, of `total`. */
@@ -328,7 +335,9 @@ export async function previewCopy(
           read,
         }),
     inbound: isMove ? await linkingIn(ctx, { tree, inside, spaceId: source.spaceId, read }) : [],
-    ends: isMove ? await endsOf(ctx, source.spaceId, { tree, inside, pages }) : null,
+    ...(isMove
+      ? await endsOf(ctx, source.spaceId, { tree, inside, pages, bringsPublished })
+      : { ends: null, keptLinks: [] }),
   };
 }
 
@@ -498,12 +507,26 @@ async function linkingIn(
   return linking;
 }
 
-/** What a move of the subtree ends, as the server lists it to an owner of the space. */
+/**
+ * What a move of the subtree ends, as the server lists it to an owner of
+ * the space, and the public links it keeps: all of them where published
+ * versions come along, none where they don't.
+ */
 async function endsOf(
   ctx: ClientContext,
   spaceId: SpaceId,
-  { tree, inside, pages }: { tree: Tree; inside: ReadonlySet<string>; pages: readonly TreePage[] },
-): Promise<MoveEnds> {
+  {
+    tree,
+    inside,
+    pages,
+    bringsPublished,
+  }: {
+    tree: Tree;
+    inside: ReadonlySet<string>;
+    pages: readonly TreePage[];
+    bringsPublished: boolean;
+  },
+): Promise<{ ends: MoveEnds; keptLinks: PageId[] }> {
   const listed = await listShares(ctx, spaceId);
   const rooted = tree.shares.flatMap((share) =>
     share.rootId !== null && inside.has(share.rootId)
@@ -530,7 +553,10 @@ async function endsOf(
     });
     for (const { spaceId: into } of live) publications.push({ pageId: page.id, spaceId: into });
   }
-  return { shares, agentPicks, publicLinks, publications };
+  return {
+    ends: { shares, agentPicks, publicLinks: bringsPublished ? [] : publicLinks, publications },
+    keptLinks: bringsPublished ? publicLinks : [],
+  };
 }
 
 /** What the copy made: the new top node, and each source node's copy. */
