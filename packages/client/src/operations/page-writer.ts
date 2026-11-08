@@ -1,8 +1,9 @@
 // The one place the app's offline-capable writes go through (ADR 0009,
-// decision 7): drafts, new pages, new folders, files, folder renames and
-// deletes. It decides whether
-// each goes to the server or into this device's queue, and falls back to
-// the queue when the server doesn't answer.
+// decision 7): drafts, new pages, new folders, files, folder renames,
+// deletes, moves and publishing. It decides whether each goes to the server
+// or into this device's queue, and falls back to the queue when the server
+// doesn't answer. A move or publish goes into the queue only: online, each
+// goes through its own operation, which first shows the person what it does.
 import {
   FolderId,
   MetadataRevisionId,
@@ -144,6 +145,20 @@ export type PageWriter = {
     name: string;
     dropChanges?: boolean;
   }): Promise<'trashed' | 'waiting' | 'dropped'>;
+  /**
+   * Move a page or folder within its space, and within one share, on this
+   * device (#331), as `OfflineQueue.move`. One that changes who can read it
+   * is made online, once the person looked it over (`moveNode`).
+   */
+  moveNode(input: {
+    spaceId: SpaceId;
+    nodeId: PageId | FolderId;
+    node: 'page' | 'folder';
+    name: string;
+    parentId: FolderId | null;
+  }): Promise<void>;
+  /** Publish a page's draft as it stands now on this device (#331), as `OfflineQueue.publish`. */
+  publish(input: { page: PageRef; title: string; draftHead: RevisionId }): Promise<void>;
 };
 
 /**
@@ -306,6 +321,16 @@ export function createPageWriter({
         if (!queue || !noAnswer(error)) throw error;
         return queue.delete({ spaceId, id: nodeId, node, name, tried: true });
       }
+    },
+
+    async moveNode({ spaceId, nodeId, node, name, parentId }) {
+      if (!queue) throw new Error('This device keeps no changes');
+      await queue.move({ spaceId, id: nodeId, node, name, parentId });
+    },
+
+    async publish(input) {
+      if (!queue) throw new Error('This device keeps no changes');
+      await queue.publish(input);
     },
   };
   return writer;

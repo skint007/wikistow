@@ -11,6 +11,7 @@ import {
   type FolderId,
   type OpenedPayload,
   type PagePayload,
+  type queueOperations,
   type Region,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
@@ -120,7 +121,12 @@ import {
   type ActionKind,
 } from '../../../../../../shell/availability';
 import { useArrivedMoved, useOldAddress } from '../../../../../../shell/old-address';
-import { pageChange, queueChoices, queueQuery } from '../../../../../../data/offline-changes';
+import {
+  pageChange,
+  pageWriter,
+  queueChoices,
+  queueQuery,
+} from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
@@ -230,7 +236,10 @@ function PageView() {
       </PageCard>
     );
 
-  const folder = tree?.folders.find((f) => f.id === info.parentId);
+  // Where the tree has it, which shows a move waiting on this device too (#331).
+  const listed = tree?.pages.find((p) => p.id === pageId);
+  const parentId = listed ? listed.parentId : info.parentId;
+  const folder = tree?.folders.find((f) => f.id === parentId);
   const folderName =
     folder?.metadata?.opened.kind === 'current' ? folder.metadata.opened.metadata.name : null;
   const spaceName =
@@ -420,6 +429,16 @@ function PageBody({
   // A page with a public link isn't changed while it's read, nor before its links are known.
   const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
   const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
+  // A page with a public link publishes online only (#331). Online, so does
+  // one whose links aren't known yet; offline, a publish waiting checks them
+  // once it is sent.
+  const publishKind: ActionKind =
+    linked === true || (linked === null && !availability.offline) ? 'publish-linked' : 'publish';
+  // A publish waiting on this device, which the person can cancel until it is sent.
+  const publishWaiting = entries?.find(
+    (entry): entry is queueOperations.QueuedPublish =>
+      entry.kind === 'publish' && entry.id === page.pageId && entry.failure === null,
+  );
   const rights = useMemo(
     () =>
       readingRights({
@@ -479,6 +498,15 @@ function PageBody({
   // One click, unless the page has a public link: then Publish asks first,
   // as publishing updates the public page too (ADR 0005).
   const publishOrAsk = async () => {
+    // Offline, or after a change waiting here, it waits on this device,
+    // sent after that change (#331). The page stays as it is meanwhile.
+    if (availability.offline || waiting !== 'none') {
+      await editor.current?.flush();
+      const { draftHead } = info.heads;
+      if (!draftHead) throw new Error('There is no draft to publish');
+      await pageWriter(ctx).publish({ page, title: payload?.title ?? '', draftHead });
+      return;
+    }
     const from = router.state.location.href;
     const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
     if (links.some((link) => link.pageId === page.pageId)) {
@@ -694,7 +722,7 @@ function PageBody({
     model.actions.publish && {
       command: publishPage,
       title: 'Publish',
-      waiting: waitsFor('publish'),
+      waiting: waitsFor(publishKind),
       run: () => void publish(),
     },
     { command: findOnPage, title: 'Find on page', keys: 'Mod-f', run: () => find.open() },
@@ -824,7 +852,11 @@ function PageBody({
                 </Button>
               )}
               {model.actions.publish && (
-                <Button size="sm" disabled={busy} {...here.click('publish', () => void publish())}>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  {...here.click(publishKind, () => void publish())}
+                >
                   <Check strokeWidth={1.75} /> Publish
                 </Button>
               )}
@@ -986,6 +1018,22 @@ function PageBody({
           </h1>
         )}
         <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
+          {publishWaiting && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              Publish waits to be sent
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() =>
+                  void act(async () => {
+                    await queueChoices(ctx)?.discard(publishWaiting);
+                  })
+                }
+              >
+                Cancel
+              </button>
+            </span>
+          )}
           {listedAt && (
             <span
               data-hint="When this device last heard from the server about this space"

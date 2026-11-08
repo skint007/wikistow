@@ -93,7 +93,7 @@ Commands:
   spaces list
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
-  export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
+  export --out DIR [--space SPACE_ID] [--folder FOLDER_ID] [--links wiki|markdown]
   import PATH [--space SPACE_ID] [--folder FOLDER_ID] [--from obsidian|joplin]
   folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
   folder copy FOLDER_ID [--space SPACE_ID] [--folder FOLDER_ID]
@@ -364,6 +364,7 @@ one line per page: its ID, title, [draft] or [unpublished], and snippet.
 Quote a QUERY of several words; put one that starts with -- after a lone --.
 `,
   export: `Usage: ${PROGRAM} export --out DIR [--space SPACE_ID] [--folder FOLDER_ID]
+                       [--links wiki|markdown]
 
 Write every page this agent can read as Markdown files in DIR, which must
 be empty or not exist yet, and open to you alone${WINDOWS ? '' : ' (mode 700)'}. Each page is
@@ -383,6 +384,15 @@ exported stays as written. A name no file system takes (a / or :, a
 reserved name like CON, one too long) is changed, a name used twice in a
 folder gets (2), and a link to a renamed file keeps the title as its text.
 
+--links markdown writes each wikilink to an exported page as a relative
+Markdown link to its file instead, for GitHub and editors that don't read
+wikilinks: [[Plan#Next steps|the plan]] becomes
+[the plan](../Work/Plan.md#next-steps), its text as WikiStow shows it and
+its #heading as GitHub's anchor for it. An embed of an attachment becomes
+an image, or a link for another kind of file. Page embeds (![[Plan]]),
+block references, links that stay as written above, and a wikilink in a
+link's text stay wikilinks, and are counted. Frontmatter stays as written.
+
 ${
   WINDOWS
     ? `Keep DIR in your user profile, which other users can't open. Nothing
@@ -397,12 +407,15 @@ With --json:
    "skipped":[{"spaceId":"...","pageId":"..."},
      {"spaceId":"...","pageId":"...","attachmentId":"...","path":"...",
       "reason":"missing|unreadable"}],
-   "unread":[{"spaceId":"...","pageId":"...","path":"..."}]}
+   "unread":[{"spaceId":"...","pageId":"...","path":"..."}],
+   "wikilinks":N}
 paths are relative to DIR, with / between folders. skipped lists pages
 whose version couldn't be opened, and attachments the server has no file
 for (missing) or that couldn't be opened (unreadable), so were left out.
 unread lists pages written as they were, their links not rewritten,
 because their Markdown couldn't be read (nested past the parser's stack).
+wikilinks, only with --links markdown, counts the wikilinks left in the
+pages written.
 A left-out attachment's path is where it would have been: its page's
 links still name it there. A lost connection, an expired session or a
 server error fails the export instead.
@@ -632,7 +645,15 @@ attachments by page read --json.${PIPES}
   'page copy': copyHelp('page'),
   'page history': `Usage: ${PROGRAM} page history PAGE_ID
 
-The published versions, newest first, and who published each.
+The published versions, newest first, and who published each. A version
+published by changes made while reading (ticking a task, changing a
+property in the reader) says what changed, as WikiStow's history does:
+"Ticked 3, unticked 1". Each version is opened to read that. With --json:
+  {"pageId":"...","versions":[{"revisionId":"...","publishedSeq":N,
+    "publishedAt":"...","basedOn":"...","publisher":{...},
+    "change":{"ticked":N,"unticked":N,"properties":["servings"]}}]}
+change is null for any other version, or one that couldn't be opened.
+properties are the keys whose value changed, as written in the page.
 `,
   'page links': `Usage: ${PROGRAM} page links PAGE_ID
 

@@ -27,9 +27,10 @@ export const queueChoices = (ctx: ClientContext): queueOperations.QueueChoices |
   ctx.keptContent?.queue ?? null;
 
 /**
- * How the app writes drafts, new pages and folders, files, folder renames
- * and deletes for `ctx`'s session: to the server, or into the queue while the app is offline
- * (`connection`) or what's written on has a change waiting.
+ * How the app writes drafts, new pages and folders, files, folder renames,
+ * deletes, moves and publishing for `ctx`'s session: to the server, or into
+ * the queue while the app is offline (`connection`) or what's written on
+ * has a change waiting.
  */
 export const pageWriter = (ctx: ClientContext): PageWriter =>
   createPageWriter({

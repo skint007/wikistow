@@ -1,13 +1,15 @@
 import type { exportOperations } from '@wikistow/client';
 
 /**
- * What an export left out, and which pages it wrote as they were because
- * their links couldn't be read, as the dialog says it, or null for neither.
+ * What an export left out, which pages it wrote as they were because their
+ * links couldn't be read, and with Markdown links how many wikilinks it
+ * kept, as the dialog says it, or null for none of these.
  */
 export function summaryStatus({
   skipped,
   unread,
-}: Pick<exportOperations.ExportSummary, 'skipped' | 'unread'>): string | null {
+  wikilinks,
+}: Pick<exportOperations.ExportSummary, 'skipped' | 'unread' | 'wikilinks'>): string | null {
   const files = skipped.filter((item) => 'attachmentId' in item).length;
   const left = (n: number, what: string, why: string) =>
     n === 0
@@ -23,6 +25,11 @@ export function summaryStatus({
       ? []
       : [
           `${n === 1 ? 'One page’s links' : `${n.toLocaleString()} pages’ links`} couldn’t be read, so ${n === 1 ? 'it was' : 'they were'} exported as written.`,
+        ]),
+    ...(wikilinks === 0
+      ? []
+      : [
+          `${wikilinks === 1 ? 'One link stays a wikilink' : `${wikilinks.toLocaleString()} links stay wikilinks`}, such as page embeds and links to pages that aren’t exported.`,
         ]),
   ];
   return parts.length === 0 ? null : `Downloaded. ${parts.join(' ')}`;

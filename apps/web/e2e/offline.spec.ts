@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, signIn, test } from './fixtures';
+import { expect, pick, signIn, test } from './fixtures';
 import { folderMenu, newFolder } from './sharing';
 import {
   adminTab,
@@ -91,12 +91,12 @@ test('pages opened here read, search and unlock offline', async ({
     // Drafts are saved on this device offline, so Edit works.
     await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');
     await page.getByRole('button', { name: 'Page actions' }).click();
-    const move = page.getByRole('menuitem', { name: 'Move to…' });
-    await expect(move).toHaveAttribute('aria-disabled', 'true');
-    await expect(move).toHaveAttribute('data-hint', 'Needs the connection');
+    const copy = page.getByRole('menuitem', { name: 'Copy to…' });
+    await expect(copy).toHaveAttribute('aria-disabled', 'true');
+    await expect(copy).toHaveAttribute('data-hint', 'Needs the connection');
     // Pressed anyway, it does nothing.
-    await move.click({ force: true });
-    await expect(move).toBeVisible();
+    await copy.click({ force: true });
+    await expect(copy).toBeVisible();
     await page.keyboard.press('Escape');
   });
 
@@ -301,4 +301,75 @@ test('a folder renamed and a folder and page deleted offline go once back online
   await page.getByRole('link', { name: 'Trash' }).click();
   await expect(page.getByText('Old notes')).toBeVisible();
   await expect(page.getByText('Bread')).toBeVisible();
+});
+
+/**
+ * A page moved and published offline (#331): the sidebar shows it in its
+ * new place at once, marked, and the page says its publish waits, which
+ * can be cancelled until it is sent. Back online, both reach the server:
+ * the page is in its folder, and readers see what was published.
+ */
+test('a page moved and published offline goes once back online', async ({
+  page,
+  context,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newFolder(page, 'Trips');
+  await newPage(page, 'Bread');
+  await fillSource(page, 'Flour and rye.');
+  await waitForSave(page);
+  await watchKeeping(page);
+  await page.reload();
+  await expectSource(page, 'Flour and rye.');
+  await expect(page.locator('html')).toHaveAttribute('data-keeping', 'done', { timeout: 30_000 });
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  await context.setOffline(true);
+  const tree = page.getByRole('tree');
+  // The app finds it is offline on its next request.
+  await tree.getByRole('treeitem', { name: /Trips/ }).click();
+  const offline = page.getByRole('status').filter({ hasText: 'Offline' });
+  await expect(offline).toBeVisible();
+  await tree.getByRole('treeitem', { name: 'Bread' }).click();
+  const bread = tree.getByRole('treeitem', { name: /^Bread/ });
+
+  await test.step('move it into a folder', async () => {
+    await page.getByRole('button', { name: 'Page actions' }).click();
+    await page.getByRole('menuitem', { name: 'Move to…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Move “Bread”' });
+    await pick(dialog.getByLabel('Folder'), 'Trips');
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await expect(dialog).toContainText('saved on this device and sent when you’re back online');
+    await dialog.getByRole('button', { name: 'Move', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(bread).toHaveAttribute('aria-level', '2');
+    await expect(bread).toContainText('Saved on this device, not sent yet');
+  });
+
+  await test.step('publish it, cancel, and publish again', async () => {
+    // Never published, it opens as its draft.
+    await expectSource(page, 'Flour and rye.');
+    const publish = page.getByRole('button', { name: 'Publish', exact: true });
+    const waits = page.getByText('Publish waits to be sent');
+    await publish.click();
+    await expect(waits).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(waits).toBeHidden();
+    await publish.click();
+    await expect(waits).toBeVisible();
+  });
+
+  await context.setOffline(false);
+  await expect(offline).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByText('Publish waits to be sent')).toBeHidden({ timeout: 30_000 });
+  await expect(bread).not.toContainText('Saved on this device', { timeout: 30_000 });
+  // Loaded afresh, as readers see it.
+  await page.goto(new URL(page.url()).pathname);
+  await expect(bread).toHaveAttribute('aria-level', '2');
+  await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
+  await expect(page.getByText(/Published v1$/)).toBeVisible();
+  await expect(page.getByText('Flour and rye.')).toBeVisible();
 });

@@ -1,4 +1,10 @@
-import { exportOperations, pace, safeName, type ClientContext } from '@wikistow/client';
+import {
+  exportOperations,
+  pace,
+  safeName,
+  type ClientContext,
+  type LinkStyle,
+} from '@wikistow/client';
 import { Zip, ZipDeflate, ZipPassThrough } from 'fflate';
 import { MarkdownWorker, READ_BUDGET_MS } from '../page/markdown-worker';
 
@@ -63,6 +69,7 @@ export async function exportZip(
   options: {
     onProgress?: (progress: exportOperations.ExportProgress) => void;
     signal?: AbortSignal;
+    links?: LinkStyle;
   } = {},
 ): Promise<{ zip: Blob; summary: exportOperations.ExportSummary }> {
   const chunks: Uint8Array[] = [];
