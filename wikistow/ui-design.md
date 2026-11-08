@@ -453,7 +453,7 @@ The model field is a combobox (`components/ui/combobox.tsx`, built like the sear
 
 ## Lock when idle
 
-A row in Settings → Security, after Two-factor sign-in, with a "This browser" pill ("This computer" in the desktop app), saying the vault locks with nobody using WikiStow and that typing is saved first. Its one control, in the row, is a **Lock after** Picker of Off (the default), 5 minutes, 15 minutes, 30 minutes and 1 hour. An idle lock leaves for the unlock page the way **Lock vault** does; Settings and admin pages stay where they are, locked.
+A row in Settings → Security, after Passkeys, with a "This browser" pill ("This computer" in the desktop app), saying the vault locks with nobody using WikiStow and that typing is saved first. Its one control, in the row, is a **Lock after** Picker of Off (the default), 5 minutes, 15 minutes, 30 minutes and 1 hour. An idle lock leaves for the unlock page the way **Lock vault** does; Settings and admin pages stay where they are, locked.
 
 ## Remember unlock
 
