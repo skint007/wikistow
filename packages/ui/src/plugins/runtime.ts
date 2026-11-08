@@ -119,6 +119,8 @@ export type PluginsSnapshot = {
   plugins: PluginStatus[];
   /** Plugins the source knows of but couldn't load, by ID, with why: a desktop's library plugin it couldn't install, or one whose version left the library. */
   unavailable: Readonly<Record<string, string>>;
+  /** The library plugins turned off on this device only (`PluginListing.offHere`), for Settings. */
+  offHere: readonly string[];
   commands: PluginCommand[];
   /** What running plugins put in each region, in plugin order, then registration order. */
   regions: { [R in keyof Regions]: Contribution<R>[] };
@@ -305,11 +307,13 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   const listeners = new Set<() => void>();
   let listed = false;
   let unavailable: Readonly<Record<string, string>> = {};
+  let offHere: readonly string[] = [];
   let snapshot: PluginsSnapshot = {
     listed,
     safeMode: false,
     plugins: [],
     unavailable,
+    offHere,
     commands: [],
     regions: contributions([]),
     replaced: replacedBy([]),
@@ -338,6 +342,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       listed,
       safeMode,
       unavailable,
+      offHere,
       plugins: [
         ...entries.map(({ plugin, problems }) => ({
           plugin,
@@ -805,6 +810,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     }
     idle = plugins.filter((plugin) => !wanted.has(plugin.manifest.id));
     unavailable = state.unavailable;
+    offHere = state.offHere;
     listed = state.plugins !== null;
     emit();
   }
@@ -993,6 +999,7 @@ const NONE: PluginsSnapshot = {
   safeMode: false,
   plugins: [],
   unavailable: {},
+  offHere: [],
   commands: [],
   regions: contributions([]),
   replaced: replacedBy([]),
