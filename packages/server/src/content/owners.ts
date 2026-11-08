@@ -45,6 +45,7 @@ import { readSettings } from '../settings.ts';
 import { currentOwners, isOwner } from './access.ts';
 import { endAgentGrants } from './agents.ts';
 import { dropCopiesFrom } from './copies.ts';
+import { forgetMoves } from './moved.ts';
 import { lookupIdentities } from './identities.ts';
 import {
   applyRotation,
@@ -704,6 +705,8 @@ export async function deleteSpace(
     await endLinks(tx, ids);
     // Copies of its nodes into other spaces, unfinished, with their hidden nodes there.
     const copied = await dropCopiesFrom(tx, spaceId);
+    // Old addresses of what moved into it.
+    await forgetMoves(tx, spaceId);
     const doomed = await tx
       .select({ hash: blobs.hash })
       .from(blobs)

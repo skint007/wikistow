@@ -120,6 +120,7 @@ import {
   useNeedsConnection,
   type ActionKind,
 } from '../../../../../../shell/availability';
+import { useArrivedMoved, useOldAddress } from '../../../../../../shell/old-address';
 import {
   pageChange,
   pageWriter,
@@ -205,7 +206,14 @@ function PageView() {
     ...historyQuery(ctx, page),
     enabled: unpublishedCopy,
   });
+  // A page a move took into another space opens there, saying so.
+  const following = useOldAddress(
+    { spaceId, nodeId: pageId },
+    error instanceof ApiError && error.code === 'not-found',
+  );
+  const arrivedMoved = useArrivedMoved();
 
+  if (following) return <PageCard>{null}</PageCard>;
   if (error)
     return (
       <PageCard>
@@ -269,6 +277,7 @@ function PageView() {
         info={info}
         model={model}
         crumbs={[spaceName, folderName].filter((c): c is string => Boolean(c))}
+        movedTo={arrivedMoved ? spaceName : null}
         // Share opens the share the page is in, or offers to share its folder,
         // or the space for a top-level page.
         shareRoot={tree ? (shareCovering(tree, info.parentId)?.rootId ?? info.parentId) : null}
@@ -307,6 +316,7 @@ function PageBody({
   info,
   model,
   crumbs,
+  movedTo,
   shareRoot,
   onReopen,
   onShareLink,
@@ -316,6 +326,8 @@ function PageBody({
   info: Info;
   model: Found;
   crumbs: string[];
+  /** The space's name, when the page was opened by its address before a move brought it here. */
+  movedTo: string | null;
   shareRoot: FolderId | null;
   /** Load the draft as it is now, dropping the editor's state. */
   onReopen: () => Promise<void>;
@@ -1120,6 +1132,11 @@ function PageBody({
           )}
         </Pills>
         <ReadingNotices state={queued} />
+        {movedTo !== null && (
+          <p role="note" className="text-sm text-muted-foreground">
+            This page moved to {movedTo ? <Name>{movedTo}</Name> : 'another space'}.
+          </p>
+        )}
         {model.view === 'published' && change && (
           <p role="note" className="text-sm text-muted-foreground">
             Changed on this device, not saved yet.

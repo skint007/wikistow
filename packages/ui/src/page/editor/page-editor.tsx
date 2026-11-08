@@ -574,6 +574,7 @@ export function PageEditor({
             pages: assist.links.pages,
             links: assist.links.table,
             editor: true,
+            moved: assist.links.moved,
           }}
           onChange={(block) => {
             setFrontmatter(block);

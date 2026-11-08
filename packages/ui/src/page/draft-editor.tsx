@@ -42,6 +42,7 @@ import { PageEditor } from './editor/page-editor';
 import { otherPages, type OtherPages } from './other-pages';
 import { QueryTable } from './query-table';
 import type { PropertyKeys } from './properties-box';
+import { useMovedLinks } from './moved-links';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
@@ -448,6 +449,7 @@ function useLinkAssist({
   // (ADR 0009, decision 4).
   const notKept = useNotKept(ctx, page.spaceId);
   const unsure = notKept !== undefined && notKept.size > 0;
+  const moved = useMovedLinks(ctx, page, pages, table);
 
   const assist = useMemo<LinkAssist>(() => {
     const parentId = tree?.pages.find((p) => p.id === page.pageId)?.parentId ?? null;
@@ -456,6 +458,7 @@ function useLinkAssist({
       targets: () => session.linkTargets(),
       selfId: page.pageId,
       table,
+      moved,
       ownHeadings: async (markdown) => linkHeadings(await readHeadings(markdown)),
       async headings(pageId) {
         const entry = tree?.pages.find((p) => p.id === pageId);
@@ -502,7 +505,7 @@ function useLinkAssist({
       pick: (key, pageId) => void session.chooseLink(key, PageId.parse(pageId)),
       choose: setChoosing,
     };
-  }, [ctx, page, pages, queryClient, session, table, tree, unsure]);
+  }, [ctx, page, pages, queryClient, session, table, tree, unsure, moved]);
 
   const scope = { pages: pages ?? [], selfId: page.pageId };
   const chooser = {

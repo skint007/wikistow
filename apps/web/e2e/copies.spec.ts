@@ -54,6 +54,7 @@ test('copying and moving pages and folders between spaces', async ({
     await publishedPageIn(owner, 'Garden', 'Plan', 'Read [[Seeds]] before sowing.');
     await newFolder(owner, 'Errands');
     await publishedPageIn(owner, 'Errands', 'Shopping', 'Buy more beans.');
+    await publishedPageIn(owner, 'Errands', 'List', 'Then the [[Shopping]].');
     await newSpace(owner, 'Work');
     work = spaceIn(owner);
   });
@@ -94,10 +95,13 @@ test('copying and moving pages and folders between spaces', async ({
     await expect(owner.getByRole('treeitem', { name: /Garden/ })).toHaveCount(2);
   });
 
+  let oldAddress = '';
+  let newAddress = '';
   await test.step('the owner moves Shopping into Work, published there and gone here', async () => {
     await openFolder(owner, 'Errands');
     await owner.getByRole('treeitem', { name: 'Shopping' }).click();
     await expect(owner.getByRole('heading', { name: 'Shopping', level: 1 })).toBeVisible();
+    oldAddress = new URL(owner.url()).pathname;
     await owner.getByRole('button', { name: 'Page actions' }).click();
     await owner.getByRole('menuitem', { name: 'Move to…' }).click();
     const dialog = owner.getByRole('dialog', { name: 'Move “Shopping”' });
@@ -110,10 +114,29 @@ test('copying and moving pages and folders between spaces', async ({
     await expect(owner).toHaveURL(new RegExp(`/s/${work}/p/`));
     await expect(owner.getByText('Buy more beans.')).toBeVisible();
     await expect(owner.getByText('Published v1')).toBeVisible();
+    newAddress = new URL(owner.url()).pathname;
 
     await openSpace(owner, 'Family');
     await openFolder(owner, 'Errands');
     await expect(owner.getByRole('treeitem', { name: 'Shopping' })).toHaveCount(0);
+  });
+
+  await test.step('its old address, and a link to it left behind, open it in Work', async () => {
+    await owner.goto(oldAddress);
+    await expect(owner).toHaveURL(new RegExp(`${newAddress}$`));
+    await expect(
+      owner.getByRole('note').filter({ hasText: 'This page moved to Work.' }),
+    ).toBeVisible();
+    await expect(owner.getByText('Buy more beans.')).toBeVisible();
+
+    await openSpace(owner, 'Family');
+    await openFolder(owner, 'Errands');
+    await owner.getByRole('treeitem', { name: 'List' }).click();
+    await owner.getByRole('link', { name: 'Shopping' }).click();
+    await expect(owner).toHaveURL(new RegExp(`${newAddress}$`));
+    await expect(owner.getByText('Buy more beans.')).toBeVisible();
+    // Opened by a link to where it is now, it doesn't say it moved.
+    await expect(owner.getByText('This page moved to Work.')).toHaveCount(0);
   });
 });
 

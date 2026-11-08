@@ -133,14 +133,15 @@ export type CopyPreview = {
   /**
    * Pages a copied version links to that won't be the same page afterwards:
    * in a copy into another space, wikilinks to pages of the source space
-   * that don't come along, and for a move, address links to pages and
-   * folders it deletes that are written with escapes, so they aren't
-   * pointed at the copies. Null when some Markdown couldn't be read for links.
+   * that don't come along. Address links to what a move deletes, written
+   * with escapes so they aren't pointed at the copies, still open it through
+   * its old address. Null when some Markdown couldn't be read for links.
    */
   links: ClosedLink[] | null;
   /**
    * For a move, pages staying behind, that this person can open, which link
-   * to a page or folder that moves.
+   * to a page or folder that moves. Their links open its new place, for
+   * people who can open it there (`movedTo`).
    */
   inbound: { pageId: PageId; title: string | null }[];
   /** For a move, what it ends. */
@@ -325,7 +326,6 @@ export async function previewCopy(
           inside,
           spaceId: source.spaceId,
           read,
-          moving: isMove,
         }),
     inbound: isMove ? await linkingIn(ctx, { tree, inside, spaceId: source.spaceId, read }) : [],
     ends: isMove ? await endsOf(ctx, source.spaceId, { tree, inside, pages }) : null,
@@ -418,9 +418,7 @@ const titled = (tree: Tree, target: string) =>
 /**
  * Wikilinks of the copied pages that name a page of the source space that
  * doesn't come along: by their table's entry, or by title. In another space
- * they resolve by title among its pages, or not at all. For a move
- * (`moving`), also address links to a page or folder it deletes that the
- * copy can't point at its copy, written with escapes. Each page or folder once.
+ * they resolve by title among its pages, or not at all. Each page once.
  */
 async function closedLinks(
   ctx: ClientContext,
@@ -430,14 +428,12 @@ async function closedLinks(
     inside,
     spaceId,
     read,
-    moving,
   }: {
     tree: Tree;
     pages: readonly TreePage[];
     inside: ReadonlySet<string>;
     spaceId: SpaceId;
     read: ReadLinks;
-    moving: boolean;
   },
 ): Promise<ClosedLink[] | null> {
   const closed = new Map<string, ClosedLink>();
@@ -460,19 +456,6 @@ async function closedLinks(
       if (target === undefined || inside.has(target)) continue;
       add({ kind: 'wikilink', page: key, text: link.target });
     }
-    if (!moving) continue;
-    const addresses = [
-      ...found.pageLinks.map((link) => ({ ...link, kind: 'page-link' as const, id: link.pageId })),
-      ...found.folderLinks.map((link) => ({
-        ...link,
-        kind: 'folder-link' as const,
-        id: link.folderId,
-      })),
-    ];
-    for (const link of addresses) {
-      if (link.plain || link.spaceId !== spaceId || !inside.has(link.id)) continue;
-      add({ kind: link.kind, page: `${link.spaceId}/${link.id}`, text: link.text || link.source });
-    }
   }
   return [...closed.values()];
 }
@@ -480,8 +463,9 @@ async function closedLinks(
 /**
  * Pages staying in the source space, that this person can open, which link
  * to a page that moves, by a table entry, an address, or a title only that
- * page has, or to a folder that moves, by its address. Those links won't
- * find it once it has moved.
+ * page has, or to a folder that moves, by its address. Once it has moved,
+ * links by entry or address open its new place for people who can open it
+ * there; one by title alone finds nothing.
  */
 async function linkingIn(
   ctx: ClientContext,

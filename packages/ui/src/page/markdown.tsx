@@ -42,6 +42,7 @@ import { BodyLink } from './body-link';
 import { CopyCode } from './copy-code';
 import { DiagramBlock } from './diagram';
 import { MarkdownTimeout, READ_BUDGET_MS } from './markdown-worker';
+import { useMovedLinks } from './moved-links';
 import { otherPages } from './other-pages';
 import { pageReader } from './page-reader';
 import { PropertiesBox } from './properties-box';
@@ -333,6 +334,7 @@ export function Markdown({
       ),
     [index, attachments.page.spaceId, attachments.page.pageId, pages, links, editor, properties],
   );
+  const moved = useMovedLinks(attachments.ctx, attachments.page, pages, links);
   const read = useQuery(readQuery(body));
   // Each task's label, from the tree as read: links and references are only placeholders in the HTML.
   const labels = useMemo(() => (read.data ? taskLabels(read.data) : new Map()), [read.data]);
@@ -376,7 +378,7 @@ export function Markdown({
     },
   };
   return (
-    <PageBody value={context}>
+    <PageBody value={{ ...context, moved }}>
       <PageProperties value={properties}>
         <OtherPagesContext value={others}>
           {/* Find on page leaves the page's properties out (#276). */}
@@ -384,7 +386,7 @@ export function Markdown({
             <div data-find="skip" className="contents">
               <PropertiesBox
                 frontmatter={frontmatter}
-                scope={bodyLinkScope(context)}
+                scope={bodyLinkScope({ ...context, moved })}
                 page={attachments.page}
               />
             </div>

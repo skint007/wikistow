@@ -1,13 +1,14 @@
 import { SpaceId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Outlet, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Outlet, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { ChatColumn, useChatColumn } from '../../../../ai/chat-column';
 import { treeQuery } from '../../../../data/queries';
 import { OwnerConfirm } from '../../../../sharing/owner-confirm';
 import { useShellSpace } from '../../../../shell/app-shell';
+import { useOldAddress } from '../../../../shell/old-address';
 import { Sidebar } from '../../../../shell/sidebar';
 import { useClient } from '../../../../vault/store';
 
@@ -49,7 +50,9 @@ function SpaceLayout() {
 /**
  * Send someone viewing a space home once the server no longer shows it to
  * them: deleted, or no longer shared with them. The home route opens their
- * first space, which is their home space.
+ * first space, which is their home space. An old address of a page or
+ * folder a move took into another space they can open goes there instead
+ * (`useOldAddress`, which the page or folder follows).
  */
 function useLeaveWhenGone(spaceId: SpaceId) {
   const ctx = useClient();
@@ -57,7 +60,9 @@ function useLeaveWhenGone(spaceId: SpaceId) {
   // A cached error stays while the tree loads again, so only a settled one counts.
   const { error, isFetching } = useQuery(treeQuery(ctx, spaceId));
   const gone = !isFetching && error instanceof ApiError && error.code === 'not-found';
+  const { pageId, folderId } = useParams({ strict: false });
+  const moved = useOldAddress({ spaceId, nodeId: pageId ?? folderId }, gone, { follow: false });
   useEffect(() => {
-    if (gone) void navigate({ to: '/' });
-  }, [gone, navigate]);
+    if (gone && !moved) void navigate({ to: '/' });
+  }, [gone, moved, navigate]);
 }

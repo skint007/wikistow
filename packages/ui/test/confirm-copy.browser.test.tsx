@@ -202,8 +202,6 @@ const button = (name: string) => {
   if (!found) throw new Error(`No ${name} button`);
   return found;
 };
-const linksNote = () =>
-  document.querySelector('[aria-label="Links that won’t work there"] p:last-child')?.textContent;
 
 it('closes before it opens the copy, so the dialog isn’t shown for the space it went to', async () => {
   fake.preview = (copyId) => previewOf(copyId);
@@ -377,22 +375,4 @@ it('offers Look again when the preview itself fails, without saying nothing was 
   expect(() => button('Look again')).toThrow();
   expect(document.activeElement).toBe(button('Copy'));
   expect(button('Copy').disabled).toBe(false);
-});
-
-it('says wikilinks find a page by title there, and address links in a move stop working', async () => {
-  const wikilink = { kind: 'wikilink', page: 'pantry', text: 'Pantry', count: 1 } as const;
-  const address = { kind: 'page-link', page: `${PERSONAL}/x`, text: 'Soup', count: 2 } as const;
-  const TITLE = 'Wikilinks to pages that don’t go with it each find a page with the same title';
-  const STOPS = 'Links to the address of a page or folder the move deletes';
-
-  fake.preview = (copyId) => previewOf(copyId, { kind: 'move', links: [address] });
-  await confirmInWork('move');
-  expect(linksNote()).toContain(STOPS);
-  expect(linksNote()).not.toContain(TITLE);
-  cleanup();
-
-  fake.preview = (copyId) => previewOf(copyId, { links: [wikilink] });
-  await confirmInWork('copy');
-  expect(linksNote()).toContain(TITLE);
-  expect(linksNote()).not.toContain(STOPS);
 });
