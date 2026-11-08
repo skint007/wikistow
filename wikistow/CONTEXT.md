@@ -128,7 +128,7 @@ What a device holds, sealed for one person, so pages open with no connection: th
 _Avoid_: Cached, synced.
 
 **Offline change**
-A draft, new page or new folder made, a folder renamed, or a page or folder deleted, while the app couldn't reach the server (#330 added renames and deletes). It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
+A draft, new page or new folder made, a folder renamed, a page or folder deleted or moved within its share, or a page published, while the app couldn't reach the server (#330 added renames and deletes, #331 moves and publishing). It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
 _Avoid_: Outbox, pending sync.
 
 **Template**
