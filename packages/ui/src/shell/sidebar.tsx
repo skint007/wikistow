@@ -965,7 +965,9 @@ function CreateDialog({
             <Label htmlFor="create-name">{kind === 'folder' ? 'Name' : 'Title'}</Label>
             <Input id="create-name" name="name" required autoFocus maxLength={200} />
           </div>
-          {kind === 'folder' && <FolderLookFields look={look} kept={null} onChange={setLook} />}
+          {kind === 'folder' && (
+            <FolderLookFields spaceId={spaceId} look={look} kept={null} onChange={setLook} />
+          )}
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}
