@@ -837,8 +837,10 @@ function Files({ workshop }: { workshop: Workshop }) {
         added = true;
       }
     } catch (error) {
-      // Only a server from before fonts and images in drafts has no route for them.
-      setProblem(error instanceof ApiError && error.status === 404 ? OLD_SERVER : message(error));
+      // Only a server from before fonts and images in drafts has no route for them: it
+      // answers 404, or 413 past its usual 1 MiB body. The limits were checked here first.
+      const old = error instanceof ApiError && (error.status === 404 || error.status === 413);
+      setProblem(old ? OLD_SERVER : message(error));
     }
     try {
       // Built and previewed at once, as on opening, so Publish carries what was added.
