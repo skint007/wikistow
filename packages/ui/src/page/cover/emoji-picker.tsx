@@ -24,11 +24,11 @@ export type ImageChoice = {
   /** The image in use, as a `blob:` URL, or null for none. */
   current: string | null;
   /**
-   * Keep a chosen image: an uploaded file made ready by `iconImage`, or the
-   * bytes of one already in the space. The tab stays open until it
-   * resolves, and shows the message of a rejection.
+   * Keep a chosen image. `icon` makes it ready: it resizes an uploaded file
+   * (`iconImage`), or gives the bytes of one already in the space. The tab
+   * stays open until it resolves, and shows the message of a rejection.
    */
-  onPick: (icon: IconFile) => Promise<void>;
+  onPick: (icon: () => Promise<IconFile>) => Promise<void>;
   /** Offers Remove image while there is one. */
   onRemove?: () => void;
   /** The upload button's label while `onPick` runs; Resizing… unless given. */
@@ -170,7 +170,7 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
     setBusy(true);
     setError(null);
     try {
-      await image.onPick(await icon());
+      await image.onPick(icon);
       onDone();
     } catch (caught) {
       setError(errorMessage(caught));

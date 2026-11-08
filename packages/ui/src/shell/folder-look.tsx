@@ -181,7 +181,8 @@ export function FolderLookFields({
           }}
           image={{
             current: image,
-            onPick: async (icon) => {
+            onPick: async (prepare) => {
+              const icon = await prepare();
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
               onChange({ ...look, symbol: null, image: { icon, url } });
             },

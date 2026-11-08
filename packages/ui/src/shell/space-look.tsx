@@ -198,7 +198,8 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
           }}
           image={{
             current: image,
-            onPick: async (icon) => {
+            onPick: async (prepare) => {
+              const icon = await prepare();
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
               setPicked({ ...look, symbol: null, image: { icon, url } });
             },

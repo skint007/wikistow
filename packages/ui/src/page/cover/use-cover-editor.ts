@@ -108,11 +108,11 @@ export function useCoverEditor({
   }
 
   /**
-   * Encrypt and upload an icon image the picker made ready, then show it in place of the
+   * Resize (or copy), encrypt and upload an icon image, then show it in place of the
    * emoji or icon, unless another image, icon or emoji was chosen meanwhile.
    * Saves wait for it. Rejects with a message to show.
    */
-  function uploadIcon(icon: IconFile): Promise<void> {
+  function uploadIcon(icon: () => Promise<IconFile>): Promise<void> {
     const handle = editor.current;
     if (!handle) return Promise.resolve();
     const epoch = vaultStore.epoch();
@@ -120,7 +120,7 @@ export function useCoverEditor({
     const work = (async () => {
       try {
         handle.checkSize();
-        const ref = await pageWriter(ctx).attach(page, icon);
+        const ref = await pageWriter(ctx).attach(page, await icon());
         if (vaultStore.epoch() !== epoch || iconChoices.current !== choices) return;
         apply({ icon: { attachmentId: ref.id }, symbol: null }, ref);
       } catch (caught) {
