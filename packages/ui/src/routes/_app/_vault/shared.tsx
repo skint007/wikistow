@@ -1,3 +1,4 @@
+import { folderIconOf, folderSymbolOf, type spaceOperations } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { Folder, Library } from 'lucide-react';
@@ -6,6 +7,8 @@ import { sharedWithMeQuery } from '../../../data/queries';
 import { sharingMessage } from '../../../sharing/messages';
 import { ACCESS_LABELS, accessOf } from '../../../sharing/model';
 import { nameOf } from '../../../sharing/names';
+import { FolderTile, folderLook } from '../../../shell/folder-look';
+import { SpaceIcon } from '../../../shell/space-look';
 import { useClient } from '../../../vault/store';
 
 export const Route = createFileRoute('/_app/_vault/shared')({ component: SharedWithMe });
@@ -37,7 +40,6 @@ function SharedWithMe() {
         )}
         <ul className="grid gap-3">
           {items?.map(({ share, role, canPublish, root, sharedBy }) => {
-            const Icon = share.rootId === null ? Library : Folder;
             return (
               <li key={share.shareId}>
                 <Link
@@ -45,9 +47,7 @@ function SharedWithMe() {
                   params={{ spaceId: share.spaceId }}
                   className="flex items-center gap-3 rounded-control border p-3 hover:tint active:tint-strong"
                 >
-                  <span className="grid size-10 shrink-0 place-items-center rounded-tile bg-folder-blue">
-                    <Icon className="size-5" strokeWidth={1.75} />
-                  </span>
+                  <SharedTile root={root} space={share.rootId === null} />
                   <span className="grid min-w-0 flex-1">
                     <span className="truncate font-extrabold">
                       <Name>{nameOf(root) ?? 'A folder this app can’t read'}</Name>
@@ -67,5 +67,37 @@ function SharedWithMe() {
         </ul>
       </div>
     </section>
+  );
+}
+
+/**
+ * A shared space's tile as the rail draws it, or a shared folder's as the
+ * sidebar does. One this app can't read, or with no look of its own, shows
+ * a library or folder on blue.
+ */
+function SharedTile({
+  root,
+  space,
+}: {
+  root: spaceOperations.LoadedMetadata | null;
+  space: boolean;
+}) {
+  const opened = root?.opened.kind === 'current' ? root.opened.metadata : null;
+  const picture = opened && (opened.emoji ?? folderSymbolOf(opened) ?? folderIconOf(opened));
+  if (opened && space && picture) {
+    return (
+      <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-tile bg-muted text-xl leading-none text-foreground">
+        <SpaceIcon metadata={root} name={opened.name} />
+      </span>
+    );
+  }
+  if (opened && !space && (picture || opened.tint)) {
+    return <FolderTile metadata={root} {...folderLook(opened)} className="size-10 text-xl" />;
+  }
+  const Icon = space ? Library : Folder;
+  return (
+    <span className="grid size-10 shrink-0 place-items-center rounded-tile bg-folder-blue">
+      <Icon className="size-5" strokeWidth={1.75} />
+    </span>
   );
 }

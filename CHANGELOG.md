@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#336)
+
 #### Releases and packaging
 
 - Signed apt and dnf repositories for the desktop app on GitHub Pages, published after each stable release, and an update notice that says to use apt or dnf for them. (#361)
