@@ -142,12 +142,13 @@ export function Propose({ workshop }: { workshop: Workshop }) {
 export function ProposalsList() {
   const { data: proposals } = useQuery({ ...proposalsQuery, retry: false });
   const [reviewing, setReviewing] = useState<ProposalSummary | null>(null);
-  if (!proposals || proposals.length === 0) return null;
+  // The review stays open while it says why its proposal went, as when declined on another device.
+  if ((!proposals || proposals.length === 0) && !reviewing) return null;
   return (
     <section aria-label="Proposals" className="grid gap-3">
       <h2 className="text-sm font-bold">Proposals for your plugins</h2>
       <ul className="grid gap-2">
-        {proposals.map((proposal) => (
+        {proposals?.map((proposal) => (
           <li
             key={proposal.id}
             aria-label={proposal.name}
