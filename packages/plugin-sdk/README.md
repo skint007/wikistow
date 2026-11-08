@@ -106,7 +106,7 @@ App plugins put interface in these places. In a region whose policy is **Add**, 
 | `settings.section` | Add | `{ id, title, view }` | Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button | The same |
 | `app.titlebar` | Add | `{ id, view }` | The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers | Not in the browser, which has no titlebar of its own |
 
-The page places' views get `{ page }`, the same handle a command gets, and `editor.toolbar`'s are drawn only in the draft view; settings sections and titlebar buttons get nothing yet, and every view can use `host.app`, so a titlebar button can open the plugin's own page. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
+The page places' views get `{ page }`, the same handle a command gets, and `editor.toolbar`'s are drawn only in the draft view; settings sections and titlebar buttons get nothing (#310 gives settings sections the plugin's settings), and every view can use `host.app`, so a titlebar button can open the plugin's own page. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
 
 The `data-region` hooks, for CSS (`DATA_REGIONS` in `src/host.ts`):
 

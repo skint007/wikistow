@@ -152,7 +152,7 @@ At phone sizes the `/workshop` page is one column at full width: the drafts list
 
 ### Out of scope
 
-Saving the conversation or the sample pages, merging two devices' changes to one draft, drafts shared between accounts, proposing a change back to someone else's plugin, sweeping drafts by age, encrypted drafts, binary files in drafts, and a server-side publish from a draft's build.
+Saving the conversation or the sample pages (#314), merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, binary files in drafts (#313), and a server-side publish from a draft's build.
 
 ## Spike evidence (2026-10-16)
 

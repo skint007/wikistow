@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Public links: a readable copy of one page, served by the server

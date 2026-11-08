@@ -38,7 +38,7 @@ sudo apt install ./wikistow-desktop-<version>-amd64.deb     # Debian, Ubuntu
 sudo dnf install ./wikistow-desktop-<version>-x86_64.rpm    # Fedora
 ```
 
-A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and `dnf upgrade` never see a newer one. To update, download the new release's package and install it the same way; it replaces the old version. To hear about new releases, use **Watch → Custom → Releases** on the [repository](https://github.com/skint007/wikistow). The packages aren't signed. The checksum shows the download matches what the release published.
+A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and `dnf upgrade` never see a newer one (#326). To update, download the new release's package and install it the same way; it replaces the old version. To hear about new releases, use **Watch → Custom → Releases** on the [repository](https://github.com/skint007/wikistow). The packages aren't signed. The checksum shows the download matches what the release published.
 
 To remove the app, run `sudo apt remove wikistow-desktop` or `sudo dnf remove wikistow-desktop`. `apt purge` also keeps `~/.config/WikiStow`.
 
@@ -50,7 +50,7 @@ Chromium's sandbox helper, `/usr/lib/wikistow-desktop/chrome-sandbox`, is instal
 
 The app runs on Windows 10 and 11 on x64, and Windows 11 on Arm. Download the installer for your computer from the [latest release](https://github.com/skint007/wikistow/releases/latest): `wikistow-desktop-<version>-x64-setup.exe` for most PCs, or `wikistow-desktop-<version>-arm64-setup.exe` for Windows on Arm, such as a Snapdragon laptop. **Settings → System → About** shows which you have, under **System type**. The x64 app also runs on Windows 11 on Arm, more slowly.
 
-The installer isn't signed yet, so the first time Windows shows **Windows protected your PC**. Choose **More info**, check that the app is the installer you downloaded and the publisher is **Unknown publisher**, then choose **Run anyway**. To check the download first, compare `Get-FileHash .\wikistow-desktop-<version>-x64-setup.exe` in PowerShell with its line in the release's `SHA256SUMS`.
+The installer isn't signed yet (#325), so the first time Windows shows **Windows protected your PC**. Choose **More info**, check that the app is the installer you downloaded and the publisher is **Unknown publisher**, then choose **Run anyway**. To check the download first, compare `Get-FileHash .\wikistow-desktop-<version>-x64-setup.exe` in PowerShell with its line in the release's `SHA256SUMS`.
 
 It installs for you alone, with no administrator prompt, into `%LOCALAPPDATA%\Programs\WikiStow Desktop`, beside the CLI's `%LOCALAPPDATA%\Programs\wikistow` if you have it. It adds **WikiStow** to the Start menu, registers `wikistow://` links for signing in, and lists the app under **Settings → Apps** (**Installed apps** on Windows 11, **Apps & features** on Windows 10), where **Uninstall** removes it.
 

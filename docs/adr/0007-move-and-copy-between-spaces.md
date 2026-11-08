@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Moving and copying pages and folders between spaces
@@ -98,14 +98,14 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 
 ### 8. Where it shows
 
-- **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. Dragging between spaces in the rail stays out.
+- **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. Dragging between spaces in the rail stays out (#338).
 - **CLI:** `wikistow page copy` and `wikistow folder copy`. The CLI acts as its agent (decision 2), so it copies within its picks and never moves; moves stay in the app.
 - **The live tree** reports the finish in both spaces.
 - **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only.
 
 ### Out of scope
 
-Earlier history; moving a whole space; keeping a page's ID or address across a move; redirecting an old address to the new place; and copying a page's publications or public link.
+Earlier history; moving a whole space (#339); keeping a page's ID or address across a move; redirecting an old address to the new place (#332); and copying a page's publications or public link (#340).
 
 ## Considered options
 

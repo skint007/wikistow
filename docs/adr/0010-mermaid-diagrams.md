@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Mermaid diagrams, drawn in a sandboxed frame

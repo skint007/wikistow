@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Plugins that replace parts of the app, see where the person is, and edit at the cursor
@@ -61,7 +61,7 @@ The region table from #281 records each region's policy.
   A view drawn there could show one thing while the person approves another. An app plugin could already do that with the page's DOM, as ADR 0001 says, but the region table must not invite it.
 - **The desktop titlebar's window controls**, as ADR 0001 decided: moving the window never depends on a plugin.
 
-Search results and the chat column wait until someone wants them.
+Search results and the chat column wait until someone wants them (#316).
 
 ### 3. Editing at the cursor, and a region in the editor's toolbar
 

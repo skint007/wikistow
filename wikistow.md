@@ -13,7 +13,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - One installation for family and friends. Registration starts closed to uninvited users, and an administrator can enable it.
 - Accounts support verified email, password login, password reset, and optional authenticator-app two-factor authentication.
 - Administrators invite people by email or single-use link, manage accounts, suspend access, and revoke sessions and agent credentials. Invitations expire after seven days.
-- Spaces contain folders and pages. People can receive access to an entire space or a folder, never a single page. A grant covers the folder's existing and future descendants. Groups, named sets of people a space or folder is shared with as one, come in Milestone 5: built for people, with agents in groups not built yet.
+- Spaces contain folders and pages. People can receive access to an entire space or a folder, never a single page. A grant covers the folder's existing and future descendants. Groups, named sets of people and their agents that a space or folder is shared with as one, come in Milestone 5 (built).
 - Personal and shared spaces use the same content model. Shared content requires authentication and authorization. The one exception is a page someone gives a public link: anyone with the link can read its published version, with no account ([ADR 0005](docs/adr/0005-public-links.md)). Search-indexed publishing is outside this version.
 - Markdown is the canonical page source. People can switch between visual editing and source editing. The application supplies the theme.
 - Drafts autosave. Readers see published versions; editors see drafts. Publishing is a separate permission. Published history records the person or agent responsible and supports restoration. An editor who can publish can tick a page's tasks, and change values its plugin blocks set, while reading it; each burst of those publishes one version, which history labels with what changed ("Ticked 3, unticked 1"), folding a run of them by one person into one row ([ADR 0008](docs/adr/0008-reader-change-labels.md)).
@@ -24,7 +24,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
 - Bulk import from Joplin and from an Obsidian vault (see **Import**). A person can also move one Obsidian note by pasting its Markdown into a page, or have an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
-Comments, simultaneous live editing, semantic search, passkeys and MCP integration are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
+Comments (#320), simultaneous live editing (#321), semantic search (#324), passkeys (#322) and MCP integration (#323) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
 
 ## Architecture
 
@@ -100,7 +100,7 @@ Proposed default: the common library is an ordinary shared space with owner-mana
 | Move or delete content across permission boundaries | No | No | No | Yes |
 | Copy content they can edit to a folder where they can make pages | No | Yes | Yes | Yes |
 
-Groups come in [Milestone 5](#milestone-5-groups): built for people, with agents in groups not built yet. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
+Groups come in [Milestone 5](#milestone-5-groups), built for people and their agents. A group belongs to a space and only its owners manage it. This avoids installation administrators gaining content access indirectly by adding themselves to a group.
 
 Access comes from a share of a space or folder, and covers everything beneath it. Shares don't nest: a folder inside a shared folder can't be shared on its own, and a folder that contains a shared folder can't be shared. A person has one role in each share; with groups it is the highest their direct grant and their groups give (Milestone 5). There are no deny exceptions, so a private child cannot live beneath a shared folder.
 
@@ -285,7 +285,7 @@ A page has frontmatter when its first line is exactly `---` and a later line is 
 
 Notes from Joplin and whole Obsidian vaults come in with **Import…** (see **Import**). A note from Obsidian or elsewhere can also arrive as ordinary Markdown, pasted into the source or visual editor, or written by an agent with `wikistow page create` or `page draft`, which can make their folders first with `folder create` (#170). Obsidian wikilinks and attachment embeds work as described above. Frontmatter is preserved as described above. Other Obsidian syntax arrives as source text and follows the unsupported-syntax rule. Images and files are added as attachments through the editor or the CLI. Pasting rich text must not silently drop content.
 
-Use stable IDs for links inside the application. For wikilinks, the encrypted link table holds these IDs. Export writes wikilinks with current titles, so the files open in Obsidian, and copies attachments into a readable directory (see **Export**). *Proposed, not built:* an export option converts wikilinks to relative Markdown paths instead. Preserve plugin syntax as source text rather than claiming it works in the visual editor. The supported subset is validated against representative documents, including pasted Obsidian notes, during the editor milestone.
+Use stable IDs for links inside the application. For wikilinks, the encrypted link table holds these IDs. Export writes wikilinks with current titles, so the files open in Obsidian, and copies attachments into a readable directory (see **Export**). *Proposed, not built (#319):* an export option converts wikilinks to relative Markdown paths instead. Preserve plugin syntax as source text rather than claiming it works in the visual editor. The supported subset is validated against representative documents, including pasted Obsidian notes, during the editor milestone.
 
 ### Diagrams
 

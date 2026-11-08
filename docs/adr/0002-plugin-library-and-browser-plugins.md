@@ -4,7 +4,7 @@ status: built
 
 # A plugin library on the server, and plugins in the browser
 
-[ADR 0004](0004-plugin-drafts.md) (accepted) amends this one: library plugins can be Only me, an upload installs the plugin for its owner, and the workshop saves plugin drafts on the server and runs in the browser and on phones too.
+[ADR 0004](0004-plugin-drafts.md) (built) amends this one: library plugins can be Only me, an upload installs the plugin for its owner, and the workshop saves plugin drafts on the server and runs in the browser and on phones too.
 
 WikiStow's server gains a shared plugin library (#5). Members upload built plugins, and anyone on the server can install them, in the browser, on a phone or in the desktop app. Installing is approving the plugin's hash; the approvals live in the person's encrypted, signed account data, so they follow the person to every device and the server can't add one. The browser runs approved plugins from the server's own origin, a script's code in a worker inside a sandboxed frame with an opaque origin, so it can't reach the tab's storage.
 
@@ -54,7 +54,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 ### Out of scope
 
-Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins, private library entries, uploading from a phone, development loading or the workshop in the browser, storage for plugins, and sandboxing app plugins.
+Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins (#312), private library entries, uploading from a phone, development loading (#317) or the workshop in the browser, storage for plugins (#310), and sandboxing app plugins.
 
 ## Spike evidence (2026-10-15)
 

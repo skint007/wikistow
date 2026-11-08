@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Labels for versions made by changes while reading
@@ -72,7 +72,7 @@ The extension is inside the encrypted payload, so the server learns nothing new.
 - **Name the publication the changes were made on**, and show the label when that is the version just before in history. This fails when the changes stay in the draft (a public link) and an older app then edits and publishes that draft: the publication before is still the one named. It also needs the version before, which readers don't have for their oldest version. Rejected for decision 2.
 - **Load labels for the whole history.** Simpler UI, but a page ticked daily for a year would download and decrypt 365 versions each time history opens. Rejected for 20 at a time.
 - **Fold runs into one row that adds up their counts.** A box ticked in one version and unticked in the next would read as both, and View and Restore would need to say which version they mean. Rejected for decision 5's row, which keeps the newest version's own label.
-- **Labels in the CLI's `page history`.** The CLI lists records only. Left out; it can come later with the same helper (`changeOf`).
+- **Labels in the CLI's `page history`.** The CLI lists records only. Left out; it can come later with the same helper (`changeOf`, #337).
 
 ## Consequences
 

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Reading and editing pages offline
@@ -78,7 +78,7 @@ Settings, under **This device**, shows the choice, how much is kept ("1,204 page
 ### 6. The browser app shell
 
 - **A service worker**, `/sw.js` at the top of the site, written for this app (about 100 lines), built with the web app, with the build's file list put in at build time. The desktop doesn't register one: its app is on disk already.
-  - At install it caches `index.html`, `boot.js`, the icons, the manifest and every file under `/assets` in the build, lazy chunks and workers included, so the editors, the Argon2id worker and the reader's worker load offline. It leaves out source maps (`*.map`, about half of `/assets`) and what only the Workshop uses (`esbuild.wasm`, 14 MB), since Workshop drafts need the server. It also leaves out Mermaid (`/assets/mermaid/`, 5.5 MB): only the diagram frame loads it, and the frame's opaque origin is never the worker's, so the frame couldn't use the copy (found building step 4).
+  - At install it caches `index.html`, `boot.js`, the icons, the manifest and every file under `/assets` in the build, lazy chunks and workers included, so the editors, the Argon2id worker and the reader's worker load offline. It leaves out source maps (`*.map`, about half of `/assets`) and what only the Workshop uses (`esbuild.wasm`, 14 MB), since Workshop drafts need the server. It also leaves out Mermaid (`/assets/mermaid/`, 5.5 MB): only the diagram frame loads it, and the frame's opaque origin is never the worker's, so the frame couldn't use the copy (found building step 4). So diagrams don't draw in the browser after an offline reload (#333).
   - **App pages** (navigations to an app path), and the files at the top of the site that it cached (`/boot.js`, the icons, the manifest), whose names carry no hash: the server first, and the cached copy when there's no answer within 3 seconds, or the answer is a 5xx that isn't the server's own (decision 4). Cached responses keep the server's headers, so the security policy is the same.
   - **`/assets/*`**: from the cache, else the server.
   - **Left to the server**: `/api/*`, public pages (`/p/*`), `/plugin-host.html` and its files, and any other path with an extension that it didn't cache.
@@ -124,7 +124,7 @@ Everything else, and the control says "Needs the connection" (a `data-hint`) rat
 
 ## Out of scope
 
-Agents and the CLI, which stay online; merging edits; keeping older versions or history; offline publishing, sharing, moves, deletes, renames of folders, new spaces and templates; background sync while the app is closed (the browser's Background Sync API); a storage cap.
+Agents and the CLI, which stay online; merging edits (#334); keeping older versions or history; offline publishing, sharing, moves, deletes, renames of folders (#330, #331), new spaces and templates; background sync while the app is closed (the browser's Background Sync API); a storage cap.
 
 ## Considered options
 
