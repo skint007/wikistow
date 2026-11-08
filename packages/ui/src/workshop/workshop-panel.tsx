@@ -36,8 +36,8 @@ export function WorkshopDisclosure({ host }: { host: string }) {
         The plugin’s files are saved as a draft on your WikiStow server as the assistant writes
         them, and the conversation, its versions and sample pages are kept with it, so you can carry
         on from any device. Like library plugins, they’re plain text on the server. A page you copy
-        into the preview isn’t kept: the conversation only notes that you copied one. The
-        assistant’s replies are kept as it wrote them.
+        into the preview isn’t kept: the conversation only notes that you copied one. What the
+        assistant writes is kept, so if it repeats some of a copy, that part is.
       </p>
     </div>
   );

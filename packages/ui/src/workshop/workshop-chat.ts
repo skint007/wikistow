@@ -46,6 +46,9 @@ export type Keeping = {
 
 const encoder = new TextEncoder();
 
+/** Each draft's last save from a workshop that closed, which one opening on it reads after. */
+const closing = new Map<string, Promise<void>>();
+
 /**
  * A conversation that builds a plugin in a workshop (#257) on the plugin
  * draft `draftId`. The model gets the workshop's tools only: the draft's
@@ -81,7 +84,8 @@ export class WorkshopChat {
   #done = false;
 
   constructor(draftId: string) {
-    const workshop = new Workshop(draftId);
+    // Read after the last workshop on this draft here kept its own, as it closed.
+    const workshop = new Workshop(draftId, closing.get(draftId));
     this.workshop = workshop;
     const tools = workshopTools.workshopTools({
       files: () => workshop.files(),
@@ -294,9 +298,9 @@ export class WorkshopChat {
     this.#done = true;
     clearTimeout(this.#timer);
     await this.#saving;
-    // What can't be read here, or another device kept, is forgotten too, so the next is kept.
+    // Whatever is kept, read here or not, so the next workshop starts afresh.
     const { status } = this.#keeping;
-    if (status !== 'kept' && status !== 'unreadable' && status !== 'stale') return;
+    if (status === 'old-server' || status === 'failed' || status === 'reading') return;
     try {
       await api.call(pluginDraftRoutes.clearDraftWorkshop, {
         params: { draftId: this.workshop.draftId },
@@ -313,6 +317,7 @@ export class WorkshopChat {
    */
   close() {
     if (!this.#done) this.#keep();
+    closing.set(this.workshop.draftId, this.#saving);
     this.#done = true;
     this.session.close();
     this.workshop.end();

@@ -233,8 +233,12 @@ export class Workshop {
   #theming: string | null = null;
   readonly #unwatchTheme: () => void;
 
-  constructor(draftId: string) {
+  /** What the draft keeps is read after this, a closed workshop's last save. */
+  readonly #after: Promise<void>;
+
+  constructor(draftId: string, after: Promise<void> = Promise.resolve()) {
     this.draftId = draftId;
+    this.#after = after;
     // The workshop's versions: approving one runs it in the preview, in place of what runs.
     const versions: PluginStore<number> = {
       list: async () => {
@@ -330,6 +334,7 @@ export class Workshop {
         draft.files > files.length
           ? (await api.call(pluginDraftRoutes.getDraftBinaryFiles, { params })).files
           : [];
+      await this.#after;
       const kept = await this.#readKept();
       if (this.#state.phase === 'ended') {
         this.#keptRead({ status: 'failed' });
