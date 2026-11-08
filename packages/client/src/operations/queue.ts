@@ -887,6 +887,10 @@ export class OfflineQueue {
           continue;
         }
         if (parent) continue;
+        // A delete waits while a change to the same item waits for the
+        // person, as its draft goes first, into the trash with it.
+        const held = entries.some((other) => other.id === entry.id && other.failure);
+        if (entry.kind === 'delete' && held) continue;
         next = entry;
         break;
       }

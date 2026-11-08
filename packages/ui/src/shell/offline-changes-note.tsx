@@ -1,4 +1,9 @@
-import { queueOperations, type ClientContext, type spaceOperations } from '@wikistow/client';
+import {
+  queueOperations,
+  reviseMetadata,
+  type ClientContext,
+  type spaceOperations,
+} from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -231,9 +236,16 @@ function RenameConflict({
 }) {
   const { data: tree } = useQuery(treeQuery(ctx, entry.spaceId));
   const theirs = tree?.folders.find((folder) => folder.id === entry.id)?.metadata ?? null;
+  // As Yours sends it: the changes on top of theirs.
   const mine: spaceOperations.LoadedMetadata = {
     ...entry.base,
-    opened: { kind: 'current', metadata: queueOperations.renamedMetadata(entry) },
+    opened: {
+      kind: 'current',
+      metadata:
+        theirs?.opened.kind === 'current'
+          ? reviseMetadata(theirs.opened, entry.changes)
+          : queueOperations.renamedMetadata(entry),
+    },
   };
   return (
     <div className="grid gap-2">
