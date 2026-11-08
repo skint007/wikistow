@@ -10,6 +10,7 @@ import {
   asksMore,
   Manifest,
   PageAccess,
+  PluginId,
   settingsFit,
   SettingsValue,
   trustLevel,
@@ -57,6 +58,11 @@ const State = z.strictObject({
    * the file while any are kept.
    */
   settings: z.record(z.string(), z.record(z.string(), SettingsValue)).optional(),
+  /**
+   * The library plugins turned off on this computer only (#312), by
+   * account. Left out while there are none, as `settings` is.
+   */
+  offHere: z.record(z.string(), z.array(PluginId).max(500)).optional(),
 });
 type State = z.infer<typeof State>;
 type Settings = z.infer<typeof SettingsValue>;
@@ -285,6 +291,20 @@ export function desktopPlugins(data: string) {
       const value = SettingsValue.parse(settings);
       if (!settingsFit(value)) throw new PluginFolderError('Those settings are too large.');
       keepSettings(account, plugin.manifest.id, value);
+      await save();
+    },
+
+    offHere: (accountId: unknown): string[] => state.offHere?.[z.string().parse(accountId)] ?? [],
+
+    /** Keep `pluginIds` as the account's library plugins off on this computer. */
+    async setOffHere(accountId: unknown, pluginIds: unknown) {
+      const account = z.string().min(1).parse(accountId);
+      const ids = State.shape.offHere.unwrap().valueType.parse(pluginIds);
+      const all = { ...state.offHere };
+      if (ids.length > 0) all[account] = [...new Set(ids)];
+      else delete all[account];
+      if (Object.keys(all).length > 0) state.offHere = all;
+      else delete state.offHere;
       await save();
     },
 

@@ -9,19 +9,26 @@ import type { AppPluginStore } from './store';
  * there per account (`plugins.json`), and, while the vault is open, the library
  * plugins the account approved (ADR 0002), which main downloads, checks
  * against their hashes and keeps copies of. Those keep their choices in
- * the account's contacts record, as in a browser. A folder or development
+ * the account's contacts record, as in a browser, except off here (#312),
+ * kept per account in `plugins.json`. A folder or development
  * install replaces the library's plugin of the same ID on this computer.
  */
 export function desktopStore(bridge: DesktopBridge): AppPluginStore {
-  const library = libraryStore(async (_ctx, approvals) => {
-    const approved = approvals.map(({ id, hash, enabled }) => ({ id, hash, enabled }));
-    // Asked even with none approved, so main deletes copies no longer approved.
-    // Never anything but this computer's own plugins, whatever went wrong.
-    const copies = await bridge
-      .libraryPlugins(approved)
-      .catch(() => ({ plugins: [], problems: {} }));
-    return { plugins: copies.plugins, unavailable: copies.problems };
-  });
+  const library = libraryStore(
+    async (_ctx, approvals) => {
+      const approved = approvals.map(({ id, hash, enabled }) => ({ id, hash, enabled }));
+      // Asked even with none approved, so main deletes copies no longer approved.
+      // Never anything but this computer's own plugins, whatever went wrong.
+      const copies = await bridge
+        .libraryPlugins(approved)
+        .catch(() => ({ plugins: [], problems: {} }));
+      return { plugins: copies.plugins, unavailable: copies.problems };
+    },
+    {
+      get: ({ vault }) => bridge.pluginsOffHere(vault.accountId),
+      set: ({ vault }, ids) => bridge.setPluginsOffHere(vault.accountId, [...ids]),
+    },
+  );
   const accountId = () => {
     const vault = vaultStore.get();
     return vault.status === 'unlocked' ? vault.vault.accountId : null;
@@ -31,7 +38,8 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
     async list() {
       const state = await bridge.plugins();
       const account = accountId();
-      if (account === null) return { ...state, access: {}, settings: {}, unavailable: {} };
+      if (account === null)
+        return { ...state, access: {}, settings: {}, offHere: [], unavailable: {} };
       const here = new Set(state.plugins.map(({ manifest }) => manifest.id));
       const [held, folders, folderSettings] = await Promise.all([
         library.list(),
@@ -48,6 +56,7 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
         ],
         access: { ...folders, ...notHere(held.access) },
         settings: { ...folderSettings, ...notHere(held.settings) },
+        offHere: held.offHere,
         unavailable: held.unavailable,
       };
     },
@@ -62,6 +71,10 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
     async setOwnParts(plugin, regions) {
       if (plugin.library) await library.setOwnParts(plugin, regions);
       else await bridge.setPluginOwnParts(plugin.id, [...regions]);
+    },
+    async setOffHere(plugin, off) {
+      // A folder install's on/off is this computer's already.
+      if (plugin.library) await library.setOffHere(plugin, off);
     },
     async setAccess(plugin, scopes) {
       if (plugin.library) return library.setAccess(plugin, scopes);

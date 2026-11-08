@@ -902,6 +902,8 @@ void app.whenReady().then(async () => {
   handle('setPluginSettings', (accountId, pluginId, settings) =>
     plugins.setSettings(accountId, pluginId, settings),
   );
+  handle('pluginsOffHere', async (accountId) => plugins.offHere(accountId));
+  handle('setPluginsOffHere', (accountId, pluginIds) => plugins.setOffHere(accountId, pluginIds));
   handle('libraryPlugins', (approved) => library.sync(approved));
   handle('pluginUpload', (id) => plugins.uploadFiles(id));
   handle('setSafeMode', async (on) => setSafeMode(on === true));
