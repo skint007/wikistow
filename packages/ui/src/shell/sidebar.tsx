@@ -41,6 +41,7 @@ import {
   DeletePageDialog,
   deleteNote,
   useDroppedOnDelete,
+  useMovedInto,
 } from '../page/delete-dialog';
 import {
   destinationsIn,
@@ -277,6 +278,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [fromTemplate, setFromTemplate] = useState<FolderId | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
   const droppedOnDelete = useDroppedOnDelete(deleting);
+  const movedInto = useMovedInto(spaceId, deleting);
   const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
@@ -819,7 +821,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
             </DialogTitle>
             <DialogDescription>
               {droppedOnDelete ? (
-                deleteNote({ made: true, offline: availability.offline })
+                deleteNote({ made: true, offline: availability.offline, moved: movedInto })
               ) : (
                 <>
                   It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
