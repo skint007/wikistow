@@ -40,6 +40,7 @@ export * from './content/sharing.ts';
 export * from './content/groups.ts';
 export * from './content/moves.ts';
 export * from './content/copies.ts';
+export * from './content/moved.ts';
 export * from './content/publications.ts';
 // Thrown by the shared checks on signatures and encodings.
 export { CryptoError } from '@wikistow/client';

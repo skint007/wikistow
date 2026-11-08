@@ -55,6 +55,7 @@ import {
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
+import { recordMoves } from './moved.ts';
 import { charge } from './quota.ts';
 import {
   deleteUnlistedFile,
@@ -809,6 +810,12 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
         nodeIds: stale,
       });
     }
+    // Where each node went, before the delete takes the records naming them.
+    await recordMoves(tx, {
+      sourceSpaceId: copy.sourceSpaceId,
+      destinationSpaceId: copy.destinationSpaceId,
+      moved: made,
+    });
     const lifted = await liftTrash(tx, copy, held);
     const going =
       lifted.length === 0

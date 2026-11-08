@@ -157,3 +157,21 @@ export const cancel = {
   params: CopyParams,
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
+
+/**
+ * Where a node a move took into another space went (section 10, "Old
+ * addresses"): the new node of the old address `/s/:spaceId/p/:nodeId` or
+ * `/s/:spaceId/f/:nodeId`, after any later moves, for a caller who can open
+ * it there. `not-found` for anyone else, for a node that didn't move, and
+ * while the new node is in the trash.
+ */
+export const moved = {
+  method: 'GET',
+  path: '/api/spaces/:spaceId/nodes/:nodeId/moved',
+  params: z.object({ spaceId: SpaceId, nodeId: NodeId }),
+  response: z.strictObject({
+    spaceId: SpaceId,
+    nodeId: NodeId,
+    kind: z.enum(['folder', 'page']),
+  }),
+} as const satisfies RouteDef;
