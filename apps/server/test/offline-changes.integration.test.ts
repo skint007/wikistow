@@ -10,6 +10,7 @@ import {
   newPayload,
   openSession,
   FolderId as FolderIdSchema,
+  moveOperations as moves,
   PageId,
   pageOperations as pages,
   publicLinkOperations as links,
@@ -567,6 +568,21 @@ describe('moves and publishes made offline', () => {
     expect(await queue.entries()).toEqual([]);
     expect(await parentNow(ctx, spaceId, inner.id)).toBe(folder.id);
     expect((await draft()).markdown).toBe('moved words');
+  });
+
+  it('send a move made again before a delete of the folder it left', async () => {
+    const { ctx, queue, spaceId, page } = await device();
+    const old = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Old' });
+    const archive = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Archive' });
+    const preview = await moves.previewMove(ctx, { spaceId, nodeId: page.pageId, parentId: old });
+    await moves.moveNode(ctx, { preview });
+    await queue.move({ spaceId, id: page.pageId, node: 'page', name: 'Plan', parentId: null });
+    await queue.delete({ spaceId, id: old, node: 'folder', name: 'Old' });
+    await queue.move({ spaceId, id: page.pageId, node: 'page', name: 'Plan', parentId: archive });
+
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await parentNow(ctx, spaceId, page.pageId)).toBe(archive);
   });
 
   it('stop a move across a shared folder’s edge, or into a folder gone meanwhile', async () => {

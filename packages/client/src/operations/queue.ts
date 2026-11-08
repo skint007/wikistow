@@ -1042,6 +1042,7 @@ export class OfflineQueue {
       const publishes = new Map(
         entries.flatMap((entry) => (entry.kind === 'publish' ? [[entry.id, entry]] : [])),
       );
+      const moving = entries.some((entry) => entry.kind === 'move' && entry.failure === null);
       let next: QueueEntry | undefined;
       for (const entry of entries) {
         if (entry.failure) continue;
@@ -1061,6 +1062,9 @@ export class OfflineQueue {
         // person, as its draft goes first, and a publish while the page's draft does.
         const held = entries.some((other) => other.id === entry.id && other.failure);
         if (entry.kind === 'delete' && held) continue;
+        // A delete waits for the moves waiting too: one made again goes in
+        // its new order, and may take its item out of what is deleted.
+        if (entry.kind === 'delete' && moving) continue;
         if (entry.kind === 'publish' && drafts.get(entry.id)?.failure) continue;
         // A publish goes between its draft as it stood and what was typed after.
         if (entry.kind === 'page' && publishesFirst(publishes.get(entry.id), entry)) continue;
