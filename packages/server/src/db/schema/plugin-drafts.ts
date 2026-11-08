@@ -1,10 +1,11 @@
-import { index, integer, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
 import { bytea, primaryId, timestamptz } from './helpers.ts';
 import { users } from './users.ts';
 
 /**
  * Plugin drafts (ADR 0004): the workshop's work, saved as the assistant
- * writes it. Plain text, like the library's plugins. `updatedAt` moves
+ * writes it. Plain, like the library's plugins. `updatedAt` moves
  * with the files, never with a build.
  */
 export const pluginDrafts = pgTable(
@@ -27,7 +28,10 @@ export const pluginDrafts = pgTable(
   (table) => [index('plugin_drafts_owner_idx').on(table.ownerId, table.updatedAt)],
 );
 
-/** A draft's files, each a text file of at most 256 KB. */
+/**
+ * A draft's files: each a text file of at most 256 KB (`text`), or a font
+ * or image under `public/` of at most 1 MB (`data`), never both.
+ */
 export const pluginDraftFiles = pgTable(
   'plugin_draft_files',
   {
@@ -35,11 +39,18 @@ export const pluginDraftFiles = pgTable(
       .notNull()
       .references(() => pluginDrafts.id, { onDelete: 'cascade' }),
     path: text().notNull(),
-    text: text().notNull(),
-    /** Its text's bytes in UTF-8. */
+    text: text(),
+    data: bytea(),
+    /** Its text's bytes in UTF-8, or its bytes. */
     size: integer().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.draftId, table.path] })],
+  (table) => [
+    primaryKey({ columns: [table.draftId, table.path] }),
+    check(
+      'plugin_draft_files_text_or_data',
+      sql`(${table.text} is null) <> (${table.data} is null)`,
+    ),
+  ],
 );
 
 /** The files of a draft's one build, as a library upload carries them. */

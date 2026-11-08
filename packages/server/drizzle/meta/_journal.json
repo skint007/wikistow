@@ -309,6 +309,13 @@
       "when": 1794161624824,
       "tag": "0043_passkeys",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794163932824,
+      "tag": "0044_draft_binary_files",
+      "breakpoints": true
     }
   ]
 }

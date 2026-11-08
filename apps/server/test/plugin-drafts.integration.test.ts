@@ -29,7 +29,11 @@ const MANIFEST = JSON.stringify({
 
 const create = (
   person: Person,
-  body: { files?: { path: string; text: string }[]; replaces?: string } = {},
+  body: {
+    files?: { path: string; text: string }[];
+    binary?: { path: string; data: string }[];
+    replaces?: string;
+  } = {},
 ) => api(person).call(pluginDraftRoutes.createDraft, { body });
 
 const errorCode = (promise: Promise<unknown>) =>
@@ -173,5 +177,102 @@ describe('plugin drafts', () => {
     const kept = await api(ann).call(pluginDraftRoutes.getDraft, { params: { draftId: draft.id } });
     expect(kept.draft.files).toBe(200);
     expect(kept.files.filter((f) => !f.path.startsWith('f/')).map((f) => f.path)).toEqual(['b.ts']);
+  });
+
+  it('hold fonts and images under public/ as bytes, read apart from the text (#313)', async () => {
+    const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
+    // Not UTF-8, with a NUL: what a text column couldn't hold.
+    const font = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 0x00, 0xff, 0xfe]);
+    const { draft } = await create(ann, {
+      files: [{ path: 'wikistow-plugin.json', text: MANIFEST }],
+      binary: [{ path: 'public/font.woff2', data: b64(font) }],
+    });
+    expect(draft).toMatchObject({ files: 2, size: MANIFEST.length + font.length });
+    const params = { draftId: draft.id };
+    const texts = async () =>
+      (await api(ann).call(pluginDraftRoutes.getDraft, { params })).files.map((f) => f.path);
+    const binary = async () =>
+      (await api(ann).call(pluginDraftRoutes.getDraftBinaryFiles, { params })).files;
+    // An older app reads the draft's text as before.
+    expect(await texts()).toEqual(['wikistow-plugin.json']);
+    expect(await binary()).toEqual([{ path: 'public/font.woff2', data: b64(font) }]);
+
+    const put = (path: string, size: number) =>
+      errorCode(
+        api(ann).call(pluginDraftRoutes.putDraftBinaryFile, {
+          params,
+          body: { path, data: b64(new Uint8Array(size)) },
+        }),
+      );
+    const binaryPath = `/api/plugin-drafts/${draft.id}/binary-files`;
+    // Fonts and images, under public/ only, and never as text.
+    for (const bad of ['src/logo.png', 'logo.png', 'public/logo.bmp', 'public/a.ts']) {
+      expect(await status(ann, binaryPath, 'POST', { path: bad, data: '' }), bad).toBe(400);
+    }
+    expect(
+      await status(ann, `/api/plugin-drafts/${draft.id}/changes`, 'POST', {
+        put: [{ path: 'public/logo.png', text: '' }],
+      }),
+    ).toBe(400);
+    // 1 MB a font or image.
+    expect(await put('public/logo.png', 1024 * 1024 + 1)).toBe('payload-too-large');
+    expect(await put('public/logo.png', 1024 * 1024)).toBe('ok');
+    expect((await binary()).map((f) => f.path)).toEqual(['public/font.woff2', 'public/logo.png']);
+    // Nobody else reads or adds them.
+    expect(await status(bob, binaryPath)).toBe(404);
+    expect(await status(bob, binaryPath, 'POST', { path: 'public/a.png', data: '' })).toBe(404);
+
+    // The changes route removes them.
+    await api(ann).call(pluginDraftRoutes.changeDraft, {
+      params,
+      body: { remove: ['public/logo.png'] },
+    });
+    expect((await binary()).map((f) => f.path)).toEqual(['public/font.woff2']);
+
+    // A library version's source/ gives them back as bytes.
+    const css = '@font-face { font-family: Serif; src: url(font.woff2); }';
+    const manifest = JSON.stringify({
+      id: 'serif-fonts',
+      name: 'Serif',
+      version: '1.0.0',
+      api: 1,
+      styles: ['serif.css'],
+    });
+    const built = {
+      'wikistow-plugin.json': manifest,
+      'serif.css': css,
+      'font.woff2': font,
+      'source/wikistow-plugin.json': manifest,
+      'source/public/serif.css': css,
+      'source/public/font.woff2': font,
+    };
+    const uploaded = await ann.browser.request('/api/plugins', {
+      method: 'POST',
+      json: {
+        files: Object.entries(built).map(([path, data]) => ({
+          path,
+          data: b64(typeof data === 'string' ? new TextEncoder().encode(data) : data),
+        })),
+      },
+    });
+    expect(uploaded.status).toBe(201);
+    const hash = await pluginHash(
+      new Map(
+        Object.entries(built).map(([path, data]) => [
+          path,
+          typeof data === 'string' ? new TextEncoder().encode(data) : data,
+        ]),
+      ),
+    );
+    const copy = await api(ann).call(pluginDraftRoutes.createDraft, {
+      body: { from: { pluginId: 'serif-fonts', hash } },
+    });
+    const from = { draftId: copy.draft.id };
+    expect(
+      (await api(ann).call(pluginDraftRoutes.getDraft, { params: from })).files.map((f) => f.path),
+    ).toEqual(['public/serif.css', 'wikistow-plugin.json']);
+    expect(
+      (await api(ann).call(pluginDraftRoutes.getDraftBinaryFiles, { params: from })).files,
+    ).toEqual([{ path: 'public/font.woff2', data: b64(font) }]);
   });
 });
