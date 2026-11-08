@@ -1,6 +1,16 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
+import {
+  check,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { bytea, primaryId, timestamptz } from './helpers.ts';
+import { plugins } from './plugins.ts';
 import { users } from './users.ts';
 
 /**
@@ -71,4 +81,54 @@ export const pluginDraftBuildFiles = pgTable(
     data: bytea().notNull(),
   },
   (table) => [primaryKey({ columns: [table.draftId, table.path] })],
+);
+
+/**
+ * A proposal (#315): a copy draft's files sent back to the owner of the
+ * plugin it copies, under that plugin's ID again, until the owner opens it
+ * as a draft or declines it. One per sender and plugin: proposing again
+ * replaces it. Not counted among the owner's drafts.
+ */
+export const pluginProposals = pgTable(
+  'plugin_proposals',
+  {
+    id: primaryId(),
+    /** The plugin it proposes a change to: its owner receives it. */
+    pluginId: text()
+      .notNull()
+      .references(() => plugins.id, { onDelete: 'cascade' }),
+    senderId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The version the copy started from. Plain text: it may be removed since. */
+    fromHash: text().notNull(),
+    /** Its manifest's name, else "Untitled plugin". */
+    name: text().notNull(),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('plugin_proposals_sender_plugin_idx').on(table.senderId, table.pluginId),
+    index('plugin_proposals_plugin_idx').on(table.pluginId),
+  ],
+);
+
+/** A proposal's files, as a draft's: text, or a font or image's bytes, never both. */
+export const pluginProposalFiles = pgTable(
+  'plugin_proposal_files',
+  {
+    proposalId: uuid()
+      .notNull()
+      .references(() => pluginProposals.id, { onDelete: 'cascade' }),
+    path: text().notNull(),
+    text: text(),
+    data: bytea(),
+    size: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.proposalId, table.path] }),
+    check(
+      'plugin_proposal_files_text_or_data',
+      sql`(${table.text} is null) <> (${table.data} is null)`,
+    ),
+  ],
 );

@@ -40,9 +40,9 @@ const MB = 1024 * 1024;
 const UNTITLED = 'Untitled plugin';
 const SOURCE = 'source/';
 
-type DraftText = { path: string; text: string };
+export type DraftText = { path: string; text: string };
 /** A font or image under `public/`, as bytes. */
-type DraftBytes = { path: string; data: Uint8Array };
+export type DraftBytes = { path: string; data: Uint8Array };
 type Draft = { accountId: string; draftId: string };
 
 const notFound = () => new ContentError('not-found', 'No such plugin draft');
@@ -71,8 +71,12 @@ const manifestFields = (text: string | undefined) =>
 const nameFrom = (text: string | undefined) =>
   manifestFields(text).name?.trim().slice(0, 100) || undefined;
 
+/** A draft's or proposal's name: its manifest's, else "Untitled plugin". */
+export const draftName = (texts: DraftText[]) =>
+  nameFrom(texts.find(({ path }) => path === MANIFEST_FILE)?.text) ?? UNTITLED;
+
 /** Refuse a draft's files, all of them as they would be, past the limits. */
-function checkFiles(files: { path: string; size: number }[]) {
+export function checkFiles(files: { path: string; size: number }[]) {
   if (files.length > MAX_DRAFT_FILES) {
     throw new ContentError('too-large', `A draft holds ${MAX_DRAFT_FILES} files at most.`);
   }
@@ -96,7 +100,7 @@ function checkFiles(files: { path: string; size: number }[]) {
 }
 
 /** Files as the draft's rows hold them, with their sizes: a text's in UTF-8, or the bytes'. */
-const rowsOf = (texts: DraftText[], binary: DraftBytes[]) => [
+export const rowsOf = (texts: DraftText[], binary: DraftBytes[]) => [
   ...texts.map(({ path, text }) => ({ path, text, data: null, size: Buffer.byteLength(text) })),
   ...binary.map(({ path, data }) => ({ path, text: null, data, size: data.length })),
 ];
@@ -217,7 +221,7 @@ async function copyId(db: Database, accountId: string, id: string) {
  * account's plugin gets a new ID (`copyId`) in its manifest; the rest of
  * the source is as it was.
  */
-async function sourceOf(
+export async function sourceOf(
   db: Database,
   store: PluginStore,
   accountId: string,
@@ -263,13 +267,20 @@ async function sourceOf(
   if (version.ownerId === accountId) return { texts: files, binary };
 
   const id = await copyId(db, accountId, pluginId);
-  const texts = files.map((file) => {
+  return { texts: withId(files, id, `This version’s ${MANIFEST_FILE} isn’t readable.`), binary };
+}
+
+/**
+ * `texts` with the manifest's `id` set to `id`, its JSON written out again,
+ * or refused with `unreadable` when the manifest isn't a JSON object.
+ */
+export function withId(texts: DraftText[], id: string, unreadable: string) {
+  return texts.map((file) => {
     if (file.path !== MANIFEST_FILE) return file;
     const fields = z.record(z.string(), z.unknown()).safeParse(parseJson(file.text));
-    if (!fields.success) throw invalid(`This version’s ${MANIFEST_FILE} isn’t readable.`);
+    if (!fields.success) throw invalid(unreadable);
     return { path: file.path, text: `${JSON.stringify({ ...fields.data, id }, null, 2)}\n` };
   });
-  return { texts, binary };
 }
 
 /**
@@ -298,12 +309,39 @@ export async function createPluginDraft(
   const { texts, binary: bytes } = from
     ? await sourceOf(db, store, accountId, from)
     : { texts: files, binary };
-  const rows = rowsOf(texts, bytes);
+  return storePluginDraft(db, { accountId, from, texts, binary: bytes, replaces });
+}
+
+/**
+ * Store a new draft of `texts` and `binary`, within the limits, as
+ * `createPluginDraft` does, noting the version it started from. `within`
+ * runs first in the same transaction, as opening a proposal deletes it.
+ */
+export async function storePluginDraft(
+  db: Database,
+  {
+    accountId,
+    from,
+    texts,
+    binary,
+    replaces,
+    within,
+  }: {
+    accountId: string;
+    from?: { pluginId: string; hash: string } | undefined;
+    texts: DraftText[];
+    binary: DraftBytes[];
+    replaces?: string | undefined;
+    within?: (tx: Database) => Promise<void>;
+  },
+) {
+  const rows = rowsOf(texts, binary);
   listed(rows.map(({ path }) => path));
   checkFiles(rows);
-  const name = nameFrom(texts.find(({ path }) => path === MANIFEST_FILE)?.text) ?? UNTITLED;
+  const name = draftName(texts);
 
   return db.transaction(async (tx) => {
+    await within?.(tx);
     // One account's drafts are made one at a time, so two can't both take
     // the last place. `no key update` leaves rows that reference the
     // account free to be written meanwhile.

@@ -1,9 +1,10 @@
 // Plugin drafts on the server (ADR 0004, D2): only their owner reaches a
 // draft or its build's files, an 11th draft needs `replaces`, and a draft
 // keeps within the workshop's limits. Agents are refused with every other
-// people-only route in agents.integration.test.ts.
+// people-only route in agents.integration.test.ts. A copy proposed back
+// to its plugin's owner (#315) reaches that owner alone.
 import { ApiError, createApiClient } from '@wikistow/client';
-import { pluginDraftRoutes } from '@wikistow/contracts';
+import { pluginDraftRoutes, pluginProposalRoutes } from '@wikistow/contracts';
 import { pluginHash } from '@wikistow/plugin-sdk/files';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
@@ -322,5 +323,143 @@ describe('plugin drafts', () => {
     expect(await keep(kept, 2)).toEqual({ revision: 3 });
     await api(cal).call(pluginDraftRoutes.deleteDraft, { params });
     expect(await errorCode(read())).toBe('not-found');
+  });
+});
+
+describe('plugin proposals (#315)', () => {
+  it('go from a copy to the plugin’s owner alone, who opens or declines them', async () => {
+    const [ann, bob, cal] = await Promise.all([
+      signedInPerson(t),
+      signedInPerson(t),
+      signedInPerson(t),
+    ]);
+    const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
+    const text = (value: string) => new TextEncoder().encode(value);
+    // Ann's plugin, its manifest's JSON on one line, with its source.
+    const manifest = JSON.stringify({
+      id: 'greet',
+      name: 'Greet',
+      version: '1.0.0',
+      api: 1,
+      ui: 'ui.js',
+    });
+    const logo = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00]);
+    const built: Record<string, Uint8Array> = {
+      'wikistow-plugin.json': text(manifest),
+      'ui.js': text('export {};'),
+      'source/wikistow-plugin.json': text(manifest),
+      'source/src/ui.tsx': text('export const hello = 1;\n'),
+      'source/src/old.ts': text('export {};\n'),
+      'source/public/logo.png': logo,
+    };
+    const uploaded = await ann.browser.request('/api/plugins', {
+      method: 'POST',
+      json: { files: Object.entries(built).map(([path, data]) => ({ path, data: b64(data) })) },
+    });
+    expect(uploaded.status).toBe(201);
+    const hash = await pluginHash(new Map(Object.entries(built)));
+
+    // Bob's copy is proposed to Ann; Ann's own draft of it goes to nobody.
+    const { draft: copy } = await api(bob).call(pluginDraftRoutes.createDraft, {
+      body: { from: { pluginId: 'greet', hash } },
+    });
+    const own = await api(ann).call(pluginDraftRoutes.createDraft, {
+      body: { from: { pluginId: 'greet', hash } },
+    });
+    const of = (person: Person, draftId: string) =>
+      api(person).call(pluginProposalRoutes.getDraftProposal, { params: { draftId } });
+    const propose = (person: Person, draftId: string) =>
+      api(person).call(pluginProposalRoutes.proposeDraft, { params: { draftId }, body: {} });
+    const annName = ann.email.split('@')[0];
+    expect(await of(bob, copy.id)).toEqual({ to: { name: annName }, sent: null });
+    expect(await of(ann, own.draft.id)).toEqual({ to: null, sent: null });
+    expect(await errorCode(propose(ann, own.draft.id))).toBe('invalid-request');
+    // Nobody else proposes Bob's draft.
+    expect(await errorCode(propose(cal, copy.id))).toBe('not-found');
+
+    await api(bob).call(pluginDraftRoutes.changeDraft, {
+      params: { draftId: copy.id },
+      body: {
+        put: [{ path: 'src/ui.tsx', text: 'export const hello = 2;\n' }],
+        remove: ['src/old.ts'],
+      },
+    });
+    await api(bob).call(pluginDraftRoutes.putDraftBinaryFile, {
+      params: { draftId: copy.id },
+      body: { path: 'public/icon.png', data: b64(logo) },
+    });
+    const first = await propose(bob, copy.id);
+    // Proposing again replaces it.
+    const { proposal } = await propose(bob, copy.id);
+    expect(proposal).toMatchObject({
+      pluginId: 'greet',
+      hash,
+      name: 'Greet',
+      from: { name: bob.email.split('@')[0] },
+      to: { name: annName },
+      files: 4,
+    });
+    expect((await of(bob, copy.id)).sent?.id).toBe(proposal.id);
+    const listed = async (person: Person) =>
+      (await api(person).call(pluginProposalRoutes.listProposals)).proposals.map((p) => p.id);
+    expect(await listed(ann)).toEqual([proposal.id]);
+    expect(await listed(bob)).toEqual([]);
+
+    // Ann reads what changed by file. The manifest, written out again with
+    // its ID set back, is the same JSON, so it isn't listed.
+    const params = { proposalId: proposal.id };
+    expect(await api(ann).call(pluginProposalRoutes.getProposal, { params })).toEqual({
+      proposal,
+      base: 'newest',
+      changes: [
+        { path: 'public/icon.png', change: 'added', before: null, after: null },
+        { path: 'src/old.ts', change: 'removed', before: 'export {};\n', after: null },
+        {
+          path: 'src/ui.tsx',
+          change: 'changed',
+          before: 'export const hello = 1;\n',
+          after: 'export const hello = 2;\n',
+        },
+      ],
+    });
+    // Only Ann reads, opens or declines it; the replaced one is gone.
+    for (const person of [bob, cal]) {
+      const proposalPath = `/api/plugin-proposals/${proposal.id}`;
+      expect(await status(person, proposalPath)).toBe(404);
+      expect(await status(person, `${proposalPath}/open`, 'POST', {})).toBe(404);
+      expect(await status(person, proposalPath, 'DELETE')).toBe(404);
+    }
+    expect(await status(ann, `/api/plugin-proposals/${first.proposal.id}`)).toBe(404);
+
+    // Opening it makes Ann's draft under the plugin's ID, from that version, and forgets it.
+    const { draft } = await api(ann).call(pluginProposalRoutes.openProposal, { params, body: {} });
+    expect(draft).toMatchObject({ name: 'Greet', from: { pluginId: 'greet', hash }, files: 4 });
+    const opened = await api(ann).call(pluginDraftRoutes.getDraft, {
+      params: { draftId: draft.id },
+    });
+    expect(opened.files.map((f) => f.path)).toEqual(['src/ui.tsx', 'wikistow-plugin.json']);
+    expect(JSON.parse(opened.files[1]?.text ?? '')).toMatchObject({ id: 'greet' });
+    expect(
+      (
+        await api(ann).call(pluginDraftRoutes.getDraftBinaryFiles, {
+          params: { draftId: draft.id },
+        })
+      ).files,
+    ).toEqual([
+      { path: 'public/icon.png', data: b64(logo) },
+      { path: 'public/logo.png', data: b64(logo) },
+    ]);
+    expect(await listed(ann)).toEqual([]);
+    expect(await of(bob, copy.id)).toEqual({ to: { name: annName }, sent: null });
+    expect(
+      await errorCode(api(ann).call(pluginProposalRoutes.openProposal, { params, body: {} })),
+    ).toBe('not-found');
+
+    // Declining forgets one too.
+    const again = await propose(bob, copy.id);
+    await api(ann).call(pluginProposalRoutes.declineProposal, {
+      params: { proposalId: again.proposal.id },
+    });
+    expect(await listed(ann)).toEqual([]);
   });
 });
