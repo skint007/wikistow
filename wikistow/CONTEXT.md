@@ -191,7 +191,7 @@ A fenced code block in a page that names a plugin, which shows and edits it wher
 _Avoid_: Page script; pages never carry code.
 
 **Workshop**
-Where a person builds a plugin with the assistant, in the browser, on a phone or in the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples end with it; the draft stays.
+Where a person builds a plugin with the assistant, in the browser, on a phone or in the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples are kept with the draft, copies left out, until **Clear conversation** or the draft is deleted.
 _Avoid_: Sandbox (the preview isn't one for app code), staging.
 
 **Safe mode**

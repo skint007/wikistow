@@ -90,7 +90,10 @@ plugin_draft_build_files
 | `GET /api/plugin-drafts/:draftId/binary-files` | Its fonts and images, `[{ path, data }]` in base64url (#313). Apart from the text, so an app older than them reads a draft as before; the workshop asks only when the summary counts more files than the text | 120 a minute |
 | `POST /api/plugin-drafts/:draftId/binary-files` | Add or replace one font or image, `{ path, data }`, within the limits. The workshop then builds and previews the draft, so **Publish** carries it | 120 a minute, body 2 MB |
 | `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits; `remove` takes fonts and images too | 120 a minute, the app's usual 1 MiB body |
-| `DELETE /api/plugin-drafts/:draftId` | Delete it, with its files and build | 120 a minute |
+| `DELETE /api/plugin-drafts/:draftId` | Delete it, with its files, build and kept workshop | 120 a minute |
+| `GET /api/plugin-drafts/:draftId/workshop` | Its kept workshop (#314), as JSON, or null | 120 a minute |
+| `PUT /api/plugin-drafts/:draftId/workshop` | `{ workshop }`, in place of what was kept, at most 768 KB as JSON. Doesn't move `updatedAt` | 60 a minute, the app's usual 1 MiB body |
+| `DELETE /api/plugin-drafts/:draftId/workshop` | Forget it, for **Clear conversation**; the files stay | 120 a minute |
 | `PUT /api/plugin-drafts/:draftId/build` | Replace the draft's build: every file, as an upload carries them. Answers its hash | 120 in 10 minutes, body 15 MB |
 | `GET /plugins/<id>/draft-<hash>/<path>` | A file of the caller's own draft build with that hash and manifest ID, served by the library's file route | the file route's 2000 a minute |
 
@@ -128,11 +131,19 @@ So the draft's build on the server is the one a browser last previewed: a cache 
 
 ### 6. The workshop's lifetime and disclosure
 
-The conversation lasts as it does now: until **End workshop**, locking the vault, signing out, or reloading or closing the app. The draft stays; **End workshop** no longer deletes anything. The workshop page lists the person's drafts, with **Open**, **Delete** and how long ago each changed, beside **New plugin**.
+The conversation lasts as it does now: until **End workshop**, locking the vault, signing out, or reloading or closing the app. The draft stays; **End workshop** no longer deletes anything. Since #314 the conversation, its versions and sample pages are kept with the draft too (**The kept workshop**, below). The workshop page lists the person's drafts, with **Open**, **Delete** and how long ago each changed, beside **New plugin**.
 
 The disclosure in `workshop-panel.tsx` keeps its first paragraph and replaces the second with: "The plugin’s files are saved as a draft on your WikiStow server as the assistant writes them, so you can carry on from any device. Like library plugins, they’re plain text on the server. The conversation isn’t saved: it ends when you end the workshop, lock your vault, sign out, or reload or close the app." The model's system prompt drops "in the desktop app" and says the files are saved as they are written.
 
-**Sample pages stay on the device**, in the page's memory, and go with the conversation as now. They never go into the draft: a sample can be a copy of a real page, which is encrypted everywhere else. A new conversation on a draft starts with the default samples, and the model writes its own as before.
+**Sample pages stay on the device**, in the page's memory, and go with the conversation as now. They never go into the draft: a sample can be a copy of a real page, which is encrypted everywhere else. A new conversation on a draft starts with the default samples, and the model writes its own as before. Since #314 the samples that aren't copies are kept with the conversation (below); copies still never leave the device.
+
+**The kept workshop (#314).** Scott decided on 2026-11-08 to keep the conversation, versions and sample pages with the draft, plain text like its files, leaving out copies of real pages. The workshop keeps one JSON document per draft, in `plugin_drafts.workshop` (migration `0045_draft_workshop`), through routes of its own, so `getDraft`'s strict answer stays as it was. The server only stores it, within 768 KB, which keeps a save within the app's usual 1 MiB body and so off the large-body slot; the model's request has the same 1 MiB cap, so a conversation near the limit is near the model's too. The app writes and reads it (`packages/ui/src/workshop/kept.ts`):
+
+- **What's kept.** The conversation as the model is sent it, each message the person sent as they wrote it, each version's number, diagnostics, hash and manifest name and version, the sample pages that aren't copies, and how many samples were made, so none is numbered again. It is saved a moment and a half after each change, at once as a reply ends, and as the workshop ends.
+- **What's left out.** A copied page's text, and its title: the person's message keeps "I copied one of my pages into the preview as sample page *n*", and in what the tools answered, a copy's place in the preview report says only that a copy was there; the copy itself isn't kept. What the model wrote over a copy goes the same way. The model's own replies are kept as it wrote them, which the disclosure says. The SDK reference is left out too, as the app's own text and the longest answer: the model is told to ask again.
+- **Versions.** Only the conversation and the last build are kept, not every version's build. On opening, the draft's files are built as before; a build with the newest kept version's hash is that version again, previewable, and a failed build saying what the newest failed one said is that one. The others come back as history: number, name and version, hash and diagnostics, marked **Build not kept**. Keeping every build would mean up to 10 MB a version on the server, a route to fetch them, and limits to drop old ones, for builds the person can make again from the files.
+- **Past the limit,** the server refuses the save and the workshop says the conversation is too long to keep, until **Clear conversation**. **Clear conversation** deletes the kept document and opens the draft afresh, its files as they are. Deleting the draft deletes it with the row.
+- **Older apps and servers.** An app older than #314 never asks for it. Against a server older than #314 (a 404 for the route) the workshop keeps nothing, and says so. A document this app can't read is left alone and not overwritten; **Clear conversation** deletes it.
 
 ### 7. Change with the assistant
 
@@ -159,7 +170,7 @@ At phone sizes the `/workshop` page is one column at full width: the drafts list
 
 Binary files in drafts, once out of scope here, are built (#313): fonts and images under `public/`, above.
 
-Saving the conversation or the sample pages (#314), merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, and a server-side publish from a draft's build.
+Keeping the conversation, versions and sample pages, once out of scope here, is built (#314): **The kept workshop**, above. Merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, and a server-side publish from a draft's build.
 
 ## Spike evidence (2026-10-16)
 
