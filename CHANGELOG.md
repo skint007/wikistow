@@ -20,6 +20,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it. (#349)
 - App plugins can draw the search results their own way: `search.results` is a replaceable region, whose view gets what was typed and the app's own results, and draws only where the plugin can read every result. The search box and `>`'s commands stay the app's, and `host.app.navigate` closes search. (#352)
 
+#### CLI
+
+- `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
+
 ## 0.24.0 - 2026-11-07
 
 ### Highlights
