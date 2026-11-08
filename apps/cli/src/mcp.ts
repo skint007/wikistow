@@ -286,8 +286,10 @@ export async function serveMcp(
   run: Run,
 ): Promise<ExitStatus> {
   const read = new Map<number, Uint8Array>();
+  // Never asks: standard input is the client's, even in a terminal.
   const kept: Io = {
     ...io,
+    askSecret: () => Promise.resolve(null),
     readFd: (fd) => {
       const bytes = read.get(fd) ?? io.readFd(fd);
       read.set(fd, bytes);
