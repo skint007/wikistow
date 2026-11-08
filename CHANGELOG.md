@@ -16,6 +16,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A page or folder moved to another space keeps its old address: opening it opens the new place, saying it moved, and links to it from pages left behind still open it, for people who can open it there. (#351)
 - A page moved to another space keeps its public link, at the same address, where you can publish it there. The move's preview lists the links that go with it, and its public page says it's being updated until you open Share public link… there and update it. A link the move can't keep ends, as before, and the preview says why. (#355)
 - Owners can move or copy everything in a space into a folder of another space, from the space menu (**Move space into…**, **Copy space into…**), with the usual preview. After a move, the space is empty and the app asks whether to delete it. (#356)
+- Drag a page or folder from the sidebar onto another space in the rail to move it there: the drop opens **Move to…** with that space chosen, or **Copy to…** if you can only copy it, and nothing moves until you confirm.
 
 #### Plugins
 
