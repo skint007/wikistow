@@ -757,12 +757,15 @@ function PasskeyList() {
   const queryClient = useQueryClient();
   const { data: passkeys } = useQuery(passkeysQuery);
   const refresh = () => queryClient.invalidateQueries({ queryKey: passkeysQuery.queryKey });
+  // A removed passkey's button goes with it, so the focus moves to the
+  // list first, staying in the row, where Escape still closes it.
+  const list = useRef<HTMLDivElement>(null);
   const remove = useMutation({
     mutationFn: async (id: string) => unwrap(await authClient.passkey.deletePasskey({ id })),
     onSettled: refresh,
   });
   return (
-    <div className="grid max-w-md gap-4">
+    <div ref={list} tabIndex={-1} className="grid max-w-md gap-4 outline-none">
       {passkeys && passkeys.length > 0 && (
         <ul aria-label="Passkeys" className="grid gap-2">
           {passkeys.map((passkey) => (
@@ -776,7 +779,10 @@ function PasskeyList() {
                 size="sm"
                 disabled={remove.isPending}
                 aria-label={`Remove ${passkey.name || 'passkey'}`}
-                onClick={() => remove.mutate(passkey.id)}
+                onClick={() => {
+                  list.current?.focus();
+                  remove.mutate(passkey.id);
+                }}
               >
                 Remove
               </Button>
