@@ -66,6 +66,7 @@ plugin_drafts
 
 plugin_draft_files
   draft_id uuid references plugin_drafts on delete cascade, path text, text text, size integer
+  data bytea                       -- a font or image (#313), in place of text
   primary key (draft_id, path)
 
 plugin_draft_build_files
@@ -73,9 +74,9 @@ plugin_draft_build_files
   primary key (draft_id, path)
 ```
 
-**Files in Postgres, not `BLOB_DIR`.** A draft's files are small text files changed one at a time. As rows, each change is one transaction that also checks the limits, deleting a draft or an account takes its files, nothing needs an orphan sweep, and `pg_dump` carries them, so `backup.sh`, `restore.sh` and the backup's check need no change. The build is up to 10 MB of bytes, still well within what one row holds; it goes with its draft the same way. The library keeps `BLOB_DIR` for its versions, which are immutable and served by hash for good.
+**Files in Postgres, not `BLOB_DIR`.** A draft's files are small text files changed one at a time, and since #313 a few fonts and images as bytes. As rows, each change is one transaction that also checks the limits, deleting a draft or an account takes its files, nothing needs an orphan sweep, and `pg_dump` carries them, so `backup.sh`, `restore.sh` and the backup's check need no change. The build is up to 10 MB of bytes, still well within what one row holds; it goes with its draft the same way. The library keeps `BLOB_DIR` for its versions, which are immutable and served by hash for good.
 
-**Limits.** The workshop's limits move from `apps/desktop/src/workshop/workshop.ts` into `packages/contracts`, and the server checks them: at most 200 files, 256 KB a file (in UTF-8) and 4 MB in all, each path plain (names of letters, digits, `_`, `.` and `-`, starting with a letter, digit or `_`, at most 64 characters, at most five folders deep), of a text kind, and not also a folder's name, as a build's paths can't be. A build is held to the library's limits (10 MB, 500 files, `script` at most 1 MB) and checked with `checkPlugin`. Drafts don't count against the storage quota; these limits bound them at about 140 MB per account.
+**Limits.** The workshop's limits move from `apps/desktop/src/workshop/workshop.ts` into `packages/contracts`, and the server checks them: at most 200 files, 256 KB a file (in UTF-8) and 4 MB in all, each path plain (names of letters, digits, `_`, `.` and `-`, starting with a letter, digit or `_`, at most 64 characters, at most five folders deep), of a text kind, and not also a folder's name, as a build's paths can't be. Since #313 a draft also holds fonts and images (`.woff2 .woff .png .jpg .webp .gif`) under `public/` only, as bytes, at most 1 MB each, since a single weight of a full font is often past 256 KB (the app's own Noto Sans Math is 264 KB), within the same 4 MB in all. A build is held to the library's limits (10 MB, 500 files, `script` at most 1 MB) and checked with `checkPlugin`. Drafts don't count against the storage quota; these limits bound them at about 140 MB per account.
 
 **Ten per account.** Creating an 11th draft is refused with `draft-limit`, unless the request names `replaces`, one of the person's own drafts, which is deleted in the same transaction. The workshop warns first, naming the least recently changed draft: "You have 10 drafts. Starting this one deletes “Name”, the one you changed longest ago." with **Delete it and start** and **Cancel**. This is the issue's suggestion, and the server deletes nothing the person wasn't shown by name. A person who would rather lose another draft deletes it from the list first. "Changed" means its files: `updated_at` moves with each file change, not with a build.
 
@@ -84,12 +85,16 @@ plugin_draft_build_files
 | Route | What | Rate limit |
 | --- | --- | --- |
 | `GET /api/plugin-drafts` | The caller's drafts, most recently changed first: ID, name, what it started from, file count, size, `updatedAt` | 120 a minute |
-| `POST /api/plugin-drafts` | Create a draft, empty, from a library version (`from: { pluginId, hash }`) or from files (`files: [{ path, text }]`), with optional `replaces`. Answers its summary | 30 in 10 minutes, body 6 MB |
-| `GET /api/plugin-drafts/:draftId` | The draft's summary and every file's text | 120 a minute |
-| `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits | 120 a minute, the app's usual 1 MiB body |
+| `POST /api/plugin-drafts` | Create a draft, empty, from a library version (`from: { pluginId, hash }`) or from files (`files: [{ path, text }]`, and `binary: [{ path, data }]` for fonts and images in base64url, sent only when there are some), with optional `replaces`. Answers its summary | 30 in 10 minutes, body 6 MB |
+| `GET /api/plugin-drafts/:draftId` | The draft's summary and every text file's text | 120 a minute |
+| `GET /api/plugin-drafts/:draftId/binary-files` | Its fonts and images, `[{ path, data }]` in base64url (#313). Apart from the text, so an app older than them reads a draft as before; the workshop asks only when the summary counts more files than the text | 120 a minute |
+| `POST /api/plugin-drafts/:draftId/binary-files` | Add or replace one font or image, `{ path, data }`, within the limits. The workshop then builds and previews the draft, so **Publish** carries it | 120 a minute, body 2 MB |
+| `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits; `remove` takes fonts and images too | 120 a minute, the app's usual 1 MiB body |
 | `DELETE /api/plugin-drafts/:draftId` | Delete it, with its files and build | 120 a minute |
 | `PUT /api/plugin-drafts/:draftId/build` | Replace the draft's build: every file, as an upload carries them. Answers its hash | 120 in 10 minutes, body 15 MB |
 | `GET /plugins/<id>/draft-<hash>/<path>` | A file of the caller's own draft build with that hash and manifest ID, served by the library's file route | the file route's 2000 a minute |
+
+An app older than #313 reads a draft's text only, so it builds, previews and publishes a draft without its fonts and images, and makes a draft from a version without them; the draft itself keeps them. That is the price of not adding them to `getDraft`'s strict answer.
 
 A route with a body limit above the app's 1 MiB takes the account's one large-body slot for each request (`bodySlots` in `apps/server/src/http/mount.ts`), so the changes route, which carries one file of at most 256 KB, keeps the usual limit, and the model's writes never wait on an upload. The workshop sends its large uploads (a preview's build, Publish) one at a time.
 
@@ -152,7 +157,9 @@ At phone sizes the `/workshop` page is one column at full width: the drafts list
 
 ### Out of scope
 
-Saving the conversation or the sample pages (#314), merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, binary files in drafts (#313), and a server-side publish from a draft's build.
+Binary files in drafts, once out of scope here, are built (#313): fonts and images under `public/`, above.
+
+Saving the conversation or the sample pages (#314), merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, and a server-side publish from a draft's build.
 
 ## Spike evidence (2026-10-16)
 

@@ -101,13 +101,14 @@ function libraryProblem(bytes: ReadonlyMap<string, Uint8Array>, manifest: Manife
 /**
  * Build a draft's files as `wikistow-plugin build` lays them out: the
  * manifest, `ui.js` and `script.js` from `src/<name>.ts(x)`, and
- * `public/`'s files at the top, plus every draft file under `source/`, so
- * a published version carries its source. Checked with the library's
- * limits, so a build that couldn't be published fails as a build, and
- * hashed as an install hashes it.
+ * `public/`'s files at the top, its fonts and images (`binary`) among
+ * them, plus every draft file under `source/`, so a published version
+ * carries its source. Checked with the library's limits, so a build that
+ * couldn't be published fails as a build, and hashed as an install hashes it.
  */
 export async function buildDraft(
   texts: ReadonlyMap<string, string>,
+  binary: ReadonlyMap<string, Uint8Array>,
   bundler: Bundler,
 ): Promise<BuildResult> {
   const failed = (diagnostics: BuildDiagnostic[]): BuildResult => ({ diagnostics, built: null });
@@ -141,9 +142,13 @@ export async function buildDraft(
   if (diagnostics.some((diagnostic) => diagnostic.severity === 'error')) return failed(diagnostics);
   const encoder = new TextEncoder();
   const bytes = new Map<string, Uint8Array>();
-  for (const [path, text] of texts) {
-    bytes.set(`source/${path}`, encoder.encode(text));
-    if (path.startsWith('public/')) bytes.set(path.slice('public/'.length), encoder.encode(text));
+  const files = [
+    ...[...texts].map(([path, text]) => [path, encoder.encode(text)] as const),
+    ...binary,
+  ];
+  for (const [path, data] of files) {
+    bytes.set(`source/${path}`, data);
+    if (path.startsWith('public/')) bytes.set(path.slice('public/'.length), data);
   }
   for (const [output, text] of Object.entries(outputs)) bytes.set(output, encoder.encode(text));
   bytes.set(MANIFEST_FILE, encoder.encode(`${JSON.stringify(manifest, null, 2)}\n`));

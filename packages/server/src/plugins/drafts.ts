@@ -1,6 +1,6 @@
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
-import { and, count, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { ContentError } from '../content/errors.ts';
 import type { Database } from '../db/client.ts';
@@ -22,8 +22,16 @@ import type { PluginStore } from './store.ts';
  * another account's draft is `not-found`, the same as a missing one.
  */
 
-const { DraftFile, MAX_DRAFTS, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
-  pluginDraftRoutes;
+const {
+  DraftBinaryFile,
+  DraftFile,
+  isBinaryDraftPath,
+  MAX_DRAFTS,
+  MAX_DRAFT_BINARY_FILE_BYTES,
+  MAX_DRAFT_BYTES,
+  MAX_DRAFT_FILE_BYTES,
+  MAX_DRAFT_FILES,
+} = pluginDraftRoutes;
 
 const KB = 1024;
 const MB = 1024 * 1024;
@@ -31,6 +39,8 @@ const UNTITLED = 'Untitled plugin';
 const SOURCE = 'source/';
 
 type DraftText = { path: string; text: string };
+/** A font or image under `public/`, as bytes. */
+type DraftBytes = { path: string; data: Uint8Array };
 type Draft = { accountId: string; draftId: string };
 
 const notFound = () => new ContentError('not-found', 'No such plugin draft');
@@ -64,11 +74,16 @@ function checkFiles(files: { path: string; size: number }[]) {
   if (files.length > MAX_DRAFT_FILES) {
     throw new ContentError('too-large', `A draft holds ${MAX_DRAFT_FILES} files at most.`);
   }
-  const big = files.find(({ size }) => size > MAX_DRAFT_FILE_BYTES);
-  if (big) {
+  for (const { path, size } of files) {
+    if (
+      isBinaryDraftPath(path) ? size <= MAX_DRAFT_BINARY_FILE_BYTES : size <= MAX_DRAFT_FILE_BYTES
+    )
+      continue;
     throw new ContentError(
       'too-large',
-      `${big.path} is too large: a draft file holds ${MAX_DRAFT_FILE_BYTES / KB} KB at most.`,
+      isBinaryDraftPath(path)
+        ? `${path} is too large: a font or image in a draft is ${MAX_DRAFT_BINARY_FILE_BYTES / MB} MB at most.`
+        : `${path} is too large: a draft file holds ${MAX_DRAFT_FILE_BYTES / KB} KB at most.`,
     );
   }
   if (files.reduce((total, { size }) => total + size, 0) > MAX_DRAFT_BYTES) {
@@ -78,9 +93,11 @@ function checkFiles(files: { path: string; size: number }[]) {
   if (both) throw invalid(`“${both}” is also the name of a folder in the draft.`);
 }
 
-/** Files with their text's size in UTF-8, as the draft's rows hold them. */
-const withSizes = (files: DraftText[]) =>
-  files.map(({ path, text }) => ({ path, text, size: Buffer.byteLength(text) }));
+/** Files as the draft's rows hold them, with their sizes: a text's in UTF-8, or the bytes'. */
+const rowsOf = (texts: DraftText[], binary: DraftBytes[]) => [
+  ...texts.map(({ path, text }) => ({ path, text, data: null, size: Buffer.byteLength(text) })),
+  ...binary.map(({ path, data }) => ({ path, text: null, data, size: data.length })),
+];
 
 const listed = (paths: string[]) => {
   if (new Set(paths).size !== paths.length) throw invalid('A file is named twice.');
@@ -141,15 +158,27 @@ export async function checkPluginDraftOwner(db: Database, draft: Draft) {
 export const listPluginDrafts = (db: Database, accountId: string) =>
   summaries(db, eq(pluginDrafts.ownerId, accountId));
 
-/** A draft and every file's text, by path. */
+/** A draft and every text file's text, by path. */
 export async function readPluginDraft(db: Database, draft: Draft) {
   const summary = await summaryOf(db, draft);
-  const files = await db
+  const rows = await db
     .select({ path: pluginDraftFiles.path, text: pluginDraftFiles.text })
     .from(pluginDraftFiles)
-    .where(eq(pluginDraftFiles.draftId, draft.draftId))
+    .where(and(eq(pluginDraftFiles.draftId, draft.draftId), isNotNull(pluginDraftFiles.text)))
     .orderBy(pluginDraftFiles.path);
+  const files = rows.flatMap(({ path, text }) => (text === null ? [] : [{ path, text }]));
   return { draft: summary, files };
+}
+
+/** A draft's fonts and images, by path: what `readPluginDraft` leaves out. */
+export async function readPluginDraftBinaryFiles(db: Database, draft: Draft) {
+  await summaryOf(db, draft);
+  const rows = await db
+    .select({ path: pluginDraftFiles.path, data: pluginDraftFiles.data })
+    .from(pluginDraftFiles)
+    .where(and(eq(pluginDraftFiles.draftId, draft.draftId), isNotNull(pluginDraftFiles.data)))
+    .orderBy(pluginDraftFiles.path);
+  return rows.flatMap(({ path, data }) => (data === null ? [] : [{ path, data }]));
 }
 
 /** `<id>-copy`, then `<id>-copy-2` and on, shortening `<id>` to keep within 40 characters. */
@@ -172,7 +201,7 @@ async function copyId(db: Database, accountId: string, id: string) {
     .where(and(eq(pluginDrafts.ownerId, accountId), eq(pluginDraftFiles.path, MANIFEST_FILE)));
   const taken = new Set([
     ...claimed.map((row) => row.id),
-    ...drafted.flatMap((row) => manifestFields(row.text).id ?? []),
+    ...drafted.flatMap((row) => manifestFields(row.text ?? undefined).id ?? []),
   ]);
   for (let n = 1; ; n++) {
     const candidate = copyName(id, n);
@@ -181,16 +210,17 @@ async function copyId(db: Database, accountId: string, id: string) {
 }
 
 /**
- * A library version's `source/` files, without the prefix, as a draft's.
- * Another account's plugin gets a new ID (`copyId`) in its manifest; the
- * rest of the source is as it was.
+ * A library version's `source/` files, without the prefix, as a draft's:
+ * its text, and its fonts and images under `public/` as bytes. Another
+ * account's plugin gets a new ID (`copyId`) in its manifest; the rest of
+ * the source is as it was.
  */
 async function sourceOf(
   db: Database,
   store: PluginStore,
   accountId: string,
   { pluginId, hash }: { pluginId: string; hash: string },
-): Promise<DraftText[]> {
+): Promise<{ texts: DraftText[]; binary: DraftBytes[] }> {
   const [version] = await db
     .select({ files: pluginVersions.files, ownerId: plugins.ownerId })
     .from(pluginVersions)
@@ -204,36 +234,47 @@ async function sourceOf(
   }
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const files: DraftText[] = [];
+  const binary: DraftBytes[] = [];
   for (const file of version.files) {
     if (!file.startsWith(SOURCE)) continue;
     const bytes = await store.get(hash, file);
     // Removed meanwhile.
     if (!bytes) throw new ContentError('not-found', 'No such version');
+    const path = file.slice(SOURCE.length);
+    if (isBinaryDraftPath(path)) {
+      // Checked by its path only: its bytes are the version's own.
+      const checked = DraftBinaryFile.shape.path.safeParse(path);
+      if (!checked.success) throw invalid(checked.error.issues[0]?.message ?? `${file} won’t do.`);
+      binary.push({ path, data: bytes });
+      continue;
+    }
     let text: string;
     try {
       text = decoder.decode(bytes);
     } catch {
       throw invalid(`${file} isn’t a text file, so a draft can’t hold it.`);
     }
-    const checked = DraftFile.safeParse({ path: file.slice(SOURCE.length), text });
+    const checked = DraftFile.safeParse({ path, text });
     if (!checked.success) throw invalid(checked.error.issues[0]?.message ?? `${file} won’t do.`);
     files.push(checked.data);
   }
-  if (version.ownerId === accountId) return files;
+  if (version.ownerId === accountId) return { texts: files, binary };
 
   const id = await copyId(db, accountId, pluginId);
-  return files.map((file) => {
+  const texts = files.map((file) => {
     if (file.path !== MANIFEST_FILE) return file;
     const fields = z.record(z.string(), z.unknown()).safeParse(parseJson(file.text));
     if (!fields.success) throw invalid(`This version’s ${MANIFEST_FILE} isn’t readable.`);
     return { path: file.path, text: `${JSON.stringify({ ...fields.data, id }, null, 2)}\n` };
   });
+  return { texts, binary };
 }
 
 /**
- * Make a draft: empty, from `files`, or from a library version's source.
- * With `MAX_DRAFTS` already, refused with `draft-limit` unless `replaces`
- * names one of the caller's drafts, which goes in the same transaction.
+ * Make a draft: empty, from `files` and `binary`, or from a library
+ * version's source. With `MAX_DRAFTS` already, refused with `draft-limit`
+ * unless `replaces` names one of the caller's drafts, which goes in the
+ * same transaction.
  */
 export async function createPluginDraft(
   db: Database,
@@ -242,17 +283,21 @@ export async function createPluginDraft(
     accountId,
     from,
     files = [],
+    binary = [],
     replaces,
   }: {
     accountId: string;
     from?: { pluginId: string; hash: string } | undefined;
     files?: DraftText[] | undefined;
+    binary?: DraftBytes[] | undefined;
     replaces?: string | undefined;
   },
 ) {
-  const texts = from ? await sourceOf(db, store, accountId, from) : files;
-  listed(texts.map(({ path }) => path));
-  const rows = withSizes(texts);
+  const { texts, binary: bytes } = from
+    ? await sourceOf(db, store, accountId, from)
+    : { texts: files, binary };
+  const rows = rowsOf(texts, bytes);
+  listed(rows.map(({ path }) => path));
   checkFiles(rows);
   const name = nameFrom(texts.find(({ path }) => path === MANIFEST_FILE)?.text) ?? UNTITLED;
 
@@ -292,7 +337,7 @@ export async function createPluginDraft(
       })
       .returning({ id: pluginDrafts.id });
     if (!draft) throw new Error('plugin draft was not stored');
-    if (texts.length > 0) {
+    if (rows.length > 0) {
       await tx.insert(pluginDraftFiles).values(rows.map((row) => ({ ...row, draftId: draft.id })));
     }
     return summaryOf(tx, { accountId, draftId: draft.id });
@@ -300,15 +345,21 @@ export async function createPluginDraft(
 }
 
 /**
- * Write `put` and remove `remove` together, or refuse all of it past the
- * limits. Writing the manifest renames the draft from its `name`.
+ * Write `put` (text) and `putBinary` (fonts and images) and remove `remove`
+ * together, or refuse all of it past the limits. Writing the manifest
+ * renames the draft from its `name`.
  */
 export async function changePluginDraft(
   db: Database,
-  { put, remove, ...draft }: Draft & { put: DraftText[]; remove: string[] },
+  {
+    put,
+    putBinary = [],
+    remove,
+    ...draft
+  }: Draft & { put: DraftText[]; putBinary?: DraftBytes[]; remove: string[] },
 ) {
-  listed([...put.map(({ path }) => path), ...remove]);
-  const rows = withSizes(put);
+  const rows = rowsOf(put, putBinary);
+  listed([...rows.map(({ path }) => path), ...remove]);
   return db.transaction(async (tx) => {
     await lockDraft(tx, draft);
     const current = await tx
@@ -328,17 +379,17 @@ export async function changePluginDraft(
           and(eq(pluginDraftFiles.draftId, draft.draftId), inArray(pluginDraftFiles.path, removed)),
         );
     }
-    if (put.length > 0) {
+    if (rows.length > 0) {
       await tx
         .insert(pluginDraftFiles)
         .values(rows.map((row) => ({ ...row, draftId: draft.draftId })))
         .onConflictDoUpdate({
           target: [pluginDraftFiles.draftId, pluginDraftFiles.path],
-          set: { text: sql`excluded.text`, size: sql`excluded.size` },
+          set: { text: sql`excluded.text`, data: sql`excluded.data`, size: sql`excluded.size` },
         });
     }
     // Only a change to its files moves the draft up the list.
-    if (removed.length > 0 || put.length > 0) {
+    if (removed.length > 0 || rows.length > 0) {
       const name = nameFrom(put.find(({ path }) => path === MANIFEST_FILE)?.text);
       await tx
         .update(pluginDrafts)

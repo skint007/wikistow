@@ -74,8 +74,11 @@ export type BuildDiagnostic = {
   message: string;
 };
 
-/** A file in a workshop's plugin draft: its path from the top, with `/` between names. */
-export type WorkshopFile = { path: string; size: number };
+/**
+ * A file in a workshop's plugin draft: its path from the top, with `/`
+ * between names, its size, and `binary` for a font or image.
+ */
+export type WorkshopFile = { path: string; size: number; binary?: true };
 
 /** One build of a workshop's plugin draft, numbered from 1 in its conversation, failed builds included. */
 export type WorkshopVersion = {

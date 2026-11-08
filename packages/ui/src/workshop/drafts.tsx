@@ -1,3 +1,5 @@
+import { toBase64 } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,6 +23,7 @@ import { api } from '../api';
 import { errorMessage } from '../errors';
 import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
 import { WorkshopChat } from './workshop-chat';
+import { OLD_SERVER } from './workshop';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
 
@@ -30,7 +33,7 @@ export const draftsQuery = queryOptions({
   queryFn: async () => (await api.call(pluginDraftRoutes.listDrafts)).drafts,
 });
 
-/** What a new draft starts from: nothing, a library version (`from`), or `files`. */
+/** What a new draft starts from: nothing, a library version (`from`), or `files` and `binary`. */
 export type DraftStart = Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>;
 
 /** Open the workshop on draft `draftId`, in place of any conversation, with its panel open. */
@@ -72,7 +75,9 @@ export function useNewDraft(): {
       openWorkshop(draft.id);
       return true;
     } catch (failure) {
-      setError(errorMessage(failure));
+      // A server from before fonts and images in drafts refuses `binary` as a field it doesn't know.
+      const old = failure instanceof ApiError && failure.code === 'invalid-request' && from.binary;
+      setError(old ? OLD_SERVER : errorMessage(failure));
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
@@ -137,17 +142,38 @@ export function useNewDraft(): {
   return { start, busy: making || busy, error, clear: () => setError(null), dialog };
 }
 
-const { draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
-  pluginDraftRoutes;
+const {
+  draftPathProblem,
+  isBinaryDraftPath,
+  MAX_DRAFT_BINARY_FILE_BYTES,
+  MAX_DRAFT_BYTES,
+  MAX_DRAFT_FILE_BYTES,
+  MAX_DRAFT_FILES,
+} = pluginDraftRoutes;
+
+/** Why a draft can't take a chosen file of `size` bytes at `path`, or null when it can. */
+function draftFileProblem(path: string, size: number) {
+  const problem = draftPathProblem(path);
+  if (problem) return problem;
+  if (isBinaryDraftPath(path)) {
+    return size > MAX_DRAFT_BINARY_FILE_BYTES
+      ? `${path} is too large: a font or image in a draft is 1 MB at most.`
+      : null;
+  }
+  return size > MAX_DRAFT_FILE_BYTES
+    ? `${path} is too large: a draft file holds 256 KB at most.`
+    : null;
+}
 
 /**
  * A plugin project's files, as a new draft's (ADR 0004): its
  * `wikistow-plugin.json` and every file under `src/` and `public/`, chosen
  * by path before anything is read, leaving out the rest (`package.json`,
- * `node_modules`, `dist`, dotfiles). A file the draft can't hold, or the
- * limits, refuse the whole folder, naming the file.
+ * `node_modules`, `dist`, dotfiles). Fonts and images under `public/` go
+ * as bytes. A file the draft can't hold, or the limits, refuse the whole
+ * folder, naming the file.
  */
-async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[]> {
+async function readProject(chosen: File[]): Promise<DraftStart> {
   const files = chosen
     .map((file) => ({ file, path: pathInFolder(file) }))
     .filter(
@@ -160,26 +186,36 @@ async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[
   if (files.length > MAX_DRAFT_FILES)
     throw new Error(`A draft holds ${MAX_DRAFT_FILES} files at most.`);
   for (const { file, path } of files) {
-    const problem = draftPathProblem(path);
+    const problem = draftFileProblem(path, file.size);
     if (problem) throw new Error(problem);
-    if (file.size > MAX_DRAFT_FILE_BYTES)
-      throw new Error(`${path} is too large: a draft file holds 256 KB at most.`);
   }
   if (files.reduce((total, { file }) => total + file.size, 0) > MAX_DRAFT_BYTES)
     throw new Error('A draft holds 4 MB at most.');
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  return Promise.all(
-    files.map(async ({ file, path }) => {
-      let text: string;
-      try {
-        text = decoder.decode(await file.arrayBuffer());
-      } catch {
-        throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
-      }
-      if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
-      return { path, text };
-    }),
+  const binary = await Promise.all(
+    files
+      .filter(({ path }) => isBinaryDraftPath(path))
+      .map(async ({ file, path }) => ({
+        path,
+        data: toBase64(new Uint8Array(await file.arrayBuffer())),
+      })),
   );
+  const texts = await Promise.all(
+    files
+      .filter(({ path }) => !isBinaryDraftPath(path))
+      .map(async ({ file, path }) => {
+        let text: string;
+        try {
+          text = decoder.decode(await file.arrayBuffer());
+        } catch {
+          throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+        }
+        if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+        return { path, text };
+      }),
+  );
+  // Only with some: a server older than fonts and images refuses the field.
+  return binary.length > 0 ? { files: texts, binary } : { files: texts };
 }
 
 /** When a draft's files last changed, as the list says it. */
@@ -226,7 +262,7 @@ export function DraftsList({ open }: { open: string | null }) {
           onFolder={async (chosen) => {
             fresh();
             try {
-              await newDraft.start({ files: await readProject(chosen) });
+              await newDraft.start(await readProject(chosen));
             } catch (failure) {
               setError(errorMessage(failure));
             }

@@ -12,7 +12,8 @@ import { aiTool, type AiTool } from './ai.ts';
 
 /** What the workshop's tools act on: the app's workshop, and through it the server, which check every request. */
 export type WorkshopBackend = {
-  files(): { path: string; size: number }[];
+  /** Every file, with its size; a font or image the person added is `binary`. */
+  files(): { path: string; size: number; binary?: true }[];
   read(path: string): string;
   /** Save a file to the draft; settles once the server has it. */
   write(path: string, text: string): Promise<void>;
@@ -46,6 +47,7 @@ export function workshopSystemPrompt() {
   return [
     'You build a WikiStow plugin with the person, in WikiStow’s plugin workshop. WikiStow is a private wiki. You work on a plugin draft: write its files, build it, and the app runs the build in a preview the person sees, against sample pages. Each file is saved to the draft on the person’s WikiStow server as you write it, so the work carries on from any of their devices. The draft may already hold files from earlier work: list them before you start. Nothing you do reaches their real pages.',
     'A draft is laid out like this: wikistow-plugin.json (the manifest); src/ui.tsx for app code that runs in the app’s page (default-exports definePlugin({ activate(host) {…} })); src/script.ts for script code that runs in a sandboxed worker with no DOM or network (calls defineScript((host) => {…})); public/ for stylesheets and theme stylesheets, copied beside the built files. A plugin needs only the parts it uses: a theme is a manifest and a stylesheet, with no code.',
+    'public/ may also hold fonts (.woff2, .woff) and images (.png, .jpg, .webp, .gif), which only the person adds, with Add file… under the workshop’s Draft files. list_files marks them binary: you can delete them, but not read or write them. A stylesheet in public/ reaches them by their place in the built folder, such as url(inter.woff2). If the plugin needs one the draft hasn’t got, ask the person to add it; an SVG is text, so you can write one.',
     'Manifest: {"id": "a-z, 0-9 and -, 2 to 40 characters", "name": "…", "version": "0.1.0", "api": 1, "description": "…", "ui": "ui.js" (if src/ui.tsx), "script": "script.js" (if src/script.ts), "styles": ["file.css"], "themes": [{"id": "dusk", "name": "Dusk", "base": "light" or "dark", "stylesheet": "dusk.css"}], "access": "none" | "read" | "write" (page access it may ever get), "blocks": ["block-type"], "inline": ["inline-type"] (only if it claims inline code)}. Files named there are paths in the built folder, so public/dusk.css is "dusk.css".',
     'Code may import only its own files (./…) and @wikistow/plugin-sdk, @wikistow/plugin-sdk/react, react, react/jsx-runtime and react-dom/client. No other packages exist here and none can be installed. Code is bundled, not type-checked, so read the reference before using the host interface.',
     'A block the app draws as a form, from a script: host.blocks.register({ type: "product", fields: { quantity: { type: "number", label: "Quantity", default: 1, min: 0 }, price: { type: "number", label: "Unit price", default: 0 } }, outputs: { total: { label: "Total", calculate: ({ quantity, price }) => quantity * price } } }). Its type must be in the manifest’s "blocks". A page holds it as a fenced block whose info string is plugin:<id>/<type>, with one "<field>: <value>" line per field, for example ```plugin:calculator/product\\nquantity: 2\\nprice: 3.5\\n```. App code can instead draw a block itself with host.blocks.register({ type, view }). App code can also draw inline code a page holds as `plugin:<id>/<type> <text>`, a type in the manifest’s "inline", with host.inline.register({ type, view }); the view gets { text, page, setText }.',
@@ -61,20 +63,22 @@ export function workshopTools(workshop: WorkshopBackend): AiTool[] {
   return [
     aiTool({
       name: 'list_files',
-      description: 'List the files in the plugin draft, with their sizes in bytes.',
+      description:
+        'List the files in the plugin draft, with their sizes in bytes. Fonts and images the person added are marked binary.',
       input: z.object({}),
       run: async () => json(workshop.files()),
     }),
     aiTool({
       name: 'read_file',
-      description: 'Read a text file in the draft, by its path from the top, such as src/ui.tsx.',
+      description:
+        'Read a text file in the draft, by its path from the top, such as src/ui.tsx. Fonts and images can’t be read.',
       input: z.object({ path: z.string().min(1).max(400) }),
       run: async ({ path }) => workshop.read(path),
     }),
     aiTool({
       name: 'write_file',
       description:
-        'Create or replace a text file in the draft with exactly this content, saved on the server at once. Paths are relative, such as wikistow-plugin.json, src/script.ts or public/theme.css.',
+        'Create or replace a text file in the draft with exactly this content, saved on the server at once. Paths are relative, such as wikistow-plugin.json, src/script.ts or public/theme.css. Fonts and images can’t be written: the person adds them.',
       input: z.object({ path: z.string().min(1).max(400), content: z.string() }),
       run: async ({ path, content }) => {
         await workshop.write(path, content);
@@ -83,7 +87,7 @@ export function workshopTools(workshop: WorkshopBackend): AiTool[] {
     }),
     aiTool({
       name: 'delete_file',
-      description: 'Delete a file from the draft.',
+      description: 'Delete a file from the draft, a font or image among them.',
       input: z.object({ path: z.string().min(1).max(400) }),
       run: async ({ path }) => {
         await workshop.remove(path);
