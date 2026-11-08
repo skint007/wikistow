@@ -11,6 +11,8 @@ import {
   openSession,
   PageId,
   pageOperations as pages,
+  type FolderId,
+  type SpaceId,
   RevisionId,
   spaceOperations as spaces,
   trashOperations as trash,
@@ -275,7 +277,7 @@ describe('changes made offline', () => {
 
     // An owner restores it: Try again sends it.
     await trash.restoreDeleted(ctx, page.pageId);
-    await queue.retry(page.pageId);
+    await queue.retry({ kind: 'page', id: page.pageId });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
     expect((await draft()).markdown).toBe('kept words');
@@ -316,5 +318,155 @@ describe('changes made offline', () => {
       copy.attachments[0]!,
     );
     expect(new TextDecoder().decode(file)).toBe('another photo');
+  });
+});
+
+/** The folder's metadata as the server has it now, or null once it's gone. */
+async function folderNow(ctx: ClientContext, spaceId: SpaceId, folderId: FolderId) {
+  const { folders } = await spaces.loadStructure(ctx, spaceId);
+  return folders.find((folder) => folder.id === folderId)?.metadata ?? null;
+}
+
+const nameOf = (metadata: Awaited<ReturnType<typeof folderNow>>) =>
+  metadata?.opened.kind === 'current' ? metadata.opened.metadata.name : null;
+
+// Folder renames and deletes made offline (#330): sent in order with the
+// rest, refused as gone when the folder or page is, and a rename over
+// someone else's as a conflict, with both names to choose from.
+describe('renames and deletes made offline', () => {
+  /** `device()` with a folder on the server, and its metadata as the tree shows it. */
+  async function withFolder() {
+    const made = await device();
+    const folderId = await spaces.createFolder(made.ctx, {
+      spaceId: made.spaceId,
+      parentId: null,
+      name: 'Trips',
+    });
+    const current = await folderNow(made.ctx, made.spaceId, folderId);
+    if (!current) throw new Error('No folder');
+    return { ...made, folderId, current };
+  }
+
+  it('rename a folder once, with the renames since folded in, and fold one made offline into its entry', async () => {
+    const { ctx, queue, spaceId, folderId, current } = await withFolder();
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Holidays' } });
+    await queue.rename({ spaceId, folderId, current, changes: { emoji: '🏖️' } });
+    expect(await queue.entries()).toHaveLength(1);
+    // A folder made offline takes its rename into its own entry.
+    const made = await queue.newFolder({
+      spaceId,
+      parentId: null,
+      metadata: newFolderMetadata('Draft'),
+    });
+    await queue.rename({ spaceId, folderId: made.id, current, changes: { name: 'Ideas' } });
+    expect((await queue.entries()).map((entry) => entry.kind)).toEqual(['rename', 'folder']);
+
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    const now = await folderNow(ctx, spaceId, folderId);
+    expect(now?.opened.kind === 'current' && now.opened.metadata).toMatchObject({
+      name: 'Holidays',
+      emoji: '🏖️',
+    });
+    expect(nameOf(await folderNow(ctx, spaceId, made.id))).toBe('Ideas');
+  });
+
+  it('land a rename whose answer was lost once', async () => {
+    const { ctx, queue, spaceId, folderId, current, losing } = await withFolder();
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Holidays' } });
+    const path = structureRoutes.updateMetadata.path.replace(':spaceId', spaceId);
+    expect(await queue.send(losing(path))).toBe('offline');
+    // Sent again, `stale-head` is its own landed version.
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Holidays');
+  });
+
+  it('wait as a conflict over someone else’s rename, and go on top once the person chooses theirs', async () => {
+    const { ctx, queue, spaceId, folderId, current } = await withFolder();
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Mine' } });
+    // Meanwhile, from another device.
+    await spaces.updateMetadata(ctx, {
+      spaceId,
+      subject: { kind: 'folder', folderId },
+      current,
+      changes: { name: 'Theirs' },
+    });
+
+    expect(await queue.send(ctx)).toBe('sent');
+    const [stopped] = await queue.entries();
+    expect(stopped?.failure).toEqual({ kind: 'conflict' });
+    expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Theirs');
+
+    const theirs = await folderNow(ctx, spaceId, folderId);
+    if (!theirs) throw new Error('No folder');
+    await queue.renameOnTop(folderId, theirs);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Mine');
+  });
+
+  it('stop a rename of a folder gone meanwhile as gone', async () => {
+    const { ctx, queue, spaceId, folderId, current } = await withFolder();
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Holidays' } });
+    await pages.deleteNode(ctx, { spaceId, nodeId: folderId });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]?.failure).toEqual({ kind: 'gone' });
+  });
+
+  it('send a draft before the delete made after it, so it goes to the trash with the page', async () => {
+    const { ctx, queue, spaceId, page, based, draft, payload } = await device();
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('last words'),
+      seen: null,
+    });
+    await queue.delete({ spaceId, id: page.pageId, node: 'page', name: 'Plan' });
+    expect((await queue.waiting(page.pageId)).map((entry) => entry.kind)).toEqual([
+      'page',
+      'delete',
+    ]);
+
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await trash.loadTrash(ctx)).map((item) => item.nodeId)).toEqual([page.pageId]);
+    await trash.restoreDeleted(ctx, page.pageId);
+    expect((await draft()).markdown).toBe('last words');
+  });
+
+  it('stop a delete of what someone deleted meanwhile as gone', async () => {
+    const { ctx, queue, spaceId, page } = await device();
+    await queue.delete({ spaceId, id: page.pageId, node: 'page', name: 'Plan' });
+    await pages.deleteNode(ctx, { spaceId, nodeId: page.pageId });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]).toMatchObject({ kind: 'delete', failure: { kind: 'gone' } });
+  });
+
+  it('drop a folder made offline, and what was made in it, without sending anything', async () => {
+    const { ctx, queue, spaceId } = await device();
+    const folder = await queue.newFolder({
+      spaceId,
+      parentId: null,
+      metadata: newFolderMetadata('Trips'),
+    });
+    const inner = await queue.newFolder({
+      spaceId,
+      parentId: folder.id,
+      metadata: newFolderMetadata('Gear'),
+    });
+    await queue.newPage({
+      spaceId,
+      parentId: inner.id,
+      payload: newPayload({ title: 'Tent', markdown: '' }),
+    });
+    expect(await queue.delete({ spaceId, id: folder.id, node: 'folder', name: 'Trips' })).toBe(
+      'dropped',
+    );
+    expect(await queue.entries()).toEqual([]);
+    expect(await queue.send(ctx)).toBe('sent');
+    const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+    expect(tree.folders).toEqual([]);
   });
 });

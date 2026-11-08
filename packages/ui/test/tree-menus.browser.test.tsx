@@ -61,7 +61,7 @@ it('holds each item as its kind says, for a folder made offline', async () => {
     expect(item(label).dataset['hint'], label).toBe(now.allowed ? undefined : now.hint);
   }
   // Waiting, it does nothing; one that runs offline still does.
-  act(() => item('Rename…').click());
+  act(() => item('Share…').click());
   expect(ran).toEqual([]);
   act(() => item('New page here').click());
   expect(ran).toEqual(['new page']);

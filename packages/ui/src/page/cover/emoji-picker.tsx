@@ -30,6 +30,8 @@ export type ImageChoice = {
   onRemove?: () => void;
   /** The upload button's label while `onPick` runs; Resizing… unless given. */
   working?: string;
+  /** Why the image can't change now, such as offline: the tab shows it, and offers nothing. */
+  waits?: string | null;
 };
 
 /** What the picker's Icons tab shows and does: an icon of the icon set, by name. */
@@ -170,6 +172,19 @@ function ImageTab({ image, onDone }: { image: ImageChoice; onDone: () => void })
     } finally {
       setBusy(false);
     }
+  }
+
+  if (image.waits) {
+    return (
+      <div className="grid gap-3">
+        {image.current && (
+          <span className="grid size-16 shrink-0 overflow-hidden rounded-tile bg-muted">
+            <IconImage src={image.current} fallback={null} />
+          </span>
+        )}
+        <p className="text-sm text-muted-foreground">{image.waits}</p>
+      </div>
+    );
   }
 
   return (

@@ -334,11 +334,14 @@ export async function updateMetadata(
     subject,
     current,
     changes,
+    metadataRevisionId: given,
   }: {
     spaceId: SpaceId;
     subject: { kind: 'space' } | { kind: 'folder'; folderId: FolderId };
     current: LoadedMetadata;
     changes: MetadataChanges;
+    /** The new version's ID, as a change made offline records it before sending. */
+    metadataRevisionId?: MetadataRevisionId;
   },
 ): Promise<LoadedMetadata & { repaired: boolean }> {
   const folderId = subject.kind === 'folder' ? subject.folderId : null;
@@ -346,7 +349,7 @@ export async function updateMetadata(
   const region = writeRegion({ kind: 'based-on', basedOn: current.region });
   const metadataRevisionId = await withFreshKeys(ctx, spaceId, async (keys) => {
     const { permissionVersion, share } = await treeTarget(ctx, spaceId, folderId);
-    const id = newId(MetadataRevisionId);
+    const id = given ?? newId(MetadataRevisionId);
     const { metadata, envelopes, wrap } = sealMetadataV2({
       author: ctx.identity,
       target: {

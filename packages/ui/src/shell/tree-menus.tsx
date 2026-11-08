@@ -75,14 +75,14 @@ export function folderActions({
     action('New page here', 'new-page', editing?.onNewPage),
     action('New page from template here', 'server', editing?.onNewFromTemplate),
     action('New folder here', 'new-folder', editing?.onNewFolder),
-    action('Rename…', 'server', editing?.onRename),
-    action('Emoji and colour…', 'server', editing?.onRestyle),
+    action('Rename…', 'rename', editing?.onRename),
+    action('Emoji and colour…', 'rename', editing?.onRestyle),
     action('Move to…', 'move', editing?.onMove),
     action('Copy to…', 'copy', editing?.onCopy),
     action('Share…', 'server', editing?.onShare),
     action('Export…', 'server', onExport),
     action('Import…', 'server', onImport),
-    action('Delete folder', 'server', editing?.onDelete, true),
+    action('Delete folder', 'delete', editing?.onDelete, true),
   ].filter((item) => item !== undefined);
 }
 
@@ -108,12 +108,12 @@ export type PageAction = 'move' | 'copy' | 'publish' | 'public-link' | 'unpublis
 /**
  * A page's actions after Open, by the rules of its own page's menu: Move,
  * Copy and Publish for editors, Publish only with publish rights, Share public
- * link and Unpublish with those and a publication, Delete for owners who
- * can share.
+ * link and Unpublish with those and a publication, Delete for those who
+ * may delete (`mayDelete`).
  */
 function pageActions(
   info: PageInfo,
-  sharer: boolean,
+  deleter: boolean,
   onAction: (action: PageAction, info: PageInfo) => void,
 ): MenuAction[] {
   const canEdit = info.role !== 'reader';
@@ -137,7 +137,7 @@ function pageActions(
       'server',
       when(info.heads.publishedHead !== null && info.canPublish, 'unpublish'),
     ),
-    action('Delete page', 'server', when(sharer, 'delete'), true),
+    action('Delete page', 'delete', when(deleter, 'delete'), true),
   ].filter((item) => item !== undefined);
 }
 
@@ -237,12 +237,12 @@ export function FolderMenuItems({
  */
 export function PageMenuItems({
   pageId,
-  sharer,
+  deleter,
   onOpen,
   onAction,
 }: {
   pageId: PageId;
-  sharer: boolean;
+  deleter: boolean;
   onOpen: () => void;
   onAction: (action: PageAction, info: PageInfo) => void;
 }) {
@@ -255,7 +255,7 @@ export function PageMenuItems({
       <ContextMenuItem onSelect={onOpen}>Open</ContextMenuItem>
       {info ? (
         <Items
-          actions={pageActions(info, sharer, onAction)}
+          actions={pageActions(info, deleter, onAction)}
           Item={ContextMenuItem}
           waiting={waiting(pageId)}
         />

@@ -36,7 +36,7 @@ import { contentChanged } from '../data/content-changed';
 import { publicLinksQuery, treeQuery } from '../data/queries';
 import { pageWriter } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
-import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
+import { DeleteButton, DeletePageDialog, deleteNote } from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublicLinkDialog, PublicMarker } from '../page/public-link';
@@ -44,7 +44,7 @@ import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
-import { useOwnerStanding } from '../sharing/owner-standing';
+import { mayDelete, useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { Replaceable } from '../plugins/places';
 import { useClient } from '../vault/store';
@@ -309,6 +309,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     : null;
   // Sharing and deleting folders wait until a new owner has confirmed who added them.
   const sharer = standing === 'owner';
+  const deleter = mayDelete(standing, availability.offline);
   // Whether the person can change what is under `parentId`: their role in
   // the share that holds it, or in the space.
   const canEditAt = (parentId: FolderId | null) => {
@@ -557,7 +558,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                               action: 'copy',
                             }),
                           onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
-                          onDelete: sharer ? () => setDeleting(row.id) : undefined,
+                          onDelete: deleter ? () => setDeleting(row.id) : undefined,
                         }
                       : null,
                     onExport: () => setExporting({ folderId: row.id, name: row.name }),
@@ -644,7 +645,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                     items={
                       <PageMenuItems
                         pageId={row.id}
-                        sharer={sharer}
+                        deleter={deleter}
                         onOpen={() => openPage(row.id)}
                         onAction={(action, info) =>
                           action === 'move' || action === 'copy'
@@ -804,14 +805,23 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               ?
             </DialogTitle>
             <DialogDescription>
-              It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
-              {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You can
-              restore it from Trash until then. Any public links in it end.
+              {deleting && availability.waiting(deleting) === 'made' ? (
+                deleteNote({ made: true, offline: availability.offline })
+              ) : (
+                <>
+                  It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
+                  {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You
+                  can restore it from Trash until then. Any public links in it end.
+                  {availability.offline &&
+                    ' You’re offline: it goes to the trash once you’re back online.'}
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DeleteButton
             spaceId={spaceId}
             nodeId={deleting}
+            node="folder"
             name={deletingName?.kind === 'folder' ? deletingName.name : 'Folder'}
             onDone={() => {
               setDeleting(null);

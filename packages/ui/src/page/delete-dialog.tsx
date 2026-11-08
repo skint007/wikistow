@@ -1,5 +1,5 @@
-import { pageOperations, type FolderId, type PageId, type SpaceId } from '@wikistow/client';
-import { useQueryClient } from '@tanstack/react-query';
+import type { FolderId, PageId, pageOperations, SpaceId } from '@wikistow/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { contentChanged } from '../data/content-changed';
+import { pageChange, pageWriter, queueQuery } from '../data/offline-changes';
 import { trashQuery } from '../data/queries';
 import { errorMessage } from '../errors';
+import { useAvailability } from '../shell/availability';
 import { useClient } from '../vault/store';
 import { noteTrashed } from './trash-notice';
 
@@ -31,6 +33,12 @@ export function DeletePageDialog({
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
 }) {
+  const ctx = useClient();
+  const { offline, waiting } = useAvailability();
+  const { data: entries } = useQuery(queueQuery(ctx));
+  const change = pageChange(entries, page.pageId);
+  const made = waiting(page.pageId) === 'made';
+  const [dropChanges, setDropChanges] = useState(false);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -38,9 +46,30 @@ export function DeletePageDialog({
           <DialogTitle>
             Delete “<Name>{title}</Name>”?
           </DialogTitle>
-          <DialogDescription>{TRASH_NOTE}</DialogDescription>
+          <DialogDescription>{deleteNote({ made, offline })}</DialogDescription>
         </DialogHeader>
-        <DeleteButton spaceId={page.spaceId} nodeId={page.pageId} name={title} onDone={onDone} />
+        {change && !made && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={dropChanges}
+              onChange={(event) => setDropChanges(event.target.checked)}
+            />
+            <span>
+              Drop my changes saved on this device, not sent yet. Otherwise they’re sent first, and
+              go to the trash with it.
+            </span>
+          </label>
+        )}
+        <DeleteButton
+          spaceId={page.spaceId}
+          nodeId={page.pageId}
+          node="page"
+          name={title}
+          dropChanges={dropChanges}
+          onDone={onDone}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -51,18 +80,36 @@ export const TRASH_NOTE =
   'It goes to the trash with everything in it, and stays there for 30 days. You can restore it from Trash until then. Any public link to it ends.';
 
 /**
+ * What deleting a page or folder does: into the trash, once back online if
+ * offline, or for one made offline and not sent, gone for good with what
+ * is in it (ADR 0009, decision 7).
+ */
+export const deleteNote = ({ made, offline }: { made: boolean; offline: boolean }) =>
+  made
+    ? 'It was made on this device and isn’t sent yet, so it goes for good, with everything in it.'
+    : offline
+      ? `${TRASH_NOTE} You’re offline: it goes to the trash once you’re back online.`
+      : TRASH_NOTE;
+
+/**
  * Moves a page or folder to the trash, then refreshes the tree and says so,
- * with Undo (`TrashNotice`).
+ * with Undo (`TrashNotice`). Offline, or after changes waiting for it, it
+ * waits on this device, and the queue refreshes the tree.
  */
 export function DeleteButton({
   spaceId,
   nodeId,
+  node,
   name,
+  dropChanges = false,
   onDone,
 }: {
   spaceId: SpaceId;
   nodeId: FolderId | PageId | null;
+  node: 'page' | 'folder';
   name: string;
+  /** Drop the page's draft waiting on this device first. */
+  dropChanges?: boolean;
   onDone: () => void;
 }) {
   const ctx = useClient();
@@ -74,12 +121,20 @@ export function DeleteButton({
     setBusy(true);
     setError(null);
     try {
-      await pageOperations.deleteNode(ctx, { spaceId, nodeId });
-      await Promise.all([
-        contentChanged(queryClient, ctx, { spaceId }),
-        queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
-      ]);
-      noteTrashed({ ctx, spaceId, nodeId, name });
+      const deleted = await pageWriter(ctx).deleteNode({
+        spaceId,
+        nodeId,
+        node,
+        name,
+        dropChanges,
+      });
+      if (deleted === 'trashed') {
+        await Promise.all([
+          contentChanged(queryClient, ctx, { spaceId }),
+          queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
+        ]);
+        noteTrashed({ ctx, spaceId, nodeId, name });
+      }
       onDone();
     } catch (caught) {
       setError(errorMessage(caught));

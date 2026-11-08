@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, signIn, test } from './fixtures';
+import { folderMenu, newFolder } from './sharing';
 import {
   adminTab,
   expectSource,
@@ -219,4 +220,85 @@ test('a draft edited offline that someone changed meanwhile comes back as a conf
   await expect(note).toBeHidden();
   await other.reload();
   await expectSource(other, 'tent and stove');
+});
+
+/**
+ * A folder renamed, and a folder and a page deleted, offline (#330): the
+ * sidebar shows them so at once and after loading again offline, the
+ * delete says it goes once back online, and back online they reach the
+ * server, the deleted ones in the trash.
+ */
+test('a folder renamed and a folder and page deleted offline go once back online', async ({
+  page,
+  context,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newFolder(page, 'Trips');
+  await newFolder(page, 'Old notes');
+  await newPage(page, 'Bread');
+  await fillSource(page, 'Flour and rye.');
+  await waitForSave(page);
+  await watchKeeping(page);
+  await page.reload();
+  await expectSource(page, 'Flour and rye.');
+  await expect(page.locator('html')).toHaveAttribute('data-keeping', 'done', { timeout: 30_000 });
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  await context.setOffline(true);
+  const tree = page.getByRole('tree');
+  // The app finds it is offline on its next request.
+  await tree.getByRole('treeitem', { name: /Old notes/ }).click();
+  const offline = page.getByRole('status').filter({ hasText: 'Offline' });
+  await expect(offline).toBeVisible();
+  const waiting = 'Saved on this device, not sent yet';
+
+  await test.step('rename a folder', async () => {
+    await folderMenu(page, 'Trips', 'Rename…');
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('saved on this device and sent when you’re back online');
+    await dialog.getByLabel('Name').fill('Holidays');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+    const renamed = tree.getByRole('treeitem', { name: /Holidays/ });
+    await expect(renamed).toContainText(waiting);
+    await expect(tree.getByRole('treeitem', { name: /Trips/ })).toBeHidden();
+  });
+
+  await test.step('delete a folder and a page', async () => {
+    await folderMenu(page, 'Old notes', 'Delete folder');
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('it goes to the trash once you’re back online');
+    await dialog.getByRole('button', { name: 'Move to trash' }).click();
+    await expect(tree.getByRole('treeitem', { name: /Old notes/ })).toBeHidden();
+
+    await tree.getByRole('treeitem', { name: 'Bread' }).click();
+    await page.getByRole('button', { name: 'Page actions' }).click();
+    await page.getByRole('menuitem', { name: 'Delete page' }).click();
+    await expect(dialog).toContainText('it goes to the trash once you’re back online');
+    await dialog.getByRole('button', { name: 'Move to trash' }).click();
+    await expect(tree.getByRole('treeitem', { name: 'Bread' })).toBeHidden();
+  });
+
+  await test.step('loaded again offline, they stay so', async () => {
+    await page.reload();
+    await expect(offline).toBeVisible();
+    await expect(tree.getByRole('treeitem', { name: /Holidays/ })).toBeVisible();
+    await expect(tree.getByRole('treeitem', { name: /Old notes/ })).toBeHidden();
+    await expect(tree.getByRole('treeitem', { name: 'Bread' })).toBeHidden();
+  });
+
+  await context.setOffline(false);
+  await expect(offline).toBeHidden({ timeout: 15_000 });
+  await expect(tree.getByRole('treeitem', { name: /Holidays/ })).not.toContainText(waiting, {
+    timeout: 30_000,
+  });
+  await page.reload();
+  await expect(tree.getByRole('treeitem', { name: /Holidays/ })).toBeVisible();
+  await expect(tree.getByRole('treeitem', { name: /Old notes/ })).toBeHidden();
+  await page.getByRole('link', { name: 'Trash' }).click();
+  await expect(page.getByText('Old notes')).toBeVisible();
+  await expect(page.getByText('Bread')).toBeVisible();
 });

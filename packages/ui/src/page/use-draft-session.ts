@@ -161,15 +161,15 @@ export async function saveOpenDraft(pageId: PageId): Promise<string | null> {
   // Not offline, nor with the page's change saved on this device only,
   // which would come back as a conflict with this change.
   const vault = vaultStore.get();
-  const entry =
+  const entries =
     vault.status === 'unlocked'
       ? await queueOf(vault.ctx)
-          ?.entry(pageId)
+          ?.waiting(pageId)
           .catch(() => null)
       : null;
   const now = availability('chat-edit', {
     offline: !connection.get().online,
-    waiting: waitingOf(entry),
+    waiting: waitingOf(entries ?? []),
   });
   return now.allowed ? null : now.hint;
 }
