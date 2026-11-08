@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A link in a folder table or a query block to a page moved to another space opens it there, as the linking page's own link does. (#PR)
 
+#### Releases and packaging
+
+- Signed apt and dnf repositories for the desktop app on GitHub Pages, published after each stable release, and an update notice that says to use apt or dnf for them. (#361)
+
 ## 0.25.0-beta.1 - 2026-11-08
 
 ### Highlights

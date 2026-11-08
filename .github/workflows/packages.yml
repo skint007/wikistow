@@ -1,0 +1,154 @@
+# Publishes the desktop app's signed apt and dnf repositories on GitHub Pages
+# (skint007.github.io/wikistow) for a GitHub Release that already has its
+# .deb and .rpm. The release workflow runs it after each stable release from
+# main. Run it by hand on main to publish a release again (docs/releasing.md).
+# Each run replaces the whole site with that release's repositories.
+name: Package repositories
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The stable release to publish, such as 0.25.0
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  # Where Pages serves the site, which the repositories' files name.
+  SITE_URL: https://skint007.github.io/wikistow
+  # The key the `packages` environment holds. The build refuses any other.
+  SIGNING_KEY: 3059DE560FA2DC27146F5940D3580799A10871D8
+
+jobs:
+  # The release's packages, checked against its SHA256SUMS, in repositories
+  # signed with the key, as the site Pages serves.
+  build:
+    runs-on: ubuntu-24.04
+    # Holds the signing key.
+    environment: packages
+    permissions:
+      contents: read
+    container: debian:13@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+    steps:
+      - run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ca-certificates curl gnupg apt-utils createrepo-c rpm >/dev/null
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$VERSION isn't a stable release: the repositories hold only those"; exit 1; }
+          mkdir "$RUNNER_TEMP/packages"
+          cd "$RUNNER_TEMP/packages"
+          for file in SHA256SUMS "wikistow-desktop-$VERSION-amd64.deb" "wikistow-desktop-$VERSION-x86_64.rpm"; do
+            curl -fsSLO --retry 10 --retry-all-errors --retry-delay 30 "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/$file"
+          done
+          sha256sum -c --ignore-missing SHA256SUMS
+          rm SHA256SUMS
+        shell: bash
+      - name: Build
+        env:
+          PACKAGES_SIGNING_KEY: ${{ secrets.PACKAGES_SIGNING_KEY }}
+        run: |
+          if [ -z "$PACKAGES_SIGNING_KEY" ]; then
+            echo "::error::PACKAGES_SIGNING_KEY is empty: the packages environment holds it (docs/releasing.md)."
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 700 "$GNUPGHOME"
+          printf '%s\n' "$PACKAGES_SIGNING_KEY" | gpg --batch --quiet --import
+          if ! gpg --batch --with-colons --list-secret-keys | grep -qx "fpr:::::::::$SIGNING_KEY:"; then
+            echo "::error::PACKAGES_SIGNING_KEY isn't the key $SIGNING_KEY"
+            exit 1
+          fi
+          scripts/package-repos.sh "$RUNNER_TEMP/packages" site "$SITE_URL"
+          rm -rf "$GNUPGHOME"
+          find site -type f -exec ls -l {} +
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+          # Long enough to re-run a failed deploy, as the other artifacts.
+          retention-days: 7
+
+  # Each supported distribution adds the repository from the site's own
+  # files, as docs/desktop.md says, and installs the app from it, checking
+  # the signatures with the published key.
+  check:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        # As in ci.yml's linux-packages-check.
+        image:
+          - debian:13@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5
+          - ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+          - ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+          - fedora:43@sha256:a651ddf48ea28a06ed4e1e6519f51c9f47e7a5a138722ade87369b8fbb7e5b42
+          - fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: github-pages
+      # Served from this folder in place of Pages.
+      - env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          site="$PWD/site"
+          mkdir "$site"
+          tar -xf artifact.tar -C "$site"
+          here() { sed "s|$SITE_URL|file://$site|" "$site/$1"; }
+          if command -v apt-get >/dev/null; then
+            install -d -m 755 /etc/apt/keyrings
+            cp "$site/wikistow.asc" /etc/apt/keyrings/wikistow.asc
+            here wikistow.sources > /etc/apt/sources.list.d/wikistow.sources
+            # apt only warns about a repository it can't check, so fail on that.
+            apt-get update 2>&1 | tee "$RUNNER_TEMP/update.log"
+            if grep -E '^(W|E):' "$RUNNER_TEMP/update.log"; then exit 1; fi
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wikistow-desktop >/dev/null
+            installed=$(dpkg-query -W -f '${Version}' wikistow-desktop)
+            source=deb
+          else
+            here wikistow.repo > /etc/yum.repos.d/wikistow.repo
+            dnf install -y -q wikistow-desktop
+            # dnf imported the key to check the .rpm with, and it checks.
+            rpm -K "$site"/rpm/*.rpm | grep 'signatures OK'
+            rpm -qi gpg-pubkey | grep -i "${SIGNING_KEY:24}"
+            installed=$(rpm -q --qf '%{VERSION}-%{RELEASE}' wikistow-desktop)
+            source=rpm
+          fi
+          [ "$installed" = "$VERSION-1" ]
+          [ "$(cat /usr/lib/wikistow-desktop/install-source)" = "$source" ]
+          echo "Installed $installed from the repository, signature checked."
+        shell: bash
+
+  deploy:
+    needs: check
+    # Only main and release tags publish.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    # Must allow main and the v* tags (docs/releasing.md#repository-settings).
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    # One site at a time.
+    concurrency:
+      group: pages
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

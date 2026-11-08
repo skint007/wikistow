@@ -99,8 +99,12 @@ export type DesktopUpdate = {
   version: string;
   /** Its release page, with the notes and the downloads; for a Windows install, its installer. */
   url: string;
-  /** How this copy was installed (`install-source`), or null when the app can't tell. */
-  source: 'aur' | 'deb' | 'rpm' | 'windows' | 'mac' | null;
+  /**
+   * How this copy was installed (`install-source`), or null when the app
+   * can't tell: `apt` and `dnf` are a .deb or .rpm with WikiStow's
+   * repository added.
+   */
+  source: 'aur' | 'apt' | 'deb' | 'dnf' | 'rpm' | 'windows' | 'mac' | null;
 };
 
 /**
