@@ -1,4 +1,5 @@
 import { aiDispatcher, workshopTools, type AiSession, type ClientContext } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import sdkGuide from '@wikistow/plugin-sdk/README.md?raw';
 import hostTypes from '@wikistow/plugin-sdk/src/host.ts?raw';
@@ -37,7 +38,11 @@ export type WorkshopTurn = { text: string; copied: { title: string | null } | nu
  * `reading` until then. `problem` is why the last change wasn't kept,
  * such as a conversation past the limit.
  */
-export type Keeping = { status: 'reading' | Kept['status']; problem: string | null };
+export type Keeping = {
+  /** `stale` once another device kept its own since: nothing more is kept here. */
+  status: 'reading' | Kept['status'] | 'stale';
+  problem: string | null;
+};
 
 const encoder = new TextEncoder();
 
@@ -68,6 +73,8 @@ export class WorkshopChat {
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** What was last sent to be kept, to send nothing when nothing changed. */
   #lastKept: string | null = null;
+  /** The revision of what the draft keeps, which the next save follows. */
+  #revision = 0;
   /** The last save: they go one at a time. */
   #saving: Promise<void> = Promise.resolve();
   /** Closed, or clearing: nothing more is kept. */
@@ -94,7 +101,10 @@ export class WorkshopChat {
       maxSteps: WORKSHOP_STEPS,
     });
     this.#restored = workshop.kept.then((kept) => {
-      if (kept.status === 'kept' && kept.workshop) this.#restore(kept.workshop);
+      if (kept.status === 'kept') {
+        this.#revision = kept.revision;
+        if (kept.workshop) this.#restore(kept.workshop);
+      }
       this.#setKeeping({ status: kept.status, problem: null });
       if (kept.status !== 'kept') return;
       // Kept a moment after each change; at once as a reply ends.
@@ -184,10 +194,20 @@ export class WorkshopChat {
     this.#lastKept = text;
     const params = { draftId: this.workshop.draftId };
     this.#saving = this.#saving.then(async () => {
+      // Nothing more after another device's: it isn't kept over.
+      if (this.#keeping.status !== 'kept') return;
       try {
-        await api.call(pluginDraftRoutes.putDraftWorkshop, { params, body: { workshop: record } });
+        const answer = await api.call(pluginDraftRoutes.putDraftWorkshop, {
+          params,
+          body: { workshop: record, revision: this.#revision },
+        });
+        this.#revision = answer.revision;
         if (this.#keeping.problem) this.#setKeeping({ ...this.#keeping, problem: null });
       } catch (error) {
+        if (error instanceof ApiError && error.code === 'stale-head') {
+          this.#setKeeping({ status: 'stale', problem: null });
+          return;
+        }
         // Sent again with the next change.
         if (this.#lastKept === text) this.#lastKept = null;
         if (!this.#done) {
@@ -210,6 +230,9 @@ export class WorkshopChat {
   async send(text: string) {
     // After the kept conversation, which this carries on.
     await this.#restored;
+    // One sent while that was read went first.
+    if (this.session.state().status === 'running')
+      throw new Error('A reply is still being written.');
     const copied = this.#copied;
     this.#copied = null;
     const said = copied
@@ -271,8 +294,9 @@ export class WorkshopChat {
     this.#done = true;
     clearTimeout(this.#timer);
     await this.#saving;
-    // What can't be read here is forgotten too, so the next workshop is kept.
-    if (this.#keeping.status !== 'kept' && this.#keeping.status !== 'unreadable') return;
+    // What can't be read here, or another device kept, is forgotten too, so the next is kept.
+    const { status } = this.#keeping;
+    if (status !== 'kept' && status !== 'unreadable' && status !== 'stale') return;
     try {
       await api.call(pluginDraftRoutes.clearDraftWorkshop, {
         params: { draftId: this.workshop.draftId },

@@ -92,7 +92,9 @@ export function WorkshopConversation({
               Open the preview
             </Link>
           )}
-          {(ai.messages.length > 0 || keeping.status === 'unreadable') && (
+          {(ai.messages.length > 0 ||
+            keeping.status === 'unreadable' ||
+            keeping.status === 'stale') && (
             <button
               type="button"
               onClick={() => setClearing(true)}
@@ -124,6 +126,12 @@ export function WorkshopConversation({
           <p role="note" className="text-xs text-muted-foreground">
             Your WikiStow server doesn’t keep the workshop’s conversation yet: it ends when you end
             the workshop or reload.
+          </p>
+        )}
+        {keeping.status === 'unread' && (
+          <p role="note" className="text-xs text-muted-foreground">
+            The conversation kept with this draft couldn’t be read just now, so this one isn’t kept.
+            Open the draft again to carry on from it.
           </p>
         )}
         {keeping.status === 'unreadable' && (
@@ -168,6 +176,12 @@ export function WorkshopConversation({
         {ai.failure && (
           <p role="alert" className="text-sm text-destructive">
             {ai.failure.message}
+          </p>
+        )}
+        {keeping.status === 'stale' && (
+          <p role="alert" className="text-xs text-destructive">
+            This draft’s conversation went on from another device, so what’s new here isn’t kept.
+            End the workshop and open the draft again to carry on from there.
           </p>
         )}
         {keeping.problem && (

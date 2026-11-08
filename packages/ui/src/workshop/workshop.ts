@@ -125,13 +125,14 @@ export type Version = WorkshopVersion & { history?: { name: string; version: str
 
 /**
  * What the draft keeps of its workshop, as read on opening: `kept`, with
- * what was kept before if anything was; `old-server`, a server older than
- * keeping; `unreadable`, kept by a later app, say, and left as it is; or
- * `failed`, the draft couldn't be read.
+ * what was kept before if anything was, and the revision a save follows;
+ * `old-server`, a server older than keeping; `unreadable`, kept by a later
+ * app, say, and left as it is; `unread`, the read failed, so nothing is
+ * kept over it; or `failed`, the draft itself couldn't be read.
  */
 export type Kept =
-  | { status: 'kept'; workshop: KeptWorkshop | null }
-  | { status: 'old-server' | 'unreadable' | 'failed' };
+  | { status: 'kept'; workshop: KeptWorkshop | null; revision: number }
+  | { status: 'old-server' | 'unreadable' | 'unread' | 'failed' };
 
 /** The same problems, in the same order. */
 const sameDiagnostics = (a: readonly BuildDiagnostic[], b: readonly BuildDiagnostic[]) =>
@@ -362,18 +363,22 @@ export class Workshop {
     }
   }
 
-  /** What the draft keeps of its workshop. A server without the route (404) keeps nothing. */
+  /** What the draft keeps of its workshop. Never throws. */
   async #readKept(): Promise<Kept> {
     try {
-      const { workshop } = await api.call(pluginDraftRoutes.getDraftWorkshop, {
+      const { workshop, revision } = await api.call(pluginDraftRoutes.getDraftWorkshop, {
         params: { draftId: this.draftId },
       });
-      if (workshop === null) return { status: 'kept', workshop: null };
+      if (workshop === null) return { status: 'kept', workshop: null, revision };
       const kept = KeptWorkshop.safeParse(workshop);
-      return kept.success ? { status: 'kept', workshop: kept.data } : { status: 'unreadable' };
+      return kept.success
+        ? { status: 'kept', workshop: kept.data, revision }
+        : { status: 'unreadable' };
     } catch (error) {
+      // The draft was just read, so only a server without the route answers 404.
       if (error instanceof ApiError && error.status === 404) return { status: 'old-server' };
-      throw error;
+      // Its files open as ever; nothing is kept over what couldn't be read.
+      return { status: 'unread' };
     }
   }
 
