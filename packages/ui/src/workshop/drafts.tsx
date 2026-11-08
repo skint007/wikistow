@@ -99,7 +99,10 @@ export function useNewDraft(): {
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
-      if ('proposal' in from) await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY });
+      // The list only: the review's own query would answer not-found while it closes.
+      if ('proposal' in from) {
+        await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY, exact: true });
+      }
     }
   };
 

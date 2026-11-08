@@ -86,8 +86,10 @@ export function Propose({ workshop }: { workshop: Workshop }) {
         <p className="flex-1">
           {data.sent ? (
             <>
-              You proposed this to <Name>{to}</Name> {when(data.sent.createdAt)}. Proposing again
-              sends the files as they are now, in its place.
+              {/* One proposal per plugin: it may have gone from another copy draft of it. */}
+              You proposed a copy of <strong>{copy.from}</strong> to <Name>{to}</Name>{' '}
+              {when(data.sent.createdAt)}. Proposing again sends this draft’s files as they are now,
+              in its place.
             </>
           ) : (
             <>
@@ -217,7 +219,7 @@ function Review({ proposal, onClose }: { proposal: ProposalSummary | null; onClo
       setError(errorMessage(failure));
     } finally {
       setDeclining(false);
-      await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY });
+      await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY, exact: true });
     }
   };
   const open = async () => {
