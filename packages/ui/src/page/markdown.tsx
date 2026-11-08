@@ -185,7 +185,6 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
         scope={{
           ctx: attachments.ctx,
           spaceId: attachments.page.spaceId,
-          pageId: attachments.page.pageId,
           pages,
           editor: editing !== null,
         }}

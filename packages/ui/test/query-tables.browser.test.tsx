@@ -275,7 +275,7 @@ describe('a query block in the visual editor', () => {
         queryTable={(source) => (
           <QueryTable
             source={source}
-            scope={{ ctx, spaceId, pageId: 'p-self', pages: PAGES, editor: true }}
+            scope={{ ctx, spaceId, pages: PAGES, editor: true }}
             failed={(error) => <p className="query-table-error">{error}</p>}
           />
         )}
