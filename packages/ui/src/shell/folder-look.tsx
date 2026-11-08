@@ -214,6 +214,11 @@ export function FolderLookFields({
             <Picture image={image} symbol={look.symbol} emoji={look.emoji} />
           </button>
         </EmojiPopover>
+        {imageWaits && image && (
+          <p className="text-xs text-muted-foreground">
+            The image stays for now, and shows in place of an emoji or icon.
+          </p>
+        )}
       </div>
       <fieldset className="grid gap-2">
         <legend className="mb-2 text-sm font-medium">Colour</legend>

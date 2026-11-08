@@ -624,11 +624,14 @@ export class OfflineQueue {
     id,
     node,
     name,
+    tried = false,
   }: {
     spaceId: SpaceId;
     id: PageId | FolderId;
     node: 'page' | 'folder';
     name: string;
+    /** A request for it already went, and got no answer. */
+    tried?: boolean;
   }): Promise<'dropped' | 'waiting'> {
     const { outcome, gone } = await this.#store.queueExclusive(async () => {
       const own = await this.entry(id);
@@ -650,6 +653,7 @@ export class OfflineQueue {
           node,
           spaceId,
           name,
+          ...(tried && { tried: true }),
           failure: null,
           at: this.#at(),
         });

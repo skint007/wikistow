@@ -304,7 +304,7 @@ export function createPageWriter({
         return 'trashed';
       } catch (error) {
         if (!queue || !noAnswer(error)) throw error;
-        return queue.delete({ spaceId, id: nodeId, node, name });
+        return queue.delete({ spaceId, id: nodeId, node, name, tried: true });
       }
     },
   };
