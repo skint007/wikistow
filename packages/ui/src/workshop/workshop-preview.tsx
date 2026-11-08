@@ -15,6 +15,7 @@ import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Name } from '@/components/name';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -144,7 +145,13 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
-            <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            {workshop.sharedBy === null ? (
+              <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            ) : (
+              <span className="text-muted-foreground">
+                Only <Name>{workshop.sharedBy}</Name> publishes it.
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">
