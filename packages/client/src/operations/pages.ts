@@ -45,6 +45,7 @@ import {
   verifyRevisionRecordV2,
   type AttachmentTarget,
 } from '../revision.ts';
+import { movedPagesFor } from './moved.ts';
 import { pinAuthors, spaceKeys, type SpaceKeys } from './keys.ts';
 import {
   keysFor,
@@ -1220,6 +1221,8 @@ export async function publishPage(
       : {}),
     tree: linkTreeFor(ctx, page.spaceId, tree),
     published: publicationsFor(ctx, page.spaceId),
+    // Links to pages a move took away keep their entries (`writeLinks`).
+    moved: movedPagesFor(ctx, page.spaceId),
     ...(read ? { read } : {}),
   });
   // Resealed with the keys of each try, so a copy is reused only under the
