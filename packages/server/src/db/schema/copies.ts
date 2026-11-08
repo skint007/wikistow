@@ -33,8 +33,9 @@ export const copies = pgTable(
     sourceSpaceId: text()
       .notNull()
       .references(() => spaces.id, { onDelete: 'cascade' }),
-    sourceNodeId: text().notNull(),
-    /** The source node's permission version the preview was made at. */
+    /** Null for the top of the space: everything in it (#339). */
+    sourceNodeId: text(),
+    /** The source node's (or for the top of the space, the space's) permission version the preview was made at. */
     sourcePermissionVersion: bigint({ mode: 'number' }).notNull(),
     destinationSpaceId: text()
       .notNull()

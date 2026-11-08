@@ -928,6 +928,109 @@ describe('moving into another space', () => {
   });
 });
 
+describe('everything in a space, into another (#339)', () => {
+  it('moves it in one finish, leaving the space empty and its trash in it', async () => {
+    const w = await world();
+    await links.turnOn(w.alice.ctx, w.plan);
+    // Deleted from under a folder no share is rooted at: it stays in the library's trash.
+    const archive = await spaceOperations.createFolder(w.alice.ctx, {
+      spaceId: w.lib,
+      parentId: null,
+      name: 'Archive',
+    });
+    const old = await pages.createPage(w.alice.ctx, {
+      spaceId: w.lib,
+      parentId: archive,
+      title: 'Old',
+    });
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib, nodeId: old });
+    const preview = await copies.previewCopy(w.alice.ctx, {
+      kind: 'move',
+      source: { spaceId: w.lib, nodeId: null },
+      destination: { spaceId: w.board, parentId: w.pinned },
+    });
+    expect(preview.source.kind).toBe('space');
+    // Each node at its top goes under Pinned, with what is under it.
+    const tops = preview.nodes.filter((node) => node.parentId === w.pinned);
+    expect(new Set(tops.map((node) => node.name))).toEqual(
+      new Set(['Notes', 'Archive', 'Elsewhere', 'Stay']),
+    );
+    expect(preview.nodes).toHaveLength(6);
+    expect(preview.inbound).toEqual([]);
+    expect(preview.links).toEqual([]);
+    expect(preview.keptLinks).toEqual([w.plan]);
+    expect(preview.ends?.shares.map((s) => s.rootId)).toEqual([w.notes]);
+
+    const made = await copies.makeCopy(w.alice.ctx, preview);
+    const left = await spaceOperations.loadTree(w.alice.ctx, w.lib);
+    expect([...left.folders, ...left.pages]).toEqual([]);
+    expect((await trashOperations.loadTrash(w.alice.ctx)).map((item) => item.nodeId)).toEqual([
+      old,
+    ]);
+    // Stay's wikilink to Plan names Plan's copy, and every old address opens its new place.
+    const stay = ref(
+      w.board,
+      made.copies.get(tops.find((n) => n.name === 'Stay')?.sourceId ?? '') ?? '',
+    );
+    const plan = made.copies.get(w.plan);
+    expect([...linkTableOf((await current(w.alice.ctx, stay)).payload).values()]).toEqual([plan]);
+    expect((await moved.movedTo(w.alice.ctx, { spaceId: w.lib, nodeId: w.plan }))?.nodeId).toBe(
+      plan,
+    );
+    expect((await moved.movedTo(w.alice.ctx, { spaceId: w.lib, nodeId: w.notes }))?.nodeId).toBe(
+      made.copies.get(w.notes),
+    );
+    // Plan's public link went with it.
+    expect((await links.list(w.alice.ctx, w.board)).map((link) => link.pageId)).toEqual([plan]);
+  });
+
+  it('copies it only for an owner, and only into another space', async () => {
+    const w = await world();
+    const whole = { spaceId: w.lib, nodeId: null };
+    const made = await copies.makeCopy(
+      w.alice.ctx,
+      await copies.previewCopy(w.alice.ctx, {
+        kind: 'copy',
+        source: whole,
+        destination: { spaceId: w.board, parentId: null },
+      }),
+    );
+    expect(made.copies.size).toBe(5);
+    expect((await spaceOperations.loadTree(w.alice.ctx, w.lib)).pages).toHaveLength(4);
+    expect(
+      await rejection(
+        copies.previewCopy(w.alice.ctx, {
+          kind: 'copy',
+          source: whole,
+          destination: { spaceId: w.lib, parentId: w.notes },
+        }),
+      ),
+    ).toBe('binding-mismatch');
+    // Bob edits Notes and Drafts, but owns neither space: the server refuses him too.
+    const [space] = await t.db
+      .select({ permissionVersion: schema.spaces.permissionVersion })
+      .from(schema.spaces)
+      .where(eq(schema.spaces.id, w.lib));
+    const opening = w.bob.ctx.api.call(copyRoutes.open, {
+      body: {
+        copyId: newId(copyRoutes.CopyId),
+        kind: 'copy',
+        bringsPublished: false,
+        sourceSpaceId: w.lib,
+        sourceNodeId: null,
+        sourcePermissionVersion: space?.permissionVersion ?? 1,
+        destinationSpaceId: w.board,
+        parentId: w.drafts,
+        permissionVersion: 1,
+        nodes: [
+          { nodeId: newId(PageIdSchema), sourceId: w.elsewhere, kind: 'page', parentId: w.drafts },
+        ],
+      },
+    });
+    expect(await rejection(opening)).toBe('not-found');
+  });
+});
+
 describe('old addresses of what moved into another space', () => {
   const move = async (
     ctx: ClientContext,

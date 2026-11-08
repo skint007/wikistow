@@ -213,3 +213,57 @@ test('an editor who isn’t an owner can’t move into another space', async ({
     await expect(eda.getByRole('menuitemradio')).toHaveCount(2);
   });
 });
+
+/**
+ * An owner moves everything in a space into a folder of another, from the
+ * space menu, while a folder of it is open (#339). Its old address leads to
+ * the other space as the tree changes, which must not take the dialog away
+ * before it asks whether to delete the empty space.
+ */
+test('moving everything in a space into another, then deleting it', async ({
+  page: owner,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(300_000);
+  const adminPage = await adminTab(freshPage, admin.email);
+  await memberWithVault(owner, adminPage);
+  await newSpace(owner, 'Family');
+  await newFolder(owner, 'Garden');
+  await publishedPageIn(owner, 'Garden', 'Seeds', 'Sow thinly.');
+  await newSpace(owner, 'Work');
+  await newFolder(owner, 'Archive');
+  await openSpace(owner, 'Family');
+  await openFolder(owner, 'Garden');
+  await owner.getByRole('treeitem', { name: 'Seeds' }).click();
+  await expect(owner.getByRole('heading', { name: 'Seeds', level: 1 })).toBeVisible();
+  const oldAddress = new URL(owner.url()).pathname;
+  await folderMenu(owner, 'Garden', 'Copy to…');
+  const copying = owner.getByRole('dialog', { name: 'Copy “Garden”' });
+  await chooseAndPreview(copying, 'Family (this space)', 'Top of Family');
+  await copying.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect(owner).toHaveURL(/\/f\//, { timeout: 60_000 });
+
+  await owner.getByRole('button', { name: 'Space menu' }).click();
+  await owner.getByRole('menuitem', { name: 'Move space into…' }).click();
+  const dialog = owner.getByRole('dialog', { name: 'Move everything in “Family”' });
+  await chooseAndPreview(dialog, 'Work', 'Archive');
+  await expect(dialog.getByRole('region', { name: 'What the move ends' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect(dialog.getByRole('status')).toContainText('“Family” is empty now', {
+    timeout: 60_000,
+  });
+  await dialog.getByRole('button', { name: 'Delete space…' }).click();
+  const deleting = owner.getByRole('dialog', { name: 'Delete this space' });
+  await deleting.getByRole('textbox').fill('Family');
+  await deleting.getByRole('button', { name: 'Delete for good' }).click();
+  await expect(owner.getByRole('link', { name: 'Family', exact: true })).toHaveCount(0);
+
+  // Both Gardens are in Work › Archive, and Seeds' old address opens it there.
+  await openSpace(owner, 'Work');
+  await openFolder(owner, 'Archive');
+  await expect(owner.getByRole('treeitem', { name: /Garden/ })).toHaveCount(2);
+  await owner.goto(oldAddress);
+  await expect(owner.getByText('Sow thinly.')).toBeVisible();
+  await expect(owner.getByText('This page moved to Work.')).toBeVisible();
+});

@@ -8,6 +8,7 @@ import {
   type spaceOperations,
 } from '@wikistow/client';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { failedToLoad, LoadFailed } from '@/components/load-failed';
 import { Name, plainText } from '@/components/name';
@@ -38,7 +39,7 @@ import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
 import { askBeforeMoves, useAskBeforeMoves } from './ask-before-moves';
-import { ConfirmCopy, type Chosen } from './confirm-copy';
+import { ConfirmCopy, openPlace, type Chosen } from './confirm-copy';
 import { moveMessage } from './messages';
 import {
   copyDestinations,
@@ -68,6 +69,19 @@ export type Moving = {
   stopped?: 'stale' | { error: string };
   /** What a drop moving without asking worked out, for the dialog showing its progress. */
   preview?: moveOperations.MovePreview;
+};
+
+/**
+ * Everything in a space, moved or copied into another space from its menu,
+ * for its owners (#339). The space stays: after a move, they are asked
+ * whether to delete it, empty, where it can be deleted.
+ */
+export type MovingSpace = {
+  spaceId: SpaceId;
+  name: string;
+  action: 'move' | 'copy';
+  /** False for a home space, which can't be deleted. */
+  deletable: boolean;
 };
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
@@ -158,6 +172,49 @@ export function MoveDialog({
               spaceId={spaceId}
               moving={moving}
               onDone={() => onOpenChange(false)}
+            />
+          )}
+        </HoldOpen>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Move or copy everything in a space into another (#339), from the space's
+ * menu. The app shell holds it, not the space's header, so it stays open
+ * when the move's old addresses take the person to the other space, and on
+ * a phone, where that header is in the drawer. `onDeleteSpace` deletes the
+ * space, asking first, once everything moved out of it.
+ */
+export function SpaceMoveDialog({
+  moving,
+  onOpenChange,
+  onDeleteSpace,
+}: {
+  /** Null while closed. */
+  moving: MovingSpace | null;
+  onOpenChange: (open: boolean) => void;
+  onDeleteSpace: (spaceId: SpaceId) => void;
+}) {
+  const { locked, hold } = useHoldOpen();
+  return (
+    <Dialog open={moving !== null} onOpenChange={onOpenChange}>
+      <DialogContent dialogClassName="sm:max-w-xl" locked={locked}>
+        <HoldOpen value={hold}>
+          {moving && (
+            <SpaceSteps
+              key={`${moving.spaceId} ${moving.action}`}
+              moving={moving}
+              onDone={() => onOpenChange(false)}
+              onDeleteSpace={
+                moving.deletable
+                  ? () => {
+                      onOpenChange(false);
+                      onDeleteSpace(moving.spaceId);
+                    }
+                  : undefined
+              }
             />
           )}
         </HoldOpen>
@@ -310,6 +367,130 @@ function MoveSteps({
   );
 }
 
+const SPACE_DESCRIPTION = {
+  move: 'Everything in it moves, with each page’s draft and published versions. The space stays, empty.',
+  copy: 'Everything in it is copied: each page’s current draft and published version.',
+};
+
+/**
+ * Everything in a space, into another (#339): choosing where, then the
+ * usual preview. After a move, the space is empty, and its owner is asked
+ * whether to delete it; it is never deleted unasked.
+ */
+function SpaceSteps({
+  moving,
+  onDone,
+  onDeleteSpace,
+}: {
+  moving: MovingSpace;
+  onDone: () => void;
+  onDeleteSpace: (() => void) | undefined;
+}) {
+  const { spaceId } = moving;
+  const navigate = useNavigate();
+  const [chosen, setChosen] = useState<Chosen | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  // Where everything went, once a move finished.
+  const [moved, setMoved] = useState<Chosen | null>(null);
+  const copy = moving.action === 'copy';
+  const goThere = async (to: Chosen) => {
+    onDone();
+    await openPlace(navigate, to);
+  };
+  return (
+    <div className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>
+          {copy ? 'Copy' : 'Move'} everything in “<Name>{moving.name}</Name>”
+        </DialogTitle>
+        <DialogDescription>{SPACE_DESCRIPTION[moving.action]}</DialogDescription>
+      </DialogHeader>
+      {moved ? (
+        <AskDeleteSpace
+          name={moving.name}
+          to={moved}
+          onKeep={() => void goThere(moved)}
+          onDelete={onDeleteSpace}
+        />
+      ) : chosen && confirming ? (
+        <ConfirmCopy
+          sourceSpaceId={spaceId}
+          node={null}
+          copy={copy}
+          chosen={chosen}
+          onBack={() => setConfirming(false)}
+          onDone={onDone}
+          onMoved={() => setMoved(chosen)}
+        />
+      ) : (
+        <ChooseDestination
+          spaceId={spaceId}
+          moving={null}
+          action={moving.action}
+          chosen={chosen}
+          onCopyInstead={() => {}}
+          onChoose={(next) => {
+            setChosen(next);
+            setConfirming(true);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * After everything in a space moved: it is empty, and its owner chooses
+ * whether to delete it, as deleting a space does, or keep it. A home space
+ * can't be deleted, so it is only said where everything went.
+ */
+function AskDeleteSpace({
+  name,
+  to,
+  onKeep,
+  onDelete,
+}: {
+  name: string;
+  to: Chosen;
+  onKeep: () => void;
+  onDelete: (() => void) | undefined;
+}) {
+  const heading = useRef<HTMLParagraphElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  return (
+    <div className="grid gap-4">
+      <p ref={heading} tabIndex={-1} role="status" className="text-sm outline-none">
+        Everything moved to{' '}
+        <strong>
+          <Name>{to.spaceName}</Name>
+          {to.place.path.map((folder, i) => (
+            <Fragment key={i}>
+              {' › '}
+              <Name>{folder}</Name>
+            </Fragment>
+          ))}
+        </strong>
+        . “<Name>{name}</Name>” is empty now.
+        {onDelete && ' Do you want to delete it?'}
+      </p>
+      <DialogFooter>
+        {onDelete ? (
+          <>
+            <Button variant="ghost" onClick={onKeep}>
+              Keep the space
+            </Button>
+            <Button variant="destructive" onClick={onDelete}>
+              Delete space…
+            </Button>
+          </>
+        ) : (
+          <Button onClick={onKeep}>Go there</Button>
+        )}
+      </DialogFooter>
+    </div>
+  );
+}
+
 const SPACE_GONE = 'The space you picked is no longer available. Choose again.';
 const FOLDER_GONE = 'The folder you picked is no longer available. Choose again.';
 
@@ -321,6 +502,8 @@ const FOLDER_GONE = 'The folder you picked is no longer available. Choose again.
  * Only an owner of the space moves it into another (ADR 0007, decision 2):
  * anyone else is told so, and offered a copy. Offline, or after a change
  * waiting here, a move stays in its space and its share (`moveRoute`).
+ * Everything in a space (`moving` null) goes only into another space, which
+ * the person picks: none is picked at first.
  */
 function ChooseDestination({
   spaceId,
@@ -331,7 +514,8 @@ function ChooseDestination({
   onChoose,
 }: {
   spaceId: SpaceId;
-  moving: Moving;
+  /** Null for everything in the space. */
+  moving: Moving | null;
   action: 'move' | 'copy';
   /** The place chosen before going back, shown chosen again. */
   chosen: Chosen | null;
@@ -379,20 +563,31 @@ function ChooseDestination({
     [spaces, shared, spaceId],
   );
   // A move waiting on this device stays in this space (#331).
-  const local = availability.offline || availability.waiting(moving.id) !== 'none';
+  const local =
+    availability.offline || (moving !== null && availability.waiting(moving.id) !== 'none');
   const movesAcross = source?.space?.role === 'owner';
-  const offered = action === 'move' && (!movesAcross || local) ? choices?.slice(0, 1) : choices;
-  const [toSpace, setToSpace] = useState<SpaceId>(chosen?.spaceId ?? spaceId);
+  const offered =
+    moving === null
+      ? choices?.slice(1)
+      : action === 'move' && (!movesAcross || local)
+        ? choices?.slice(0, 1)
+        : choices;
+  const [toSpace, setToSpace] = useState<SpaceId | null>(
+    chosen?.spaceId ?? (moving ? spaceId : null),
+  );
   const space = offered?.find((c) => c.spaceId === toSpace);
-  const treeLoad = useQuery({ ...treeQuery(ctx, toSpace), enabled: space !== undefined });
+  const treeLoad = useQuery({
+    ...treeQuery(ctx, toSpace ?? spaceId),
+    enabled: space !== undefined,
+  });
   const tree = treeLoad.data;
   const within = action === 'move' && toSpace === spaceId;
   const allowed = useMemo(() => {
     if (!tree) return null;
-    if (within) return known ? destinationsIn(tree, moving, owner) : null;
+    if (within && moving) return known ? destinationsIn(tree, moving, owner) : null;
     // A copy in its own space goes anywhere but inside itself.
     const inside =
-      toSpace === spaceId && moving.kind === 'folder'
+      toSpace === spaceId && moving?.kind === 'folder'
         ? foldersUnder(tree.folders, moving.id)
         : new Set<string>();
     return copyDestinations(moveTreeOf(tree), inside);
@@ -400,7 +595,7 @@ function ChooseDestination({
   // A copy goes into no folder made offline until it is sent: the server doesn't have it.
   const places =
     allowed?.filter((d) =>
-      within && tree
+      within && tree && moving
         ? moveRoute(tree, moving, d.parentId, availability).route !== null
         : availability.of(d.parentId).can('into'),
     ) ?? null;
@@ -417,6 +612,9 @@ function ChooseDestination({
   }
   const index = picked === undefined ? 0 : (places?.findIndex((d) => d.parentId === picked) ?? -1);
   const place = places?.[index];
+  // Everything in a space needs something in it, and another space to go to.
+  const empty =
+    moving === null && source !== undefined && [...source.folders, ...source.pages].length === 0;
   const label = (d: Destination, spaceName: string) =>
     d.parentId === null ? `Top of ${plainText(spaceName)}` : d.path.map(plainText).join(' › ');
   return (
@@ -424,7 +622,8 @@ function ChooseDestination({
       className="grid gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (space && place) onChoose({ spaceId: space.spaceId, spaceName: space.name, place });
+        if (space && place && !empty)
+          onChoose({ spaceId: space.spaceId, spaceName: space.name, place });
       }}
     >
       <div className="grid gap-1.5">
@@ -452,7 +651,13 @@ function ChooseDestination({
             setPicked(undefined);
           }}
         />
-        <ErrorLine error={space ? null : SPACE_GONE} />
+        <ErrorLine error={space || toSpace === null ? null : SPACE_GONE} />
+        {moving === null && offered.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            You have no other space where you can make pages.
+          </p>
+        )}
+        {empty && <p className="text-sm text-muted-foreground">There’s nothing in this space.</p>}
         {/* This space is offered without them, for a move or copy within it. */}
         <LoadFailed what="your other spaces" queries={[spacesLoad]} />
         {action === 'move' && source && !movesAcross && !local && choices && choices.length > 1 && (
@@ -515,7 +720,7 @@ function ChooseDestination({
         </div>
       )}
       <DialogFooter>
-        <Button type="submit" disabled={!place}>
+        <Button type="submit" disabled={!place || !space || empty}>
           Next
         </Button>
       </DialogFooter>

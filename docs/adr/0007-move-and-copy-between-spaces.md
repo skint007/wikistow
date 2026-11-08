@@ -7,7 +7,7 @@ status: built
 People want to move a page or folder into another space, and to copy one, into another space or the same one. The spec rules this out: "Treat a move into another space as an explicit copy or publication, not an ordinary rename" (`wikistow.md`, Sharing), and protocol section 10 ends "A move into another space isn't a move; it is a copy or a publication". This ADR replaces both rules. A move between spaces becomes a copy that deletes its source in the same transaction. The same machinery, without the delete, gives **Copy to…**.
 
 In short:
-- **Move to…** and **Copy to…** take a page or folder, with everything under it, to any folder or the top of any space where the person can make pages. Copy also works within one space. Moves within one space stay as they are (protocol section 10).
+- **Move to…** and **Copy to…** take a page or folder, with everything under it, to any folder or the top of any space where the person can make pages. Copy also works within one space. Moves within one space stay as they are (protocol section 10). **Move space into…** and **Copy space into…** take everything in a space into another (decision 11).
 - Each page brings its current draft and current published version, sealed again for the destination by the person moving it. Folders bring their current name and look. Earlier history doesn't come: a move deletes it with the source.
 - The app makes the destination nodes hidden, uploads their records and attachments in as many requests as it needs, then finishes in one request. For a move, the finish deletes the source in the same transaction. For a move, if a source page changed in the meantime, the finish is refused and the app seals the pages that changed again. If anything else changed, such as a page added to a moved folder, the app starts again from a new preview.
 - A move ends what deleting the source ends: its publications into other spaces, and the shares, members and agent picks inside it. Its pages' public links go with them where the person moving them can publish them there, and end otherwise (decision 10). A copy changes nothing at the source.
@@ -99,7 +99,7 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 
 ### 8. Where it shows
 
-- **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. Dragging between spaces in the rail stays out (#338).
+- **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. **Move space into…** and **Copy space into…** in the space menu, for owners (decision 11). Dragging between spaces in the rail stays out (#338).
 - **CLI:** `wikistow page copy` and `wikistow folder copy`. The CLI acts as its agent (decision 2), so it copies within its picks and never moves between spaces; moves between spaces stay in the app. Moves within one space are `wikistow page move` and `wikistow folder move` (#318).
 - **The live tree** reports the finish in both spaces.
 - **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only, and `node.public-link-moved` for each public link a move carries over (decision 10).
@@ -123,9 +123,21 @@ A move carries a page's public link (ADR 0005) over to its new page when the pag
 
 A copy makes a new page, which starts with no link.
 
+### 11. Everything in a space (#339, built)
+
+An owner can move or copy everything in a space into a folder, or the top, of another space where they can make pages, from the space menu: **Move space into…** and **Copy space into…**. Merging two spaces is the use.
+
+- **One copy.** Its source is the top of the space: `sourceNodeId` is null, and the source's permission version is the space's. Every node at the top of the space, but a copy's hidden nodes and what is in the trash, is a top node of the copy, under the destination parent, with everything under it. So there is one preview, one finish and one lock, and a move records old addresses (decision 9) and carries public links over (decision 10) as any move does. Running one copy per top node behind one preview was the other way; it would have finished in parts, so a failure part-way would leave the space half moved.
+- **Owners only, never within the space.** Copying everything in a space needs an owner of it, a person, for a copy as for a move: the menu is theirs, and an editor of the space share can't always read the folders shared on their own. A space can't be copied into itself.
+- **The space stays.** Its name and look, owners, space share, groups and trash stay with it. What was deleted from under its folders stays in its trash, moved to its top, unless a share rooted at a folder that moves goes with it, as in decision 7. After a move, the app says the space is empty and asks whether to delete it, which deletes it as **Delete space…** does; it is never deleted unasked. A home space can't be deleted, so it isn't asked. The usual preview is all the confirmation a move needs: who loses access is on it.
+- **Its name and look don't come.** The contents go into the folder chosen, as they are. Making a folder from the space's name and look would need its metadata sealed again as a folder's, and the person can make that folder first.
+- **The audit log** names the space as the target of `node.moved-between-spaces` or `node.copied`, and the first new top node as `nodeId`.
+
+Decided by Scott on 2026-11-08: ask whether to delete the empty space, never delete it automatically, and no second confirmation beyond the preview.
+
 ### Out of scope
 
-Earlier history; moving a whole space (#339); keeping a page's ID across a move (old addresses are built: decision 9, #332); copying a page's public link (a move carries it over: decision 10, #340); and carrying a page's publications into other spaces over a move, which waits until public links have been used for a while and may not be needed (#340).
+Earlier history; moving a whole space, built as decision 11 (#339); keeping a page's ID across a move (old addresses are built: decision 9, #332); copying a page's public link (a move carries it over: decision 10, #340); and carrying a page's publications into other spaces over a move, which waits until public links have been used for a while and may not be needed (#340).
 
 ## Considered options
 

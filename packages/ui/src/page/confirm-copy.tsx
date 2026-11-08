@@ -30,6 +30,15 @@ import { pageReader } from './page-reader';
 /** Where the person chose to put it: a space, by the name they saw, and a place in it. */
 export type Chosen = { spaceId: SpaceId; spaceName: string; place: Destination<FolderId> };
 
+/** Open the place chosen: its folder, or the top of its space. */
+export const openPlace = (navigate: ReturnType<typeof useNavigate>, to: Chosen) =>
+  to.place.parentId === null
+    ? navigate({ to: '/s/$spaceId', params: { spaceId: to.spaceId } })
+    : navigate({
+        to: '/s/$spaceId/f/$folderId',
+        params: { spaceId: to.spaceId, folderId: to.place.parentId },
+      });
+
 const REACH: Record<moveOperations.Reach, string> = {
   drafts: 'drafts and published versions',
   published: 'published versions',
@@ -43,7 +52,8 @@ const titleOf = (title: string | null) => (title?.trim() ? title : 'Untitled');
  * won't find their page, and for a move, the public links it keeps and
  * what it ends. A move always asks, even with asking before moves turned
  * off, because it deletes. Then it runs, showing how far it has got, and
- * opens what it made.
+ * opens what it made. For everything in a space (`node` null), it opens the
+ * place chosen, or after a move, leaves the dialog to `onMoved`.
  */
 export function ConfirmCopy({
   sourceSpaceId,
@@ -52,14 +62,18 @@ export function ConfirmCopy({
   chosen,
   onBack,
   onDone,
+  onMoved,
 }: {
   sourceSpaceId: SpaceId;
-  node: { id: FolderId | PageId; kind: 'folder' | 'page' };
+  /** Null for everything in the space. */
+  node: { id: FolderId | PageId; kind: 'folder' | 'page' } | null;
   /** False for a move into another space. */
   copy: boolean;
   chosen: Chosen;
   onBack: () => void;
   onDone: () => void;
+  /** Once a move finished, in place of closing and opening what it made. */
+  onMoved?: () => void;
 }) {
   const ctx = useClient();
   const queryClient = useQueryClient();
@@ -82,14 +96,14 @@ export function ConfirmCopy({
       'copy-preview',
       copy,
       sourceSpaceId,
-      node.id,
+      node?.id ?? null,
       chosen.spaceId,
       chosen.place.parentId,
     ],
     queryFn: ({ signal }) =>
       copyOperations.previewCopy(ctx, {
         kind: copy ? 'copy' : 'move',
-        source: { spaceId: sourceSpaceId, nodeId: node.id },
+        source: { spaceId: sourceSpaceId, nodeId: node?.id ?? null },
         destination: { spaceId: chosen.spaceId, parentId: chosen.place.parentId },
         // Off the page's thread, given as long as the reader.
         read: (markdown) => pageReader.run('links', markdown, { budgetMs: READ_BUDGET_MS, signal }),
@@ -198,14 +212,24 @@ export function ConfirmCopy({
       const { spaceId, nodeId } = made;
       // Both trees, before opening what it made there.
       await contentChanged(queryClient, ctx, [{ spaceId: sourceSpaceId }, { spaceId }]);
+      if (!copy && onMoved) {
+        void refreshAccess(queryClient, ctx);
+        onMoved();
+        return;
+      }
       // Closed first: a dialog left open would be shown again for the space it went to.
       onDone();
-      await (node.kind === 'folder'
-        ? navigate({
-            to: '/s/$spaceId/f/$folderId',
-            params: { spaceId, folderId: nodeId as FolderId },
-          })
-        : navigate({ to: '/s/$spaceId/p/$pageId', params: { spaceId, pageId: nodeId as PageId } }));
+      await (node === null
+        ? openPlace(navigate, chosen)
+        : node.kind === 'folder'
+          ? navigate({
+              to: '/s/$spaceId/f/$folderId',
+              params: { spaceId, folderId: nodeId as FolderId },
+            })
+          : navigate({
+              to: '/s/$spaceId/p/$pageId',
+              params: { spaceId, pageId: nodeId as PageId },
+            }));
       // A move ended shares and links at the source.
       if (!copy) void refreshAccess(queryClient, ctx);
     });
@@ -456,8 +480,10 @@ export function ConfirmCopy({
           )}
           {!copy && (
             <p role="note" className="rounded-control bg-muted p-3 text-sm">
-              <strong>A move can’t be undone.</strong> Once it’s there, it is deleted here, with
-              everything listed above.
+              <strong>A move can’t be undone.</strong>{' '}
+              {node === null
+                ? 'Once everything is there, it is deleted here, with everything listed above. The space itself stays, empty.'
+                : 'Once it’s there, it is deleted here, with everything listed above.'}
             </p>
           )}
         </>
