@@ -664,8 +664,10 @@ function PageBody({
     return now.allowed ? null : now.hint;
   };
   const coverFromPalette = (command: typeof changeBanner | typeof changeEmoji) => {
-    pickerFocus.opener.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Where the focus went back to, inside the source editor's shadow root too.
+    let focused = document.activeElement;
+    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+    pickerFocus.opener.current = focused instanceof HTMLElement ? focused : null;
     void act(() => runCommand(command, page, coverEnv));
   };
   const pluginEntries = usePluginPaletteEntries(pluginShown, setActionError);

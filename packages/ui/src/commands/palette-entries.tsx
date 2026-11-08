@@ -37,7 +37,8 @@ export class PaletteOffers {
       .filter(({ shownBy }) => {
         if (!shownBy) return true;
         const element = shownBy();
-        return element !== null && element.checkVisibility();
+        // Safari before 17.4 has no checkVisibility: shown, as it was mounted.
+        return element !== null && element.checkVisibility?.() !== false;
       })
       .flatMap(({ entries }) => entries());
   }
