@@ -302,7 +302,7 @@ export class WorkshopChat {
     const { copy } = this.workshop.state();
     const told =
       copy && !this.#toldCopy
-        ? `(This draft is a copy of the plugin ${copy.from}, under a new ID of my own, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
+        ? `(This draft is a copy of the plugin ${copy.from}, under a new ID${this.workshop.sharedBy === null ? ' of my own' : ''}, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
         : '';
     if (copy) this.#toldCopy = true;
     this.#turns = [
