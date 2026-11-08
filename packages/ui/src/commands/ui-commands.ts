@@ -129,6 +129,8 @@ const ExportInput = z.object({
   folderId: FolderId.nullable(),
   /** What is exported, by name, for the zip's file name. */
   name: z.string(),
+  /** How links between pages are written: wikilinks, or relative Markdown links. */
+  links: z.enum(['wiki', 'markdown']).default('wiki'),
 });
 
 /**
@@ -147,11 +149,11 @@ export const exportMarkdown: Command<
   id: 'space.export',
   input: ExportInput,
   requires: ['unlocked-vault'],
-  run: async ({ spaceId, folderId, name }, { ctx, onProgress, onExported, signal }) => {
+  run: async ({ spaceId, folderId, name, links }, { ctx, onProgress, onExported, signal }) => {
     const { zip, summary } = await exportZip(
       ctx,
       { spaceId, ...(folderId === null ? {} : { folderId }) },
-      { ...(onProgress ? { onProgress } : {}), ...(signal ? { signal } : {}) },
+      { links, ...(onProgress ? { onProgress } : {}), ...(signal ? { signal } : {}) },
     );
     signal?.throwIfAborted();
     saveFile(zip, zipName(name));

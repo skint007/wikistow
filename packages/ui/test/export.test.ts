@@ -31,6 +31,7 @@ const summary: exportOperations.ExportSummary = {
   attachments: [],
   skipped: [],
   unread: [],
+  wikilinks: 0,
 };
 const ctx = {} as ClientContext;
 const scope = { spaceId: 'space' as SpaceId };
@@ -75,7 +76,7 @@ describe('what the export dialog says it left out, or wrote as it was', () => {
   const page = { spaceId: 's' as SpaceId, pageId: 'p' as never };
 
   it('counts pages and attachments apart', () => {
-    expect(summaryStatus({ skipped: [], unread: [] })).toBeNull();
-    expect(summaryStatus({ skipped: [page], unread: [] })).not.toBeNull();
+    expect(summaryStatus({ skipped: [], unread: [], wikilinks: 0 })).toBeNull();
+    expect(summaryStatus({ skipped: [page], unread: [], wikilinks: 0 })).not.toBeNull();
   });
 });
