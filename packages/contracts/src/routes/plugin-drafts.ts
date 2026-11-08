@@ -1,4 +1,4 @@
-import { PluginId } from '@wikistow/plugin-sdk/manifest';
+import { PluginFile, PluginId } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { Timestamp } from '../records/encoding.ts';
 import type { RouteDef } from '../route.ts';
@@ -184,12 +184,20 @@ export const changeDraft = {
   response: z.strictObject({ draft: DraftSummary }),
 } as const satisfies RouteDef;
 
-/** A draft's fonts and images, sorted by path: those `getDraft` leaves out. */
+/**
+ * A draft's fonts and images, sorted by path: those `getDraft` leaves out.
+ * Each path is read as any plain plugin path, so a kind a later server
+ * adds doesn't keep this app from opening the draft.
+ */
 export const getDraftBinaryFiles = {
   method: 'GET',
   path: '/api/plugin-drafts/:draftId/binary-files',
   params: DraftParams,
-  response: z.strictObject({ files: z.array(DraftBinaryFile).max(MAX_DRAFT_FILES) }),
+  response: z.strictObject({
+    files: z
+      .array(z.strictObject({ path: PluginFile, data: UploadFile.shape.data }))
+      .max(MAX_DRAFT_FILES),
+  }),
 } as const satisfies RouteDef;
 
 /**
