@@ -57,7 +57,7 @@ Removing a folder's image writes `wikistow.icon: null`, since `reviseMetadata` m
 - **A. Upload each time (recommended).** Each folder or page holds its own copy. Choosing the same picture twice means choosing the file twice.
 - **B. A per-space library.** A new encrypted record listing the space's icons. Its key would have to reach everyone who can see any folder or page using an icon, and the space's shares have different members: an owner-region library can't be read by a share's readers, so each icon would still need copying into each region that uses it. That is a new record type, new sealing rules and new server storage for a convenience.
 
-**Recommendation: A.** With icons of a few KB the copies cost nothing that matters. If people ask for reuse, a later "recent images" row in the picker (#335) can copy the bytes of icons the person can already see, with no new record.
+**Recommendation: A.** With icons of a few KB the copies cost nothing that matters. For reuse, the Image tab has an **In this space** row (#335, built): the images of the space, its folders and its pages that this app already holds, each shown once. Picking one copies its bytes into the folder, space or page, with no new record. A page's image is offered once its sidebar row has decrypted it, so nothing is downloaded for the row. The tree keeps no time an icon was set, so the row follows the tree's order rather than newest first.
 
 ### 4. Size, type, downscaling, and SVG
 
