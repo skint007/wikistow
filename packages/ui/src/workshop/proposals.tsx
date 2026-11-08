@@ -45,7 +45,8 @@ const draftProposalQuery = (draftId: string) =>
 /** When something was sent, as a list says it. */
 function when(iso: string) {
   const said = ago(iso, new Date());
-  return /^\d+ (min|h|d)$/.test(said) ? `${said} ago` : said;
+  if (said === 'just now') return said;
+  return /^\d+ (min|h|d)$/.test(said) ? `${said} ago` : `on ${said}`;
 }
 
 /**
