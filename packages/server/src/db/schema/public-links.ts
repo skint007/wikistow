@@ -125,9 +125,10 @@ export const publicTargets = pgTable(
       .notNull()
       .references(() => publicCopies.id, { onDelete: 'cascade' }),
     key: text().notNull(),
+    // A move into another space points the link at the new page; its rows follow.
     targetPageId: text()
       .notNull()
-      .references(() => publicLinks.pageId, { onDelete: 'cascade' }),
+      .references(() => publicLinks.pageId, { onDelete: 'cascade', onUpdate: 'cascade' }),
   },
   (table) => [
     primaryKey({ columns: [table.copyId, table.key] }),

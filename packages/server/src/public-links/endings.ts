@@ -103,7 +103,7 @@ export async function endCopies(
 
 /**
  * Carry the links of pages a move takes into another space over to their
- * new pages (ADR 0007, decision 6): `moved` names each page and its new
+ * new pages (ADR 0007, decision 10): `moved` names each page and its new
  * page, which arrives published where the mover, `sharedBy`, can publish
  * it. Each link keeps its id, so `/p/<id>` keeps working, and the mover
  * becomes who turned it on, since its old sharer may have no access
@@ -148,21 +148,9 @@ export async function moveLinks(
     .for('update');
   const copyIds = copies.map((copy) => copy.id);
   await lockTargets(tx, { copyIds, pageIds });
-  // Other copies' gaps leading to these links, kept for their new pages.
-  // The rows' foreign key can't follow the link's page ID as it changes,
-  // so they go while it does and come back after.
-  const naming = await tx
-    .select()
-    .from(publicTargets)
-    .where(
-      and(
-        anyOf(publicTargets.targetPageId, pageIds),
-        copyIds.length > 0 ? sql`not ${anyUuid(publicTargets.copyId, copyIds)}` : undefined,
-      ),
-    );
-  // Their files and own target rows go with them.
+  // Their files and own target rows go with them. Other copies' target rows
+  // naming these links follow the links to their new pages, by cascade.
   if (copyIds.length > 0) await tx.delete(publicCopies).where(anyUuid(publicCopies.id, copyIds));
-  await tx.delete(publicTargets).where(anyOf(publicTargets.targetPageId, pageIds));
   const linked = new Map(links.map((link) => [link.pageId, link]));
   const carried = move.moved.flatMap((page) => {
     const link = linked.get(page.sourceId);
@@ -175,15 +163,6 @@ export async function moveLinks(
       ${sql.param(carried.map((link) => link.nodeId))}::text[]
     ) as p(source_id, node_id)
     where l.page_id = p.source_id`);
-  const newPage = new Map(carried.map((link) => [link.pageId, link.nodeId]));
-  if (naming.length > 0) {
-    await tx.insert(publicTargets).values(
-      naming.map((row) => ({
-        ...row,
-        targetPageId: newPage.get(row.targetPageId) ?? row.targetPageId,
-      })),
-    );
-  }
   return carried;
 }
 
