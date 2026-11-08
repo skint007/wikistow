@@ -8,7 +8,7 @@ An owner can share a folder or a space, but can never stop sharing it (#329). Re
 
 In short:
 - **Stop sharing** is in the Share dialog of a shared folder or space, for its owners. It works like moving the folder out of its share without moving it: the owner's app opens every record wrapped under the share's keys and seals each again to the space's owners, as a move into the owner region does (protocol section 10), then sends it all in one request. The server deletes the share, its members, its groups' access, its agents' picks and its keys in the same transaction.
-- **Former members keep what they had**: every key version of the share, and so whatever they read or downloaded, as anyone removed from a share does. Nothing saved afterwards reaches them.
+- **Former members keep what they had**: every key version of the share, and so whatever they read or downloaded, as anyone removed from a share does. Nothing saved afterwards reaches them, but through a public link an owner turned on, which stays.
 - **What ends with it:** every member's and agent's access, the groups' access to that folder (the groups stay), and the public links and public copies of people who can no longer publish the page. Publications into other spaces stay, and from then on only owners send or end them.
 - **Writers who haven't heard** are refused by the checks every write already meets: the permission version, then access, then the region of the key material.
 - **The trash** comes along: what was deleted from under the share is sealed to the owners too, so it can still be restored.
@@ -33,7 +33,8 @@ In short:
 An owner stops sharing a folder share or the space share. Afterwards:
 - **The folder and everything in it are in the owner region** (protocol section 6.6), sealed to the space's owners, as if it had never been shared. For a space share that includes the space's name.
 - **The share is gone.** Its members, its groups' access to it, its agents' picks, the people waiting for its keys, its folder key envelopes and its wraps are deleted. The groups themselves stay, with their other folders.
-- **The nesting rule no longer counts it,** so the folder above can be shared, and so can the folder itself again, later, as a new share with new keys and a new ID. The server never gives an ended share's ID to another share.
+- **The nesting rule no longer counts it,** so the folder above can be shared, and so can the folder itself again, later, as a new share with new keys and a new ID.
+- **The app that ended it remembers,** in its **No going back** mark for the share (protocol section 6.8), and never writes under it again, even if a server lists it again (Decide, item 5).
 - **Nothing in the tree moves,** and no page changes: their versions, heads, history and addresses stay as they are.
 
 It is one step, and it can't be undone. Sharing again is a new share, which shares the history again (protocol section 6.7).
@@ -52,11 +53,11 @@ The space's owners, as people with a session, as for every other sharing action.
 
 The owner's app does what a move into the owner region does, without moving anything:
 
-1. **Preview.** It works out who loses access as a move's preview does (protocol section 10): the people holding the share's current keys, from the envelopes it verifies, and the members the server lists, but the owners; the groups that have the folder; and the agents with a pick or a group there, by the names the server lists. It adds the public links that end (decision 6) and the publications into other spaces that only owners will send from then on. Nothing is sealed before the owner confirms.
+1. **Preview.** It works out who loses access as a move's preview does (protocol section 10): the people holding the share's current keys, from the envelopes it verifies, and the members the server lists, but the owners; the groups that have the folder; and the agents with a pick or a group there, by the names the server lists. It adds what ends with it and what stays, from a new owner-only route, `GET /api/shares/:shareId/ending`, since no listing says who turned a link on: the pages with a public link that ends or that stays (decision 6), and the pages with a live publication into another space, or that are one from another space. Nothing is sealed before the owner confirms.
 2. **Scan.** It lists every record wrapped under the share, by key material, with a new scope of the scan route (`share`): the pages and folder names under the root, the space's name for a space share, and the records of what is in the trash under it (decision 8), but a copy's hidden nodes'. For each, it opens the content key through the wrap, checks it against the record, and seals it to every sealing owner (protocol section 6.5) in a v2 envelope. Ending writes nothing under the share's keys, so any key version it can open will do, including one that counts only for reading.
-3. **Upload.** `POST /api/shares/:shareId/end {permissionVersion, keyEnvelopes, metadataEnvelopes}`, with the permission version of the share's root (the space's, for a space share). Under the lock on the space, which every write also takes, the server checks the caller is an owner and the permission version is current, and that the envelopes cover exactly the records wrapped under the share, but a copy's hidden nodes', each going to exactly the space's current owners, signed by the caller. A record not covered, saved since the scan, is `stale-head`: the app seals what it lacks and sends again, as a move does. In the same transaction it ends what decision 6 ends, deletes the share with everything that cascades from it, stores the envelopes, keeps the share's ID, bumps the permission versions of the space and of every node under the root, records `share.ended` in the audit log, and tells the live tree.
+3. **Upload.** `POST /api/shares/:shareId/end {permissionVersion, keyEnvelopes, metadataEnvelopes}`, with the permission version of the share's root (the space's, for a space share). Under the lock on the space, which every write also takes, the server checks the caller is an owner and the permission version is current, and that the envelopes cover exactly the records wrapped under the share, but a copy's hidden nodes', each going to exactly the space's current owners, signed by the caller. A record not covered, saved since the scan, is `stale-head`, and so is an envelope for a record no longer wrapped under the share, gone since the scan (a trash sweep, draft retention) or moved out of it: the app scans again, drops what the scan no longer lists, seals what it lacks and sends again. In the same transaction it ends what decision 6 ends, deletes the share with everything that cascades from it, stores the envelopes, bumps the permission versions of the space and of every node under the root, records `share.ended` in the audit log, and tells the live tree.
 
-A change of access meanwhile, a member added or a rotation, moves the root's permission version on, so the ending is refused as `permission-version` and previewed again. A co-owner added or removed meanwhile makes the envelopes miss the current owners (`recipients-mismatch`), with the same result. A record the owner's app can't open, such as one an editor wrote with a wrap that fails `key-commitment`, stops the ending, naming its page, as it stops making a share. The owner deletes that page for good, or restores an older version over it until draft retention drops the bad one.
+A change of access meanwhile, a member added, a rotation, or a co-owner added or removed, moves the root's permission version on, so the ending is refused as `permission-version` and previewed again. The envelope check still refuses envelopes to anyone but the current owners (`recipients-mismatch`). A record the owner's app can't open, such as one an editor wrote with a wrap that fails `key-commitment`, stops the ending, naming its page or folder, as it stops making a share. The owner deletes that page or folder for good to get past it.
 
 **Cost, measured.** A throwaway variant of the sharing-cost benchmark (`apps/server/bench/sharing-cost.ts`) timed exactly this rewrap, as a move of a folder out of a shared folder to the top of its space, through the real client operation and server, on the benchmark's host. Each page had 20 versions of about 2 KB.
 
@@ -75,12 +76,12 @@ Each owner adds about 400 bytes of JSON a record, an envelope with its signature
 
 - **Members** lose access at once, as if each were removed (protocol section 7.5), but nothing rotates: there is no share left to rotate. They keep every key version they held (A3).
 - **Groups** lose the folder. A group's own name and members don't change, and its other folders keep their access.
-- **Agents** lose their picks and group access there, as when their person loses access (section 9.4). They keep the keys they held (A6). An owner's own agent with a pick in the folder loses it too; its person picks the folder again, which makes it a new share (section 9.4), or picks the folder above once that is shared. A person's contacts record keeps the ended share in its agent's `shares` list, which then costs nothing: the server lists no grant there, and no share takes its ID again.
+- **Agents** lose their picks and group access there, as when their person loses access (section 9.4). They keep the keys they held (A6). An owner's own agent with a pick in the folder loses it too; its person picks the folder again, which makes it a new share (section 9.4), or picks the folder above once that is shared. A person's contacts record keeps the ended share in its agent's `shares` list, which then costs nothing: the server lists no grant there, and the app seals only shares the server lists as missing.
 - **People waiting** for the share's keys (section 7.9) stop waiting.
 
 ### 6. Publications and public links
 
-- **Public links** follow ADR 0005, decision 8: a member who turned a link on can no longer publish the page, so the link ends, with its copies; a copy a member uploaded of a page whose link an owner turned on goes, and that public page says it is being updated until an owner updates it. Links owners turned on stay. The preview lists the links that end.
+- **Public links** follow ADR 0005, decision 8: a member who turned a link on can no longer publish the page, so the link ends, with its copies; a copy a member uploaded of a page whose link an owner turned on goes, and that public page says it is being updated until an owner updates it. Links owners turned on stay, and so do later publishes through them: a former member who kept such a link can read what the owners publish on that page afterwards (A12). The preview lists the links that end and those that stay.
 - **Publications into other spaces** from pages in the folder stay live, and their copies don't change. Only someone who can publish the source page sends a new version or ends one (protocol section 13), which is now only the owners. The preview says so.
 - **Publications into the folder** from other spaces stay too. Their destination pages are now in the owner region, so a source publisher who isn't an owner here can no longer send to them; their app lists the publication by its space alone, and they can still end it, as for any copy they can't publish at. The owners keep the pages, or detach them.
 
@@ -89,15 +90,17 @@ Each owner adds about 400 bytes of JSON a record, an envelope with its signature
 No new check is needed. Each case meets one that exists:
 - **A write prepared before the ending** names an older permission version, and is refused (`permission-version`).
 - **A former member, or their agent,** has no access: `not-found`, or `forbidden` for a page they could still name.
-- **An owner's app** that still holds a version opened through the share's wrap sends a wrap for a page now in the owner region, which the server refuses (`region-mismatch`, section 6.8). The app opens its base again, finds it sealed to the owners, and writes there, as it does after a move (`saveDraft` already retries this way).
+- **An owner's app** that still holds a version opened through the share's wrap sends a wrap for a page now in the owner region, which the server refuses (`region-mismatch`, section 6.8). A draft save opens its base again, finds it sealed to the owners, and writes there (`saveDraft` already retries this way); any other write gives the error it gives after a move today, and the person tries again. The app that ended the share refuses before sending, through its mark.
 - **A write the ending races** waits for the space lock. One that landed before it, after the app's scan, makes the ending `stale-head` instead (decision 4).
-- **Offline changes** (ADR 0009) are sealed when sent, with the keys of that moment: an owner's go to the owner region, and a former member's come back as a page out of reach, with **Save as a new page in my space**, **Copy text** and **Discard**.
+- **Offline changes** (ADR 0009): an owner's drafts are sealed when sent, with the keys of that moment, so they go to the owner region. A folder rename queued before the ending keeps the region it was queued in and stays refused, as after a move today (#359); nothing goes under the old keys. A former member's changes come back as a page out of reach, with **Save as a new page in my space**, **Copy text** and **Discard**.
 - **Kept pages** on a former member's device are dropped once it is online again, as after any removal (A13).
 - **Unfinished copies** into the folder fail at their finish, as for a share made at the destination (protocol section 10). A move out of it, opened before, fails as its source's permission version moved on; a copy out of it by a former member fails its finish's check of who may copy.
 
 ### 8. The trash
 
 What was deleted from under the share keeps its wraps today, and restoring checks they fit where it goes. Ending the share would leave those records with no keys at all, since the wraps cascade with the share, so a restore would fail for good. So the ending seals them to the owners too: the scan goes by key material, which covers them, as the owner-region scan covers the trash for a new co-owner. They then restore into the owner region like anything else. Only owners see the trash, so this tells nobody anything.
+
+Making a share leaves the trash as it is, as today. So once the owner shares the folder above, what was deleted from under the ended share is sealed to the owners under a folder of the new share, and restoring it is `region-mismatch` (protocol section 10, **The trash**). The confirm step says to restore anything wanted back before sharing the folder above.
 
 ### 9. Sending in parts (#328): not now
 
@@ -113,7 +116,7 @@ Writes go on meanwhile, as they do while the app scans today; the finish's cover
 
 ### 10. Where it shows
 
-- **The Share dialog** of a shared folder or the shared space has **Stop sharing** (**Stop sharing space**) under its access list, for owners. It opens a confirm step, "Stop sharing *Folder*?", with **These people lose access** (people, groups, and agents "via" their person), **Public links that end**, **Publications only owners can send from now on**, and a note: "They keep what they already read or downloaded. Nothing saved from now on reaches them." Then **Cancel** and **Stop sharing**, which shows how many versions are done for a large folder.
+- **The Share dialog** of a shared folder or the shared space has **Stop sharing** (**Stop sharing space**) under its access list, for owners. It opens a confirm step, "Stop sharing *Folder*?", with **These people lose access** (people, groups, and agents "via" their person), **Public links that end**, **Public links that stay**, **Publications only owners can send from now on**, and a note: "They keep what they already read or downloaded. Nothing saved from now on reaches them, except through a public link that stays." When the trash holds anything from the folder, it adds that restoring it is easiest before sharing the folder above. Then **Cancel** and **Stop sharing**, which shows how many versions are done for a large folder.
 - **Sharing a folder that holds a share,** or sits inside one, names that share, and for owners offers **Open its sharing**, where **Stop sharing** is, in place of today's plain "shares don't nest".
 - **Members and owners** lists each shared folder with the same **Stop sharing** in its menu.
 - **The CLI** has none: agents can't share.
@@ -124,13 +127,13 @@ Ending a share by folding it into a share of the folder above, in one rewrap, wi
 
 ## Threat model
 
-Ending only narrows who can read: content moves from a share's audience to the owners, who already hold every key of every share in the space. So it gives nobody a key, and a server can't use it to add a reader.
+Ending only narrows who can read: content moves from a share's audience to the owners, who already hold every key of every share in the space. So it gives no new reader a key, and a server can't use it to add one. The owners it seals to are the app's sealing owners (section 6.5), so an owner another owner removed, whom this app still accepts, is sealed to as by any owner-region save from that app (A5).
 
 - **What former members keep** is what anyone removed keeps (A3): every key version they held, and so every record wrapped under them. The rewrap keeps the content keys, so a server that kept the old wraps can serve those records to them. Nothing saved after the ending is under a key they hold.
-- **A server that undoes or hides an ending** is A2. One that keeps serving the share, its wraps and its current key version to an owner's app that hasn't heard, and accepts writes under it, makes those writes readable to former members who collude with it, as a server that rolls back a move or hides a removal can. An app keeps no mark of an ended share (Decide, item 5).
-- **A server that hides a record from the scan** can't keep it in the share without breaking its own check, and if it lies about that too, the record stays wrapped under the old share. The owner's next save of that page is then refused as `region-mismatch` (section 6.8), so new content never lands under the old keys from an honest app.
+- **A server that undoes or hides an ending** is A2. One that keeps serving the share, its wraps and its current key version to an owner's app that hasn't heard, and accepts writes under it, makes those writes readable to former members who collude with it, as a server that hides a removal can. The app that ended the share keeps it in its **No going back** mark (decision 1), so this needs another owner's app, or the ender's own after its marks are lost (a browser whose site storage was cleared, a desktop without a trusted secret store, a restore notice), as for a hidden rotation.
+- **A server that hides a record from the scan** can't keep it in the share without breaking its own check, and if it lies about that too, the record stays wrapped under the old share. If the server places that page outside the share from then on, the owner's app refuses its next save as `region-mismatch` (section 6.8), and the ender's app refuses any write under the share through its mark. Only a server that also keeps placing the page in the share gets another owner's app to write under the old keys: the rollback above.
 - **A server that ends a share by itself** can stop serving it to members, which it can do anyway (A2), but can't make anyone's app seal content to people: the owner region's envelopes come only from owners' apps.
-- **A malicious member** can block an ending by writing a version the owners' apps can't open (decision 4). That costs availability only, and the owner deletes the page for good to get past it.
+- **A malicious member** can block an ending by writing a version the owners' apps can't open (decision 4). That costs availability only, and the owner deletes the page or folder for good to get past it.
 
 ## Considered options
 
@@ -141,15 +144,15 @@ Ending only narrows who can read: content moves from a share's audience to the o
 
 ## Consequences
 
-- `wikistow/protocol.md` gains section 6.9, **Ending a share**, and notes in sections 2.4 (A2), 5.5, 6.1, 6.8, 9.5, 10 (**The trash**), 12.2 and Q8, marked proposed. `protocol-review.md` logs it. `wikistow.md`'s Sharing, `ui-design.md`'s Sharing and `CONTEXT.md`'s **Share** say an owner can stop sharing.
-- The server gains `POST /api/shares/:shareId/end`, the scan route's `share` scope, a table of ended share IDs, and the audit action `share.ended`. No existing response gains a field: a listing just loses the share.
-- The client gains an ending operation, built from the move's rewrapper and preview.
+- `wikistow/protocol.md` gains section 6.9, **Ending a share**, and notes in sections 2.4 (A2), 5.5, 6.1, 6.8, 9.5, 10 (**The trash**, and its hidden nodes), 12.2 and Q8, marked proposed. `protocol-review.md` logs it. `wikistow.md`'s Sharing, `ui-design.md`'s Sharing and `CONTEXT.md`'s **Share** say an owner can stop sharing.
+- The server gains `POST /api/shares/:shareId/end`, `GET /api/shares/:shareId/ending`, the scan route's `share` scope, and the audit action `share.ended`. No existing response gains a field: a listing just loses the share.
+- The client gains an ending operation, built from the move's rewrapper and preview, and an `ended` value for a share's **No going back** mark.
 - Older apps meet an ended share as a share they lost access to, or, for an owner, as content that moved into the owner region, which they already handle.
 
 ## Implementation, in pull requests
 
 1. **This ADR, the spec and the protocol.**
-2. **The server:** the route, the scan scope, the ended IDs, and the transaction, with integration tests for the checks, a stale writer, an owner's stale wrap, the trash and the content-leak sweep after an ending.
+2. **The server:** the routes, the scan scope, and the transaction, with integration tests for the checks, a stale writer, an owner's stale wrap, the trash and the content-leak sweep after an ending.
 3. **The client operation and the dialog:** preview, scan, seal, send and retries, the Share dialog's **Stop sharing**, the pointer from a nested share and Members and owners, with an e2e test that stops sharing a folder and then shares the folder above.
 
 Step 3 needs step 2.
@@ -162,6 +165,6 @@ Scott decides these before building. Each has a recommendation.
 2. **The space share too?** Recommended: yes, with the same steps and dialog. Its members then lose the whole space, and the space's name goes back to the owners.
 3. **What's in the trash under the share: seal it to the owners, or delete it for good?** Recommended: seal it to the owners (decision 8), so it can still be restored.
 4. **Publications into other spaces from the folder: keep them live, or end them with the share?** Recommended: keep them (decision 6). They are copies the readers there already have, and the owners can still update or end them.
-5. **An "ended" mark on the device that ended a share,** so it never writes under that share again even if the server lists it again? Recommended: no. A server that undoes an ending is the same accepted risk as one that undoes a move (A2), and other owners' apps wouldn't have the mark anyway.
+5. **An "ended" mark on the device that ended a share,** so it never writes under that share again even if a server lists it again? Recommended: yes (decision 1). A removal leaves the remover's device a **No going back** mark at the new key version, and the owner who ends a share is the one most likely to keep editing the folder, so the ending gets the same protection, in the same mark. Other owners' apps learn of it only from the server, as of a rotation (A2).
 6. **Send large shares, moves and endings in parts now (#328)?** Recommended: no (decision 9). Keep #328 open as the written-down limit, and build it, for all four requests at once, when a library gets near it.
 7. **Where Stop sharing shows.** Recommended: the Share dialog, the pointer from a nested share, and Members and owners (decision 10).
