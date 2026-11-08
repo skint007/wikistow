@@ -12,7 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
-- `wikistow mcp` serves the agent's commands as the tools of an MCP server, over standard input and output, for agent tools that speak MCP. Each tool runs its command with `--json`, with the same checks, idempotency keys and exit statuses. `wikistow mcp --help` says how to add it to Claude Code, Codex and other clients.
+- `wikistow mcp` serves the agent's commands as the tools of an MCP server, over standard input and output, for agent tools that speak MCP. Each tool runs its command with `--json`, with the same checks, idempotency keys and exit statuses. `wikistow mcp --help` says how to add it to Claude Code, Codex and other clients. (#368)
 
 #### Releases and packaging
 
