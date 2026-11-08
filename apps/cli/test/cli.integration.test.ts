@@ -6,7 +6,7 @@ import type { PageId, SpaceId } from '@wikistow/contracts';
 import { bumpPermissions, schema } from '@wikistow/server';
 import { personWithVault } from '@wikistow/server-app/testing/content';
 import { createTestApp, type TestApp } from '@wikistow/server-app/testing/harness';
-import { invite, library, shareFolder } from '@wikistow/server-app/testing/sharing';
+import { ABOVE, invite, library, shareFolder } from '@wikistow/server-app/testing/sharing';
 import { eq } from 'drizzle-orm';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -320,6 +320,92 @@ describe('making folders', () => {
     const tree = (await run(['tree', '--space', lib.spaceId])).json();
     expect(tree.folders).toEqual([{ id: lib.shared, parentId: null, name: 'Shared' }]);
   }, 60_000);
+});
+
+describe('moving and renaming', () => {
+  it('moves and renames within its share, never outside it, and moves once on a retry', async () => {
+    const { alice, lib, run } = await bobsAgent();
+    const { spaceId } = lib;
+    const box = (await run(['folder', 'create', '--parent', lib.shared, '--name', 'Box'])).json();
+    const pageId = lib.page.pageId;
+
+    // The move lands, but its answer never comes back: the retry sends the
+    // same bytes with the same key, and the server answers as it did.
+    const sent: string[] = [];
+    let drop = true;
+    server.hooks.intercept = async (request, forward) => {
+      if (request.method !== 'POST' || !request.url.endsWith(`/nodes/${pageId}/move`)) {
+        return forward();
+      }
+      sent.push(await request.clone().text());
+      const res = await forward();
+      if (!drop) return res;
+      drop = false;
+      return new Response('upstream went away', { status: 502 });
+    };
+    try {
+      const move = ['page', 'move', pageId, '--folder', box.folderId];
+      const key = ['--idempotency-key', 'move-retry-1'];
+      const first = await run([...move, ...key]);
+      expect(first.code).toBe(1);
+      expect(first.json().error).toMatchObject({ outcomeUnknown: true });
+      const second = await run([...move, ...key]);
+      expect(second.code, second.stdout).toBe(0);
+      expect(second.json()).toEqual({
+        kind: 'page',
+        spaceId,
+        nodeId: pageId,
+        parentId: box.folderId,
+        moved: true,
+      });
+      expect(sent).toHaveLength(2);
+      expect(sent[1]).toBe(sent[0]);
+      // Unkeyed and already there, it sends nothing.
+      const again = await run(move);
+      expect(again.json()).toMatchObject({ moved: false });
+      expect(sent).toHaveLength(2);
+    } finally {
+      server.hooks.intercept = null;
+    }
+
+    const renamed = await run(['folder', 'rename', box.folderId, '--name', ' Crate ']);
+    expect(renamed.code, renamed.stdout).toBe(0);
+    expect(renamed.json()).toEqual({
+      spaceId,
+      folderId: box.folderId,
+      name: 'Crate',
+      renamed: true,
+    });
+    const hers = await spaceOperations.loadTree(alice.ctx, spaceId);
+    const crate = hers.folders.find((f) => f.id === box.folderId)?.metadata?.opened;
+    expect(crate?.kind === 'current' && crate.metadata).toMatchObject({
+      name: 'Crate',
+      emoji: '⭐',
+    });
+    expect(hers.pages.find((p) => p.id === pageId)?.parentId).toBe(box.folderId);
+    const inside = await run(['folder', 'move', box.folderId, '--folder', box.folderId]);
+    expect(inside.code, inside.stdout).toBe(2);
+
+    // Outside its share: refused, as making a folder there is, and nothing changes.
+    const outside = await run(['folder', 'create', '--parent', lib.above, '--name', 'X']);
+    expect(outside.code).not.toBe(0);
+    for (const args of [
+      ['folder', 'rename', lib.above, '--name', 'X'],
+      ['folder', 'move', box.folderId, '--folder', lib.above],
+      ['folder', 'move', box.folderId, '--folder', 'top'],
+      ['page', 'move', lib.beside.pageId, '--folder', box.folderId],
+    ]) {
+      const refused = await run(args);
+      expect(refused.code, args.join(' ')).toBe(outside.code);
+      expect(refused.json().error.code).toBe(outside.json().error.code);
+    }
+    const after = await spaceOperations.loadTree(alice.ctx, spaceId);
+    const places = (tree: typeof hers) =>
+      new Map(tree.folders.map((f) => [f.id, f.parentId] as const));
+    expect(places(after)).toEqual(places(hers));
+    const above = after.folders.find((f) => f.id === lib.above)?.metadata?.opened;
+    expect(above?.kind === 'current' && above.metadata.name).toBe(ABOVE);
+  }, 90_000);
 });
 
 describe('an export', () => {

@@ -28,6 +28,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### CLI
 
 - `export --links markdown` writes links between pages as relative Markdown links instead of wikilinks, as the web's **Markdown links** does, and counts the wikilinks left (`wikilinks` in `--json`). (#350)
+#### Server
+
+- Agents can rename folders where they may edit, and moves and renames take an `Idempotency-Key`, so a retry after a lost answer gets the first answer back. (#343)
+
+#### CLI
+
+- `page move`, `folder move` and `folder rename` move a page or folder within its space and rename a folder, with `--json` and `--idempotency-key`. (#343)
 
 ## 0.24.0 - 2026-11-07
 

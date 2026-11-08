@@ -1265,7 +1265,7 @@ The CLI never receives the person's keyring, vault key, password or browser cook
 ### 9.5 Abilities, limits and attribution
 
 - **The cap (#2).** The server limits an agent, on every request, to the lesser of its grant and its person's **current** access at the node. A person with no access leaves their agent none. An owner's access counts as editor with publish.
-- **An agent can** read, create pages and folders, edit drafts, attach files, view history, move pages and folders within one region, and copy them (section 10, **Copies, and moves between spaces**), inside what it was picked for, within its grants and the cap. It can publish and unpublish only if its grant allows it **and** its person can publish there.
+- **An agent can** read, create pages and folders, rename folders, edit drafts, attach files, view history, move pages and folders within one region, and copy them (section 10, **Copies, and moves between spaces**), inside what it was picked for, within its grants and the cap. It can publish and unpublish only if its grant allows it **and** its person can publish there.
 - **An agent can never** share, add or remove members, change roles, rotate keys, move across shares or into another space, add or remove owners, or use account, admin, vault or agent-management routes or `PUT /api/me/contacts`.
 - **Attribution.** An agent signs its own records. The record names the agent's ID, which derives from its person's ID and its keys (section 4.2), so any client can check whose agent wrote it. The interface shows it as "agent (for person)": the person's own label for their agent, or for someone else's agent the server's agent name marked as from the server, with the person's pinned label.
 - **After a rotation,** an agent can't save in that share until its person's app unlocks and seals it the new version. The server answers `key-version`, and the CLI reports missing keys (section 6.8).
@@ -1286,7 +1286,7 @@ The token is sent as `Authorization: Bearer <token>`. To accept it, the server:
 3. checks, on every request, that the credential isn't revoked, that it was created after `users.credentials_revoked_at` for the person's account (or that timestamp is null), that the account isn't suspended or deleted, and that the agent identity isn't revoked;
 4. **refuses a request that also carries a `Cookie`, or an `Origin` other than the server's own**, so a token is never mixed with a person's session or used from another site. The server's own origin is allowed for the agents a person's app runs (section 9.8), whose requests a browser sends with it. A browser never attaches a token by itself, so another site can't use one.
 
-Agents may use the content routes of section 9.5 (moves, and the copy routes for copies of kind `copy`, cancelling their own included, among them, section 10), `GET /api/me/contacts` (their person's record), their own folder key envelopes, and directory lookups of the authors of records they can read. Everything else is for humans only.
+Agents may use the content routes of section 9.5 (moves, folder renames through `POST /api/spaces/:spaceId/metadata`, never a space's, and the copy routes for copies of kind `copy`, cancelling their own included, among them, section 10), `GET /api/me/contacts` (their person's record), their own folder key envelopes, and directory lookups of the authors of records they can read. Everything else is for humans only.
 
 ### 9.7 Revocation
 

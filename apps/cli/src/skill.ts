@@ -61,14 +61,18 @@ on their version.
 Give each change a new \`--idempotency-key\`, and reuse a key only to retry
 its own change.
 
-## Copy, never move
+## Move within a space, copy between spaces
 
+\`page move\` and \`folder move\` move a page or folder to another folder of
+its space, and \`folder rename\` renames a folder. Move and rename only
+when the person asks you to, or the move is part of what they asked.
 \`page copy\` and \`folder copy\` copy a page or folder, with what is in it,
 into another folder or space, and leave the original as it is. Copy only
 what the person asked you to: where this agent may publish, pages
 published now arrive published. This agent can't move anything into
-another space. When the person asks for that, tell them: they can use
-Move to... in WikiStow, or you copy it and they delete the original.
+another space, or into or out of a shared folder, and can't delete. When
+the person asks for that, tell them: they can use Move to... or Delete in
+WikiStow, or you copy it and they delete the original.
 
 ## Hand these to the person
 
