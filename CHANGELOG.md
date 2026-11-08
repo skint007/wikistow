@@ -16,7 +16,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Plugins
 
 - Plugins can keep settings for the person, the same on each of their devices: `host.settings` (`get`, `set`, `update`, `on('changed')`), one JSON object of at most 16 KB per plugin, kept encrypted beside the plugin's approval in the account's record, or on the computer for a desktop folder install. A manifest's `settings` declares text, number, on/off and choice fields, which Settings → Plugins draws under the plugin's **Settings**, so scripts get settings without a view. Settings sections get `{ settings }`, `host.app.navigate({ kind: 'settings' })` opens the plugin's own, and the page's Plugins menu has ***Plugin* settings…**. An update keeps them and Remove deletes them. `reading-room` declares its column's width and reading speed. The library lists versions with `settings` only to apps that send `manifest=3`. (#344)
-- A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it.
+- A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it. (#349)
 
 ## 0.24.0 - 2026-11-07
 
