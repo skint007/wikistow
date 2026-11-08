@@ -33,7 +33,8 @@ async function watchKeeping(page: Page) {
  * offline, opens the kept pages and follows links between them, searches
  * them, and says "Needs the connection" on what waits for the server. It
  * loads again offline, and the vault opens from what the tab kept, or
- * with the passphrase against the wrapper kept. Back online, it says so
+ * with the passphrase against the wrapper kept. Diagrams draw, from the
+ * frame's files in the browser's cache (#333). Back online, it says so
  * once the server answers, and the session goes on.
  */
 test('pages opened here read, search and unlock offline', async ({
@@ -46,7 +47,7 @@ test('pages opened here read, search and unlock offline', async ({
   await memberWithVault(page, await adminTab(freshPage, admin.email));
   for (const [title, text] of [
     ['Bean soup', 'Beans and stock. Serve with [[Bread]].'],
-    ['Bread', 'Flour and rye, baked slowly.'],
+    ['Bread', 'Flour and rye, baked slowly.\n\n```mermaid\nflowchart LR\n  Knead --> Bake\n```'],
   ] as const) {
     await newPage(page, title);
     await fillSource(page, text);
@@ -113,6 +114,8 @@ test('pages opened here read, search and unlock offline', async ({
     await expect(offline).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
     await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
+    // Nothing drawn is kept, so the diagram is drawn again, offline.
+    await expect(page.getByRole('img', { name: 'Diagram' })).toBeVisible();
   });
 
   await test.step('locked, it unlocks offline with the passphrase', async () => {

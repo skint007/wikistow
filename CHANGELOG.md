@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Mermaid diagrams now draw in the browser after an offline reload. The diagram frame's files are named by their hashes under `/assets/diagram/`, so the browser's cache keeps them, and the service worker fetches them once when it installs. A diagram that can't draw offline shows its source and says so at once, instead of "Drawing diagram…" for two minutes. (#342)
+
 ## 0.24.0 - 2026-11-07
 
 ### Highlights

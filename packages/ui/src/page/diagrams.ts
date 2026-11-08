@@ -1,16 +1,24 @@
 import type { publicLinkOperations } from '@wikistow/client';
-import { DIAGRAM_HOST_PAGE } from '@wikistow/contracts';
 import type { ThemeToken } from '@wikistow/plugin-sdk';
+import { connection } from '../data/connection';
 import { vaultStore } from '../vault/store';
+
+/** The frame's page, under `/assets/diagram/` by its hash (`apps/web/vite.config.ts`). */
+declare const __DIAGRAM_HOST__: string;
 
 /** How long Mermaid may take to load in a new frame, a 5.5 MB file on a slow line. */
 const LOAD_MS = 120_000;
+/**
+ * How long a frame that has loaded may take to say it's ready. One that
+ * doesn't got an error page instead of its files.
+ */
+const READY_MS = 2_000;
 /** How long the frame may take over one diagram before it is replaced. */
 const DRAW_MS = 10_000;
 /** How long the frame stays once nothing is being drawn, so Mermaid isn't kept loaded. */
 const IDLE_MS = 60_000;
 
-/** What the frame says to the app (see `apps/web/public/diagram-host.js`). */
+/** What the frame says to the app (see `apps/web/diagram/host.js`). */
 type FrameMessage =
   | { type: 'ready' }
   | { type: 'rendered'; id: number; svg: string }
@@ -142,7 +150,18 @@ class DiagramFrame {
     this.#iframe.setAttribute('aria-hidden', 'true');
     this.#iframe.tabIndex = -1;
     this.#iframe.className = 'invisible fixed top-0 -left-[10000px] h-[1000px] w-[1000px]';
-    this.#iframe.src = DIAGRAM_HOST_PAGE;
+    this.#iframe.src = __DIAGRAM_HOST__;
+    // Loaded without saying it's ready, the frame got an error page or no
+    // Mermaid: the server's error, or offline, files the browser hasn't
+    // kept (#333). Fail at once, rather than wait out a slow line.
+    this.#iframe.addEventListener('load', () => {
+      if (this.#ready) return;
+      clearTimeout(this.#timer);
+      const reason = connection.get().online
+        ? 'Mermaid didn’t load.'
+        : 'Offline, diagrams draw only after this browser has drawn one online.';
+      this.#timer = setTimeout(() => this.remove(reason), READY_MS);
+    });
     window.addEventListener('message', this.#listen);
     document.body.append(this.#iframe);
     this.#arm();

@@ -60,23 +60,26 @@ export const pluginHostCsp = (origin: string) =>
   ].join('; ');
 
 /**
- * The sandboxed frame that draws Mermaid diagrams (ADR 0010), its script,
- * and the folder holding Mermaid's own build, named by its hash, all of
- * the web build.
+ * The folder of the web build holding the sandboxed frame that draws
+ * Mermaid diagrams (ADR 0010), and nothing else: its page, its script and
+ * Mermaid's own build, each named by its hash. Cached for good like the
+ * rest of `/assets`, so the frame loads offline from the browser's cache
+ * (#333), as its requests never go through the service worker.
  */
-export const DIAGRAM_HOST_PAGE = '/diagram-host.html';
-export const DIAGRAM_HOST_SCRIPT = '/diagram-host.js';
-export const DIAGRAM_LIBRARY = '/assets/mermaid/';
+export const DIAGRAM_FILES = '/assets/diagram/';
+
+/** Whether `path` is the diagram frame's page. */
+const diagramHostPage = (path: string) => path.startsWith(DIAGRAM_FILES) && path.endsWith('.html');
 
 /**
- * The diagram frame's policy: only its script and Mermaid's folder, and no
+ * The diagram frame's policy: only the scripts in its folder, and no
  * requests. Mermaid writes `<style>` elements and style attributes to
  * measure text, which only this frame's opaque origin may do.
  */
 export const diagramHostCsp = (origin: string) =>
   [
     "default-src 'none'",
-    `script-src ${origin}${DIAGRAM_LIBRARY} ${origin}${DIAGRAM_HOST_SCRIPT}`,
+    `script-src ${origin}${DIAGRAM_FILES}`,
     "style-src 'unsafe-inline'",
     "frame-ancestors 'self'",
     'sandbox allow-scripts',
@@ -89,16 +92,12 @@ export const diagramHostCsp = (origin: string) =>
  * opaque origins, which the usual `same-origin` resource policy refuses.
  */
 export function securityHeadersFor(path: string, origin: string): Record<string, string> {
-  if (path === PLUGIN_HOST_PAGE || path === DIAGRAM_HOST_PAGE) {
+  if (path === PLUGIN_HOST_PAGE || diagramHostPage(path)) {
     const { 'X-Frame-Options': _, ...headers } = SECURITY_HEADERS;
     const csp = path === PLUGIN_HOST_PAGE ? pluginHostCsp(origin) : diagramHostCsp(origin);
     return { ...headers, 'Content-Security-Policy': csp };
   }
-  if (
-    path === PLUGIN_HOST_SCRIPT ||
-    path === DIAGRAM_HOST_SCRIPT ||
-    path.startsWith(DIAGRAM_LIBRARY)
-  ) {
+  if (path === PLUGIN_HOST_SCRIPT || path.startsWith(DIAGRAM_FILES)) {
     return { ...SECURITY_HEADERS, 'Cross-Origin-Resource-Policy': 'cross-origin' };
   }
   return { ...SECURITY_HEADERS };

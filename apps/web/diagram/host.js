@@ -1,5 +1,6 @@
-// The diagram host frame (ADR 0010). The app frames diagram-host.html
-// (which the build writes, loading Mermaid's own script before this one)
+// The diagram host frame (ADR 0010). The app frames the host page, which
+// the build writes under /assets/diagram/ with this script and Mermaid's
+// own, each named by its hash (vite.config.ts), loading Mermaid before this,
 // with sandbox="allow-scripts", so Mermaid runs here at an opaque origin, under
 // a policy that allows no requests, and may use the inline styles it needs
 // to measure text. It draws each diagram it is sent and returns the SVG
@@ -9,7 +10,7 @@
 //   { type: 'render', id, source, look }: draw `source` in the theme's
 //     colours, `look` ({ dark, variables }: Mermaid's theme variables as
 //     plain colours), or in Mermaid's own light theme if `look` is null.
-// To the app (window messages): { type: 'ready' } once loaded, then for
+// To the app (window messages): { type: 'ready' } once loaded with Mermaid, then for
 //   each render { type: 'rendered', id, svg } or { type: 'failed', id, error }.
 (function () {
   var queue = Promise.resolve();
@@ -93,5 +94,7 @@
     });
   });
 
-  parent.postMessage({ type: 'ready' }, '*');
+  // Without Mermaid (its script failed, as offline when the browser hasn't
+  // kept it), the app hears nothing and fails the frame once it has loaded.
+  if (typeof mermaid !== 'undefined') parent.postMessage({ type: 'ready' }, '*');
 })();
