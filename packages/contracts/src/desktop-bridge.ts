@@ -1,3 +1,4 @@
+import type { Settings } from '@wikistow/plugin-sdk';
 import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/manifest';
 // Types only: the preload bundles this file and may load nothing but electron.
 // The package's index exports `PluginScope`.
@@ -236,11 +237,14 @@ export type DesktopBridge = {
    * candidate when it asks for more than was approved.
    */
   reloadPlugin(id: string): Promise<PluginCandidate | null>;
-  /** Uninstall: its files and every account's access settings for it go. */
+  /** Uninstall: its files and every account's access and settings for it go. */
   removePlugin(id: string): Promise<void>;
   /** Each plugin's page access for this account. */
   pluginAccess(accountId: string): Promise<Record<string, PluginScope[]>>;
   setPluginAccess(accountId: string, pluginId: string, scopes: PluginScope[]): Promise<void>;
+  /** Each folder or development install's settings for this account (`host.settings`), where it has any. */
+  pluginSettings(accountId: string): Promise<Record<string, Settings>>;
+  setPluginSettings(accountId: string, pluginId: string, settings: Settings): Promise<void>;
   /**
    * Hold a copy of each library plugin the account approved (ADR 0002):
    * those this computer lacks are downloaded through the app's session,
@@ -323,6 +327,8 @@ export const DESKTOP_CHANNELS = {
   removePlugin: 'wikistow:remove-plugin',
   pluginAccess: 'wikistow:plugin-access',
   setPluginAccess: 'wikistow:set-plugin-access',
+  pluginSettings: 'wikistow:plugin-settings',
+  setPluginSettings: 'wikistow:set-plugin-settings',
   libraryPlugins: 'wikistow:library-plugins',
   pluginUpload: 'wikistow:plugin-upload',
   setSafeMode: 'wikistow:set-safe-mode',

@@ -3,7 +3,38 @@
   "name": "Reading room",
   "version": "0.1.0",
   "api": 1,
-  "description": "A narrower, centred column for a page's text, with a desktop titlebar button to turn it off, its reading time beside it, and a Recent item in the rail listing the pages read since the vault opened.",
+  "description": "A narrower, centred column for a page's text, with a desktop titlebar button to turn it off, its reading time beside it, and a Recent item in the rail listing the pages read since the vault opened. Its settings choose the column's width and your reading speed.",
   "ui": "ui.js",
-  "styles": ["reading-room.css"]
+  "styles": ["reading-room.css"],
+  "settings": [
+    {
+      "key": "width",
+      "label": "Column width",
+      "type": "choice",
+      "options": [
+        {
+          "value": "narrow",
+          "label": "Narrow"
+        },
+        {
+          "value": "medium",
+          "label": "Medium"
+        },
+        {
+          "value": "roomy",
+          "label": "Roomy"
+        }
+      ],
+      "default": "medium"
+    },
+    {
+      "key": "wordsPerMinute",
+      "label": "Reading speed",
+      "description": "Words a minute, for each page's reading time.",
+      "type": "number",
+      "default": 220,
+      "min": 60,
+      "max": 1000
+    }
+  ]
 }

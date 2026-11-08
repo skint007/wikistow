@@ -367,6 +367,7 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
       enabled: true,
       access: [],
       ownParts: [],
+      settings: {},
     });
     const plugin = (payloads: ContactsPayloads, id: string) =>
       pluginApprovals(payloads.private).find((entry) => entry.id === id);

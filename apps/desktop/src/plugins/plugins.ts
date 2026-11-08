@@ -6,7 +6,14 @@ import {
   type PluginsState,
 } from '@wikistow/contracts';
 import { fileType } from '@wikistow/plugin-sdk/files';
-import { asksMore, Manifest, PageAccess, trustLevel } from '@wikistow/plugin-sdk/manifest';
+import {
+  asksMore,
+  Manifest,
+  PageAccess,
+  settingsFit,
+  SettingsValue,
+  trustLevel,
+} from '@wikistow/plugin-sdk/manifest';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -44,8 +51,15 @@ const State = z.strictObject({
   plugins: z.array(Stored),
   /** Page access, by account and then plugin. */
   access: z.record(z.string(), z.record(z.string(), z.array(PluginScope))),
+  /**
+   * Settings (`host.settings`, #310), by account and then plugin. Left out
+   * while there are none, as `ownParts` is: an app older than it refuses
+   * the file while any are kept.
+   */
+  settings: z.record(z.string(), z.record(z.string(), SettingsValue)).optional(),
 });
 type State = z.infer<typeof State>;
+type Settings = z.infer<typeof SettingsValue>;
 
 /** A file served under `/plugins/`, with what it is served as. */
 export type PluginFile = { path: string; type: string };
@@ -92,6 +106,18 @@ export function desktopPlugins(data: string) {
   };
 
   const find = (id: string) => state.plugins.find((plugin) => plugin.manifest.id === id);
+
+  /** Keep `settings` as an account's for a plugin, leaving out what is empty. */
+  const keepSettings = (account: string, pluginId: string, settings: Settings) => {
+    const all = { ...state.settings };
+    const mine = { ...all[account] };
+    if (Object.keys(settings).length > 0) mine[pluginId] = settings;
+    else delete mine[pluginId];
+    if (Object.keys(mine).length > 0) all[account] = mine;
+    else delete all[account];
+    if (Object.keys(all).length > 0) state.settings = all;
+    else delete state.settings;
+  };
   const installed = (plugin: Stored) => join(root, plugin.manifest.id, plugin.hash ?? '');
   const keyOf = (plugin: Stored) => plugin.hash ?? `dev-${reloads.get(plugin.manifest.id) ?? 0}`;
 
@@ -221,6 +247,8 @@ export function desktopPlugins(data: string) {
       if (!plugin) return;
       state.plugins = state.plugins.filter((other) => other !== plugin);
       for (const access of Object.values(state.access)) delete access[plugin.manifest.id];
+      for (const account of Object.keys(state.settings ?? {}))
+        keepSettings(account, plugin.manifest.id, {});
       await save();
       if (!plugin.development)
         await rm(join(root, plugin.manifest.id), { recursive: true, force: true });
@@ -244,6 +272,19 @@ export function desktopPlugins(data: string) {
       if (!plugin) throw new PluginFolderError('That plugin isn’t installed.');
       const mine = (state.access[account] ??= {});
       mine[plugin.manifest.id] = z.array(PluginScope).max(100).parse(scopes);
+      await save();
+    },
+
+    settings: (accountId: unknown): Record<string, Settings> =>
+      state.settings?.[z.string().parse(accountId)] ?? {},
+
+    async setSettings(accountId: unknown, pluginId: unknown, settings: unknown) {
+      const account = z.string().min(1).parse(accountId);
+      const plugin = find(z.string().parse(pluginId));
+      if (!plugin) throw new PluginFolderError('That plugin isn’t installed.');
+      const value = SettingsValue.parse(settings);
+      if (!settingsFit(value)) throw new PluginFolderError('Those settings are too large.');
+      keepSettings(account, plugin.manifest.id, value);
       await save();
     },
 

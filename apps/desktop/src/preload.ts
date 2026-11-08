@@ -46,6 +46,9 @@ const bridge: DesktopBridge = {
   pluginAccess: (accountId) => call(DESKTOP_CHANNELS.pluginAccess, accountId),
   setPluginAccess: (accountId, pluginId, scopes) =>
     call(DESKTOP_CHANNELS.setPluginAccess, accountId, pluginId, scopes),
+  pluginSettings: (accountId) => call(DESKTOP_CHANNELS.pluginSettings, accountId),
+  setPluginSettings: (accountId, pluginId, settings) =>
+    call(DESKTOP_CHANNELS.setPluginSettings, accountId, pluginId, settings),
   libraryPlugins: (approved) => call(DESKTOP_CHANNELS.libraryPlugins, approved),
   pluginUpload: (id) => call(DESKTOP_CHANNELS.pluginUpload, id),
   setSafeMode: (on) => call(DESKTOP_CHANNELS.setSafeMode, on),

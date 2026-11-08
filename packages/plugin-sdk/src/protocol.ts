@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { PageRef, PluginErrorCode, PluginEvent } from './host.ts';
+import type { PageRef, PluginErrorCode, PluginEvent, Settings } from './host.ts';
+import { SettingsValue } from './manifest.ts';
 
 /*
  * The messages between a script's worker and the host. The host checks
@@ -40,13 +41,21 @@ export const METHODS = {
   'page.edit': z.tuple([z.object(Change)]),
   'page.selection': z.tuple([]),
   'page.insert': z.tuple([Markdown]),
+  /** Its settings (`host.settings`), which the host checks against the manifest and the limit. */
+  'settings.get': z.tuple([]),
+  'settings.set': z.tuple([SettingsValue]),
+  'settings.update': z.tuple([SettingsValue]),
 } as const;
 export type Method = keyof typeof METHODS;
 const MethodName = z.custom<Method>(
   (value) => typeof value === 'string' && Object.hasOwn(METHODS, value),
 );
 
-const EventName = z.enum(['page.shown', 'draft.saved']);
+/** The events a script listens for: `settings.changed` is `host.settings.on('changed')`. */
+const EventName = z.enum(['page.shown', 'draft.saved', 'settings.changed']);
+
+/** What a script is told: its events, and its own settings changing. */
+export type ScriptEvent = PluginEvent | { event: 'settings.changed'; payload: Settings };
 
 // A script's blocks (#260): what it declares, and what its outputs answer.
 const BlockType = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
@@ -148,7 +157,7 @@ export type HostMessage =
             /** It has `editor`: missing from an app older than it. */
             cursor?: boolean;
           }
-        | ({ kind: 'event' } & PluginEvent)
+        | ({ kind: 'event' } & ScriptEvent)
         /** A block's outputs, from its valid fields' values (the rest are left out). */
         | {
             kind: 'calculate';

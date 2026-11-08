@@ -34,6 +34,7 @@ import { Place, Replaceable, type OpenPanel } from '../plugins/places';
 import { useAppPlugins } from '../plugins/app-plugins';
 import type { MarkdownPage } from '../plugins/markdown-drawings';
 import { RenderedMarkdown } from '../plugins/rendered-markdown';
+import { DeclaredSettings } from '../plugins/declared-settings';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
@@ -549,7 +550,7 @@ function PluginPlaces({
   workshop: Workshop;
   onOpen: (pageId: string) => void;
 }) {
-  const { regions, replaced } = usePlugins();
+  const { regions, replaced, plugins } = usePlugins();
   // The sample pages, which a replaced page tree is given again as they change.
   const samples = useSyncExternalStore(workshop.samples.subscribe, workshop.samples.get);
   const [open, setOpen] = useState<string | null>(null);
@@ -565,6 +566,9 @@ function PluginPlaces({
         if (to.kind === 'plugin') {
           setRailView({ pluginId: to.pluginId, viewId: to.viewId });
           setOpen(viewKey(to.pluginId, to.viewId));
+        } else if (to.kind === 'settings') {
+          // Its settings here, kept in the workshop: none to open shows nothing.
+          setOpen(`settings.section:${to.pluginId}`);
         } else if (
           to.kind === 'page' &&
           to.spaceId === SAMPLE_SPACE &&
@@ -640,18 +644,25 @@ function PluginPlaces({
           },
         ]
       : []),
-    // Each plugin's sections together, as its row on the Plugins page shows them.
-    ...[...new Set(regions['settings.section'].map(({ pluginId }) => pluginId))].map(
-      (pluginId) => ({
-        key: `settings.section:${pluginId}`,
+    // Each plugin's settings together, as its row on the Plugins page shows them: those its
+    // manifest declares, then its sections. What it keeps there stays in the workshop.
+    ...plugins
+      .map(({ plugin }) => plugin)
+      .filter(
+        ({ manifest }) =>
+          (manifest.settings?.length ?? 0) > 0 ||
+          regions['settings.section'].some(({ pluginId }) => pluginId === manifest.id),
+      )
+      .map((plugin) => ({
+        key: `settings.section:${plugin.manifest.id}`,
         label: 'Settings',
         draw: () => (
           <div className="grid gap-2">
-            <Place name="settings.section" pluginId={pluginId} />
+            <DeclaredSettings plugin={plugin} />
+            <Place name="settings.section" pluginId={plugin.manifest.id} />
           </div>
         ),
-      }),
-    ),
+      })),
     // All its titlebar buttons, as the desktop app's titlebar shows them.
     ...(regions['app.titlebar'].length > 0
       ? [

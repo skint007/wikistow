@@ -169,14 +169,15 @@ export type AppLocation =
 
 /**
  * Where `host.app.navigate` goes: a space, a folder, a page (its draft or
- * publication, else the one the app opens), or one of the plugin's own
- * `app.view`s.
+ * publication, else the one the app opens), one of the plugin's own
+ * `app.view`s, or the plugin's own settings in Settings → Plugins.
  */
 export type Destination =
   | { kind: 'space'; spaceId: string }
   | { kind: 'folder'; spaceId: string; folderId: string }
   | { kind: 'page'; spaceId: string; pageId: string; version?: PageVersion['version'] | undefined }
-  | { kind: 'plugin'; viewId: string };
+  | { kind: 'plugin'; viewId: string }
+  | { kind: 'settings' };
 
 /** A space the plugin has page access in. */
 export type SpaceSummary = {
@@ -194,7 +195,11 @@ export interface AppAccess {
     /** Called as the location changes, as `location.changed` handlers are. */
     subscribe(listener: (location: AppLocation) => void | Promise<void>): Disposer;
   };
-  /** Go there, as a link would. Fails with `invalid` for a malformed ID. */
+  /**
+   * Go there, as a link would. Fails with `invalid` for a malformed ID, and
+   * for a kind of destination the app doesn't know, as an app older than
+   * `settings` answers for that one.
+   */
   navigate(to: Destination): Promise<void>;
   readonly spaces: {
     /** The spaces the plugin has any page access in, as the app lists them. */
@@ -229,6 +234,39 @@ export type AppEvent = {
 
 export type Disposer = () => void;
 
+/**
+ * A plugin's settings: a JSON object of the person's choices, kept for
+ * their account, encrypted with their plugin approvals, so the same on
+ * each of their devices.
+ */
+export type Settings = { [key: string]: Json };
+
+/** The most a plugin's settings may hold, as UTF-8 JSON. */
+export const SETTINGS_LIMIT = 16 * 1024;
+
+/**
+ * A plugin's settings for the person (`host.settings`). Each value of a key
+ * the manifest's `settings` declares has that field's type; `get` gives a
+ * declared key's `default` while none is set, or while the value set no
+ * longer fits its field. Other keys hold any JSON.
+ */
+export interface PluginSettings {
+  get(): Promise<Settings>;
+  /**
+   * Replace them all. Fails with `too-large` past `SETTINGS_LIMIT`, and
+   * `invalid` for a value that isn't JSON or doesn't fit its declared field.
+   */
+  set(settings: Settings): Promise<void>;
+  /** Set the top-level keys `patch` names, keeping the rest; what it gives is `get`'s answer after. */
+  update(patch: Settings): Promise<Settings>;
+  /**
+   * Called with `get`'s answer whenever they change, by this plugin or in
+   * Settings. Another device's changes reach it at the next unlock, as it
+   * starts again and reads them.
+   */
+  on(event: 'changed', handler: (settings: Settings) => void | Promise<void>): Disposer;
+}
+
 /** What every plugin gets. */
 export interface Host {
   /** The host interface version. */
@@ -242,6 +280,12 @@ export interface Host {
       handler: (event: PluginEvents[E]) => void | Promise<void>,
     ): Disposer;
   };
+  /**
+   * The person's settings for this plugin. Missing (undefined) in an app
+   * older than it; in a script it is always there, and such an app stops
+   * the script that uses it.
+   */
+  readonly settings?: PluginSettings | undefined;
   /** Aborted when the plugin unloads, the vault locks or the person signs out. */
   readonly signal: AbortSignal;
 }
@@ -262,8 +306,11 @@ export type AppViewProps = {
   openPage: (page: PageRef) => void;
 };
 
-/** What a settings section is given: nothing yet. */
-export type SettingsViewProps = Record<string, never>;
+/**
+ * What a settings section is given: the plugin's settings, as
+ * `host.settings` reaches them. Missing (undefined) in an app older than it.
+ */
+export type SettingsViewProps = { settings?: PluginSettings | undefined };
 
 /** What a titlebar button is given: nothing yet. */
 export type TitlebarViewProps = Record<string, never>;
@@ -505,6 +552,8 @@ export type ScriptBlock<Fields extends Record<string, BlockField>> = {
 export interface ScriptHost extends Host {
   /** Every page operation: the SDK in the script sends each, `tree` too, whatever the app knows. */
   readonly pages: Required<Pages>;
+  /** Its settings: the SDK in the script sends these too, whatever the app knows. */
+  readonly settings: PluginSettings;
   readonly blocks: {
     register<const Fields extends Record<string, BlockField>>(block: ScriptBlock<Fields>): Disposer;
   };
@@ -686,7 +735,7 @@ export const REGIONS = {
     policy: 'add',
     registers: '{ id, title, view }',
     where:
-      "Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button",
+      "Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button; its view gets `{ settings }`, what `host.settings` gives",
     phone: 'The same',
   },
   'app.titlebar': {

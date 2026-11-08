@@ -6,6 +6,7 @@ import {
   isReplaceable,
   PLUGIN_API,
   PluginError,
+  SETTINGS_LIMIT,
   type AppEvent,
   type AppHost,
   type AppLocation,
@@ -17,11 +18,21 @@ import {
   type PageRef,
   type PageVersion,
   type PageViewProps,
+  type PluginSettings,
   type Regions,
   type Replacements,
+  type Settings,
+  type SettingsViewProps,
   type SpaceSummary,
   type View,
 } from '@wikistow/plugin-sdk';
+import {
+  misfit,
+  settingFits,
+  settingsFit,
+  settingsWithDefaults,
+  SettingsValue,
+} from '@wikistow/plugin-sdk/manifest';
 import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
@@ -31,6 +42,7 @@ import {
   perRegion,
   perReplaceable,
   type BlockResults,
+  type HostEvent,
   type Part,
   type Registry,
 } from './registry';
@@ -135,10 +147,14 @@ type Active = {
   pages: HostPages;
   /** What its app code and its script registered. */
   registry: Registry;
+  /** Its `host.settings`. */
+  settings: PluginSettings;
+  /** What its settings sections are given: the same object while it runs. */
+  settingsProps: SettingsViewProps;
   app: AppPlugin | null;
   worker: ScriptWorker | null;
   /** Each event and page whose handlers run now, with the latest that arrived meanwhile. */
-  running: Map<string, { next: AppEvent | null }>;
+  running: Map<string, { next: HostEvent | null }>;
 };
 
 type Loaded = {
@@ -283,6 +299,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   let idle: InstalledPlugin[] = [];
   /** The open account's page access settings, by plugin. */
   let access: Readonly<Record<string, readonly PluginScope[]>> = {};
+  /** The open account's plugin settings, by plugin, as stored. */
+  let settings: Readonly<Record<string, Settings>> = {};
   let safeMode = false;
   const listeners = new Set<() => void>();
   let listed = false;
@@ -374,46 +392,88 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
   };
 
   function deliver(event: AppEvent, from: string | null = null) {
-    for (const [id, entry] of loaded) {
-      const { active } = entry;
-      if (!active || id === from) continue;
-      if (active.registry.handlersOf(event).length === 0) continue;
-      // One run of its handlers at a time per event and page (or for the
-      // location, which names none); the latest waiting replaces the rest.
-      const key =
-        event.event === 'location.changed'
-          ? event.event
-          : `${event.event}:${event.payload.page.pageId}`;
-      const running = active.running.get(key);
-      if (running) {
-        running.next = event;
-        continue;
-      }
-      const slot: { next: AppEvent | null } = { next: null };
-      active.running.set(key, slot);
-      void (async () => {
-        for (let next: AppEvent | null = event; next; next = slot.next) {
-          slot.next = null;
-          const told = next;
-          // Its handlers run together, its app code's and its script's alike.
-          await Promise.all(
-            active.registry.handlersOf(told).map(async ({ part, run }) => {
-              try {
-                await run();
-              } catch (error) {
-                if (entry.active !== active) return;
-                problem(
-                  entry,
-                  part,
-                  `Its ${told.event} handler failed: ${pluginError(error).message}`,
-                );
-              }
-            }),
-          );
-        }
-        active.running.delete(key);
-      })();
+    for (const [id, entry] of loaded) if (id !== from) tell(entry, event);
+  }
+
+  /** Run `entry`'s handlers of `event`, if it is running. */
+  function tell(entry: Loaded, event: HostEvent) {
+    const { active } = entry;
+    if (!active || active.registry.handlersOf(event).length === 0) return;
+    // One run of its handlers at a time per event and page (or for the
+    // location and its settings, which name none); the latest waiting replaces the rest.
+    const key =
+      event.event === 'location.changed' || event.event === 'settings.changed'
+        ? event.event
+        : `${event.event}:${event.payload.page.pageId}`;
+    const running = active.running.get(key);
+    if (running) {
+      running.next = event;
+      return;
     }
+    const slot: { next: HostEvent | null } = { next: null };
+    active.running.set(key, slot);
+    void (async () => {
+      for (let next: HostEvent | null = event; next; next = slot.next) {
+        slot.next = null;
+        const told = next;
+        // Its handlers run together, its app code's and its script's alike.
+        await Promise.all(
+          active.registry.handlersOf(told).map(async ({ part, run }) => {
+            try {
+              await run();
+            } catch (error) {
+              if (entry.active !== active) return;
+              problem(
+                entry,
+                part,
+                `Its ${told.event} handler failed: ${pluginError(error).message}`,
+              );
+            }
+          }),
+        );
+      }
+      active.running.delete(key);
+    })();
+  }
+
+  /** The settings `plugin` reads now: what is stored, with its declared fields' defaults. */
+  const settingsOf = (plugin: InstalledPlugin) =>
+    settingsWithDefaults(plugin.manifest.settings, settings[plugin.manifest.id] ?? {});
+
+  /**
+   * Keep `next(stored)` as `plugin`'s settings for the open account, after
+   * every change asked for before it: checked as a JSON object, against
+   * `SETTINGS_LIMIT` and against its manifest's fields. What runs of the
+   * plugin is told, its own change included.
+   */
+  function changeSettings(plugin: InstalledPlugin, next: (stored: Settings) => unknown) {
+    const id = plugin.manifest.id;
+    const done = syncing.then(async () => {
+      if (!session.get()) throw new PluginError('locked', 'The vault is locked');
+      // A value its field no longer takes (an update changed the field) reads as the
+      // default, so it goes rather than failing every change after it.
+      const fitting = Object.fromEntries(
+        Object.entries(settings[id] ?? {}).filter(([key, value]) => {
+          const field = plugin.manifest.settings?.find((declared) => declared.key === key);
+          return !field || settingFits(field, value);
+        }),
+      );
+      const read = SettingsValue.safeParse(next(fitting));
+      if (!read.success) throw new PluginError('invalid', 'Settings are a JSON object');
+      const value = read.data;
+      if (!settingsFit(value))
+        throw new PluginError('too-large', `Settings hold at most ${SETTINGS_LIMIT / 1024} KB`);
+      const wrong = misfit(plugin.manifest.settings, value);
+      if (wrong) throw new PluginError('invalid', `${wrong.label} can’t be that value`);
+      await store.setSettings(refOf(plugin), value);
+      settings = { ...settings, [id]: value };
+      const entry = loaded.get(id);
+      if (entry) tell(entry, { event: 'settings.changed', payload: settingsOf(entry.plugin) });
+      emit();
+    });
+    // A listing can't come between a change and its keeping, nor a change between another's.
+    syncing = done.catch(() => {});
+    return done;
   }
 
   /** Each activation's views' last props, by view, with the page and version they are for. */
@@ -451,6 +511,38 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         if (session.get()) reach.changed(spaceId);
       },
     };
+    const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
+    // Its settings, written as its pages are: counted against its writes a minute.
+    const ownSettings: PluginSettings = {
+      get: async () => {
+        if (!live()) throw unloaded();
+        return settingsOf(entry.plugin);
+      },
+      set: async (value) => {
+        if (!live()) throw unloaded();
+        write();
+        await changeSettings(entry.plugin, () => value);
+      },
+      update: async (patch) => {
+        if (!live()) throw unloaded();
+        write();
+        await changeSettings(entry.plugin, (stored) => {
+          const read = SettingsValue.safeParse(patch);
+          if (!read.success) throw new PluginError('invalid', 'A patch is a JSON object');
+          return { ...stored, ...read.data };
+        });
+        return settingsOf(entry.plugin);
+      },
+      on(event, handler) {
+        if (!live()) return () => {};
+        // A plugin built for a newer app may name an event this one lacks.
+        if (event !== 'changed') throw new PluginError('unsupported', `No event ${String(event)}`);
+        return active.registry.addHandler('settings.changed', {
+          part: 'app',
+          run: async ({ payload }) => handler(payload),
+        });
+      },
+    };
     const active: Active = {
       controller: new AbortController(),
       caller,
@@ -458,6 +550,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       registry: createRegistry(() => {
         if (live()) emit();
       }),
+      settings: ownSettings,
+      settingsProps: { settings: ownSettings },
       app: null,
       worker: null,
       running: new Map(),
@@ -482,6 +576,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       api: PLUGIN_API,
       pluginId: id,
       pages: active.pages,
+      settings: ownSettings,
       signal: active.controller.signal,
       commands: {
         register: (command) =>
@@ -503,9 +598,13 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         navigate: async (to) => {
           if (!live()) throw new PluginError('unloaded', 'The plugin was turned off');
           try {
-            // Its own pages only: the plugin's ID is the runtime's to give.
+            // Its own pages and settings only: the plugin's ID is the runtime's to give.
             await reach.location.navigate(
-              to.kind === 'plugin' ? { kind: 'plugin', pluginId: id, viewId: to.viewId } : to,
+              to.kind === 'plugin'
+                ? { kind: 'plugin', pluginId: id, viewId: to.viewId }
+                : to.kind === 'settings'
+                  ? { kind: 'settings', pluginId: id }
+                  : to,
             );
           } catch (error) {
             throw pluginError(error);
@@ -582,7 +681,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       },
     };
     if (manifest.script) {
-      active.worker = new ScriptWorker(code.script(plugin), active.pages, {
+      active.worker = new ScriptWorker(code.script(plugin), active.pages, ownSettings, {
         command: (commandId, title, runCommand) =>
           whileLive(() =>
             registry.addCommand({ id: commandId, title, part: 'script', run: runCommand }),
@@ -680,7 +779,17 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         unload(entry);
     }
     const open = session.get() !== null;
-    if (open) access = state.access;
+    if (open) {
+      const before = settings;
+      access = state.access;
+      settings = state.settings;
+      // Changed since the last listing, as when a save read the record again.
+      for (const entry of loaded.values()) {
+        const id = entry.plugin.manifest.id;
+        if (JSON.stringify(before[id] ?? {}) !== JSON.stringify(settings[id] ?? {}))
+          tell(entry, { event: 'settings.changed', payload: settingsOf(entry.plugin) });
+      }
+    }
     for (const plugin of wanted.values()) {
       const entry = loaded.get(plugin.manifest.id) ?? {
         plugin,
@@ -736,7 +845,10 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         epoch += 1;
         for (const entry of loaded.values()) deactivate(entry);
         emit();
-        if (!now) access = {};
+        if (!now) {
+          access = {};
+          settings = {};
+        }
         // Listed again: the browser's plugins come and go with the account.
         void refresh();
       });
@@ -763,6 +875,16 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     },
     /** Tell every running plugin but `from` of `event`. */
     deliver: (event: AppEvent, from: string | null = null) => deliver(event, from),
+    /** A plugin's settings for the open account, with its declared fields' defaults. */
+    settings: (plugin: InstalledPlugin) => settingsOf(plugin),
+    /** Set some of a plugin's settings from Settings → Plugins, checked as its own changes are. */
+    updateSettings: (plugin: InstalledPlugin, patch: Settings) =>
+      changeSettings(plugin, (stored) => ({ ...stored, ...patch })),
+    /** What a running plugin's settings sections are given; null once it stopped. */
+    settingsViewProps: (pluginId: string): SettingsViewProps | null =>
+      loaded.get(pluginId)?.active?.settingsProps ?? null,
+    /** Open a plugin's settings, where this runtime's places are: Settings → Plugins in the app. */
+    openSettings: (pluginId: string) => reach.location.navigate({ kind: 'settings', pluginId }),
     /** Turn a running plugin off in its store, from where its view failed. */
     async disable(pluginId: string) {
       const entry = loaded.get(pluginId);

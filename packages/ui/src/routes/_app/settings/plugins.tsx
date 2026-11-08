@@ -20,7 +20,11 @@ const TABS = [
 
 export const Route = createFileRoute('/_app/settings/plugins')({
   // The tab is in the address, so other places can link to Library. Installed has none.
-  validateSearch: z.object({ tab: z.literal('library').optional().catch(undefined) }),
+  // `plugin` opens that plugin's settings, as it asked (`navigate({ kind: 'settings' })`).
+  validateSearch: z.object({
+    tab: z.literal('library').optional().catch(undefined),
+    plugin: z.string().max(40).optional().catch(undefined),
+  }),
   component: PluginsPage,
 });
 

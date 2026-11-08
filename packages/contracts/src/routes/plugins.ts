@@ -90,11 +90,12 @@ export const haveQuery = (hashes: readonly string[]) => hashes.slice(0, MAX_HAVE
 
 /**
  * The manifests this app reads, as the listing's `manifest`: from 2, with
- * `inline` and `replaces` (ADR 0011). Released apps read manifests strictly and send
- * none, so the listing leaves out the versions whose manifests they would
- * refuse, which would fail the whole listing for them.
+ * `inline` and `replaces` (ADR 0011); from 3, with `settings` (#310).
+ * Released apps read manifests strictly and send none, or an older number, so
+ * the listing leaves out the versions whose manifests they would refuse,
+ * which would fail the whole listing for them.
  */
-export const MANIFEST_READ = 2;
+export const MANIFEST_READ = 3;
 
 /**
  * Every plugin in the library the caller may see, by ID: every Shared one,

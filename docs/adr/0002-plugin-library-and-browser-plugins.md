@@ -54,7 +54,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 ### Out of scope
 
-Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins (#312), private library entries, uploading from a phone, development loading (#317) or the workshop in the browser, storage for plugins (#310), and sandboxing app plugins.
+Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins (#312), private library entries, uploading from a phone, development loading (#317) or the workshop in the browser, storage for plugins (settings since built in #310, kept beside the approval; nothing else), and sandboxing app plugins.
 
 ## Spike evidence (2026-10-15)
 

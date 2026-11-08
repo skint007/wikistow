@@ -7,7 +7,7 @@
 import type { AppHost } from './host.ts';
 
 export * from './host.ts';
-export type { Manifest, PageAccess, TrustLevel } from './manifest.ts';
+export type { Manifest, PageAccess, SettingField, TrustLevel } from './manifest.ts';
 export { defineScript } from './script.ts';
 export * from './theme.ts';
 

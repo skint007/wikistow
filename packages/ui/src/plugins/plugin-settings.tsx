@@ -9,8 +9,8 @@ import {
   type TrustLevel,
 } from '@wikistow/plugin-sdk';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { Fragment, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { ScopePill, SettingRow } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
+import { DeclaredSettings } from './declared-settings';
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
 import { Place as RegionPlace, REPLACED } from './places';
@@ -528,8 +529,10 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
 /**
  * One installed plugin on the Plugins page: its name, version, trust level,
  * where it came from and on/off, its description and any problem, Remove
- * beside `actions`, then its page access. Settings opens its own sections
- * (`settings.section`) under it.
+ * beside `actions`, then its page access. Settings opens its settings
+ * under it: those its manifest declares, drawn by the app, then its own
+ * sections (`settings.section`). The page's `plugin` search, which a
+ * plugin's `navigate({ kind: 'settings' })` sets, opens them at once.
  */
 export function PluginRow({
   status: { plugin, problem },
@@ -554,8 +557,25 @@ export function PluginRow({
   const sections = here
     ? regions['settings.section'].filter(({ pluginId }) => pluginId === manifest.id)
     : [];
+  const declared = here && (manifest.settings?.length ?? 0) > 0;
+  const hasSettings = declared || sections.length > 0;
+  // Asked for by the plugin: its sections come once it runs, so this may turn true later.
+  const asked = useSearch({ strict: false }).plugin === manifest.id && hasSettings;
+  const row = useRef<HTMLLIElement>(null);
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!asked) return;
+    setSettingsOpen(true);
+    row.current?.scrollIntoView({ block: 'start' });
+    // Done with, so the Installed tab shows as current, and asking again opens them again.
+    void navigate({ to: '/settings/plugins', search: {}, replace: true });
+  }, [asked]);
   return (
-    <li className="grid gap-2 rounded-control border border-border p-3" aria-label={manifest.name}>
+    <li
+      ref={row}
+      className="grid gap-2 rounded-control border border-border p-3"
+      aria-label={manifest.name}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <strong>{manifest.name}</strong>
         <span className="text-sm text-muted-foreground">{manifest.version}</span>
@@ -579,7 +599,7 @@ export function PluginRow({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {sections.length > 0 && (
+        {hasSettings && (
           <Button
             size="sm"
             variant="outline"
@@ -599,6 +619,7 @@ export function PluginRow({
           Remove
         </Button>
       </div>
+      {settingsOpen && declared && <DeclaredSettings plugin={plugin} />}
       {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
         <PageAccessEditor plugin={refOf(plugin)} most={manifest.access} />

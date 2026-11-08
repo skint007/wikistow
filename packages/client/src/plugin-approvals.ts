@@ -1,13 +1,13 @@
 import { PluginScope } from '@wikistow/contracts';
-import { PluginId } from '@wikistow/plugin-sdk/manifest';
+import { PluginId, SettingsValue } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import type { PrivateContacts } from './contacts.ts';
 
 /**
  * Where a person's contacts record keeps the library plugins they approved
  * (ADR 0002), in the private payload, which only the person can open: per
- * plugin, the hash approved, whether it is on, its plugin access, and
- * where it gives way to the app's own part. They follow the person to
+ * plugin, the hash approved, whether it is on, its plugin access, where
+ * it gives way to the app's own part, and its settings. They follow the person to
  * every device. The desktop's folder and development installs keep theirs
  * in its `plugins.json` instead.
  */
@@ -25,6 +25,13 @@ export const PluginApproval = z.object({
    * plugin's (ADR 0011), on every device. An older app's entry has none.
    */
   ownParts: z.array(z.string().max(40)).max(20).default([]),
+  /**
+   * The plugin's settings (`host.settings`, #310), the last write winning.
+   * An older app's entry has none, and keeps them when it changes the
+   * entry, as `plugin-change` sets only the fields it names. Missing, or
+   * not readable as settings, they read as none, not as a lost approval.
+   */
+  settings: SettingsValue.catch({}),
 });
 export type PluginApproval = z.infer<typeof PluginApproval>;
 
@@ -61,7 +68,7 @@ export function pluginApprovals(own: PrivateContacts): PluginApproval[] {
 export type PluginChange =
   /** Install, or approve again: the whole entry, turned on. */
   | { kind: 'plugin-approve'; approval: PluginApproval }
-  /** Update (a new `hash`), change access or own parts, or turn on or off, if the entry is still there. */
+  /** Update (a new `hash`), change access, own parts or settings, or turn on or off, if the entry is still there. */
   | { kind: 'plugin-change'; pluginId: string; set: Partial<Omit<PluginApproval, 'id'>> }
   | { kind: 'plugin-remove'; pluginId: string };
 

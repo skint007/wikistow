@@ -9,6 +9,7 @@ import {
   type PageRef,
   type Regions,
   type Replacements,
+  type Settings,
   type View,
 } from '@wikistow/plugin-sdk';
 import type { OutputResult } from '@wikistow/plugin-sdk/protocol';
@@ -18,10 +19,18 @@ import type { BlockProperties } from './block-properties';
 /** Which of a plugin's code registered something: what goes wrong with it is said as that part's. */
 export type Part = 'app' | 'script';
 
-/** One event of type `E`, with its payload: `AppEvent` when `E` is every event. */
-export type EventOf<E extends keyof AppEvents> = {
-  [K in E]: { event: K; payload: AppEvents[K] };
+/**
+ * What a plugin's handlers hear: app code's events, and its own settings
+ * changing, which `host.settings.on('changed')` listens for.
+ */
+export type HostEvents = AppEvents & { 'settings.changed': Settings };
+
+/** One event of type `E`, with its payload: `HostEvent` when `E` is every event. */
+export type EventOf<E extends keyof HostEvents> = {
+  [K in E]: { event: K; payload: HostEvents[K] };
 }[E];
+
+export type HostEvent = EventOf<keyof HostEvents>;
 
 /** What a script's block shows for its source on a page: its fields as read, and its outputs or why they failed. */
 export type BlockResults = {
@@ -49,12 +58,12 @@ export type BlockEntry = {
 /** Inline code app code draws, its view drawn as a block's. */
 export type InlineEntry = { type: string; view: View<BlockProps> };
 
-export type HandlerEntry<E extends keyof AppEvents> = {
+export type HandlerEntry<E extends keyof HostEvents> = {
   part: Part;
   run: (event: EventOf<E>) => Promise<void>;
 };
 
-type Handlers = { [E in keyof AppEvents]: Set<HandlerEntry<E>> };
+type Handlers = { [E in keyof HostEvents]: Set<HandlerEntry<E>> };
 
 /** A region's contributions, by their IDs. */
 type Contributions = { [R in keyof Regions]: Map<string, Regions[R]> };
@@ -106,6 +115,7 @@ export function createRegistry(changed: () => void) {
     'page.shown': new Set(),
     'draft.saved': new Set(),
     'location.changed': new Set(),
+    'settings.changed': new Set(),
   };
   const regions = perRegion<Contributions>(() => new Map());
   // A plugin replaces each region with one view at a time.
@@ -132,13 +142,13 @@ export function createRegistry(changed: () => void) {
     replacement: <R extends keyof Replacements>(region: R): Replacements[R] | undefined =>
       replacements[region],
     /** Each handler of `event`, to run with it. */
-    handlersOf: <E extends keyof AppEvents>(event: EventOf<E>) =>
+    handlersOf: <E extends keyof HostEvents>(event: EventOf<E>) =>
       [...handlers[event.event]].map(({ part, run }) => ({ part, run: () => run(event) })),
 
     addCommand: (entry: CommandEntry) => keyed(commands, entry.id, entry),
     addBlock: (entry: BlockEntry) => keyed(blocks, entry.type, entry),
     addInline: (entry: InlineEntry) => keyed(inline, entry.type, entry),
-    addHandler<E extends keyof AppEvents>(event: E, entry: HandlerEntry<E>): Disposer {
+    addHandler<E extends keyof HostEvents>(event: E, entry: HandlerEntry<E>): Disposer {
       const set: Handlers[E] = handlers[event];
       set.add(entry);
       // Handlers aren't shown anywhere, so nothing is told.

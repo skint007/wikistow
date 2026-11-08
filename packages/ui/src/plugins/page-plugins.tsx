@@ -17,8 +17,9 @@ import { useNeedsConnection } from '../shell/availability';
 
 /**
  * The page toolbar's plugin menu: each running plugin's commands, run on
- * the page shown, and its panels, which `onOpenPanel` opens in the page's
- * `page.panel` place. Nothing shows without any.
+ * the page shown, its panels, which `onOpenPanel` opens in the page's
+ * `page.panel` place, and for each with settings (declared, or a
+ * `settings.section`) a way to them. Nothing shows without any.
  */
 export function PagePlugins({
   shown,
@@ -30,8 +31,17 @@ export function PagePlugins({
   const runtime = usePluginRuntime();
   // The editor is the app's, in the workshop's preview too.
   const { openDraft } = useAppPlugins().runtime;
-  const { commands, regions, plugins } = usePlugins();
+  const { commands, regions, plugins, safeMode } = usePlugins();
   const panels = regions['page.panel'];
+  const sections = new Set(regions['settings.section'].map(({ pluginId }) => pluginId));
+  const withSettings = safeMode
+    ? []
+    : plugins
+        .map(({ plugin }) => plugin)
+        .filter(
+          ({ enabled, manifest }) =>
+            enabled && ((manifest.settings?.length ?? 0) > 0 || sections.has(manifest.id)),
+        );
   const [notice, setNotice] = useState<string | null>(null);
   const needs = useNeedsConnection();
   const { pageId, spaceId } = shown.page;
@@ -47,7 +57,7 @@ export function PagePlugins({
 
   const nameOf = (pluginId: string) => pluginName(plugins, pluginId);
 
-  if (commands.length === 0 && panels.length === 0) return null;
+  if (commands.length === 0 && panels.length === 0 && withSettings.length === 0) return null;
   // A browser's plugins load from the server; the desktop's run from disk (ADR 0009, decision 8).
   const select = (run: () => void) => (desktop ? { onSelect: run } : needs.select(run));
   return (
@@ -82,6 +92,24 @@ export function PagePlugins({
               })}
             >
               {command.title}
+            </DropdownMenuItem>
+          ))}
+          {(panels.length > 0 || commands.length > 0) && withSettings.length > 0 && (
+            <DropdownMenuSeparator />
+          )}
+          {/* Opening settings needs no connection, so it is never held offline. */}
+          {withSettings.map(({ manifest }) => (
+            <DropdownMenuItem
+              key={`settings:${manifest.id}`}
+              onSelect={() => {
+                setNotice(null);
+                runtime.openSettings(manifest.id).catch((error: unknown) => {
+                  const message = error instanceof Error ? error.message : 'It failed';
+                  setNotice(`${manifest.name} settings didn’t open. ${message}`);
+                });
+              }}
+            >
+              {manifest.name} settings…
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
