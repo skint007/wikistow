@@ -35,7 +35,7 @@ In short:
 - an offline change that came back as a conflict, opened from the shell's note;
 - another window's change waiting on this device.
 
-It isn't offered when theirs can't be read (`newer-format`), or when there is nothing of the person's to merge: no unsaved text and no offline entry for the page (the prompt then says "Someone else saved a newer version of this draft"). Text saved into an offline entry counts as the person's, though the session has nothing unsaved, so today's prompt test (`hasUnsaved`) gains the entry. A cell in a folder table that conflicts still says **Open the draft**, as today: one value has nothing to merge. The CLI, agents and plugins still get the conflict as a refusal, since a merge needs a person to confirm it. A publish stopped by its page's conflict still says so with **OK**, and the person publishes again after the merge.
+It isn't offered when theirs can't be read (`newer-format`), or when there is nothing of the person's to merge: no unsaved text and no offline entry for the page (the prompt then says "Someone else saved a newer version of this draft"). Text saved into an offline entry counts as the person's, though the session has nothing unsaved, so the prompt's own test in `draft-editor.tsx` becomes unsaved text or an entry waiting (`hasUnsaved() || onDevice`). `DraftSession.hasUnsaved()` itself stays as it is, since leaving the page and locking use it, and text in an entry is safe. A cell in a folder table that conflicts still says **Open the draft**, as today: one value has nothing to merge. The CLI, agents and plugins still get the conflict as a refusal, since a merge needs a person to confirm it. A publish stopped by its page's conflict still says so with **OK**, and the person publishes again after the merge.
 
 ### 2. The three versions
 
@@ -54,7 +54,7 @@ The body (the Markdown after the front matter) is cut into blocks, parsed with t
 - a table row. The header row and its delimiter row are one block, so a new column changes every row;
 - each block inside a block quote or an alert.
 
-Blank lines between blocks are blocks of their own. Each block is its exact source text, markers and indentation included, so joining the blocks gives the page back byte for byte (checked on all 236 pages of the spike). Blocks are compared by exact text, except that a body whose last line has no line ending is given one first, so two people each adding a paragraph at the end of such a page aren't both changing its last block. The merged body ends as theirs does, with or without one.
+Blank lines between blocks are blocks of their own. Each block is its exact source text, markers and indentation included, so joining the blocks gives the page back byte for byte (checked on all 236 pages of the spike). Blocks are compared by their text, with two exceptions for what the visual editor rewrites. It writes every table it changes aligned, so one wider cell changes every row's padding, and it numbers an ordered list in order, so an item added changes the numbers after it. So a table row is compared by its cells with their padding trimmed (the delimiter row by its alignment), and an ordered list item without its number. Also, a body whose last line has no line ending is given one first, so two people each adding a paragraph at the end of such a page aren't both changing its last block. The merged body ends as theirs does, with or without one.
 
 ### 4. The merge
 
@@ -67,6 +67,7 @@ A three-way merge over the three lists of blocks (diff3):
 - Changes to neighbouring blocks don't overlap: a person ticking one task while another edits the next one is not a conflict.
 - **Both adding at the same place** (two people each adding an item at the end of the same list, or a row at the end of a table) keeps both, theirs first. Blocks that both additions start or end with appear once, so two people who each add the same `#### CLI` heading with an item under it get one heading. The review (decision 7) shows the order chosen.
 - **Joining two sides' blocks**, here and for **Use both** (decision 6), puts a blank line between them unless both are list items or table rows, so two paragraphs never run into one.
+- **Writing the merged body.** A block that both sides left as it was is written as theirs has it. A table is written aligned again if theirs' was, and an ordered list numbered in order again if theirs' was, so a page the visual editor opened still opens there (its fidelity check), and padding and numbers never show as changes in the review.
 - A block one side moved is, to the merge, a block removed and one added. If the other side edited that block, the removal and the edit overlap.
 
 Nothing is merged inside a block. Two edits to different words of one paragraph overlap, and the person chooses (Decide 3).
@@ -124,7 +125,7 @@ The review shows the merged draft as what saving changes in theirs, since theirs
 - a removed block in red, with `−`;
 - runs of unchanged blocks folded to one line ("⋯ 9 unchanged lines"), which opens them.
 
-Lines under it say what happens to the title, banner, icon, attachments and other data when they differ from theirs. **Save merged draft** saves; **Back** returns to the choices, as they were; **Cancel** goes back to the conflict prompt.
+Under it, one line each names what the merge changes in theirs' title, banner, icon, attachments and other data ("Icon: yours"), and nothing when it keeps theirs. **Save merged draft** saves; **Back** returns to the choices, as they were; **Cancel** goes back to the conflict prompt.
 
 ```
 ┌────────────────────────────────────────────────┐
@@ -138,12 +139,12 @@ Lines under it say what happens to the title, banner, icon, attachments and othe
 │   ⋯ 14 unchanged lines                         │
 │ ~ 6. … bake at [-180-]{+190+} °C for 45 …      │
 │ − Use fresh sheets if you can get them; …      │
-│ Title: Sam's                                   │
+│ Icon: yours                                    │
 │              [Back] [Cancel] [Save merged draft]│
 └────────────────────────────────────────────────┘
 ```
 
-**Saving** goes on top of theirs, as **Save mine on top** does, but the session first takes the merged payload whole, not only its text: its title, Markdown, attachments and extensions, with theirs' link table region. Today's **Save mine on top** builds its save from the session's own payload, so a banner Sam changed would go back to the base's. The session then takes as its base the revision the merge read as theirs, and saves at once. That is not always what **Save mine on top** saves on: it takes the newest head it has heard of, which may have moved on while the person was choosing. Based on the version the merge read, a save over a newer one is `stale-head`, as below. For another window's change, the save names the entry version the merge read as the one it saw. The editor shows the merged draft, and typing goes on from there. For an offline entry, the save goes into the entry and onto theirs as **Save mine on top** does today (`onTopOf`, then the queue's `onTop` rebase), and the sender sends it. If someone saved again meanwhile, the save is `stale-head` as usual, and **Merge…** merges again, with the draft that was theirs as the base. Nothing is written until **Save merged draft**, and the person's own text stays in the editor until then, so leaving the merge loses nothing.
+**Saving** goes on top of theirs, as **Save mine on top** does, but the session first takes the merged payload whole, not only its text: its title, Markdown, attachments and extensions, with theirs' link table region. Today's **Save mine on top** builds its save from the session's own payload, so a banner Sam changed would go back to the base's. The session then takes as its base the revision the merge read as theirs, and saves at once. That is not always what **Save mine on top** saves on: it takes the newest head it has heard of, which may have moved on while the person was choosing. Based on the version the merge read, a save over a newer one is `stale-head`, as below. For another window's change, the save names the entry version the merge read as the one it saw. The editor shows the merged draft, and typing goes on from there. For an offline entry, the save goes into the entry and onto theirs as **Save mine on top** does today (`onTopOf`, then the queue's `onTop` rebase), and the sender sends it. If someone saved again meanwhile, the save is `stale-head` as usual, and **Merge…** merges again, with the draft that was theirs as the base: before the save, the session's base is theirs as read, and for another window's change the payload it compares against is that entry version, with the merged text on top as the person's. Nothing is written until **Save merged draft**, and the person's own text stays in the editor until then, so leaving the merge loses nothing.
 
 ### 8. Code
 
@@ -166,7 +167,7 @@ Merging when no person is there to confirm (the CLI, agents, plugins); merging f
 
 A throwaway script (not committed) cut pages into blocks as decision 3 says, merged them as decision 4 says, and compared the result with a line merge (`git merge-file`).
 
-Its limits: it parsed with `micromark-extension-math` rather than the app's own math rule and wikilinks, so the build checks the cuts again with the app's parser. Its edits never added at the very end of a page without a final line ending, and it joined kept additions without decision 4's blank line. Both rules came from review after it, and were then checked on small cases (two paragraphs, list items and table rows added at one place, a page with no final line ending) and on the real history, whose numbers didn't change. Its front matter check rebuilt the block from each key's text, so it counts stops but doesn't test where a new key goes.
+Its limits: it parsed with `micromark-extension-math` rather than the app's own math rule and wikilinks, so the build checks the cuts again with the app's parser. Its first run's edits were typed as in the source editor; the second run above covers the visual editor's tables and lists. Its edits never added at the very end of a page without a final line ending, and it joined kept additions without decision 4's blank line. Both rules came from review after it, and were then checked on small cases (two paragraphs, list items and table rows added at one place, a page with no final line ending) and on the real history, whose numbers didn't change. Its front matter check rebuilt the block from each key's text, so it counts stops but doesn't test where a new key goes.
 
 **Splitting.** On all 236 pages below, the blocks joined back into the page byte for byte.
 
@@ -213,6 +214,15 @@ Each case makes two single edits to the same page, one per side, of one category
 - The block merge stopped in 3 of the 3,416 cases, all from the spike's own edits: a row added without the indent of a table inside a list item, and an LF line break added to a page with CRLF line breaks, which each changed a neighbouring block.
 - The line merge never gave a wrong result where it combined.
 
+**As the visual editor writes.** The edits above are typed as in the source editor. The visual editor instead writes every table it changes aligned, and numbers ordered lists in order. A second run made the pages and both sides' edits that way (near placement only), and compared blocks by exact text and as decision 3 says (table rows without their padding, ordered items without their number):
+
+| Category | Cases | Line merge stops | Exact blocks stop | Decision 3's blocks stop |
+| --- | --- | --- | --- | --- |
+| Lists | 550 | 175 (32%) | 9 (1.6%) | 0 |
+| Tables | 587 | 280 (48%) | 100 (17%) | 3 (0.5%) |
+
+The 3 table stops, and the one wrong result in that run, come from the spike's edits: text added after a row's last bar, which makes a new column, and a row added without the indent of a table inside a list item. Comparing by exact text would have made a table edited in the visual editor an overlap one time in six, which is why decision 3 trims padding and numbers.
+
 When both edits fell in the same block, at different words (near: 19 list items, 10 rows, 59 paragraphs), the block merge stops by design. A word merge inside the block would have combined 77 of those 88 cases correctly in the simulation. On the real history it combined 5 of the 6 real overlaps: 4 as the person did, and 1 into a broken sentence that read as fine to the merge. One side had removed a sentence's first words and the other had rewritten them, and the result started "comments, simultaneous live editing…" in lower case. That is the reason for Decide 3.
 
 **Front matter.** Front matter is a few lines next to each other, so a line merge stops on almost any two edits. On the 5 spike pages with tags:
@@ -252,7 +262,7 @@ When both edits fell in the same block, at different words (near: 19 list items,
 Scott decides these before building. Each has a recommendation.
 
 1. **Keep Save mine on top and Discard mine beside Merge…?** Recommended: yes, with **Merge…** first. Save mine on top is still the quick way when the person knows theirs should win, and Discard mine when theirs should.
-2. **Two additions at the same place: keep both without asking?** Recommended: yes, theirs first, with blocks they both start or end with shown once (decision 4). The spike's line merge stopped on every one of these, and they are the most common case in lists and tables. The review shows the order.
+2. **Two additions at the same place: keep both without asking?** Recommended: yes, theirs first, with blocks they both start or end with shown once (decision 4). The spike's line merge stopped on 221 of 222 of these, and they are the most common case in lists and tables. The review shows the order.
 3. **Merge inside a block, by words?** Recommended: no, not now. It would have combined most same-block overlaps, but it made a broken sentence from a real conflict without saying so. The side-by-side view with marked words makes the choice quick, and **Edit…** covers combining both.
 4. **Show the blocks as Markdown source, or drawn as the reader draws them?** Recommended: source first, with marked words. It is exact, shows what is saved, and works for every block kind; a drawn view needs a diff over drawn output, and could come later.
 5. **The `diff` library, or the app's own code?** Recommended: `diff` (jsdiff) for the alignment and the word marks, with the three-way step the app's own. Writing a word diff that handles spacing well is more code than it saves.
@@ -263,7 +273,7 @@ Scott decides these before building. Each has a recommendation.
 ## Implementation, in pull requests
 
 1. **This ADR.**
-2. **The merge module.** `packages/client/src/merge/`, the `diff` dependency, and unit tests: blocks join back byte for byte; the spike's cases (neighbouring items, additions at one place, a shared heading, a moved block, front matter by key, tags by item, attachments, cover, unknown data); and payloads round-trip through `resolve`.
+2. **The merge module.** `packages/client/src/merge/`, the `diff` dependency, and unit tests: blocks join back byte for byte; the spike's cases (neighbouring items, additions at one place, a shared heading, a moved block, a table re-aligned and a list renumbered by the visual editor, front matter by key, tags by item, attachments, cover, unknown data); and payloads round-trip through `resolve`.
 3. **The merge view, online.** **Merge…** in the conflict prompt for a draft someone else saved, the choosing step, the review, saving on top of theirs, the diff tokens, and the spec. An e2e with two browser contexts editing one page, merging, and saving.
 4. **Offline and other windows.** **Merge…** for a queue entry that came back as a conflict (its kept base) and for another window's change, the entry taking the merged payload. An e2e: an edit offline, a change online meanwhile, then the merge.
 
