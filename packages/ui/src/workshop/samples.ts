@@ -125,6 +125,24 @@ export function sampleStore() {
     },
     get: () => samples,
 
+    /** How many samples were made: the next is `sample-<made + 1>`. */
+    made: () => made,
+
+    /**
+     * Start from samples kept with the draft (#314), before any is made
+     * here. Numbering carries on after `count`, so a sample the kept
+     * conversation names, such as a copy that wasn't kept, is never another.
+     */
+    restore(
+      kept: readonly Pick<Sample, 'pageId' | 'title' | 'markdown' | 'data'>[],
+      count: number,
+    ) {
+      if (made > 0) return;
+      made = count;
+      samples = kept.map((page) => ({ ...page, revision: 1, outside: 0, copyOf: null }));
+      changed();
+    },
+
     /** Add a sample page, or with `pageId` replace one's title and text. */
     put({
       pageId,

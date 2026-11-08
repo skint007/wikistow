@@ -330,8 +330,8 @@ export function DraftsList({ open }: { open: string | null }) {
           <DialogHeader>
             <DialogTitle>Delete this draft?</DialogTitle>
             <DialogDescription>
-              “<Name>{deleting?.name ?? ''}</Name>” and its files are deleted from your WikiStow
-              server. Versions you published stay in the library.
+              “<Name>{deleting?.name ?? ''}</Name>”, its files and its workshop’s conversation are
+              deleted from your WikiStow server. Versions you published stay in the library.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

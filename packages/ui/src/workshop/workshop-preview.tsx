@@ -175,7 +175,7 @@ function Status({ workshop }: { workshop: Workshop }) {
           {problem}
         </p>
       )}
-      {latest && !latest.plugin && (
+      {latest && !latest.plugin && !latest.history && (
         <Alert variant="destructive">
           <AlertDescription className="grid gap-1.5">
             <p>
@@ -724,7 +724,11 @@ function PluginPlaces({
   );
 }
 
-/** Every build, newest first: preview any that built, or on the desktop export it, by its hash. */
+/**
+ * Every build, newest first: preview any that built, or on the desktop
+ * export it, by its hash. One kept from before whose build isn't kept is
+ * history only.
+ */
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
@@ -762,6 +766,13 @@ function Versions({ workshop }: { workshop: Workshop }) {
                 <span>
                   {version.plugin.manifest.name} {version.plugin.manifest.version}
                 </span>
+              ) : version.history ? (
+                <>
+                  <span>
+                    {version.history.name} {version.history.version}
+                  </span>
+                  <Badge variant="secondary">Build not kept</Badge>
+                </>
               ) : (
                 <Badge variant="destructive">Didn’t build</Badge>
               )}
@@ -794,7 +805,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
             {version.hash && (
               <p className="text-xs break-all text-muted-foreground">SHA-256 {version.hash}</p>
             )}
-            {version.plugin ? <Diagnostics version={version} /> : null}
+            {version.plugin || version.history ? <Diagnostics version={version} /> : null}
           </li>
         ))}
       </ul>

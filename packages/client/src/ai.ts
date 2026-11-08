@@ -163,6 +163,7 @@ export type AiSessionOptions = {
 export type AiSession = ReturnType<typeof createAiSession>;
 
 const STOPPED = 'The person stopped the reply before this ran.';
+const CLOSED = 'The conversation was closed before this ran.';
 
 /** Start a conversation. Nothing is sent until `send`. */
 export function createAiSession({
@@ -268,17 +269,13 @@ export function createAiSession({
   // Once a reply ends, leave a conversation the provider will take next
   // time: no empty reply (a model can finish without a word), and after a
   // stop or failure an answer to every tool call.
-  function settle() {
+  function settle(output = STOPPED) {
     const last = state.messages.at(-1);
     if (last?.role !== 'assistant') return;
     if (last.text.trim() === '' && last.toolCalls.length === 0) {
       update({ messages: state.messages.slice(0, -1) });
     } else if (last.toolCalls.length > 0) {
-      const results = last.toolCalls.map((call) => ({
-        callId: call.id,
-        output: STOPPED,
-        isError: true,
-      }));
+      const results = last.toolCalls.map((call) => ({ callId: call.id, output, isError: true }));
       update({ messages: [...state.messages, { role: 'tool', results }] });
     }
   }
@@ -343,6 +340,19 @@ export function createAiSession({
           update({ status: 'idle' });
         }
       }
+    },
+    /**
+     * Carry on from `messages`, a conversation kept from before, such as a
+     * workshop's (#314), as if it had been said here. Only before anything
+     * is sent. A reply kept while it was still being written is settled as
+     * a stopped one is.
+     */
+    resume(messages: readonly AiMessage[]) {
+      if (state.status !== 'idle' || state.messages.length > 0) {
+        throw new Error('This conversation has already started');
+      }
+      update({ messages: [...messages] });
+      settle(CLOSED);
     },
     /** End the reply being written. What it wrote stays; nothing arriving later is used. */
     stop() {
