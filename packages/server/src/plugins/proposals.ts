@@ -207,13 +207,15 @@ async function filesOf(db: Database, proposalId: string) {
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
 
-/** Whether two texts are the same JSON, whatever their layout. */
-function sameJson(a: string | null, b: string | null) {
-  if (a === null || b === null) return false;
+/**
+ * A manifest's text laid out as proposing writes it (`withId`), so a diff
+ * against it shows only what changed: unchanged as it is when unreadable.
+ */
+function laidOut(text: string) {
   try {
-    return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
+    return `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
   } catch {
-    return false;
+    return text;
   }
 }
 
@@ -250,17 +252,23 @@ export async function readPluginProposal(db: Database, store: PluginStore, propo
       ...files.texts.map(({ path, text }): [string, Side] => [path, { text, data: null }]),
       ...files.binary.map(({ path, data }): [string, Side] => [path, { text: null, data }]),
     ]);
-  // The manifest's JSON is written out again with the ID set back, so its layout may differ.
-  const same = (path: string, a: Side, b: Side) =>
-    (a.text === b.text || (path === MANIFEST_FILE && sameJson(a.text, b.text))) &&
+  const same = (a: Side, b: Side) =>
+    a.text === b.text &&
     (a.data === null || b.data === null ? a.data === b.data : sameBytes(a.data, b.data));
-  const was = sides(before ?? { texts: [], binary: [] });
+  // The proposal's manifest is written out again with the ID set back: the version's is too.
+  const laid = before && {
+    ...before,
+    texts: before.texts.map((file) =>
+      file.path === MANIFEST_FILE ? { ...file, text: laidOut(file.text) } : file,
+    ),
+  };
+  const was = sides(laid ?? { texts: [], binary: [] });
   const now = sides(after);
   const paths = [...new Set([...was.keys(), ...now.keys()])].sort();
   const changes = paths.flatMap((path): pluginProposalRoutes.ProposalChange[] => {
     const old = was.get(path);
     const next = now.get(path);
-    if (old && next && same(path, old, next)) return [];
+    if (old && next && same(old, next)) return [];
     return [
       {
         path,
