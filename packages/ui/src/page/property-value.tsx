@@ -5,6 +5,7 @@ import {
   parseWikilink,
   propertyText,
   type LinkablePage,
+  type MovedPage,
   type Property,
   type PropertyData,
   type PropertyScalar,
@@ -87,6 +88,8 @@ export type LinkScope = {
   editor: boolean;
   /** Offline, the space's pages this device doesn't keep (`WikilinkScope`). */
   notKept?: ReadonlySet<string> | undefined;
+  /** Where pages a move took into another space went (`WikilinkScope`). */
+  moved?: ReadonlyMap<string, MovedPage> | undefined;
 };
 
 /** The link scope of a page body (`PageBody`). */
@@ -96,6 +99,7 @@ export const bodyLinkScope = ({
   links,
   editing,
   notKept,
+  moved,
 }: PageBodyContext): LinkScope => ({
   spaceId: attachments.page.spaceId,
   selfId: attachments.page.pageId,
@@ -103,6 +107,7 @@ export const bodyLinkScope = ({
   links,
   editor: editing !== null,
   notKept,
+  moved,
 });
 
 const CHIP = 'inline rounded-row bg-primary-soft px-1.5 py-px font-bold text-primary-ink';
@@ -120,6 +125,7 @@ export function wikilinkValueView(value: string, scope: LinkScope) {
       attachments: [],
       editor: scope.editor,
       notKept: scope.notKept,
+      moved: scope.moved,
     })
   );
 }
@@ -148,7 +154,10 @@ export function WikilinkChip({
       return (
         <Link
           to="/s/$spaceId/p/$pageId"
-          params={{ spaceId: SpaceId.parse(scope.spaceId), pageId: PageId.parse(view.pageId) }}
+          params={{
+            spaceId: view.spaceId ?? SpaceId.parse(scope.spaceId),
+            pageId: PageId.parse(view.pageId),
+          }}
           {...(view.hash ? { hash: view.hash } : {})}
           {...linkHint(view.name)}
           className={cn(CHIP, 'hover:underline')}

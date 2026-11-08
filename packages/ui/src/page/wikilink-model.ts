@@ -4,6 +4,8 @@ import {
   resolveWikilinks,
   withHeading,
   type LinkablePage,
+  type MovedPage,
+  type SpaceId,
   type WikilinkNode,
 } from '@wikistow/client';
 import { headingId } from '@wikistow/client/reader';
@@ -18,6 +20,8 @@ export type WikilinkView =
   | {
       kind: 'page';
       pageId: string;
+      /** The space of a page a move took out of this one; else the page is in this space. */
+      spaceId?: SpaceId;
       hash: string | undefined;
       text: string;
       /** The page's title, and heading, it goes to; its hint in the desktop app. */
@@ -47,6 +51,8 @@ export type WikilinkScope = {
    * of (ADR 0009, decision 4), whose titles it doesn't know.
    */
   notKept?: ReadonlySet<string> | undefined;
+  /** Where the pages of entries a move took into another space went (`PageBodyContext.moved`). */
+  moved?: ReadonlyMap<string, MovedPage> | undefined;
 };
 
 /**
@@ -95,6 +101,21 @@ export function wikilinkView(link: WikilinkNode, scope: WikilinkScope): Wikilink
       // A link to a heading of this page (`[[#Dates]]`) shows just the heading.
       text: link.shown ?? withHeading(link.target && title, link.heading),
       name: withHeading(title, link.heading),
+    };
+  }
+  // A page a move took into another space, by its entry: no page here has the link's title.
+  const away =
+    found?.status === 'missing'
+      ? scope.moved?.get(scope.links.get(linkKey(link)) ?? '')
+      : undefined;
+  if (away) {
+    return {
+      kind: 'page',
+      pageId: away.pageId,
+      spaceId: away.spaceId,
+      hash: link.heading ? headingId(link.heading) : undefined,
+      text: link.shown ?? withHeading(link.target, link.heading),
+      name: withHeading(link.target, link.heading),
     };
   }
   if (scope.notKept && scope.notKept.size > 0 && found?.status !== 'ambiguous') {

@@ -2,6 +2,7 @@ import {
   agentOperations,
   groupOperations,
   keptOperations,
+  movedOperations,
   ownerOperations,
   pageOperations,
   publicationOperations,
@@ -100,6 +101,21 @@ export const treeQuery = (ctx: ClientContext, spaceId: SpaceId) =>
         queued(ctx),
       ]);
       return queueOperations.withQueued(tree, spaceId, entries);
+    },
+  });
+
+/**
+ * Where the page or folder of an old address went, when a move took it into
+ * another space and this person can open it there (`movedTo`); else null.
+ * Offline it isn't asked, as nothing is kept of it: it fails, so it is asked
+ * again once the connection is back.
+ */
+export const movedQuery = (ctx: ClientContext, old: { spaceId: SpaceId; nodeId: string }) =>
+  queryOptions({
+    queryKey: [PLAIN, 'moved', old.spaceId, old.nodeId],
+    queryFn: () => {
+      if (!connection.get().online) throw new keptOperations.NotKept();
+      return movedOperations.movedTo(ctx, old);
     },
   });
 
