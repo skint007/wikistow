@@ -86,6 +86,7 @@ function Settings() {
             <SettingsGroup id="security" title="Security" note="How you sign in, and where">
               <ChangePassword />
               <TwoFactor />
+              <Passkeys />
               <IdleLock />
               {!desktop && <RememberUnlock />}
               <DesktopApps />
@@ -717,12 +718,133 @@ function BackupCodes({ codes }: { codes: string[] }) {
   );
 }
 
+const passkeysQuery = {
+  queryKey: ['passkeys'],
+  queryFn: async () => unwrap(await authClient.passkey.listUserPasskeys()),
+};
+
+const passkeyCount = (count: number) => (count === 1 ? '1 passkey' : `${count} passkeys`);
+
+/**
+ * Passkeys sign in without the password or a code. Added here in a browser;
+ * the desktop app's pages aren't on the server's address, which a passkey
+ * belongs to, so there it only lists and removes them.
+ */
+function Passkeys() {
+  const { data, error } = useQuery(passkeysQuery);
+  return (
+    <FormRow
+      id="passkeys"
+      name="Passkeys"
+      state={
+        error ? (
+          <span className="text-destructive">{errorMessage(error)}</span>
+        ) : !data ? null : data.length === 0 ? (
+          'None'
+        ) : (
+          `${passkeyCount(data.length)}: sign in with a fingerprint, face or security key`
+        )
+      }
+      label="Manage"
+      close="Close"
+    >
+      <PasskeyList />
+    </FormRow>
+  );
+}
+
+function PasskeyList() {
+  const queryClient = useQueryClient();
+  const { data: passkeys } = useQuery(passkeysQuery);
+  const refresh = () => queryClient.invalidateQueries({ queryKey: passkeysQuery.queryKey });
+  const remove = useMutation({
+    mutationFn: async (id: string) => unwrap(await authClient.passkey.deletePasskey({ id })),
+    onSettled: refresh,
+  });
+  return (
+    <div className="grid max-w-md gap-4">
+      {passkeys && passkeys.length > 0 && (
+        <ul aria-label="Passkeys" className="grid gap-2">
+          {passkeys.map((passkey) => (
+            <li key={passkey.id} className="flex items-center justify-between gap-3 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate font-bold">{passkey.name || 'Passkey'}</span>
+                <span className="text-muted-foreground">Added {day(passkey.createdAt)}</span>
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={remove.isPending}
+                aria-label={`Remove ${passkey.name || 'passkey'}`}
+                onClick={() => remove.mutate(passkey.id)}
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {remove.error && <FormMessage>{errorMessage(remove.error)}</FormMessage>}
+      {desktop ? (
+        <p className="text-sm text-muted-foreground">
+          To add a passkey, open WikiStow in your browser. It signs this app in too, from the
+          browser.
+        </p>
+      ) : (
+        <AddPasskey onAdded={refresh} />
+      )}
+    </div>
+  );
+}
+
+function AddPasskey({ onAdded }: { onAdded: () => Promise<void> }) {
+  const withReauth = useReauth();
+  const [error, setError] = useState<string | null>(null);
+  const form = useForm({ defaultValues: { name: '' } });
+  const { isSubmitting } = form.formState;
+
+  const submit = form.handleSubmit(async ({ name }) => {
+    setError(null);
+    try {
+      // Named after it's made: a name sent with it would also become the
+      // account name the browser shows when choosing a passkey, in place
+      // of the email. Without one, the server names it after its maker.
+      const added = await withReauth(async () => unwrap(await authClient.passkey.addPasskey()));
+      if (name.trim()) {
+        unwrap(await authClient.passkey.updatePasskey({ id: added.id, name: name.trim() }));
+      }
+      form.reset();
+      await onAdded();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      await onAdded();
+    }
+  });
+
+  return (
+    <form onSubmit={submit} className="grid gap-4" noValidate>
+      <Field
+        id="passkey-name"
+        label="Name (optional)"
+        placeholder="Like “Work laptop”"
+        maxLength={100}
+        {...form.register('name')}
+      />
+      {error && <FormMessage>{error}</FormMessage>}
+      <Button type="submit" disabled={isSubmitting} className="justify-self-start">
+        Add a passkey
+      </Button>
+    </form>
+  );
+}
+
 const desktopSessionsQuery = {
   queryKey: ['desktop-sessions'],
   queryFn: () => api.call(desktopRoutes.listDesktopSessions),
 };
 
-const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+const day = (at: string | Date) =>
+  new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium' });
 
 /** How many desktop apps are signed in, with Review opening the list to sign each out. */
 function DesktopApps() {

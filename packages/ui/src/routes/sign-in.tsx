@@ -72,7 +72,10 @@ function SignIn() {
       <div className="grid gap-4">
         <ChangesNotSent />
         {step === 'password' ? (
-          <PasswordStep onCode={() => setStep('code')} onDone={done} />
+          <>
+            <PasswordStep onCode={() => setStep('code')} onDone={done} />
+            <PasskeySignIn onDone={done} />
+          </>
         ) : (
           <CodeStep onDone={done} onRestart={() => setStep('password')} />
         )}
@@ -152,6 +155,43 @@ function PasswordStep({ onCode, onDone }: { onCode: () => void; onDone: () => Pr
         )}
       </div>
     </form>
+  );
+}
+
+/**
+ * A passkey signs in on its own: it counts as both factors, so there's no
+ * code step after it. Browsers without WebAuthn don't show it.
+ */
+function PasskeySignIn({ onDone }: { onDone: () => Promise<void> }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (typeof window.PublicKeyCredential !== 'function') return null;
+
+  async function signIn() {
+    setError(null);
+    setBusy(true);
+    try {
+      unwrap(await authClient.signIn.passkey());
+      await onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        or
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </div>
+      {error && <FormMessage>{error}</FormMessage>}
+      <Button type="button" variant="outline" disabled={busy} onClick={() => void signIn()}>
+        Use a passkey
+      </Button>
+    </div>
   );
 }
 
