@@ -115,15 +115,30 @@ export class WorkshopChat {
       }
       this.#setKeeping({ status: kept.status, problem: null });
       if (kept.status !== 'kept') return;
-      // Kept a moment after each change; at once as a reply ends.
+      // Kept a moment after each change; at once as a reply ends. What opening
+      // makes, the files built again, isn't a change made here: a device that
+      // only opens the draft sends nothing. Anything done meanwhile is kept.
+      let opened = false;
+      let touched = false;
+      const changed = (now = false) => {
+        if (!opened) touched = true;
+        this.#changed(now);
+      };
+      const open = () => {
+        if (opened || workshop.state().opening) return;
+        opened = true;
+        if (touched) this.#changed();
+        else this.#lastKept = JSON.stringify(this.#record());
+      };
       let running = false;
       this.session.subscribe(() => {
         const now = this.session.state().status === 'running';
-        this.#changed(running && !now);
+        changed(running && !now);
         running = now;
       });
-      workshop.subscribe(() => this.#changed());
-      workshop.samples.subscribe(() => this.#changed());
+      workshop.subscribe(() => (opened ? this.#changed() : open()));
+      workshop.samples.subscribe(() => changed());
+      open();
     });
   }
 
@@ -150,8 +165,6 @@ export class WorkshopChat {
       kept: said[index] ?? text,
     }));
     this.#toldCopy = kept.toldCopy;
-    // As this workshop would keep it: a device that only opens the draft sends nothing.
-    this.#lastKept = JSON.stringify(this.#record());
   }
 
   /** Something changed: keep it in a moment, or `now`. */
