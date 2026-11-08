@@ -207,10 +207,10 @@ export const removeDevelopment = {
 
 /**
  * The file route's key for a development build: not the bare hash, which a
- * library version uses. `reload` counts the tab's Reloads, so each one
- * runs the plugin afresh, as the desktop's `dev-<n>` does, even unchanged.
+ * library version uses. `load` numbers the tab's loads and Reloads, so
+ * each runs the plugin afresh, as the desktop's `dev-<n>` does, even unchanged.
  */
-export const developmentKey = (hash: string, reload: number) => `dev-${hash}-${reload}`;
+export const developmentKey = (hash: string, load: number) => `dev-${hash}-${load}`;
 
 /**
  * A version's file, for any signed-in session, outside `/api`. Sent with

@@ -76,8 +76,8 @@ type Held = {
   folder: string;
   /** Kept to read again at Reload, where the browser gives one. */
   handle: FileSystemDirectoryHandle | null;
-  /** How many times it was loaded or reloaded in this tab, which names its files' address. */
-  reloads: number;
+  /** Which of the tab's loads and Reloads ran it last, which names its files' address. */
+  load: number;
   enabled: boolean;
   ownParts: readonly string[];
   /** What the person approved: more of either asks again. */
@@ -127,6 +127,8 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
 } {
   let held: Held[] = [];
   let pending: Pending | null = null;
+  // Counted across removals too, so each load gets an address this tab never imported.
+  let loads = 0;
 
   const find = (id: string) => {
     const vault = vaultStore.get();
@@ -174,7 +176,7 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
         plugins: mine.map((plugin) =>
           installedPlugin({
             manifest: plugin.manifest,
-            key: pluginRoutes.developmentKey(plugin.hash, plugin.reloads),
+            key: pluginRoutes.developmentKey(plugin.hash, plugin.load),
             development: plugin.folder,
             library: false,
             enabled: plugin.enabled,
@@ -204,7 +206,7 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
           hash,
           folder,
           handle,
-          reloads: (before?.reloads ?? 0) + 1,
+          load: ++loads,
           enabled: true,
           ownParts: before?.ownParts ?? [],
           approved: { access: manifest.access, level: trustLevel(manifest) },
@@ -260,7 +262,7 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
           hash: upload.hash,
           folder: name,
           handle,
-          reloads: plugin.reloads + 1,
+          load: ++loads,
         });
         return null;
       },
