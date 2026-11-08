@@ -90,6 +90,7 @@ Commands:
   agent status                    (also: whoami)
   agent secret-store enable|disable${SECRET_TOOL}
   skill                           a skill that teaches an agent this CLI
+  mcp                             these commands as an MCP server's tools
   spaces list
   tree --space SPACE_ID
   search QUERY [--space SPACE_ID]
@@ -350,6 +351,64 @@ The same as agent status.
 enable keeps an unlock secret in ${STORE_PLACE} (asking for the
 passphrase first); disable removes it, so only the passphrase unlocks the
 agent. See agent enroll --help.
+`,
+  mcp: `Usage: ${PROGRAM} mcp${WINDOWS ? '' : ' [--passphrase-fd N]'}
+
+Serve this agent's commands as the tools of an MCP (Model Context
+Protocol) server, on standard input and output, until the client closes
+them. The client starts it. Each tool runs the command it is named for
+(page_read runs page read), with the command's options and arguments as
+its parameters, named as there (page-id for PAGE_ID, base-published for
+--base-published), and answers with what the command prints with --json.
+So its IDs, checks, idempotency keys and exit statuses are the command's.
+help gives a command's --help, and page_create and page_draft take the
+Markdown itself as markdown. It gives the client what ${PROGRAM} skill
+says as its instructions, so the agent needs no skill. Not served: agent
+enroll, agent secret-store, skill, import and export. Tools run one at a
+time.
+
+It unlocks the key file for each tool call, as each command does: from the
+secret store, so set that up first (agent secret-store enable)${
+    WINDOWS
+      ? `. It
+can't ask for the passphrase, and on Windows it can't take one either:
+standard input is the client's.`
+      : `, or with
+--passphrase-fd N, read once when it starts and kept in memory until it
+stops (not 0: standard input is the client's). It can't ask for the
+passphrase. A client opens no descriptor for it, so start it through a
+shell that does, with a file only you can read:
+  sh -c 'exec ${PROGRAM} mcp --passphrase-fd 3 3<"$HOME/.${PROGRAM}-passphrase"'`
+  }
+
+When it starts, it unlocks the key file once. If that fails (not
+enrolled, locked, a wrong passphrase), it says why on standard error and
+exits with that status. Anything the server says, such as a revoked agent
+or no answer at all, comes back from each tool call.
+
+To add it to Claude Code, for every project:
+  claude mcp add --scope user ${PROGRAM} -- ${PROGRAM} mcp
+Codex gives a server only a few environment variables, so name the others
+it needs${
+    {
+      'secret-service': `, and XDG_CONFIG_HOME too if you set it:
+  codex mcp add ${PROGRAM} --env DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" -- ${PROGRAM} mcp`,
+      keychain: `, such as XDG_CONFIG_HOME if you set it:
+  codex mcp add ${PROGRAM} -- ${PROGRAM} mcp`,
+      'credential-manager': `:
+  codex mcp add ${PROGRAM} --env APPDATA="$env:APPDATA" -- ${PROGRAM} mcp`,
+    }[SYSTEM_STORE]
+  }
+Other clients take a stdio server's command and arguments, often as JSON:
+  {"mcpServers":{"${PROGRAM}":{"command":"${PROGRAM}","args":["mcp"]}}}
+A client started from the desktop rather than a terminal may not find
+${PROGRAM} on its PATH: then give its full path, as
+${WINDOWS ? `(Get-Command ${PROGRAM}).Source` : `command -v ${PROGRAM}`} prints it.
+
+It runs as long as the client does, so the client keeps the version it
+started with: restart the client after updating the CLI.${
+    WINDOWS ? ` Close it before\nupdating: Windows can't replace a program while it runs.` : ''
+  }
 `,
   skill: `Usage: ${PROGRAM} skill
 
