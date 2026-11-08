@@ -174,11 +174,11 @@ describe('writing Markdown links', () => {
     const photo = file('photo.png', 'image/png');
     const manual = file('manual.pdf', 'application/pdf');
     const markdown = [
-      '[[Plan]], [[plan|the plan]], [[Plan#Next steps]], [[#What’s new?]], [[Plan#Pros & cons]]',
+      '[[Plan]], [[plan|the plan]], [[Plan#Next steps]], [[#What’s new?]], [[Plan#Pros & cons]], [[Plan#1½ cups]]',
       '[see [[Plan]]](https://example.com)',
       '[[A/B]] [[Work/Notes]] [[Home/Notes]]',
       '| [[Plan|in a table]] |\n| - |',
-      '![[photo.png|300]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
+      '![[photo.png|A cat]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
     ].join('\n\n');
     const self = {
       id: 'p-self',
@@ -224,12 +224,12 @@ describe('writing Markdown links', () => {
       markdown: [
         '[Plan](../Work/Plan.md), [the plan](../Work/Plan.md), ' +
           '[Plan › Next steps](../Work/Plan.md#next-steps), [What’s new?](#whats-new), ' +
-          '[Plan › Pros \\& cons](../Work/Plan.md#pros--cons)',
+          '[Plan › Pros \\& cons](../Work/Plan.md#pros--cons), [Plan › 1½ cups](../Work/Plan.md#1-cups)',
         // A link can't hold another, so this one stays.
         '[see [[Plan]]](https://example.com)',
         '[A/B](A_B.md) [notes](../Work/notes%20%282%29.md) [Notes](Notes.md)',
         '| [in a table](../Work/Plan.md) |\n| - |',
-        '![photo.png](../attachments/photo.png) [manual.pdf](../attachments/manual.pdf) ' +
+        '![A cat](../attachments/photo.png) [manual.pdf](../attachments/manual.pdf) ' +
           '![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
       ].join('\n\n'),
       wikilinks: 5,

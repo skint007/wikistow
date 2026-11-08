@@ -634,7 +634,8 @@ function wikilinkEdits(
       if (path === undefined || !ref) return undefined;
       const url = pathUrl(relativePath(links.dir, path));
       const image = ref.mediaType.startsWith('image/');
-      const text = `${image ? '!' : ''}[${escapeText(ref.name)}](${url})`;
+      // Its text as the reader shows it: an image's alt, a file's link.
+      const text = `${image ? '!' : ''}[${escapeText(link.shown ?? ref.name)}](${url})`;
       return { ...at, text, reads: { markdown: url, image } };
     }
     const path = links.pagePath(id);
@@ -650,7 +651,7 @@ type PlacedLink = LinkSpans['wikilinks'][number];
 
 /**
  * The anchor GitHub gives a heading with this text, as github-slugger makes
- * it: lowercased, everything but letters, marks, numbers, `_`, `-` and
+ * it: lowercased, everything but letters, marks, digits, `_`, `-` and
  * spaces dropped, then each space a dash. The reader's own ids
  * (`headingId`) differ, as they always have, for a heading such as
  * "Pros & cons": GitHub's is `pros--cons`. A repeated heading's `-1` isn't
@@ -660,7 +661,7 @@ const headingAnchor = (text: string) =>
   text
     .trim()
     .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{Nd}\p{Pc} -]/gu, '')
     .replace(/ /g, '-');
 
 // Text that can stand after a wikilink's bar and still read back as its text.

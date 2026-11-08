@@ -78,5 +78,9 @@ describe('what the export dialog says it left out, or wrote as it was', () => {
   it('counts pages and attachments apart', () => {
     expect(summaryStatus({ skipped: [], unread: [], wikilinks: 0 })).toBeNull();
     expect(summaryStatus({ skipped: [page], unread: [], wikilinks: 0 })).not.toBeNull();
+    // Only an export with Markdown links counts them.
+    expect(summaryStatus({ skipped: [], unread: [], wikilinks: 2 })).toMatch(
+      /2 links stay wikilinks/,
+    );
   });
 });
