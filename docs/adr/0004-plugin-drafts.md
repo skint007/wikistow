@@ -60,7 +60,6 @@ plugin_drafts
   name            text not null    -- the manifest's name as last saved, else "Untitled plugin"
   from_plugin_id  text             -- what it started from: a library version, or null
   from_hash       text             --   plain text, since the version may be removed later
-  build_hash      text             -- the build a browser last previewed (decision 5), or null
   created_at, updated_at timestamptz
   index (owner_id, updated_at)
 
@@ -69,10 +68,31 @@ plugin_draft_files
   data bytea                       -- a font or image (#313), in place of text
   primary key (draft_id, path)
 
+plugin_draft_shares               -- since #315: the people the owner shared it with
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  created_at timestamptz
+  primary key (draft_id, account_id)
+
+plugin_draft_builds               -- since #315: the build each person's browser last previewed
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  hash text
+  primary key (draft_id, account_id)
+
 plugin_draft_build_files
-  draft_id uuid references plugin_drafts on delete cascade, path text, data bytea
-  primary key (draft_id, path)
+  draft_id uuid, account_id uuid, path text, data bytea
+  primary key (draft_id, account_id, path)
+  foreign key (draft_id, account_id) references plugin_draft_builds on delete cascade
+
+plugin_draft_workshops            -- since #315: each person's kept workshop (#314)
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  workshop text, revision integer
+  primary key (draft_id, account_id)
 ```
+
+Until #315 (migration `0046_shared_drafts`), `plugin_drafts` held the one build's hash (`build_hash`) and the kept workshop (`workshop`, `workshop_revision`), and build files were keyed by draft and path.
 
 **Files in Postgres, not `BLOB_DIR`.** A draft's files are small text files changed one at a time, and since #313 a few fonts and images as bytes. As rows, each change is one transaction that also checks the limits, deleting a draft or an account takes its files, nothing needs an orphan sweep, and `pg_dump` carries them, so `backup.sh`, `restore.sh` and the backup's check need no change. The build is up to 10 MB of bytes, still well within what one row holds; it goes with its draft the same way. The library keeps `BLOB_DIR` for its versions, which are immutable and served by hash for good.
 
@@ -80,7 +100,7 @@ plugin_draft_build_files
 
 **Ten per account.** Creating an 11th draft is refused with `draft-limit`, unless the request names `replaces`, one of the person's own drafts, which is deleted in the same transaction. The workshop warns first, naming the least recently changed draft: "You have 10 drafts. Starting this one deletes “Name”, the one you changed longest ago." with **Delete it and start** and **Cancel**. This is the issue's suggestion, and the server deletes nothing the person wasn't shown by name. A person who would rather lose another draft deletes it from the list first. "Changed" means its files: `updated_at` moves with each file change, not with a build.
 
-**Routes** (`pluginDraftRoutes` in `packages/contracts/src/routes/plugin-drafts.ts`), people only, through `routes.account`. Agents never reach drafts. A draft that isn't the caller's answers `not-found`, the same as one that doesn't exist.
+**Routes** (`pluginDraftRoutes` in `packages/contracts/src/routes/plugin-drafts.ts`), people only, through `routes.account`. Agents never reach drafts. A draft that isn't the caller's, or shared with them (#315), answers `not-found`, the same as one that doesn't exist.
 
 | Route | What | Rate limit |
 | --- | --- | --- |
@@ -162,7 +182,7 @@ The disclosure in `workshop-panel.tsx` keeps its first paragraph and replaces th
 - **Two people changing one file:** the last write wins, as between one person's devices. An open workshop sees the other's changes when the draft is opened again.
 - **Each person's workshop is their own.** The kept workshop is kept per person (`plugin_draft_workshops`, keyed by draft and account), which nobody else reads, so one person's conversation, and the samples and notes of copies in it, never reach another. A person starts the workshop on a shared draft with no conversation, and keeps their own from then on. The owner's kept workshop and build moved to the per-person tables in the migration. Keeping only the owner's would have meant the others' conversations ending at each reload, and showing the owner's to them would have shown one person's work with their pages to another.
 - **Builds.** Each person's preview build is their own (above), so one person's preview never replaces another's.
-- **Ending it.** The owner's **Remove**, or the person's **Leave**, ends their access and deletes their build and kept workshop of the draft. Deleting the draft, or either account, deletes it all.
+- **Ending it.** The owner's **Remove**, or the person's **Leave**, ends their access and deletes their build and kept workshop of the draft. Deleting the draft, or the owner's account, deletes it all; deleting a shared person's account deletes only their share, build and kept workshop.
 
 ### 8. SDK projects
 
@@ -223,10 +243,10 @@ Scott decided the direction in #60 on 2026-10-16 and asked for it to be built an
 1. Visibility is a column on `plugins`, Shared by default, set by the owner at upload or with its own route.
 2. The listing takes the caller's approved hashes and lists an Only me plugin to its owner and to anyone who names one of its versions' hashes; its response keeps its shape. The file route stays as it is for library versions: the hash is the key.
 3. Every upload installs the plugin for its owner, with the hash the client computed, replacing an older approved version and keeping its access, after one confirmation that shows what the approval dialog shows.
-4. Plugin drafts live in Postgres, files and one build, with the workshop's limits, people only, in the backups through `pg_dump`.
+4. Plugin drafts live in Postgres, files and one build (since #315 one per person who reaches it), with the workshop's limits, people only, in the backups through `pg_dump`.
 5. At most 10 drafts; an 11th replaces the least recently changed one the person is shown and agrees to lose.
 6. Each model write saves at once; the last write of a file wins.
-7. The build runs in a module worker in the page, esbuild-wasm with `worker: false`, in every client. The browser previews from the file route under `draft-<hash>`, owner only; the desktop's main serves what the page hands it under the same key.
+7. The build runs in a module worker in the page, esbuild-wasm with `worker: false`, in every client. The browser previews from the file route under `draft-<hash>`, owner only (since #315 to whoever built it); the desktop's main serves what the page hands it under the same key.
 8. Publish uploads the previewed version from the page, Shared or Only me.
 9. A draft of someone else's plugin gets `<id>-copy` (or `-copy-2` and on) when it is made; the upload's ownership check is the final word.
 10. An SDK project becomes a draft from its `wikistow-plugin.json`, `src/` and `public/`.
