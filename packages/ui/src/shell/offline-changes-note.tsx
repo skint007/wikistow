@@ -33,7 +33,10 @@ function nameOf(entry: Entry): string {
     case 'rename':
       return queueOperations.renamedMetadata(entry).name;
     case 'delete':
+    case 'move':
       return entry.name || 'Untitled';
+    case 'publish':
+      return entry.title || 'Untitled';
   }
 }
 
@@ -50,8 +53,22 @@ function goneText(entry: Entry): string {
       return 'This folder was deleted, or you lost access to it, while you were offline, so it wasn’t renamed.';
     case 'delete':
       return 'This was deleted already, or you lost access to it.';
+    case 'move':
+      return 'This, or the folder it was moved to, was deleted, or you lost access to it, while you were offline, so it wasn’t moved.';
+    case 'publish':
+      return 'This page was deleted, or you can no longer publish it, so it wasn’t published.';
   }
 }
+
+/** What the note says of a change the server refused for another reason, before its reason. */
+const REFUSED: Record<Entry['kind'], string> = {
+  page: 'Couldn’t be saved.',
+  folder: 'Couldn’t be saved.',
+  rename: 'Couldn’t be saved.',
+  delete: 'Couldn’t be saved.',
+  move: 'Couldn’t be moved.',
+  publish: 'Wasn’t published.',
+};
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
@@ -61,8 +78,9 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * changed meanwhile, which open to the conflict prompt; folders someone
  * renamed meanwhile, with both names to choose from; pages or folders
  * gone or out of reach, with Try again, Save as a new page in my space,
- * Copy text and Discard, or for a rename or delete, which has nothing left
- * to save, only OK; and changes the server refused, with its reason.
+ * Copy text and Discard, or for a rename, delete or move, which has nothing
+ * left to save, only OK; and changes the server refused, with its reason,
+ * only OK for a publish, which the person publishes again once they've looked.
  */
 export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const { data: entries } = useQuery(queueQuery(ctx));
@@ -81,9 +99,13 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
       entry.kind === 'rename' && entry.failure?.kind === 'conflict',
   );
   const others = stopped.filter((entry) => entry.failure?.kind !== 'conflict');
-  // Nothing is left to save of a rename or delete of what's gone: the person is told, and it goes.
+  // Nothing is left to save of a rename, delete or move of what's gone: the
+  // person is told, and it goes. Nor of a publish: sent again, it would
+  // stop again, so the person publishes it again once they've looked.
   const nothingLeft = (entry: Entry) =>
-    (entry.kind === 'rename' || entry.kind === 'delete') && entry.failure?.kind === 'gone';
+    entry.kind === 'publish' ||
+    ((entry.kind === 'rename' || entry.kind === 'delete' || entry.kind === 'move') &&
+      entry.failure?.kind === 'gone');
   const copy = (entry: queueOperations.QueuedPage) =>
     navigator.clipboard.writeText(queueOperations.changeText(entry.payload));
   const act = async (work: () => Promise<unknown>) => {
@@ -159,7 +181,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
             </span>{' '}
             {entry.failure?.kind === 'gone'
               ? goneText(entry)
-              : `Couldn’t be saved. ${entry.failure?.kind === 'refused' ? entry.failure.message : ''}`}
+              : `${REFUSED[entry.kind]} ${entry.failure?.kind === 'refused' ? entry.failure.message : ''}`}
           </p>
           {nothingLeft(entry) ? (
             <div className="flex flex-wrap gap-2">

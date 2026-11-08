@@ -22,6 +22,14 @@ export type OwnerStanding = 'owner' | 'unconfirmed' | 'checking' | null;
 export const mayDelete = (standing: OwnerStanding, offline: boolean) =>
   standing === 'owner' || (standing === 'checking' && offline);
 
+/**
+ * Whether this person may move things as an owner of the space: as an
+ * owner, or offline while the check waits for the server. Offline, a move
+ * stays in its share, changing no keys, and waits on this device (#331).
+ */
+export const movesAsOwner = (standing: OwnerStanding, offline: boolean) =>
+  standing === 'owner' || (standing === 'checking' && offline);
+
 export function useOwnerStanding(spaceId: SpaceId): OwnerStanding {
   const ctx = useClient();
   const { data: spaces } = useQuery(spacesQuery(ctx));

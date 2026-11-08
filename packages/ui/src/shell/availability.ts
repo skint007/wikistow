@@ -32,16 +32,21 @@ export type ActionKind =
   | 'open'
   | 'new-page'
   | 'new-folder'
+  /** Move to… opened, or a drag started: where it may go is `moveAvailability`'s to say. */
   | 'move'
   | 'copy'
   | 'publish-elsewhere'
+  /** Publish, for a page with no public link. */
   | 'publish'
+  /** Publish, for a page with a public link, or whose links aren't known yet (ADR 0005). */
+  | 'publish-linked'
   | 'restore'
+  /** A page or folder dragged in the sidebar, which moves it. */
   | 'drag'
   /**
-   * A page or folder moved, copied or dropped into this folder, or a page
-   * published into it from another space. The action itself waits for the
-   * connection: this is about the folder only.
+   * A page or folder copied into this folder, or a page published into it
+   * from another space. The action itself waits for the connection: this
+   * is about the folder only. A move into it goes by `moveAvailability`.
    */
   | 'into'
   /** A task ticked or a property set while reading, which publishes. */
@@ -77,13 +82,18 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   open: { offline: true, holds: 'never' },
   'new-page': { offline: true, holds: 'never' },
   'new-folder': { offline: true, holds: 'never' },
+  // Wait on this device, after the changes before them (#331). The writer
+  // folds a move into an item made offline; a page made offline isn't
+  // published until it is made.
+  move: { offline: true, holds: 'never' },
+  drag: { offline: true, holds: 'never' },
+  publish: { offline: true, holds: 'made' },
   // Act on the page's draft, so never on the one from before its change (decision 8).
-  move: { offline: false, holds: 'changed' },
   copy: { offline: false, holds: 'changed' },
   'publish-elsewhere': { offline: false, holds: 'changed' },
-  publish: { offline: false, holds: 'changed' },
+  // Its public copy is checked first, which needs the server.
+  'publish-linked': { offline: false, holds: 'changed' },
   restore: { offline: false, holds: 'changed' },
-  drag: { offline: false, holds: 'changed' },
   // A folder made offline isn't on the server yet, so nothing goes into it
   // there, nor into what is under it, made offline too.
   into: { offline: true, holds: 'made' },
@@ -108,6 +118,42 @@ export function availability(
   const held = holds === 'changed' ? waiting !== 'none' : holds === 'made' && waiting === 'made';
   if (held) return { allowed: false, hint: kind === 'chat-edit' ? CHAT_SENDS_FIRST : SENDS_FIRST };
   return { allowed: true };
+}
+
+/**
+ * How a move goes, if it can now: on the server, as online, once the person
+ * looked it over (`server`), or on this device, sent after the changes
+ * before it (`device`), or not now, with the hint saying why.
+ */
+export type MoveAvailability = { route: 'server' | 'device' } | { route: null; hint: string };
+
+/**
+ * How moving an item with `item` waiting to a place with `place` waiting
+ * goes (ADR 0009, decision 8; #331). `across` is a move that changes who can
+ * read it, across a shared folder's edge, or one into another space: the
+ * server works out who gains and loses access, or copies it, so it goes
+ * online only, never after a change waiting here, nor into a folder made
+ * offline. Any other move waits on this device while the app is offline,
+ * or while the item, or the folder it goes in, has something waiting: it
+ * goes after that.
+ */
+export function moveAvailability({
+  offline,
+  item,
+  place,
+  across,
+}: {
+  offline: boolean;
+  item: Waiting;
+  place: Waiting;
+  across: boolean;
+}): MoveAvailability {
+  if (across) {
+    if (offline) return { route: null, hint: NEEDS_CONNECTION };
+    if (item !== 'none' || place === 'made') return { route: null, hint: SENDS_FIRST };
+    return { route: 'server' };
+  }
+  return { route: offline || item !== 'none' || place === 'made' ? 'device' : 'server' };
 }
 
 type Entry = queueOperations.QueueEntry;
@@ -172,7 +218,14 @@ export function useAvailability() {
   const byId = useMemo(() => Map.groupBy(entries ?? [], (entry) => entry.id), [entries]);
   const waiting = (id: PageId | FolderId | null): Waiting =>
     waitingOf((id !== null && byId.get(id)) || []);
-  return { offline, waiting, of: (id: PageId | FolderId | null) => controls(offline, waiting(id)) };
+  return {
+    offline,
+    waiting,
+    of: (id: PageId | FolderId | null) => controls(offline, waiting(id)),
+    /** How moving `id` into `parentId`, or the top of the space, goes (`moveAvailability`). */
+    move: (id: PageId | FolderId, parentId: FolderId | null, { across }: { across: boolean }) =>
+      moveAvailability({ offline, item: waiting(id), place: waiting(parentId), across }),
+  };
 }
 
 /**

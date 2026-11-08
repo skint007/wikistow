@@ -42,14 +42,20 @@ import {
   deleteNote,
   useDroppedOnDelete,
 } from '../page/delete-dialog';
-import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
+import {
+  destinationsIn,
+  MoveDialog,
+  moveRoute,
+  useStartMove,
+  type Moving,
+} from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublicLinkDialog, PublicMarker } from '../page/public-link';
 import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
-import { mayDelete, useOwnerStanding } from '../sharing/owner-standing';
+import { mayDelete, movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { Replaceable } from '../plugins/places';
 import { useClient } from '../vault/store';
@@ -407,9 +413,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const startDrag = (event: DragEvent, moving: Moving) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DRAG_TYPE, '');
-    // Not into a folder made offline until it is sent, as Move to… offers.
-    const places = destinationsIn(tree, moving, sharer).filter((d) =>
-      availability.of(d.parentId).can('into'),
+    // Where Move to… offers: offline, only within its share (`moveRoute`).
+    const owner = movesAsOwner(standing, availability.offline);
+    const places = destinationsIn(tree, moving, owner).filter(
+      (d) => moveRoute(tree, moving, d.parentId, availability).route !== null,
     );
     setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
   };
