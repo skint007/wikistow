@@ -149,6 +149,8 @@ const QueuedDeleteJson = z.strictObject({
   node: z.enum(['page', 'folder']),
   spaceId: SpaceId,
   name: z.string(),
+  /** A request went: one sent again, refused as `not-found`, landed then. */
+  tried: z.literal(true).exactOptional(),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -180,6 +182,13 @@ export const madeOffline = (entry: QueueEntry): entry is QueuedFolder | QueuedPa
 // to make it went, and its answer was lost.
 const mayHaveLanded = (entry: QueuedFolder | QueuedPage) =>
   entry.kind === 'folder' ? entry.tried === true : entry.sending !== null;
+
+/**
+ * Whether deleting the item `entry` waits for drops it for good: made
+ * offline, and never sent, so the server doesn't have it (`OfflineQueue.delete`).
+ */
+export const droppedOnDelete = (entry: QueueEntry): boolean =>
+  madeOffline(entry) && !mayHaveLanded(entry);
 
 /**
  * What changed in the queue, for whatever shows it: a draft saved into an
@@ -623,7 +632,7 @@ export class OfflineQueue {
   }): Promise<'dropped' | 'waiting'> {
     const { outcome, gone } = await this.#store.queueExclusive(async () => {
       const own = await this.entry(id);
-      if (own && madeOffline(own) && !mayHaveLanded(own)) {
+      if (own && droppedOnDelete(own)) {
         const entries = await this.entries();
         const parents = new Map<string, FolderId | null>(
           entries.flatMap((entry) => (madeOffline(entry) ? [[entry.id, parentOf(entry)]] : [])),
@@ -910,19 +919,21 @@ export class OfflineQueue {
     entry: QueuedFolder,
     entries: readonly QueueEntry[],
   ): Promise<'offline' | void> {
-    const { id: folderId, spaceId, parentId, metadata } = entry;
-    if (!entry.tried) {
-      await this.#store.queueExclusive(async () => {
-        const current = await this.entry(folderId);
-        if (current?.kind === 'folder') await this.#write({ ...current, tried: true });
-      });
-    }
-    let duplicate = false;
+    const { id: folderId, spaceId, parentId } = entry;
+    // Recorded before its request, as one whose answer is lost may be made.
+    // Gone meanwhile, as when deleted, it isn't sent.
+    const current = await this.#store.queueExclusive(async () => {
+      const current = await this.entry(folderId);
+      if (current?.kind !== 'folder' || current.failure) return null;
+      if (!current.tried) await this.#write({ ...current, tried: true });
+      return current;
+    });
+    if (!current) return;
+    let { metadata } = current;
     try {
       await createFolderAs(ctx, { spaceId, parentId, folderId, metadata });
     } catch (error) {
-      duplicate = error instanceof ApiError && error.code === 'duplicate';
-      if (!duplicate) {
+      if (!(error instanceof ApiError && error.code === 'duplicate')) {
         const failure = failureOf(error);
         if (!failure) return 'offline';
         // An empty folder made offline whose parent is gone just goes.
@@ -932,18 +943,24 @@ export class OfflineQueue {
         if (failure.kind === 'gone' && !holds) return this.discard(entry);
         return this.#stop(entry, failure);
       }
+      // Made by an earlier request whose answer was lost: renamed since,
+      // the name and look it holds now go too.
+      const now = await this.entry(folderId);
+      if (now?.kind === 'folder') {
+        const owed = await this.#renameMade(ctx, now);
+        if (owed === 'offline') return 'offline';
+        if (owed === 'stopped') return;
+        ({ metadata } = now);
+      }
     }
-    // Made by an earlier request whose answer was lost, or renamed while
-    // this one went: the name and look it holds now go too.
-    const now = await this.entry(folderId);
-    const renamed =
-      now?.kind === 'folder' && JSON.stringify(now.metadata) !== JSON.stringify(metadata);
-    if (now?.kind === 'folder' && (duplicate || renamed)) {
-      const owed = await this.#renameMade(ctx, now);
-      if (owed === 'offline') return 'offline';
-      if (owed === 'stopped') return;
-    }
-    await this.discard(entry);
+    // It goes, unless renamed while this went: then the next round sends that.
+    await this.#store.queueExclusive(async () => {
+      const now = await this.entry(folderId);
+      if (now?.kind === 'folder' && JSON.stringify(now.metadata) === JSON.stringify(metadata)) {
+        await this.#remove(now);
+      }
+    });
+    this.#emit({ kind: 'changed', spaceId, id: folderId });
   }
 
   // A folder made offline, on the server already: the name and look its
@@ -1047,11 +1064,22 @@ export class OfflineQueue {
   }
 
   async #sendDelete(ctx: ClientContext, entry: QueuedDelete): Promise<'offline' | void> {
+    // Recorded before its request, as its answer may be lost.
+    const tried = await this.#store.queueExclusive(async () => {
+      const current = await this.#keyed(entry);
+      if (current?.kind !== 'delete' || current.failure) return null;
+      if (!current.tried) await this.#write({ ...current, tried: true });
+      return current.tried === true;
+    });
+    if (tried === null) return;
     try {
       await deleteNode(ctx, { spaceId: entry.spaceId, nodeId: entry.id });
     } catch (error) {
       const failure = failureOf(error);
-      return failure ? this.#stop(entry, failure) : 'offline';
+      if (!failure) return 'offline';
+      // Sent before, and its answer lost: it is in the trash already.
+      const landed = tried && error instanceof ApiError && error.code === 'not-found';
+      if (!landed) return this.#stop(entry, failure);
     }
     await this.discard(entry);
     this.#emit({ kind: 'sent', spaceId: entry.spaceId });

@@ -44,7 +44,7 @@ function goneText(entry: Entry): string {
     case 'rename':
       return 'This folder was deleted, or you lost access to it, while you were offline, so it wasn’t renamed.';
     case 'delete':
-      return 'This was deleted already, or you lost access to it, while you were offline.';
+      return 'This was deleted already, or you lost access to it.';
   }
 }
 

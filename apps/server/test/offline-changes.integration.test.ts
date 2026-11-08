@@ -54,7 +54,7 @@ async function device() {
     api: createApiClient({
       fetch: async (url, init) => {
         const answer = await person.browser.fetch(url, init);
-        if (init?.method === 'POST' || init?.method === 'PUT') {
+        if (init?.method === 'POST' || init?.method === 'PUT' || init?.method === 'DELETE') {
           if (new URL(url, 'http://app').pathname === path) throw new TypeError('Lost');
         }
         return answer;
@@ -435,6 +435,19 @@ describe('renames and deletes made offline', () => {
     expect((await trash.loadTrash(ctx)).map((item) => item.nodeId)).toEqual([page.pageId]);
     await trash.restoreDeleted(ctx, page.pageId);
     expect((await draft()).markdown).toBe('last words');
+  });
+
+  it('land a delete whose answer was lost once', async () => {
+    const { ctx, queue, spaceId, page, losing } = await device();
+    await queue.delete({ spaceId, id: page.pageId, node: 'page', name: 'Plan' });
+    const path = pageRoutes.deleteNode.path
+      .replace(':spaceId', spaceId)
+      .replace(':nodeId', page.pageId);
+    expect(await queue.send(losing(path))).toBe('offline');
+    // Sent again, `not-found` is its own delete, landed.
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await trash.loadTrash(ctx)).map((item) => item.nodeId)).toEqual([page.pageId]);
   });
 
   it('stop a delete of what someone deleted meanwhile as gone', async () => {

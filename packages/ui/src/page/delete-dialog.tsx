@@ -1,4 +1,10 @@
-import type { FolderId, PageId, pageOperations, SpaceId } from '@wikistow/client';
+import {
+  queueOperations,
+  type FolderId,
+  type PageId,
+  type pageOperations,
+  type SpaceId,
+} from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Name } from '@/components/name';
@@ -15,7 +21,7 @@ import { contentChanged } from '../data/content-changed';
 import { pageChange, pageWriter, queueQuery } from '../data/offline-changes';
 import { trashQuery } from '../data/queries';
 import { errorMessage } from '../errors';
-import { useAvailability } from '../shell/availability';
+import { useOffline } from '../data/connection';
 import { useClient } from '../vault/store';
 import { noteTrashed } from './trash-notice';
 
@@ -34,10 +40,10 @@ export function DeletePageDialog({
   onDone: () => void;
 }) {
   const ctx = useClient();
-  const { offline, waiting } = useAvailability();
+  const offline = useOffline();
   const { data: entries } = useQuery(queueQuery(ctx));
   const change = pageChange(entries, page.pageId);
-  const made = waiting(page.pageId) === 'made';
+  const made = useDroppedOnDelete(page.pageId);
   const [dropChanges, setDropChanges] = useState(false);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -48,7 +54,7 @@ export function DeletePageDialog({
           </DialogTitle>
           <DialogDescription>{deleteNote({ made, offline })}</DialogDescription>
         </DialogHeader>
-        {change && !made && (
+        {change && !change.newPage && (
           <label className="flex items-start gap-2 text-sm">
             <input
               type="checkbox"
@@ -78,6 +84,15 @@ export function DeletePageDialog({
 /** What deleting does, for the dialogs that ask first. */
 export const TRASH_NOTE =
   'It goes to the trash with everything in it, and stays there for 30 days. You can restore it from Trash until then. Any public link to it ends.';
+
+/** Whether deleting `id` drops it for good, made offline and never sent (`droppedOnDelete`). */
+export function useDroppedOnDelete(id: FolderId | PageId | null): boolean {
+  const { data: entries } = useQuery(queueQuery(useClient()));
+  return (
+    id !== null &&
+    (entries ?? []).some((entry) => entry.id === id && queueOperations.droppedOnDelete(entry))
+  );
+}
 
 /**
  * What deleting a page or folder does: into the trash, once back online if

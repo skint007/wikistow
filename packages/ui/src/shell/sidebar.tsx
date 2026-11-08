@@ -36,7 +36,12 @@ import { contentChanged } from '../data/content-changed';
 import { publicLinksQuery, treeQuery } from '../data/queries';
 import { pageWriter } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
-import { DeleteButton, DeletePageDialog, deleteNote } from '../page/delete-dialog';
+import {
+  DeleteButton,
+  DeletePageDialog,
+  deleteNote,
+  useDroppedOnDelete,
+} from '../page/delete-dialog';
 import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublicLinkDialog, PublicMarker } from '../page/public-link';
@@ -265,6 +270,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // Where a page from a template goes, while that dialog is open.
   const [fromTemplate, setFromTemplate] = useState<FolderId | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
+  const droppedOnDelete = useDroppedOnDelete(deleting);
   const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
@@ -805,7 +811,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               ?
             </DialogTitle>
             <DialogDescription>
-              {deleting && availability.waiting(deleting) === 'made' ? (
+              {droppedOnDelete ? (
                 deleteNote({ made: true, offline: availability.offline })
               ) : (
                 <>
