@@ -60,7 +60,7 @@ _Avoid_: Trusting an owner because the server lists them.
 ## Sharing and trust
 
 **Share**
-A space or folder that has its own folder keys and members. Shares don't nest: no share sits inside another. Content outside every share is readable by the space's owners only.
+A space or folder that has its own folder keys and members. Shares don't nest: no share sits inside another. Content outside every share is readable by the space's owners only. **Stopping sharing** (proposed) ends a share: its content is the owners' alone again, and its members keep only what they already had.
 _Avoid_: Sharing a page; pages are shared with people only through their folder. A public link is the one way to show a single page, to anyone.
 
 **Folder key**
