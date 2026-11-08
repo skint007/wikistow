@@ -31,7 +31,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- ADR 0013 (`docs/adr/0013-merging-conflicting-edits.md`) proposes merging a draft's conflicting edits instead of choosing one: a three-way merge of the page's Markdown by block, front matter by key, the person choosing where both changed the same block, and reviewing the merged draft before it saves. Not built yet.
+- ADR 0013 (`docs/adr/0013-merging-conflicting-edits.md`) proposes merging a draft's conflicting edits instead of choosing one: a three-way merge of the page's Markdown by block, front matter by key, the person choosing where both changed the same block, and reviewing the merged draft before it saves. Not built yet. (#370)
 
 ## 0.25.0-beta.1 - 2026-11-08
 
