@@ -13,6 +13,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#347)
 - Move pages and folders within their space, by Move to… or by dragging, and publish pages, while offline. They wait on the device and go once the app is back online; a waiting publish can be cancelled from the page. Moves into or out of a shared folder, and publishing a page with a public link, still need the connection. (#354)
+- **Export…** has a **Markdown links** switch, off by default, that writes links between pages as relative links to their files, `[Plan](../Work/Plan.md#next-steps)`, for GitHub and editors that don’t read wikilinks. It says how many links stayed wikilinks, such as page embeds. (#350)
 
 #### Plugins
 
@@ -23,6 +24,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### CLI
 
 - `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
+
+#### CLI
+
+- `export --links markdown` writes links between pages as relative Markdown links instead of wikilinks, as the web's **Markdown links** does, and counts the wikilinks left (`wikilinks` in `--json`). (#350)
 
 ## 0.24.0 - 2026-11-07
 
