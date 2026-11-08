@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - **Load development folder…** in Settings → Plugins works in a computer's browser too: choose a plugin's built `dist/` folder, approve it, and press **Reload** after each build. Chrome and Edge read the folder again; Firefox and Safari ask for it again at each **Reload…**. The plugin runs in that tab only, labelled Development, until you close or reload the tab or remove it, and replaces a library plugin of the same ID there. Each build goes to the server as your own development build, served only to you and dropped a week after the last Reload (migration `0042_plugin_development`). (#364)
 
+#### CLI
+
+- `wikistow mcp` serves the agent's commands as the tools of an MCP server, over standard input and output, for agent tools that speak MCP. Each tool runs its command with `--json`, with the same checks, idempotency keys and exit statuses. `wikistow mcp --help` says how to add it to Claude Code, Codex and other clients.
+
 #### Releases and packaging
 
 - Signed apt and dnf repositories for the desktop app on GitHub Pages, published after each stable release, and an update notice that says to use apt or dnf for them. (#361)

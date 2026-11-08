@@ -24,7 +24,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
 - Bulk import from Joplin and from an Obsidian vault (see **Import**). A person can also move one Obsidian note by pasting its Markdown into a page, or have an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
-Comments (#320), simultaneous live editing (#321), semantic search (#324), passkeys (#322) and MCP integration (#323) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
+Comments (#320), simultaneous live editing (#321), semantic search (#324) and passkeys (#322) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
 
 ## Architecture
 
@@ -394,9 +394,12 @@ wikistow page publish-to PAGE_ID --space SPACE_ID --revision REVISION_ID --previ
 wikistow page publish-to PAGE_ID --space SPACE_ID --revision REVISION_ID --base-copy none --attachments all --permission-version N --json
 wikistow page copy PAGE_ID --space SPACE_ID --folder FOLDER_ID --idempotency-key KEY --json
 wikistow folder copy FOLDER_ID --space SPACE_ID --idempotency-key KEY --json
+wikistow mcp
 ```
 
 Reads return stable page and revision IDs. Commands support machine-readable output, distinguish an unpublished page from missing permission without exposing private existence, and report stale revision, locked vault, revoked credentials, and missing keys separately where the caller is authorized to know them. Mutations support idempotency keys, or name the state they change, so a retry finds the change done or refuses it as stale (unpublish, publishing into another space). Agent output is plaintext by intent; the user controls what their model receives.
+
+**MCP** (#323). `wikistow mcp` serves the agent's commands as the tools of an MCP (Model Context Protocol) server, over standard input and output, for agent tools that speak MCP rather than run commands. It runs as the enrolled agent, with its key file, unlock and grants, so it can do nothing the CLI can't. Each tool runs the command it is named for through the CLI's own code, with `--json`, and answers with that output: the same checks, idempotency keys, exit statuses and escaping of text the CLI didn't write (protocol section 9.3). It serves tools only, no resources, and the skill's rules as its instructions. Left out: enrolling, the secret store, import and export. It unlocks for each call from the secret store, or from a passphrase on a file descriptor it reads once when it starts, never asks for one, and stops at once, with the command's exit status, if the agent can't open. The page chat's tools stay their own: they run in the app under its own agent, and hand changes to the person to approve, where the CLI's agent makes them.
 
 ## AI assistant
 
