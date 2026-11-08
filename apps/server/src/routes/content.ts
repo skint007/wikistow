@@ -57,6 +57,7 @@ import {
   cancelCopy,
   checkCopyOpener,
   finishCopy,
+  movedPlace,
   openCopy,
   sendCopyRecords,
   removeOwner,
@@ -849,6 +850,11 @@ export function mountContentRoutes(
       return { ok: true as const };
     },
     { rateLimit: WRITE_LIMIT },
+  );
+
+  // Old addresses of what a move took into another space.
+  routes.content(copyRoutes.moved, async ({ params }, { actor }) =>
+    movedPlace(db, actor, params).catch(toApiError),
   );
 
   routes.content(pageRoutes.history, async ({ params }, { actor }) => ({

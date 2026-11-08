@@ -10,10 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Mermaid diagrams now draw in the browser after an offline reload. The diagram frame's files are named by their hashes under `/assets/diagram/`, so the browser's cache keeps them, and the service worker fetches them once when it installs. A diagram that can't draw offline shows its source and says so at once, instead of "Drawing diagram…" for two minutes. (#342)
 - The search box is a command palette too: type `>` first, or open it with Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, to run what you could do where you are by typing its name. It lists the page's commands, such as Edit page, Publish, Move to… and Find on page, the space's (Export space…, and for owners Share space… and Delete space…), Lock vault, Change theme…, each plugin's settings, and the running plugins' commands under their plugin's name. Letters match in order, best matches first, then the commands you ran last, kept on this device. (#345)
-
 - Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#347)
 - Move pages and folders within their space, by Move to… or by dragging, and publish pages, while offline. They wait on the device and go once the app is back online; a waiting publish can be cancelled from the page. Moves into or out of a shared folder, and publishing a page with a public link, still need the connection. (#354)
 - **Export…** has a **Markdown links** switch, off by default, that writes links between pages as relative links to their files, `[Plan](../Work/Plan.md#next-steps)`, for GitHub and editors that don’t read wikilinks. It says how many links stayed wikilinks, such as page embeds. (#350)
+- A page or folder moved to another space keeps its old address: opening it opens the new place, saying it moved, and links to it from pages left behind still open it, for people who can open it there. (#351)
 
 #### Plugins
 

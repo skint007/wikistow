@@ -104,6 +104,7 @@ class WikilinkView implements NodeView {
       selfId: links.selfId,
       attachments: this.#host.attachments().list,
       editor: true,
+      moved: links.moved,
     });
     const text = document.createElement('span');
     text.textContent = plainText(view.text);

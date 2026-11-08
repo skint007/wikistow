@@ -89,11 +89,14 @@ export function FolderView({
   spaceId,
   folderId,
   save,
+  movedHere = false,
 }: {
   spaceId: SpaceId;
   folderId: FolderId;
   /** How a cell's edit is saved; by default as the page's draft. */
   save?: SaveProperty | undefined;
+  /** Opened by its address before a move brought it to this space: it says so. */
+  movedHere?: boolean;
 }) {
   const ctx = useClient();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
@@ -151,6 +154,8 @@ export function FolderView({
   const crumbs = crumbsOf(tree, folder.parentId);
   const shownColumns = columns.filter((column) => !column.hidden);
   const pagesHere = tree.pages.filter((p) => p.parentId === folderId).length;
+  const spaceName =
+    tree.space?.metadata?.opened.kind === 'current' ? tree.space.metadata.opened.metadata.name : '';
 
   return (
     <FolderCard>
@@ -215,6 +220,11 @@ export function FolderView({
             </div>
           </div>
         </div>
+        {movedHere && (
+          <p role="note" className="text-sm text-muted-foreground">
+            This folder moved to {spaceName ? <Name>{spaceName}</Name> : 'another space'}.
+          </p>
+        )}
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-3 px-11 pb-10 max-[899px]:px-[18px] max-[899px]:pb-8">
         <IndexStatus
@@ -283,7 +293,7 @@ function crumbsOf(tree: Tree, parentId: FolderId | null): string[] {
 }
 
 /** The folder's card, as a page's is, scrolling within the window. */
-function FolderCard({ children }: { children: ReactNode }) {
+export function FolderCard({ children }: { children: ReactNode }) {
   return (
     <section
       aria-label="Folder"

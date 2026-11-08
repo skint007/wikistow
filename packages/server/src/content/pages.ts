@@ -62,6 +62,7 @@ import { requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { charge, usedBytes } from './quota.ts';
 import { copyUploadAccess, sweepCopies } from './copies.ts';
+import { forgetMoves } from './moved.ts';
 import { endPublicationsFrom } from './publications.ts';
 import { endCopies, endLinkFor, endLinks } from '../public-links/endings.ts';
 import { revisionKeyMaterial } from './serving.ts';
@@ -1396,6 +1397,8 @@ export async function removeSubtree(
       ),
     );
   await tx.delete(metadataRevisions).where(folderMetadata);
+  // Old addresses of what moved here open nothing once it is gone.
+  await forgetMoves(tx, spaceId, ids);
   await tx.delete(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.spaceId, spaceId)));
   return [...doomed.map((b) => b.hash), ...openingFiles];
 }

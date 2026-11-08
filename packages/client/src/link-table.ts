@@ -190,7 +190,17 @@ export type LinkWrite = {
    * as for any draft.
    */
   renames?: boolean;
+  /**
+   * Where pages a move took into another space went, by their old IDs:
+   * those of `pageIds` this writer can open there (`movedTo`). Asked only
+   * by a publication, for entries naming a page the writer doesn't see
+   * here, which it then keeps (`writeLinks`).
+   */
+  moved?: (pageIds: readonly PageId[]) => Promise<ReadonlyMap<PageId, MovedPage>>;
 };
+
+/** Where a page a move took into another space is now. */
+export type MovedPage = { spaceId: SpaceId; pageId: PageId };
 
 /** Reads a page's wikilinks as `tableWikilinks` does, maybe somewhere it can end. */
 export type ReadWikilinks = (markdown: string) => Promise<PlacedWikilink[]>;
@@ -258,7 +268,13 @@ type Decision = { link: PlacedWikilink; pageId: PageId | null; renamed: string |
  *   (`renameTo`), unless `renames` is false. The
  *   entry keeps its old key too, for this version, so text from before
  *   the rename still names the page, unless the old text is the title of
- *   another page this version could name.
+ *   another page this version could name;
+ * - a publication keeps an entry whose page the writer doesn't see, when a
+ *   move took that page into another space where the writer can open it
+ *   (`moved`), for a link no page here has the title of: it names no page
+ *   of this space, and opens the moved page, through its old ID, only for
+ *   those who can open it there (protocol section 10, "Old addresses"). A
+ *   draft keeps it as it keeps any such entry.
  *
  * A table in a format this app doesn't know is kept as it is in a draft in
  * the region it came from; else it is worked out afresh in format 1.
@@ -489,9 +505,16 @@ async function decide(
     chosen.flatMap(({ link, target }) => (target && mayRename(link, target) ? [target] : [])),
     write,
   );
+  const away =
+    write.audience === 'published'
+      ? await movedAway(
+          chosen.map(({ carried }) => carried),
+          write,
+        )
+      : null;
   return chosen.map(({ link, carried, target }) => {
     if (carried !== undefined) {
-      const kept = write.audience === 'draft' && write.carries;
+      const kept = (write.audience === 'draft' && write.carries) || Boolean(away?.has(carried));
       return { link, pageId: kept ? carried : null, renamed: null };
     }
     if (!target) return { link, pageId: null, renamed: null };
@@ -506,6 +529,19 @@ async function decide(
         : null;
     return { link, pageId: target.id, renamed };
   });
+}
+
+/**
+ * Those of `entries` naming a page a move took into another space, where
+ * the writer can open it (`LinkWrite.moved`); none when nothing asks.
+ */
+async function movedAway(
+  entries: readonly (PageId | undefined)[],
+  write: LinkWrite,
+): Promise<ReadonlySet<PageId>> {
+  const asked = [...new Set(entries.flatMap((entry) => (entry === undefined ? [] : [entry])))];
+  if (asked.length === 0 || !write.moved) return new Set();
+  return new Set((await write.moved(asked)).keys());
 }
 
 /**
@@ -553,6 +589,16 @@ async function forReaders(
     (link) => resolveWikilinks([link], { pages, selfId: write.page.id })[0]?.targets ?? [],
   );
   const titled = new Set(matches.flatMap((byTitle) => (byTitle.length === 1 ? byTitle : [])));
+  // An entry readers there read already, for a page a move took away, with no page here titled so.
+  const away = await movedAway(
+    links.map((link, i) => {
+      const entry = read.get(linkKey(link));
+      return matches[i]?.length === 0 && entry !== undefined && !targets.has(entry)
+        ? entry
+        : undefined;
+    }),
+    write,
+  );
   return links.map((link, i) => {
     const byTitle = matches[i] ?? [];
     const entry = read.get(linkKey(link));
@@ -560,7 +606,9 @@ async function forReaders(
       entry !== undefined &&
       pages.some((page) => page.id === entry) &&
       (byTitle.length === 0 ? link.shown !== null || !titled.has(entry) : byTitle.includes(entry));
-    const pageId = kept ? entry : byTitle.length === 1 ? targets.get(byTitle[0] ?? '')?.id : null;
+    const moved = byTitle.length === 0 && entry !== undefined && away.has(entry);
+    const pageId =
+      kept || moved ? entry : byTitle.length === 1 ? targets.get(byTitle[0] ?? '')?.id : null;
     return { link, pageId: pageId ?? null, renamed: null };
   });
 }

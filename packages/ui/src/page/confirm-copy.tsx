@@ -368,11 +368,8 @@ export function ConfirmCopy({
                 </ul>
               )}
               <p className="text-xs text-muted-foreground">
-                {/* Links that couldn't be read could be of either kind. */}
-                {(shown.links?.some((link) => link.kind === 'wikilink') ?? true) &&
-                  'Wikilinks to pages that don’t go with it each find a page with the same title there, if there is one. '}
-                {(shown.links?.some((link) => link.kind !== 'wikilink') ?? !copy) &&
-                  'Links to the address of a page or folder the move deletes, written so they can’t be pointed at its new place, stop working.'}
+                Wikilinks to pages that don’t go with it each find a page with the same title there,
+                if there is one.
               </p>
             </section>
           )}
@@ -389,7 +386,8 @@ export function ConfirmCopy({
                 ))}
               </ul>
               <p className="text-xs text-muted-foreground">
-                Their links stop working once it has moved.
+                Their links will open it in its new place, for people who can open it there, except
+                a link that finds it only by its title.
               </p>
             </section>
           )}

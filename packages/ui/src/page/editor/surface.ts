@@ -1,4 +1,10 @@
-import type { AttachmentRef, LinkablePage, PropertyData, PropertyValue } from '@wikistow/client';
+import type {
+  AttachmentRef,
+  LinkablePage,
+  MovedPage,
+  PropertyData,
+  PropertyValue,
+} from '@wikistow/client';
 import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
 import type { Findable } from '../find/findable';
@@ -53,6 +59,8 @@ export type LinkAssist = {
   selfId: string;
   /** The link table the next save starts from, key → page: the saved one and the picks it will keep. */
   table: ReadonlyMap<string, string>;
+  /** Where the pages of entries a move took into another space went (`useMovedLinks`). */
+  moved?: ReadonlyMap<string, MovedPage>;
   /** A page's headings, from its current version; empty when it can't be opened. */
   headings(pageId: string): Promise<readonly string[]>;
   /** The headings of `markdown`, this page's text as it is now; empty when it can't be read. */

@@ -1,4 +1,4 @@
-import type { FolderId, LinkablePage, PropertyData } from '@wikistow/client';
+import type { FolderId, LinkablePage, MovedPage, PropertyData } from '@wikistow/client';
 import { createContext } from 'react';
 import type { AttachmentContext } from './attachments';
 import type { OtherPages } from './other-pages';
@@ -17,6 +17,11 @@ export type PageBodyContext = {
   editing: { parentId: FolderId | null; create: boolean } | null;
   /** Offline, the space's pages this device doesn't keep, which links to read as such. */
   notKept?: ReadonlySet<string> | undefined;
+  /**
+   * Where the pages of entries not in `pages` went, when a move took them
+   * into another space the viewer can open them in (`useMovedLinks`).
+   */
+  moved?: ReadonlyMap<string, MovedPage> | undefined;
 };
 
 export const PageBody = createContext<PageBodyContext | null>(null);

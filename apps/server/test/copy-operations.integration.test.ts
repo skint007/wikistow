@@ -7,21 +7,24 @@ import {
   ApiError,
   copyOperations as copies,
   linkTableOf,
+  movedOperations as moved,
   newId,
   pageOperations as pages,
   PageId as PageIdSchema,
   publicationOperations as pubs,
   publicLinkOperations as links,
   spaceOperations,
+  trashOperations,
   utf8,
   type ApiClient,
   type ClientContext,
+  type FolderId,
   type PageId,
   type SpaceId,
 } from '@wikistow/client';
 import { copyRoutes, pageRoutes, type RouteDef } from '@wikistow/contracts';
 import { schema } from '@wikistow/server';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
@@ -872,7 +875,7 @@ describe('moving into another space', () => {
     expect(lost).toContain(w.bob.vault.identity.public.id);
   });
 
-  it('points links to the folder it moves at its copy, and lists those it can’t', async () => {
+  it('points links to the folder it moves at its copy, and lists pages linking to it', async () => {
     const w = await world();
     const notes = `/s/${w.lib}/f/${w.notes}`;
     // The same address, with its first letter escaped, which reads the same.
@@ -892,9 +895,8 @@ describe('moving into another space', () => {
       destination: { spaceId: w.board, parentId: w.pinned },
     });
     expect(new Set(preview.inbound.map((p) => p.title))).toEqual(new Set(['Index', 'Stay']));
-    expect(preview.links?.filter((l) => l.kind === 'folder-link')).toEqual([
-      { kind: 'folder-link', page: `${w.lib}/${w.notes}`, text: 'the old way', count: 1 },
-    ]);
+    // The escaped address isn't pointed at the copy, but still opens it, by its old address.
+    expect(preview.links?.filter((l) => l.kind !== 'wikilink')).toEqual([]);
     const made = await copies.makeCopy(w.alice.ctx, preview);
     const budget = ref(w.board, made.copies.get(w.budget) ?? '');
     expect((await current(w.dave.ctx, budget)).payload.markdown).toBe(
@@ -921,5 +923,127 @@ describe('moving into another space', () => {
     const top = preview.nodes[0]?.nodeId ?? '';
     expect(await t.db.select().from(schema.nodes).where(eq(schema.nodes.id, top))).toEqual([]);
     expect((await current(w.alice.ctx, w.page)).payload.title).toBe('Plan');
+  });
+});
+
+describe('old addresses of what moved into another space', () => {
+  const move = async (
+    ctx: ClientContext,
+    source: { spaceId: SpaceId; nodeId: FolderId | PageId },
+    destination: { spaceId: SpaceId; parentId: FolderId | null },
+  ) => copies.makeCopy(ctx, await copies.previewCopy(ctx, { kind: 'move', source, destination }));
+
+  it('open the new place for those who can open it, through later moves, until it is gone', async () => {
+    const w = await world();
+    const made = await move(
+      w.alice.ctx,
+      { spaceId: w.lib, nodeId: w.notes },
+      {
+        spaceId: w.board,
+        parentId: w.pinned,
+      },
+    );
+    const plan = PageIdSchema.parse(made.copies.get(w.plan));
+    const budget = PageIdSchema.parse(made.copies.get(w.budget));
+    expect(await moved.movedTo(w.alice.ctx, { spaceId: w.lib, nodeId: w.notes })).toEqual({
+      kind: 'folder',
+      spaceId: w.board,
+      nodeId: made.nodeId,
+    });
+    expect(await moved.movedTo(w.alice.ctx, { spaceId: w.lib, nodeId: w.plan })).toEqual({
+      kind: 'page',
+      spaceId: w.board,
+      nodeId: plan,
+    });
+    // Carol reads Pinned: published Plan, but not Budget, never published.
+    // Bob edited Notes in the library, but has nothing in Pinned.
+    expect((await moved.movedTo(w.carol.ctx, { spaceId: w.lib, nodeId: w.plan }))?.nodeId).toBe(
+      plan,
+    );
+    expect(await moved.movedTo(w.carol.ctx, { spaceId: w.lib, nodeId: w.budget })).toBeNull();
+    expect(await moved.movedTo(w.bob.ctx, { spaceId: w.lib, nodeId: w.plan })).toBeNull();
+    // Only an old address in its own space, and a copy leaves none.
+    expect(await moved.movedTo(w.alice.ctx, { spaceId: w.board, nodeId: w.plan })).toBeNull();
+    const copied = await copies.makeCopy(
+      w.alice.ctx,
+      await copies.previewCopy(w.alice.ctx, {
+        kind: 'copy',
+        source: { spaceId: w.board, nodeId: budget },
+        destination: { spaceId: w.lib, parentId: null },
+      }),
+    );
+    expect(copied.nodeId).not.toBe(budget);
+    expect(await moved.movedTo(w.alice.ctx, { spaceId: w.board, nodeId: budget })).toBeNull();
+
+    // Moved on again, every old address follows it.
+    const again = await move(
+      w.alice.ctx,
+      { spaceId: w.board, nodeId: plan },
+      {
+        spaceId: w.lib,
+        parentId: null,
+      },
+    );
+    for (const old of [
+      { spaceId: w.lib, nodeId: w.plan },
+      { spaceId: w.board, nodeId: plan },
+    ]) {
+      expect((await moved.movedTo(w.alice.ctx, old))?.nodeId).toBe(again.nodeId);
+    }
+
+    // In the trash it opens from nowhere; deleted for good, its records go.
+    await pages.deleteNode(w.alice.ctx, { spaceId: w.lib, nodeId: again.nodeId });
+    expect(await moved.movedTo(w.alice.ctx, { spaceId: w.lib, nodeId: w.plan })).toBeNull();
+    await trashOperations.emptyTrash(w.alice.ctx, w.lib);
+    const recorded = (ids: string[]) =>
+      t.db.select().from(schema.movedNodes).where(inArray(schema.movedNodes.oldId, ids));
+    expect(await recorded([w.plan, plan])).toEqual([]);
+    // Deleting the space it moved to takes the rest.
+    expect(await recorded([w.notes, w.budget])).toHaveLength(2);
+    const [board] = await t.db
+      .select({ permissionVersion: schema.spaces.permissionVersion })
+      .from(schema.spaces)
+      .where(eq(schema.spaces.id, w.board));
+    await spaceOperations.deleteSpace(w.alice.ctx, {
+      spaceId: w.board,
+      permissionVersion: board?.permissionVersion ?? 1,
+    });
+    expect(await recorded([w.notes, w.budget])).toEqual([]);
+  });
+
+  it('keeps the entry of a wikilink left behind through a save and a publish', async () => {
+    const w = await world();
+    const markdown = 'Back to [[Plan]], and [[Elsewhere]].';
+    const linking = await pages.createPage(w.alice.ctx, {
+      spaceId: w.lib,
+      parentId: null,
+      title: 'Linking',
+      markdown,
+    });
+    const page = ref(w.lib, linking);
+    await move(
+      w.alice.ctx,
+      { spaceId: w.lib, nodeId: w.notes },
+      {
+        spaceId: w.board,
+        parentId: w.pinned,
+      },
+    );
+    await pages.editDraft(w.alice.ctx, page, { markdown });
+    await pages.publishPage(w.alice.ctx, page);
+    const { heads, payload } = await current(w.alice.ctx, page);
+    if (!heads.publishedHead) throw new Error('expected a publication');
+    const { opened } = await pages.openRevisionOf(
+      w.alice.ctx,
+      page,
+      'published',
+      heads.publishedHead,
+    );
+    if (opened.kind !== 'current') throw new Error('expected a current payload');
+    // Plan's entry names its old ID, which opens it where it is now.
+    for (const version of [payload, opened.payload]) {
+      expect(version.markdown).toBe(markdown);
+      expect(new Set(linkTableOf(version).values())).toEqual(new Set([w.plan, w.elsewhere]));
+    }
   });
 });

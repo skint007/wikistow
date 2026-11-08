@@ -16,7 +16,7 @@ import { NOT_KEPT_HINT, wikilinkView, type WikilinkView } from './wikilink-model
 export function WikilinkReader({ node }: { node: WikilinkNode }) {
   const body = use(PageBody);
   if (!body) throw new Error('unreachable: a page body provides it');
-  const { attachments, pages, links, editing, notKept } = body;
+  const { attachments, pages, links, editing, notKept, moved } = body;
   const view = wikilinkView(node, {
     pages,
     links,
@@ -24,6 +24,7 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
     attachments: attachments.attachments,
     editor: editing !== null,
     notKept,
+    moved,
   });
   // In a link's text, a link to a page or a file, or one to create a page,
   // is part of that link (`InLink`), not a control of its own inside it.
@@ -82,14 +83,15 @@ export function WikilinkReader({ node }: { node: WikilinkNode }) {
 /** A wikilink to a page of this wiki. */
 function PageLink({
   spaceId,
-  view: { pageId, hash, text, name },
+  view,
 }: {
   spaceId: SpaceId;
   view: Extract<WikilinkView, { kind: 'page' }>;
 }) {
+  const { pageId, hash, text, name } = view;
   const to = {
     to: '/s/$spaceId/p/$pageId',
-    params: { spaceId, pageId: PageId.parse(pageId) },
+    params: { spaceId: view.spaceId ?? spaceId, pageId: PageId.parse(pageId) },
     ...(hash ? { hash } : {}),
   } as const;
   return (

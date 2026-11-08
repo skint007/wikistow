@@ -86,3 +86,27 @@ export const copyNodes = pgTable(
   },
   (table) => [index('copy_nodes_copy_idx').on(table.copyId)],
 );
+
+/**
+ * Where each node a move took into another space went (protocol section
+ * 10, "Old addresses"): its old ID and space, and the node that copies it
+ * now. Written in the move's finish, so an old address, or a link from a
+ * page left behind, opens the new place for anyone who can open it. A move
+ * of the new node points its records on at the node it moves to, so a
+ * chain of moves is one step. The records last as long as the new node:
+ * deleting it for good, or its space, removes them (`forgetMoves`). No
+ * foreign key does, as its trigger would slow every large delete.
+ */
+export const movedNodes = pgTable(
+  'moved_nodes',
+  {
+    /** Node IDs are unique across the installation, so the old ID names one. */
+    oldId: text().primaryKey(),
+    /** No foreign key: the old space may be deleted, and the record kept. */
+    oldSpaceId: text().notNull(),
+    newSpaceId: text().notNull(),
+    newId: text().notNull(),
+    movedAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [index('moved_nodes_new_idx').on(table.newSpaceId, table.newId)],
+);

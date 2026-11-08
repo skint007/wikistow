@@ -64,7 +64,7 @@ Every new node takes the region of its parent's name record (section 6.1), as an
 
 - **Between pages that move or copy together**, a link keeps working. The app rewrites each `wikistow.links` entry that names a page of the same copy to that page's new ID, and each Markdown link to the address of a page or folder of the same copy (`/s/<space>/p/<page>`, `/s/<space>/f/<folder>`) to its new address. In a published version, the page counts as published only when its own published version comes along.
 - **To any other page**, an entry stays only where the writer can check it at the destination (section 5.5); a copy never carries forward entries it can't check, even within one share. An entry for a page of another space never survives: those links resolve by title in the destination, or show as unresolved. Property references (ADR 0006) follow their links. Apart from address links, a copy's text is the source's as it was: no link is renamed on the way.
-- **Into a moved page or folder**, wikilinks and address links from pages left in the source space stop working. The preview lists the linking pages the person can open.
+- **Into a moved page or folder**, wikilinks and address links from pages left in the source space open its new place for people who can open it there (decision 9). The preview lists the linking pages the person can open.
 
 ### 6. The preview
 
@@ -103,14 +103,22 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 - **The live tree** reports the finish in both spaces.
 - **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only.
 
+### 9. Old addresses (#332, built)
+
+A move gives every node a new ID, so the finish records, in its transaction, where each node went: its old ID and space, and its new node and space. When a move takes a node that an earlier move brought, the records naming it as their new place point on at its new node, so a chain of moves is one step. A copy leaves no record: its source is still there.
+
+- **Opening an old address** (`/s/<space>/p/<page>` or `/s/<space>/f/<folder>`) opens the new place, saying "This page moved to <space>." It does so only for people who can open it there. Anyone else gets the answer a page that doesn't exist gets, so the record shows nothing about where it went. The server sees node and space IDs already, so the record adds no plaintext.
+- **Links from pages left behind** open the new place too. A wikilink whose table entry names a moved page does so through the entry's old ID, while no page there has its title, which wins as it does for any entry. Address links reach it through the old address. The link's text and entry stay as they are: a table names only pages of its own space, and an address link in a page body opens apart, in a new tab, so writing the link as one would make it worse. A publication of the linking page keeps the entry where the publisher can open the moved page.
+- **Records last as long as the new node does.** Deleting it for good, or its space, takes them along. While it is in the trash, its old addresses open nothing.
+
 ### Out of scope
 
-Earlier history; moving a whole space (#339); keeping a page's ID or address across a move; redirecting an old address to the new place (#332); and copying a page's publications or public link (#340).
+Earlier history; moving a whole space (#339); keeping a page's ID across a move (old addresses are built: decision 9, #332); and copying a page's publications or public link (#340).
 
 ## Considered options
 
 - **Seal all of history again as the mover.** It keeps the versions, but shows the mover as their author and is slow on large pages. Rejected (decision 1).
-- **Keep the page IDs.** Links and addresses would survive, but attachments can only be uploaded to a node that exists, and the source holds the ID until the finish. It would need staged blobs without a page. Rejected for the link rewrite in decision 5.
+- **Keep the page IDs.** Links and addresses would survive, but attachments can only be uploaded to a node that exists, and the source holds the ID until the finish. It would need staged blobs without a page. Rejected for the link rewrite in decision 5. The record of decision 9 now keeps old addresses working without it.
 - **Carry provenance inside the page**, like `wikistow.publication`. Nobody can check it once the source is gone, and every later save would carry it. The audit log records the move instead.
 - **One request**, as section 10 sends. Simpler, but a folder of any size would hit the body limit. Rejected for decision 7's three steps.
 
@@ -118,6 +126,7 @@ Earlier history; moving a whole space (#339); keeping a page's ID or address acr
 
 - `wikistow.md` changes in Sharing (the cross-space move rule) and the capability table (copy). Protocol section 10 gains **Copies, and moves between spaces** in place of its last bullet; A10, sections 5.5, 9.5, 9.6 and 13 mention copies. `CONTEXT.md` gains **Copy**.
 - The server gains a `copies` table, a hidden state for nodes, three routes and a cancel, a sweep, and changes to the tree reads and coverage checks so hidden nodes stay out.
+- For old addresses (decision 9), the server gains a `moved_nodes` table, written at a move's finish, and `GET /api/spaces/:spaceId/nodes/:nodeId/moved`.
 - The client gains a copy operation built from the publication sealing and the move preview.
 - Readers in the destination see new pages appear in one step. Readers at the source of a move see them go in the same step.
 - An app that fails part-way leaves a hidden copy until the sweep. Nobody sees it.
