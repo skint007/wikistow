@@ -12,6 +12,9 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - The icon picker's **Image** tab has an **In this space** row of the images already used in the space, its folders and its pages, each once. Picking one copies it, so the same picture can go on several folders or pages without uploading it again. (#360)
+#### App
+
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#362)
 
 #### Releases and packaging
 
