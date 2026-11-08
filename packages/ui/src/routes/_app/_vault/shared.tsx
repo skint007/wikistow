@@ -72,8 +72,8 @@ function SharedWithMe() {
 
 /**
  * A shared space's tile as the rail draws it, or a shared folder's as the
- * sidebar does. One this app can't read, or with no look of its own, shows
- * a library or folder on blue.
+ * sidebar does. One this app can't read, or a space with no emoji, icon or
+ * image, shows a library or folder on blue.
  */
 function SharedTile({
   root,
@@ -83,15 +83,17 @@ function SharedTile({
   space: boolean;
 }) {
   const opened = root?.opened.kind === 'current' ? root.opened.metadata : null;
-  const picture = opened && (opened.emoji ?? folderSymbolOf(opened) ?? folderIconOf(opened));
-  if (opened && space && picture) {
+  if (opened && space && (opened.emoji ?? folderSymbolOf(opened) ?? folderIconOf(opened))) {
     return (
-      <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-tile bg-muted text-xl leading-none text-foreground">
+      <span
+        aria-hidden
+        className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-tile bg-muted text-xl leading-none text-foreground"
+      >
         <SpaceIcon metadata={root} name={opened.name} />
       </span>
     );
   }
-  if (opened && !space && (picture || opened.tint)) {
+  if (opened && !space) {
     return <FolderTile metadata={root} {...folderLook(opened)} className="size-10 text-xl" />;
   }
   const Icon = space ? Library : Folder;
