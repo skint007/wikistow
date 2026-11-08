@@ -250,7 +250,8 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
         const next = { access: upload.manifest.access, level: trustLevel(upload.manifest) };
         if (asksMore(plugin.approved, next))
           return candidate({ upload, folder: name, handle }, plugin);
-        if (upload.hash !== plugin.hash) await send(upload);
+        // Sent even unchanged, so the server keeps it another week.
+        await send(upload);
         change(id, { manifest: upload.manifest, hash: upload.hash, folder: name, handle });
         return null;
       },

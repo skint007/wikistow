@@ -59,7 +59,7 @@ A script's command or event handler gets 10 seconds, as does its `defineScript` 
 
 ## Settings
 
-A plugin keeps the person's choices for it (a width, a default folder, an on/off) as its **settings**: one JSON object per plugin and account, at most 16 KB (`SETTINGS_LIMIT`). They are kept with the person's plugin approvals, encrypted in their account's record, so they follow the person to every device and the server can't read them; a folder or development install on the desktop keeps them on that computer, per account, as it keeps its page access. The last write wins, with no history.
+A plugin keeps the person's choices for it (a width, a default folder, an on/off) as its **settings**: one JSON object per plugin and account, at most 16 KB (`SETTINGS_LIMIT`). They are kept with the person's plugin approvals, encrypted in their account's record, so they follow the person to every device and the server can't read them; a folder or development install on the desktop keeps them on that computer, per account, as it keeps its page access, and a development folder in a browser keeps them in that tab only, until it closes or reloads. The last write wins, with no history.
 
 - `get()` gives them, each declared field (below) holding its `default` while it has no value, or while its value no longer fits the field.
 - `set(settings)` replaces them, and `update(patch)` sets the top-level keys `patch` names, keeping the rest, and gives `get()`'s answer after. A value that isn't JSON, or doesn't fit its declared field, fails with `invalid`, and past 16 KB with `too-large`. They count toward the plugin's 30 writes a minute.
