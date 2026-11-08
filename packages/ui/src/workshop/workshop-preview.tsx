@@ -11,6 +11,7 @@ import {
 import { ApiError } from '@wikistow/client/api';
 import { pluginDraftRoutes, type pluginRoutes, type WorkshopVersion } from '@wikistow/contracts';
 import { PluginError, type AppViewProps } from '@wikistow/plugin-sdk';
+import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -840,7 +841,7 @@ function Files({ workshop }: { workshop: Workshop }) {
     }
     try {
       // Built and previewed at once, as on opening, so Publish carries what was added.
-      if (added) await workshop.buildAndPreview();
+      if (added && workshop.state().files.has(MANIFEST_FILE)) await workshop.buildAndPreview();
     } catch (error) {
       setProblem(message(error));
     } finally {
