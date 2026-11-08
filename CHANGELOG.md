@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- A link in a folder table or a query block to a page moved to another space opens it there, as the linking page's own link does. (#PR)
+- A link in a folder table or a query block to a page moved to another space opens it there, as the linking page's own link does. A query block's links also follow a renamed page now. (#PR)
 
 #### Releases and packaging
 
