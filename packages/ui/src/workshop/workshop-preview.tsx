@@ -40,7 +40,7 @@ import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
 import { SAMPLE_SPACE, type Sample } from './samples';
-import type { Workshop } from './workshop';
+import { OLD_SERVER, type Workshop } from './workshop';
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
@@ -837,7 +837,8 @@ function Files({ workshop }: { workshop: Workshop }) {
         added = true;
       }
     } catch (error) {
-      setProblem(message(error));
+      // Only a server from before fonts and images in drafts has no route for them.
+      setProblem(error instanceof ApiError && error.status === 404 ? OLD_SERVER : message(error));
     }
     try {
       // Built and previewed at once, as on opening, so Publish carries what was added.

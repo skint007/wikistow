@@ -1,4 +1,5 @@
 import { toBase64 } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,6 +23,7 @@ import { api } from '../api';
 import { errorMessage } from '../errors';
 import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
 import { WorkshopChat } from './workshop-chat';
+import { OLD_SERVER } from './workshop';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
 
@@ -73,7 +75,9 @@ export function useNewDraft(): {
       openWorkshop(draft.id);
       return true;
     } catch (failure) {
-      setError(errorMessage(failure));
+      // A server from before fonts and images in drafts refuses `binary` as a field it doesn't know.
+      const old = failure instanceof ApiError && failure.code === 'invalid-request' && from.binary;
+      setError(old ? OLD_SERVER : errorMessage(failure));
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
