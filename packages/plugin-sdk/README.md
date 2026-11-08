@@ -75,7 +75,7 @@ A manifest can declare settings the app draws itself, in the plugin's row on the
 | `boolean` | A switch, saved at once | `true` or `false` |
 | `choice` | A menu of `options: [{ value, label }]`, saved at once | One option's `value` |
 
-A section of the plugin's own (`settings.section`) gets `{ settings }`, the same object as `host.settings`, for anything a declared field can't hold. For every enabled plugin with settings, declared or a section, the page toolbar's Plugins menu has ***Plugin* settings…**, which opens them as `navigate({ kind: 'settings' })` does. `reading-room` declares its column's width and the reading speed, and links to its settings from its page.
+A section of the plugin's own (`settings.section`) gets `{ settings }`, the same object as `host.settings`, for anything a declared field can't hold. For every enabled plugin with settings, declared or a section, the page toolbar's Plugins menu, and the command palette anywhere, have ***Plugin* settings…**, which opens them as `navigate({ kind: 'settings' })` does. `reading-room` declares its column's width and the reading speed, and links to its settings from its page.
 
 ## Themes
 
