@@ -4,6 +4,7 @@
 import {
   moveOperations as moves,
   pageOperations as pages,
+  PageId as PageIdSchema,
   publicLinkOperations as links,
   reviseCover,
   sharingOperations as sharing,
@@ -19,6 +20,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
 import { personWithVault } from './support/content.ts';
+import { copyAll } from './support/copies.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { invite, shareFolder, type Person } from './support/sharing.ts';
 import { snapshot } from './support/snapshot.ts';
@@ -325,6 +327,31 @@ describe('a page with a public link', () => {
         }),
     ],
     ['suspending its sharer', (w) => suspend(w.sharer)],
+    // Its mover can't publish there, so the page arrives with its draft alone.
+    [
+      'moving it into another space where its mover can’t publish',
+      async (w) => {
+        const theirs = await spaceOperations.createSpace(w.uploader.ctx, { name: 'Theirs' });
+        const folder = await spaceOperations.createFolder(w.uploader.ctx, {
+          spaceId: theirs,
+          parentId: null,
+          name: 'Drafts',
+        });
+        await shareFolder(w.uploader.ctx, {
+          spaceId: theirs,
+          rootId: folder,
+          people: [await invite(w.uploader, w.owner, 'editor')],
+        });
+        await copyAll(w.owner.ctx, {
+          kind: 'move',
+          from: w.page.spaceId,
+          nodeId: w.page.pageId,
+          to: theirs,
+          parentId: folder,
+          published: false,
+        });
+      },
+    ],
   ];
 
   for (const [ending, end] of endings) {
@@ -405,6 +432,48 @@ describe('a page with a public link', () => {
     expect(await copies).toEqual([]);
     // The owner's link on the target stays.
     expect((await visit(`/p/${w.targetLink}`)).status).toBe(200);
+  });
+
+  it('keeps its link when moved into another space where its mover can publish, and nothing of its copy', async () => {
+    const w = await world();
+    const elsewhere = await spaceOperations.createSpace(w.owner.ctx, { name: 'Elsewhere' });
+    const move = await copyAll(w.owner.ctx, {
+      kind: 'move',
+      from: w.page.spaceId,
+      nodeId: w.folderId,
+      to: elsewhere,
+      parentId: null,
+    });
+    const moved = { spaceId: elsewhere, pageId: PageIdSchema.parse(move.newIdOf(w.page.pageId)) };
+    // Its id stays, now the mover's, on the new page; its copy, made from the old page, is gone.
+    const [link] = await t.db
+      .select()
+      .from(schema.publicLinks)
+      .where(eq(schema.publicLinks.id, w.id));
+    expect(link).toMatchObject({ pageId: moved.pageId, sharedBy: w.owner.id });
+    expect(await readable(...copied(w.m))).toEqual(noneCopied(w.m));
+    const res = await visit(`/p/${w.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('This page is being updated');
+    // The target's copy still leads to it.
+    expect(await rowsNaming(moved.pageId)).toHaveLength(1);
+    expect(await (await visit(`/p/${w.targetLink}`)).text()).toContain(
+      `<a href="/p/${w.id}">the notes</a>`,
+    );
+    expect(
+      await t.db
+        .select()
+        .from(schema.auditEvents)
+        .where(
+          and(
+            eq(schema.auditEvents.action, 'node.public-link-moved'),
+            eq(schema.auditEvents.targetId, w.page.pageId),
+          ),
+        ),
+    ).toHaveLength(1);
+    // Updated from the version that arrived published, it shows again.
+    await links.shareCopy(w.owner.ctx, moved);
+    expect(await (await visit(`/p/${w.id}`)).text()).toContain(w.m.title);
   });
 
   it('leaves nothing of its copy once a new version is published, and keeps its link', async () => {

@@ -26,6 +26,7 @@ import type { BlobStore } from '../blobs/store.ts';
 import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
+import { moveLinks } from '../public-links/endings.ts';
 import {
   copies,
   copyNodes,
@@ -816,6 +817,27 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
       destinationSpaceId: copy.destinationSpaceId,
       moved: made,
     });
+    // Public links of pages arriving published, where the mover can
+    // publish them, go with them; the delete ends the rest.
+    const carried = who.canPublish
+      ? await moveLinks(tx, {
+          sharedBy: caller.accountId,
+          moved: made.filter((node) => node.publishedFrom !== null),
+        })
+      : [];
+    for (const link of carried) {
+      await audit(tx, {
+        actor: caller.accountId,
+        action: 'node.public-link-moved',
+        target: { kind: 'node', id: link.pageId },
+        details: {
+          spaceId: copy.sourceSpaceId,
+          toSpaceId: copy.destinationSpaceId,
+          nodeId: link.nodeId,
+          sharedBy: link.sharedBy,
+        },
+      });
+    }
     const lifted = await liftTrash(tx, copy, held);
     const going =
       lifted.length === 0

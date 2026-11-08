@@ -101,6 +101,15 @@ const DETAILS = {
     sharedBy: z.string(),
     reason: z.enum(['turned-off', 'unpublished', 'lost-publish-rights']),
   }),
+  // A link a move into another space carried over to the new page
+  // (`nodeId`): the actor moved it, and became who turned it on in place
+  // of `sharedBy`.
+  'node.public-link-moved': z.strictObject({
+    spaceId: z.string(),
+    toSpaceId: z.string(),
+    nodeId: z.string(),
+    sharedBy: z.string(),
+  }),
   'space.owner-added': z.strictObject({ identityId: z.string(), keyVersion: z.number().int() }),
   'space.owner-removed': z.strictObject({ identityId: z.string(), shares: z.number().int() }),
   // How much went with it, never what.
