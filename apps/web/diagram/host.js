@@ -10,7 +10,7 @@
 //   { type: 'render', id, source, look }: draw `source` in the theme's
 //     colours, `look` ({ dark, variables }: Mermaid's theme variables as
 //     plain colours), or in Mermaid's own light theme if `look` is null.
-// To the app (window messages): { type: 'ready' } once loaded, then for
+// To the app (window messages): { type: 'ready' } once loaded with Mermaid, then for
 //   each render { type: 'rendered', id, svg } or { type: 'failed', id, error }.
 (function () {
   var queue = Promise.resolve();
@@ -94,5 +94,7 @@
     });
   });
 
-  parent.postMessage({ type: 'ready' }, '*');
+  // Without Mermaid (its script failed, as offline when the browser hasn't
+  // kept it), the app hears nothing and fails the frame once it has loaded.
+  if (typeof mermaid !== 'undefined') parent.postMessage({ type: 'ready' }, '*');
 })();

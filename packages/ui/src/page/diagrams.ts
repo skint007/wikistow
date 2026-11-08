@@ -151,9 +151,9 @@ class DiagramFrame {
     this.#iframe.tabIndex = -1;
     this.#iframe.className = 'invisible fixed top-0 -left-[10000px] h-[1000px] w-[1000px]';
     this.#iframe.src = __DIAGRAM_HOST__;
-    // Loaded without saying it's ready, the frame got an error page: the
-    // server's, or offline the browser's, when it hasn't kept the frame's
-    // files (#333). Fail at once, rather than wait out a slow line.
+    // Loaded without saying it's ready, the frame got an error page or no
+    // Mermaid: the server's error, or offline, files the browser hasn't
+    // kept (#333). Fail at once, rather than wait out a slow line.
     this.#iframe.addEventListener('load', () => {
       if (this.#ready) return;
       clearTimeout(this.#timer);
