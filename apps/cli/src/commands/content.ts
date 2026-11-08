@@ -1,6 +1,7 @@
 // `wikistow spaces list`, `tree` and `page …`: what an agent reads and writes.
 import {
   ApiError,
+  changeLabel,
   checkPayloadSize,
   withoutLinkTable,
   CryptoError,
@@ -1273,30 +1274,44 @@ function writeNewFile(path: string, bytes: Uint8Array): void {
   }
 }
 
-/** `page history`: published versions, newest first, and who published each. */
+/**
+ * `page history`: published versions, newest first, who published each,
+ * and what a version made by changes while reading changed (ADR 0008),
+ * from every version opened in one batch, as the app's history opens them.
+ */
 export async function pageHistory(
   io: Io,
   out: Printer,
   args: ContentArgs & { pageId: PageId },
   deps: Deps,
 ) {
-  const versions = await withAgent(io, out, args, deps, async ({ ctx }) => {
+  const listed = await withAgent(io, out, args, deps, async ({ ctx }) => {
     const { page } = await pageRef(ctx, args.pageId);
-    return pages.loadHistory(ctx, page);
+    const versions = await pages.loadHistory(ctx, page);
+    const changes = await pages.versionChanges(
+      ctx,
+      page,
+      versions.map((v) => v.revisionId),
+    );
+    return versions.map(({ revisionId, publishedSeq, publishedAt, basedOn, publisher }) => ({
+      revisionId,
+      publishedSeq,
+      publishedAt,
+      basedOn,
+      publisher,
+      change: changes.get(revisionId) ?? null,
+    }));
   });
-  const listed = versions.map(({ revisionId, publishedSeq, publishedAt, basedOn, publisher }) => ({
-    revisionId,
-    publishedSeq,
-    publishedAt,
-    basedOn,
-    publisher,
-  }));
   out.result({ pageId: args.pageId, versions: listed }, () => {
     for (const v of listed) {
       const by = v.publisher.agentName
         ? `${out.foreign(v.publisher.agentName)} (for ${out.foreign(v.publisher.name ?? 'someone')})`
         : out.foreign(v.publisher.name ?? v.publisher.identityId);
-      out.line(`v${v.publishedSeq}  ${v.revisionId}  ${out.foreign(v.publishedAt)}  ${by}`);
+      // A property's key is the page's text.
+      const change = v.change ? `  ${out.foreign(changeLabel(v.change))}` : '';
+      out.line(
+        `v${v.publishedSeq}  ${v.revisionId}  ${out.foreign(v.publishedAt)}  ${by}${change}`,
+      );
     }
   });
 }

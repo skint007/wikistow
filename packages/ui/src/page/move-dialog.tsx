@@ -25,13 +25,15 @@ import { Picker } from '@/components/ui/picker';
 import { runCommand } from '../commands/command';
 import { moveNode } from '../commands/page-commands';
 import { requirementsHere } from '../commands/ui-commands';
+import { pageWriter } from '../data/offline-changes';
 import { refreshAccess, sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
-import { useAvailability } from '../shell/availability';
+import { errorMessage } from '../errors';
+import { SAVED_HERE, useAvailability, type MoveAvailability } from '../shell/availability';
 import { THIS_DEVICE } from '../settings/rows';
 import { PreviewTree } from '../sharing/first-share';
 import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
-import { useOwnerStanding } from '../sharing/owner-standing';
+import { movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
 import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
@@ -41,6 +43,7 @@ import { moveMessage } from './messages';
 import {
   copyDestinations,
   copySpaces,
+  crossesShare,
   moveDestinations,
   type Destination,
   type MoveTree,
@@ -93,6 +96,38 @@ export function destinationsIn(
 }
 
 /**
+ * How moving `moving`, in `tree`, its space's, under `parentId` goes now:
+ * on the server, or on this device while offline or after a change waiting
+ * here, or not now (`moveAvailability`).
+ */
+export function moveRoute(
+  tree: Tree,
+  moving: Pick<Moving, 'id'>,
+  parentId: FolderId | null,
+  availability: Pick<ReturnType<typeof useAvailability>, 'move'>,
+): MoveAvailability {
+  const node =
+    tree.folders.find((f) => f.id === moving.id) ?? tree.pages.find((p) => p.id === moving.id);
+  const across = !node || crossesShare(moveTreeOf(tree), node, parentId);
+  return availability.move(moving.id, parentId, { across });
+}
+
+/** Move it on this device, sent once the server answers (#331). */
+const moveOnDevice = (
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  moving: Moving,
+  parentId: FolderId | null,
+) =>
+  pageWriter(ctx).moveNode({
+    spaceId,
+    nodeId: moving.id,
+    node: moving.kind,
+    name: moving.name,
+    parentId,
+  });
+
+/**
  * Move or copy a page or folder: choose a space, then where in it it goes.
  * A move within its own space is the ordinary move (protocol section 10):
  * look over who gains and who loses access when that crosses a shared
@@ -140,8 +175,18 @@ export function MoveDialog({
 export function useStartMove(spaceId: SpaceId, open: (moving: Moving) => void) {
   const ctx = useClient();
   const queryClient = useQueryClient();
+  const availability = useAvailability();
   return async (moving: Moving & { to: Destination<FolderId> }) => {
     if (askBeforeMoves.get()) return open(moving);
+    const tree = queryClient.getQueryData(treeQuery(ctx, spaceId).queryKey);
+    if (tree && moveRoute(tree, moving, moving.to.parentId, availability).route === 'device') {
+      try {
+        await moveOnDevice(ctx, spaceId, moving, moving.to.parentId);
+      } catch (caught) {
+        open({ ...moving, stopped: { error: errorMessage(caught) } });
+      }
+      return;
+    }
     try {
       const preview = await moveOperations.previewMove(ctx, {
         spaceId,
@@ -191,6 +236,7 @@ function MoveSteps({
   moving: Moving;
   onDone: () => void;
 }) {
+  const ctx = useClient();
   const [action, setAction] = useState(moving.action ?? 'move');
   // A drop stays in its own space, which ConfirmMove names itself.
   const [chosen, setChosen] = useState<Chosen | null>(
@@ -203,6 +249,13 @@ function MoveSteps({
     setDropped({});
     setConfirming(false);
   };
+  // Offline, or after a change waiting here, a move within one share waits on this device.
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const availability = useAvailability();
+  const onDevice =
+    chosen !== null &&
+    tree !== undefined &&
+    moveRoute(tree, moving, chosen.place.parentId, availability).route === 'device';
   return (
     <div className="grid gap-4">
       <DialogHeader>
@@ -212,7 +265,16 @@ function MoveSteps({
         <DialogDescription>{DESCRIPTION[action][moving.kind]}</DialogDescription>
       </DialogHeader>
       {chosen && confirming ? (
-        action === 'move' && chosen.spaceId === spaceId ? (
+        action === 'move' && chosen.spaceId === spaceId && onDevice ? (
+          <ConfirmOnDevice
+            spaceId={spaceId}
+            moving={moving}
+            destination={chosen.place}
+            error={typeof dropped.stopped === 'object' ? dropped.stopped.error : null}
+            onBack={back}
+            onDone={onDone}
+          />
+        ) : action === 'move' && chosen.spaceId === spaceId ? (
           <ConfirmMove
             spaceId={spaceId}
             moving={moving}
@@ -255,9 +317,10 @@ const FOLDER_GONE = 'The folder you picked is no longer available. Choose again.
  * A space, its own first, then where in it: for a move within its own
  * space, where `moveDestinations` allows, from the tree as it is now;
  * otherwise anywhere the person can make pages, but not inside what is
- * copied. Never into a folder made offline that isn't sent yet. Only an
- * owner of the space moves it into another (ADR 0007, decision 2): anyone
- * else is told so, and offered a copy.
+ * copied. A copy never goes into a folder made offline that isn't sent yet.
+ * Only an owner of the space moves it into another (ADR 0007, decision 2):
+ * anyone else is told so, and offered a copy. Offline, or after a change
+ * waiting here, a move stays in its space and its share (`moveRoute`).
  */
 function ChooseDestination({
   spaceId,
@@ -285,7 +348,9 @@ function ChooseDestination({
   const spacesLoad = useQuery(spacesQuery(ctx));
   const sharedLoad = useQuery(sharedWithMeQuery(ctx));
   const standing = useOwnerStanding(spaceId);
-  const known = !spacesLoad.isPending && standing !== 'checking';
+  const availability = useAvailability();
+  const known = !spacesLoad.isPending && (standing !== 'checking' || availability.offline);
+  const owner = movesAsOwner(standing, availability.offline);
   // Without them, this space alone, by its tree (named by its shared folders if they hold only those).
   const spaces =
     spacesLoad.data ??
@@ -313,8 +378,10 @@ function ChooseDestination({
         : null,
     [spaces, shared, spaceId],
   );
+  // A move waiting on this device stays in this space (#331).
+  const local = availability.offline || availability.waiting(moving.id) !== 'none';
   const movesAcross = source?.space?.role === 'owner';
-  const offered = action === 'move' && !movesAcross ? choices?.slice(0, 1) : choices;
+  const offered = action === 'move' && (!movesAcross || local) ? choices?.slice(0, 1) : choices;
   const [toSpace, setToSpace] = useState<SpaceId>(chosen?.spaceId ?? spaceId);
   const space = offered?.find((c) => c.spaceId === toSpace);
   const treeLoad = useQuery({ ...treeQuery(ctx, toSpace), enabled: space !== undefined });
@@ -322,17 +389,21 @@ function ChooseDestination({
   const within = action === 'move' && toSpace === spaceId;
   const allowed = useMemo(() => {
     if (!tree) return null;
-    if (within) return known ? destinationsIn(tree, moving, standing === 'owner') : null;
+    if (within) return known ? destinationsIn(tree, moving, owner) : null;
     // A copy in its own space goes anywhere but inside itself.
     const inside =
       toSpace === spaceId && moving.kind === 'folder'
         ? foldersUnder(tree.folders, moving.id)
         : new Set<string>();
     return copyDestinations(moveTreeOf(tree), inside);
-  }, [tree, within, known, moving, standing, toSpace, spaceId]);
-  // Not a folder made offline until it is sent: the server doesn't have it.
-  const availability = useAvailability();
-  const places = allowed?.filter((d) => availability.of(d.parentId).can('into')) ?? null;
+  }, [tree, within, known, moving, owner, toSpace, spaceId]);
+  // A copy goes into no folder made offline until it is sent: the server doesn't have it.
+  const places =
+    allowed?.filter((d) =>
+      within && tree
+        ? moveRoute(tree, moving, d.parentId, availability).route !== null
+        : availability.of(d.parentId).can('into'),
+    ) ?? null;
   // The place picked, by its folder; until the person picks, the first.
   // If a refetch no longer offers it, nothing is picked until they pick again.
   const [picked, setPicked] = useState<FolderId | null | undefined>(chosen?.place.parentId);
@@ -384,7 +455,7 @@ function ChooseDestination({
         <ErrorLine error={space ? null : SPACE_GONE} />
         {/* This space is offered without them, for a move or copy within it. */}
         <LoadFailed what="your other spaces" queries={[spacesLoad]} />
-        {action === 'move' && source && !movesAcross && choices && choices.length > 1 && (
+        {action === 'move' && source && !movesAcross && !local && choices && choices.length > 1 && (
           <p className="text-sm text-muted-foreground">
             Only an owner of this space can move things into another space. You can copy it there
             instead.{' '}
@@ -414,9 +485,11 @@ function ChooseDestination({
             )
           ) : places.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              {within
-                ? 'There’s nowhere here you can move it. Inside a shared folder, you can move things only within that folder; an owner of the space can move them anywhere.'
-                : 'There’s nowhere here you can make pages. Choose another space.'}
+              {within && availability.offline
+                ? 'Offline, there’s nowhere here you can move it without changing who can read it.'
+                : within
+                  ? 'There’s nowhere here you can move it. Inside a shared folder, you can move things only within that folder; an owner of the space can move them anywhere.'
+                  : 'There’s nowhere here you can make pages. Choose another space.'}
             </p>
           ) : (
             <>
@@ -432,6 +505,11 @@ function ChooseDestination({
                 }}
               />
               <ErrorLine error={place ? null : FOLDER_GONE} />
+              {within && availability.offline && (
+                <p className="text-sm text-muted-foreground">
+                  Offline, it moves only where the same people can read it.
+                </p>
+              )}
             </>
           )}
         </div>
@@ -442,6 +520,106 @@ function ChooseDestination({
         </Button>
       </DialogFooter>
     </form>
+  );
+}
+
+/** Where it goes, which focus goes to after Next, so a screen reader starts with what is being confirmed. */
+function MoveHeading({
+  spaceId,
+  destination,
+}: {
+  spaceId: SpaceId;
+  destination: Destination<FolderId>;
+}) {
+  const ctx = useClient();
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
+  // Named as the picker named it.
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const spaceName = nameOf(tree?.space?.metadata) ?? 'this space';
+  return (
+    <h3 ref={heading} tabIndex={-1} className="text-sm outline-none">
+      To{' '}
+      <strong>
+        {destination.parentId === null ? (
+          <>
+            the top of <Name>{spaceName}</Name>
+          </>
+        ) : (
+          // Each name kept apart, so one holding " › " or right-to-left text reads as one.
+          destination.path.map((folder, i) => (
+            <Fragment key={i}>
+              {i > 0 && ' › '}
+              <Name>{folder}</Name>
+            </Fragment>
+          ))
+        )}
+      </strong>
+      .
+    </h3>
+  );
+}
+
+/**
+ * A move within one share, offline or after a change waiting here: nobody
+ * gains or loses access, and it waits on this device, sent after what was
+ * made before it (#331). The server checks it again then.
+ */
+function ConfirmOnDevice({
+  spaceId,
+  moving,
+  destination,
+  error: earlier,
+  onBack,
+  onDone,
+}: {
+  spaceId: SpaceId;
+  moving: Moving;
+  destination: Destination<FolderId>;
+  /** Why a drop moving without asking stopped. */
+  error: string | null;
+  onBack: () => void;
+  onDone: () => void;
+}) {
+  const ctx = useClient();
+  const { offline } = useAvailability();
+  const { busy, error, run } = useAction((caught) => moveMessage(caught, moving.kind));
+  const asking = useAskBeforeMoves();
+  const [dontAsk, setDontAsk] = useState(false);
+  const move = () =>
+    run(async () => {
+      if (dontAsk) askBeforeMoves.set(false);
+      await moveOnDevice(ctx, spaceId, moving, destination.parentId);
+      onDone();
+    });
+  return (
+    <div className="grid gap-4">
+      <MoveHeading spaceId={spaceId} destination={destination} />
+      <p className="rounded-control bg-muted p-3 text-sm">
+        Nobody gains or loses access: it stays with the same people.{' '}
+        {offline ? SAVED_HERE : 'It’s sent after your change made offline.'}
+      </p>
+      <ErrorLine error={error ?? earlier} />
+      {asking && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={dontAsk}
+            disabled={busy}
+            onChange={(event) => setDontAsk(event.target.checked)}
+          />
+          Don’t ask again on {THIS_DEVICE.toLowerCase()}
+        </label>
+      )}
+      <DialogFooter>
+        <Button variant="ghost" disabled={busy} onClick={onBack}>
+          Back
+        </Button>
+        <Button disabled={busy} onClick={() => void move()}>
+          Move
+        </Button>
+      </DialogFooter>
+    </div>
   );
 }
 
@@ -515,11 +693,6 @@ function ConfirmMove({
     ? shown.folders.filter((f) => nameOf(f.metadata) === null).length +
       shown.pages.filter((p) => p.title === null).length
     : 0;
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
-  // Named as the picker named it.
-  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
-  const spaceName = nameOf(tree?.space?.metadata) ?? 'this space';
 
   const move = (confirmed: moveOperations.MovePreview) => {
     tried.current = true;
@@ -560,26 +733,7 @@ function ConfirmMove({
 
   return (
     <div className="grid gap-4">
-      {/* Where focus goes after Next, so a screen reader starts with what is being confirmed. */}
-      <h3 ref={heading} tabIndex={-1} className="text-sm outline-none">
-        To{' '}
-        <strong>
-          {destination.parentId === null ? (
-            <>
-              the top of <Name>{spaceName}</Name>
-            </>
-          ) : (
-            // Each name kept apart, so one holding " › " or right-to-left text reads as one.
-            destination.path.map((folder, i) => (
-              <Fragment key={i}>
-                {i > 0 && ' › '}
-                <Name>{folder}</Name>
-              </Fragment>
-            ))
-          )}
-        </strong>
-        .
-      </h3>
+      <MoveHeading spaceId={spaceId} destination={destination} />
       {notice && !preview.isError && (
         <p role="status" className="text-sm font-bold">
           {notice}

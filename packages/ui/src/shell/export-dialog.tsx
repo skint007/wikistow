@@ -2,6 +2,7 @@ import { exportOperations, type FolderId, type SpaceId } from '@wikistow/client'
 import { useEffect, useRef, useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,8 @@ export function ExportDialog({
   const [progress, setProgress] = useState<exportOperations.ExportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skipped, setSkipped] = useState<string | null>(null);
+  // Off by default: wikilinks, which Obsidian reads.
+  const [markdownLinks, setMarkdownLinks] = useState(false);
   const running = useRef<AbortController | null>(null);
   const opened = exporting === null ? null : `${exporting.folderId}`;
   useEffect(() => {
@@ -47,6 +50,7 @@ export function ExportDialog({
     setProgress(null);
     setError(null);
     setSkipped(null);
+    setMarkdownLinks(false);
     // Closing the dialog, or leaving the space, stops the export.
     return () => running.current?.abort();
   }, [opened]);
@@ -61,7 +65,12 @@ export function ExportDialog({
     try {
       await runCommand(
         exportMarkdown,
-        { spaceId, folderId: target.folderId, name: target.name },
+        {
+          spaceId,
+          folderId: target.folderId,
+          name: target.name,
+          links: markdownLinks ? 'markdown' : 'wiki',
+        },
         {
           satisfies: requirementsHere(),
           ctx,
@@ -103,6 +112,24 @@ export function ExportDialog({
             draft if you edit it, else the published version.
           </DialogDescription>
         </DialogHeader>
+        <div className="flex items-start gap-3">
+          <div className="grid flex-1 gap-1">
+            <label htmlFor="export-markdown-links" className="text-sm font-bold">
+              Markdown links
+            </label>
+            <p id="export-markdown-links-about" className="text-sm text-muted-foreground">
+              Write links between pages as links to their files, for GitHub and editors that don’t
+              read wikilinks.
+            </p>
+          </div>
+          <Switch
+            id="export-markdown-links"
+            aria-describedby="export-markdown-links-about"
+            checked={markdownLinks}
+            disabled={progress !== null || skipped !== null}
+            onCheckedChange={setMarkdownLinks}
+          />
+        </div>
         <p className="text-sm text-muted-foreground">
           The files aren’t encrypted, so keep them somewhere safe.
         </p>

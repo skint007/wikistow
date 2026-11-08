@@ -2,8 +2,10 @@
 // space, or a folder of it, becomes. Each page is one `.md` file in folders
 // that mirror the tree, its frontmatter and line endings as written, and
 // each attachment is a file in the space's `attachments/` folder. Wikilinks
-// name the files written, so the export opens as an Obsidian vault. This
-// part is pure; `operations/export.ts` opens the pages and attachments.
+// name the files written, so the export opens as an Obsidian vault, or
+// with `links: 'markdown'` become relative Markdown links, for tools that
+// don't read wikilinks. This part is pure; `operations/export.ts` opens the
+// pages and attachments.
 
 import { linkTableOf, resolveLinked } from './link-table.ts';
 import { pageIndex, type LinkablePage, type PageIndex } from './links.ts';
@@ -163,8 +165,18 @@ export type ExportSpace = {
 };
 
 /**
+ * How links between pages are written: as wikilinks naming the files
+ * (`wiki`), or as relative Markdown links to them (`markdown`).
+ */
+export type LinkStyle = 'wiki' | 'markdown';
+
+/** How an export is written. */
+export type ExportOptions = { links?: LinkStyle };
+
+/**
  * A file to write, at a `/`-separated path relative to the export's top. A
- * page whose links couldn't be read (`unread`) is written as it was.
+ * page whose links couldn't be read (`unread`) is written as it was. With
+ * Markdown links, `wikilinks` counts those it still holds (`exportedMarkdown`).
  */
 export type ExportFile =
   | {
@@ -174,6 +186,7 @@ export type ExportFile =
       pageId: string;
       markdown: string;
       unread?: true;
+      wikilinks?: number;
     }
   | { kind: 'attachment'; path: string; space: number; pageId: string; ref: AttachmentRef };
 
@@ -187,8 +200,10 @@ const UNREADABLE_FOLDER = 'Unreadable folder';
  * Where each page, folder and attachment of `spaces` goes, and each page's
  * Markdown with its links rewritten (`exportedMarkdown`).
  */
-export const planExport = (listed: readonly ExportSpace[]): ExportPlan =>
-  finish(planningExport(listed));
+export const planExport = (
+  listed: readonly ExportSpace[],
+  options: ExportOptions = {},
+): ExportPlan => finish(planningExport(listed, options));
 
 /** How many pages' Markdown a plan has written, of how many. */
 export type PlanProgress = { done: number; total: number };
@@ -209,7 +224,10 @@ export type Planning<T> = Generator<PlanStep, T, LinkSpans | undefined>;
  * it has got, stop, let others run, and read links somewhere else, such as
  * a worker it can end.
  */
-export function* planningExport(listed: readonly ExportSpace[]): Planning<ExportPlan> {
+export function* planningExport(
+  listed: readonly ExportSpace[],
+  { links: style = 'wiki' }: ExportOptions = {},
+): Planning<ExportPlan> {
   // A lying tree may list a page or attachment twice; the first counts.
   const spaces = listed.map((space) => ({
     ...space,
@@ -310,6 +328,7 @@ export function* planningExport(listed: readonly ExportSpace[]): Planning<Export
       const path = pagePaths.get(key(page.id));
       if (path === undefined) continue;
       const writing = exportingMarkdown(page.payload, {
+        style,
         selfId: page.id,
         linkable: space.linkable,
         index,
@@ -318,9 +337,10 @@ export function* planningExport(listed: readonly ExportSpace[]): Planning<Export
           const at = pagePaths.get(key(pageId));
           return at === undefined ? undefined : targets.get(at);
         },
+        pagePath: (pageId) => pagePaths.get(key(pageId)),
         attachmentPath: (attachmentId) => attachmentPaths.get(`${key(page.id)}\0${attachmentId}`),
       });
-      const { markdown, unread } = yield* writing;
+      const { markdown, unread, wikilinks } = yield* writing;
       files.push({
         kind: 'page',
         path,
@@ -328,6 +348,7 @@ export function* planningExport(listed: readonly ExportSpace[]): Planning<Export
         pageId: page.id,
         markdown,
         ...(unread && { unread }),
+        ...(wikilinks !== undefined && { wikilinks }),
       });
       for (const ref of page.payload.attachments) {
         const at = attachmentPaths.get(`${key(page.id)}\0${ref.id}`);
@@ -425,6 +446,7 @@ export function relativePath(from: string, path: string): string {
 
 /** What a page's links are rewritten against. */
 export type ExportLinks = {
+  style: LinkStyle;
   selfId: string;
   /** Every page the viewer sees in the space, for resolving its links. */
   linkable: readonly LinkablePage[];
@@ -434,16 +456,24 @@ export type ExportLinks = {
   dir: string;
   /** The wikilink text naming a page's file, or none when it isn't exported. */
   pageTarget: (pageId: string) => string | undefined;
+  /** Where a page's file is written, from the export's top, or none when it isn't exported. */
+  pagePath: (pageId: string) => string | undefined;
   /** Where one of the page's attachments is written, from the export's top. */
   attachmentPath: (attachmentId: string) => string | undefined;
 };
 
-/** One replacement, and what the link it changes reads back as: a wikilink's target, or a URL. */
+/**
+ * One replacement, and what the link it changes reads back as: a
+ * wikilink's target, a URL, or a wikilink become a Markdown link or image.
+ */
 type Edit = {
   start: number;
   end: number;
   text: string;
-  reads: { wikilink: string } | { url: string; node: number };
+  reads:
+    | { wikilink: string }
+    | { url: string; node: number }
+    | { markdown: string; image: boolean };
 };
 
 /**
@@ -459,6 +489,15 @@ type Edit = {
  * written, and so do frontmatter and line endings. If the result wouldn't
  * read back as the same links rewritten, only its wikilinks are, or only
  * its URLs, or nothing.
+ *
+ * With Markdown links (`style: 'markdown'`), a wikilink naming an exported
+ * page becomes a relative link to its file, `[text](../Folder/Page.md)`, its
+ * text as the reader shows it and its `#heading` as GitHub's anchor for
+ * the heading (`headingAnchor`); `[[#Heading]]` links within the page. An
+ * embed of an attachment becomes an image, or a link for any other file. A
+ * wikilink in a link's text stays, since a link can't hold another. Page
+ * embeds, block references and the wikilinks that stay as written are
+ * counted.
  */
 export const exportedMarkdown = (payload: PagePayload, links: ExportLinks): string =>
   finish(exportingMarkdown(payload, links)).markdown;
@@ -470,9 +509,14 @@ export const exportedMarkdown = (payload: PagePayload, links: ExportLinks): stri
 function* exportingMarkdown(
   payload: PagePayload,
   links: ExportLinks,
-): Planning<{ markdown: string; unread?: true }> {
+): Planning<{ markdown: string; unread?: true; wikilinks?: number }> {
   const { markdown } = payload;
-  if (!REWRITABLE.test(markdown)) return { markdown };
+  // The wikilinks a page as written holds, counted for Markdown links.
+  const left = (spans: LinkSpans) =>
+    links.style === 'markdown' ? { wikilinks: spans.wikilinks.length + spans.inert } : {};
+  if (!REWRITABLE.test(markdown)) {
+    return { markdown, ...(links.style === 'markdown' && { wikilinks: 0 }) };
+  }
   let before: LinkSpans;
   let edits: Edit[];
   try {
@@ -485,17 +529,17 @@ function* exportingMarkdown(
     // Too much for the parser, or too slow: no link can be found, so none is rewritten.
     return { markdown, unread: true };
   }
-  const wikilinksOnly = edits.filter((edit) => 'wikilink' in edit.reads);
   const urlsOnly = edits.filter((edit) => 'url' in edit.reads);
+  const wikilinksOnly = edits.filter((edit) => !('url' in edit.reads));
   for (const tried of [edits, wikilinksOnly, urlsOnly]) {
     if (tried.length === 0) continue;
     const next = applyEdits(markdown, tried);
     const reads = yield* readsBack(next, before, tried);
-    if (reads === true) return { markdown: next };
     // A rewrite that can't be checked: the smaller ones likely can't either.
     if (reads === null) return { markdown, unread: true };
+    if (reads !== false) return { markdown: next, ...left(reads) };
   }
-  return { markdown };
+  return { markdown, ...left(before) };
 }
 
 // What every link rewritten is written with: a wikilink's `[[`, the `](`
@@ -536,9 +580,14 @@ function wikilinkEdits(
   let table = 0;
   wikilinks.forEach((link, i) => {
     while ((tables[table]?.end ?? Infinity) < link.end) table++;
-    const found = resolved[i];
-    if (found?.status !== 'resolved' || link.target === '') return;
     if (markdown.slice(link.start, link.end) !== link.source) return;
+    const found = resolved[i];
+    if (links.style === 'markdown') {
+      const edit = markdownLink(link, found?.status === 'resolved' ? found.targets[0] : undefined);
+      if (edit) edits.push(edit);
+      return;
+    }
+    if (found?.status !== 'resolved' || link.target === '') return;
     const inTable = (tables[table]?.start ?? Infinity) <= link.start;
     const [id = ''] = found.targets;
     const edit = (target: string, shown: string | null) =>
@@ -563,7 +612,60 @@ function wikilinkEdits(
     if (target !== link.target || shown !== null) edit(target, shown);
   });
   return edits;
+
+  /**
+   * `link`, resolved to `id`, as a Markdown link: to the file written for
+   * the page or attachment it names, or to the heading of this page for
+   * `[[#Heading]]`. None for a link that stays as written.
+   */
+  function markdownLink(link: PlacedLink, id: string | undefined): Edit | undefined {
+    const at = { start: link.start, end: link.end };
+    if (link.inLink) return undefined;
+    const anchor = link.heading ? `#${encodeURIComponent(headingAnchor(link.heading))}` : '';
+    if (link.target === '') {
+      if (link.embed || anchor === '') return undefined;
+      const text = `[${escapeText(link.shown ?? link.heading ?? '')}](${anchor})`;
+      return { ...at, text, reads: { markdown: anchor, image: false } };
+    }
+    if (id === undefined) return undefined;
+    if (link.embed) {
+      const path = links.attachmentPath(id);
+      const ref = payload.attachments.find((a) => a.id === id);
+      if (path === undefined || !ref) return undefined;
+      const url = pathUrl(relativePath(links.dir, path));
+      const image = ref.mediaType.startsWith('image/');
+      // Its own text, an image's alt or a file's link, unless it is
+      // Obsidian's size (`|300`, `|640x480`), as import reads it.
+      const size = link.shown !== null && /^\d+(?:x\d+)?$/.test(link.shown);
+      const shown = link.shown === null || size ? ref.name : link.shown;
+      const text = `${image ? '!' : ''}[${escapeText(shown)}](${url})`;
+      return { ...at, text, reads: { markdown: url, image } };
+    }
+    const path = links.pagePath(id);
+    if (path === undefined) return undefined;
+    const title = links.index.titles.get(id) ?? link.target;
+    const url = `${pathUrl(relativePath(links.dir, path))}${anchor}`;
+    const text = `[${escapeText(link.shown ?? withHeading(title, link.heading))}](${url})`;
+    return { ...at, text, reads: { markdown: url, image: false } };
+  }
 }
+
+type PlacedLink = LinkSpans['wikilinks'][number];
+
+/**
+ * The anchor GitHub gives a heading with this text, as github-slugger makes
+ * it: lowercased, everything but letters, marks, digits, `_`, `-` and
+ * spaces dropped, then each space a dash. The reader's own ids
+ * (`headingId`) differ, as they always have, for a heading such as
+ * "Pros & cons": GitHub's is `pros--cons`. A repeated heading's `-1` isn't
+ * added: a link names the first heading of its text.
+ */
+const headingAnchor = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{Nd}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-');
 
 // Text that can stand after a wikilink's bar and still read back as its text.
 const aliasable = (text: string) => !/[[\]|\r\n`<\\]/.test(text) && text.trim() === text;
@@ -625,12 +727,17 @@ function applyEdits(markdown: string, edits: readonly Edit[]): string {
   return out + markdown.slice(at);
 }
 
-/** Whether `next` reads as the links `before` with exactly `edits` made, or null if it couldn't be read. */
+/**
+ * Whether `next` reads as the links `before` with exactly `edits` made:
+ * its links when it does, false when it doesn't, or null if it couldn't be
+ * read. A wikilink become a Markdown link is gone from the wikilinks, and
+ * its URL is among the others, in the place it was written.
+ */
 function* readsBack(
   next: string,
   before: LinkSpans,
   edits: readonly Edit[],
-): Planning<boolean | null> {
+): Planning<LinkSpans | false | null> {
   let after: LinkSpans;
   try {
     after = yield* read(next);
@@ -639,16 +746,32 @@ function* readsBack(
   }
   const targets = new Map<number, string>();
   const urlsAt = new Map<number, string>();
+  const converted = new Set<number>();
+  const added: { at: number; url: string; image?: true }[] = [];
   for (const { start, reads } of edits.toReversed()) {
     if ('wikilink' in reads) targets.set(start, reads.wikilink);
-    else urlsAt.set(reads.node, reads.url);
+    else if ('url' in reads) urlsAt.set(reads.node, reads.url);
+    else {
+      converted.add(start);
+      added.push({ at: start, url: reads.markdown, ...(reads.image && { image: true }) });
+    }
   }
-  const wikilinks = before.wikilinks.map((link) => targets.get(link.start) ?? link.target);
-  const urls = before.urls.map(({ url }, node) => urlsAt.get(node) ?? url);
-  return (
+  const wikilinks = before.wikilinks
+    .filter((link) => !converted.has(link.start))
+    .map((link) => targets.get(link.start) ?? link.target);
+  // In the order written: edits keep the order of everything around them.
+  const urls = [
+    ...before.urls.map(({ at, url, image }, node) => ({
+      at,
+      url: urlsAt.get(node) ?? url,
+      ...(image && { image }),
+    })),
+    ...added,
+  ].sort((a, b) => a.at - b.at);
+  const same =
     after.wikilinks.length === wikilinks.length &&
     after.wikilinks.every((link, i) => link.target === wikilinks[i]) &&
     after.urls.length === urls.length &&
-    after.urls.every((found, i) => found.url === urls[i] && found.image === before.urls[i]?.image)
-  );
+    after.urls.every((found, i) => found.url === urls[i]?.url && found.image === urls[i]?.image);
+  return same ? after : false;
 }

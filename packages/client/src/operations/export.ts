@@ -7,6 +7,7 @@ import {
   type ExportFolder,
   type ExportPage,
   type ExportSpace,
+  type LinkStyle,
 } from '../export.ts';
 import { linkablePages } from '../links.ts';
 import { linkSpans, type LinkSpans } from '../markdown/index.ts';
@@ -61,6 +62,11 @@ export type ExportSummary = {
   skipped: ExportSkipped[];
   /** Pages written as they were, their links not rewritten, because they couldn't be read. */
   unread: { spaceId: SpaceId; pageId: PageId; path: string }[];
+  /**
+   * With Markdown links, the wikilinks the pages written still hold: page
+   * embeds, block references, and links to no page exported. Zero otherwise.
+   */
+  wikilinks: number;
 };
 
 /** The vault locked, access changed, or the caller gave up while exporting. */
@@ -114,7 +120,8 @@ const nameOf = (loaded: LoadedMetadata | null) =>
  * page's links are read with `read`, by default here (`linkSpans`); some
  * text takes that far longer than its size suggests (#47), so the web app
  * reads them in a worker with a time limit. A page whose read fails or
- * throws is exported as written.
+ * throws is exported as written. `links` says how links between pages are
+ * written: as wikilinks, by default, or as relative Markdown links.
  */
 export async function exportMarkdown(
   ctx: ClientContext,
@@ -124,9 +131,11 @@ export async function exportMarkdown(
     checkSize,
     onProgress,
     signal,
+    links = 'wiki',
     read = async (markdown) => linkSpans(markdown),
   }: {
     scope?: ExportScope;
+    links?: LinkStyle;
     write: (entry: ExportEntry) => void | Promise<void>;
     checkSize?: (size: ExportSize) => void;
     onProgress?: (progress: ExportProgress) => void;
@@ -229,7 +238,7 @@ export async function exportMarkdown(
     });
   }
 
-  const planning = planningExport(spaces);
+  const planning = planningExport(spaces, { links });
   let step = planning.next();
   while (!step.done) {
     if ('progress' in step.value) {
@@ -271,7 +280,7 @@ export async function exportMarkdown(
     await pace();
     live();
   }
-  const summary: ExportSummary = { pages: [], attachments: [], skipped, unread: [] };
+  const summary: ExportSummary = { pages: [], attachments: [], skipped, unread: [], wikilinks: 0 };
   const pageIds = new Set<string>();
   const attachments: {
     file: Extract<ExportFile, { kind: 'attachment' }>;
@@ -286,6 +295,7 @@ export async function exportMarkdown(
       await write({ kind: 'file', path: file.path, bytes: encoder.encode(file.markdown) });
       summary.pages.push({ spaceId: space.spaceId, pageId, path: file.path });
       if (file.unread) summary.unread.push({ spaceId: space.spaceId, pageId, path: file.path });
+      summary.wikilinks += file.wikilinks ?? 0;
       await pace();
       live();
     } else {

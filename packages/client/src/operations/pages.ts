@@ -1172,7 +1172,9 @@ async function checksOut(
  * while reading changed, it says so (`wikistow.change`, naming itself), as
  * their flush's publication does; any other leaves it out (ADR 0008).
  * Its links are worked out from `tree`, the space as the caller sees it,
- * or one loaded if they need it.
+ * or one loaded if they need it. A publication is new, or `revisionId`, as
+ * for one made offline (#331): sent again under the same ID once it was
+ * made, the server answers as it did then.
  */
 export async function publishPage(
   ctx: ClientContext,
@@ -1182,6 +1184,7 @@ export async function publishPage(
     read,
     change,
     tree,
+    revisionId: sent,
   }: {
     expected?: {
       draftHead: RevisionId;
@@ -1191,6 +1194,7 @@ export async function publishPage(
     read?: ReadWikilinks;
     change?: ChangeSummary;
     tree?: LinkTree;
+    revisionId?: RevisionId;
   } = {},
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
@@ -1232,7 +1236,7 @@ export async function publishPage(
       writing: writingFor(ctx, keys, region, target),
     });
     // What it changed names the version it is in, so no copy of it counts.
-    const revisionId = newId(RevisionIdSchema);
+    const revisionId = sent ?? newId(RevisionIdSchema);
     const payload: PagePayload = change
       ? {
           ...resealed,

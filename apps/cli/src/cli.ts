@@ -63,7 +63,12 @@ const COMMANDS = {
   tree: { options: { space: { type: 'string' } }, positionals: 0 },
   search: { options: { space: { type: 'string' } }, positionals: 1 },
   export: {
-    options: { space: { type: 'string' }, folder: { type: 'string' }, out: { type: 'string' } },
+    options: {
+      space: { type: 'string' },
+      folder: { type: 'string' },
+      out: { type: 'string' },
+      links: { type: 'string' },
+    },
     positionals: 0,
   },
   import: {
@@ -469,6 +474,10 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
     case 'export': {
       const space = optional(values, 'space');
       const folder = optional(values, 'folder');
+      const links = optional(values, 'links') ?? 'wiki';
+      if (links !== 'wiki' && links !== 'markdown') {
+        throw new CliError('usage', '--links takes wiki or markdown');
+      }
       return exportMarkdown(
         io,
         out,
@@ -477,6 +486,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
           spaceId: space === null ? null : id(SpaceId, space, 'space'),
           folderId: folder === null ? null : id(FolderId, folder, 'folder'),
           out: required(values, 'out'),
+          links,
         },
         deps,
       );

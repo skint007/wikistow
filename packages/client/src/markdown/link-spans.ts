@@ -14,7 +14,8 @@ type Span = { start: number; end: number };
 
 /** A page's links, where each is written, as export finds them and compares a read-back with. */
 export type LinkSpans = {
-  wikilinks: PlacedWikilink[];
+  /** Each wikilink, and whether it is in a link's text, where no other link can go. */
+  wikilinks: (PlacedWikilink & { inLink?: true })[];
   /**
    * Each link, image, definition and autolink's URL, in order, whether it is
    * an image's, and where its destination is written, or where an autolink
@@ -23,11 +24,15 @@ export type LinkSpans = {
    */
   urls: {
     url: string;
+    /** Where it is written: its `(`, its definition, or its autolink. */
+    at: number;
     image?: true;
     destination: Span | null;
     autolink?: Span & { before?: string };
   }[];
   tables: Span[];
+  /** Page embeds and block references, which stay as written (`UnsupportedWikilink`). */
+  inert: number;
 };
 
 // The reader's syntax (`parseMarkdown`), made once.
@@ -47,10 +52,11 @@ export function linkSpans(markdown: string): LinkSpans {
   const offset = frontmatter?.length ?? 0;
   const document = parse({ extensions: SYNTAX }).document();
   const events = postprocess(document.write(preprocess()(body, undefined, true)));
-  const wikilinks: PlacedWikilink[] = [];
+  const wikilinks: LinkSpans['wikilinks'] = [];
   const tables: Span[] = [];
   const urls: LinkSpans['urls'] = [];
   const open: string[] = [];
+  let inert = 0;
   let inImageText = 0;
   let escapedTo = -1;
   for (const [kind, token, context] of events) {
@@ -72,21 +78,37 @@ export function linkSpans(markdown: string): LinkSpans {
       case 'wikilink': {
         // As `placedWikilinks` finds them.
         const node = parseWikilink(context.sliceSerialize(token));
+        if (node?.unsupported) inert++;
         if (!node || node.unsupported) break;
         const { source, target, heading, shown, embed } = node;
-        wikilinks.push({ source, target, heading, shown, embed, ...span });
+        const inLink = open.includes('label');
+        wikilinks.push({
+          source,
+          target,
+          heading,
+          shown,
+          embed,
+          ...span,
+          ...(inLink && { inLink }),
+        });
         break;
       }
       case 'resource':
-        urls.push({ url: '', destination: null, ...(open.at(-2) === 'image' && { image: true }) });
+        urls.push({
+          url: '',
+          at: span.start,
+          destination: null,
+          ...(open.at(-2) === 'image' && { image: true }),
+        });
         break;
       case 'definition':
-        urls.push({ url: '', destination: null });
+        urls.push({ url: '', at: span.start, destination: null });
         break;
       case 'resourceDestinationString':
       case 'definitionDestinationString': {
         // Escapes and references decoded, as the tree has it.
         urls[urls.length - 1] = {
+          at: span.start,
           ...urls.at(-1),
           url: decodeString(context.sliceSerialize(token)),
           destination: span,
@@ -105,12 +127,12 @@ export function linkSpans(markdown: string): LinkSpans {
         // before it would take the new label as a reference's, unlinking
         // `[foo]` there.
         const rewritable = !open.includes('label') && before !== ']';
-        urls.push({ url, destination: null, ...(rewritable && { autolink }) });
+        urls.push({ url, at: span.start, destination: null, ...(rewritable && { autolink }) });
         break;
       }
       case 'literalAutolink':
-        urls.push({ url: context.sliceSerialize(token), destination: null });
+        urls.push({ url: context.sliceSerialize(token), at: span.start, destination: null });
     }
   }
-  return { wikilinks, urls, tables };
+  return { wikilinks, urls, tables, inert };
 }

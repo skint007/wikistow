@@ -27,7 +27,7 @@ electron=node_modules/electron
 electron_version=$(node -p "require('./$electron/package.json').version")
 zip="electron-v$electron_version-darwin-$arch.zip"
 sum=$(node -p "require('./$electron/checksums.json')['$zip']")
-curl -fsSLo "$stage/$zip" "https://github.com/electron/electron/releases/download/v$electron_version/$zip"
+curl -fsSL --retry 10 --retry-all-errors --retry-delay 30 -o "$stage/$zip" "https://github.com/electron/electron/releases/download/v$electron_version/$zip"
 echo "$sum  $stage/$zip" | shasum -a 256 -c -
 
 ditto -x -k "$stage/$zip" "$stage"
