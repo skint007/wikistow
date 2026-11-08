@@ -155,6 +155,12 @@ export function ConfirmCopy({
 
   const go = (confirmed: copyOperations.CopyPreview) =>
     run(async () => {
+      // Everything in the space moves: off what is open first, whose old
+      // address would otherwise take the person, and this dialog in the
+      // space's header, to the other space as soon as the tree changes.
+      if (node === null && !copy) {
+        await navigate({ to: '/s/$spaceId', params: { spaceId: sourceSpaceId } });
+      }
       setSpent(confirmed.copyId);
       setBlocked(null);
       setStopped(false);
