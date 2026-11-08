@@ -7,12 +7,13 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import type { UnlockOptions } from './agent.ts';
+import { readKeyFile, systemSecretStore, unlockSecret, type UnlockOptions } from './agent.ts';
 import type { CommandName } from './cli.ts';
 import type { Deps } from './commands/agent.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { COMMAND_HELP, USAGE, VERSION } from './help.ts';
 import { Printer, type Io } from './io.ts';
+import { openKeyFile } from './keyfile.ts';
 import { PROGRAM } from './program.ts';
 import { SKILL_RULES } from './skill.ts';
 
@@ -224,7 +225,9 @@ command's exit status. Call help with a tool's name before its first use:
 it gives the command's --help, the reference for its IDs, output and exit
 statuses. help with no tool explains retrying a change and the exit
 statuses. page_create and page_draft take the Markdown itself as
-markdown. Below, commands are named as on the command line.
+markdown. Below, commands are named as on the command line. import and
+export aren't tools here: when the person asks for one, ask them to run
+it in a terminal.
 
 ${SKILL_RULES}`;
 
@@ -273,8 +276,8 @@ function captured(io: Io, stdin: Uint8Array | null) {
 /**
  * Serve the tools until standard input ends. The key file is unlocked
  * for each call, as for each command; a passphrase from `--passphrase-fd`
- * is read once, and kept for the next. The agent must open first: if it
- * can't, this says why on standard error and exits as the command would.
+ * is read once, and kept for the next. The key file must open first: if
+ * it doesn't, this says why on standard error and exits as a command would.
  */
 export async function serveMcp(
   io: Io,
@@ -310,10 +313,17 @@ export async function serveMcp(
     return done.then((exit) => ({ exit, ...printed }));
   };
 
-  const opened = await runOne(['agent', 'status'], [], null);
-  if (opened.exit !== EXIT.ok) {
-    io.stderr.write(opened.stderr);
-    return opened.exit;
+  // Only the key file is checked here: a server that doesn't answer yet
+  // fails the calls made before it does, not the server.
+  const out = new Printer(io, { json: false });
+  try {
+    const { file } = readKeyFile(kept);
+    const makeStore = deps.makeStore ?? systemSecretStore;
+    openKeyFile(file, await unlockSecret(kept, file, unlock, makeStore));
+  } catch (error) {
+    const failure = classify(error);
+    out.failure(failure);
+    return failure.exit;
   }
 
   const server = () => {
@@ -369,7 +379,6 @@ export async function serveMcp(
     return mcp;
   };
 
-  const out = new Printer(io, { json: false });
   const ended = new Promise<void>((resolve) => {
     process.stdin.once('end', resolve);
     process.stdin.once('close', resolve);

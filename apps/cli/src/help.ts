@@ -370,14 +370,19 @@ time.
 It unlocks the key file for each tool call, as each command does: from the
 secret store, so set that up first (agent secret-store enable)${
     WINDOWS
-      ? '. It\ncan’t ask for the passphrase, and on Windows it can’t take one either:\nstandard input is the client’s.'
+      ? `. It
+can't ask for the passphrase, and on Windows it can't take one either:
+standard input is the client's.`
       : `, or with
 --passphrase-fd N, read once when it starts and kept in memory until it
 stops (not 0: standard input is the client's). It can't ask for the
 passphrase.`
-  } When it starts it opens the agent as agent status does. If that fails
-(not enrolled, locked, revoked), it says why on standard error and exits
-with that command's status.
+  }
+
+When it starts, it unlocks the key file once. If that fails (not
+enrolled, locked, a wrong passphrase), it says why on standard error and
+exits with that status. Anything the server says, such as a revoked agent
+or no answer at all, comes back from each tool call.
 
 To add it to Claude Code, for every project:
   claude mcp add --scope user ${PROGRAM} -- ${PROGRAM} mcp
@@ -394,6 +399,9 @@ it needs${
   }
 Other clients take a stdio server's command and arguments, often as JSON:
   {"mcpServers":{"${PROGRAM}":{"command":"${PROGRAM}","args":["mcp"]}}}
+A client started from the desktop rather than a terminal may not find
+${PROGRAM} on its PATH: then give its full path, as
+${WINDOWS ? `(Get-Command ${PROGRAM}).Source` : `command -v ${PROGRAM}`} prints it.
 `,
   skill: `Usage: ${PROGRAM} skill
 
