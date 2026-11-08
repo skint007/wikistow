@@ -95,6 +95,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       },
     );
   }, []);
+  // A plugin drawing search's results opens one with `host.app.navigate`, which closes search,
+  // as the app's own row does.
+  useEffect(() => plugins.location.onNavigate(() => setSearchIn(null)), [plugins.location]);
   // An address with a query (`SearchLink`'s, opened in a new tab) opens
   // search on its page, and lets the query go, so reloading or going back
   // doesn't open it again; so does one held while the vault was unlocked.
