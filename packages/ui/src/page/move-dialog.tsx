@@ -74,9 +74,15 @@ export type Moving = {
 /**
  * Everything in a space, moved or copied into another space from its menu,
  * for its owners (#339). The space stays: after a move, they are asked
- * whether to delete it, empty.
+ * whether to delete it, empty, where it can be deleted.
  */
-export type MovingSpace = { kind: 'space'; name: string; action: 'move' | 'copy' };
+export type MovingSpace = {
+  spaceId: SpaceId;
+  name: string;
+  action: 'move' | 'copy';
+  /** False for a home space, which can't be deleted. */
+  deletable: boolean;
+};
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -142,20 +148,17 @@ const moveOnDevice = (
  * folder's edge, then move it. A copy, or a move into another space, is a
  * copy (section 10, "Copies, and moves between spaces"; ADR 0007), which
  * always asks first. Opened from the page menu, the sidebar's menus, and a
- * drop in the sidebar; and for everything in a space, from its menu.
+ * drop in the sidebar.
  */
 export function MoveDialog({
   spaceId,
   moving,
   onOpenChange,
-  onDeleteSpace,
 }: {
   spaceId: SpaceId;
   /** Null while closed. */
-  moving: Moving | MovingSpace | null;
+  moving: Moving | null;
   onOpenChange: (open: boolean) => void;
-  /** After everything in a space moved, deletes it, asking first; unset where it can't be deleted. */
-  onDeleteSpace?: (() => void) | undefined;
 }) {
   const { locked, hold } = useHoldOpen();
   return (
@@ -163,23 +166,56 @@ export function MoveDialog({
       <DialogContent dialogClassName="sm:max-w-xl" locked={locked}>
         <HoldOpen value={hold}>
           {/* Afresh each time it opens, not each time its caller makes `moving` again. */}
-          {moving?.kind === 'space' ? (
-            <SpaceSteps
-              key={moving.action}
+          {moving && (
+            <MoveSteps
+              key={moving.id}
               spaceId={spaceId}
               moving={moving}
               onDone={() => onOpenChange(false)}
-              onDeleteSpace={onDeleteSpace}
             />
-          ) : (
-            moving && (
-              <MoveSteps
-                key={moving.id}
-                spaceId={spaceId}
-                moving={moving}
-                onDone={() => onOpenChange(false)}
-              />
-            )
+          )}
+        </HoldOpen>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Move or copy everything in a space into another (#339), from the space's
+ * menu. The app shell holds it, not the space's header, so it stays open
+ * when the move's old addresses take the person to the other space, and on
+ * a phone, where that header is in the drawer. `onDeleteSpace` deletes the
+ * space, asking first, once everything moved out of it.
+ */
+export function SpaceMoveDialog({
+  moving,
+  onOpenChange,
+  onDeleteSpace,
+}: {
+  /** Null while closed. */
+  moving: MovingSpace | null;
+  onOpenChange: (open: boolean) => void;
+  onDeleteSpace: (spaceId: SpaceId) => void;
+}) {
+  const { locked, hold } = useHoldOpen();
+  return (
+    <Dialog open={moving !== null} onOpenChange={onOpenChange}>
+      <DialogContent dialogClassName="sm:max-w-xl" locked={locked}>
+        <HoldOpen value={hold}>
+          {moving && (
+            <SpaceSteps
+              key={`${moving.spaceId} ${moving.action}`}
+              moving={moving}
+              onDone={() => onOpenChange(false)}
+              onDeleteSpace={
+                moving.deletable
+                  ? () => {
+                      onOpenChange(false);
+                      onDeleteSpace(moving.spaceId);
+                    }
+                  : undefined
+              }
+            />
           )}
         </HoldOpen>
       </DialogContent>
@@ -342,16 +378,15 @@ const SPACE_DESCRIPTION = {
  * whether to delete it; it is never deleted unasked.
  */
 function SpaceSteps({
-  spaceId,
   moving,
   onDone,
   onDeleteSpace,
 }: {
-  spaceId: SpaceId;
   moving: MovingSpace;
   onDone: () => void;
   onDeleteSpace: (() => void) | undefined;
 }) {
+  const { spaceId } = moving;
   const navigate = useNavigate();
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -375,13 +410,7 @@ function SpaceSteps({
           name={moving.name}
           to={moved}
           onKeep={() => void goThere(moved)}
-          onDelete={
-            onDeleteSpace &&
-            (() => {
-              onDone();
-              onDeleteSpace();
-            })
-          }
+          onDelete={onDeleteSpace}
         />
       ) : chosen && confirming ? (
         <ConfirmCopy

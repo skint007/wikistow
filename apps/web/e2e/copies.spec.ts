@@ -216,8 +216,9 @@ test('an editor who isn’t an owner can’t move into another space', async ({
 
 /**
  * An owner moves everything in a space into a folder of another, from the
- * space menu, while a folder of it is open (#339). Its old address must not
- * take the dialog away before it asks whether to delete the empty space.
+ * space menu, while a folder of it is open (#339). Its old address leads to
+ * the other space as the tree changes, which must not take the dialog away
+ * before it asks whether to delete the empty space.
  */
 test('moving everything in a space into another, then deleting it', async ({
   page: owner,
@@ -252,7 +253,6 @@ test('moving everything in a space into another, then deleting it', async ({
   await expect(dialog.getByRole('status')).toContainText('“Family” is empty now', {
     timeout: 60_000,
   });
-  await expect(owner.getByText('No pages yet.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Delete space…' }).click();
   const deleting = owner.getByRole('dialog', { name: 'Delete this space' });
   await deleting.getByRole('textbox').fill('Family');

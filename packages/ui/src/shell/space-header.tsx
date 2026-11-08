@@ -1,6 +1,6 @@
 import type { spaceOperations, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { use, useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { Name } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -31,10 +31,10 @@ import { sharesQuery, spaceKeysQuery, spaceOrderQuery } from '../data/queries';
 import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
-import { MoveDialog, type MovingSpace } from '../page/move-dialog';
 import { useClient } from '../vault/store';
 import { NEEDS_CONNECTION, useNeedsConnection } from './availability';
 import { SpaceIcon, SpaceLookDialog } from './space-look';
+import { SpaceMoveOpener } from './space-moves';
 
 /**
  * The sidebar's head: the space tile and name, and for owners, how many
@@ -74,7 +74,7 @@ export function SpaceHeader({
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
   const [action, setAction] = useState<OwnerAction | null>(null);
-  const [moving, setMoving] = useState<MovingSpace | null>(null);
+  const moveSpace = use(SpaceMoveOpener);
   // Everything in the space's menu needs the server (ADR 0009, decision 8).
   const needs = useNeedsConnection();
   const { data: order } = useQuery(spaceOrderQuery(ctx));
@@ -164,12 +164,12 @@ export function SpaceHeader({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    {...needs.select(() => setMoving({ kind: 'space', name, action: 'move' }))}
+                    {...needs.select(() => moveSpace({ spaceId, name, action: 'move', deletable }))}
                   >
                     <FolderInput strokeWidth={1.75} /> Move space into…
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    {...needs.select(() => setMoving({ kind: 'space', name, action: 'copy' }))}
+                    {...needs.select(() => moveSpace({ spaceId, name, action: 'copy', deletable }))}
                   >
                     <Copy strokeWidth={1.75} /> Copy space into…
                   </DropdownMenuItem>
@@ -200,12 +200,6 @@ export function SpaceHeader({
         </DropdownMenuContent>
       </DropdownMenu>
       <SpaceLookDialog spaceId={spaceId} open={restyling} onOpenChange={setRestyling} />
-      <MoveDialog
-        spaceId={spaceId}
-        moving={moving}
-        onOpenChange={(open) => !open && setMoving(null)}
-        onDeleteSpace={deletable ? () => setAction({ kind: 'delete' }) : undefined}
-      />
       <OwnerDialog
         spaceId={spaceId}
         action={action}
