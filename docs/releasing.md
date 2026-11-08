@@ -32,7 +32,7 @@ A push to `main` or a release tag also runs four more jobs, which pull requests 
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. The `main` tag moves to the newest of these builds, for a test server that follows `main`. It waits for the packages too, so a release whose packages fail publishes nothing.
 
-Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap.
+Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap. Only the release's `packages` job, or a run of the package repositories workflow by hand, can use the packages' signing key, and only its `deploy` job can publish the site on GitHub Pages.
 
 ## Versions
 
@@ -56,6 +56,7 @@ Each new version goes out as a beta first, then as a stable release once it has 
 | Takes | every release from `main`: betas, and stable releases too | stable releases only |
 | Server image | `:beta`, plus each release's own tag | `:latest`, `:<major>.<minor>`, each release's own tag |
 | AUR | `wikistow-desktop-beta-bin`, `wikistow-cli-beta-bin` | `wikistow-desktop-bin`, `wikistow-cli-bin` |
+| apt and dnf repositories | | `wikistow-desktop` |
 | GitHub Release | marked as a prerelease | marked as the latest |
 | Desktop update notice | the newest release, betas included | the newest stable release |
 
@@ -86,7 +87,7 @@ The desktop app's two AUR packages install side by side: the beta goes under nam
    1. `verify` checks that the tag names the version in the source, that the commit is on `main` or a `release/` branch, that Electron is its major's newest patch, and that every release in the commit's history, this one too, has a changelog entry dated the day of its tag.
    2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0`, `:0.3` for a stable release, `:latest` for a stable release from `main`, and `:beta` for any release from `main`.
    3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
-   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), and `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)). For any release from `main`, `aur-beta` publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`.
+   4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)), and `packages` the `.deb` and `.rpm` to the apt and dnf repositories ([below](#the-apt-and-dnf-repositories)). For any release from `main`, `aur-beta` publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`.
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
@@ -270,6 +271,47 @@ Their beta twins, `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`, follo
 
 To publish again without a new release, such as after a packaging fix, merge the fix, then run **Actions → AUR → Run workflow** on `main` with the release's version, the package (or both), the channel and the next `pkgrel`, such as `2`. Each package counts its own `pkgrel`, and the next release starts both again at 1.
 
+## The apt and dnf repositories
+
+GitHub Pages serves the desktop app's apt and dnf repositories at `https://skint007.github.io/wikistow`, so Debian, Ubuntu and Fedora update it with their other packages ([desktop](desktop.md#from-the-repository)). They hold the newest stable release only: apt and dnf need no other to upgrade. Betas aren't in them.
+
+`scripts/package-repos.sh` builds the site from a release's `.deb` and `.rpm`:
+
+| Path | What it is |
+| --- | --- |
+| `wikistow.asc` | The signing key's public half, fingerprint `3059DE560FA2DC27146F5940D3580799A10871D8` |
+| `wikistow.sources`, `wikistow.repo` | What people put in `/etc/apt/sources.list.d` and `/etc/yum.repos.d`. The app looks for these names |
+| `apt/` | One suite, `stable`, with one component, `main`, for `amd64`. `dists/stable/InRelease` and `Release.gpg` sign its `Release`, which names the index's checksum, which names the `.deb`'s. The `.deb` is the release's, byte for byte |
+| `rpm/` | The `.rpm`, signed with the key, and its `repodata`, with `repomd.xml.asc` signing `repomd.xml`. Signing changes the `.rpm`, so it doesn't match the release's checksum, only its contents |
+
+`.github/workflows/packages.yml` publishes it, once the release's files are up:
+
+1. `build`, in the `packages` environment, downloads the release's `.deb` and `.rpm`, checks them against its `SHA256SUMS`, imports `PACKAGES_SIGNING_KEY`, refuses any other key than the one the workflow names, and builds and signs the site.
+2. `check` adds the repository on each supported distribution from the site's own files, with the key it publishes, installs the app with apt or dnf, and checks the version and the `.rpm`'s signature.
+3. `deploy` publishes the site to GitHub Pages, replacing what was there. Only `main` and the release tags publish.
+
+To publish again, such as after a fix to the script, merge the fix, then run **Actions → Package repositories → Run workflow** on `main` with the release's version, which must be stable.
+
+To build the site yourself, in Debian 13 with `apt-utils`, `createrepo-c`, `rpm` and `gnupg`, and a key in gpg's keyring, from a folder holding one `.deb` and one `.rpm`:
+
+```sh
+SIGNING_KEY=<fingerprint> scripts/package-repos.sh <packages> <site> file://<site>
+```
+
+Then point a container's `/etc/apt/sources.list.d/wikistow.sources` or `/etc/yum.repos.d/wikistow.repo` at it, as `check` does.
+
+### The signing key
+
+The key is RSA 4096, without a passphrase, kept only in the `packages` environment. Every install trusts it, so a new key means every install changes its key by hand.
+
+It expires five years after it's made, the current one on 2031-11-07, after which apt and dnf refuse the repositories. GitHub never shows a secret again, so extending it needs a copy of the private key kept elsewhere: `gpg --quick-set-expire 3059DE560FA2DC27146F5940D3580799A10871D8 5y`, then put it back in the environment. Its fingerprint stays the same. Without a copy, change the key as below. Either way, publish the newest release again and tell people to fetch `wikistow.asc` again, since apt and dnf keep the copy they have.
+
+To change the key, such as if it leaks:
+
+1. Make a new key, put it in the environment, and change `SIGNING_KEY` in the workflow and the fingerprint in the docs.
+2. Publish the newest release again with the workflow.
+3. Tell people to fetch `wikistow.asc` again, and on Fedora remove the old key with `rpmkeys --delete`.
+
 ## The server image
 
 Run a release's version tag, or pin its digest, and change it on purpose to upgrade ([operations](operations.md#choose-an-image)). The image's labels name its version and source commit:
@@ -281,7 +323,7 @@ docker image inspect ghcr.io/skint007/wikistow:0.3.0 \
 
 ## Repository settings
 
-The workflows use the token GitHub gives each run, the AUR key and the tap's key. Set up the public repository once, as an administrator:
+The workflows use the token GitHub gives each run, the AUR key, the tap's key and the packages' signing key. Set up the public repository once, as an administrator:
 
 1. **Settings → Actions → General.** Keep the default workflow permissions at **Read repository contents and packages permissions**. The workflows ask for more only in the jobs that publish. Require approval before fork pull requests from outside contributors run workflows.
 2. **Settings → Rules → Rulesets**, for `main`: require a pull request, require the status check **CI passed** from GitHub Actions, and block force pushes and deletion.
@@ -297,6 +339,16 @@ The workflows use the token GitHub gives each run, the AUR key and the tap's key
 
    Upload the key from the computer that holds it, so it never shows on screen: `gh secret set AUR_SSH_PRIVATE_KEY --env aur < <key file>`.
 6. The tap: a public repository `skint007/homebrew-wikistow`, with a `Casks` folder. Make a key for it with `ssh-keygen -t ed25519 -N '' -f homebrew-tap`, and add `homebrew-tap.pub` under the tap's **Settings → Deploy keys**, with **Allow write access**. That key can push only to the tap. Then **Settings → Environments → `homebrew`** here, limited to the `v*` tags and `main`, with the private half as the secret `HOMEBREW_TAP_KEY`: `gh secret set HOMEBREW_TAP_KEY --env homebrew < homebrew-tap`. Delete both files after.
+
+7. **Settings → Pages**: the source **GitHub Actions**. Then **Settings → Environments → `github-pages`**, which that makes, limited to `main` and the `v*` tags. Its tag rule is what lets a release's `deploy` job publish.
+8. **Settings → Environments → `packages`**, limited to the `v*` tags and `main`, with the signing key as the secret `PACKAGES_SIGNING_KEY`: an ASCII-armored private key without a passphrase. Make it in a scratch keyring, so it's kept nowhere else, and upload it without showing it:
+
+   ```sh
+   export GNUPGHOME=$(mktemp -d)
+   gpg --batch --passphrase '' --quick-gen-key 'WikiStow packages' rsa4096 sign 5y
+   gpg --armor --export-secret-keys | gh secret set PACKAGES_SIGNING_KEY --env packages
+   rm -rf "$GNUPGHOME"
+   ```
 
 ## Moving from the private repository
 

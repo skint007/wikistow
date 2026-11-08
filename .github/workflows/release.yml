@@ -2,7 +2,8 @@
 # This checks the tag names the version in the source, runs CI on that
 # commit, which publishes the server image under the version, and publishes
 # the desktop app and the CLI from the same build as a GitHub Release, with
-# the notes from its CHANGELOG.md entry, then to the AUR and the Homebrew tap.
+# the notes from its CHANGELOG.md entry, then to the AUR, the Homebrew tap
+# and the apt and dnf repositories.
 name: Release
 
 on:
@@ -223,3 +224,17 @@ jobs:
     secrets: inherit
     permissions:
       contents: read
+
+  # The apt and dnf repositories follow the newest stable release too.
+  packages:
+    needs: [verify, github-release]
+    if: needs.verify.outputs.latest == 'true'
+    uses: ./.github/workflows/packages.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+    # As for the AUR (actions/runner#4453).
+    secrets: inherit
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
