@@ -100,4 +100,12 @@ describe('samples the plugin writes', () => {
     await pages.saveDraft(before, { base: before.revision, markdown: SECRET });
     expect([...samples.fromCopies()]).toEqual([after.pageId, before.pageId]);
   });
+
+  it('still do once something was written over the copy', async () => {
+    const samples = sampleStore();
+    const { pageId } = samples.put({ title: 'Family recipes', markdown: SECRET, copyOf: 'x' });
+    samples.put({ pageId, title: 'Family recipes', markdown: `${SECRET}, with a block` });
+    const made = await samples.pages(caller).create(at, { title: 'List', markdown: SECRET });
+    expect(samples.fromCopies().has(made.pageId)).toBe(true);
+  });
 });

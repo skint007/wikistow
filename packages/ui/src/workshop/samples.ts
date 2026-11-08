@@ -14,8 +14,9 @@ export const SAMPLE_SPACE = 'workshop-samples';
 
 /**
  * A page of the workshop's own (#257): disposable text the preview shows
- * and the plugin being built reads and changes. Nothing here reaches the
- * server. A real page comes in only as a copy the person chose to take.
+ * and the plugin being built reads and changes, kept with the draft
+ * (#314). A real page comes in only as a copy the person chose to take,
+ * which is never kept.
  */
 export type Sample = {
   pageId: string;
@@ -47,6 +48,8 @@ export type SampleEditor = {
 export function sampleStore() {
   let samples: Sample[] = [];
   let made = 0;
+  /** A copy of a real page was made here, even if something was written over it since. */
+  let copied = false;
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const listener of listeners) listener();
@@ -78,6 +81,7 @@ export function sampleStore() {
 
   const add = (page: Pick<Sample, 'title' | 'markdown' | 'data' | 'copyOf'>): Sample => {
     made += 1;
+    if (page.copyOf !== null) copied = true;
     const sample: Sample = { ...page, pageId: `sample-${made}`, revision: 1, outside: 0 };
     samples = [...samples, sample];
     changed();
@@ -102,7 +106,7 @@ export function sampleStore() {
    */
   const fromCopies = new Set<string>();
   const byPlugin = (pageId: string) => {
-    if (samples.some((sample) => sample.copyOf !== null)) fromCopies.add(pageId);
+    if (copied) fromCopies.add(pageId);
   };
 
   /** Apply a plugin's `change` to `ref` on top of `base`; a newer revision is a conflict. */
@@ -173,6 +177,7 @@ export function sampleStore() {
       if (!samples.some((sample) => sample.pageId === pageId)) {
         throw new Error(`There’s no sample page ${pageId}.`);
       }
+      if (copyOf !== null) copied = true;
       set(pageId, { title, markdown, copyOf }, true);
       const sample = samples.find((s) => s.pageId === pageId);
       if (!sample) throw new Error(`There’s no sample page ${pageId}.`);
