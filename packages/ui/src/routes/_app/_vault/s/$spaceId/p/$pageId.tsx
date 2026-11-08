@@ -34,9 +34,21 @@ import {
   changeBanner,
   changeEmoji,
   editPage,
+  findOnPage,
   finishEditing,
+  publishPage,
   requirementsHere,
 } from '../../../../../../commands/ui-commands';
+import {
+  detachPage,
+  moveNode,
+  copyNode,
+  publishElsewhere,
+  unpublishPage,
+} from '../../../../../../commands/page-commands';
+import type { PaletteEntry } from '../../../../../../commands/palette';
+import { usePaletteEntries } from '../../../../../../commands/palette-entries';
+import { usePluginPaletteEntries } from '../../../../../../commands/plugin-palette';
 import { AgentName, agentPersonName } from '../../../../../../agents/agent-name';
 import { AssistantButton, useChatPage } from '../../../../../../ai/chat-column';
 import { ago } from '../../../../../../agents/model';
@@ -100,7 +112,13 @@ import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
 import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
-import { useAvailability, useNeedsConnection } from '../../../../../../shell/availability';
+import {
+  availability as availabilityOf,
+  NEEDS_CONNECTION,
+  useAvailability,
+  useNeedsConnection,
+  type ActionKind,
+} from '../../../../../../shell/availability';
 import { pageChange, queueChoices, queueQuery } from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
@@ -447,24 +465,25 @@ function PageBody({
   };
   // One click, unless the page has a public link: then Publish asks first,
   // as publishing updates the public page too (ADR 0005).
-  const publish = () =>
-    act(async () => {
-      const from = router.state.location.href;
-      const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
-      if (links.some((link) => link.pageId === page.pageId)) {
-        setPublishingMarkdown(editor.current?.markdown() ?? null);
-        setPublishingFrom(from);
-        return;
-      }
-      await publishDraft();
-      await showPublished(from);
-    });
+  const publishOrAsk = async () => {
+    const from = router.state.location.href;
+    const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
+    if (links.some((link) => link.pageId === page.pageId)) {
+      setPublishingMarkdown(editor.current?.markdown() ?? null);
+      setPublishingFrom(from);
+      return;
+    }
+    await publishDraft();
+    await showPublished(from);
+  };
 
   const commandEnv = {
     satisfies: requirementsHere({ editor: info.role !== 'reader' }),
     navigate,
     flushDraft: async () => editor.current?.flush(),
   };
+  const publish = () =>
+    act(() => runCommand(publishPage, page, { ...commandEnv, publish: publishOrAsk }));
   const done = () => act(() => runCommand(finishEditing, page, commandEnv));
   // Discard mine and view theirs: the change waiting on this device goes
   // too, unless it is theirs, saved by another window.
@@ -639,6 +658,83 @@ function PageBody({
     [location, page.spaceId, page.pageId, model.view, revisionId],
   );
 
+  // The toolbar's and menu's commands, for the palette, while they show here.
+  const waitsFor = (kind: ActionKind) => {
+    const now = availabilityOf(kind, { offline: availability.offline, waiting });
+    return now.allowed ? null : now.hint;
+  };
+  const coverFromPalette = (command: typeof changeBanner | typeof changeEmoji) => {
+    // Where the focus went back to, inside the source editor's shadow root too.
+    let focused = document.activeElement;
+    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+    pickerFocus.opener.current = focused instanceof HTMLElement ? focused : null;
+    void act(() => runCommand(command, page, coverEnv));
+  };
+  const pluginEntries = usePluginPaletteEntries(pluginShown, setActionError);
+  const pageEntries: (Omit<PaletteEntry, 'satisfies'> | false)[] = [
+    model.actions.edit && {
+      command: editPage,
+      title: 'Edit page',
+      run: () => void act(() => runCommand(editPage, page, commandEnv)),
+    },
+    model.actions.done && { command: finishEditing, title: 'Done editing', run: () => void done() },
+    model.actions.publish && {
+      command: publishPage,
+      title: 'Publish',
+      waiting: waitsFor('publish'),
+      run: () => void publish(),
+    },
+    { command: findOnPage, title: 'Find on page', keys: 'Mod-f', run: () => find.open() },
+    editingCover && {
+      command: changeBanner,
+      title: 'Change banner',
+      run: () => coverFromPalette(changeBanner),
+    },
+    editingCover && {
+      command: changeEmoji,
+      title: icon ? 'Change image' : symbol ? 'Change icon' : 'Change emoji',
+      run: () => coverFromPalette(changeEmoji),
+    },
+    canEdit && {
+      command: moveNode,
+      title: 'Move to…',
+      waiting: waitsFor('move'),
+      run: () => setMoving('move'),
+    },
+    canEdit && {
+      command: copyNode,
+      title: 'Copy to…',
+      waiting: waitsFor('copy'),
+      run: () => setMoving('copy'),
+    },
+    canEdit &&
+      info.canPublish && {
+        command: publishElsewhere,
+        title: 'Publish to another space…',
+        waiting: waitsFor('publish-elsewhere'),
+        run: () => setPublishing(true),
+      },
+    !!publishedHead &&
+      info.canPublish && {
+        command: unpublishPage,
+        title: 'Unpublish…',
+        waiting: waitsFor('server'),
+        run: () => setUnpublishing(true),
+      },
+    model.actions.detach && {
+      command: detachPage,
+      title: 'Detach to edit…',
+      waiting: needs.offline ? NEEDS_CONNECTION : null,
+      run: () => setDetaching(true),
+    },
+  ];
+  usePaletteEntries([
+    ...pageEntries
+      .filter((entry) => entry !== false)
+      .map((entry) => ({ ...entry, satisfies: commandEnv.satisfies })),
+    ...pluginEntries,
+  ]);
+
   return (
     <PageCard ref={setCard} find={find}>
       <CoverBand
@@ -743,7 +839,14 @@ function PageBody({
                   <DropdownMenuItem
                     onSelect={() => {
                       fromMenu.current = true;
-                      find.open(menuButton.current);
+                      void runCommand(
+                        findOnPage,
+                        {},
+                        {
+                          ...commandEnv,
+                          openFind: () => find.open(menuButton.current),
+                        },
+                      );
                     }}
                   >
                     Find on page

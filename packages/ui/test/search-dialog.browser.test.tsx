@@ -21,6 +21,14 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it } from 'vite-plus/test';
 import { userEvent } from 'vite-plus/test/browser/context';
+import type { PaletteEntry } from '../src/commands/palette.ts';
+import { shortcutLabel } from '../src/lib/shortcuts.ts';
+import { recentCommands } from '../src/commands/palette.ts';
+import {
+  PaletteOffers,
+  PaletteOffersProvider,
+  usePaletteEntries,
+} from '../src/commands/palette-entries.tsx';
 import { searchIndexQuery } from '../src/data/queries.ts';
 import { SearchDialog } from '../src/shell/search-dialog.tsx';
 import {
@@ -32,7 +40,7 @@ import {
   takeHeldSearch,
   withoutSearchHash,
 } from '../src/shell/search-link.tsx';
-import { SEARCH_HELP } from '../src/shell/search-model.ts';
+import { isApple, SEARCH_HELP } from '../src/shell/search-model.ts';
 import { vaultStore } from '../src/vault/store.ts';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -247,4 +255,92 @@ it('holds a link’s search in memory while unlocking, not in the address', () =
   withoutSearchHash(href);
   expect(withoutSearchHash(href, { hold: false })).toBe('/s/home/p/bean-soup?view=draft');
   expect(takeHeldSearch()).toBeNull();
+});
+
+it('turns into the command palette with >, listing what can run here, recent first', async () => {
+  const ran: string[] = [];
+  const entry = (id: string, title: string, more: Partial<PaletteEntry> = {}): PaletteEntry => ({
+    command: { id, requires: [] },
+    satisfies: () => false,
+    title,
+    run: () => ran.push(id),
+    ...more,
+  });
+  function Offers() {
+    usePaletteEntries([
+      entry('vault.lock', 'Lock vault'),
+      entry('page.edit', 'Edit page'),
+      entry('page.change-banner', 'Change banner'),
+      // Its requirement doesn't hold here.
+      entry('space.delete', 'Delete space…', {
+        command: { id: 'space.delete', requires: ['space-owner'] },
+      }),
+      entry('plugin:clock:stamp', 'Insert the time', { plugin: 'Clock' }),
+      entry('page.find', 'Find on page', { keys: 'Mod-f' }),
+    ]);
+    return null;
+  }
+  recentCommands.used('page.find');
+  const box = () => {
+    const found = document.querySelector<HTMLInputElement>('input[role="combobox"]');
+    if (!found) throw new Error('No search box');
+    return found;
+  };
+  const fill = (text: string) => act(() => userEvent.fill(box(), text));
+  const listed = () =>
+    [...document.querySelectorAll('[role="option"]')].map((option) => option.textContent);
+  await mount(
+    '>',
+    <PaletteOffersProvider value={new PaletteOffers()}>
+      <Offers />
+      <SearchDialog ctx={ctx} open query=">" onOpenChange={() => {}} />
+    </PaletteOffersProvider>,
+  );
+  expect(box().getAttribute('aria-label')).toBe('Run a command');
+  // Typing goes on after the `>` it opened with.
+  expect(box().selectionStart).toBe(1);
+  // The one used last first, then by title; each with its plugin and keys.
+  expect(listed()).toEqual([
+    `Find on page${shortcutLabel('Mod-f')}`,
+    'Change banner',
+    'Edit page',
+    'Insert the timeClock',
+    'Lock vault',
+  ]);
+  expect(status()).toBe('5 commands');
+  // Letters in order, best where they start words.
+  await fill('>cb');
+  expect(listed()).toEqual(['Change banner']);
+  expect([...document.querySelectorAll('[role="option"] mark')].map((m) => m.textContent)).toEqual([
+    'C',
+    'b',
+  ]);
+  // A word starting with the letter first.
+  await fill('>t');
+  expect(listed()).toEqual(['Insert the timeClock', 'Edit page', 'Lock vault']);
+  await fill('>zz');
+  expect(status()).toBe('No commands match.');
+  // Enter runs the row chosen, once the box has closed, and keeps it as recent.
+  await fill('>lock');
+  await act(async () => {
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  await expect.poll(() => ran).toEqual(['vault.lock']);
+  expect(recentCommands.get().slice(0, 2)).toEqual(['vault.lock', 'page.find']);
+  // Typed, a better match leads a recent one.
+  await fill('>c');
+  expect(listed()[0]).toBe('Change banner');
+  // Without the `>` it searches pages again.
+  await fill('tag:soup');
+  expect(box().getAttribute('aria-label')).toBe('Search pages');
+  await expect.poll(titles).toEqual(['Bean soup', 'Pea soup']);
+  // The palette's key turns it to commands, and search's back to pages.
+  const key = (init: KeyboardEventInit) =>
+    act(async () => {
+      box().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+    });
+  await key({ key: 'F1' });
+  expect(box().value).toBe('>');
+  await key(isApple() ? { key: 'k', metaKey: true } : { key: 'k', ctrlKey: true });
+  expect(box().value).toBe('');
 });
