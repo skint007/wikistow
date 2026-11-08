@@ -4,6 +4,8 @@
 // re-applied on top of the newer record, so two devices' changes to
 // different plugins both stand, and for one plugin the last write does.
 import type { PluginScope } from '@wikistow/contracts';
+import type { Settings } from '@wikistow/plugin-sdk';
+import { SettingsValue } from '@wikistow/plugin-sdk/manifest';
 import type { ContactsChange } from '../contacts.ts';
 import { PluginApproval, pluginApprovals } from '../plugin-approvals.ts';
 import { saveContacts, type ClientContext } from './session.ts';
@@ -63,6 +65,14 @@ export const setPluginOwnParts = async (
   regions: readonly string[],
 ) => save(ctx, { kind: 'plugin-change', pluginId, set: { ownParts: [...regions] } });
 
-/** Remove a plugin's approval, on every device. Pages keep its blocks and data. */
+/** Replace an installed plugin's settings, on every device. */
+export const setPluginSettings = async (ctx: ClientContext, pluginId: string, settings: Settings) =>
+  save(ctx, {
+    kind: 'plugin-change',
+    pluginId,
+    set: { settings: SettingsValue.parse(settings) },
+  });
+
+/** Remove a plugin's approval and its settings, on every device. Pages keep its blocks and data. */
 export const removePlugin = async (ctx: ClientContext, pluginId: string) =>
   save(ctx, { kind: 'plugin-remove', pluginId });

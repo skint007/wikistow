@@ -290,7 +290,7 @@ describe('the plugin library', () => {
     expect(await onlyMe(ann)).toEqual({ ids: ['diary'] });
   });
 
-  it('lists a version whose manifest claims inline code or replaces a region only to apps that read it', async () => {
+  it('lists a version whose manifest claims inline code, replaces a region or declares settings only to apps that read it', async () => {
     const stars = plugin(
       { id: 'stars', ui: 'ui.js', inline: ['rating'] },
       { 'ui.js': 'export default {};' },
@@ -299,15 +299,23 @@ describe('the plugin library', () => {
       { id: 'home', ui: 'ui.js', replaces: ['space.home'] },
       { 'ui.js': 'export default {};' },
     );
+    const tuned = plugin(
+      { id: 'tuned', ui: 'ui.js', settings: [{ key: 'width', label: 'Width', type: 'number' }] },
+      { 'ui.js': 'export default {};' },
+    );
     expect((await upload(ann, stars)).status).toBe(201);
     expect((await upload(ann, home)).status).toBe(201);
+    expect((await upload(ann, tuned)).status).toBe(201);
     const ids = async (manifest?: number) => (await list(bob, [], manifest)).map(({ id }) => id);
     // Released apps send no `manifest`, and refuse a whole listing with `inline` or `replaces` in it.
     expect(await ids()).not.toContain('stars');
     expect(await ids()).not.toContain('home');
     expect(await ids()).toContain('notes');
+    // Apps reading 2 refuse `settings`.
+    expect(await ids(2)).toEqual(expect.arrayContaining(['stars', 'home']));
+    expect(await ids(2)).not.toContain('tuned');
     expect(await ids(pluginRoutes.MANIFEST_READ)).toEqual(
-      expect.arrayContaining(['stars', 'home']),
+      expect.arrayContaining(['stars', 'home', 'tuned']),
     );
   });
 });

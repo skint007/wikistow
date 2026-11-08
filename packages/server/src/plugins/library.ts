@@ -146,9 +146,15 @@ export async function uploadPlugin(
   return { pluginId: manifest.id, version: versionOut(version) };
 }
 
-/** Whether an app reading manifests `reads` (`MANIFEST_READ`) takes `manifest`: before 2, one without `inline` or `replaces`. */
+/**
+ * Whether an app reading manifests `reads` (`MANIFEST_READ`) takes
+ * `manifest`: before 3, one without `settings`; before 2, one without
+ * `inline` or `replaces` either.
+ */
 const readable = (manifest: Manifest, reads: number) =>
-  reads >= 2 || (manifest.inline === undefined && manifest.replaces === undefined);
+  reads >= 3 ||
+  (manifest.settings === undefined &&
+    (reads >= 2 || (manifest.inline === undefined && manifest.replaces === undefined)));
 
 /**
  * Every plugin in the library `accountId` may see, with its versions,
