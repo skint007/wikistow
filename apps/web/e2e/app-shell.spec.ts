@@ -53,7 +53,9 @@ test('the app loads offline after one online visit', async ({ page, context, adm
   );
   // Not the API, source maps, Workshop's esbuild or the frames' own files.
   expect(
-    offline.kept.filter((path) => /^\/api\/|\.map$|\.wasm$|^\/(plugin|diagram)-host\./.test(path)),
+    offline.kept.filter((path) =>
+      /^\/api\/|\.map$|\.wasm$|^\/plugin-host\.|^\/assets\/diagram\//.test(path),
+    ),
   ).toEqual([]);
   expect(offline.loads.every(Boolean)).toBe(true);
   expect(offline.api).toBe('failed');

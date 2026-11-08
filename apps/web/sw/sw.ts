@@ -2,13 +2,18 @@
 // app's own files when the server can't, so the app loads offline. It never
 // stores anything else: no API answer, no public page, nothing per account.
 // The build writes it to `/sw.js` (`appShell` in vite.config.ts), with
-// `SHELL` naming this build's cache and the files it keeps.
+// `SHELL` naming this build's cache, the files it keeps, and the diagram
+// frame's files, which it only fetches.
 
 // A module to the type checker, so `self` can be the worker's scope. The
 // type-only export leaves nothing in the built script.
 export type {};
 declare const self: ServiceWorkerGlobalScope;
-declare const SHELL: { readonly cache: string; readonly files: readonly string[] };
+declare const SHELL: {
+  readonly cache: string;
+  readonly files: readonly string[];
+  readonly warm: readonly string[];
+};
 
 /** Every build's cache is named this, then a hash of the build's files. */
 const PREFIX = 'wikistow-app-';
@@ -26,6 +31,13 @@ self.addEventListener('install', (event) => {
       // loaded serves, and a deploy downloads only what changed.
       await cache.addAll(
         SHELL.files.map((file) => new Request(file, TOP.has(file) ? { cache: 'no-cache' } : {})),
+      );
+      // The diagram frame's requests never come here, as it is sandboxed,
+      // but the browser's own cache answers them offline, as their names
+      // carry hashes. So read them once into that cache, and keep no copy.
+      // One that fails is fetched when a diagram is first drawn online.
+      await Promise.allSettled(
+        SHELL.warm.map((file) => fetch(file).then((response) => response.arrayBuffer())),
       );
       // A new build takes over at once, so online the app loads as it would without a worker.
       await self.skipWaiting();
@@ -58,7 +70,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(serverFirst(request, path));
   }
   // Anything else goes to the server as if there were no worker: the API,
-  // public pages, the plugin and diagram frames, and files not kept here.
+  // public pages, the plugin frame, and files not kept here.
 });
 
 /**

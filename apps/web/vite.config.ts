@@ -11,9 +11,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformWithOxc } from 'vite-plus';
 import {
-  DIAGRAM_HOST_PAGE,
-  DIAGRAM_HOST_SCRIPT,
-  DIAGRAM_LIBRARY,
+  DIAGRAM_FILES,
   PLUGIN_HOST_PAGE,
   PLUGIN_HOST_SCRIPT,
 } from '../../packages/contracts/src/security.ts';
@@ -113,74 +111,80 @@ const publicPageFonts = {
 };
 
 /**
- * Mermaid's own single-file build, which the diagram host frame loads as a
- * classic script (ADR 0010): a module script or `import()` from the
- * frame's opaque origin would be a cross-origin request. Written under
- * `/assets/mermaid/` by its hash, so it is cached for good, with the host
- * page naming it. The dev server serves both from here.
+ * The diagram host frame's files (ADR 0010), under `DIAGRAM_FILES` by their
+ * hashes: Mermaid's own single-file build, which the frame loads as a
+ * classic script (a module script or `import()` from the frame's opaque
+ * origin would be a cross-origin request), the frame's script
+ * `diagram/host.js`, and the page loading both, which the app frames as
+ * `__DIAGRAM_HOST__`. All are cached for good, so once loaded the frame
+ * loads offline from the browser's cache. A sandboxed frame's requests
+ * never go through the service worker, so its cache can't serve them
+ * (#333). The dev server serves them from here.
  */
-const mermaidFile = createRequire(fileURLToPath(import.meta.url)).resolve(
-  'mermaid/dist/mermaid.min.js',
-);
-const hostPage = (library: string) => `<!doctype html>
+const hashed = (name: string, extension: string, source: Uint8Array | string) =>
+  `${DIAGRAM_FILES}${name}-${createHash('sha256').update(source).digest('hex').slice(0, 16)}.${extension}`;
+const diagramFiles = () => {
+  const mermaid = readFileSync(
+    createRequire(fileURLToPath(import.meta.url)).resolve('mermaid/dist/mermaid.min.js'),
+  );
+  const script = readFileSync(new URL('diagram/host.js', import.meta.url));
+  const library = hashed('mermaid', 'js', mermaid);
+  const hostScript = hashed('host', 'js', script);
+  const page = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>WikiStow diagram host</title>
     <script src="${library}"></script>
-    <script src="${DIAGRAM_HOST_SCRIPT}"></script>
+    <script src="${hostScript}"></script>
   </head>
   <body></body>
 </html>
 `;
-const diagramLibrary = {
-  name: 'diagram-library',
+  const host = hashed('host', 'html', page);
+  const files = new Map<string, Uint8Array | string>([
+    [library, mermaid],
+    [hostScript, script],
+    [host, page],
+  ]);
+  return { host, files };
+};
+const diagram = diagramFiles();
+const diagramFrame = {
+  name: 'diagram-frame',
   configureServer(server: {
     middlewares: {
       use: (path: string, handle: (req: unknown, res: ServerResponse) => void) => void;
     };
   }) {
-    const library = `${DIAGRAM_LIBRARY}dev.js`;
-    server.middlewares.use(library, (_req, res) => {
-      res.setHeader('Content-Type', 'text/javascript');
-      res.end(readFileSync(mermaidFile));
-    });
-    server.middlewares.use(DIAGRAM_HOST_PAGE, (_req, res) => {
-      res.setHeader('Content-Type', 'text/html');
-      res.end(hostPage(library));
-    });
+    for (const [path, source] of diagram.files) {
+      server.middlewares.use(path, (_req, res) => {
+        res.setHeader('Content-Type', path.endsWith('.html') ? 'text/html' : 'text/javascript');
+        res.end(source);
+      });
+    }
   },
-  async generateBundle(this: {
+  generateBundle(this: {
     emitFile: (file: { type: 'asset'; fileName: string; source: Uint8Array | string }) => string;
   }) {
-    const source = await readFile(mermaidFile);
-    const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
-    const library = `${DIAGRAM_LIBRARY}${hash}.js`;
-    this.emitFile({ type: 'asset', fileName: library.slice(1), source });
-    this.emitFile({
-      type: 'asset',
-      fileName: DIAGRAM_HOST_PAGE.slice(1),
-      source: hostPage(library),
-    });
+    for (const [path, source] of diagram.files) {
+      this.emitFile({ type: 'asset', fileName: path.slice(1), source });
+    }
   },
 };
 
 /**
  * The service worker, `/sw.js` (ADR 0009, decision 6), written once the
  * build is on disk: `sw/sw.ts` with the files it keeps named before it.
- * It keeps the files at the top of the build but the frames' own, and
- * everything under `/assets/` but source maps, Workshop's esbuild, which
- * only an online Workshop loads, and Mermaid, which only the diagram
- * frame loads: the frame's opaque origin is never the worker's. Its cache
- * is named by a hash of those files, so each build that changes one
- * installs again.
+ * It keeps the files at the top of the build but the plugin frame's own,
+ * and everything under `/assets/` but source maps, Workshop's esbuild,
+ * which only an online Workshop loads, and the diagram frame's files. The
+ * frame's opaque origin is never the worker's, so the worker only fetches
+ * those once, into the browser's own cache, where the frame finds them
+ * (`warm`). Its cache is named by a hash of the files it keeps, so each
+ * build that changes one installs again.
  */
-const LEFT_TO_SERVER = new Set([
-  PLUGIN_HOST_PAGE,
-  PLUGIN_HOST_SCRIPT,
-  DIAGRAM_HOST_PAGE,
-  DIAGRAM_HOST_SCRIPT,
-]);
+const LEFT_TO_SERVER = new Set([PLUGIN_HOST_PAGE, PLUGIN_HOST_SCRIPT]);
 const appShell = () => {
   let outDir = '';
   return {
@@ -198,7 +202,7 @@ const appShell = () => {
         const kept = top
           ? !LEFT_TO_SERVER.has(file) && file !== '/sw.js'
           : file.startsWith('/assets/') &&
-            !file.startsWith(DIAGRAM_LIBRARY) &&
+            !file.startsWith(DIAGRAM_FILES) &&
             !file.endsWith('.map') &&
             !/\/esbuild-[^/]*\.wasm$/.test(file);
         if (kept) files.push(file);
@@ -206,7 +210,11 @@ const appShell = () => {
       files.sort();
       const hash = createHash('sha256');
       for (const file of files) hash.update(file).update(await readFile(join(outDir, file)));
-      const shell = { cache: `wikistow-app-${hash.digest('hex').slice(0, 16)}`, files };
+      const shell = {
+        cache: `wikistow-app-${hash.digest('hex').slice(0, 16)}`,
+        files,
+        warm: [...diagram.files.keys()].sort(),
+      };
       const { code } = await transformWithOxc(
         await readFile(new URL('sw/sw.ts', import.meta.url), 'utf8'),
         'sw.ts',
@@ -237,10 +245,13 @@ export default {
     // For the dev server; a build bundles workers with `worker.plugins`.
     library,
     publicPageFonts,
-    diagramLibrary,
+    diagramFrame,
     appShell(),
   ],
-  define: { __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`) },
+  define: {
+    __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`),
+    __DIAGRAM_HOST__: JSON.stringify(diagram.host),
+  },
   resolve: { alias: { '@': ui('src'), 'decode-named-character-reference': entities } },
   // The API runs separately in development (`pnpm --filter @wikistow/server-app dev`).
   // Library plugins' files are the server's too (ADR 0002).

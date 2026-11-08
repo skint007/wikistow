@@ -1,5 +1,6 @@
-// The diagram host frame (ADR 0010). The app frames diagram-host.html
-// (which the build writes, loading Mermaid's own script before this one)
+// The diagram host frame (ADR 0010). The app frames the host page, which
+// the build writes under /assets/diagram/ with this script and Mermaid's
+// own, each named by its hash (vite.config.ts), loading Mermaid before this,
 // with sandbox="allow-scripts", so Mermaid runs here at an opaque origin, under
 // a policy that allows no requests, and may use the inline styles it needs
 // to measure text. It draws each diagram it is sent and returns the SVG
