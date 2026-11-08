@@ -1,5 +1,5 @@
 import type { ClientContext } from '@wikistow/client';
-import { libraryInstall, pluginRoutes, type PluginUploadFile } from '@wikistow/contracts';
+import { libraryInstall, pluginRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -21,13 +21,15 @@ import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useNewDraft } from '../workshop/drafts';
-import { ChooseFolder, pathInFolder } from './choose-folder';
+import { ChooseFolder, folderFiles } from './choose-folder';
 import {
   LIBRARY_KEY,
   libraryQuery,
   libraryRequest,
   privatePluginsQuery,
+  readFolder,
   readUpload,
+  size,
   uploadAndInstall,
   type LibraryPlugin,
   type LibraryVersion,
@@ -59,8 +61,6 @@ const VISIBILITY = [
 type Removal = { plugin: LibraryPlugin; version: LibraryVersion | null };
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
-const size = (bytes: number) =>
-  bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /**
  * The library plugins this account installed (ADR 0002), in the Installed
@@ -129,7 +129,8 @@ export function Library({
     // What runs: in a browser the library's version, in the desktop app its copy,
     // which stays when the library drops the version.
     const runs = status?.plugin.library && status.plugin.key === approval.hash ? status : null;
-    // In the desktop app, a folder install of the same ID runs instead.
+    // In the desktop app a folder install of the same ID runs instead, in a
+    // browser a development folder.
     const replaced = status !== undefined && !status.plugin.library;
     const shown =
       runs?.plugin ?? (version ? libraryInstall(version.manifest, version.hash, true) : null);
@@ -195,8 +196,9 @@ export function Library({
               <>
                 {replaced && (
                   <p className="text-sm text-muted-foreground">
-                    A plugin installed from a folder on this computer replaces it here, until you
-                    remove that one.
+                    {desktop
+                      ? 'A plugin installed from a folder on this computer replaces it here, until you remove that one.'
+                      : 'A development folder loaded in this tab replaces it here, until you remove that one.'}
                   </p>
                 )}
                 {update && (
@@ -249,7 +251,9 @@ export function Library({
                 name="Plugin folder"
                 phone="Uploading a plugin needs a computer."
                 onFolder={(chosen) =>
-                  act(async () => setUpload(await readUpload(await readFolder(chosen))))
+                  act(async () =>
+                    setUpload(await readUpload(await readFolder(folderFiles(chosen)))),
+                  )
                 }
               />
             </div>
@@ -323,31 +327,6 @@ export function Library({
         }
       />
     </div>
-  );
-}
-
-/**
- * A chosen folder's files as an upload, each path from the folder's top.
- * Paths are checked here as the server checks them, naming the first bad
- * file, and so are the limits, before anything is sent.
- */
-async function readFolder(chosen: File[]): Promise<PluginUploadFile[]> {
-  if (chosen.length > pluginRoutes.MAX_VERSION_FILES)
-    throw new Error(`A plugin holds at most ${pluginRoutes.MAX_VERSION_FILES} files.`);
-  const bytes = chosen.reduce((total, file) => total + file.size, 0);
-  if (bytes > pluginRoutes.MAX_VERSION_BYTES)
-    throw new Error(`A plugin holds at most ${size(pluginRoutes.MAX_VERSION_BYTES)}.`);
-  const files = chosen.map((file) => ({
-    file,
-    shown: file.webkitRelativePath || file.name,
-    path: pathInFolder(file),
-  }));
-  for (const { path, shown } of files) {
-    const problem = pluginRoutes.uploadPathProblem(path, shown);
-    if (problem) throw new Error(problem);
-  }
-  return Promise.all(
-    files.map(async ({ file, path }) => ({ path, data: new Uint8Array(await file.arrayBuffer()) })),
   );
 }
 

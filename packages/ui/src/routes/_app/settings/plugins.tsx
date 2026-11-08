@@ -53,7 +53,7 @@ function PluginsPage() {
         </Link>
         <div className="flex flex-wrap items-center gap-2 px-1.5">
           <h1 className="flex-1 text-[32px] leading-tight font-extrabold">Plugins</h1>
-          {desktop && <InstallFromFolder />}
+          <InstallFromFolder />
           {!safeMode && (
             <Button size="sm" variant="outline" asChild>
               <Link to="/workshop">Build one with the assistant</Link>

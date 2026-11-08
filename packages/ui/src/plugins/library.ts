@@ -16,7 +16,15 @@ import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
 import { vaultStore, type VaultState } from '../vault/store';
 import { tabSafeMode } from './safe-mode';
-import type { AppPluginStore, LibraryRequest, PluginListing, PluginStore } from './store';
+import { developmentStore } from './development';
+import {
+  inFrontOfLibrary,
+  type AppPluginStore,
+  type LibraryRequest,
+  type PluginListing,
+  type PluginRef,
+  type PluginStore,
+} from './store';
 
 /** What every library query's key starts with, to show the library afresh after a change. */
 export const LIBRARY_KEY = ['plugin-library'];
@@ -82,6 +90,36 @@ export type PluginUpload = {
   manifest: Manifest;
   hash: string;
 };
+
+/** A size in KB or MB, as Settings shows it. */
+export const size = (bytes: number) =>
+  bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** A file of a chosen folder: its path from the folder's top, and as the person sees it. */
+export type FolderFile = { file: File; path: string; shown: string };
+
+/**
+ * A chosen folder's files as an upload. Paths are checked here as the
+ * server checks them, naming the first bad file, and so are the limits,
+ * before anything is sent.
+ */
+export async function readFolder(chosen: readonly FolderFile[]): Promise<PluginUploadFile[]> {
+  if (chosen.length > pluginRoutes.MAX_VERSION_FILES)
+    throw new Error(`A plugin holds at most ${pluginRoutes.MAX_VERSION_FILES} files.`);
+  const bytes = chosen.reduce((total, { file }) => total + file.size, 0);
+  if (bytes > pluginRoutes.MAX_VERSION_BYTES)
+    throw new Error(`A plugin holds at most ${size(pluginRoutes.MAX_VERSION_BYTES)}.`);
+  for (const { path, shown } of chosen) {
+    const problem = pluginRoutes.uploadPathProblem(path, shown);
+    if (problem) throw new Error(problem);
+  }
+  return Promise.all(
+    chosen.map(async ({ file, path }) => ({
+      path,
+      data: new Uint8Array(await file.arrayBuffer()),
+    })),
+  );
+}
 
 /** Check `files` as one built plugin folder (`checkPlugin`), throwing what is wrong with it. */
 export async function readUpload(files: readonly PluginUploadFile[]): Promise<PluginUpload> {
@@ -278,9 +316,11 @@ const offHereKey = (ctx: ClientContext, vault: Unlocked['vault']) =>
 let lastListed: { ctx: ClientContext; library: LibraryPlugin[] } | null = null;
 
 /**
- * The browser's plugins: the library versions the person approved. Files
- * come from the server's `/plugins/<id>/<hash>/…`, unhashed: the browser
- * trusts the server for them as for the app's own code.
+ * The browser's plugins: the library versions the person approved, and
+ * the development folders loaded in this tab (`developmentStore`), one of
+ * which replaces the library plugin of its ID here. Files come from the
+ * server's `/plugins/<id>/<hash>/…` (or `dev-<hash>-<n>`), unhashed: the
+ * browser trusts the server for them as for the app's own code.
  */
 export function browserStore(): AppPluginStore {
   const library = libraryStore(async (ctx, approvals) => {
@@ -302,13 +342,28 @@ export function browserStore(): AppPluginStore {
     );
     return { plugins, unavailable };
   }, browserOffHere);
+  const own = developmentStore();
+  const pick = (ref: PluginRef) => (ref.library ? library : own);
   return {
-    ...library,
-    async approve(version) {
-      if ('token' in version) throw new Error('Only the desktop app installs from a folder.');
-      await library.approve(version);
+    async list() {
+      const held = await library.list();
+      // Not known now (locked, or the server away before any listing):
+      // nor are this tab's development folders, which need both.
+      if (held.plugins === null) return held;
+      return { safeMode: held.safeMode, ...inFrontOfLibrary(await own.list(), held) };
     },
+    async approve(version) {
+      if ('token' in version) await own.approve(version);
+      else await library.approve(version);
+    },
+    enable: (ref, on) => pick(ref).enable(ref, on),
+    setAccess: (ref, scopes) => pick(ref).setAccess(ref, scopes),
+    setSettings: (ref, settings) => pick(ref).setSettings(ref, settings),
+    setOwnParts: (ref, regions) => pick(ref).setOwnParts(ref, regions),
+    setOffHere: (ref, off) => pick(ref).setOffHere(ref, off),
+    remove: (ref) => pick(ref).remove(ref),
     folders: null,
+    development: own.development,
     approvals: openApprovals,
   };
 }
