@@ -825,7 +825,14 @@ function Files({ workshop }: { workshop: Workshop }) {
     try {
       // One at a time: each is its own upload.
       for (const file of chosen) {
-        await workshop.addBinary(`public/${file.name}`, new Uint8Array(await file.arrayBuffer()));
+        const path = `public/${file.name}`;
+        // The person chose a file, not a path: say what its name needs.
+        if (pluginDraftRoutes.draftPathProblem(path)) {
+          throw new Error(
+            `“${file.name}” can’t be added: a font or image’s name uses only letters, digits, _, . and -, and ends in ${pluginDraftRoutes.DRAFT_BINARY_KINDS.join(', ')}. Rename it and add it again.`,
+          );
+        }
+        await workshop.addBinary(path, new Uint8Array(await file.arrayBuffer()));
         added = true;
       }
     } catch (error) {

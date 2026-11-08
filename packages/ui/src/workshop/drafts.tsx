@@ -31,7 +31,7 @@ export const draftsQuery = queryOptions({
   queryFn: async () => (await api.call(pluginDraftRoutes.listDrafts)).drafts,
 });
 
-/** What a new draft starts from: nothing, a library version (`from`), or `files`. */
+/** What a new draft starts from: nothing, a library version (`from`), or `files` and `binary`. */
 export type DraftStart = Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>;
 
 /** Open the workshop on draft `draftId`, in place of any conversation, with its panel open. */
