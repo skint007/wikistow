@@ -103,8 +103,9 @@ const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
 
 /**
  * What the palette lists for `query`: each command whose requirements hold
- * where it is offered, once, that matches. Those in `recent` come first, the
- * latest first, then the best matches, then by title.
+ * where it is offered, once, that matches: the best matches first, then
+ * those in `recent`, the latest first, then by title. With nothing typed,
+ * every command matches alike, so the recent ones lead.
  */
 export function paletteRows(
   entries: readonly PaletteEntry[],
@@ -130,7 +131,7 @@ export function paletteRows(
   return rows
     .sort(
       (a, b) =>
-        a.used - b.used || b.score - a.score || collator.compare(a.entry.title, b.entry.title),
+        b.score - a.score || a.used - b.used || collator.compare(a.entry.title, b.entry.title),
     )
     .map(({ entry, title }) => ({ entry, title }));
 }

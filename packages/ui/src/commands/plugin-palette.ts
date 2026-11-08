@@ -8,11 +8,12 @@ import type { PaletteEntry } from './palette';
 /**
  * The running plugins' commands, for the palette while `shown` is: each run
  * on it as the page toolbar's Plugins menu runs it, through the runtime,
- * with its time limit. `onFailed` hears what to say when one fails.
+ * with its time limit. `onNotice` hears what to say when one fails, and
+ * null as each starts, as the menu clears its note.
  */
 export function usePluginPaletteEntries(
   shown: ShownPage,
-  onFailed: (message: string) => void,
+  onNotice: (message: string | null) => void,
 ): PaletteEntry[] {
   const runtime = usePluginRuntime();
   const { commands, plugins } = usePlugins();
@@ -27,11 +28,13 @@ export function usePluginPaletteEntries(
       plugin,
       // A browser's plugins load from the server; the desktop's run from disk (ADR 0009, decision 8).
       waiting: offline && !desktop ? NEEDS_CONNECTION : null,
-      run: () =>
+      run: () => {
+        onNotice(null);
         void runtime.runCommand(command.pluginId, command.id, shown).catch((error: unknown) => {
           const message = error instanceof Error ? error.message : 'It failed';
-          onFailed(`${plugin}: ${command.title} failed. ${message}`);
-        }),
+          onNotice(`${plugin}: ${command.title} failed. ${message}`);
+        });
+      },
     };
   });
 }

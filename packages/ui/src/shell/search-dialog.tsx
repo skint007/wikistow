@@ -10,6 +10,7 @@ import { ariaShortcut, shortcutLabel } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { usePaletteList } from '../commands/palette-entries';
 import {
+  isPaletteKey,
   paletteRows,
   recentCommands,
   useRecentCommands,
@@ -17,7 +18,14 @@ import {
 } from '../commands/palette';
 import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
-import { breadcrumb, commandStatus, markedParts, searchStatus } from './search-model';
+import {
+  breadcrumb,
+  commandStatus,
+  isApple,
+  isSearchKey,
+  markedParts,
+  searchStatus,
+} from './search-model';
 
 type Hit = SearchHit<searchOperations.SearchPage>;
 
@@ -163,6 +171,16 @@ function SearchBody({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
+            // The palette's keys in search turn to commands, and search's
+            // key among commands back to pages; the shell leaves them be.
+            const apple = isApple();
+            if (isPaletteKey(event, apple) || isSearchKey(event, apple)) {
+              event.preventDefault();
+              setQuery(
+                isPaletteKey(event, apple) ? (commanding ? query : '>') : commanding ? '' : query,
+              );
+              return;
+            }
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
               list.step(event.key === 'ArrowDown' ? 1 : -1);
@@ -280,7 +298,7 @@ function CommandRow({
         <Highlighted {...title} />
       </span>
       {entry.plugin && (
-        <span className="min-w-0 shrink truncate text-xs text-muted-foreground">
+        <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
           <bdi>{plainText(entry.plugin)}</bdi>
         </span>
       )}

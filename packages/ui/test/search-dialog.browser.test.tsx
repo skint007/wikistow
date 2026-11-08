@@ -40,7 +40,7 @@ import {
   takeHeldSearch,
   withoutSearchHash,
 } from '../src/shell/search-link.tsx';
-import { SEARCH_HELP } from '../src/shell/search-model.ts';
+import { isApple, SEARCH_HELP } from '../src/shell/search-model.ts';
 import { vaultStore } from '../src/vault/store.ts';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -327,8 +327,20 @@ it('turns into the command palette with >, listing what can run here, recent fir
   });
   await expect.poll(() => ran).toEqual(['vault.lock']);
   expect(recentCommands.get().slice(0, 2)).toEqual(['vault.lock', 'page.find']);
+  // Typed, a better match leads a recent one.
+  await fill('>c');
+  expect(listed()[0]).toBe('Change banner');
   // Without the `>` it searches pages again.
   await fill('tag:soup');
   expect(box().getAttribute('aria-label')).toBe('Search pages');
   await expect.poll(titles).toEqual(['Bean soup', 'Pea soup']);
+  // The palette's key turns it to commands, and search's back to pages.
+  const key = (init: KeyboardEventInit) =>
+    act(async () => {
+      box().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
+    });
+  await key({ key: 'F1' });
+  expect(box().value).toBe('>');
+  await key(isApple() ? { key: 'k', metaKey: true } : { key: 'k', ctrlKey: true });
+  expect(box().value).toBe('');
 });
