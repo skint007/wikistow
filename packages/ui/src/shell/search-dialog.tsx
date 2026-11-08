@@ -263,7 +263,7 @@ function useChosen(keys: readonly string[], query: string) {
   };
 }
 
-/** A command: its title, with what the query matched marked, its plugin and its keys. */
+/** A command: its title, with what the query matched marked, why it can't run now, its plugin and its keys. */
 function CommandRow({
   row: { entry, title },
   id,
@@ -284,19 +284,25 @@ function CommandRow({
       role="option"
       aria-selected={active}
       aria-disabled={waiting ? true : undefined}
-      data-hint={waiting}
-      aria-description={waiting}
       onClick={onRun}
       onMouseMove={onHover}
       className={cn(
         'flex min-w-0 cursor-pointer items-center gap-3 rounded-row px-2.5 py-2',
         active && 'bg-primary-soft',
-        waiting && 'cursor-default opacity-60',
+        waiting && 'cursor-default',
       )}
     >
-      <span className={cn('min-w-0 flex-1 truncate font-bold', active && 'text-primary-ink')}>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate font-bold',
+          active && 'text-primary-ink',
+          waiting && 'opacity-60',
+        )}
+      >
         <Highlighted {...title} />
       </span>
+      {/* Written out, not a hint: the focus stays in the box, so a hint would show only on hover. */}
+      {waiting && <span className="shrink-0 text-xs text-muted-foreground">{waiting}</span>}
       {entry.plugin && (
         <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
           <bdi>{plainText(entry.plugin)}</bdi>
