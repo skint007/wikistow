@@ -6,6 +6,7 @@ import type {
   RailViewProps,
   Regions,
   Replacements,
+  SearchResult,
   SettingsViewProps,
   TitlebarViewProps,
   View,
@@ -416,6 +417,8 @@ export type ReplaceInputs = {
   'folder.view': { spaceId: string; folderId: string };
   /** The publication shown, and its text as shown, after its frontmatter. */
   'page.reader': { page: PageRef; revision: string; markdown: string };
+  /** What was typed, and the app's own results for it. */
+  'search.results': { query: string; results: SearchResult[] };
 };
 
 /** What a replacing view of region `R` is given. */
@@ -472,6 +475,22 @@ export const REPLACED: {
         : null,
     bind: (view, props) => (element) => view(element, props),
   },
+  'search.results': {
+    part: 'the search results',
+    // Only where it has page access, and can read every result, so none goes missing.
+    props: async ({ pages, spaces }, { query, results }) => {
+      if ((await spaces()).length === 0) return null;
+      const trees = await Promise.all(
+        [...new Set(results.map((result) => result.spaceId))].map((spaceId) => pages.tree(spaceId)),
+      );
+      const key = (page: PageRef) => `${page.spaceId}/${page.pageId}`;
+      const readable = new Set(
+        trees.flat().flatMap((entry) => (entry.kind === 'page' ? [key(entry)] : [])),
+      );
+      return results.every((result) => readable.has(key(result))) ? { query, results } : null;
+    },
+    bind: (view, props) => (element) => view(element, props),
+  },
 };
 
 const NO_RAIL: RailViewProps = {};
@@ -489,20 +508,23 @@ type Made<R extends keyof Replacements> = {
  * names, or as the app's own part, `children`, where none does, where the
  * plugin has no page access, and once its view failed, which a note above
  * it says, with Disable. Nothing shows while what the view is given is
- * first read; read again, what showed stays if it was the app's own. What
- * it is given is read again as `inputs` or the plugin's page access
- * change, and as `stamp` does, such as the tree's update time, and it is
- * drawn again only if that changed.
+ * first read; read again, what showed stays if it was the app's own, or
+ * with `keep`, whatever it was. What it is given is read again as `inputs`
+ * or the plugin's page access change, and as `stamp` does, such as the
+ * tree's update time, and it is drawn again only if that changed.
  */
 export function Replaceable<R extends keyof Replacements>({
   name,
   inputs,
   stamp,
+  keep = false,
   children,
 }: {
   name: R;
   inputs: ReplaceInputs[R];
   stamp?: unknown;
+  /** Keep the view drawn for the inputs before until it is drawn for these, as for results that change as the person types. */
+  keep?: boolean;
   children: ReactNode;
 }) {
   const { replaced, plugins } = usePlugins();
@@ -537,7 +559,7 @@ export function Replaceable<R extends keyof Replacements>({
   }, [name, view, pluginId, runtime, key, access, stamp]);
   if (!replacing) return children;
   const sameView = made?.view === replacing.view;
-  const shown = sameView && made.inputs === key ? made : null;
+  const shown = sameView && (keep || made.inputs === key) ? made : null;
   // The app's own part stays while what the view is given is read again, if
   // that is what showed: drawn afresh, it would lose its focus and scroll.
   if (!shown) return sameView && !made.draw ? children : null;

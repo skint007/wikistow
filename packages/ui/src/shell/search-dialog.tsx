@@ -1,7 +1,16 @@
 import type { ClientContext, Marked, SearchHit, searchOperations } from '@wikistow/client';
 import { useNavigate } from '@tanstack/react-router';
 import { ChevronRight, Search } from 'lucide-react';
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  useDeferredValue,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
@@ -18,11 +27,14 @@ import {
 } from '../commands/palette';
 import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
+import { Replaceable } from '../plugins/places';
+import { usePlugins } from '../plugins/runtime';
 import {
   breadcrumb,
   commandStatus,
   isApple,
   isSearchKey,
+  looksFor,
   markedParts,
   searchStatus,
 } from './search-model';
@@ -44,6 +56,11 @@ const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
  * Typed first, `>` turns it into the command palette (`paletteRows`): the
  * commands offered where the person is (`usePaletteEntries`), recent ones
  * first. Ctrl+Shift+P (Cmd+Shift+P on Apple) or F1 opens it so.
+ *
+ * A plugin can draw the results of a word search in place of the list
+ * (`search.results`, ADR 0011); the box, the line under it and the
+ * commands stay the app's. The view opens a result with
+ * `host.app.navigate`, which closes search (`AppShell`).
  */
 export function SearchDialog({
   ctx,
@@ -91,6 +108,17 @@ function SearchBody({
     [index, deferred],
   );
   const hits = useChosen(results.map(hitKey), deferred);
+  // What a plugin drawing the results is given of them.
+  const searchResults = useMemo(
+    () =>
+      results.map(({ doc, title }) => ({
+        spaceId: doc.spaceId,
+        pageId: doc.pageId,
+        title: title.text,
+        draft: doc.draft,
+      })),
+    [results],
+  );
   const offered = usePaletteList();
   const recent = useRecentCommands();
   const commands = commanding ? paletteRows(offered, query.slice(1), recent) : [];
@@ -99,7 +127,10 @@ function SearchBody({
     query,
   );
   const list = commanding ? chosenCommand : hits;
-  const count = commanding ? commands.length : results.length;
+  // Up, down and Enter move through the app's own list, not a plugin's drawn in its place.
+  // Set as the list mounts (`Own`), so search opened with a query a plugin draws never has it.
+  const [ownShown, setOwnShown] = useState(false);
+  const count = commanding ? commands.length : ownShown ? results.length : 0;
   const { active } = list;
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
@@ -114,6 +145,14 @@ function SearchBody({
     const end = box.current?.value.length ?? 0;
     box.current?.setSelectionRange(end, end);
   }, []);
+
+  // A word search's results, which a plugin may draw in place of the list (`search.results`).
+  const replaced =
+    usePlugins().replaced['search.results'] !== null &&
+    !commanding &&
+    index !== undefined &&
+    index.size > 0 &&
+    looksFor(deferred);
 
   function openHit({ doc }: Hit) {
     onDone();
@@ -133,6 +172,30 @@ function SearchBody({
     // opens then gives it back there too.
     setTimeout(entry.run);
   }
+
+  const listProps = {
+    id: `${ids}-results`,
+    role: 'listbox',
+    className: '-mx-1 grid max-h-[min(60vh,28rem)] gap-0.5 overflow-y-auto px-1',
+  };
+  const resultList = (
+    <Own onShown={setOwnShown}>
+      {results.length > 0 && (
+        <ul {...listProps} aria-label="Results">
+          {results.map((hit, i) => (
+            <ResultRow
+              key={hitKey(hit)}
+              hit={hit}
+              id={optionId(i)}
+              active={i === active}
+              onOpen={() => openHit(hit)}
+              onHover={() => hits.choose(hitKey(hit))}
+            />
+          ))}
+        </ul>
+      )}
+    </Own>
+  );
 
   const status = commanding
     ? commandStatus(commands.length)
@@ -184,7 +247,7 @@ function SearchBody({
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
               list.step(event.key === 'ArrowDown' ? 1 : -1);
-            } else if (event.key === 'Enter') {
+            } else if (event.key === 'Enter' && count > 0) {
               const row = commanding ? commands[active] : results[active];
               if (!row) return;
               event.preventDefault();
@@ -208,38 +271,45 @@ function SearchBody({
           </Button>
         </div>
       )}
-      {count > 0 && (
-        <ul
-          id={`${ids}-results`}
-          role="listbox"
-          aria-label={commanding ? 'Commands' : 'Results'}
-          className="-mx-1 grid max-h-[min(60vh,28rem)] gap-0.5 overflow-y-auto px-1"
-        >
-          {commanding
-            ? commands.map((row, i) => (
-                <CommandRow
-                  key={row.entry.command.id}
-                  row={row}
-                  id={optionId(i)}
-                  active={i === active}
-                  onRun={() => runCommandRow(row)}
-                  onHover={() => chosenCommand.choose(row.entry.command.id)}
-                />
-              ))
-            : results.map((hit, i) => (
-                <ResultRow
-                  key={hitKey(hit)}
-                  hit={hit}
-                  id={optionId(i)}
-                  active={i === active}
-                  onOpen={() => openHit(hit)}
-                  onHover={() => hits.choose(hitKey(hit))}
-                />
-              ))}
-        </ul>
+      {commanding ? (
+        commands.length > 0 && (
+          <ul {...listProps} aria-label="Commands">
+            {commands.map((row, i) => (
+              <CommandRow
+                key={row.entry.command.id}
+                row={row}
+                id={optionId(i)}
+                active={i === active}
+                onRun={() => runCommandRow(row)}
+                onHover={() => chosenCommand.choose(row.entry.command.id)}
+              />
+            ))}
+          </ul>
+        )
+      ) : replaced ? (
+        <div className="-mx-1 flex max-h-[min(60vh,28rem)] min-h-0 flex-col px-1 empty:hidden">
+          <Replaceable
+            name="search.results"
+            inputs={{ query: deferred, results: searchResults }}
+            keep
+          >
+            {resultList}
+          </Replaceable>
+        </div>
+      ) : (
+        resultList
       )}
     </>
   );
+}
+
+/** The app's own list, saying while it is shown, so the box's keys move through it then. */
+function Own({ onShown, children }: { onShown: (shown: boolean) => void; children: ReactNode }) {
+  useLayoutEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
+  return children;
 }
 
 /**
