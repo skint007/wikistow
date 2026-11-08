@@ -13,16 +13,20 @@ import {
   type ScriptBlock,
   type ScriptHost,
   type SearchResult,
+  type Settings,
   type TreeEntry,
   PLUGIN_API,
 } from './host.ts';
 import type { HostMessage, Method, OutputResult, WorkerMessage } from './protocol.ts';
 
+/** What a script hears: its events, and its settings changing. */
+type Heard = PluginEvents & { 'settings.changed': Settings };
+
 type Handlers = {
-  [E in keyof PluginEvents]: Set<(event: PluginEvents[E]) => void | Promise<void>>;
+  [E in keyof Heard]: Set<(event: Heard[E]) => void | Promise<void>>;
 };
 
-const fire = <E extends keyof PluginEvents>(set: Handlers[E], payload: PluginEvents[E]) =>
+const fire = <E extends keyof Heard>(set: Handlers[E], payload: Heard[E]) =>
   Promise.all([...set].map(async (handler) => handler(payload)));
 
 /**
@@ -52,7 +56,23 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
     });
 
   const commands = new Map<string, Command>();
-  const handlers: Handlers = { 'page.shown': new Set(), 'draft.saved': new Set() };
+  const handlers: Handlers = {
+    'page.shown': new Set(),
+    'draft.saved': new Set(),
+    'settings.changed': new Set(),
+  };
+  const listen = <E extends keyof Heard>(
+    event: E,
+    handler: (event: Heard[E]) => void | Promise<void>,
+  ): Disposer => {
+    const set: Handlers[E] = handlers[event];
+    if (set.size === 0) send({ type: 'listen', event, on: true });
+    set.add(handler);
+    return () => {
+      if (!set.delete(handler) || set.size > 0) return;
+      send({ type: 'listen', event, on: false });
+    };
+  };
   const blocks = new Map<string, ScriptBlock<Record<string, BlockField>>>();
 
   const host: ScriptHost = {
@@ -83,16 +103,12 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
         };
       },
     },
-    events: {
-      on(event, handler): Disposer {
-        const set: Handlers[typeof event] = handlers[event];
-        if (set.size === 0) send({ type: 'listen', event, on: true });
-        set.add(handler);
-        return () => {
-          if (!set.delete(handler) || set.size > 0) return;
-          send({ type: 'listen', event, on: false });
-        };
-      },
+    events: { on: listen },
+    settings: {
+      get: () => call<Settings>('settings.get', []),
+      set: (settings) => call<void>('settings.set', [settings]),
+      update: (patch) => call<Settings>('settings.update', [patch]),
+      on: (_event, handler) => listen('settings.changed', handler),
     },
     blocks: {
       register(block): Disposer {
@@ -156,6 +172,9 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
         return;
       case 'draft.saved':
         await fire(handlers['draft.saved'], target.payload);
+        return;
+      case 'settings.changed':
+        await fire(handlers['settings.changed'], target.payload);
         return;
     }
   };

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PLUGIN_API } from './host.ts';
+import { PLUGIN_API, SETTINGS_LIMIT, type Json, type Settings } from './host.ts';
 
 export { PLUGIN_API };
 
@@ -35,6 +35,43 @@ export const PluginTheme = z.strictObject({
   base: z.enum(['light', 'dark']),
   stylesheet: PluginFile,
 });
+
+const SettingCommon = {
+  /** Its key in the plugin's settings. */
+  key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,39}$/),
+  label: z.string().min(1).max(100),
+  /** A line under the label, saying what it does. */
+  description: z.string().max(400).optional(),
+};
+
+/** A setting the host draws in the plugin's row in Settings → Plugins, and checks values against. */
+export const SettingField = z.discriminatedUnion('type', [
+  z.strictObject({
+    ...SettingCommon,
+    type: z.literal('text'),
+    default: z.string().max(1000).optional(),
+  }),
+  z.strictObject({
+    ...SettingCommon,
+    type: z.literal('number'),
+    default: z.number().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+  }),
+  z.strictObject({ ...SettingCommon, type: z.literal('boolean'), default: z.boolean().optional() }),
+  z.strictObject({
+    ...SettingCommon,
+    type: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({ value: z.string().min(1).max(100), label: z.string().min(1).max(100) }),
+      )
+      .min(1)
+      .max(50),
+    default: z.string().max(100).optional(),
+  }),
+]);
+export type SettingField = z.infer<typeof SettingField>;
 
 /** `wikistow-plugin.json`: what a plugin is and what it contains. */
 export const Manifest = z.strictObject({
@@ -76,8 +113,78 @@ export const Manifest = z.strictObject({
     .array(z.string().regex(/^[a-z][a-z0-9.-]{0,39}$/))
     .max(20)
     .optional(),
+  /**
+   * The settings the host draws for it in Settings → Plugins (#310), each
+   * key once, each default a value its field takes. Left out, not
+   * defaulted, as `inline` is.
+   */
+  settings: z
+    .array(SettingField)
+    .max(30)
+    .refine(
+      (fields) => new Set(fields.map(({ key }) => key)).size === fields.length,
+      'Each setting needs a key of its own',
+    )
+    .refine(
+      (fields) =>
+        fields.every((field) => field.default === undefined || settingFits(field, field.default)),
+      'A setting’s default must be a value it takes',
+    )
+    .optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
+
+/** A plugin's settings as stored: any JSON object. */
+export const SettingsValue = z.record(z.string().max(100), z.json());
+
+/** Whether `value` is one `field` takes. */
+export function settingFits(field: SettingField, value: Json): boolean {
+  switch (field.type) {
+    case 'text':
+      return typeof value === 'string';
+    case 'number':
+      return (
+        typeof value === 'number' &&
+        Number.isFinite(value) &&
+        (field.min === undefined || value >= field.min) &&
+        (field.max === undefined || value <= field.max)
+      );
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'choice':
+      return field.options.some((option) => option.value === value);
+  }
+}
+
+/**
+ * The settings a plugin reads: what is stored, with each declared field's
+ * default where its value is missing or no longer fits it (after an update
+ * changed the field, say).
+ */
+export function settingsWithDefaults(
+  fields: readonly SettingField[] | undefined,
+  stored: Settings,
+): Settings {
+  const read: Settings = { ...stored };
+  for (const field of fields ?? []) {
+    const value = read[field.key];
+    if (value !== undefined && settingFits(field, value)) continue;
+    if (field.default === undefined) delete read[field.key];
+    else read[field.key] = field.default;
+  }
+  return read;
+}
+
+/** The first declared field `settings` holds a value for that it doesn't take, if any. */
+export const misfit = (fields: readonly SettingField[] | undefined, settings: Settings) =>
+  (fields ?? []).find((field) => {
+    const value = settings[field.key];
+    return value !== undefined && !settingFits(field, value);
+  });
+
+/** Whether `settings` fit in `SETTINGS_LIMIT`. */
+export const settingsFit = (settings: Settings) =>
+  new TextEncoder().encode(JSON.stringify(settings)).byteLength <= SETTINGS_LIMIT;
 
 /**
  * How far a person trusts a plugin by installing it, from what it holds:
