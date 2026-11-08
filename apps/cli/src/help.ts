@@ -390,8 +390,8 @@ wikilinks: [[Plan#Next steps|the plan]] becomes
 [the plan](../Work/Plan.md#next-steps), its text as WikiStow shows it and
 its #heading as GitHub's anchor for it. An embed of an attachment becomes
 an image, or a link for another kind of file. Page embeds (![[Plan]]),
-block references and links that stay as written above stay wikilinks, and
-are counted.
+block references, links that stay as written above, and a wikilink in a
+link's text stay wikilinks, and are counted. Frontmatter stays as written.
 
 ${
   WINDOWS

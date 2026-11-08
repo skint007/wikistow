@@ -78,7 +78,7 @@ export async function exportMarkdown(
     out.line(`Exported ${files} to ${args.out}`);
     if (markdown && wikilinks > 0) {
       out.note(
-        `${wikilinks} wikilink${wikilinks === 1 ? '' : 's'} left as written: page embeds, block references, and links that don't lead to one page in the export`,
+        `${wikilinks} wikilink${wikilinks === 1 ? '' : 's'} left as written, such as page embeds and links to pages not exported`,
       );
     }
     for (const item of skipped) {
