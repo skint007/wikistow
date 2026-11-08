@@ -57,7 +57,7 @@ Removing a folder's image writes `wikistow.icon: null`, since `reviseMetadata` m
 - **A. Upload each time (recommended).** Each folder or page holds its own copy. Choosing the same picture twice means choosing the file twice.
 - **B. A per-space library.** A new encrypted record listing the space's icons. Its key would have to reach everyone who can see any folder or page using an icon, and the space's shares have different members: an owner-region library can't be read by a share's readers, so each icon would still need copying into each region that uses it. That is a new record type, new sealing rules and new server storage for a convenience.
 
-**Recommendation: A.** With icons of a few KB the copies cost nothing that matters. If people ask for reuse, a later "recent images" row in the picker can copy the bytes of icons the person can already see, with no new record.
+**Recommendation: A.** With icons of a few KB the copies cost nothing that matters. If people ask for reuse, a later "recent images" row in the picker (#335) can copy the bytes of icons the person can already see, with no new record.
 
 ### 4. Size, type, downscaling, and SVG
 
@@ -93,7 +93,7 @@ At the default 5 GiB quota none of this is noticeable. No new limit is needed be
 - **Pages:** the cover editor resizes, uploads as a draft attachment and sets `cover.icon`, the way `upload` sets a banner, with saves waiting for it (`handle.track`).
 - **Folders:** `FolderLookFields` keeps the prepared image in the dialog until **Save** writes the metadata, in the New folder dialog (`createFolder` gains an optional image) and in **Emoji and colour…**. The 48 px tile shows the image on the tint, which shows through a transparent image. The colour swatches keep showing the emoji, so the colour choice stays visible, and the tint still matters for the fallback.
 
-The image shows wherever the emoji shows now: the sidebar's folder and page rows, the folder look tiles and the page badge. A shared `IconImage` component draws the `blob:` URL and falls back to the emoji. Page icons get their URL from `decryptedQuery`, kept until lock as above. A folder's bytes come with the tree, so its URL is cached by the metadata version's ID the same way, not made again on each tree fetch, which would pile up URLs until the vault locks. Space icons (rail, space header) and the Shared with me page's folder looks (it shows a generic icon today) can use the same field and component later; they are out of scope.
+The image shows wherever the emoji shows now: the sidebar's folder and page rows, the folder look tiles and the page badge. A shared `IconImage` component draws the `blob:` URL and falls back to the emoji. Page icons get their URL from `decryptedQuery`, kept until lock as above. A folder's bytes come with the tree, so its URL is cached by the metadata version's ID the same way, not made again on each tree fetch, which would pile up URLs until the vault locks. Space icons (rail, space header) and the Shared with me page's folder looks (it shows a generic icon today, #336) can use the same field and component later; they are out of scope.
 
 ## Spike evidence (2026-10-16)
 

@@ -54,7 +54,7 @@ Everything Milestones 0 and 1 shipped is **version 1 and frozen**. Stored data u
 - agent enrollment with an enrollment fingerprint (`agent-enrollment-check/v1`), and bearer credentials;
 - the `wikistow.publication` payload extension, which names a published copy's source inside its encrypted payload (section 13).
 
-Identity key rotation, and its statement format, are left to a later milestone (section 4.6).
+Identity key rotation, and its statement format, are left to a later milestone (section 4.6, #327).
 
 ### What Milestone 5 adds
 
@@ -400,7 +400,7 @@ To accept an enrollment (`verifyEnrollment`):
 
 ### 4.6 Identity key rotation
 
-Identity key rotation, and the statement that would announce it, are left to a later milestone (Q4). In Milestone 2 a person's key version still increases when they replace lost keys during recovery. Every other app treats that as a key change (section 8.4): owners share with the person again after confirming it (section 7.3), and an owner is re-added as a co-owner (section 7.6).
+Identity key rotation, and the statement that would announce it, are left to a later milestone (Q4, #327). In Milestone 2 a person's key version still increases when they replace lost keys during recovery. Every other app treats that as a key change (section 8.4): owners share with the person again after confirming it (section 7.3), and an owner is re-added as a co-owner (section 7.6).
 
 ---
 
@@ -723,7 +723,7 @@ The server serves a record with either its wrap or the caller's own envelopes, n
 - making a share on folder `F` when an ancestor of `F` is a share root, or the space is shared, or `F`'s subtree holds a share root. A space share needs a space with no shares;
 - a move (section 10) that would put a share root, or a subtree that holds one, inside a share.
 
-Shares made for agents count as shares here. Milestone 2 has no way to stop a share, so a folder that holds a share can't be shared; a later milestone may add one.
+Shares made for agents count as shares here. Milestone 2 has no way to stop a share, so a folder that holds a share can't be shared; a later milestone may add one (#329).
 
 ### 6.2 Key versions
 
@@ -1582,11 +1582,11 @@ These notes say what the next two PRs change. They add no rules; where they diff
 | Q1 | **Agents in groups.** | Built in Milestone 5 (sections 7.8, 7.9 and 9.4). A group is a set of people and their agents added to shares together; it needs no new key format. |
 | Q2 | **Contacts rollback in the browser, and contacts forks between devices** (section 8.5). | Accepted. The CLI, the desktop app with a trusted secret store, and the browser (ADR 0009) detect a rollback across sessions; the person can compare the version and hash each device shows. |
 | Q3 | **KDF floor.** Vault wrappers accept libsodium's minimum Argon2id cost (section 5.6). | Recommend refusing to *write* below INTERACTIVE. Needs a code change. |
-| Q4 | **Identity key rotation** isn't in Milestone 2 (section 4.6). | Later milestone, which also defines its statement format. Until then a person with a new key version is re-shared by owners after a key-change warning. |
+| Q4 | **Identity key rotation** isn't in Milestone 2 (section 4.6). | Later milestone (#327), which also defines its statement format. Until then a person with a new key version is re-shared by owners after a key-change warning. |
 | Q5 | **Published history order** is the server's, and unsigned. | Accepted, as in Milestone 1 (A2). |
 | Q6 | **New key version after unpublish.** | Dropped. New members get every key version and current readers get the new one, so the rotation protected nothing. Unpublish only hides the page from readers (section 11). |
 | Q7 | **Agents wait for their person after a rotation** (section 9.4). An unattended agent can't save in a rotated share until its person unlocks an app. | Accepted for Milestone 2. Owners sealing to agents directly would need owners to trust the server's list of agents. |
-| Q8 | **Large first shares.** Making a share wraps every retained record of the subtree in one request (section 6.7). | PR 3 measures it in the sharing-cost benchmark (`apps/server/bench/sharing-cost.ts`, results in [`benchmarks/sharing.md`](benchmarks/sharing.md)), and may split the upload under an open operation that commits at once. |
+| Q8 | **Large first shares.** Making a share wraps every retained record of the subtree in one request (section 6.7). | PR 3 measures it in the sharing-cost benchmark (`apps/server/bench/sharing-cost.ts`, results in [`benchmarks/sharing.md`](benchmarks/sharing.md)), and may split the upload under an open operation that commits at once (#328). |
 | Q9 | **Node deletion** is the server's, and so is the trash (section 10, **The trash**). | Affects availability only (A1, A2). |
 | Q10 | **Owners don't see an agent's demotion** (section 9.4). An agent changed to reader keeps the draft keys it had (A6). Its person's app offers Rotate keys when the person owns the space. Otherwise it tells them to ask the owners, whose apps aren't told: they list agents with no grant that held keys, but the server doesn't record which keys an envelope held. | Accepted for Milestone 2. Telling owners would need the server to keep each envelope's key class, so a demoted agent could be listed beside former agents. |
 | Q11 | **Which agent wrote a draft** is the server's claim (section 9.5). The page's 🤖 pill and the space's activity card show the agent the server says last saved a draft, which nothing signed backs. They name only the person's own agents, by the person's label, and any other as "an agent". | Accepted for Milestone 2. They drive no key decisions. Checking the claim against the draft's signed author needs the draft revision, which the published view doesn't load, so it is deferred. History is checked: each version's signed author, and the agent's person from its pinned keys (section 4.2). |

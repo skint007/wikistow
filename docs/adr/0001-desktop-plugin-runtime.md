@@ -1,12 +1,12 @@
 ---
-status: accepted
+status: built
 ---
 
 # Desktop plugins: locally installed folders, trusted app code, sandboxed scripts
 
-[ADR 0002](0002-plugin-library-and-browser-plugins.md) (accepted) amends this one: a plugin library on the server, approvals that follow the account, plugins in the browser, and scripts in a sandboxed frame, in the browser and the desktop app alike.
+[ADR 0002](0002-plugin-library-and-browser-plugins.md) (built) amends this one: a plugin library on the server, approvals that follow the account, plugins in the browser, and scripts in a sandboxed frame, in the browser and the desktop app alike.
 
-[ADR 0011](0011-replaceable-regions.md) (accepted) amends it again: some regions become replaceable, app plugins get `host.app` (where the person is, navigation, spaces), plugins can insert Markdown at the cursor and add to the editor's toolbar, and plugins can claim inline code as they claim fences.
+[ADR 0011](0011-replaceable-regions.md) (built) amends it again: some regions become replaceable, app plugins get `host.app` (where the person is, navigation, spaces), plugins can insert Markdown at the cursor and add to the editor's toolbar, and plugins can claim inline code as they claim fences.
 
 WikiStow gains TypeScript plugins (#256), on the desktop app first. A person installs a built plugin folder from their own disk; nothing comes from the server. The plugin is served from the app's own origin. Its interface code runs in the page with the person's full trust, and its scripts run in a network-less worker that can reach pages only through a typed, access-checked host interface. Pages never carry code: a plugin block in a page is a fenced code block that names an installed plugin, so without the plugin it reads, edits, saves and exports as the code block it is.
 
@@ -106,7 +106,7 @@ All are made at activation or later, return a disposer, and are removed on unloa
 
 - Page data: `extensions['plugin.<id>']`, JSON, encrypted with the revision and carried by every client, publication and restore under the existing unknown-namespace rule, so readers of a publication get the data its draft had. It never holds key material and counts toward the page's size limit. Export writes Markdown only, so anything a page needs readably belongs in its block.
 - Block data: the fence's text, in the page's Markdown, readable, versioned, exported and searched like any code block.
-- No device storage or settings store for plugins in v1.
+- No device storage or settings store for plugins in v1 (#310).
 
 ## How the follow-ups map onto it
 
