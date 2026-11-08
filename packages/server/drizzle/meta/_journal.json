@@ -295,6 +295,13 @@
       "when": 1794141781758,
       "tag": "0041_copy_whole_space",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794156697540,
+      "tag": "0042_plugin_development",
+      "breakpoints": true
     }
   ]
 }

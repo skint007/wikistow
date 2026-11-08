@@ -182,6 +182,37 @@ export const removeVersion = {
 } as const satisfies RouteDef;
 
 /**
+ * Load a built plugin folder as the caller's development build of
+ * `pluginId` (#317), which its manifest must name: what a browser uploads
+ * at each **Reload** of a development folder. One build per account and
+ * ID, replaced each time, checked as an upload is but never in the
+ * library, and served to the caller only, under `developmentKey(hash, n)`.
+ * Kept a week after the last Reload. People only, not agents.
+ */
+export const putDevelopment = {
+  method: 'PUT',
+  path: '/api/plugins/:pluginId/development',
+  params: z.object({ pluginId: PluginId }),
+  body: z.strictObject({ files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES) }),
+  response: z.strictObject({ hash: PluginHash }),
+} as const satisfies RouteDef;
+
+/** Remove the caller's development build of `pluginId`, if there is one. */
+export const removeDevelopment = {
+  method: 'DELETE',
+  path: '/api/plugins/:pluginId/development',
+  params: z.object({ pluginId: PluginId }),
+  response: z.object({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/**
+ * The file route's key for a development build: not the bare hash, which a
+ * library version uses. `load` numbers the tab's loads and Reloads, so
+ * each runs the plugin afresh, as the desktop's `dev-<n>` does, even unchanged.
+ */
+export const developmentKey = (hash: string, load: number) => `dev-${hash}-${load}`;
+
+/**
  * A version's file, for any signed-in session, outside `/api`. Sent with
  * `Content-Security-Policy: default-src 'none'`, `nosniff`, the type from
  * its extension (`fileType` in the SDK), and cached privately for good,
