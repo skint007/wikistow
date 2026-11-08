@@ -24,6 +24,15 @@ const ENABLED_AUTH_PATHS = [
   '/list-accounts',
   '/list-sessions',
   '/ok',
+  // Passkeys: adding one needs a recent sign-in (RECENT_SIGN_IN_AUTH_PATHS);
+  // signing in with one only finds an existing account's credential.
+  '/passkey/delete-passkey',
+  '/passkey/generate-authenticate-options',
+  '/passkey/generate-register-options',
+  '/passkey/list-user-passkeys',
+  '/passkey/update-passkey',
+  '/passkey/verify-authentication',
+  '/passkey/verify-registration',
   '/request-password-reset',
   '/reset-password',
   '/reset-password/:token',

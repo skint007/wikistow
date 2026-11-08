@@ -21,7 +21,6 @@ import { contentChanged } from '../data/content-changed';
 import { spacesQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { EmojiPopover } from '../page/cover/emoji-picker';
-import { iconImage } from '../page/cover/icon-image';
 import { useClient, vaultStore } from '../vault/store';
 import { pictureChange, pictureLabel, useFolderIcon, type PickedImage } from './folder-look';
 
@@ -199,12 +198,13 @@ function LookForm({ spaceId, onDone }: { spaceId: SpaceId; onDone: () => void })
           }}
           image={{
             current: image,
-            onPick: async (file) => {
-              const icon = await iconImage(file);
+            onPick: async (prepare) => {
+              const icon = await prepare();
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
               setPicked({ ...look, symbol: null, image: { icon, url } });
             },
             onRemove: () => setPicked({ ...look, image: null }),
+            spaceId,
           }}
         >
           <button

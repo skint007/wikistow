@@ -19,7 +19,8 @@ let state: VaultState = { status: 'locked' };
 // before the recovery key is confirmed, recovery before the new passphrase.
 let staged: UnlockedVault | null = null;
 const listeners = new Set<() => void>();
-const blobUrls = new Set<string>();
+// Each URL made for decrypted bytes, and its bytes, so they can be copied without fetching it.
+const blobUrls = new Map<string, Blob>();
 const lockGuards = new Set<LockGuard>();
 let queryClient: QueryClient | null = null;
 // Counts locks, so work started before one can tell it happened.
@@ -128,7 +129,7 @@ export const vaultStore = {
     vaultStore.dropStaged();
     state = { status: 'locked' };
     queryClient?.removeQueries({ queryKey: [PLAIN] });
-    for (const url of blobUrls) URL.revokeObjectURL(url);
+    for (const url of blobUrls.keys()) URL.revokeObjectURL(url);
     blobUrls.clear();
     emit();
   },
@@ -139,9 +140,17 @@ export const vaultStore = {
    */
   objectUrl(bytes: Uint8Array, mediaType: string, decryptedIn: number): string {
     if (decryptedIn !== epoch) throw new Error('The vault locked while this was decrypted');
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mediaType }));
-    blobUrls.add(url);
+    const blob = new Blob([new Uint8Array(bytes)], { type: mediaType });
+    const url = URL.createObjectURL(blob);
+    blobUrls.set(url, blob);
     return url;
+  },
+  /** The bytes behind a URL `objectUrl` made, until it's revoked: CSP refuses to fetch a `blob:` URL. */
+  blobOf: (url: string) => blobUrls.get(url),
+  /** Revoke a URL `objectUrl` made, before the lock does. */
+  revoke(url: string) {
+    URL.revokeObjectURL(url);
+    blobUrls.delete(url);
   },
   get: () => state,
   /** Changes on every lock: compare a value taken earlier to know the keys are gone. */

@@ -6,9 +6,19 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- Sign in with a passkey, a fingerprint, face, screen lock or security key, with **Use a passkey** on the sign-in page, and in the browser when signing in the desktop app. It counts as both factors, so there's no two-factor code. Add, name and remove passkeys in Settings → Security; the desktop app lists and removes them. Passwords keep working, and your vault passphrase is still asked for. (#366)
+
 #### Plugins
 
 - **Load development folder…** in Settings → Plugins works in a computer's browser too: choose a plugin's built `dist/` folder, approve it, and press **Reload** after each build. Chrome and Edge read the folder again; Firefox and Safari ask for it again at each **Reload…**. The plugin runs in that tab only, labelled Development, until you close or reload the tab or remove it, and replaces a library plugin of the same ID there. Each build goes to the server as your own development build, served only to you and dropped a week after the last Reload (migration `0042_plugin_development`). (#364)
+#### App
+
+- The icon picker's **Image** tab has an **In this space** row of the images already used in the space, its folders and its pages, each once. Picking one copies it, so the same picture can go on several folders or pages without uploading it again. (#360)
+#### App
+
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#362)
 
 #### CLI
 

@@ -302,6 +302,13 @@
       "when": 1794156697540,
       "tag": "0042_plugin_development",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794161624824,
+      "tag": "0043_passkeys",
+      "breakpoints": true
     }
   ]
 }

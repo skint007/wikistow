@@ -13,6 +13,7 @@ import { symmetricDecrypt } from 'better-auth/crypto';
 import { createOTP } from '@better-auth/utils/otp';
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { twoFactor } from 'better-auth/plugins';
+import { getAuthenticatorName, passkey } from '@better-auth/passkey';
 import type { Config } from '../config.ts';
 import type { Log } from '../http/logger.ts';
 import { sendInBackground, type Mail, type Mailer } from '../mail/mailer.ts';
@@ -75,25 +76,41 @@ export const CLIENT_ADDRESS_HEADER = 'x-wikistow-client-address';
 
 /**
  * The routes that prove who someone is: a password sign-in (Better Auth
- * discards that session and asks for a code when two-factor is on), or a
- * TOTP or backup code. Sessions created anywhere else are never "recent".
+ * discards that session and asks for a code when two-factor is on), a
+ * TOTP or backup code, or a passkey. Sessions created anywhere else are
+ * never "recent".
  */
 const SIGN_IN_PATHS = new Set([
   '/sign-in/email',
   '/two-factor/verify-totp',
   '/two-factor/verify-backup-code',
+  '/passkey/verify-authentication',
 ]);
 
 /**
- * Two-factor management needs a recent full sign-in, so a stolen session and
- * the password alone can't switch the second factor off or read its secret.
+ * Two-factor management and adding a passkey need a recent full sign-in, so
+ * a stolen session and the password alone can't switch the second factor
+ * off, read its secret, or add a way in that skips both.
  */
 export const RECENT_SIGN_IN_AUTH_PATHS = new Set([
   '/api/auth/two-factor/enable',
   '/api/auth/two-factor/disable',
   '/api/auth/two-factor/get-totp-uri',
   '/api/auth/two-factor/generate-backup-codes',
+  '/api/auth/passkey/generate-register-options',
+  '/api/auth/passkey/verify-registration',
 ]);
+
+/**
+ * A passkey counts as both factors, so the authenticator must have checked
+ * it's the person (a fingerprint, face, PIN or screen lock), not only that
+ * the key is there.
+ */
+const notVerified = () =>
+  new APIError('UNAUTHORIZED', {
+    message: 'The passkey didn’t check it’s you',
+    code: 'PASSKEY_NOT_VERIFIED',
+  });
 
 /** Code checks that, when made with an existing session, confirm a new authenticator. */
 export const SESSION_CODE_PATHS = new Set([
@@ -221,6 +238,17 @@ export function createAuth({
       // its password matched); with no mail, none did.
       after: createAuthMiddleware(async (ctx) => {
         const returned = ctx.context.returned;
+        // The passkey plugin asks only that sign-in "prefer" the check that
+        // it's the person, but a passkey without it is refused (notVerified),
+        // so ask for it outright and the authenticator never leaves it out.
+        if (
+          ctx.path === '/passkey/generate-authenticate-options' &&
+          typeof returned === 'object' &&
+          returned !== null &&
+          !(returned instanceof APIError)
+        ) {
+          return ctx.json({ ...returned, userVerification: 'required' });
+        }
         if (
           ctx.path === '/sign-in/email' &&
           returned instanceof APIError &&
@@ -354,6 +382,32 @@ export function createAuth({
           durationSeconds: TWO_FACTOR_LOCKOUT.durationSeconds,
         },
       }),
+      // A passkey signs in on its own and skips the TOTP step: the twoFactor
+      // plugin only steps into password sign-ins.
+      passkey({
+        rpName: 'WikiStow',
+        origin: config.publicOrigin,
+        // Discoverable, so sign-in needs no email first, and always checked
+        // (sign-in asks for the check in the after-hook above).
+        authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+        registration: {
+          // Adding one needs a recent sign-in (RECENT_SIGN_IN_AUTH_PATHS, in
+          // app.ts). Better Auth's own "fresh session" check counts from when
+          // the session began, so confirming it's you again wouldn't pass it.
+          requireSession: false,
+          afterVerification: ({ verification }) => {
+            const info = verification.registrationInfo;
+            if (!info?.userVerified) throw notVerified();
+            const name = getAuthenticatorName(info.aaguid);
+            return name ? { name } : undefined;
+          },
+        },
+        authentication: {
+          afterVerification: ({ verification }) => {
+            if (!verification.authenticationInfo.userVerified) throw notVerified();
+          },
+        },
+      }),
     ],
     rateLimit: {
       enabled: config.rateLimit,
@@ -372,6 +426,11 @@ export function createAuth({
         '/two-factor/disable': { window: 60, max: 5 },
         '/two-factor/get-totp-uri': { window: 60, max: 5 },
         '/two-factor/generate-backup-codes': { window: 60, max: 5 },
+        // Each try stores a challenge, so asking for one is limited too.
+        '/passkey/generate-authenticate-options': { window: 60, max: 10 },
+        '/passkey/verify-authentication': { window: 60, max: 5 },
+        '/passkey/generate-register-options': { window: 60, max: 5 },
+        '/passkey/verify-registration': { window: 60, max: 5 },
       },
     },
   });
