@@ -6,7 +6,7 @@ The clients encrypt page content before sending it to the server. Accounts, perm
 
 ## Install the desktop app
 
-On Linux the desktop app runs on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest), from 0.3.0 on. A downloaded package doesn't add a repository, so `apt upgrade` and `dnf upgrade` won't update it. Install each new release's package instead.
+On Linux the desktop app runs on x86_64. On Arch Linux, install `wikistow-desktop-bin` from the AUR. On Debian 13, Ubuntu 24.04 and 26.04, and Fedora 43 and 44, add WikiStow's apt or dnf repository and install `wikistow-desktop`, so `apt upgrade` and `dnf upgrade` update it ([desktop](docs/desktop.md#from-the-repository)), or install the `.deb` or `.rpm` from the [latest release](https://github.com/skint007/wikistow/releases/latest).
 
 On Windows 10 and 11 on x64, or Windows 11 on Arm, run `wikistow-desktop-<version>-x64-setup.exe` or `…-arm64-setup.exe` from the [latest release](https://github.com/skint007/wikistow/releases/latest). It isn't signed yet, so Windows says **Windows protected your PC** at first: choose **More info**, then **Run anyway**. Run each new release's installer to update.
 

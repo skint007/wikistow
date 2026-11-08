@@ -30,7 +30,38 @@ To try each release before it's stable, install [`wikistow-desktop-beta-bin`](ht
 
 ### Debian, Ubuntu and Fedora
 
-The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Releases have them from 0.3.0 on. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it. apt and dnf install what it depends on.
+The `.deb` works on Debian 13, Ubuntu 24.04 and Ubuntu 26.04. The `.rpm` works on Fedora 43 and 44. Install it from WikiStow's package repository, so the app updates with the rest of your system, or download it from a release.
+
+#### From the repository
+
+WikiStow's apt and dnf repositories, at `https://skint007.github.io/wikistow`, hold the newest stable release ([releasing](releasing.md#the-apt-and-dnf-repositories)). Betas aren't in them. Add the repository once, then install the app. apt and dnf install what it depends on.
+
+On Debian and Ubuntu:
+
+```sh
+sudo install -d -m 755 /etc/apt/keyrings
+sudo wget -qO /etc/apt/keyrings/wikistow.asc https://skint007.github.io/wikistow/wikistow.asc
+sudo wget -qO /etc/apt/sources.list.d/wikistow.sources https://skint007.github.io/wikistow/wikistow.sources
+sudo apt update
+sudo apt install wikistow-desktop
+```
+
+On Fedora:
+
+```sh
+sudo curl -fsSLo /etc/yum.repos.d/wikistow.repo https://skint007.github.io/wikistow/wikistow.repo
+sudo dnf install wikistow-desktop
+```
+
+The first time, dnf asks twice whether to import the key, once for the repository and once for the package. Say yes both times when its fingerprint is `3059 DE56 0FA2 DC27 146F 5940 D358 0799 A108 71D8`. On Debian and Ubuntu, `gpg --show-keys /etc/apt/keyrings/wikistow.asc` shows the same fingerprint.
+
+apt and dnf check every update against that key: apt checks the repository's signed index, and dnf both the signed index and the signature on the `.rpm` itself. From then on, `sudo apt update && sudo apt upgrade` or `sudo dnf upgrade --refresh` updates the app, as do GNOME Software and other update tools. Keep the two files' names: the app looks for `/etc/apt/sources.list.d/wikistow.sources` or `/etc/yum.repos.d/wikistow.repo` to tell you how to update ([updates](#updates)).
+
+To stop using the repository, delete those files, and on Debian and Ubuntu `/etc/apt/keyrings/wikistow.asc` too. On Fedora, `sudo rpmkeys --delete 3059DE560FA2DC27146F5940D3580799A10871D8` removes the key dnf imported.
+
+#### From a release
+
+Each release has the packages from 0.3.0 on, betas too. Download the package and `SHA256SUMS` from the [latest release](https://github.com/skint007/wikistow/releases/latest), check the download, and install it:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
@@ -38,7 +69,7 @@ sudo apt install ./wikistow-desktop-<version>-amd64.deb     # Debian, Ubuntu
 sudo dnf install ./wikistow-desktop-<version>-x86_64.rpm    # Fedora
 ```
 
-A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and `dnf upgrade` never see a newer one (#326). To update, download the new release's package and install it the same way; it replaces the old version. To hear about new releases, use **Watch → Custom → Releases** on the [repository](https://github.com/skint007/wikistow). The packages aren't signed. The checksum shows the download matches what the release published.
+A package downloaded from GitHub doesn't add a repository, so `apt upgrade` and `dnf upgrade` never see a newer one. To update, download the new release's package and install it the same way; it replaces the old version. Or add the repository. To hear about new releases, use **Watch → Custom → Releases** on the [repository](https://github.com/skint007/wikistow). The release's packages aren't signed. The checksum shows the download matches what the release published.
 
 To remove the app, run `sudo apt remove wikistow-desktop` or `sudo dnf remove wikistow-desktop`. `apt purge` also keeps `~/.config/WikiStow`.
 
@@ -90,7 +121,7 @@ On a Mac the app keeps your sign-in, settings and plugins in `~/Library/Applicat
 
 ### How it was installed
 
-Each Linux package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`.
+Each Linux package records how it was installed in `/usr/lib/wikistow-desktop/install-source`: one word, `aur`, `deb` or `rpm`, and a newline. The app reads it to tell which package manager updates it. The file belongs to the package, so only root can change it, and it goes when the package does. The path is fixed, so a development build also sees an installed package's file. The app trusts it only when it runs from `/usr/lib/wikistow-desktop`. A `.deb` or `.rpm` from the repository is the same package as the release's, so the app also looks for the repository's file, `/etc/apt/sources.list.d/wikistow.sources` or `/etc/yum.repos.d/wikistow.repo`, and with it says to update with apt or dnf. The repository holds stable releases only, so for a newer beta it still points to the download.
 
 The Windows installer writes `windows` to `resources\install-source`, beside the app's `app.asar`. The install folder is yours to change, so that file only decides what the update notice says.
 
@@ -98,7 +129,7 @@ The Mac app carries its own, `WikiStow.app/Contents/Resources/install-source`, b
 
 ### Updates
 
-When a newer release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with a `.deb` or `.rpm` it is the new package from the release; on Windows, the new installer, which the link downloads in your browser, x64 or Arm as the app you have is; on a Mac it is the new zip, or `brew upgrade wikistow`; when the app can't tell how it was installed, it opens the release page. Otherwise the link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
+When a newer release is out, a blue dot shows on your avatar, at the bottom of the rail (in a narrow window, on the menu button that opens it too), and the account menu says **Update available**: the new version, the one you have, and how to update. With the AUR package that is your AUR helper; with the [repository](#from-the-repository) added, `apt upgrade` or `dnf upgrade --refresh`; with a `.deb` or `.rpm` alone it is the new package from the release; on Windows, the new installer, which the link downloads in your browser, x64 or Arm as the app you have is; on a Mac it is the new zip, or `brew upgrade wikistow`; when the app can't tell how it was installed, it opens the release page. Otherwise the link opens the release in your browser, with its notes and downloads. Screen readers hear the avatar as "Account, update available", and the link with the versions and how to update.
 
 The app asks GitHub for its newest releases (`api.github.com/repos/skint007/wikistow/releases`) when it starts and every 6 hours. It sends no token and nothing about you or your wiki. It offers the newest stable release. On the beta channel, it offers the newest release of any kind, betas included: the app is on it when it is a beta itself, such as `0.4.0-beta.1`, or installed with `wikistow-desktop-beta-bin`, whose `/usr/lib/wikistow-desktop/channel` says `beta`. A beta installed from a release's downloads leaves the channel once you install a stable release over it. The app keeps the last answer in `update.json` in its data folder, so it still knows offline. A check that fails changes nothing and shows nothing. The browser shows no update notice: updating the desktop app never updates your server.
 
@@ -220,8 +251,8 @@ The launch check CI runs on that app: `MAC_APP="$PWD/out/macos/WikiStow.app" pnp
 The app holds decrypted pages and, if asked, the key to your vault, so an update can read everything you can. Before anyone else installs it:
 
 1. Release only through a tag, as [releasing](releasing.md) describes. CI builds and tests the tagged commit, then publishes the app from that build. Every package installs that same build.
-2. Keep the AUR key, the Homebrew tap's key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment, and the tap's in its `homebrew` environment.
-3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history. With a `.deb` or `.rpm`, install the older release's package with `sudo apt install --allow-downgrades ./<file>.deb` or `sudo dnf downgrade ./<file>.rpm`. It stays until you install a newer one. On Windows, run the older release's installer, which replaces the app the same way. On a Mac, replace WikiStow in Applications with the older release's zip. Homebrew can't hold a cask back, so don't run `brew upgrade` until the fix ships.
+2. Keep the AUR key, the Homebrew tap's key and any package signing credentials outside this source repository. The AUR key lives only in the repository's `aur` environment, the tap's in its `homebrew` environment, and the apt and dnf repositories' signing key in its `packages` environment.
+3. To roll back, revert the change on `main`, let CI pass, and release a new version. It is newer, so it ships as an ordinary update. Reinstalling an older package doesn't stick: the next update brings the bad build back. To hold a computer on the older package until the fix ships, reinstall the older `wikistow-desktop-bin-*.pkg.tar.zst` with `pacman -U` and add `IgnorePkg = wikistow-desktop-bin` to `/etc/pacman.conf`, then remove that line again. AUR packages never enter pacman's cache: AUR helpers keep the packages they built in their own folder, such as `~/.cache/yay/wikistow-desktop-bin`, and `makepkg` leaves them in the folder it ran in. Without one, build the older release's package from the AUR repository's history. With a `.deb` or `.rpm`, install the older release's package with `sudo apt install --allow-downgrades ./<file>.deb` or `sudo dnf downgrade ./<file>.rpm`. Without the [repository](#from-the-repository), it stays until you install a newer one. With it, hold the app back too, until the fix ships: `sudo apt-mark hold wikistow-desktop`, then `sudo apt-mark unhold wikistow-desktop`, or on Fedora add `excludepkgs=wikistow-desktop` to `/etc/yum.repos.d/wikistow.repo`, then remove that line again. On Windows, run the older release's installer, which replaces the app the same way. On a Mac, replace WikiStow in Applications with the older release's zip. Homebrew can't hold a cask back, so don't run `brew upgrade` until the fix ships.
 
 The AUR package's version is the release's, such as `0.2.0`. It provides and conflicts with `wikistow-desktop`, the package the old PKGBUILD built from source, so installing it replaces that one. The `.deb` and `.rpm` are `wikistow-desktop` at the release's version, with package release `1`. A prerelease such as `0.3.0-rc.1` becomes `0.3.0~rc.1` there, which apt and dnf sort before `0.3.0`. Later releases must keep versions increasing.
 
