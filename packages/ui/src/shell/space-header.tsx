@@ -6,7 +6,9 @@ import { Name } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ChevronDown,
+  Copy,
   Download,
+  FolderInput,
   Palette,
   Share,
   ShieldAlert,
@@ -29,6 +31,7 @@ import { sharesQuery, spaceKeysQuery, spaceOrderQuery } from '../data/queries';
 import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
+import { MoveDialog, type MovingSpace } from '../page/move-dialog';
 import { useClient } from '../vault/store';
 import { NEEDS_CONNECTION, useNeedsConnection } from './availability';
 import { SpaceIcon, SpaceLookDialog } from './space-look';
@@ -37,8 +40,9 @@ import { SpaceIcon, SpaceLookDialog } from './space-look';
  * The sidebar's head: the space tile and name, and for owners, how many
  * people have access. Its menu exports the space, imports into it for those
  * who can publish there, and for owners changes its
- * name and look, shares it, shows its members or its groups, or deletes it,
- * unless it is their home space.
+ * name and look, shares it, shows its members or its groups, moves or
+ * copies everything in it into another space (#339), or deletes it, unless
+ * it is their home space.
  * A new owner who hasn't confirmed who added them gets a way back to that
  * question instead (section 6.5). Keyed by space, so a dialog open in one
  * space doesn't follow to the next. Someone who holds only folders of a
@@ -70,6 +74,7 @@ export function SpaceHeader({
   const owner = standing === 'owner';
   const [restyling, setRestyling] = useState(false);
   const [action, setAction] = useState<OwnerAction | null>(null);
+  const [moving, setMoving] = useState<MovingSpace | null>(null);
   // Everything in the space's menu needs the server (ADR 0009, decision 8).
   const needs = useNeedsConnection();
   const { data: order } = useQuery(spaceOrderQuery(ctx));
@@ -155,6 +160,21 @@ export function SpaceHeader({
               >
                 <UsersRound strokeWidth={1.75} /> Groups
               </DropdownMenuItem>
+              {name !== null && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    {...needs.select(() => setMoving({ kind: 'space', name, action: 'move' }))}
+                  >
+                    <FolderInput strokeWidth={1.75} /> Move space into…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    {...needs.select(() => setMoving({ kind: 'space', name, action: 'copy' }))}
+                  >
+                    <Copy strokeWidth={1.75} /> Copy space into…
+                  </DropdownMenuItem>
+                </>
+              )}
               <DropdownMenuSeparator />
             </>
           )}
@@ -180,6 +200,12 @@ export function SpaceHeader({
         </DropdownMenuContent>
       </DropdownMenu>
       <SpaceLookDialog spaceId={spaceId} open={restyling} onOpenChange={setRestyling} />
+      <MoveDialog
+        spaceId={spaceId}
+        moving={moving}
+        onOpenChange={(open) => !open && setMoving(null)}
+        onDeleteSpace={deletable ? () => setAction({ kind: 'delete' }) : undefined}
+      />
       <OwnerDialog
         spaceId={spaceId}
         action={action}
