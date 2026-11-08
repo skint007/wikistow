@@ -872,10 +872,16 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
       });
     }
     const lifted = await liftTrash(tx, copy, held);
+    // Only what was held at first goes. Nothing can be made under a held
+    // node, but at the top of a space a page made or restored meanwhile
+    // isn't locked out, and it stays.
+    const first = new Set(held);
     const going =
       lifted.length === 0
         ? held
-        : await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId });
+        : (
+            await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId })
+          ).filter((id) => first.has(id));
     removed = await removeSubtree(
       tx,
       copy.sourceSpaceId,
