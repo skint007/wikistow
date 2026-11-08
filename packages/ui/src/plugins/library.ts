@@ -319,7 +319,7 @@ let lastListed: { ctx: ClientContext; library: LibraryPlugin[] } | null = null;
  * The browser's plugins: the library versions the person approved, and
  * the development folders loaded in this tab (`developmentStore`), one of
  * which replaces the library plugin of its ID here. Files come from the
- * server's `/plugins/<id>/<hash>/…` (or `dev-<hash>`), unhashed: the
+ * server's `/plugins/<id>/<hash>/…` (or `dev-<hash>-<n>`), unhashed: the
  * browser trusts the server for them as for the app's own code.
  */
 export function browserStore(): AppPluginStore {

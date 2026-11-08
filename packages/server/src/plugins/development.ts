@@ -50,7 +50,7 @@ export async function removePluginDevelopment(db: Database, at: Slot) {
 
 /**
  * A file of the caller's own development build of `pluginId` with that
- * hash: what the file route serves under `dev-<hash>`.
+ * hash: what the file route serves under `dev-<hash>-<n>`.
  */
 export async function pluginDevelopmentFile(
   db: Database,

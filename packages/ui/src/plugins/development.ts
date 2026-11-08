@@ -76,6 +76,8 @@ type Held = {
   folder: string;
   /** Kept to read again at Reload, where the browser gives one. */
   handle: FileSystemDirectoryHandle | null;
+  /** How many times it was loaded or reloaded in this tab, which names its files' address. */
+  reloads: number;
   enabled: boolean;
   ownParts: readonly string[];
   /** What the person approved: more of either asks again. */
@@ -114,7 +116,7 @@ async function send({ manifest, files, hash }: PluginUpload) {
  * person chose, approved as the desktop approves one (for the folder, not
  * a hash; asked again only when it asks for more), uploaded at each Reload
  * as their own development build on the server, since the app's policy
- * runs only the server's scripts, and run from there under `dev-<hash>`.
+ * runs only the server's scripts, and run from there under `dev-<hash>-<n>`.
  * Everything about them, choices included, is held in this tab only, for
  * the account that loaded them, and ends with it: the account's record
  * and other tabs never see them. Listed only while that account's vault is
@@ -172,7 +174,7 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
         plugins: mine.map((plugin) =>
           installedPlugin({
             manifest: plugin.manifest,
-            key: pluginRoutes.developmentKey(plugin.hash),
+            key: pluginRoutes.developmentKey(plugin.hash, plugin.reloads),
             development: plugin.folder,
             library: false,
             enabled: plugin.enabled,
@@ -202,6 +204,7 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
           hash,
           folder,
           handle,
+          reloads: (before?.reloads ?? 0) + 1,
           enabled: true,
           ownParts: before?.ownParts ?? [],
           approved: { access: manifest.access, level: trustLevel(manifest) },
@@ -252,7 +255,13 @@ export function developmentStore(): PluginStore<PluginCandidate> & {
           return candidate({ upload, folder: name, handle }, plugin);
         // Sent even unchanged, so the server keeps it another week.
         await send(upload);
-        change(id, { manifest: upload.manifest, hash: upload.hash, folder: name, handle });
+        change(id, {
+          manifest: upload.manifest,
+          hash: upload.hash,
+          folder: name,
+          handle,
+          reloads: plugin.reloads + 1,
+        });
         return null;
       },
     },

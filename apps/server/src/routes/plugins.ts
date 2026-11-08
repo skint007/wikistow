@@ -37,7 +37,8 @@ const FILE = /^\/plugins\/([^/]+)\/([^/]+)\/(.+)$/;
 // A draft build's key (ADR 0004), apart from the installed copy's bare hash.
 const DRAFT_KEY = /^draft-([0-9a-f]{64})$/;
 // A development build's key (#317).
-const DEVELOPMENT_KEY = /^dev-([0-9a-f]{64})$/;
+// Its count of Reloads only makes each a new address.
+const DEVELOPMENT_KEY = /^dev-([0-9a-f]{64})-\d{1,9}$/;
 
 /** The plugin library (ADR 0002, `pluginRoutes`): people only, never agents. */
 export function mountPluginRoutes(
@@ -132,7 +133,7 @@ export function mountPluginRoutes(
   );
 
   // A library version's file under its hash, or one of the caller's own
-  // draft builds' under `draft-<hash>` or development builds' under `dev-<hash>`.
+  // draft builds' under `draft-<hash>` or development builds' under `dev-<hash>-<n>`.
   const fileFor = (accountId: string, pluginId: string, key: string, path: string) => {
     const draft = DRAFT_KEY.exec(key)?.[1];
     if (draft !== undefined) {

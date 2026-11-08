@@ -336,12 +336,12 @@ describe('the plugin library', () => {
     const { hash } = await load(bob, first);
     expect(hash).toBe(await hashOf(first));
     const at = (key: string) => `/plugins/notes/${key}/script.js`;
-    const served = await bob.browser.request(at(pluginRoutes.developmentKey(hash)));
+    const served = await bob.browser.request(at(pluginRoutes.developmentKey(hash, 1)));
     expect(served.status).toBe(200);
     expect(await served.text()).toBe(first['script.js']);
     expect(served.headers.get('content-security-policy')).toBe("default-src 'none'");
     // Nobody else gets it, not under the bare hash either, and the library doesn't list it.
-    expect((await ann.browser.request(at(pluginRoutes.developmentKey(hash)))).status).toBe(404);
+    expect((await ann.browser.request(at(pluginRoutes.developmentKey(hash, 1)))).status).toBe(404);
     expect((await bob.browser.request(at(hash))).status).toBe(404);
     expect(
       (await list(bob)).flatMap(({ versions }) => versions).some((each) => each.hash === hash),
@@ -349,14 +349,14 @@ describe('the plugin library', () => {
 
     // A Reload replaces it; the folder must hold the ID it is loaded as.
     const next = await load(bob, notes('9.0.1'));
-    expect((await bob.browser.request(at(pluginRoutes.developmentKey(hash)))).status).toBe(404);
-    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash)))).status).toBe(
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(hash, 1)))).status).toBe(404);
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash, 2)))).status).toBe(
       200,
     );
     await expect(load(bob, notes(), 'other')).rejects.toMatchObject({ code: 'invalid-request' });
 
     expect((await remove(bob, 'notes/development')).status).toBe(200);
-    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash)))).status).toBe(
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash, 2)))).status).toBe(
       404,
     );
   });

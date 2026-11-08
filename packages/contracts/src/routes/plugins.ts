@@ -186,7 +186,7 @@ export const removeVersion = {
  * `pluginId` (#317), which its manifest must name: what a browser uploads
  * at each **Reload** of a development folder. One build per account and
  * ID, replaced each time, checked as an upload is but never in the
- * library, and served to the caller only, under `developmentKey(hash)`.
+ * library, and served to the caller only, under `developmentKey(hash, n)`.
  * Kept a week after the last Reload. People only, not agents.
  */
 export const putDevelopment = {
@@ -205,8 +205,12 @@ export const removeDevelopment = {
   response: z.object({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
-/** The file route's key for a development build: not the bare hash, which a library version uses. */
-export const developmentKey = (hash: string) => `dev-${hash}`;
+/**
+ * The file route's key for a development build: not the bare hash, which a
+ * library version uses. `reload` counts the tab's Reloads, so each one
+ * runs the plugin afresh, as the desktop's `dev-<n>` does, even unchanged.
+ */
+export const developmentKey = (hash: string, reload: number) => `dev-${hash}-${reload}`;
 
 /**
  * A version's file, for any signed-in session, outside `/api`. Sent with
