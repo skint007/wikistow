@@ -386,7 +386,7 @@ export async function purgeTrash(
 // Delete a held trash row's nodes for good; the caller holds the space.
 async function purgeHeld(tx: Database, row: { spaceId: string; nodeId: string }) {
   const at = { spaceId: row.spaceId, nodeId: row.nodeId };
-  return removeSubtree(tx, row.spaceId, row.nodeId, await holdSubtree(tx, at));
+  return removeSubtree(tx, row.spaceId, [row.nodeId], await holdSubtree(tx, at));
 }
 
 /**

@@ -33,7 +33,8 @@ export const MAX_RECORDS_NODES = 1000;
 /**
  * One node of the source subtree and the new node that copies it: `parentId`
  * is the new node's parent, the new ID of its source's parent, or for the
- * new top node, the destination folder (null for the top of the space).
+ * new top node (each of them, for the top of a space), the destination
+ * folder (null for the top of the space).
  */
 export const CopiedNode = z.object({
   nodeId: NodeId,
@@ -46,7 +47,10 @@ export const CopiedNode = z.object({
  * Open a copy of `sourceNodeId` (in `sourceSpaceId`) under `parentId` in
  * `destinationSpaceId`: the new nodes, one for each node of the source
  * subtree the caller's tree lists, under the same parents, are made hidden,
- * so their attachments can be uploaded. `kind: 'move'` deletes the source
+ * so their attachments can be uploaded. A null `sourceNodeId` is the top of
+ * the space: everything in it, each node at its top copied under
+ * `parentId`, which only an owner of the space, with a session, copies or
+ * moves, and never within the space. `kind: 'move'` deletes the source
  * when the copy finishes, and goes only into another space; only an owner
  * of the source space, with a session, moves. Anyone who can edit at the
  * source node, which covers everything under it, copies; and both need to
@@ -70,7 +74,9 @@ export const open = {
     /** Whether pages' published versions come along: only where the caller can publish. */
     bringsPublished: z.boolean(),
     sourceSpaceId: SpaceId,
-    sourceNodeId: NodeId,
+    /** Null for the top of the space. */
+    sourceNodeId: NodeId.nullable(),
+    /** The source node's, or for the top of the space, the space's. */
     sourcePermissionVersion: z.number().int(),
     destinationSpaceId: SpaceId,
     parentId: FolderId.nullable(),

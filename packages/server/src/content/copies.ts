@@ -1,7 +1,9 @@
 // Copying a page or folder, with everything under it, as new nodes under a
 // folder of any space, and moving one into another space: a copy that
 // deletes its source when it finishes (protocol section 10, "Copies, and
-// moves between spaces"; ADR 0007).
+// moves between spaces"; ADR 0007). The source can be the top of a space
+// too (`sourceNodeId` null), for its owners: everything in it, its nodes at
+// the top each a top node of the copy, in one finish (#339).
 //
 // A copy is made in three steps, as a publication into another space is.
 // Opening makes the new nodes, hidden: nobody has access to them
@@ -75,7 +77,8 @@ type Entry = z.output<typeof copyRoutes.CopiedRecords>;
 /**
  * A node of a source subtree as trees list it, with the heads a copy of it
  * is sealed from. A publication opening nobody finished isn't listed: it has
- * no heads yet. A copy's hidden nodes aren't either (`subtreeOf`).
+ * no heads yet. A copy's hidden nodes aren't either (`subtreeOf`). The top
+ * nodes are at depth 0: the source node, or those at the top of the space.
  */
 type Listed = {
   id: string;
@@ -88,7 +91,11 @@ type Listed = {
   publishedHead: string | null;
 };
 
-async function listedSubtree(tx: Database, spaceId: string, nodeId: string): Promise<Listed[]> {
+async function listedSubtree(
+  tx: Database,
+  spaceId: string,
+  nodeId: string | null,
+): Promise<Listed[]> {
   const rows = await tx.execute<{
     id: string;
     parent_id: string | null;
@@ -155,6 +162,17 @@ const requireVersion = (actual: number, given: number) => {
 };
 
 /**
+ * The source's permission version: its node's, from `listed`, or for the
+ * top of a space, the space's.
+ */
+const sourceVersion = async (
+  tx: Database,
+  spaceId: string,
+  nodeId: string | null,
+  listed: readonly Listed[],
+) => (nodeId === null ? parentVersion(tx, spaceId, null) : (listed[0]?.permissionVersion ?? -1));
+
+/**
  * Who may copy (section 10, **Who**), checked at the opening and again at
  * the finish: for a move, an owner of the source space, a person; for a
  * copy, someone who can edit at the source node, which an agent may within
@@ -162,7 +180,8 @@ const requireVersion = (actual: number, given: number) => {
  * nest; and for both, someone who can make pages at the destination
  * parent. Their access there, and its share. A source node deleted
  * meanwhile is not-found; nodes under it deleted meanwhile don't matter to
- * a copy, which shows what was sealed from them.
+ * a copy, which shows what was sealed from them. Everything in a space is
+ * copied or moved only by an owner of it, a person, as its menu offers.
  */
 async function requireCopier(
   tx: Database,
@@ -173,7 +192,7 @@ async function requireCopier(
   >,
 ): Promise<{ share: ShareRow | null; canPublish: boolean }> {
   const holder: Holder = caller;
-  if (copy.kind === 'move') {
+  if (copy.kind === 'move' || copy.sourceNodeId === null) {
     // Moves are for people, as sharing is (section 9.5).
     if (caller.personId !== null || !(await isOwner(tx, caller.identity.id, copy.sourceSpaceId))) {
       const access = await accessTo(tx, holder, {
@@ -182,7 +201,9 @@ async function requireCopier(
       });
       throw new ContentError(
         access ? 'forbidden' : 'not-found',
-        'Only an owner of its space moves a page or folder into another space',
+        copy.sourceNodeId === null
+          ? 'Only an owner of a space moves or copies everything in it'
+          : 'Only an owner of its space moves a page or folder into another space',
       );
     }
   } else {
@@ -238,7 +259,10 @@ export async function openCopy(
     await lockSpaces(tx, input.sourceSpaceId, input.destinationSpaceId);
     const listed = await listedSubtree(tx, input.sourceSpaceId, input.sourceNodeId);
     const [top] = listed;
-    if (top?.id !== input.sourceNodeId) throw new ContentError('not-found');
+    // The top of a space needs something in it.
+    if (!top || (input.sourceNodeId !== null && top.id !== input.sourceNodeId)) {
+      throw new ContentError('not-found');
+    }
     const copy = {
       kind: input.kind,
       sourceSpaceId: input.sourceSpaceId,
@@ -250,12 +274,18 @@ export async function openCopy(
     if (input.bringsPublished && !who.canPublish) {
       throw new ContentError('forbidden', 'Published versions go only where you can publish');
     }
-    requireVersion(top.permissionVersion, input.sourcePermissionVersion);
+    requireVersion(
+      await sourceVersion(tx, input.sourceSpaceId, input.sourceNodeId, listed),
+      input.sourcePermissionVersion,
+    );
     const permissionVersion = await parentVersion(tx, input.destinationSpaceId, input.parentId);
     requireVersion(permissionVersion, input.permissionVersion);
 
     const path = await pathUp(tx, input.destinationSpaceId, input.parentId);
-    if (input.sourceSpaceId === input.destinationSpaceId && path?.includes(input.sourceNodeId)) {
+    if (
+      input.sourceSpaceId === input.destinationSpaceId &&
+      (input.sourceNodeId === null || path?.includes(input.sourceNodeId))
+    ) {
       throw new ContentError('binding-mismatch', 'Nothing copies into itself');
     }
     requireRoom(path, Math.max(...listed.map((node) => node.depth)) + 1);
@@ -329,7 +359,7 @@ export async function openCopy(
           nodeId: node.nodeId,
           copyId: input.copyId,
           sourceId: source.id,
-          sourceParentId: source.id === input.sourceNodeId ? null : source.parentId,
+          sourceParentId: source.depth === 0 ? null : source.parentId,
         })),
       ),
     );
@@ -340,7 +370,7 @@ export async function openCopy(
 /**
  * The new nodes paired with the listed source nodes they copy, in the
  * order of `listed`, if they mirror them exactly: one each, of its kind,
- * under the copy of its parent, the top one under the destination parent.
+ * under the copy of its parent, the top ones under the destination parent.
  * Otherwise the source changed since the preview (`stale-head`).
  */
 function mirror(input: Open, listed: readonly Listed[]) {
@@ -355,9 +385,7 @@ function mirror(input: Open, listed: readonly Listed[]) {
   return listed.map((source) => {
     const node = bySource.get(source.id);
     const parentId =
-      source.id === input.sourceNodeId
-        ? input.parentId
-        : (bySource.get(source.parentId ?? '')?.nodeId ?? null);
+      source.depth === 0 ? input.parentId : (bySource.get(source.parentId ?? '')?.nodeId ?? null);
     if (!node || node.kind !== source.kind || node.parentId !== parentId) throw stale();
     return { node, source };
   });
@@ -794,7 +822,9 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
   const missing = made.some((node) =>
     node.kind === 'page' ? node.draftFrom === null : node.metadataFrom === null,
   );
-  const top = made.find((node) => node.sourceParentId === null);
+  // The copy's top nodes: one, or for the top of a space, each at its top.
+  const tops = made.filter((node) => node.sourceParentId === null);
+  const [top] = tops;
   if (missing || !top || hidden.length !== made.length) {
     throw new ContentError('not-found', 'Some of what you are copying has no records yet');
   }
@@ -804,7 +834,10 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
   if (copy.kind === 'move') {
     const held = await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId });
     const listed = await listedSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId);
-    requireVersion(listed[0]?.permissionVersion ?? -1, copy.sourcePermissionVersion);
+    requireVersion(
+      await sourceVersion(tx, copy.sourceSpaceId, copy.sourceNodeId, listed),
+      copy.sourcePermissionVersion,
+    );
     const stale = staleNodes(made, listed, copy);
     if (stale.length > 0) {
       throw new ContentError('stale-head', 'Some of what you are moving changed since', {
@@ -843,7 +876,14 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
       lifted.length === 0
         ? held
         : await holdSubtree(tx, { spaceId: copy.sourceSpaceId, nodeId: copy.sourceNodeId });
-    removed = await removeSubtree(tx, copy.sourceSpaceId, copy.sourceNodeId, going);
+    removed = await removeSubtree(
+      tx,
+      copy.sourceSpaceId,
+      copy.sourceNodeId === null
+        ? await topsOf(tx, copy.sourceSpaceId, going)
+        : [copy.sourceNodeId],
+      going,
+    );
   }
   // Shown, and no longer the copy's: removing it later leaves them.
   await tx.update(nodes).set({ copyId: null }).where(eq(nodes.copyId, copy.id));
@@ -855,7 +895,11 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
   await audit(tx, {
     actor: copy.openedBy,
     action: copy.kind === 'move' ? 'node.moved-between-spaces' : 'node.copied',
-    target: { kind: 'node', id: copy.sourceNodeId },
+    // Everything in a space names the space, and the first of its new top nodes.
+    target:
+      copy.sourceNodeId === null
+        ? { kind: 'space', id: copy.sourceSpaceId }
+        : { kind: 'node', id: copy.sourceNodeId },
     details: {
       spaceId: copy.sourceSpaceId,
       toSpaceId: copy.destinationSpaceId,
@@ -871,7 +915,8 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
  * stays in the trash, moved under the source's parent, where its keys still
  * fit, unless a share rooted at the source or between it and the item goes
  * with the move. Those go with the move too, since they may need its keys. `held` is the source subtree. The
- * items moved, whose subtrees leave it.
+ * items moved, whose subtrees leave it. For the top of a space, what was
+ * deleted from under its folders goes to the top of the space.
  */
 async function liftTrash(tx: Database, copy: CopyRow, held: readonly string[]) {
   const rows = await tx
@@ -895,7 +940,8 @@ async function liftTrash(tx: Database, copy: CopyRow, held: readonly string[]) {
       if (trashed.has(at) || roots.has(at)) return false;
       if (at === copy.sourceNodeId) return true;
     }
-    return false;
+    // Up to the top of the space, which stays.
+    return copy.sourceNodeId === null;
   });
   if (kept.length === 0) return [];
   const source = rows.find((node) => node.id === copy.sourceNodeId);
@@ -997,6 +1043,15 @@ function staleNodes(
   });
 }
 
+/** Those of `ids`, held, at the top of the space. */
+async function topsOf(tx: Database, spaceId: string, ids: readonly string[]) {
+  const rows = await tx
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(and(anyId(nodes.id, ids), eq(nodes.spaceId, spaceId), isNull(nodes.parentId)));
+  return rows.map((node) => node.id);
+}
+
 /**
  * Delete the copy and its hidden nodes, with whatever was sent for them, as
  * deleting a node would; the hashes of their attachments, whose files go
@@ -1005,13 +1060,15 @@ function staleNodes(
  * nodes is ever under one of them, and no share is rooted in one.
  */
 async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
-  const [top] = await tx
-    .select({ nodeId: copyNodes.nodeId })
-    .from(copyNodes)
-    .where(and(eq(copyNodes.copyId, copy.id), isNull(copyNodes.sourceParentId)));
+  const tops = (
+    await tx
+      .select({ nodeId: copyNodes.nodeId })
+      .from(copyNodes)
+      .where(and(eq(copyNodes.copyId, copy.id), isNull(copyNodes.sourceParentId)))
+  ).map((node) => node.nodeId);
   let removed: string[] = [];
-  // Gone already if a delete at the destination took it.
-  if (top) {
+  // Gone already if a delete at the destination took them.
+  if (tops.length > 0) {
     const held = await tx
       .select({ id: nodes.id })
       .from(nodes)
@@ -1020,8 +1077,9 @@ async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
       .orderBy(nodes.id)
       .for('update');
     const ids = held.map((node) => node.id);
-    if (!ids.includes(top.nodeId)) throw new ContentError('not-found');
-    removed = await removeSubtree(tx, copy.destinationSpaceId, top.nodeId, ids);
+    const there = new Set(ids);
+    if (!tops.every((id) => there.has(id))) throw new ContentError('not-found');
+    removed = await removeSubtree(tx, copy.destinationSpaceId, tops, ids);
   }
   await tx.delete(copies).where(eq(copies.id, copy.id));
   return removed;

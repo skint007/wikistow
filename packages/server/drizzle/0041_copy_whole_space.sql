@@ -1,0 +1,1 @@
+ALTER TABLE "copies" ALTER COLUMN "source_node_id" DROP NOT NULL;

@@ -31,6 +31,16 @@ export type ShareRow = typeof shares.$inferSelect;
 export const MAX_DEPTH = 256;
 
 // A node and its ancestors, nearest first.
+/**
+ * Where a walk down from `nodeId` starts: the node itself, or for `null`,
+ * the top of the space, its nodes at the top that are neither a copy's
+ * hidden nodes nor in the trash.
+ */
+export const topOf = (spaceId: string, nodeId: string | null) =>
+  nodeId === null
+    ? sql`space_id = ${spaceId} and parent_id is null and copy_id is null and trash_id is null`
+    : sql`id = ${nodeId} and space_id = ${spaceId}`;
+
 export const ancestorsOf = (spaceId: string, nodeId: string) => sql`
   with recursive ancestors(id, parent_id, depth) as (
     select id, parent_id, 0 from nodes where id = ${nodeId} and space_id = ${spaceId}
@@ -44,10 +54,12 @@ export const ancestorsOf = (spaceId: string, nodeId: string) => sql`
 // for nothing outside their copy (section 10), and nodes in the trash. The space is carried through
 // the walk rather than compared with a constant: for a space Postgres has
 // no statistics on yet, that estimates one row a step, and plans a scan of
-// the space's nodes for every node walked.
-export const subtreeOf = (spaceId: string, nodeId: string) => sql`
+// the space's nodes for every node walked. For `null`, the top of the
+// space: every node at the top of it, but hidden ones and those in the
+// trash, at depth 0, and everything beneath them.
+export const subtreeOf = (spaceId: string, nodeId: string | null) => sql`
   with recursive subtree(id, space_id, depth) as (
-    select id, space_id, 0 from nodes where id = ${nodeId} and space_id = ${spaceId}
+    select id, space_id, 0 from nodes where ${topOf(spaceId, nodeId)}
     union all
     select n.id, n.space_id, s.depth + 1 from nodes n
       join subtree s on n.space_id = s.space_id and n.parent_id = s.id

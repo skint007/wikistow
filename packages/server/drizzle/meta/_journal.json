@@ -288,6 +288,13 @@
       "when": 1794139798415,
       "tag": "0040_public_targets_follow_moves",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794141781758,
+      "tag": "0041_copy_whole_space",
+      "breakpoints": true
     }
   ]
 }

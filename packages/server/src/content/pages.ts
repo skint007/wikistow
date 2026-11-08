@@ -52,6 +52,7 @@ import {
   readSnapshot,
   requireRoom,
   shareAt,
+  topOf,
   type Access,
   type Holder,
   type ShareRow,
@@ -1289,13 +1290,17 @@ async function readerMayRead(db: Database, blob: { hash: string; pageId: string 
  * locked, and writes to a page hold it `FOR SHARE`, so once the whole set is
  * locked nothing can be added to it or written into it.
  */
-async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promise<string[]> {
+async function lockSubtree(
+  tx: Database,
+  spaceId: string,
+  nodeId: string | null,
+): Promise<string[]> {
   let locked = new Set<string>();
   for (;;) {
     // The space is carried through the walk, as in `subtreeOf`.
     const subtree = await tx.execute<{ id: string }>(sql`
       with recursive subtree(id, space_id) as (
-        select id, space_id from nodes where id = ${nodeId} and space_id = ${spaceId}
+        select id, space_id from nodes where ${topOf(spaceId, nodeId)}
         union all
         select n.id, n.space_id from nodes n
           join subtree s on n.space_id = s.space_id and n.parent_id = s.id
@@ -1321,10 +1326,14 @@ async function lockSubtree(tx: Database, spaceId: string, nodeId: string): Promi
  * while holding what it waits for. No share can be made meanwhile, since
  * the caller holds the space.
  */
-async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): Promise<void> {
+async function lockSharesUnder(
+  tx: Database,
+  spaceId: string,
+  nodeId: string | null,
+): Promise<void> {
   await tx.execute(sql`
     with recursive subtree(id, space_id) as (
-      select id, space_id from nodes where id = ${nodeId} and space_id = ${spaceId}
+      select id, space_id from nodes where ${topOf(spaceId, nodeId)}
       union all
       select n.id, n.space_id from nodes n
         join subtree s on n.space_id = s.space_id and n.parent_id = s.id
@@ -1338,12 +1347,14 @@ async function lockSharesUnder(tx: Database, spaceId: string, nodeId: string): P
 /**
  * Hold a node and everything beneath it for `removeSubtree`, a copy's
  * hidden nodes inside it included: first the shares rooted there, as saves
- * and rotations lock them, then the nodes. The caller holds the space
- * against a share being made meanwhile. The nodes held; not-found if none.
+ * and rotations lock them, then the nodes. For `null`, the top of the
+ * space: everything in it but the hidden nodes and those in the trash at
+ * its top (`topOf`). The caller holds the space against a share being made
+ * meanwhile. The nodes held; not-found if none.
  */
 export async function holdSubtree(
   tx: Database,
-  { spaceId, nodeId }: { spaceId: string; nodeId: string },
+  { spaceId, nodeId }: { spaceId: string; nodeId: string | null },
 ): Promise<string[]> {
   await lockSharesUnder(tx, spaceId, nodeId);
   const ids = await lockSubtree(tx, spaceId, nodeId);
@@ -1352,8 +1363,9 @@ export async function holdSubtree(
 }
 
 /**
- * Delete a node and everything beneath it (`ids`, held by `holdSubtree`),
- * with the shares rooted in it. Its pages' publications into other spaces
+ * Delete nodes and everything beneath them (`ids`, held by `holdSubtree`):
+ * `tops`, a node, or what is at the top of a space or of a copy, with the
+ * shares rooted in them. Their pages' publications into other spaces
  * end with them (`endPublicationsFrom`), and so do their public links and
  * copies. The hashes of the blobs that went, whose files the caller
  * removes once the transaction commits (`deleteUnlistedFile`).
@@ -1361,7 +1373,7 @@ export async function holdSubtree(
 export async function removeSubtree(
   tx: Database,
   spaceId: string,
-  nodeId: string,
+  tops: readonly string[],
   ids: readonly string[],
 ): Promise<string[]> {
   const openingFiles = await endPublicationsFrom(tx, ids);
@@ -1399,7 +1411,8 @@ export async function removeSubtree(
   await tx.delete(metadataRevisions).where(folderMetadata);
   // Old addresses of what moved here open nothing once it is gone.
   await forgetMoves(tx, spaceId, ids);
-  await tx.delete(nodes).where(and(eq(nodes.id, nodeId), eq(nodes.spaceId, spaceId)));
+  // The rest go with them, by the cascade.
+  await tx.delete(nodes).where(and(anyId(nodes.id, tops), eq(nodes.spaceId, spaceId)));
   return [...doomed.map((b) => b.hash), ...openingFiles];
 }
 
