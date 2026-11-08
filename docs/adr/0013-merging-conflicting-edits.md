@@ -17,11 +17,11 @@ In short:
 
 - **The conflict prompt.** A save over a draft someone else saved is `stale-head`, and so is a draft head the live tree names that this session didn't make (`noticeHead`, `packages/ui/src/page/draft-session.ts`). The draft view then offers **Save mine on top** (`saveMineOnTop`, which sets the session's base to theirs and saves) or **Discard mine and view theirs** (`onReload`) (`packages/ui/src/page/draft-editor.tsx`).
 - **The offline queue** (ADR 0009, decision 7). A draft entry whose base isn't the draft head any more stops as `conflict` (`packages/client/src/operations/queue.ts`). The shell's note lists it, and opening it opens the draft view with the entry's text as unsaved changes and the same prompt (`useDraftSession` passes `queued.theirs`). Another window's change saved into the queue is a conflict there and then (`conflictWithDevice`), and **Discard mine** keeps that window's change. A publish waiting for the page stops with its draft's conflict (`PUBLISH_CHANGED`).
-- **The base is at hand.** The session holds the payload it opened or last saved (`#payload`), which is the draft the person's typing is based on. For a queue entry, the keeper keeps the version the entry was based on until it is resolved (ADR 0009, decision 3; `OfflineQueue.bases()`).
+- **The base is at hand.** The session knows the server draft its text is based on (`#base`). While the page has an offline entry, the session saves into the entry and `#base` stays that server draft, and the keeper keeps it until the entry is resolved (ADR 0009, decision 3; `OfflineQueue.bases()`). The session's `#payload` is not the base: after a save into the queue it is the person's own queued text, and a view opened from an entry starts with the entry's payload.
 - **Theirs** is the page's draft head, which **Discard mine and view theirs** already opens, or the other window's queue entry.
 - **A payload** (`packages/client/src/payload.ts`) is a title, the Markdown (front matter included), the attachments list with each file's key, and namespaced extensions: the link table (`wikistow.links`), the banner and icon (`wikistow.cover`), plugins' data, and others. `wikistow.change` is written only by a publication, never into a draft.
-- **Parsing.** `packages/client` reads Markdown with `mdast-util-from-markdown`, GFM and math, which give every node's place in the source. Front matter is split off first (`splitFrontmatter`) and read with `yaml`, which keeps every key's and value's place too, so a value can change by its characters alone (ADR 0006, decision 3).
-- **No diff code.** No diff library is a dependency. `diff` (jsdiff 8.0.4) is in the lockfile only through the router's build plugin. The theme has no colours for added and removed text.
+- **Parsing.** `packages/client/src/markdown` reads Markdown with `mdast-util-from-markdown`, GFM, its own math rule (Pandoc's dollars) and wikilinks, which give every node's place in the source. Front matter is split off first (`splitFrontmatter`) and read with `yaml`, which keeps every key's and value's place too, so a value can change by its characters alone (ADR 0006, decision 3).
+- **No diff code of the app's own.** `diff` (jsdiff 8.0.4) is in the lockfile only through the router's build plugin. `@milkdown/plugin-diff` comes with `@milkdown/kit`, unused: it reviews a two-way diff inside the visual editor. The theme colours removed lines in highlighted code (`--code-deletion`), but has no colours for added and removed text in a page.
 - **Folder renames already merge by field.** A rename that meets someone else's shows **Yours** or **Theirs**, and Yours is drawn as theirs with the person's changes on top (ADR 0009, decision 7). This ADR leaves it as it is.
 - **The spec** says of a draft conflict: "The client preserves its unsaved text and presents the competing revisions … Do not silently merge or retry with a newer base" (`wikistow.md`, Drafts). A merge the person reviews isn't silent, so that rule stands.
 
@@ -35,11 +35,11 @@ In short:
 - an offline change that came back as a conflict, opened from the shell's note;
 - another window's change waiting on this device.
 
-It isn't offered when theirs can't be read (`newer-format`), or when there is nothing of the person's to merge (the prompt then says "Someone else saved a newer version of this draft"). A cell in a folder table that conflicts still says **Open the draft**, as today: one value has nothing to merge. The CLI, agents and plugins still get the conflict as a refusal, since a merge needs a person to confirm it. A publish stopped by its page's conflict still says so with **OK**, and the person publishes again after the merge.
+It isn't offered when theirs can't be read (`newer-format`), or when there is nothing of the person's to merge: no unsaved text and no offline entry for the page (the prompt then says "Someone else saved a newer version of this draft"). Text saved into an offline entry counts as the person's, though the session has nothing unsaved, so today's prompt test (`hasUnsaved`) gains the entry. A cell in a folder table that conflicts still says **Open the draft**, as today: one value has nothing to merge. The CLI, agents and plugins still get the conflict as a refusal, since a merge needs a person to confirm it. A publish stopped by its page's conflict still says so with **OK**, and the person publishes again after the merge.
 
 ### 2. The three versions
 
-- **Base**: the draft the person's text was based on. In the draft view, the payload the session opened or last saved. For an offline entry, its kept base. For another window's change, the base that window's entry and this session share.
+- **Base**: the server draft the person's text was based on: the session's `#base`, opened from the revision cache, or from the kept store offline. For an offline entry, that is its kept base. For another window's change, the base is the entry as this session last saved or opened it (the session's `#payload`), since both windows' text grew from it; the entry's own server base would show the edits both windows share as overlaps.
 - **Theirs**: the page's draft head now, opened as **Discard mine** opens it, or the other window's entry.
 - **Yours**: what the draft view holds, the person's unsaved text included.
 
@@ -47,14 +47,14 @@ The merge reads only these plaintext payloads, in the client. Nothing new goes t
 
 ### 3. Blocks
 
-The body (the Markdown after the front matter) is cut into blocks, parsed as the reader parses it (CommonMark, GFM, math). A block starts at the line where each of these starts:
+The body (the Markdown after the front matter) is cut into blocks, parsed with the app's own parser in `packages/client/src/markdown`, as the reader parses it (CommonMark, GFM, its math rule, wikilinks). A block starts at the line where each of these starts:
 
 - a leaf block: a paragraph, heading, fenced or indented code block (a Mermaid diagram is one), math block, HTML block or thematic break;
 - a list item, at any depth. A nested list's items are blocks of their own, so the parent item's block is its own lines only;
 - a table row. The header row and its delimiter row are one block, so a new column changes every row;
 - each block inside a block quote or an alert.
 
-Blank lines between blocks are blocks of their own. Each block is its exact source text, markers and indentation included, so joining the blocks gives the page back byte for byte (checked on all 236 pages of the spike). Blocks are compared by exact text.
+Blank lines between blocks are blocks of their own. Each block is its exact source text, markers and indentation included, so joining the blocks gives the page back byte for byte (checked on all 236 pages of the spike). Blocks are compared by exact text, except that a body whose last line has no line ending is given one first, so two people each adding a paragraph at the end of such a page aren't both changing its last block. The merged body ends as theirs does, with or without one.
 
 ### 4. The merge
 
@@ -66,6 +66,7 @@ A three-way merge over the three lists of blocks (diff3):
 - Changes on both sides to the same base blocks overlap, and the person chooses (decision 6).
 - Changes to neighbouring blocks don't overlap: a person ticking one task while another edits the next one is not a conflict.
 - **Both adding at the same place** (two people each adding an item at the end of the same list, or a row at the end of a table) keeps both, theirs first. Blocks that both additions start or end with appear once, so two people who each add the same `#### CLI` heading with an item under it get one heading. The review (decision 7) shows the order chosen.
+- **Joining two sides' blocks**, here and for **Use both** (decision 6), puts a blank line between them unless both are list items or table rows, so two paragraphs never run into one.
 - A block one side moved is, to the merge, a block removed and one added. If the other side edited that block, the removal and the edit overlap.
 
 Nothing is merged inside a block. Two edits to different words of one paragraph overlap, and the person chooses (Decide 3).
@@ -74,14 +75,14 @@ Nothing is merged inside a block. Two edits to different words of one paragraph 
 
 - **Title**: one field. Changed on one side, it takes that side; changed on both, it is an overlap.
 - **Front matter by key** (ADR 0006): each top-level key of the block. A key changed, added or removed on one side takes that side. A key changed on both sides to different values is an overlap, shown as that key's line. A list of plain values (`tags`) changed on both sides merges by item instead: an item either side added is kept, and one either side removed goes, with only that value written again in theirs' style. The merged block starts from theirs' exact text, and each of yours' changes replaces only its key's characters, as an edit through the property rows does. A key yours added goes after the key it follows in yours. A block that isn't a map of keys on any side is one field, like the title.
-- **Attachments by ID**: those on either side, less any either side removed, unless the merged text still links to one.
+- **Attachments by ID**: those on either side, less any either side removed, unless the merged payload still names one: in its text, its banner or icon, or other data.
 - **The link table** (`wikistow.links`): both sides' entries, theirs taking precedence for the same link text. The save trims it to the links the text uses, as every save does.
 - **Banner and icon** (`wikistow.cover`) by field. Both sides changing the same one is an overlap, shown as the two pictures.
 - **Other data**, such as a plugin's or an import's, by namespace. Changed on both sides, it is an overlap naming it ("Data Recipe cards keeps for this page"), with yours or theirs and no editing.
 
 ### 6. Choosing where both changed
 
-The draft view's page card shows the merge in place of the editor, titled "Merge your changes with Sam's". Theirs is named by who saved it, from the revision's `authorId`, as the app names people and agents elsewhere: "your other window" for this device's other window, and "the other version" when the app can't tell. With no overlaps it goes straight to the review (decision 7). Otherwise it says how many changes combined on their own and how many places both changed, then lists each overlap in page order:
+The draft view's page card shows the merge in place of the editor, titled "Merge your changes with Sam's". Theirs is named by who saved it, from the revision's `authorId`, as the app names people and agents elsewhere: "your other version" when the person saved it themselves, in another tab or on another device, "your other window" for this device's other window, and "the other version" when the app can't tell. With no overlaps it goes straight to the review (decision 7). Otherwise it says how many changes combined on their own and how many places both changed, then lists each overlap in page order:
 
 - the heading it sits under and its number ("Method · 2 of 2"), and the block before it, dimmed, for context;
 - **yours and theirs side by side**, each as its Markdown source, with the words it changed from the base marked: added in green, taken out in red and struck through;
@@ -141,7 +142,7 @@ Lines under it say what happens to the title, banner, icon, attachments and othe
 └────────────────────────────────────────────────┘
 ```
 
-**Saving** is the existing **Save mine on top**, with the merged payload as the person's text: the session takes theirs as its base and saves at once. The editor then shows the merged draft, and typing goes on from there. For an offline entry, the merged payload replaces the entry's and goes on top of theirs, as **Yours** does today, and the sender sends it. If someone saved again meanwhile, the save is `stale-head` as usual, and **Merge…** merges again, with the draft that was theirs as the base. Nothing is written until **Save merged draft**, and the person's own text stays in the editor until then, so leaving the merge loses nothing.
+**Saving** goes on top of theirs, as **Save mine on top** does, but the session first takes the merged payload whole, not only its text: its title, Markdown, attachments and extensions, with theirs' link table region. Today's **Save mine on top** builds its save from the session's own payload, so a banner Sam changed would go back to the base's. The session then takes theirs as its base and saves at once. The editor shows the merged draft, and typing goes on from there. For an offline entry, the save goes into the entry and onto theirs as **Save mine on top** does today (`onTopOf`, then the queue's `onTop` rebase), and the sender sends it. If someone saved again meanwhile, the save is `stale-head` as usual, and **Merge…** merges again, with the draft that was theirs as the base. Nothing is written until **Save merged draft**, and the person's own text stays in the editor until then, so leaving the merge loses nothing.
 
 ### 8. Code
 
@@ -152,7 +153,7 @@ Lines under it say what happens to the title, banner, icon, attachments and othe
   - `mergePayloads(base, yours, theirs)` for the whole payload, returning the merge and its overlaps;
   - `resolve(merge, choices)`, which builds the payload to save.
 - **The alignment and the word marks** use `diff` (jsdiff): `diffArrays` over blocks, and `diffWordsWithSpace` for the marks in decisions 6 and 7. The three-way step on top of it is under 100 lines of the app's own (Decide 5).
-- **`packages/ui/src/page/merge/`**: the merge view inside the draft view, and the review. `DraftSession` gains a way to save a given payload on top of theirs, which `saveMineOnTop` then uses too.
+- **`packages/ui/src/page/merge/`**: the merge view inside the draft view, and the review. `DraftSession` gains a way to take a whole payload and save it on top of theirs (decision 7).
 - **Theme tokens**: `--diff-added`, `--diff-added-foreground`, `--diff-removed` and `--diff-removed-foreground` join `theme.css`'s one token source, for every palette, so plugin themes can set them.
 - **Cost**: the merge parses three versions of one page, once per merge. The spike parsed a 5.5 KB page in 50 to 90 ms, so a merge of an ordinary page is a moment's "Merging…". If long pages make phones wait, it moves into the reader's Markdown worker.
 
@@ -163,6 +164,8 @@ Merging when no person is there to confirm (the CLI, agents, plugins); merging f
 ## Spike evidence (2026-11-08)
 
 A throwaway script (not committed) cut pages into blocks as decision 3 says, merged them as decision 4 says, and compared the result with a line merge (`git merge-file`).
+
+Its limits: it parsed with `micromark-extension-math` rather than the app's own math rule and wikilinks, so the build checks the cuts again with the app's parser. Its edits never added at the very end of a page without a final line ending, and it joined kept additions without decision 4's blank line. Both rules came from review after it, and were then checked on small cases (two paragraphs, list items and table rows added at one place, a page with no final line ending) and on the real history, whose numbers didn't change. Its front matter check rebuilt the block from each key's text, so it counts stops but doesn't test where a new key goes.
 
 **Splitting.** On all 236 pages below, the blocks joined back into the page byte for byte.
 
@@ -205,7 +208,8 @@ Each case makes two single edits to the same page, one per side, of one category
 | Paragraphs | anywhere | 575 | 33 (6%) | 1 (0.2%) |
 
 - Every false conflict of the line merge in lists and tables was between neighbouring lines, or two additions at the same place. Where both sides added at the same place (222 cases near), the line merge stopped on 221.
-- Where the block merge combined, its result was the one expected, with one exception in 3,416 cases (below).
+- Where the block merge combined, its result was the one expected, with one exception in 3,416 cases: two paragraphs added at the same place ran into one, with no blank line between them. Decision 4's joining rule comes from it.
+- The block merge stopped in 3 of the 3,416 cases, all from the spike's own edits: a row added without the indent of a table inside a list item, and an LF line break added to a page with CRLF line breaks, which each changed a neighbouring block.
 - The line merge never gave a wrong result where it combined.
 
 When both edits fell in the same block, at different words (near: 19 list items, 10 rows, 59 paragraphs), the block merge stops by design. A word merge inside the block would have combined 77 of those 88 cases correctly in the simulation. On the real history it combined 5 of the 6 real overlaps: 4 as the person did, and 1 into a broken sentence that read as fine to the merge. One side had removed a sentence's first words and the other had rewritten them, and the result started "comments, simultaneous live editing…" in lower case. That is the reason for Decide 3.
@@ -229,6 +233,7 @@ When both edits fell in the same block, at different words (near: 19 list items,
 - **A line merge** (`git merge-file`, or `node-diff3` over lines). Standard and simple, but it stops at neighbouring lines, which in Markdown are a list's items, a table's rows and front matter's keys: 15% to 34% false conflicts in lists and tables, and 31 of 89 real cases against the block merge's 6.
 - **Conflict markers in the source editor**, as git does. No new view, but the visual editor would show the markers as text, the person has to know the syntax, and a marker left in by mistake is saved. Rejected for side by side, as decided on #334.
 - **Merging inside a block by words.** Fewer overlaps, but a quiet wrong result on the real history. See Decide 3.
+- **Reviewing inside the visual editor** with `@milkdown/plugin-diff`, already in the tree. It shows a two-way diff with accept and reject in place, but only in the visual editor, and a page that stays in source mode couldn't use it. The three-way step is needed either way.
 - **Merging the editor's document tree** (ProseMirror steps) instead of Markdown. It would follow the visual editor's structure, but the source editor, offline entries and other windows hold Markdown, not steps, and a page the visual editor can't round-trip stays in source mode.
 - **Saving the merge without a review** when nothing overlaps. Fewer clicks, but the real history shows results that combine cleanly and still read wrong. Decided on #334: the person always reviews.
 - **Merging on the server.** The server can't read pages.
