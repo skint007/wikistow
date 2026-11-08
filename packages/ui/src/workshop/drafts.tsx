@@ -119,7 +119,8 @@ export function useNewDraft(): {
           <DialogTitle>Delete a draft to start this one?</DialogTitle>
           <DialogDescription>
             You have {pluginDraftRoutes.MAX_DRAFTS} drafts. Starting this one deletes “
-            <Name>{asking?.oldest.name ?? ''}</Name>”, the one you changed longest ago.
+            <Name>{asking?.oldest.name ?? ''}</Name>”, the one changed longest ago, for anyone you
+            shared it with too.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
