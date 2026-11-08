@@ -402,6 +402,11 @@ Other clients take a stdio server's command and arguments, often as JSON:
 A client started from the desktop rather than a terminal may not find
 ${PROGRAM} on its PATH: then give its full path, as
 ${WINDOWS ? `(Get-Command ${PROGRAM}).Source` : `command -v ${PROGRAM}`} prints it.
+
+It runs as long as the client does, so the client keeps the version it
+started with: restart the client after updating the CLI.${
+    WINDOWS ? ` Close it before\nupdating: Windows can't replace a program while it runs.` : ''
+  }
 `,
   skill: `Usage: ${PROGRAM} skill
 

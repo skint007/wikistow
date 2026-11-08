@@ -44,6 +44,6 @@ If your AI tool speaks MCP, you can add the CLI as an MCP server instead, and sk
 claude mcp add --scope user wikistow -- wikistow mcp
 ```
 
-Other tools: add a stdio MCP server that runs `wikistow mcp`, as `wikistow mcp --help` shows. It unlocks with the secret store from step 2, so turn that on first.
+Other tools: add a stdio MCP server that runs `wikistow mcp`, as `wikistow mcp --help` shows. It unlocks with the secret store from step 2, so turn that on first. Close your AI tool before you update the CLI, as Windows can’t replace it while it runs, and open it again after.
 
 That’s it. Your agent leaves its changes as drafts, and you publish them when you’re happy.

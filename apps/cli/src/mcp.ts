@@ -30,7 +30,10 @@ const MARKDOWN = z
   .string()
   .optional()
   .describe('The Markdown itself, in place of --file -. Give this or file');
-const FILE = z.string().optional().describe('--file PATH: a file holding the Markdown');
+const FILE = z
+  .string()
+  .optional()
+  .describe('--file PATH: a file holding the Markdown, by its full path');
 
 type Tool = {
   command: CommandName;
@@ -97,7 +100,7 @@ const TOOLS: readonly Tool[] = [
     args: ['page-id'],
     input: {
       'page-id': ID('PAGE_ID'),
-      file: z.string().describe('--file PATH: the file to attach'),
+      file: z.string().describe('--file PATH: the file to attach, by its full path'),
       name: z.string().optional().describe('--name NAME'),
       'media-type': z.string().optional().describe('--media-type TYPE'),
       base: ID('--base REVISION_ID: the draft head').optional(),
@@ -165,7 +168,9 @@ const TOOLS: readonly Tool[] = [
     input: {
       'page-id': ID('PAGE_ID'),
       'attachment-id': ID('ATTACHMENT_ID'),
-      out: z.string().describe('--out PATH: where to write the file, a path that does not exist'),
+      out: z
+        .string()
+        .describe('--out PATH: where to write the file, a full path that does not exist'),
       draft: z.boolean().optional().describe('--draft'),
       revision: ID('--revision REVISION_ID').optional(),
     },
