@@ -18,7 +18,7 @@ const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), '../..');
 // Built outside the workspace, so the bundle can't find a dependency in
 // node_modules that it left out, and CI's own build can't overwrite it.
 const OUT_DIR = mkdtempSync(join(tmpdir(), 'wikistow-cli-dist-'));
-const BIN = join(OUT_DIR, 'wikistow.mjs');
+export const BIN = join(OUT_DIR, 'wikistow.mjs');
 
 /** Build the bundle the tests run, with the same `vp pack` CI runs. */
 export async function buildCli(): Promise<void> {

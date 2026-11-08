@@ -9,6 +9,7 @@ import {
   splitFrontmatter,
   type FolderId,
   type LinkablePage,
+  type MovedPage,
   type PageId,
   type Property,
   type PropertyData,
@@ -43,6 +44,7 @@ import { usePageIndex } from '../data/page-index';
 import { revisionQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { ValueField } from '../page/property-rows';
+import { useMovedRows } from '../page/moved-links';
 import { propertyIcon, PropertyValueView, type LinkScope } from '../page/property-value';
 import { shareCovering } from '../sharing/model';
 import { folderLook, FolderTile } from '../shell/folder-look';
@@ -126,6 +128,18 @@ export function FolderView({
     [keys, choice.hidden, tag],
   );
   const linkable = useMemo(() => (tree ? linkablePages(tree) : null), [tree]);
+  // Where pages the shown values link to went, when a move took them into another space.
+  const rows = useMemo(
+    () =>
+      entries.map((page) => ({
+        page,
+        values: columns
+          .filter((column) => !column.hidden)
+          .map((column) => valueIn(page.properties, column)),
+      })),
+    [entries, columns],
+  );
+  const moved = useMovedRows(ctx, spaceId, linkable, rows);
   const edits = useCellEdits(spaceId, save);
 
   if (!tree) return <FolderCard>{null}</FolderCard>;
@@ -249,6 +263,7 @@ export function FolderView({
               entries={entries}
               columns={shownColumns}
               linkable={linkable}
+              moved={moved}
               canEdit={canEdit}
             />
           ) : (
@@ -259,6 +274,7 @@ export function FolderView({
                 entries={entries}
                 columns={shownColumns}
                 linkable={linkable}
+                moved={moved}
                 canEdit={canEdit}
                 edits={edits}
               />
@@ -415,6 +431,8 @@ type Listed = {
   entries: readonly searchOperations.IndexedEntry[];
   columns: Column[];
   linkable: readonly LinkablePage[] | null;
+  /** Where pages the values link to went, when a move took them into another space (`useMovedRows`). */
+  moved: ReadonlyMap<string, MovedPage>;
   canEdit: boolean;
 };
 
@@ -425,7 +443,8 @@ const scopeOf = (
   links: ReadonlyMap<string, string>,
   editor: boolean,
   notKept: ReadonlySet<string> | undefined,
-): LinkScope => ({ spaceId, selfId: pageId, pages: linkable, links, editor, notKept });
+  moved: ReadonlyMap<string, MovedPage>,
+): LinkScope => ({ spaceId, selfId: pageId, pages: linkable, links, editor, notKept, moved });
 
 /** A page's title as a link that opens it, with its icon, and for editors whether the values are a draft's. */
 function TitleLink({
@@ -516,7 +535,7 @@ const valueIn = (properties: readonly PropertyData[], column: Column) =>
  * The pages as a list: each one's title, then the values it has of the
  * columns shown, read-only. The phone's layout unless the person chose.
  */
-function PageList({ spaceId, tree, entries, columns, linkable, canEdit }: Listed) {
+function PageList({ spaceId, tree, entries, columns, linkable, moved, canEdit }: Listed) {
   return (
     <ul aria-label="Pages" className="grid gap-1">
       {entries.map((entry) => (
@@ -527,6 +546,7 @@ function PageList({ spaceId, tree, entries, columns, linkable, canEdit }: Listed
           treePage={tree.pages.find((p) => p.id === entry.pageId)}
           columns={columns}
           linkable={linkable}
+          moved={moved}
           canEdit={canEdit}
         />
       ))}
@@ -540,6 +560,7 @@ function ListItem({
   treePage,
   columns,
   linkable,
+  moved,
   canEdit,
 }: Omit<Listed, 'tree' | 'entries'> & {
   entry: searchOperations.IndexedEntry;
@@ -547,7 +568,7 @@ function ListItem({
 }) {
   const { links } = useShownRevision(spaceId, entry, undefined, editsDraft(canEdit, treePage));
   const notKept = useNotKept(useClient(), spaceId);
-  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept);
+  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept, moved);
   // Tags link to their search, as the page's rows do.
   const tags = tagProperties(entry.properties);
   const values = columns
@@ -670,6 +691,7 @@ function PageRow({
   treePage,
   columns,
   linkable,
+  moved,
   canEdit,
   edits,
   opened,
@@ -718,7 +740,7 @@ function PageRow({
     return { properties: read, refusals };
   }, [markdown, columns]);
   const notKept = useNotKept(useClient(), spaceId);
-  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept);
+  const scope = scopeOf(spaceId, entry.pageId, linkable, links, canEdit, notKept, moved);
   // Back to the control used, or one in its place: the field it opened from,
   // or a list's Add field once the item removed has gone. Only if nothing
   // else took the focus meanwhile, as the control it had is gone.

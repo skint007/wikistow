@@ -25,6 +25,7 @@ import { copyNode } from './commands/copy.ts';
 import { exportMarkdown } from './commands/export.ts';
 import { importNotes } from './commands/import.ts';
 import { moveNode, renameFolder } from './commands/move.ts';
+import { serveMcp } from './mcp.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { WINDOWS } from './files.ts';
@@ -59,6 +60,7 @@ const COMMANDS = {
   whoami: { options: {}, positionals: 0 },
   'agent secret-store': { options: { 'secret-tool': { type: 'string' } }, positionals: 1 },
   skill: { options: {}, positionals: 0 },
+  mcp: { options: {}, positionals: 0 },
   'spaces list': { options: {}, positionals: 0 },
   tree: { options: { space: { type: 'string' } }, positionals: 0 },
   search: { options: { space: { type: 'string' } }, positionals: 1 },
@@ -341,6 +343,10 @@ function parse(argv: readonly string[]) {
       '--idempotency-key is only for create, draft, publish, attach, copy, move and rename',
     );
   }
+  // Its standard output carries MCP messages, and nothing else.
+  if (name === 'mcp' && values.json === true) {
+    throw new CliError('usage', 'mcp answers in MCP messages; leave out --json');
+  }
   const unlock = unlockOf(values);
   if (unlock.passphraseFd === 0) {
     // Read to its end for the passphrase, standard input has nothing left.
@@ -348,6 +354,12 @@ function parse(argv: readonly string[]) {
       throw new CliError(
         'usage',
         'agent enroll reads the fingerprint’s yes from standard input, so not the passphrase',
+      );
+    }
+    if (name === 'mcp') {
+      throw new CliError(
+        'usage',
+        'mcp reads MCP messages from standard input, so not the passphrase',
       );
     }
     if (values.file === '-') {
@@ -399,6 +411,8 @@ export async function run(
   }
   const out = new Printer(io, { json: command.values.json === true });
   try {
+    // It serves until its client is done, or exits as its first command did.
+    if (command.name === 'mcp') return await serveMcp(io, command.content.unlock, all, run);
     await dispatch(io, out, command, all);
     return out.warning?.exit ?? EXIT.ok;
   } catch (error) {
