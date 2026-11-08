@@ -104,7 +104,7 @@ Making a share leaves the trash as it is, as today. So once the owner shares the
 
 ### 9. Sending in parts (#328): not now
 
-One request holds tens of thousands of records (decision 4): at 397 bytes a record for each owner, 64 MiB holds about 169,000 with one owner, 84,000 with two and 56,000 with three. Making a share fits about 250,000 (`wikistow/benchmarks/sharing.md`), and a family library's spaces hold about 8,000 each. So #328 stays a written-down limit, and the dialog says the folder is too large to end at once when the server answers `payload-too-large`.
+One request holds tens of thousands of records (decision 4): at 397 bytes a record for each owner, 64 MiB holds about 169,000 with one owner, 84,000 with two and 56,000 with three. Making a share fits about 250,000 (`wikistow/benchmarks/sharing.md`), and a family library's spaces hold about 8,000 each. So #328 stays a written-down limit, and the dialog says the folder is too large to end at once when the server answers `payload-too-large`. These counts come from the body limit alone: the benchmark ran in process, so it never met the server's 60-second idle timeout on a socket (`apps/server/src/main.ts`), which a request whose transaction runs longer could reach first. Building the ending checks that on the largest request it allows.
 
 When someone gets near it, #328 builds one mechanism for every request that carries key material for a whole subtree (making a share, a move across a region, ending a share, adding a co-owner), on the pattern of a copy's three steps (ADR 0007, decision 7):
 - **Open** names the operation and the permission versions it was prepared at, and changes nothing.
