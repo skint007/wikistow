@@ -796,6 +796,13 @@ function PasskeyList() {
           To add a passkey, open WikiStow in your browser. It signs this app in too, from the
           browser.
         </p>
+      ) : typeof window.PublicKeyCredential !== 'function' ? (
+        // Browsers leave passkeys out on pages that aren't secure (http://
+        // other than localhost), as well as where they have none.
+        <p className="text-sm text-muted-foreground">
+          This browser can’t add passkeys here. Passkeys need a browser that has them, and a server
+          address that starts with https://.
+        </p>
       ) : (
         <AddPasskey onAdded={refresh} />
       )}
