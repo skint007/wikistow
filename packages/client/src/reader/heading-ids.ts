@@ -3,16 +3,23 @@ import type { Root } from 'mdast';
 import type {} from 'mdast-util-to-hast';
 
 /**
- * The id a heading with this text gets, which `[[Page#Heading]]` links to:
- * lowercased, punctuation dropped, spaces as dashes. The prefix keeps a
- * page's headings clear of the app's own ids.
+ * A heading's text as an anchor: lowercased, punctuation dropped, spaces as
+ * dashes. For an ordinary heading that is GitHub's anchor too, so an export
+ * with Markdown links (`export.ts`) lands on it there.
  */
-export const headingId = (text: string) =>
-  `heading-${text
+export const headingSlug = (text: string) =>
+  text
     .trim()
     .toLocaleLowerCase('en')
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
-    .replace(/\s+/g, '-')}`;
+    .replace(/\s+/g, '-');
+
+/**
+ * The id a heading with this text gets, which `[[Page#Heading]]` links to:
+ * its `headingSlug`, prefixed to keep a page's headings clear of the app's
+ * own ids.
+ */
+export const headingId = (text: string) => `heading-${headingSlug(text)}`;
 
 /**
  * A remark plugin: each heading gets its `headingId`, and a repeat the

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  AttachmentId,
   LINKS_NAMESPACE,
   newPayload,
   placedWikilinks,
@@ -157,4 +158,94 @@ describe('rewriting links', () => {
     expect(expected).toContain('[[plan]] in a fence');
     expect(markdownOf(page, [plan])).toBe(expected);
   }, 30_000);
+});
+
+describe('writing Markdown links', () => {
+  const file = (name: string, mediaType: string) => ({
+    id: AttachmentId.parse(`a-${name.replace(/\W/g, '')}`),
+    name,
+    mediaType,
+    size: 1,
+    key: 'AAAA',
+    blobHash: 'A'.repeat(43),
+  });
+
+  it('links each page’s file by its path from here, to the heading GitHub names', () => {
+    const photo = file('photo.png', 'image/png');
+    const manual = file('manual.pdf', 'application/pdf');
+    const markdown = [
+      '[[Plan]], [[plan|the plan]], [[Plan#Next steps]], [[#What’s new?]]',
+      '[[A/B]] [[Work/Notes]] [[Home/Notes]]',
+      '| [[Plan|in a table]] |\n| - |',
+      '![[photo.png|300]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
+    ].join('\n\n');
+    const self = {
+      id: 'p-self',
+      parentId: 'f-home',
+      payload: {
+        // The link table picks the second of two pages that `Work/Notes` names.
+        ...payload('Self', markdown, { links: { 'work/notes': 'p-notes-2' } }),
+        attachments: [photo, manual],
+      },
+    };
+    const pages = [
+      self,
+      { id: 'p-plan', parentId: 'f-work', payload: payload('Plan') },
+      // A name no file system takes, and one used twice in a folder.
+      { id: 'p-slash', parentId: 'f-home', payload: payload('A/B') },
+      { id: 'p-notes', parentId: 'f-work', payload: payload('Notes') },
+      { id: 'p-notes-2', parentId: 'f-work', payload: payload('notes') },
+      { id: 'p-home-notes', parentId: 'f-home', payload: payload('Notes') },
+    ];
+    const folders = [
+      { id: 'f-home', name: 'Home' },
+      { id: 'f-work', name: 'Work' },
+    ];
+    const listed = space(folders, pages);
+    const linkable = [
+      ...listed.linkable,
+      { id: 'p-out', title: 'Elsewhere', folders: ['Not exported'] },
+    ];
+    const plan = planExport([{ ...listed, linkable }], { links: 'markdown' });
+    const paths = plan.files.map((f) => f.path).sort();
+    expect(paths).toEqual([
+      'Home/A_B.md',
+      'Home/Notes.md',
+      'Home/Self.md',
+      'Work/Notes.md',
+      'Work/Plan.md',
+      'Work/notes (2).md',
+      'attachments/manual.pdf',
+      'attachments/photo.png',
+    ]);
+    const written = plan.files.find((f) => f.pageId === 'p-self' && f.kind === 'page');
+    expect(written).toMatchObject({
+      markdown: [
+        '[Plan](../Work/Plan.md), [the plan](../Work/Plan.md), ' +
+          '[Plan › Next steps](../Work/Plan.md#next-steps), [What’s new?](#whats-new)',
+        '[A/B](A_B.md) [notes](../Work/notes%20%282%29.md) [Notes](Notes.md)',
+        '| [in a table](../Work/Plan.md) |\n| - |',
+        '![photo.png](../attachments/photo.png) [manual.pdf](../attachments/manual.pdf) ' +
+          '![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
+      ].join('\n\n'),
+      wikilinks: 4,
+    });
+    const twice = { id: 'p-twice', parentId: 'f-work', payload: payload('Twice', '[[notes]]') };
+    const other = planExport([space(folders, [...pages, twice])], { links: 'markdown' });
+    // `notes` names two pages, so it stays a wikilink; one link per page is enough here.
+    expect(other.files.find((f) => f.pageId === 'p-twice')).toMatchObject({
+      markdown: '[[notes]]',
+      wikilinks: 1,
+    });
+  });
+
+  it('percent-encodes a path as attachment links are, and leaves wikilinks alone by default', () => {
+    const page = { id: 'p-self', payload: payload('Self', '[[Q3 (draft)]]') };
+    const target = { id: 'p-q3', payload: payload('Q3 (draft)') };
+    const markdown = (links: 'wiki' | 'markdown') =>
+      planExport([space([], [page, target])], { links }).files.find((f) => f.pageId === page.id);
+    expect(markdown('markdown')).toMatchObject({ markdown: '[Q3 (draft)](Q3%20%28draft%29.md)' });
+    expect(markdown('wiki')).toMatchObject({ markdown: '[[Q3 (draft)]]' });
+    expect(markdown('wiki')).not.toHaveProperty('wikilinks');
+  });
 });
