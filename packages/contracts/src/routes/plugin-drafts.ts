@@ -212,7 +212,7 @@ export const putDraftBinaryFile = {
   response: z.strictObject({ draft: DraftSummary }),
 } as const satisfies RouteDef;
 
-/** Delete a draft, with its files and build. */
+/** Delete a draft, with its files, build and kept workshop. */
 export const deleteDraft = {
   method: 'DELETE',
   path: '/api/plugin-drafts/:draftId',
@@ -231,6 +231,42 @@ export const putDraftBuild = {
   params: DraftParams,
   body: z.strictObject({ files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES) }),
   response: z.strictObject({ hash: PluginHash }),
+} as const satisfies RouteDef;
+
+/**
+ * The most a draft's kept workshop holds, as JSON in UTF-8: within the
+ * app's usual 1 MiB body, as is everything the model is sent in one request.
+ */
+export const MAX_DRAFT_WORKSHOP_BYTES = 768 * 1024;
+
+/**
+ * What the workshop keeps with a draft (#314): its conversation, versions
+ * and sample pages, plain text like the draft's files. The app that wrote
+ * it reads it; the server only keeps it, within `MAX_DRAFT_WORKSHOP_BYTES`.
+ * Null when nothing is kept.
+ */
+export const getDraftWorkshop = {
+  method: 'GET',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.strictObject({ workshop: z.json().nullable() }),
+} as const satisfies RouteDef;
+
+/** Keep `workshop` with the draft, in place of what was kept. It doesn't move `updatedAt`. */
+export const putDraftWorkshop = {
+  method: 'PUT',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  body: z.strictObject({ workshop: z.json() }),
+  response: z.object({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/** Forget the draft's kept workshop, for **Clear conversation**. Its files stay. */
+export const clearDraftWorkshop = {
+  method: 'DELETE',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.object({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
 /** The file route's key for a draft build: not the bare hash, which an installed copy uses. */

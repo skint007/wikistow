@@ -1,0 +1,1 @@
+ALTER TABLE "plugin_drafts" ADD COLUMN "workshop" text;

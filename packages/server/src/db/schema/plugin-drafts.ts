@@ -6,7 +6,7 @@ import { users } from './users.ts';
 /**
  * Plugin drafts (ADR 0004): the workshop's work, saved as the assistant
  * writes it. Plain, like the library's plugins. `updatedAt` moves
- * with the files, never with a build.
+ * with the files, never with a build or the kept workshop.
  */
 export const pluginDrafts = pgTable(
   'plugin_drafts',
@@ -22,6 +22,11 @@ export const pluginDrafts = pgTable(
     fromHash: text(),
     /** The build a browser last previewed, held in `plugin_draft_build_files`. */
     buildHash: text(),
+    /**
+     * The workshop kept with it (#314) as JSON: the conversation, versions
+     * and sample pages, without copies of real pages. Plain, like its files.
+     */
+    workshop: text(),
     createdAt: timestamptz().notNull().defaultNow(),
     updatedAt: timestamptz().notNull().defaultNow(),
   },

@@ -275,4 +275,49 @@ describe('plugin drafts', () => {
       (await api(ann).call(pluginDraftRoutes.getDraftBinaryFiles, { params: from })).files,
     ).toEqual([{ path: 'public/font.woff2', data: b64(font) }]);
   });
+
+  it('keep their workshop apart from the draft, within its limit, until cleared or deleted (#314)', async () => {
+    const cal = await signedInPerson(t);
+    const { draft } = await create(cal);
+    const params = { draftId: draft.id };
+    const read = async () =>
+      (await api(cal).call(pluginDraftRoutes.getDraftWorkshop, { params })).workshop;
+    const keep = (workshop: unknown) =>
+      errorCode(
+        api(cal).call(pluginDraftRoutes.putDraftWorkshop, {
+          params,
+          body: {
+            workshop: pluginDraftRoutes.putDraftWorkshop.body.shape.workshop.parse(workshop),
+          },
+        }),
+      );
+    expect(await read()).toBeNull();
+
+    const kept = { kept: 1, messages: [{ role: 'user', text: 'Make a clock' }], made: 2 };
+    expect(await keep(kept)).toBe('ok');
+    expect(await read()).toEqual(kept);
+    // Keeping it leaves the draft where it was in the list.
+    expect((await api(cal).call(pluginDraftRoutes.getDraft, { params })).draft).toEqual(draft);
+    // Another person's draft is not found, as a missing one is.
+    expect(await errorCode(api(bob).call(pluginDraftRoutes.getDraftWorkshop, { params }))).toBe(
+      'not-found',
+    );
+    expect(
+      await errorCode(
+        api(bob).call(pluginDraftRoutes.putDraftWorkshop, { params, body: { workshop: 1 } }),
+      ),
+    ).toBe('not-found');
+
+    // Past the limit it is refused, and what was kept stays.
+    const long = 'x'.repeat(pluginDraftRoutes.MAX_DRAFT_WORKSHOP_BYTES);
+    expect(await keep({ text: long })).toBe('payload-too-large');
+    expect(await read()).toEqual(kept);
+
+    // Clear conversation forgets it; the draft stays.
+    await api(cal).call(pluginDraftRoutes.clearDraftWorkshop, { params });
+    expect(await read()).toBeNull();
+    expect(await keep(kept)).toBe('ok');
+    await api(cal).call(pluginDraftRoutes.deleteDraft, { params });
+    expect(await errorCode(read())).toBe('not-found');
+  });
 });

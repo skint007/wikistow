@@ -8,6 +8,8 @@ import {
   putPluginDraftBuild,
   readPluginDraft,
   readPluginDraftBinaryFiles,
+  readPluginDraftWorkshop,
+  putPluginDraftWorkshop,
   type Database,
   type PluginStore,
 } from '@wikistow/server';
@@ -28,6 +30,8 @@ const bytesOf = ({ path, data }: { path: string; data: string }) => ({
   path,
   data: Buffer.from(data, 'base64url'),
 });
+// The kept workshop, saved a few seconds after each change while the workshop is in use.
+const WORKSHOP_LIMIT = { windowSeconds: 60, max: 60 };
 // A build each time a browser previews one, up to 10 MB in base64.
 const BUILD_LIMIT = { windowSeconds: 600, max: 120 };
 const BUILD_BODY = 15 * 1024 * 1024;
@@ -119,6 +123,43 @@ export function mountPluginDraftRoutes(
     pluginDraftRoutes.deleteDraft,
     async ({ params }, { principal }) => {
       await deletePluginDraft(db, { accountId: principal.accountId, ...params }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: LIMIT },
+  );
+
+  routes.account(
+    pluginDraftRoutes.getDraftWorkshop,
+    async ({ params }, { principal }) => ({
+      workshop: await readPluginDraftWorkshop(db, {
+        accountId: principal.accountId,
+        ...params,
+      }).catch(toApiError),
+    }),
+    { rateLimit: LIMIT },
+  );
+
+  routes.account(
+    pluginDraftRoutes.putDraftWorkshop,
+    async ({ params, body }, { principal }) => {
+      await putPluginDraftWorkshop(db, {
+        accountId: principal.accountId,
+        ...params,
+        workshop: body.workshop,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WORKSHOP_LIMIT },
+  );
+
+  routes.account(
+    pluginDraftRoutes.clearDraftWorkshop,
+    async ({ params }, { principal }) => {
+      await putPluginDraftWorkshop(db, {
+        accountId: principal.accountId,
+        ...params,
+        workshop: null,
+      }).catch(toApiError);
       return { ok: true as const };
     },
     { rateLimit: LIMIT },
