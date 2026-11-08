@@ -14,6 +14,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Move pages and folders within their space, by Move to… or by dragging, and publish pages, while offline. They wait on the device and go once the app is back online; a waiting publish can be cancelled from the page. Moves into or out of a shared folder, and publishing a page with a public link, still need the connection. (#354)
 - **Export…** has a **Markdown links** switch, off by default, that writes links between pages as relative links to their files, `[Plan](../Work/Plan.md#next-steps)`, for GitHub and editors that don’t read wikilinks. It says how many links stayed wikilinks, such as page embeds. (#350)
 - A page or folder moved to another space keeps its old address: opening it opens the new place, saying it moved, and links to it from pages left behind still open it, for people who can open it there. (#351)
+- A page moved to another space keeps its public link, at the same address, where you can publish it there. The move's preview lists the links that go with it, and its public page says it's being updated until you open Share public link… there and update it. A link the move can't keep ends, as before, and the preview says why. (#355)
 
 #### Plugins
 

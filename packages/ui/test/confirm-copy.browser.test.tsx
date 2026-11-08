@@ -123,6 +123,7 @@ const previewOf = (copyId: string, more: Partial<Preview> = {}): Preview => ({
   links: [],
   inbound: [],
   ends: null,
+  keptLinks: [],
   ...more,
 });
 

@@ -756,7 +756,7 @@ describe('what a copy refuses', () => {
 });
 
 describe('moving into another space', () => {
-  it('moves a folder and deletes the source with its share, links and publications', async () => {
+  it('moves a folder and deletes the source with its share and publications, keeping its public link', async () => {
     const w = await world();
     const linkId = await links.turnOn(w.alice.ctx, w.page.pageId);
     const { revisionId } = await pages.publishPage(w.alice.ctx, w.page);
@@ -793,12 +793,13 @@ describe('moving into another space', () => {
     expect(await t.db.select().from(schema.shares).where(eq(schema.shares.id, w.libShare))).toEqual(
       [],
     );
+    // Alice can publish there, so the public link goes with it, keeping its id.
     expect(
       await t.db
-        .select()
+        .select({ pageId: schema.publicLinks.pageId })
         .from(schema.publicLinks)
-        .where(eq(schema.publicLinks.pageId, w.page.pageId)),
-    ).toEqual([]);
+        .where(eq(schema.publicLinks.id, linkId)),
+    ).toEqual([{ pageId: made.pageId }]);
     const [row] = await t.db
       .select()
       .from(schema.publications)

@@ -40,9 +40,10 @@ const titleOf = (title: string | null) => (title?.trim() ? title : 'Untitled');
 /**
  * A copy, or a move into another space (ADR 0007), worked out afresh: who
  * can open it there, who loses it, what arrives unpublished, links that
- * won't find their page, and for a move, what it ends. A move always asks,
- * even with asking before moves turned off, because it deletes. Then it
- * runs, showing how far it has got, and opens what it made.
+ * won't find their page, and for a move, the public links it keeps and
+ * what it ends. A move always asks, even with asking before moves turned
+ * off, because it deletes. Then it runs, showing how far it has got, and
+ * opens what it made.
  */
 export function ConfirmCopy({
   sourceSpaceId,
@@ -391,13 +392,31 @@ export function ConfirmCopy({
               </p>
             </section>
           )}
+          {shown.keptLinks.length > 0 && (
+            <section aria-label="Public links that go with it" className="grid gap-2">
+              <h3 className="text-sm font-bold text-subtle-foreground">
+                Public links that go with it
+              </h3>
+              <ul className="grid list-disc gap-1 pl-5 text-sm">
+                {shown.keptLinks.map((pageId) => (
+                  <li key={pageId}>
+                    <Name>{named(pageId)}</Name>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground">
+                Their links keep working. Each public page says it’s being updated until you open
+                Share public link… there and update it.
+              </p>
+            </section>
+          )}
           {ends && (
             <section aria-label="What the move ends" className="grid gap-2">
               <h3 className="text-sm font-bold text-subtle-foreground">What the move ends</h3>
               <ul className="grid list-disc gap-1 pl-5 text-sm">
                 {ends.publicLinks.map((pageId) => (
                   <li key={`link ${pageId}`}>
-                    The public link of “<Name>{named(pageId)}</Name>”
+                    The public link of “<Name>{named(pageId)}</Name>”, as you can’t publish there
                   </li>
                 ))}
                 {ends.publications.map(({ pageId, spaceId }) => (
