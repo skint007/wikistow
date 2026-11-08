@@ -54,6 +54,8 @@ import {
  * What is being moved or copied: a page or a folder, by the name the
  * person sees. A drop in the sidebar has already chosen where it goes
  * (`to`), in its own space, so the dialog opens on who gains and loses access.
+ * A drop on another space's tile in the rail has chosen that space (`into`),
+ * so the dialog opens on choosing where in it, its top first.
  */
 export type Moving = {
   id: FolderId | PageId;
@@ -62,6 +64,7 @@ export type Moving = {
   /** Move to… (the default) or Copy to…. */
   action?: 'move' | 'copy';
   to?: Destination<FolderId>;
+  into?: SpaceId;
   /**
    * Why a drop moving without asking stopped, for the dialog it opens on:
    * something changed meanwhile, or what went wrong.
@@ -147,8 +150,8 @@ const moveOnDevice = (
  * look over who gains and who loses access when that crosses a shared
  * folder's edge, then move it. A copy, or a move into another space, is a
  * copy (section 10, "Copies, and moves between spaces"; ADR 0007), which
- * always asks first. Opened from the page menu, the sidebar's menus, and a
- * drop in the sidebar.
+ * always asks first. Opened from the page menu, the sidebar's menus, a
+ * drop in the sidebar, and one on a space in the rail (`SpaceMoves`).
  */
 export function MoveDialog({
   spaceId,
@@ -573,7 +576,7 @@ function ChooseDestination({
         ? choices?.slice(0, 1)
         : choices;
   const [toSpace, setToSpace] = useState<SpaceId | null>(
-    chosen?.spaceId ?? (moving ? spaceId : null),
+    chosen?.spaceId ?? (moving ? (moving.into ?? spaceId) : null),
   );
   const space = offered?.find((c) => c.spaceId === toSpace);
   const treeLoad = useQuery({

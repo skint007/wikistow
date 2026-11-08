@@ -192,6 +192,8 @@ export function controls(offline: boolean, waiting: Waiting) {
   };
   return {
     can: (kind: ActionKind) => availability(kind, { offline, waiting }).allowed,
+    /** Why `kind` can't run now, or null if it can. */
+    hint: hintOf,
     click: <E extends { preventDefault(): void }>(
       kind: ActionKind,
       onClick: (event: E) => void,

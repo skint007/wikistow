@@ -86,6 +86,7 @@ import {
   type PageInfo,
 } from './tree-menus';
 import { useAvailability } from './availability';
+import { NODE_DRAG_TYPE, nodeDrag } from './node-drag';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -254,9 +255,6 @@ type Dragging = {
   over: Destination<FolderId> | null;
 };
 
-// Set, empty, on a drag from the tree, since Firefox starts no drag without data.
-const DRAG_TYPE = 'application/x-wikistow-node';
-
 /**
  * A space's sidebar, at every size, the phone's drawer too: its name and
  * menu, New page, and its page tree, which a plugin can draw instead
@@ -408,26 +406,44 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // place dropped on, as Move to… does once that place is chosen, or moves at
   // once if the person turned asking before moves off. Keyboard
   // users have Move to… in the menus. A drop on a page is a drop beside it,
-  // and one below the rows is at the top of the space.
+  // and one below the rows is at the top of the space. A drop on another
+  // space in the rail is the rail's, from what `nodeDrag` holds (#338).
   // A drag whose row went away meanwhile, moved or deleted elsewhere, is
   // over: the row's dragend never reaches the tree.
-  if (dragging && !rows.some((r) => r.id === dragging.moving.id)) setDragging(null);
+  if (dragging && !rows.some((r) => r.id === dragging.moving.id)) {
+    setDragging(null);
+    nodeDrag.set(null);
+  }
   const startDrag = (event: DragEvent, moving: Moving) => {
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData(DRAG_TYPE, '');
+    // A copy, for a drop on another space's tile in the rail.
+    event.dataTransfer.effectAllowed = 'copyMove';
+    event.dataTransfer.setData(NODE_DRAG_TYPE, '');
     // Where Move to… offers: offline, only within its share (`moveRoute`).
     const owner = movesAsOwner(standing, availability.offline);
     const places = destinationsIn(tree, moving, owner).filter(
       (d) => moveRoute(tree, moving, d.parentId, availability).route !== null,
     );
     setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
+    // Into another space, as Move to… offers it: a move for an owner of this space, else a copy.
+    const movesAcross = tree.space?.role === 'owner';
+    const across = availability.move(moving.id, null, { across: true });
+    nodeDrag.set({
+      spaceId,
+      moving,
+      action: movesAcross ? 'move' : 'copy',
+      hint: !movesAcross
+        ? availability.of(moving.id).hint('copy')
+        : across.route === null
+          ? across.hint
+          : null,
+    });
   };
   const pointAt = (over: Destination<FolderId> | null) =>
     setDragging((current) => (current && current.over !== over ? { ...current, over } : current));
   // Only a drag from this tree, and only where Move to… would offer: not onto
   // itself, inside itself, or where it is.
   const placeAt = (event: DragEvent, parentId: FolderId | null) =>
-    event.dataTransfer.types.includes(DRAG_TYPE) ? (dragging?.to.get(parentId) ?? null) : null;
+    event.dataTransfer.types.includes(NODE_DRAG_TYPE) ? (dragging?.to.get(parentId) ?? null) : null;
   // For dragenter as well as dragover: a browser takes a drop on whatever
   // took either last, and moving onto a new element fires only dragenter.
   const dragOver = (event: DragEvent, parentId: FolderId | null) => {
@@ -527,7 +543,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 const to = event.relatedTarget;
                 if (!(to instanceof Node) || !event.currentTarget.contains(to)) pointAt(null);
               }}
-              onDragEnd={() => setDragging(null)}
+              onDragEnd={() => {
+                setDragging(null);
+                nodeDrag.set(null);
+              }}
               className={cn(
                 // `relative` keeps the rows' sr-only text inside the scroller: placed
                 // by the page instead, it stretched the window to the hidden rows.

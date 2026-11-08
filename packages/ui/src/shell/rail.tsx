@@ -1,4 +1,4 @@
-import { spaceOperations } from '@wikistow/client';
+import { spaceOperations, type SpaceId } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import type { DesktopUpdate } from '@wikistow/contracts';
@@ -15,7 +15,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import { useCallback, useEffect, useId, useState, type DragEvent } from 'react';
+import { use, useCallback, useEffect, useId, useState, type DragEvent } from 'react';
 import { Avatar } from '@/components/avatar';
 import { submitData } from '@/components/form/submit';
 import { plainText } from '@/components/name';
@@ -48,6 +48,9 @@ import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../de
 import { changesNotSent, forgetKept, signOutWarning } from '../data/kept-store';
 import { connection } from '../data/connection';
 import { useNeedsConnection } from './availability';
+import { NODE_DRAG_TYPE, nodeDrag } from './node-drag';
+import { DropMoveOpener } from './space-moves';
+import { nameOf } from '../sharing/names';
 import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
 import { errorMessage } from '../errors';
@@ -200,7 +203,9 @@ function moved<T>(ids: T[], from: number, to: number) {
  * The person's spaces in their order, home space first. A mouse drags any
  * other tile to a new place; the tile menu's Move up and Move down do the
  * same from the keyboard. The rail shows the new order at once, and puts the
- * old one back if saving it fails.
+ * old one back if saving it fails. A page or folder dragged from the sidebar
+ * onto another space where the person can make pages opens Move to…, or
+ * Copy to…, with that space chosen (#338); nothing moves on the drop alone.
  */
 function SpaceTiles({
   vault,
@@ -219,6 +224,12 @@ function SpaceTiles({
   // The tile being dragged, and the place it would land: before the tile at that index.
   const [dragging, setDragging] = useState<{ from: number; to: number | null } | null>(null);
   const [failed, setFailed] = useState(false);
+  // The tile a page or folder from the sidebar is over, and why it can't go there now, if not.
+  const [nodeOver, setNodeOver] = useState<{
+    spaceId: SpaceId;
+    hint: { text: string; top: number; left: number } | null;
+  } | null>(null);
+  const openDropped = use(DropMoveOpener);
   useEffect(() => {
     if (!failed) return;
     const timer = setTimeout(() => setFailed(false), 6000);
@@ -263,6 +274,41 @@ function SpaceTiles({
     event.preventDefault();
     if (dragging?.to != null) void move(dragging.from, dragging.to);
     setDragging(null);
+  };
+
+  // A page or folder from the sidebar, which another space takes where the
+  // person can make pages at all; where in it is the dialog's to say.
+  const nodeFor = (event: DragEvent, space: (typeof spaces)[number]) => {
+    const node = nodeDrag.get();
+    if (!node || !event.dataTransfer.types.includes(NODE_DRAG_TYPE)) return null;
+    const takes =
+      space.id !== node.spaceId &&
+      (space.role === 'owner' || space.role === 'editor') &&
+      nameOf(space.metadata) !== null;
+    return takes ? node : null;
+  };
+  // For dragenter as well as dragover, as in the sidebar.
+  const nodeDragOver = (event: DragEvent<HTMLElement>, space: (typeof spaces)[number]) => {
+    const node = nodeFor(event, space);
+    if (!node) return setNodeOver(null);
+    if (node.hint === null) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = node.action;
+    }
+    if (nodeOver?.spaceId === space.id) return;
+    // Hints show on hover, which a drag doesn't fire, so this one is drawn here.
+    const { top, height, right } = event.currentTarget.getBoundingClientRect();
+    setNodeOver({
+      spaceId: space.id,
+      hint: node.hint === null ? null : { text: node.hint, top: top + height / 2, left: right + 8 },
+    });
+  };
+  const nodeDrop = (event: DragEvent, space: (typeof spaces)[number]) => {
+    const node = nodeFor(event, space);
+    setNodeOver(null);
+    if (!node || node.hint !== null) return;
+    event.preventDefault();
+    openDropped(node.spaceId, { ...node.moving, action: node.action, into: space.id });
   };
 
   return (
@@ -317,6 +363,9 @@ function SpaceTiles({
                 'grid size-11 place-items-center overflow-hidden rounded-tile bg-muted text-sm font-extrabold text-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none',
                 active && 'bg-primary-soft ring-2 ring-primary',
                 dragging?.from === index && 'opacity-50',
+                nodeOver?.spaceId === space.id &&
+                  nodeOver.hint === null &&
+                  'bg-primary-soft ring-2 ring-primary',
               )}
             >
               <SpaceIcon metadata={space.metadata} name={name} />
@@ -326,9 +375,21 @@ function SpaceTiles({
             <li
               key={space.id}
               className="relative"
+              onDragEnter={(event) => nodeDragOver(event, space)}
               onDragOver={(event) => {
                 event.stopPropagation();
+                if (event.dataTransfer.types.includes(NODE_DRAG_TYPE))
+                  return nodeDragOver(event, space);
                 dropAt(event, placeOver(event, index));
+              }}
+              onDragLeave={(event) => {
+                const to = event.relatedTarget;
+                if (!(to instanceof Node) || !event.currentTarget.contains(to)) setNodeOver(null);
+              }}
+              onDrop={(event) => {
+                if (!event.dataTransfer.types.includes(NODE_DRAG_TYPE)) return;
+                event.stopPropagation();
+                nodeDrop(event, space);
               }}
             >
               {active && (
@@ -353,6 +414,15 @@ function SpaceTiles({
       </button>
       <span aria-hidden className="my-1 h-px w-7 bg-border" />
       <NewSpaceDialog open={creating} onOpenChange={setCreating} vault={vault} />
+      {nodeOver?.hint && (
+        <span
+          aria-hidden
+          className="pointer-events-none fixed z-50 w-max -translate-y-1/2 max-w-80 rounded-row border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
+          style={{ top: nodeOver.hint.top, left: nodeOver.hint.left }}
+        >
+          {nodeOver.hint.text}
+        </span>
+      )}
       {failed && (
         <p
           role="alert"
