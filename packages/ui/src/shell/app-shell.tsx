@@ -23,6 +23,7 @@ import { appReader, RenderedMarkdown } from '../plugins/rendered-markdown';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
 import { isPaletteKey } from '../commands/palette';
+import { usePluginSettingsEntries } from '../commands/plugin-palette';
 import {
   PaletteOffers,
   PaletteOffersProvider,
@@ -227,11 +228,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-/** What the palette offers anywhere: locking, and the theme, which Settings changes. */
+/**
+ * What the palette offers anywhere: locking, the theme, which Settings
+ * changes, and each plugin's settings.
+ */
 function AppCommands() {
   const navigate = useNavigate();
   const satisfies = requirementsHere();
+  const pluginSettings = usePluginSettingsEntries();
   usePaletteEntries([
+    ...pluginSettings,
     {
       command: lockVault,
       satisfies,
