@@ -315,7 +315,8 @@ export class Workshop {
       return;
     }
     try {
-      if (this.#state.files.size === 0 && this.#state.binary.size === 0) return;
+      // Fonts and images alone have no manifest to build, as after Add file….
+      if (this.#state.files.size === 0) return;
       await this.buildAndPreview();
     } catch (error) {
       this.#set({ problem: message(error) });
