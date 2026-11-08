@@ -43,6 +43,17 @@ const MESSAGES: Partial<Record<string, string>> = {
   INVALID_TWO_FACTOR_COOKIE: 'Your sign-in expired. Start again.',
   TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: 'Too many wrong codes for this sign-in. Start again.',
   INVALID_PASSWORD: 'That password is not right.',
+  // Passkeys (Better Auth's passkey plugin, and the browser's WebAuthn errors).
+  PASSKEY_NOT_FOUND: 'This passkey isn’t on any account here. Sign in with your password.',
+  PASSKEY_NOT_VERIFIED:
+    'The passkey didn’t check it’s you. Use one with a fingerprint, face, PIN or screen lock.',
+  AUTHENTICATION_FAILED: 'That passkey didn’t work. Try again, or sign in with your password.',
+  CHALLENGE_NOT_FOUND: 'That took too long. Try again.',
+  // Cancelling the browser's prompt arrives as one of these.
+  ERROR_PASSTHROUGH_SEE_CAUSE_PROPERTY: 'The passkey prompt closed before it finished.',
+  ERROR_CEREMONY_ABORTED: 'The passkey prompt closed before it finished.',
+  AUTH_CANCELLED: 'The passkey prompt closed before it finished.',
+  ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED: 'This passkey is already on your account.',
 };
 
 // The server's answers in this app's words, since its own, when it sends
