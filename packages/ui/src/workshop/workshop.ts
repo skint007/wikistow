@@ -403,7 +403,14 @@ export class Workshop {
   keptVersions() {
     return this.#state.versions.map(({ version, diagnostics, hash, plugin, history }) => ({
       version,
-      diagnostics,
+      // In one order, so the same build keeps the same text.
+      diagnostics: diagnostics.map(({ severity, file, line, column, message }) => ({
+        severity,
+        file,
+        line,
+        column,
+        message,
+      })),
       hash,
       plugin: plugin
         ? { name: plugin.manifest.name, version: plugin.manifest.version }

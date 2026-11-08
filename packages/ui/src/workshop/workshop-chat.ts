@@ -46,6 +46,8 @@ export type Keeping = {
 
 const encoder = new TextEncoder();
 
+const stale = (error: unknown) => error instanceof ApiError && error.code === 'stale-head';
+
 /** Each draft's last save from a workshop that closed, which one opening on it reads after. */
 const closing = new Map<string, Promise<void>>();
 
@@ -76,6 +78,8 @@ export class WorkshopChat {
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** What was last sent to be kept, to send nothing when nothing changed. */
   #lastKept: string | null = null;
+  /** A save whose answer was lost, which may have landed. */
+  #unsure: string | null = null;
   /** The revision of what the draft keeps, which the next save follows. */
   #revision = 0;
   /** The last save: they go one at a time. */
@@ -146,7 +150,8 @@ export class WorkshopChat {
       kept: said[index] ?? text,
     }));
     this.#toldCopy = kept.toldCopy;
-    this.#lastKept = JSON.stringify(kept);
+    // As this workshop would keep it: a device that only opens the draft sends nothing.
+    this.#lastKept = JSON.stringify(this.#record());
   }
 
   /** Something changed: keep it in a moment, or `now`. */
@@ -200,18 +205,29 @@ export class WorkshopChat {
     this.#saving = this.#saving.then(async () => {
       // Nothing more after another device's: it isn't kept over.
       if (this.#keeping.status !== 'kept') return;
-      try {
-        const answer = await api.call(pluginDraftRoutes.putDraftWorkshop, {
+      const send = () =>
+        api.call(pluginDraftRoutes.putDraftWorkshop, {
           params,
           body: { workshop: record, revision: this.#revision },
         });
+      try {
+        let answer: { revision: number };
+        try {
+          answer = await send();
+        } catch (error) {
+          // Stale after a save whose answer was lost: it may have landed, and then this follows it.
+          if (!stale(error) || !(await this.#landed())) throw error;
+          answer = await send();
+        }
+        this.#unsure = null;
         this.#revision = answer.revision;
         if (this.#keeping.problem) this.#setKeeping({ ...this.#keeping, problem: null });
       } catch (error) {
-        if (error instanceof ApiError && error.code === 'stale-head') {
+        if (stale(error)) {
           this.#setKeeping({ status: 'stale', problem: null });
           return;
         }
+        this.#unsure = text;
         // Sent again with the next change.
         if (this.#lastKept === text) this.#lastKept = null;
         if (!this.#done) {
@@ -222,6 +238,17 @@ export class WorkshopChat {
         }
       }
     });
+  }
+
+  /** Whether the save whose answer was lost is what the draft keeps; then the next follows it. */
+  async #landed() {
+    if (this.#unsure === null) return false;
+    const now = await api.call(pluginDraftRoutes.getDraftWorkshop, {
+      params: { draftId: this.workshop.draftId },
+    });
+    if (JSON.stringify(now.workshop) !== this.#unsure) return false;
+    this.#revision = now.revision;
+    return true;
   }
 
   subscribe = (listener: () => void) => {
