@@ -316,6 +316,13 @@
       "when": 1794163932824,
       "tag": "0044_draft_binary_files",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794167525459,
+      "tag": "0045_draft_workshop",
+      "breakpoints": true
     }
   ]
 }

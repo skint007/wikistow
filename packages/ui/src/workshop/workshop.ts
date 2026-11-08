@@ -1,4 +1,4 @@
-import { fromBase64, toBase64 } from '@wikistow/client';
+import { ApiError, fromBase64, toBase64 } from '@wikistow/client';
 import {
   installedPlugin,
   pluginDraftRoutes,
@@ -23,6 +23,7 @@ import { tabSafeMode } from '../plugins/safe-mode';
 import { SCRIPT_BUDGET_MS } from '../plugins/script-worker';
 import { pluginTheme } from '../theme/plugin-theme';
 import { buildDraft, Bundler, type Built } from './builder';
+import { KeptWorkshop } from './kept';
 import { SAMPLE_SPACE, sampleStore } from './samples';
 
 const {
@@ -62,11 +63,11 @@ export type WorkshopState = {
   problem: string | null;
   /** Reading the draft, then building and previewing it, as it opens. */
   opening: boolean;
-  /** Every build so far, failed ones too, oldest first. */
-  versions: readonly WorkshopVersion[];
+  /** Every build so far, failed ones too, oldest first, with those kept from before. */
+  versions: readonly Version[];
   building: boolean;
   /** The version the preview runs: one that built. A failed build leaves it as it is. */
-  running: WorkshopVersion | null;
+  running: Version | null;
   /** The person let this workshop's app code (`ui`) run in the preview, with the app's trust. */
   appCode: boolean;
   /** The running version's theme shown across the app, by ID. */
@@ -114,6 +115,28 @@ const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
 
 const ManifestId = z.object({ id: z.string() });
+
+/**
+ * A version in the workshop's list: one built here, or one from the
+ * conversation kept with the draft (#314) whose build this workshop hasn't
+ * got, by its manifest's name and version (`history`), with no plugin.
+ */
+export type Version = WorkshopVersion & { history?: { name: string; version: string } };
+
+/**
+ * What the draft keeps of its workshop, as read on opening: `kept`, with
+ * what was kept before if anything was, and the revision a save follows;
+ * `old-server`, a server older than keeping; `unreadable`, kept by a later
+ * app, say, and left as it is; `unread`, the read failed, so nothing is
+ * kept over it; or `failed`, the draft itself couldn't be read.
+ */
+export type Kept =
+  | { status: 'kept'; workshop: KeptWorkshop | null; revision: number }
+  | { status: 'old-server' | 'unreadable' | 'unread' | 'failed' };
+
+/** The same problems, in the same order. */
+const sameDiagnostics = (a: readonly BuildDiagnostic[], b: readonly BuildDiagnostic[]) =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * Whether `draft` is a copy of another plugin: it started from a library
@@ -168,6 +191,9 @@ export class Workshop {
   readonly markdown = createMarkdownDrawings();
   readonly preview: PluginRuntime;
   readonly #bundler = new Bundler();
+  /** What the draft keeps of its workshop, once read as it opens. */
+  readonly kept: Promise<Kept>;
+  #keptRead: (kept: Kept) => void = () => {};
   #state: WorkshopState = {
     phase: 'starting',
     failure: null,
@@ -207,8 +233,12 @@ export class Workshop {
   #theming: string | null = null;
   readonly #unwatchTheme: () => void;
 
-  constructor(draftId: string) {
+  /** What the draft keeps is read after this, a closed workshop's last save. */
+  readonly #after: Promise<void>;
+
+  constructor(draftId: string, after: Promise<void> = Promise.resolve()) {
     this.draftId = draftId;
+    this.#after = after;
     // The workshop's versions: approving one runs it in the preview, in place of what runs.
     const versions: PluginStore<number> = {
       list: async () => {
@@ -274,6 +304,7 @@ export class Workshop {
     });
     window.addEventListener('error', this.#caught);
     window.addEventListener('unhandledrejection', this.#rejected);
+    this.kept = new Promise((resolve) => (this.#keptRead = resolve));
     void this.#start();
   }
 
@@ -289,7 +320,11 @@ export class Workshop {
     for (const listener of this.#listeners) listener();
   }
 
-  /** Read the draft whole, then build it and preview what built, without the assistant. */
+  /**
+   * Read the draft whole, with what it keeps of its workshop, then build it
+   * and preview what built, without the assistant. A build that matches the
+   * newest kept version is that version again.
+   */
   async #start() {
     try {
       const params = { draftId: this.draftId };
@@ -299,7 +334,12 @@ export class Workshop {
         draft.files > files.length
           ? (await api.call(pluginDraftRoutes.getDraftBinaryFiles, { params })).files
           : [];
-      if (this.#state.phase === 'ended') return;
+      await this.#after;
+      const kept = await this.#readKept();
+      if (this.#state.phase === 'ended') {
+        this.#keptRead({ status: 'failed' });
+        return;
+      }
       const texts = new Map(files.map(({ path, text }) => [path, text]));
       this.#set({
         phase: 'ready',
@@ -308,7 +348,10 @@ export class Workshop {
         binary: new Map(binary.map(({ path, data }) => [path, fromBase64(data)])),
         copy: copyOf(draft, texts),
       });
+      if (kept.status === 'kept' && kept.workshop) this.#restore(kept.workshop);
+      this.#keptRead(kept);
     } catch (error) {
+      this.#keptRead({ status: 'failed' });
       if (this.#state.phase !== 'ended') {
         this.#set({ phase: 'failed', failure: errorMessage(error), opening: false });
       }
@@ -317,7 +360,7 @@ export class Workshop {
     try {
       // Fonts and images alone have no manifest to build, as after Add file….
       if (this.#state.files.size === 0) return;
-      await this.buildAndPreview();
+      await this.buildAndPreview(true);
     } catch (error) {
       this.#set({ problem: message(error) });
     } finally {
@@ -325,9 +368,63 @@ export class Workshop {
     }
   }
 
-  /** Build the draft's files into the next version, and preview it if it built. */
-  async buildAndPreview() {
-    const version = await this.build();
+  /** What the draft keeps of its workshop. Never throws. */
+  async #readKept(): Promise<Kept> {
+    try {
+      const { workshop, revision } = await api.call(pluginDraftRoutes.getDraftWorkshop, {
+        params: { draftId: this.draftId },
+      });
+      if (workshop === null) return { status: 'kept', workshop: null, revision };
+      const kept = KeptWorkshop.safeParse(workshop);
+      return kept.success
+        ? { status: 'kept', workshop: kept.data, revision }
+        : { status: 'unreadable' };
+    } catch (error) {
+      // The draft was just read, so only a server without the route answers 404.
+      if (error instanceof ApiError && error.status === 404) return { status: 'old-server' };
+      // Its files open as ever; nothing is kept over what couldn't be read.
+      return { status: 'unread' };
+    }
+  }
+
+  /** Start from what was kept: its versions as history, and its samples. */
+  #restore({ versions, samples, made }: KeptWorkshop) {
+    this.samples.restore(samples, made);
+    this.#set({
+      versions: versions.map(({ version, diagnostics, hash, plugin }) =>
+        plugin
+          ? { version, diagnostics, plugin: null, hash, history: plugin }
+          : failedVersion(version, diagnostics),
+      ),
+    });
+  }
+
+  /** The versions as the draft keeps them: their builds stay here. */
+  keptVersions() {
+    return this.#state.versions.map(({ version, diagnostics, hash, plugin, history }) => ({
+      version,
+      // In one order, so the same build keeps the same text.
+      diagnostics: diagnostics.map(({ severity, file, line, column, message }) => ({
+        severity,
+        file,
+        line,
+        column,
+        message,
+      })),
+      hash,
+      plugin: plugin
+        ? { name: plugin.manifest.name, version: plugin.manifest.version }
+        : (history ?? null),
+    }));
+  }
+
+  /**
+   * Build the draft's files into the next version, and preview it if it
+   * built. `again`, as the workshop opens: a build like the newest version
+   * is that version, not another.
+   */
+  async buildAndPreview(again = false) {
+    const version = await this.#build(undefined, again);
     if (version?.plugin) await this.load(version.version);
   }
 
@@ -483,7 +580,11 @@ export class Workshop {
   }
 
   /** Build the draft's files into the next version. Null if stopped or unloaded meanwhile. */
-  async build(signal?: AbortSignal): Promise<WorkshopVersion | null> {
+  build(signal?: AbortSignal): Promise<Version | null> {
+    return this.#build(signal, false);
+  }
+
+  async #build(signal: AbortSignal | undefined, again: boolean): Promise<Version | null> {
     this.#open();
     const generation = this.#generation;
     this.#building += 1;
@@ -500,9 +601,18 @@ export class Workshop {
       if (generation !== this.#generation || signal?.aborted || this.#state.phase !== 'ready') {
         return null;
       }
-      const number = this.#state.versions.length + 1;
+      const { versions } = this.#state;
       const { built } = result;
-      const version: WorkshopVersion = built
+      // The same build as the newest, kept from before: the same version, now with its build.
+      const last = versions.at(-1);
+      const same =
+        again &&
+        last !== undefined &&
+        (built
+          ? last.hash === built.hash
+          : last.hash === null && sameDiagnostics(last.diagnostics, result.diagnostics));
+      const number = same ? last.version : (last?.version ?? 0) + 1;
+      const version: Version = built
         ? {
             version: number,
             diagnostics: result.diagnostics,
@@ -517,7 +627,7 @@ export class Workshop {
           }
         : failedVersion(number, result.diagnostics);
       if (built) this.#built.set(number, built);
-      this.#set({ versions: [...this.#state.versions, version] });
+      this.#set({ versions: [...(same ? versions.slice(0, -1) : versions), version] });
       return version;
     } finally {
       this.#building -= 1;
@@ -585,7 +695,7 @@ export class Workshop {
    */
   async #serveRunning() {
     // Again if a load took the preview meanwhile: its upload went first.
-    let served: WorkshopVersion | null = null;
+    let served: Version | null = null;
     try {
       while (this.#state.running && this.#state.running !== served) {
         served = this.#state.running;
@@ -599,6 +709,11 @@ export class Workshop {
   /** Run version `version` in the preview, in place of what runs now. */
   async load(version: number, signal?: AbortSignal) {
     const record = this.#state.versions.find((built) => built.version === version);
+    if (record?.history) {
+      throw new Error(
+        `Version ${version} is from before: its build isn’t kept, so it can’t be previewed again.`,
+      );
+    }
     if (!record?.plugin)
       throw new Error(`Version ${version} didn’t build, so it can’t be previewed.`);
     if (signal?.aborted || this.#state.phase !== 'ready') return;
@@ -781,7 +896,8 @@ export class Workshop {
         latest && latest !== running
           ? {
               version: latest.version,
-              built: latest.plugin !== null,
+              built: latest.plugin !== null || latest.history !== undefined,
+              ...(latest.history ? { previewable: false } : {}),
               diagnostics: latest.diagnostics,
             }
           : null,

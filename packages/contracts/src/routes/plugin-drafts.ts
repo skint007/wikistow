@@ -212,7 +212,7 @@ export const putDraftBinaryFile = {
   response: z.strictObject({ draft: DraftSummary }),
 } as const satisfies RouteDef;
 
-/** Delete a draft, with its files and build. */
+/** Delete a draft, with its files, build and kept workshop. */
 export const deleteDraft = {
   method: 'DELETE',
   path: '/api/plugin-drafts/:draftId',
@@ -231,6 +231,50 @@ export const putDraftBuild = {
   params: DraftParams,
   body: z.strictObject({ files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES) }),
   response: z.strictObject({ hash: PluginHash }),
+} as const satisfies RouteDef;
+
+/**
+ * The most a draft's kept workshop holds, as JSON in UTF-8: within the
+ * app's usual 1 MiB body, as is everything the model is sent in one request.
+ */
+export const MAX_DRAFT_WORKSHOP_BYTES = 768 * 1024;
+
+/** Counts each save and clear of a draft's kept workshop, from 0. */
+const WorkshopRevision = z.number().int().nonnegative();
+
+/**
+ * What the workshop keeps with a draft (#314): its conversation, versions
+ * and sample pages, plain text like the draft's files. The app that wrote
+ * it reads it; the server only keeps it, within `MAX_DRAFT_WORKSHOP_BYTES`.
+ * `workshop` is null when nothing is kept. A save names the `revision` it
+ * follows.
+ */
+export const getDraftWorkshop = {
+  method: 'GET',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.strictObject({ workshop: z.json().nullable(), revision: WorkshopRevision }),
+} as const satisfies RouteDef;
+
+/**
+ * Keep `workshop` with the draft, in place of what was kept, if `revision`
+ * is still the latest: else `stale-head`, as when another device kept its
+ * own meanwhile. Answers the new revision. It doesn't move `updatedAt`.
+ */
+export const putDraftWorkshop = {
+  method: 'PUT',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  body: z.strictObject({ workshop: z.json(), revision: WorkshopRevision }),
+  response: z.strictObject({ revision: WorkshopRevision }),
+} as const satisfies RouteDef;
+
+/** Forget the draft's kept workshop, for **Clear conversation**, whatever its revision. Its files stay. */
+export const clearDraftWorkshop = {
+  method: 'DELETE',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.object({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
 /** The file route's key for a draft build: not the bare hash, which an installed copy uses. */

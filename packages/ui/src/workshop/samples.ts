@@ -14,8 +14,9 @@ export const SAMPLE_SPACE = 'workshop-samples';
 
 /**
  * A page of the workshop's own (#257): disposable text the preview shows
- * and the plugin being built reads and changes. Nothing here reaches the
- * server. A real page comes in only as a copy the person chose to take.
+ * and the plugin being built reads and changes, kept with the draft
+ * (#314). A real page comes in only as a copy the person chose to take,
+ * which is never kept.
  */
 export type Sample = {
   pageId: string;
@@ -47,6 +48,8 @@ export type SampleEditor = {
 export function sampleStore() {
   let samples: Sample[] = [];
   let made = 0;
+  /** A copy of a real page was made here, even if something was written over it since. */
+  let copied = false;
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const listener of listeners) listener();
@@ -78,6 +81,7 @@ export function sampleStore() {
 
   const add = (page: Pick<Sample, 'title' | 'markdown' | 'data' | 'copyOf'>): Sample => {
     made += 1;
+    if (page.copyOf !== null) copied = true;
     const sample: Sample = { ...page, pageId: `sample-${made}`, revision: 1, outside: 0 };
     samples = [...samples, sample];
     changed();
@@ -95,10 +99,21 @@ export function sampleStore() {
     data: sample.data,
   });
 
+  /**
+   * Samples the previewed plugin made or changed while a copy of a real
+   * page was among them, by ID: they may hold its text, so they aren't
+   * kept with the conversation either (#314).
+   */
+  const fromCopies = new Set<string>();
+  const byPlugin = (pageId: string) => {
+    if (copied) fromCopies.add(pageId);
+  };
+
   /** Apply a plugin's `change` to `ref` on top of `base`; a newer revision is a conflict. */
   const save = (ref: PageRef, base: string, change: PageChange) => {
     const sample = find(ref);
     if (!sample) throw elsewhere();
+    byPlugin(sample.pageId);
     if (String(sample.revision) !== base) {
       throw new PluginError('conflict', 'This sample changed since that revision; read it again');
     }
@@ -125,6 +140,27 @@ export function sampleStore() {
     },
     get: () => samples,
 
+    /** How many samples were made: the next is `sample-<made + 1>`. */
+    made: () => made,
+
+    /** Samples that may hold a copy's text, which the plugin wrote while one was here. */
+    fromCopies: (): ReadonlySet<string> => fromCopies,
+
+    /**
+     * Start from samples kept with the draft (#314), before any is made
+     * here. Numbering carries on after `count`, so a sample the kept
+     * conversation names, such as a copy that wasn't kept, is never another.
+     */
+    restore(
+      kept: readonly Pick<Sample, 'pageId' | 'title' | 'markdown' | 'data'>[],
+      count: number,
+    ) {
+      if (made > 0) return;
+      made = count;
+      samples = kept.map((page) => ({ ...page, revision: 1, outside: 0, copyOf: null }));
+      changed();
+    },
+
     /** Add a sample page, or with `pageId` replace one's title and text. */
     put({
       pageId,
@@ -141,6 +177,7 @@ export function sampleStore() {
       if (!samples.some((sample) => sample.pageId === pageId)) {
         throw new Error(`There’s no sample page ${pageId}.`);
       }
+      if (copyOf !== null) copied = true;
       set(pageId, { title, markdown, copyOf }, true);
       const sample = samples.find((s) => s.pageId === pageId);
       if (!sample) throw new Error(`There’s no sample page ${pageId}.`);
@@ -240,6 +277,7 @@ export function sampleStore() {
           allow('write');
           if (spaceId !== SAMPLE_SPACE || folderId !== null) throw elsewhere();
           const sample = add({ title, markdown, data: data ?? null, copyOf: null });
+          byPlugin(sample.pageId);
           caller.wrote({ spaceId: SAMPLE_SPACE, pageId: sample.pageId }, String(sample.revision));
           return versionOf(sample, 'draft');
         },
@@ -305,6 +343,7 @@ export function sampleStore() {
                   const editor = editors.get(shown.page.pageId);
                   if (!editor) throw new PluginError('unloaded', 'The preview’s editor was closed');
                   caller.write();
+                  byPlugin(shown.page.pageId);
                   editor.insert(markdown);
                 },
               }

@@ -1,4 +1,5 @@
 import { pluginDraftRoutes } from '@wikistow/contracts';
+import type { Json } from '@wikistow/plugin-sdk';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { and, count, desc, eq, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
@@ -31,6 +32,7 @@ const {
   MAX_DRAFT_BYTES,
   MAX_DRAFT_FILE_BYTES,
   MAX_DRAFT_FILES,
+  MAX_DRAFT_WORKSHOP_BYTES,
 } = pluginDraftRoutes;
 
 const KB = 1024;
@@ -400,7 +402,57 @@ export async function changePluginDraft(
   });
 }
 
-/** Delete a draft with its files and build. */
+/** The workshop kept with a draft (#314), as the app sent it, or null, and its revision. */
+export async function readPluginDraftWorkshop(db: Database, { accountId, draftId }: Draft) {
+  const [row] = await db
+    .select({ workshop: pluginDrafts.workshop, revision: pluginDrafts.workshopRevision })
+    .from(pluginDrafts)
+    .where(and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)));
+  if (!row) throw notFound();
+  return {
+    workshop: row.workshop === null ? null : z.json().parse(JSON.parse(row.workshop)),
+    revision: row.revision,
+  };
+}
+
+/**
+ * Keep `workshop` with a draft, or with null forget it, refused past
+ * `MAX_DRAFT_WORKSHOP_BYTES`. A save names the `revision` it follows, and
+ * is refused with `stale-head` after another; a clear (`null`) names
+ * none. The new revision. The draft stays where it is in the list.
+ */
+export async function putPluginDraftWorkshop(
+  db: Database,
+  {
+    workshop,
+    revision,
+    ...draft
+  }:
+    | (Draft & { workshop: Json; revision: number })
+    | (Draft & { workshop: null; revision?: undefined }),
+) {
+  const text = workshop === null ? null : JSON.stringify(workshop);
+  if (text !== null && Buffer.byteLength(text) > MAX_DRAFT_WORKSHOP_BYTES) {
+    throw new ContentError(
+      'too-large',
+      `A draft keeps ${MAX_DRAFT_WORKSHOP_BYTES / KB} KB of its workshop at most.`,
+    );
+  }
+  const yours = and(eq(pluginDrafts.id, draft.draftId), eq(pluginDrafts.ownerId, draft.accountId));
+  const [kept] = await db
+    .update(pluginDrafts)
+    .set({ workshop: text, workshopRevision: sql`${pluginDrafts.workshopRevision} + 1` })
+    .where(revision === undefined ? yours : and(yours, eq(pluginDrafts.workshopRevision, revision)))
+    .returning({ revision: pluginDrafts.workshopRevision });
+  if (kept) return kept.revision;
+  await summaryOf(db, draft);
+  throw new ContentError(
+    'stale-head',
+    'The workshop was kept from another device since. Open the draft again to carry on from there.',
+  );
+}
+
+/** Delete a draft with its files, build and kept workshop. */
 export async function deletePluginDraft(db: Database, { accountId, draftId }: Draft) {
   const gone = await db
     .delete(pluginDrafts)
