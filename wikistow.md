@@ -510,7 +510,7 @@ The internal extension points stay internal and may change freely; plugins see o
 | Blobs | Opaque ID, encrypted bytes, size, version references, upload completion state |
 | Plugin library | Plugin ID, owner and whether it is Shared or Only me; the hashes of approved versions a client names when it lists the library, not kept; each version's hash, manifest, file paths, size, uploader and time; its files in plain text, stored beside the blobs and backed up with them |
 | Plugin drafts | Owner, name, the library version it started from, its source files in plain text, the build its owner last previewed, when its files last changed, and its workshop's conversation, versions and sample pages in plain text, without copies of real pages; in the database, so backed up with it |
-| Plugin proposals | Who sent it, the plugin and version it changes, its name and when, and the copy's source files in plain text, until the owner opens or declines it; in the database |
+| Plugin proposals | Who sent it, the plugin and version it changes, its name and when, and the copy's source files in plain text, until the owner opens or declines it or the sender proposes again; in the database |
 | Public links | A page's link id and who turned it on; each copy, staged or live, with its published revision, title, Markdown body, rendering, wikilink targets and the attachments it shows or links to, in plain text, in the database, deleted with the link, by publishing a new version, or when its uploader can no longer publish the page ([ADR 0005](docs/adr/0005-public-links.md)) |
 | Audit events | Actor, resource IDs, administrative and publication actions, public links turned on, carried over by a move and ended, timestamps; no plaintext names or bodies, and no link ids |
 
