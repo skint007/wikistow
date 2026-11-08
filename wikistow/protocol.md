@@ -1245,6 +1245,8 @@ An agent is a CLI installation, or a chat assistant its person's own app runs (s
 3. **`--json` output** is written by a serializer that emits only printable ASCII inside strings: every code point outside U+0020–U+007E as a lowercase `\uXXXX` escape. A plain `JSON.stringify` is not enough.
 4. **Raw output** of decrypted content is allowed only when stdout isn't a terminal.
 
+`wikistow mcp` (#323) answers each tool call with what its command prints with `--json`, so by rule 3, and writes its own messages to stderr by rule 1.
+
 These encoders disarm escape sequences, operating-system commands such as OSC 52 and OSC 8, carriage returns and backspaces, which could otherwise draw a forged fingerprint or prompt. The encoders of PR #29 stay (`cli-text.ts`), with the fingerprint in place of the safety-code words.
 
 The CLI never receives the person's keyring, vault key, password or browser cookie.
