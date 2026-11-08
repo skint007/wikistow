@@ -5,7 +5,6 @@ import {
   folderIconOf,
   folderSymbolChange,
   folderSymbolOf,
-  ICON_NAMESPACE,
   type spaceOperations,
   type FolderIcon,
   type FolderId,
@@ -33,8 +32,8 @@ import { treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { availability, SAVED_HERE, useAvailability } from './availability';
 import { EmojiPopover } from '../page/cover/emoji-picker';
-import { iconImage } from '../page/cover/icon-image';
-import { PLAIN, useClient, vaultStore } from '../vault/store';
+import { folderIconQuery } from '../page/cover/space-images';
+import { useClient, vaultStore } from '../vault/store';
 
 // Written out in full so Tailwind finds each class.
 const TINTS: Record<string, string> = {
@@ -92,27 +91,13 @@ export const tileClass = (tint: string) =>
   );
 
 /**
- * A `blob:` URL for a folder's or space's image, or null for none. Made once
- * for each version of its metadata, not on each tree load, and kept until
- * the vault locks. It needs no network: the image came with the metadata.
+ * A `blob:` URL for a folder's or space's image, or null for none
+ * (`folderIconQuery`): it needs no network, as the image came with the metadata.
  */
 export function useFolderIcon(
   loaded: spaceOperations.LoadedMetadata | null | undefined,
 ): string | null {
-  const metadata = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
-  const { data } = useQuery({
-    // A version's metadata never changes, so its ID is enough.
-    queryKey: [PLAIN, 'folder-icon', loaded?.head],
-    enabled: metadata?.extensions[ICON_NAMESPACE] != null,
-    staleTime: Infinity,
-    gcTime: Infinity,
-    networkMode: 'always',
-    retry: false,
-    queryFn: () => {
-      const icon = metadata && folderIconOf(metadata);
-      return icon ? vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch()) : null;
-    },
-  });
+  const { data } = useQuery(folderIconQuery(loaded));
   return data ?? null;
 }
 
@@ -166,7 +151,10 @@ export function FolderLookFields({
   kept,
   onChange,
   imageWaits = null,
+  spaceId,
 }: {
+  /** The space whose images the picker offers again. */
+  spaceId: SpaceId;
   look: LookChoice;
   kept: string | null;
   onChange: (look: LookChoice) => void;
@@ -193,13 +181,14 @@ export function FolderLookFields({
           }}
           image={{
             current: image,
-            onPick: async (file) => {
-              const icon = await iconImage(file);
+            onPick: async (prepare) => {
+              const icon = await prepare();
               const url = vaultStore.objectUrl(icon.bytes, icon.mediaType, vaultStore.epoch());
               onChange({ ...look, symbol: null, image: { icon, url } });
             },
             onRemove: () => onChange({ ...look, image: null }),
             waits: imageWaits,
+            spaceId,
           }}
         >
           <button
@@ -389,7 +378,13 @@ function LookForm({
           {offline && ' ' + SAVED_HERE}
         </DialogDescription>
       </DialogHeader>
-      <FolderLookFields look={look} kept={kept} onChange={pick} imageWaits={imageWaits} />
+      <FolderLookFields
+        spaceId={spaceId}
+        look={look}
+        kept={kept}
+        onChange={pick}
+        imageWaits={imageWaits}
+      />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
