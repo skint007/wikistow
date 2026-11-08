@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Sign in with a passkey, a fingerprint, face, screen lock or security key, with **Use a passkey** on the sign-in page, and in the browser when signing in the desktop app. It counts as both factors, so there's no two-factor code. Add, name and remove passkeys in Settings → Security; the desktop app lists and removes them. Passwords keep working, and your vault passphrase is still asked for. (#PR)
+- Sign in with a passkey, a fingerprint, face, screen lock or security key, with **Use a passkey** on the sign-in page, and in the browser when signing in the desktop app. It counts as both factors, so there's no two-factor code. Add, name and remove passkeys in Settings → Security; the desktop app lists and removes them. Passwords keep working, and your vault passphrase is still asked for. (#366)
 
 #### Plugins
 
