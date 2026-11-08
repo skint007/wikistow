@@ -74,11 +74,13 @@ export async function moveNode(io: Io, out: Printer, args: MoveArgs, deps: Deps)
     moved: done.moved,
   };
   out.result(result, () => {
-    const where = args.parentId === null ? 'the top of the space' : `folder ${args.parentId}`;
+    const top = args.parentId === null;
+    const to = top ? 'to the top of the space' : `to folder ${args.parentId}`;
+    const at = top ? 'at the top of the space' : `in folder ${args.parentId}`;
     out.line(
       done.moved
-        ? `Moved ${args.kind} ${args.nodeId} to ${where}`
-        : `The ${args.kind} ${args.nodeId} is in ${where} already; nothing changed`,
+        ? `Moved ${args.kind} ${args.nodeId} ${to}`
+        : `The ${args.kind} ${args.nodeId} is ${at} already; nothing changed`,
     );
   });
 }
