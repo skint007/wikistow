@@ -84,7 +84,7 @@ const otherInput = () =>
   new CliError(
     'journal-mismatch',
     'That idempotency key was used for this change with other input (another file, ' +
-      'title or revision). Run it again exactly as the first time, or use a new key',
+      'title, name, revision or folder). Run it again exactly as the first time, or use a new key',
   );
 
 /** A hash of a change command's input, for `Journal`'s `input`. */

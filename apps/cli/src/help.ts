@@ -57,15 +57,16 @@ PowerShell 5.1, so accents become ?, and its > writes UTF-16). cmd's < and
 
 const RETRYING = `Retrying a change:
   Give create, draft, attach, publish, copy, move and rename
-  --idempotency-key KEY, a new KEY for each new change. Running the same command again with the
-  same KEY and the same input never makes the change twice: if the first
+  --idempotency-key KEY, a new KEY for each new change. Running the same
+  command again with the same KEY and the same input never makes the
+  change twice: if the first
   run's answer came back, it is reported again and nothing is sent; if
   not, the first run's exact request is sent again. So retrying with the
   same KEY is safe after any failure, and is the thing to do when --json
   says "outcomeUnknown": true: no answer came back, or the server failed,
   so the change may have happened. After any other failure nothing
   changed, and the key is free again. The same KEY with other input
-  (another file, title, revision or folder) is refused while the first run's
+  (another file, title, name, revision or folder) is refused while the first run's
   change may still land, or has landed.
   The server keeps KEY for a day. A change first sent over a day ago and
   refused now may have been made by the first run, and be what is in the
@@ -219,7 +220,7 @@ goes: its share and its person both. A page published now arrives
 published only where both may also publish there, else with its draft
 alone, listed in "unpublished". So a copy where the agent may publish
 publishes the copies there. This agent never moves anything into another
-space: moves are for its person, in WikiStow.
+space: moves between spaces are for its person, in WikiStow.
 
 Links between pages copied together lead to each other's copies. In
 another space, a wikilink to a page left behind finds a page of that
@@ -286,10 +287,12 @@ ${what} It keeps its ID and every version, so links to it still
 lead to it.
 
 The agent must be able to edit it where it is and where it goes: its
-share and its person both. A move into or out of a shared folder changes
-who can read it, so it is for the space's owners, and refused as
-"forbidden" (exit 1). This agent never moves anything into another space
-either. For those, ask its person: they can use Move to... in WikiStow.
+share and its person both. A folder outside what it was given is not
+found (exit 4), as it is for every command. A move into or out of a
+shared folder changes who can read it, so it is for the space's owners,
+and refused as "forbidden" (exit 1) where the agent was given both
+sides. This agent never moves anything into another space either. For
+those, ask its person: they can use Move to... in WikiStow.
 
 One that is in that folder already is left as it is, and "moved" is
 false. If someone moves it while the move is sent, nothing moves: exit 3,

@@ -1,8 +1,8 @@
 // `wikistow page copy` and `folder copy`: a page or folder, with everything
 // under it, copied as new nodes under a folder of any space (protocol
 // section 10, "Copies, and moves between spaces"; ADR 0007). The CLI acts as
-// its agent, so it copies within its picks and never moves. An agent's copy
-// has no preview: the command prints where the copy went.
+// its agent, so it copies within its picks and never moves between spaces.
+// An agent's copy has no preview: the command prints where the copy went.
 import {
   ApiError,
   canonical,

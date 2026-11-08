@@ -400,9 +400,9 @@ describe('moving and renaming', () => {
       expect(refused.json().error.code).toBe(outside.json().error.code);
     }
     const after = await spaceOperations.loadTree(alice.ctx, spaceId);
-    expect(after.folders.map((f) => [f.id, f.parentId]).sort()).toEqual(
-      hers.folders.map((f) => [f.id, f.parentId]).sort(),
-    );
+    const places = (tree: typeof hers) =>
+      new Map(tree.folders.map((f) => [f.id, f.parentId] as const));
+    expect(places(after)).toEqual(places(hers));
     const above = after.folders.find((f) => f.id === lib.above)?.metadata?.opened;
     expect(above?.kind === 'current' && above.metadata.name).toBe(ABOVE);
   }, 90_000);
