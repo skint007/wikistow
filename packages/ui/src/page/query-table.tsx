@@ -16,6 +16,7 @@ import { treeQuery } from '../data/queries';
 import { linkHint } from '../desktop';
 import { PropertyValueView, type LinkScope } from './property-value';
 import { useNotKept } from '../data/connection';
+import { rowTable, useMovedRows, type RowLinks } from './moved-links';
 
 // A query table (`wikistow-query`, ADR 0006 decision 7), as its viewer's
 // app runs it: over their own search index, so only pages they can open,
@@ -27,13 +28,13 @@ import { useNotKept } from '../data/connection';
 export type QueryScope = {
   ctx: ClientContext;
   spaceId: string;
-  /** The page the block is in. */
-  pageId: string;
   /** The pages the viewer can open in the space, which page links in values resolve against. */
   pages: readonly LinkablePage[] | null;
   /** The viewer edits the page, and so sees links that don't resolve as such. */
   editor: boolean;
 };
+
+const NO_ROWS: readonly RowLinks[] = [];
 
 /** What a block's text reads as: a query, or one line saying why it doesn't. */
 export const readQuery = (source: string) => parsePageQuery(source);
@@ -71,17 +72,25 @@ export function QueryTable({
     }));
     return runPageQuery(read.query, { pages: index.list({ spaceId }), folders });
   }, [read, index, tree, spaceId]);
-  const links = useMemo<LinkScope>(
-    () => ({
-      spaceId: scope.spaceId,
-      selfId: scope.pageId,
-      pages: scope.pages,
-      // Values are other pages', whose link tables aren't this one's: by title.
-      links: new Map(),
-      editor: scope.editor,
-      notKept,
-    }),
-    [scope.spaceId, scope.pageId, scope.pages, scope.editor, notKept],
+  const moved = useMovedRows(scope.ctx, spaceId, scope.pages, result?.ok ? result.rows : NO_ROWS);
+  // Values are other pages', each resolved by its own page's links as the index keeps them.
+  const drawn = useMemo(
+    () =>
+      result?.ok
+        ? result.rows.map((row) => ({
+            ...row,
+            links: {
+              spaceId: scope.spaceId,
+              selfId: row.page.pageId,
+              pages: scope.pages,
+              links: rowTable(row.page.links),
+              editor: scope.editor,
+              notKept,
+              moved,
+            } satisfies LinkScope,
+          }))
+        : [],
+    [result, scope.spaceId, scope.pages, scope.editor, notKept, moved],
   );
 
   if (!read.ok) return failed(read.error);
@@ -99,7 +108,7 @@ export function QueryTable({
       </p>
     );
   }
-  const { columns, rows, total } = result;
+  const { columns, total } = result;
   return (
     <figure className="query-table">
       <div className="overflow-x-auto rounded-control">
@@ -113,7 +122,7 @@ export function QueryTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ page, values }) => (
+            {drawn.map(({ page, values, links }) => (
               <tr key={page.pageId}>
                 <td>
                   <Link
@@ -136,8 +145,8 @@ export function QueryTable({
       <figcaption className="mt-1 text-xs text-muted-foreground">
         {total === 0
           ? 'No pages match.'
-          : rows.length < total
-            ? `The first ${rows.length} of ${total} pages.`
+          : drawn.length < total
+            ? `The first ${drawn.length} of ${total} pages.`
             : total === 1
               ? '1 page.'
               : `${total} pages.`}

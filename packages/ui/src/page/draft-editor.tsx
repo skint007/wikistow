@@ -163,7 +163,7 @@ export function DraftEditor({
     (source: string) => (
       <QueryTable
         source={source}
-        scope={{ ctx, spaceId: page.spaceId, pageId: page.pageId, pages, editor: true }}
+        scope={{ ctx, spaceId: page.spaceId, pages, editor: true }}
         failed={(error) => (
           <p role="note" className="query-table-error text-xs text-muted-foreground">
             {error}
@@ -171,7 +171,7 @@ export function DraftEditor({
         )}
       />
     ),
-    [ctx, page.spaceId, page.pageId, pages],
+    [ctx, page.spaceId, pages],
   );
   const markdown = useRef(snapshot.markdown);
   useLayoutEffect(() => {
