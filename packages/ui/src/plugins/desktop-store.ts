@@ -1,7 +1,7 @@
 import type { DesktopBridge } from '@wikistow/contracts';
 import { vaultStore } from '../vault/store';
 import { libraryStore, openApprovals } from './library';
-import type { AppPluginStore } from './store';
+import { inFrontOfLibrary, type AppPluginStore } from './store';
 
 /**
  * The desktop's plugins: folder and development installs on this computer,
@@ -40,24 +40,14 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
       const account = accountId();
       if (account === null)
         return { ...state, access: {}, settings: {}, offHere: [], unavailable: {} };
-      const here = new Set(state.plugins.map(({ manifest }) => manifest.id));
-      const [held, folders, folderSettings] = await Promise.all([
+      const [held, access, settings] = await Promise.all([
         library.list(),
         bridge.pluginAccess(account).catch(() => ({})),
         bridge.pluginSettings(account).catch(() => ({})),
       ]);
-      const notHere = <T>(record: Readonly<Record<string, T>>) =>
-        Object.fromEntries(Object.entries(record).filter(([id]) => !here.has(id)));
       return {
         safeMode: state.safeMode,
-        plugins: [
-          ...state.plugins,
-          ...(held.plugins ?? []).filter(({ manifest }) => !here.has(manifest.id)),
-        ],
-        access: { ...folders, ...notHere(held.access) },
-        settings: { ...folderSettings, ...notHere(held.settings) },
-        offHere: held.offHere,
-        unavailable: held.unavailable,
+        ...inFrontOfLibrary({ plugins: state.plugins, access, settings }, held),
       };
     },
     async approve(version) {
@@ -95,6 +85,7 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
       reload: (pluginId) => bridge.reloadPlugin(pluginId),
       files: (pluginId) => bridge.pluginUpload(pluginId),
     },
+    development: null,
     approvals: openApprovals,
   };
 }

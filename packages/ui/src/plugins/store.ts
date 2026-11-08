@@ -82,6 +82,29 @@ export type PluginStore<Version> = {
   remove(plugin: PluginRef): Promise<void>;
 };
 
+/**
+ * A device's own installs (the desktop's folder and development installs,
+ * a browser tab's development folders) listed in front of the library
+ * plugins: one of the same ID replaces the library's here, with its own
+ * page access and settings.
+ */
+export function inFrontOfLibrary(
+  own: Pick<PluginListing, 'plugins' | 'access' | 'settings'>,
+  library: PluginListing,
+): Omit<PluginListing, 'safeMode'> {
+  const mine = own.plugins ?? [];
+  const here = new Set(mine.map(({ manifest }) => manifest.id));
+  const notHere = <T>(record: Readonly<Record<string, T>>) =>
+    Object.fromEntries(Object.entries(record).filter(([id]) => !here.has(id)));
+  return {
+    plugins: [...mine, ...(library.plugins ?? []).filter(({ manifest }) => !here.has(manifest.id))],
+    access: { ...own.access, ...notHere(library.access) },
+    settings: { ...own.settings, ...notHere(library.settings) },
+    offHere: library.offHere,
+    unavailable: library.unavailable,
+  };
+}
+
 /** Any store, as the runtime uses it: it lists and changes choices, and approves nothing. */
 export type AnyPluginStore = PluginStore<never>;
 
@@ -98,10 +121,32 @@ export type FolderInstalls = {
   files(pluginId: string): Promise<PluginUploadFile[]>;
 };
 
-/** The app's own store: the desktop's, or the browser's library plugins. */
+/**
+ * A development folder the person chose in a browser: its handle, which
+ * the File System Access picker gives and Reload reads again (Chromium),
+ * or the files a folder input gives, chosen again at each Reload.
+ */
+export type ChosenFolder = { handle: FileSystemDirectoryHandle } | { files: File[] };
+
+/** What only the browser's store does: load a development folder (#317), held in this tab. */
+export type DevelopmentFolders = {
+  /** Whether Reload reads the folder again by itself, from a kept handle; otherwise the person chooses it again. */
+  keepsFolder: boolean;
+  /** Read a chosen folder for approval as a development plugin. */
+  load(folder: ChosenFolder): Promise<PluginCandidate>;
+  /**
+   * Read a development plugin's folder again, from `folder` or its kept
+   * handle, and run it: a candidate to approve instead if it now asks for more.
+   */
+  reload(pluginId: string, folder: ChosenFolder | null): Promise<PluginCandidate | null>;
+};
+
+/** The app's own store: the desktop's, or the browser's library plugins and development folders. */
 export type AppPluginStore = PluginStore<PluginCandidate | LibraryRequest> & {
   /** Null in the browser, which installs only from the library. */
   folders: FolderInstalls | null;
+  /** Null in the desktop app, whose `folders` load development folders. */
+  development: DevelopmentFolders | null;
   /** The library plugins the open account approved, in its record's order, versions gone from the library included. */
   approvals(): readonly PluginApproval[];
 };
