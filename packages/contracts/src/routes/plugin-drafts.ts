@@ -326,8 +326,8 @@ export const shareDraft = {
 } as const satisfies RouteDef;
 
 /**
- * Stop sharing a draft with a person: its owner stops sharing with anyone,
- * and a person it's shared with leaves it. Their build and kept workshop
+ * Stop sharing a draft with one person: its owner removes any of them, or
+ * the person leaves it themselves. Their build and kept workshop
  * of it go too.
  */
 export const unshareDraft = {

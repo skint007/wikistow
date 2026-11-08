@@ -650,8 +650,8 @@ export async function sharePluginDraft(
 }
 
 /**
- * Stop sharing a draft with the person of `identityId`: the owner stops
- * sharing with anyone, or the person leaves it. Their build and kept
+ * Stop sharing a draft with the person of `identityId`: the owner removes
+ * any of them, or the person leaves it themselves. Their build and kept
  * workshop of it go too.
  */
 export async function unsharePluginDraft(

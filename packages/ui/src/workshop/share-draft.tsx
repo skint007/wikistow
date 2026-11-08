@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { FormMessage } from '@/components/layout/auth-card';
+import { ApiError } from '@wikistow/client/api';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { PersonFinder } from '../sharing/person-finder';
@@ -71,7 +72,15 @@ export function ShareDraft({
     setError(null);
     onClose();
   };
-  const shown = error ?? (readError ? errorMessage(readError) : null);
+  // A server from before shared drafts has no route for them: it answers 404 for a draft listed here.
+  const old = readError instanceof ApiError && readError.status === 404;
+  const shown =
+    error ??
+    (old
+      ? 'Your WikiStow server doesn’t share plugin drafts yet.'
+      : readError
+        ? errorMessage(readError)
+        : null);
   return (
     <Dialog open={draft !== null} onOpenChange={(open) => !open && !busy && close()}>
       <DialogContent dialogClassName="sm:max-w-lg" className="grid gap-4" locked={busy}>
@@ -81,11 +90,12 @@ export function ShareDraft({
           </DialogTitle>
           <DialogDescription>
             The people you share it with see it in their workshop. They can read and change its
-            files and preview it, each with a conversation of their own. Only you publish it or
-            delete it. When two people change one file, the last change wins.
+            files and preview it, each with a conversation of their own, which goes if you remove
+            them. Only you publish it or delete it. When two people change one file, the last change
+            wins.
           </DialogDescription>
         </DialogHeader>
-        {draft && (
+        {draft && !old && (
           <PersonFinder
             withAccess={false}
             submitLabel="Share"

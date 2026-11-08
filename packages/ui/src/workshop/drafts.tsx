@@ -383,9 +383,11 @@ export function SharedDraftsList({ open }: { open: string | null }) {
   const queryClient = useQueryClient();
   const { data: shared } = useQuery(sharedDraftsQuery);
   const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState<DraftSummary | null>(null);
   if (!shared || shared.length === 0) return null;
   const leave = async (draft: DraftSummary) => {
     setError(null);
+    setLeaving(null);
     try {
       await api.call(pluginDraftRoutes.unshareDraft, {
         params: { draftId: draft.id, identityId: ctx.identity.public.id },
@@ -426,7 +428,7 @@ export function SharedDraftsList({ open }: { open: string | null }) {
                 >
                   Open
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => void leave(draft)}>
+                <Button size="sm" variant="ghost" onClick={() => setLeaving(draft)}>
                   Leave
                 </Button>
               </>
@@ -434,6 +436,25 @@ export function SharedDraftsList({ open }: { open: string | null }) {
           </li>
         ))}
       </ul>
+      <Dialog open={leaving !== null} onOpenChange={(next) => !next && setLeaving(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Leave this draft?</DialogTitle>
+            <DialogDescription>
+              “<Name>{leaving?.name ?? ''}</Name>” goes from your workshop, with your conversation
+              on it. Its owner can share it with you again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaving(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => leaving && void leave(leaving)}>
+              Leave
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
