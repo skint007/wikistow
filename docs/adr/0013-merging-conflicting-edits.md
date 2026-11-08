@@ -93,7 +93,7 @@ The draft view's page card shows the merge in place of the editor, titled "Merge
 
 - the heading it sits under and its number ("Method · 2 of 2"), and the block before it, dimmed, for context;
 - **yours and theirs side by side**, each as its Markdown source, with the words it changed from the base marked: added in green, taken out in red and struck through;
-- **Use yours**, **Use Sam's**, **Use both** (theirs, then yours) and **Edit…**, which opens a text field with yours in it, or theirs where yours has nothing there, to change before using. The chosen button stays marked.
+- **Use yours**, **Use Sam's**, **Use both** (theirs, then yours) and **Edit…**, which opens a text field with yours in it, or theirs where yours has nothing there, already written in the bullet style and indentation of the list it lands in (decision 4), to change before using. The chosen button stays marked.
 - **Use both** is for blocks of the body only, and not at a block that didn't fit (decision 4). The title and a front matter key offer yours, theirs and **Edit…**, since both would make two titles or a key written twice. The banner, the icon and other data offer yours and theirs only.
 
 **Review merged draft** is enabled once every overlap has a choice. **Cancel** goes back to the conflict prompt with nothing changed. On phones the two sides stack, yours above theirs, and the four buttons sit in two rows.
