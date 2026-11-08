@@ -14,6 +14,22 @@ import { useClient } from '../vault/store';
  */
 export type OwnerStanding = 'owner' | 'unconfirmed' | 'checking' | null;
 
+/**
+ * Whether this person may delete in the space: as an owner, or offline
+ * while the check waits for the server. A delete made offline waits on this
+ * device, and goes to the trash, where an owner can restore it (#330).
+ */
+export const mayDelete = (standing: OwnerStanding, offline: boolean) =>
+  standing === 'owner' || (standing === 'checking' && offline);
+
+/**
+ * Whether this person may move things as an owner of the space: as an
+ * owner, or offline while the check waits for the server. Offline, a move
+ * stays in its share, changing no keys, and waits on this device (#331).
+ */
+export const movesAsOwner = (standing: OwnerStanding, offline: boolean) =>
+  standing === 'owner' || (standing === 'checking' && offline);
+
 export function useOwnerStanding(spaceId: SpaceId): OwnerStanding {
   const ctx = useClient();
   const { data: spaces } = useQuery(spacesQuery(ctx));

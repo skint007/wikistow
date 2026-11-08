@@ -72,6 +72,8 @@ async function writerOn(connection: Connection) {
         sealAttachment({ target: { installationId, ...page, audience: 'draft' }, ...file }).ref,
       ),
     uploadBlob: () => answer('uploadBlob', undefined),
+    updateMetadata: () => answer('updateMetadata', undefined),
+    deleteNode: () => answer('deleteNode', undefined),
   };
   const writer = createPageWriter({ queue, server, isOnline: () => connection !== 'offline' });
   return { writer, queue, sent, calls: () => asked };

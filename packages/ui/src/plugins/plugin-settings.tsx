@@ -24,8 +24,9 @@ import {
 } from '@/components/ui/dialog';
 import { Picker } from '@/components/ui/picker';
 import { Switch } from '@/components/ui/switch';
+import { desktop } from '../desktop';
 import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
-import { ScopePill, SettingRow } from '../settings/rows';
+import { ScopePill, SettingRow, THIS_DEVICE } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { DeclaredSettings } from './declared-settings';
@@ -528,7 +529,8 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
 
 /**
  * One installed plugin on the Plugins page: its name, version, trust level,
- * where it came from and on/off, its description and any problem, Remove
+ * where it came from and on/off (for a library plugin, for the account and,
+ * while that is on, on this device), its description and any problem, Remove
  * beside `actions`, then its page access. Settings opens its settings
  * under it: those its manifest declares, drawn by the app, then its own
  * sections (`settings.section`). The page's `plugin` search, which a
@@ -541,6 +543,7 @@ export function PluginRow({
   actions,
   note,
   here = true,
+  offHere,
 }: {
   status: PluginStatus;
   onEnabled: (on: boolean) => void;
@@ -550,6 +553,8 @@ export function PluginRow({
   note?: ReactNode;
   /** False where another install of the ID runs instead: no page access or settings of its own. */
   here?: boolean;
+  /** A library plugin's switch for this device only (#312), shown while it is on for the account. */
+  offHere?: { off: boolean; onChange: (off: boolean) => void } | undefined;
 }) {
   const { manifest, level, development, enabled } = plugin;
   const { regions } = usePlugins();
@@ -584,13 +589,31 @@ export function PluginRow({
         {!plugin.library && <ScopePill />}
         {development && <Badge variant="outline">Development</Badge>}
         <span className="flex-1" />
-        <Switch
-          checked={enabled}
-          aria-label={`${manifest.name} enabled`}
-          onCheckedChange={onEnabled}
-        />
+        <span className="flex items-center gap-2 text-sm text-muted-foreground">
+          {offHere && 'Your account'}
+          <Switch
+            checked={enabled}
+            aria-label={`${manifest.name} enabled`}
+            onCheckedChange={onEnabled}
+          />
+        </span>
+        {offHere && enabled && (
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            {THIS_DEVICE}
+            <Switch
+              checked={!offHere.off}
+              aria-label={`${manifest.name} on ${THIS_DEVICE.toLowerCase()}`}
+              onCheckedChange={(on) => offHere.onChange(!on)}
+            />
+          </span>
+        )}
       </div>
       {manifest.description && <p className="text-sm">{manifest.description}</p>}
+      {offHere?.off && enabled && (
+        <p className="text-sm text-muted-foreground">
+          Off {desktop ? 'on this computer' : 'in this browser'}. Your other devices still run it.
+        </p>
+      )}
       {development && <p className="text-sm text-muted-foreground">Read from {development}</p>}
       {note}
       {problem && (

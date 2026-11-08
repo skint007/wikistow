@@ -220,7 +220,7 @@ test('the browser stores no page content or key material', async ({ page, freshP
   await page.keyboard.press('Control+k');
   const search = page.getByRole('dialog', { name: 'Search' });
   await expect(search.getByRole('status')).toHaveText(
-    'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress".',
+    'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress". Type > for commands.',
     { timeout: 30_000 },
   );
   await search.getByRole('combobox', { name: 'Search pages' }).fill('wifi hunter');

@@ -35,6 +35,7 @@ export function createLocation() {
   let location: AppLocation = OTHER;
   let navigator: ((to: Place) => Promise<void>) | null = null;
   const listeners = new Set<() => void>();
+  const goers = new Set<() => void>();
 
   const update = () => {
     location =
@@ -86,7 +87,16 @@ export function createLocation() {
     },
     navigate(to: Place): Promise<void> {
       if (!navigator) return Promise.reject(new PluginError('unsupported', 'Nowhere to go here'));
+      for (const going of goers) going();
       return navigator(to);
+    },
+    /**
+     * Call `going` as a plugin navigates, before it goes, even to where the
+     * person is already, such as to close search, whose results it drew.
+     */
+    onNavigate(going: () => void) {
+      goers.add(going);
+      return () => void goers.delete(going);
     },
   };
 }

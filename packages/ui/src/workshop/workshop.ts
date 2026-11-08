@@ -199,7 +199,14 @@ export class Workshop {
     const versions: PluginStore<number> = {
       list: async () => {
         const safeMode = desktop ? (await desktop.plugins()).safeMode : tabSafeMode.on();
-        const none = { safeMode, plugins: [], access: {}, settings: {}, unavailable: {} };
+        const none = {
+          safeMode,
+          plugins: [],
+          access: {},
+          settings: {},
+          offHere: [],
+          unavailable: {},
+        };
         const running = this.#state.running?.plugin;
         if (!running || this.#holding) return none;
         const settings = { ...this.#settings };
@@ -221,6 +228,8 @@ export class Workshop {
       setAccess: async () => {},
       // The preview draws whatever the version replaces: there is no Settings to choose in.
       setOwnParts: async () => {},
+      // The preview is no device's: its version runs while it is shown.
+      setOffHere: async () => {},
       // Kept here only, so trying a version leaves the person's settings as they are.
       setSettings: async ({ id }, settings) => {
         this.#settings = { ...this.#settings, [id]: settings };

@@ -39,6 +39,11 @@ export type PluginListing = {
   access: Readonly<Record<string, readonly PluginScope[]>>;
   /** The open account's settings, by plugin, as stored (`host.settings`); empty while the vault is locked. */
   settings: Readonly<Record<string, Settings>>;
+  /**
+   * The library plugins turned off on this device only (#312), by ID,
+   * which `plugins` lists as off; empty while the vault is locked.
+   */
+  offHere: readonly string[];
   /** Plugins it knows of but couldn't load, by ID, with why. */
   unavailable: Readonly<Record<string, string>>;
 };
@@ -51,7 +56,10 @@ export type PluginListing = {
  * access per account), the account's contacts record for library plugins.
  * ADR 0011's **Use the app's own** is kept the same way as on/off, as
  * `ownParts` beside `enabled` in each. Settings (#310) are kept as page
- * access is: per account, in `plugins.json` or beside the approval.
+ * access is: per account, in `plugins.json` or beside the approval. A
+ * library plugin can also be turned off on one device only (#312), kept
+ * on that device: in browser storage, or in `plugins.json`. It runs here
+ * only while it is on for the account and not off here.
  *
  * `Version` is what the store approves. Approving an installed ID updates
  * it, keeping its page access. A library update keeps on/off too; a folder
@@ -68,6 +76,8 @@ export type PluginStore<Version> = {
   setSettings(plugin: PluginRef, settings: Settings): Promise<void>;
   /** The regions where the app's own part shows in place of the plugin's (`InstalledPlugin.ownParts`). */
   setOwnParts(plugin: PluginRef, regions: readonly string[]): Promise<void>;
+  /** Turn a library plugin off on this device only, or back on (`PluginListing.offHere`). */
+  setOffHere(plugin: PluginRef, off: boolean): Promise<void>;
   /** Its page access and settings go; pages keep its blocks and data. */
   remove(plugin: PluginRef): Promise<void>;
 };
@@ -99,7 +109,7 @@ export type AppPluginStore = PluginStore<PluginCandidate | LibraryRequest> & {
 /**
  * A store held in memory, for tests. Approving a plugin installs it, or
  * updates the one of its ID as the library does, keeping on/off, own
- * parts, page access and settings. The workshop's preview keeps its
+ * parts, page access, settings and off here. The workshop's preview keeps its
  * settings in one, so trying a version leaves the real ones as they are.
  */
 export function memoryStore({
@@ -116,6 +126,7 @@ export function memoryStore({
   let held = [...plugins];
   let scopes = { ...access };
   let kept = { ...settings };
+  let off: string[] = [];
   const is = (ref: PluginRef) => (plugin: InstalledPlugin) =>
     plugin.manifest.id === ref.id && plugin.library === ref.library;
   const without = <T>(record: Record<string, T>, id: string) =>
@@ -123,9 +134,12 @@ export function memoryStore({
   return {
     list: async () => ({
       safeMode,
-      plugins: [...held],
+      plugins: held.map((plugin) =>
+        plugin.library && off.includes(plugin.manifest.id) ? { ...plugin, enabled: false } : plugin,
+      ),
       access: { ...scopes },
       settings: { ...kept },
+      offHere: [...off],
       unavailable: {},
     }),
     async approve(version) {
@@ -143,6 +157,10 @@ export function memoryStore({
         is(ref)(plugin) ? { ...plugin, ownParts: [...regions] } : plugin,
       );
     },
+    async setOffHere(ref, value) {
+      off = off.filter((id) => id !== ref.id);
+      if (value) off.push(ref.id);
+    },
     async setAccess(ref, list) {
       scopes = { ...scopes, [ref.id]: [...list] };
     },
@@ -153,6 +171,7 @@ export function memoryStore({
       held = held.filter((plugin) => !is(ref)(plugin));
       scopes = without(scopes, ref.id);
       kept = without(kept, ref.id);
+      if (ref.library) off = off.filter((id) => id !== ref.id);
     },
   };
 }

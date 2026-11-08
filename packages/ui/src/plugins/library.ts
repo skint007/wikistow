@@ -14,7 +14,7 @@ import { checkPlugin } from '@wikistow/plugin-sdk/files';
 import { trustLevel, type Manifest } from '@wikistow/plugin-sdk/manifest';
 import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import { api } from '../api';
-import { vaultStore } from '../vault/store';
+import { vaultStore, type VaultState } from '../vault/store';
 import { tabSafeMode } from './safe-mode';
 import type { AppPluginStore, LibraryRequest, PluginListing, PluginStore } from './store';
 
@@ -153,30 +153,65 @@ type LibraryFiles = (
   approvals: readonly PluginApproval[],
 ) => Promise<Pick<PluginListing, 'plugins' | 'unavailable'> | null>;
 
+type Unlocked = Extract<VaultState, { status: 'unlocked' }>;
+
+/**
+ * Where a device keeps the library plugins the open account turned off on
+ * it only (#312), by ID: browser storage, or the desktop's `plugins.json`.
+ * Never the contacts record, so the other devices keep them on.
+ */
+export type OffHere = {
+  get(vault: Unlocked): Promise<readonly string[]>;
+  set(vault: Unlocked, pluginIds: readonly string[]): Promise<void>;
+};
+
 /**
  * The library plugins the account approved, kept in its contacts record
  * (ADR 0002) with their on/off, own parts, page access and settings, so they follow
  * the person to every device and are known only while the vault is open.
- * `files` says which of them can run here.
+ * `files` says which of them can run here. `offHere` keeps those turned
+ * off on this device only: listed as off (`enabled` false), as if turned
+ * off for the account, and named in the listing's `offHere`.
  */
-export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
+export function libraryStore(files: LibraryFiles, offHere: OffHere): PluginStore<LibraryRequest> {
+  /** What is off here, forgetting any no longer approved, so a later install starts on. */
+  const offNow = async (vault: Unlocked, approvals: readonly PluginApproval[]) => {
+    const kept = await offHere.get(vault);
+    const off = kept.filter((id) => approvals.some((approval) => approval.id === id));
+    if (off.length < kept.length) await offHere.set(vault, off);
+    return off;
+  };
   return {
     async list() {
       const safeMode = tabSafeMode.on();
       const vault = vaultStore.get();
       if (vault.status !== 'unlocked')
-        return { safeMode, plugins: null, access: {}, settings: {}, unavailable: {} };
+        return {
+          safeMode,
+          plugins: null,
+          access: {},
+          settings: {},
+          offHere: [],
+          unavailable: {},
+        };
       const approvals = pluginOperations.listPluginApprovals(vault.ctx);
       const access = Object.fromEntries(approvals.map(({ id, access }) => [id, access]));
       const settings = Object.fromEntries(approvals.map(({ id, settings }) => [id, settings]));
-      const held = await files(vault.ctx, approvals);
+      const off = await offNow(vault, approvals);
+      // Off here runs nowhere here: the desktop's main doesn't serve its files either.
+      const held = await files(
+        vault.ctx,
+        approvals.map((approval) =>
+          off.includes(approval.id) ? { ...approval, enabled: false } : approval,
+        ),
+      );
       // The record's choices, whichever copy runs: the desktop's main keeps none of them.
       const plugins =
         held?.plugins?.map((plugin) => ({
           ...plugin,
           ownParts: approvals.find(({ id }) => id === plugin.manifest.id)?.ownParts ?? [],
         })) ?? null;
-      return { safeMode, unavailable: {}, ...held, plugins, access, settings };
+      return { safeMode, unavailable: {}, ...held, plugins, access, settings, offHere: off };
     },
     // A new install is turned on with no page access; for an ID already
     // approved, the new hash replaces the old, keeping access and on/off.
@@ -200,9 +235,44 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
     },
     async remove({ id }) {
       await pluginOperations.removePlugin(openCtx(), id);
+      await turnOffHere(id, false);
     },
+    setOffHere: ({ id }, off) => turnOffHere(id, off),
   };
+
+  async function turnOffHere(id: string, off: boolean) {
+    const vault = vaultStore.get();
+    if (vault.status !== 'unlocked') throw new Error('Unlock your vault first.');
+    const others = (await offHere.get(vault)).filter((each) => each !== id);
+    await offHere.set(vault, off ? [...others, id] : others);
+  }
 }
+
+/**
+ * The browser's library plugins off here (#312): kept in this browser's
+ * storage per server and account, under `wikistow.pluginsOffHere.`, for
+ * every tab, until turned back on. Another tab sees a change at its next listing.
+ */
+const browserOffHere: OffHere = {
+  async get({ ctx, vault }) {
+    try {
+      const kept: unknown = JSON.parse(localStorage.getItem(offHereKey(ctx, vault)) ?? '[]');
+      return Array.isArray(kept) ? kept.filter((id) => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  },
+  async set({ ctx, vault }, ids) {
+    try {
+      if (ids.length > 0) localStorage.setItem(offHereKey(ctx, vault), JSON.stringify(ids));
+      else localStorage.removeItem(offHereKey(ctx, vault));
+    } catch {
+      // Storage refused (some private windows): it stays on here.
+    }
+  },
+};
+const offHereKey = (ctx: ClientContext, vault: Unlocked['vault']) =>
+  `wikistow.pluginsOffHere.${ctx.installationId}.${vault.accountId}`;
 
 /** The library as last listed, with the session it was listed in. */
 let lastListed: { ctx: ClientContext; library: LibraryPlugin[] } | null = null;
@@ -231,7 +301,7 @@ export function browserStore(): AppPluginStore {
         .map(({ id }) => [id, 'The version you installed is no longer in the library.']),
     );
     return { plugins, unavailable };
-  });
+  }, browserOffHere);
   return {
     ...library,
     async approve(version) {

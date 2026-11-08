@@ -87,7 +87,7 @@ export function Library({
   const { data: onlyMe } = useQuery(privatePluginsQuery);
   const { data: me } = useQuery(meQuery);
   // Its problems, and drawn again as each change lands.
-  const { plugins: running, listed, unavailable, safeMode } = usePlugins();
+  const { plugins: running, listed, unavailable, safeMode, offHere } = usePlugins();
   const { data: ai } = useQuery(aiStatusQuery);
   const newDraft = useNewDraft();
   const navigate = useNavigate();
@@ -183,6 +183,14 @@ export function Library({
             onEnabled={(on) => void act(() => pluginStore.enable(ref, on))}
             onRemove={() => void act(() => pluginStore.remove(ref))}
             here={!replaced}
+            offHere={
+              replaced
+                ? undefined
+                : {
+                    off: offHere.includes(approval.id),
+                    onChange: (off) => void act(() => pluginStore.setOffHere(ref, off)),
+                  }
+            }
             note={
               <>
                 {replaced && (

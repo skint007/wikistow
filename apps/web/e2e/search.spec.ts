@@ -75,3 +75,57 @@ test('search finds pages by tag and property, typed or from a link', async ({
     await expect(titles).toHaveText(['Bean soup'], { timeout: 30_000 });
   });
 });
+
+/**
+ * Ctrl+Shift+P and F1 open search as the command palette, with `>` typed,
+ * from the source editor, which keeps neither key. It lists the commands of
+ * the view shown, runs one with Enter, and Escape gives the focus back.
+ */
+test('the command palette runs what the page offers', async ({ page, freshPage, admin }) => {
+  test.setTimeout(120_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Bean soup');
+  await fillSource(page, 'Beans and stock.');
+  await waitForSave(page);
+
+  const search = page.getByRole('dialog', { name: 'Search' });
+  const box = search.getByRole('combobox', { name: 'Run a command' });
+  const titles = search.getByRole('option');
+  const source = page.locator('#page-source');
+
+  await test.step('on a draft: its own commands, and Escape returns to the editor', async () => {
+    await source.focus();
+    await page.keyboard.press('Control+Shift+P');
+    await expect(box).toHaveValue('>');
+    await expect(titles.filter({ hasText: 'Change banner' })).toHaveCount(1);
+    await expect(titles.filter({ hasText: 'Lock vault' })).toHaveCount(1);
+    // Never published, it has nothing to be done with yet.
+    await expect(titles.filter({ hasText: /^(Edit page|Done editing)$/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(search).toBeHidden();
+    await expect(source).toBeFocused();
+  });
+
+  await test.step('F1, then Enter runs the best match', async () => {
+    await page.keyboard.press('F1');
+    await expect(box).toHaveValue('>');
+    await page.keyboard.type('publish');
+    await expect(titles.first()).toHaveText('Publish');
+    await page.keyboard.press('Enter');
+    await expect(search).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  });
+
+  await test.step('on the publication, Edit page; on the draft, Done editing', async () => {
+    await page.keyboard.press('Control+Shift+P');
+    await page.keyboard.type('edit');
+    await expect(titles.first()).toHaveText('Edit page');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#page-source')).toBeVisible();
+    await page.keyboard.press('Control+Shift+P');
+    await page.keyboard.type('done');
+    await expect(titles.first()).toHaveText('Done editing');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+  });
+});

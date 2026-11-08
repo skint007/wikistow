@@ -346,6 +346,14 @@ export type FolderViewProps = {
   entries: FolderEntry[];
 };
 
+/**
+ * What a view drawing the search dialog's results (`search.results`) is
+ * given: what was typed, and the app's own results for it, best first, at
+ * most 50. It is drawn again as they change. `host.pages.search` searches
+ * the same pages, for a view that ranks its own.
+ */
+export type SearchResultsProps = { query: string; results: SearchResult[] };
+
 /** The info string of a fenced block a plugin claims: `plugin:<id>/<block>`. */
 export const blockLanguage = (pluginId: string, type: string) => `plugin:${pluginId}/${type}`;
 
@@ -632,6 +640,12 @@ export type Replacements = {
    * title, cover, toolbar and properties stay the app's.
    */
   'page.reader': { id: string; view: View<PageReaderProps> };
+  /**
+   * The search dialog's results, for a word search: its box, and the
+   * commands that `>` lists, stay the app's. Open a result with
+   * `host.app.navigate`, which closes the dialog.
+   */
+  'search.results': { id: string; view: View<SearchResultsProps> };
 };
 
 /** Every region: one plugins add to (`Regions`), or one they can replace (`Replacements`). */
@@ -692,6 +706,13 @@ export const REGIONS = {
     registers: null,
     where:
       'The text of a page as read, under its title and properties; its view gets `{ page, markdown }`',
+    phone: 'The same',
+  },
+  'search.results': {
+    policy: 'replace',
+    registers: null,
+    where:
+      "The search dialog's results, under its box, for a word search (not `>`'s commands); its view gets `{ query, results }`, the app's own results",
     phone: 'The same',
   },
   'page.toolbar': {

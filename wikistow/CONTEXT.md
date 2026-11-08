@@ -128,7 +128,7 @@ What a device holds, sealed for one person, so pages open with no connection: th
 _Avoid_: Cached, synced.
 
 **Offline change**
-A draft, new page or new folder made while the app couldn't reach the server. It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
+A draft, new page or new folder made, a folder renamed, a page or folder deleted or moved within its share, or a page published, while the app couldn't reach the server (#330 added renames and deletes, #331 moves and publishing). It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
 _Avoid_: Outbox, pending sync.
 
 **Template**
@@ -179,7 +179,7 @@ A theme a plugin adds to the theme picker: a stylesheet setting the app's tokens
 _Avoid_: Skin, custom palette.
 
 **Region**
-A documented place in the app's interface that app plugins draw into (the rail, a plugin page, a page's toolbar, header, footer, aside and panel, a settings section, the editor's toolbar), also named by a `data-region` attribute for styles. Most only take additions beside the app's own content. A **replaceable region** (the rail, a space's sidebar and home, a folder's page, a page's text as read) can show one plugin's view in place of the app's own part, only where the plugin's **plugin access** reaches (the rail needs none). The app's own part stays the default, and comes back in safe mode, where the plugin can't read, or when its view fails. With the rail replaced, safe mode is the way back to plugin settings. The editors, the ways back to plugin settings, and anywhere keys, trust or audience are decided are never replaceable.
+A documented place in the app's interface that app plugins draw into (the rail, a plugin page, a page's toolbar, header, footer, aside and panel, a settings section, the editor's toolbar), also named by a `data-region` attribute for styles. Most only take additions beside the app's own content. A **replaceable region** (the rail, a space's sidebar and home, a folder's page, a page's text as read, the search results) can show one plugin's view in place of the app's own part, only where the plugin's **plugin access** reaches (the rail needs none). The app's own part stays the default, and comes back in safe mode, where the plugin can't read, or when its view fails. With the rail replaced, safe mode is the way back to plugin settings. The editors, the ways back to plugin settings, and anywhere keys, trust or audience are decided are never replaceable.
 _Avoid_: Slot, extension point (the internal registries), skin.
 
 **Plugin access**

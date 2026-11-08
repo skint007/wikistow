@@ -6,7 +6,7 @@ import {
   folderSymbolChange,
   folderSymbolOf,
   ICON_NAMESPACE,
-  spaceOperations,
+  type spaceOperations,
   type FolderIcon,
   type FolderId,
   type FolderLook,
@@ -28,8 +28,10 @@ import {
 } from '@/components/ui/dialog';
 import { Name } from '@/components/name';
 import { cn } from '@/lib/utils';
+import { pageWriter } from '../data/offline-changes';
 import { treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
+import { availability, SAVED_HERE, useAvailability } from './availability';
 import { EmojiPopover } from '../page/cover/emoji-picker';
 import { iconImage } from '../page/cover/icon-image';
 import { PLAIN, useClient, vaultStore } from '../vault/store';
@@ -163,10 +165,13 @@ export function FolderLookFields({
   look,
   kept,
   onChange,
+  imageWaits = null,
 }: {
   look: LookChoice;
   kept: string | null;
   onChange: (look: LookChoice) => void;
+  /** Why the image can't change now (`availability`): the image stays as it is. */
+  imageWaits?: string | null;
 }) {
   const [picking, setPicking] = useState(false);
   const tile = useRef<HTMLButtonElement>(null);
@@ -194,6 +199,7 @@ export function FolderLookFields({
               onChange({ ...look, symbol: null, image: { icon, url } });
             },
             onRemove: () => onChange({ ...look, image: null }),
+            waits: imageWaits,
           }}
         >
           <button
@@ -208,6 +214,11 @@ export function FolderLookFields({
             <Picture image={image} symbol={look.symbol} emoji={look.emoji} />
           </button>
         </EmojiPopover>
+        {imageWaits && image && (
+          <p className="text-xs text-muted-foreground">
+            The image stays for now, and shows in place of an emoji or icon.
+          </p>
+        )}
       </div>
       <fieldset className="grid gap-2">
         <legend className="mb-2 text-sm font-medium">Colour</legend>
@@ -306,6 +317,10 @@ function LookForm({
   const loaded = tree?.folders.find((f) => f.id === folderId)?.metadata;
   const opened = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
   const kept = useFolderIcon(loaded);
+  // Offline, or with a change waiting, the rest is saved on this device, and the image stays.
+  const { offline, waiting } = useAvailability();
+  const picture = availability('picture', { offline, waiting: waiting(folderId) });
+  const imageWaits = picture.allowed ? null : picture.hint;
   // What the person picked, until they save; null shows the folder as it is.
   const [picked, setPicked] = useState<LookChoice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -329,6 +344,8 @@ function LookForm({
     image: folderIconOf(opened) && 'kept',
   };
   const look = picked ?? current;
+  const pick = (next: LookChoice) =>
+    setPicked(imageWaits ? { ...next, image: current.image } : next);
 
   async function save() {
     if (!loaded || sameLook(look, current)) return onDone();
@@ -336,13 +353,16 @@ function LookForm({
     setError(null);
     try {
       const { emoji, tint } = look;
-      await spaceOperations.updateMetadata(ctx, {
+      const saved = await pageWriter(ctx).renameFolder({
         spaceId,
-        subject: { kind: 'folder', folderId },
+        folderId,
         current: loaded,
         changes: { emoji, tint, extensions: pictureChange(look, current) },
       });
-      await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      // One waiting on this device shows from the queue.
+      if (saved === 'saved') {
+        await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+      }
       onDone();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'stale-head') {
@@ -366,9 +386,10 @@ function LookForm({
         </DialogTitle>
         <DialogDescription>
           Everyone who can see the folder sees them. They’re encrypted like its name.
+          {offline && ' ' + SAVED_HERE}
         </DialogDescription>
       </DialogHeader>
-      <FolderLookFields look={look} kept={kept} onChange={setPicked} />
+      <FolderLookFields look={look} kept={kept} onChange={pick} imageWaits={imageWaits} />
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

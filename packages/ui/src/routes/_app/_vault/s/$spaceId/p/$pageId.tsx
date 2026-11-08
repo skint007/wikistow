@@ -11,6 +11,7 @@ import {
   type FolderId,
   type OpenedPayload,
   type PagePayload,
+  type queueOperations,
   type Region,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
@@ -34,9 +35,21 @@ import {
   changeBanner,
   changeEmoji,
   editPage,
+  findOnPage,
   finishEditing,
+  publishPage,
   requirementsHere,
 } from '../../../../../../commands/ui-commands';
+import {
+  detachPage,
+  moveNode,
+  copyNode,
+  publishElsewhere,
+  unpublishPage,
+} from '../../../../../../commands/page-commands';
+import type { PaletteEntry } from '../../../../../../commands/palette';
+import { usePaletteEntries } from '../../../../../../commands/palette-entries';
+import { usePluginPaletteEntries } from '../../../../../../commands/plugin-palette';
 import { AgentName, agentPersonName } from '../../../../../../agents/agent-name';
 import { AssistantButton, useChatPage } from '../../../../../../ai/chat-column';
 import { ago } from '../../../../../../agents/model';
@@ -98,10 +111,21 @@ import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
 import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
-import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
+import { mayDelete, useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
-import { useAvailability, useNeedsConnection } from '../../../../../../shell/availability';
-import { pageChange, queueChoices, queueQuery } from '../../../../../../data/offline-changes';
+import {
+  availability as availabilityOf,
+  NEEDS_CONNECTION,
+  useAvailability,
+  useNeedsConnection,
+  type ActionKind,
+} from '../../../../../../shell/availability';
+import {
+  pageChange,
+  pageWriter,
+  queueChoices,
+  queueQuery,
+} from '../../../../../../data/offline-changes';
 import { asOf } from '../../../../../../shell/offline-pill';
 import { pageTitle } from '../../../../../../shell/sidebar';
 import { useClient } from '../../../../../../vault/store';
@@ -204,7 +228,10 @@ function PageView() {
       </PageCard>
     );
 
-  const folder = tree?.folders.find((f) => f.id === info.parentId);
+  // Where the tree has it, which shows a move waiting on this device too (#331).
+  const listed = tree?.pages.find((p) => p.id === pageId);
+  const parentId = listed ? listed.parentId : info.parentId;
+  const folder = tree?.folders.find((f) => f.id === parentId);
   const folderName =
     folder?.metadata?.opened.kind === 'current' ? folder.metadata.opened.metadata.name : null;
   const spaceName =
@@ -348,7 +375,8 @@ function PageBody({
   const crumbsNav = useRef<HTMLElement>(null);
   const [sharing, setSharing] = useState(false);
   // Sharing waits until a new owner has confirmed who added them.
-  const sharer = useOwnerStanding(page.spaceId) === 'owner';
+  const standing = useOwnerStanding(page.spaceId);
+  const sharer = standing === 'owner';
   // Nothing can be made or shared at the top of a space whose own name
   // failed its checks; one in a newer format still opened.
   const topOpened = !!tree?.space?.metadata;
@@ -389,6 +417,16 @@ function PageBody({
   // A page with a public link isn't changed while it's read, nor before its links are known.
   const { data: publicLinks } = useQuery(publicLinksQuery(ctx, page.spaceId));
   const linked = publicLinks ? publicLinks.some((link) => link.pageId === page.pageId) : null;
+  // A page with a public link publishes online only (#331). Online, so does
+  // one whose links aren't known yet; offline, a publish waiting checks them
+  // once it is sent.
+  const publishKind: ActionKind =
+    linked === true || (linked === null && !availability.offline) ? 'publish-linked' : 'publish';
+  // A publish waiting on this device, which the person can cancel until it is sent.
+  const publishWaiting = entries?.find(
+    (entry): entry is queueOperations.QueuedPublish =>
+      entry.kind === 'publish' && entry.id === page.pageId && entry.failure === null,
+  );
   const rights = useMemo(
     () =>
       readingRights({
@@ -447,30 +485,40 @@ function PageBody({
   };
   // One click, unless the page has a public link: then Publish asks first,
   // as publishing updates the public page too (ADR 0005).
-  const publish = () =>
-    act(async () => {
-      const from = router.state.location.href;
-      const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
-      if (links.some((link) => link.pageId === page.pageId)) {
-        setPublishingMarkdown(editor.current?.markdown() ?? null);
-        setPublishingFrom(from);
-        return;
-      }
-      await publishDraft();
-      await showPublished(from);
-    });
+  const publishOrAsk = async () => {
+    // Offline, or after a change waiting here, it waits on this device,
+    // sent after that change (#331). The page stays as it is meanwhile.
+    if (availability.offline || waiting !== 'none') {
+      await editor.current?.flush();
+      const { draftHead } = info.heads;
+      if (!draftHead) throw new Error('There is no draft to publish');
+      await pageWriter(ctx).publish({ page, title: payload?.title ?? '', draftHead });
+      return;
+    }
+    const from = router.state.location.href;
+    const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
+    if (links.some((link) => link.pageId === page.pageId)) {
+      setPublishingMarkdown(editor.current?.markdown() ?? null);
+      setPublishingFrom(from);
+      return;
+    }
+    await publishDraft();
+    await showPublished(from);
+  };
 
   const commandEnv = {
     satisfies: requirementsHere({ editor: info.role !== 'reader' }),
     navigate,
     flushDraft: async () => editor.current?.flush(),
   };
+  const publish = () =>
+    act(() => runCommand(publishPage, page, { ...commandEnv, publish: publishOrAsk }));
   const done = () => act(() => runCommand(finishEditing, page, commandEnv));
   // Discard mine and view theirs: the change waiting on this device goes
   // too, unless it is theirs, saved by another window.
   const viewTheirs = async ({ keepQueued }: { keepQueued: boolean }) => {
     if (change && !keepQueued) {
-      await queueChoices(ctx)?.discard(page.pageId);
+      await queueChoices(ctx)?.discard({ kind: 'page', id: page.pageId });
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
     }
     await onReopen();
@@ -639,6 +687,83 @@ function PageBody({
     [location, page.spaceId, page.pageId, model.view, revisionId],
   );
 
+  // The toolbar's and menu's commands, for the palette, while they show here.
+  const waitsFor = (kind: ActionKind) => {
+    const now = availabilityOf(kind, { offline: availability.offline, waiting });
+    return now.allowed ? null : now.hint;
+  };
+  const coverFromPalette = (command: typeof changeBanner | typeof changeEmoji) => {
+    // Where the focus went back to, inside the source editor's shadow root too.
+    let focused = document.activeElement;
+    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+    pickerFocus.opener.current = focused instanceof HTMLElement ? focused : null;
+    void act(() => runCommand(command, page, coverEnv));
+  };
+  const pluginEntries = usePluginPaletteEntries(pluginShown, setActionError);
+  const pageEntries: (Omit<PaletteEntry, 'satisfies'> | false)[] = [
+    model.actions.edit && {
+      command: editPage,
+      title: 'Edit page',
+      run: () => void act(() => runCommand(editPage, page, commandEnv)),
+    },
+    model.actions.done && { command: finishEditing, title: 'Done editing', run: () => void done() },
+    model.actions.publish && {
+      command: publishPage,
+      title: 'Publish',
+      waiting: waitsFor(publishKind),
+      run: () => void publish(),
+    },
+    { command: findOnPage, title: 'Find on page', keys: 'Mod-f', run: () => find.open() },
+    editingCover && {
+      command: changeBanner,
+      title: 'Change banner',
+      run: () => coverFromPalette(changeBanner),
+    },
+    editingCover && {
+      command: changeEmoji,
+      title: icon ? 'Change image' : symbol ? 'Change icon' : 'Change emoji',
+      run: () => coverFromPalette(changeEmoji),
+    },
+    canEdit && {
+      command: moveNode,
+      title: 'Move to…',
+      waiting: waitsFor('move'),
+      run: () => setMoving('move'),
+    },
+    canEdit && {
+      command: copyNode,
+      title: 'Copy to…',
+      waiting: waitsFor('copy'),
+      run: () => setMoving('copy'),
+    },
+    canEdit &&
+      info.canPublish && {
+        command: publishElsewhere,
+        title: 'Publish to another space…',
+        waiting: waitsFor('publish-elsewhere'),
+        run: () => setPublishing(true),
+      },
+    !!publishedHead &&
+      info.canPublish && {
+        command: unpublishPage,
+        title: 'Unpublish…',
+        waiting: waitsFor('server'),
+        run: () => setUnpublishing(true),
+      },
+    model.actions.detach && {
+      command: detachPage,
+      title: 'Detach to edit…',
+      waiting: needs.offline ? NEEDS_CONNECTION : null,
+      run: () => setDetaching(true),
+    },
+  ];
+  usePaletteEntries([
+    ...pageEntries
+      .filter((entry) => entry !== false)
+      .map((entry) => ({ ...entry, satisfies: commandEnv.satisfies })),
+    ...pluginEntries,
+  ]);
+
   return (
     <PageCard ref={setCard} find={find}>
       <CoverBand
@@ -715,7 +840,11 @@ function PageBody({
                 </Button>
               )}
               {model.actions.publish && (
-                <Button size="sm" disabled={busy} {...here.click('publish', () => void publish())}>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  {...here.click(publishKind, () => void publish())}
+                >
                   <Check strokeWidth={1.75} /> Publish
                 </Button>
               )}
@@ -743,7 +872,14 @@ function PageBody({
                   <DropdownMenuItem
                     onSelect={() => {
                       fromMenu.current = true;
-                      find.open(menuButton.current);
+                      void runCommand(
+                        findOnPage,
+                        {},
+                        {
+                          ...commandEnv,
+                          openFind: () => find.open(menuButton.current),
+                        },
+                      );
                     }}
                   >
                     Find on page
@@ -793,10 +929,10 @@ function PageBody({
                       Unpublish…
                     </DropdownMenuItem>
                   )}
-                  {sharer && (
+                  {mayDelete(standing, availability.offline) && (
                     <DropdownMenuItem
                       variant="destructive"
-                      {...here.select('server', () => setDeleting(true))}
+                      {...here.select('delete', () => setDeleting(true))}
                     >
                       Delete page
                     </DropdownMenuItem>
@@ -870,6 +1006,22 @@ function PageBody({
           </h1>
         )}
         <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
+          {publishWaiting && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              Publish waits to be sent
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() =>
+                  void act(async () => {
+                    await queueChoices(ctx)?.discard(publishWaiting);
+                  })
+                }
+              >
+                Cancel
+              </button>
+            </span>
+          )}
           {listedAt && (
             <span
               data-hint="When this device last heard from the server about this space"

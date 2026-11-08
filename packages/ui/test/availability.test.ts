@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   availability,
   CHAT_SENDS_FIRST,
+  moveAvailability,
   NEEDS_CONNECTION,
   SENDS_FIRST,
   waitingOf,
@@ -21,15 +22,19 @@ const TABLE: Record<ActionKind, [string, string, string, string, string, string]
   open: /*                    */ [OK, OK, OK, OK, OK, OK],
   'new-page': /*              */ [OK, OK, OK, OK, OK, OK],
   'new-folder': /*            */ [OK, OK, OK, OK, OK, OK],
-  move: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  move: /*                    */ [OK, OK, OK, OK, OK, OK],
   copy: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   'publish-elsewhere': /*     */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  publish: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  publish: /*                 */ [OK, OK, HELD, OK, OK, HELD],
+  'publish-linked': /*        */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   restore: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  drag: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  drag: /*                    */ [OK, OK, OK, OK, OK, OK],
   into: /*                    */ [OK, OK, HELD, OK, OK, HELD],
   tick: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   'chat-edit': /*             */ [OK, CHAT_SENDS_FIRST, CHAT_SENDS_FIRST, NEEDS, NEEDS, NEEDS],
+  rename: /*                  */ [OK, OK, OK, OK, OK, OK],
+  picture: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  delete: /*                  */ [OK, OK, OK, OK, OK, OK],
   server: /*                  */ [OK, OK, HELD, NEEDS, NEEDS, NEEDS],
 };
 
@@ -46,11 +51,33 @@ describe('what can run now', () => {
     expect(got).toEqual(expected);
   });
 
-  it('counts a page made offline, and a folder, as made, and a draft saved offline as changed', () => {
+  // A move within one share waits on the device offline, or after what waits
+  // for it or its folder; one across a share's edge, or to another space, needs
+  // the server, with nothing waiting (#331).
+  it.each([
+    //            offline  item       place      across  →
+    [false, 'none', 'none', false, 'server'],
+    [false, 'changed', 'none', false, 'device'],
+    [false, 'none', 'made', false, 'device'],
+    [true, 'none', 'none', false, 'device'],
+    [true, 'made', 'made', false, 'device'],
+    [false, 'none', 'none', true, 'server'],
+    [false, 'changed', 'none', true, HELD],
+    [false, 'none', 'made', true, HELD],
+    [true, 'none', 'none', true, NEEDS],
+  ] as const)('moves %s %s %s %s: %s', (offline, item, place, across, expected) => {
+    const how = moveAvailability({ offline, item, place, across });
+    expect(how.route ?? ('hint' in how ? how.hint : null)).toBe(expected);
+  });
+
+  it('counts a page made offline, and a folder, as made, and other changes as changed', () => {
     const made = { parentId: null, revisionId: RevisionId.parse('A'.repeat(22)) };
-    expect(waitingOf(null)).toBe('none');
-    expect(waitingOf({ kind: 'page', newPage: null })).toBe('changed');
-    expect(waitingOf({ kind: 'page', newPage: made })).toBe('made');
-    expect(waitingOf({ kind: 'folder' })).toBe('made');
+    expect(waitingOf([])).toBe('none');
+    expect(waitingOf([{ kind: 'page', newPage: null }])).toBe('changed');
+    expect(waitingOf([{ kind: 'page', newPage: made }])).toBe('made');
+    expect(waitingOf([{ kind: 'folder' }])).toBe('made');
+    expect(waitingOf([{ kind: 'rename' }])).toBe('changed');
+    expect(waitingOf([{ kind: 'page', newPage: null }, { kind: 'delete' }])).toBe('changed');
+    expect(waitingOf([{ kind: 'move' }, { kind: 'publish' }])).toBe('changed');
   });
 });

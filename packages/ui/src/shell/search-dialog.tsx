@@ -1,15 +1,43 @@
 import type { ClientContext, Marked, SearchHit, searchOperations } from '@wikistow/client';
 import { useNavigate } from '@tanstack/react-router';
-import { Search } from 'lucide-react';
-import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
+import { ChevronRight, Search } from 'lucide-react';
+import {
+  useDeferredValue,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { notCredential } from '@/components/ui/input';
+import { ariaShortcut, shortcutLabel } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
+import { usePaletteList } from '../commands/palette-entries';
+import {
+  isPaletteKey,
+  paletteRows,
+  recentCommands,
+  useRecentCommands,
+  type PaletteRow,
+} from '../commands/palette';
 import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
-import { breadcrumb, markedParts, searchStatus } from './search-model';
+import { Replaceable } from '../plugins/places';
+import { usePlugins } from '../plugins/runtime';
+import {
+  breadcrumb,
+  commandStatus,
+  isApple,
+  isSearchKey,
+  looksFor,
+  markedParts,
+  searchStatus,
+} from './search-model';
 
 type Hit = SearchHit<searchOperations.SearchPage>;
 
@@ -24,6 +52,15 @@ const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
  * ready. Up and down move through the results, Enter or a click opens one:
  * its draft, for a draft hit. A copy unpublished where it is opens as its
  * page does, at its last publication.
+ *
+ * Typed first, `>` turns it into the command palette (`paletteRows`): the
+ * commands offered where the person is (`usePaletteEntries`), recent ones
+ * first. Ctrl+Shift+P (Cmd+Shift+P on Apple) or F1 opens it so.
+ *
+ * A plugin can draw the results of a word search in place of the list
+ * (`search.results`, ADR 0011); the box, the line under it and the
+ * commands stay the app's. The view opens a result with
+ * `host.app.navigate`, which closes search (`AppShell`).
  */
 export function SearchDialog({
   ctx,
@@ -64,24 +101,58 @@ function SearchBody({
   const { index, progress, error, updating, retry } = usePageIndex(ctx);
   const [query, setQuery] = useState(initial);
   const deferred = useDeferredValue(query);
-  const results = useMemo(() => index?.search(deferred, { limit: 50 }) ?? [], [index, deferred]);
-  // The hit chosen for a query, by its page, so the index rebuilding as
-  // pages change doesn't move it; a new query starts at its first hit.
-  const [chosen, setChosen] = useState<{ query: string; key: string } | null>(null);
-  const found =
-    chosen?.query === deferred ? results.findIndex((hit) => hitKey(hit) === chosen.key) : -1;
-  const active = Math.max(found, 0);
-  const choose = (hit: Hit | undefined) => {
-    if (hit) setChosen({ query: deferred, key: hitKey(hit) });
-  };
+  // `>` first lists commands instead; deleting it searches again.
+  const commanding = query.startsWith('>');
+  const results = useMemo(
+    () => (deferred.startsWith('>') ? [] : (index?.search(deferred, { limit: 50 }) ?? [])),
+    [index, deferred],
+  );
+  const hits = useChosen(results.map(hitKey), deferred);
+  // What a plugin drawing the results is given of them.
+  const searchResults = useMemo(
+    () =>
+      results.map(({ doc, title }) => ({
+        spaceId: doc.spaceId,
+        pageId: doc.pageId,
+        title: title.text,
+        draft: doc.draft,
+      })),
+    [results],
+  );
+  const offered = usePaletteList();
+  const recent = useRecentCommands();
+  const commands = commanding ? paletteRows(offered, query.slice(1), recent) : [];
+  const chosenCommand = useChosen(
+    commands.map(({ entry }) => entry.command.id),
+    query,
+  );
+  const list = commanding ? chosenCommand : hits;
+  // Up, down and Enter move through the app's own list, not a plugin's drawn in its place.
+  // Set as the list mounts (`Own`), so search opened with a query a plugin draws never has it.
+  const [ownShown, setOwnShown] = useState(false);
+  const count = commanding ? commands.length : ownShown ? results.length : 0;
+  const { active } = list;
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
-  // Only when the hit chosen changes: a rebuild or progress mustn't scroll the list.
-  const shown = results[active];
-  const shownKey = `${deferred}\n${shown ? hitKey(shown) : ''}`;
+  // Only when the row chosen changes: a rebuild or progress mustn't scroll the list.
   useEffect(() => {
     document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-  }, [shownKey]);
+  }, [list.shown]);
+
+  // Opened with a query, as `>` from Ctrl+Shift+P, typing goes on after it.
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const end = box.current?.value.length ?? 0;
+    box.current?.setSelectionRange(end, end);
+  }, []);
+
+  // A word search's results, which a plugin may draw in place of the list (`search.results`).
+  const replaced =
+    usePlugins().replaced['search.results'] !== null &&
+    !commanding &&
+    index !== undefined &&
+    index.size > 0 &&
+    looksFor(deferred);
 
   function openHit({ doc }: Hit) {
     onDone();
@@ -92,24 +163,69 @@ function SearchBody({
     });
   }
 
-  const status = error
-    ? null
-    : searchStatus({ index, progress, query: deferred, results: results.length });
+  function runCommandRow({ entry }: PaletteRow) {
+    // Dimmed, it does nothing, as its own control doesn't.
+    if (entry.waiting) return;
+    recentCommands.used(entry.command.id);
+    onDone();
+    // Once this box has closed and put the focus back: what the command
+    // opens then gives it back there too.
+    setTimeout(entry.run);
+  }
+
+  const listProps = {
+    id: `${ids}-results`,
+    role: 'listbox',
+    className: '-mx-1 grid max-h-[min(60vh,28rem)] gap-0.5 overflow-y-auto px-1',
+  };
+  const resultList = (
+    <Own onShown={setOwnShown}>
+      {results.length > 0 && (
+        <ul {...listProps} aria-label="Results">
+          {results.map((hit, i) => (
+            <ResultRow
+              key={hitKey(hit)}
+              hit={hit}
+              id={optionId(i)}
+              active={i === active}
+              onOpen={() => openHit(hit)}
+              onHover={() => hits.choose(hitKey(hit))}
+            />
+          ))}
+        </ul>
+      )}
+    </Own>
+  );
+
+  const status = commanding
+    ? commandStatus(commands.length)
+    : error
+      ? null
+      : searchStatus({ index, progress, query: deferred, results: results.length });
   return (
     <>
       <div className="relative mr-8">
-        <Search
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          strokeWidth={1.75}
-        />
+        {commanding ? (
+          <ChevronRight
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.75}
+          />
+        ) : (
+          <Search
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.75}
+          />
+        )}
         <input
           role="combobox"
-          aria-label="Search pages"
-          aria-expanded={results.length > 0}
+          aria-label={commanding ? 'Run a command' : 'Search pages'}
+          aria-expanded={count > 0}
           aria-controls={`${ids}-results`}
-          aria-activedescendant={results.length > 0 ? optionId(active) : undefined}
+          aria-activedescendant={count > 0 ? optionId(active) : undefined}
           aria-autocomplete="list"
+          ref={box}
           autoFocus
           {...notCredential}
           spellCheck={false}
@@ -118,16 +234,25 @@ function SearchBody({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
+            // The palette's keys in search turn to commands, and search's
+            // key among commands back to pages; the shell leaves them be.
+            const apple = isApple();
+            if (isPaletteKey(event, apple) || isSearchKey(event, apple)) {
+              event.preventDefault();
+              setQuery(
+                isPaletteKey(event, apple) ? (commanding ? query : '>') : commanding ? '' : query,
+              );
+              return;
+            }
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
-              const step = event.key === 'ArrowDown' ? 1 : -1;
-              choose(results[Math.min(Math.max(active + step, 0), results.length - 1)]);
-            } else if (event.key === 'Enter') {
-              const hit = results[active];
-              if (hit) {
-                event.preventDefault();
-                openHit(hit);
-              }
+              list.step(event.key === 'ArrowDown' ? 1 : -1);
+            } else if (event.key === 'Enter' && count > 0) {
+              const row = commanding ? commands[active] : results[active];
+              if (!row) return;
+              event.preventDefault();
+              if ('entry' in row) runCommandRow(row);
+              else openHit(row);
             }
           }}
           className="h-10 w-full rounded-control border border-input bg-transparent pr-3 pl-9 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -136,9 +261,9 @@ function SearchBody({
       <p role="status" className="text-sm text-muted-foreground">
         {status}
         {/* Once a rebuild, not at each step: pages others change rebuild it. */}
-        {index && updating && <span className="sr-only">Updating</span>}
+        {!commanding && index && updating && <span className="sr-only">Updating</span>}
       </p>
-      {error && (
+      {!commanding && error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span className="flex-1">Couldn’t index your pages: {errorMessage(error)}</span>
           <Button variant="outline" size="sm" onClick={retry}>
@@ -146,26 +271,122 @@ function SearchBody({
           </Button>
         </div>
       )}
-      {results.length > 0 && (
-        <ul
-          id={`${ids}-results`}
-          role="listbox"
-          aria-label="Results"
-          className="-mx-1 grid max-h-[min(60vh,28rem)] gap-0.5 overflow-y-auto px-1"
-        >
-          {results.map((hit, i) => (
-            <ResultRow
-              key={hitKey(hit)}
-              hit={hit}
-              id={optionId(i)}
-              active={i === active}
-              onOpen={() => openHit(hit)}
-              onHover={() => choose(hit)}
-            />
-          ))}
-        </ul>
+      {commanding ? (
+        commands.length > 0 && (
+          <ul {...listProps} aria-label="Commands">
+            {commands.map((row, i) => (
+              <CommandRow
+                key={row.entry.command.id}
+                row={row}
+                id={optionId(i)}
+                active={i === active}
+                onRun={() => runCommandRow(row)}
+                onHover={() => chosenCommand.choose(row.entry.command.id)}
+              />
+            ))}
+          </ul>
+        )
+      ) : replaced ? (
+        <div className="-mx-1 flex max-h-[min(60vh,28rem)] min-h-0 flex-col px-1 empty:hidden">
+          <Replaceable
+            name="search.results"
+            inputs={{ query: deferred, results: searchResults }}
+            keep
+          >
+            {resultList}
+          </Replaceable>
+        </div>
+      ) : (
+        resultList
       )}
     </>
+  );
+}
+
+/** The app's own list, saying while it is shown, so the box's keys move through it then. */
+function Own({ onShown, children }: { onShown: (shown: boolean) => void; children: ReactNode }) {
+  useLayoutEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
+  return children;
+}
+
+/**
+ * The row chosen among `keys` for `query`, by its key, so a list changing
+ * under it (the index rebuilding as pages change) doesn't move it; a new
+ * query starts at its first row. `shown` changes only when the row shown
+ * chosen does.
+ */
+function useChosen(keys: readonly string[], query: string) {
+  const [chosen, setChosen] = useState<{ query: string; key: string } | null>(null);
+  const found = chosen?.query === query ? keys.indexOf(chosen.key) : -1;
+  const active = Math.max(found, 0);
+  const choose = (key: string | undefined) => {
+    if (key !== undefined) setChosen({ query, key });
+  };
+  return {
+    active,
+    choose,
+    step: (by: 1 | -1) => choose(keys[Math.min(Math.max(active + by, 0), keys.length - 1)]),
+    shown: `${query}\n${keys[active] ?? ''}`,
+  };
+}
+
+/** A command: its title, with what the query matched marked, why it can't run now, its plugin and its keys. */
+function CommandRow({
+  row: { entry, title },
+  id,
+  active,
+  onRun,
+  onHover,
+}: {
+  row: PaletteRow;
+  id: string;
+  active: boolean;
+  onRun: () => void;
+  onHover: () => void;
+}) {
+  const waiting = entry.waiting ?? undefined;
+  return (
+    <li
+      id={id}
+      role="option"
+      aria-selected={active}
+      aria-disabled={waiting ? true : undefined}
+      onClick={onRun}
+      onMouseMove={onHover}
+      className={cn(
+        'flex min-w-0 cursor-pointer items-center gap-3 rounded-row px-2.5 py-2',
+        active && 'bg-primary-soft',
+        waiting && 'cursor-default',
+      )}
+    >
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate font-bold',
+          active && 'text-primary-ink',
+          waiting && 'opacity-60',
+        )}
+      >
+        <Highlighted {...title} />
+      </span>
+      {/* Written out, not a hint: the focus stays in the box, so a hint would show only on hover. */}
+      {waiting && <span className="shrink-0 text-xs text-muted-foreground">{waiting}</span>}
+      {entry.plugin && (
+        <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
+          <bdi>{plainText(entry.plugin)}</bdi>
+        </span>
+      )}
+      {entry.keys && (
+        <kbd
+          aria-keyshortcuts={ariaShortcut(entry.keys)}
+          className="shrink-0 font-sans text-xs text-muted-foreground"
+        >
+          {shortcutLabel(entry.keys)}
+        </kbd>
+      )}
+    </li>
   );
 }
 

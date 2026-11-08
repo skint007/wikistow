@@ -1,4 +1,4 @@
-import { spaceOperations, type FolderId, type SpaceId } from '@wikistow/client';
+import type { FolderId, SpaceId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -15,10 +15,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Name } from '@/components/name';
+import { useOffline } from '../data/connection';
 import { contentChanged } from '../data/content-changed';
+import { pageWriter } from '../data/offline-changes';
 import { treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
 import { useClient } from '../vault/store';
+import { SAVED_HERE } from './availability';
 
 /** The folder menu's Rename…: changes a folder's name for everyone who can see it. */
 export function FolderRenameDialog({
@@ -62,6 +65,7 @@ function RenameForm({
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const loaded = tree?.folders.find((f) => f.id === folderId)?.metadata;
   const opened = loaded?.opened.kind === 'current' ? loaded.opened.metadata : null;
+  const offline = useOffline();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -86,14 +90,14 @@ function RenameForm({
     setError(null);
     try {
       // Only the name: the emoji, colour, image and anything else stay as they are.
-      await spaceOperations.updateMetadata(ctx, {
+      const saved = await pageWriter(ctx).renameFolder({
         spaceId,
-        subject: { kind: 'folder', folderId },
+        folderId,
         current: loaded,
         changes: { name: name.trim() },
       });
-      // Search shows each page's folders.
-      await contentChanged(queryClient, ctx, { spaceId });
+      // Search shows each page's folders. One waiting on this device shows from the queue.
+      if (saved === 'saved') await contentChanged(queryClient, ctx, { spaceId });
       onDone();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'stale-head') {
@@ -118,6 +122,7 @@ function RenameForm({
         </DialogTitle>
         <DialogDescription>
           Everyone who can see the folder sees the new name. It’s encrypted.
+          {offline && ' ' + SAVED_HERE}
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-2">

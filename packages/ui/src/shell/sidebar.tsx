@@ -36,15 +36,27 @@ import { contentChanged } from '../data/content-changed';
 import { publicLinksQuery, treeQuery } from '../data/queries';
 import { pageWriter } from '../data/offline-changes';
 import { decryptedQuery } from '../page/attachments';
-import { DeleteButton, DeletePageDialog } from '../page/delete-dialog';
-import { destinationsIn, MoveDialog, useStartMove, type Moving } from '../page/move-dialog';
+import {
+  DeleteButton,
+  DeletePageDialog,
+  deleteNote,
+  useDroppedOnDelete,
+  useMovedInto,
+} from '../page/delete-dialog';
+import {
+  destinationsIn,
+  MoveDialog,
+  moveRoute,
+  useStartMove,
+  type Moving,
+} from '../page/move-dialog';
 import type { Destination } from '../page/move-model';
 import { PublicLinkDialog, PublicMarker } from '../page/public-link';
 import { PublishDialog } from '../page/publish-dialog';
 import { UnpublishDialog } from '../page/unpublish-dialog';
 import { errorMessage } from '../errors';
 import { shareCovering } from '../sharing/model';
-import { useOwnerStanding } from '../sharing/owner-standing';
+import { mayDelete, movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
 import { ShareDialog } from '../sharing/share-dialog';
 import { Replaceable } from '../plugins/places';
 import { useClient } from '../vault/store';
@@ -265,6 +277,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // Where a page from a template goes, while that dialog is open.
   const [fromTemplate, setFromTemplate] = useState<FolderId | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<FolderId | null>(null);
+  const droppedOnDelete = useDroppedOnDelete(deleting);
+  const movedInto = useMovedInto(spaceId, deleting);
   const [renaming, setRenaming] = useState<FolderId | null>(null);
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
@@ -309,6 +323,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     : null;
   // Sharing and deleting folders wait until a new owner has confirmed who added them.
   const sharer = standing === 'owner';
+  const deleter = mayDelete(standing, availability.offline);
   // Whether the person can change what is under `parentId`: their role in
   // the share that holds it, or in the space.
   const canEditAt = (parentId: FolderId | null) => {
@@ -400,9 +415,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const startDrag = (event: DragEvent, moving: Moving) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DRAG_TYPE, '');
-    // Not into a folder made offline until it is sent, as Move to… offers.
-    const places = destinationsIn(tree, moving, sharer).filter((d) =>
-      availability.of(d.parentId).can('into'),
+    // Where Move to… offers: offline, only within its share (`moveRoute`).
+    const owner = movesAsOwner(standing, availability.offline);
+    const places = destinationsIn(tree, moving, owner).filter(
+      (d) => moveRoute(tree, moving, d.parentId, availability).route !== null,
     );
     setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
   };
@@ -557,7 +573,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                               action: 'copy',
                             }),
                           onShare: sharer ? () => setSharing({ rootId: row.id }) : undefined,
-                          onDelete: sharer ? () => setDeleting(row.id) : undefined,
+                          onDelete: deleter ? () => setDeleting(row.id) : undefined,
                         }
                       : null,
                     onExport: () => setExporting({ folderId: row.id, name: row.name }),
@@ -644,7 +660,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                     items={
                       <PageMenuItems
                         pageId={row.id}
-                        sharer={sharer}
+                        deleter={deleter}
                         onOpen={() => openPage(row.id)}
                         onAction={(action, info) =>
                           action === 'move' || action === 'copy'
@@ -804,14 +820,23 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               ?
             </DialogTitle>
             <DialogDescription>
-              It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
-              {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You can
-              restore it from Trash until then. Any public links in it end.
+              {droppedOnDelete ? (
+                deleteNote({ made: true, offline: availability.offline, moved: movedInto })
+              ) : (
+                <>
+                  It goes to the trash with the {deletingContents?.folders ?? 0} folder(s) and{' '}
+                  {deletingContents?.pages ?? 0} page(s) inside it, and stays there for 30 days. You
+                  can restore it from Trash until then. Any public links in it end.
+                  {availability.offline &&
+                    ' You’re offline: it goes to the trash once you’re back online.'}
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DeleteButton
             spaceId={spaceId}
             nodeId={deleting}
+            node="folder"
             name={deletingName?.kind === 'folder' ? deletingName.name : 'Folder'}
             onDone={() => {
               setDeleting(null);

@@ -22,7 +22,14 @@ import { useAppPlugins } from '../plugins/app-plugins';
 import { appReader, RenderedMarkdown } from '../plugins/rendered-markdown';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
-import { openSearch, requirementsHere } from '../commands/ui-commands';
+import { isPaletteKey } from '../commands/palette';
+import { usePluginSettingsEntries } from '../commands/plugin-palette';
+import {
+  PaletteOffers,
+  PaletteOffersProvider,
+  usePaletteEntries,
+} from '../commands/palette-entries';
+import { lockVault, openSearch, requirementsHere, setTheme } from '../commands/ui-commands';
 import { Rail, UpdateDot, useSignOut } from './rail';
 import { useConfirmSession, useSessionConfirmed } from '../vault/confirm';
 import { useVault, vaultStore } from '../vault/store';
@@ -44,7 +51,9 @@ const SlotContext = createContext<Slot | null>(null);
  * not in the rail, so it still shows after the drawer closed. Search opens
  * from the rail, the top bar or `isSearchKey` while the vault is open, or
  * with a query from a link (`SearchLink`), and meanwhile trees others
- * change load again (`useTreeChanges`).
+ * change load again (`useTreeChanges`). `isPaletteKey` opens it with `>`,
+ * as the command palette, listing what is offered there
+ * (`usePaletteEntries`).
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const [spaceId, setSpace] = useState<SpaceId | null>(null);
@@ -86,6 +95,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       },
     );
   }, []);
+  // A plugin drawing search's results opens one with `host.app.navigate`, which closes search,
+  // as the app's own row does.
+  useEffect(() => plugins.location.onNavigate(() => setSearchIn(null)), [plugins.location]);
   // An address with a query (`SearchLink`'s, opened in a new tab) opens
   // search on its page, and lets the query go, so reloading or going back
   // doesn't open it again; so does one held while the vault was unlocked.
@@ -101,13 +113,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // Left to whatever handled it first, such as an editor's own keys.
-      if (event.defaultPrevented || !isSearchKey(event, isApple())) return;
+      if (event.defaultPrevented) return;
+      const palette = isPaletteKey(event, isApple());
+      if (!palette && !isSearchKey(event, isApple())) return;
       if (vaultStore.get().status !== 'unlocked') return;
       // Never the browser's own shortcut. Over another dialog nothing opens; in
       // search itself, it stays where it is.
       event.preventDefault();
       if (document.querySelector('dialog[open]')) return;
-      search();
+      search(palette ? '>' : '');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -116,101 +130,131 @@ export function AppShell({ children }: { children: ReactNode }) {
   // the redirect after locking.
   const href = useRouterState({ select: (state) => state.location.href });
   useEffect(() => closeDrawer(), [href, closeDrawer]);
+  const [offers] = useState(() => new PaletteOffers());
   return (
     <SlotContext value={slot}>
-      <SearchOpener value={search}>
-        <div
-          data-region="app"
-          className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
-        >
-          <div className="hidden min-h-0 min-[900px]:block">
-            <Rail onSignOut={signOut} onSearch={() => search()} />
-          </div>
-          <header
-            data-region="topbar"
-            className="sticky top-(--titlebar-height) z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
+      <PaletteOffersProvider value={offers}>
+        <AppCommands />
+        <SearchOpener value={search}>
+          <div
+            data-region="app"
+            className="min-h-[calc(100svh-var(--titlebar-height))] bg-background min-[900px]:grid min-[900px]:h-[calc(100svh-var(--titlebar-height))] min-[900px]:grid-cols-[70px_1fr]"
           >
-            <button
-              type="button"
-              aria-label={update ? 'Open navigation, update available' : 'Open navigation'}
-              onClick={() => setDrawer(true)}
-              className="relative grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+            <div className="hidden min-h-0 min-[900px]:block">
+              <Rail onSignOut={signOut} onSearch={() => search()} />
+            </div>
+            <header
+              data-region="topbar"
+              className="sticky top-(--titlebar-height) z-10 flex h-[52px] items-center gap-3 bg-background px-3 min-[900px]:hidden"
             >
-              <Menu className="size-5" strokeWidth={1.75} />
-              {update && <UpdateDot />}
-            </button>
-            <span className="font-extrabold">
-              Wiki<span className="text-primary">Stow</span>
-            </span>
-            <OfflinePill />
-            {vault.status === 'unlocked' && (
               <button
                 type="button"
-                aria-label="Search"
-                onClick={() => search()}
-                className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+                aria-label={update ? 'Open navigation, update available' : 'Open navigation'}
+                onClick={() => setDrawer(true)}
+                className="relative grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
               >
-                <Search className="size-5" strokeWidth={1.75} />
+                <Menu className="size-5" strokeWidth={1.75} />
+                {update && <UpdateDot />}
               </button>
-            )}
-          </header>
-          <div
-            data-region="main"
-            className="min-h-0 p-2 min-[900px]:py-3.5 min-[900px]:pr-3.5 min-[900px]:pl-0"
-          >
-            {children}
-          </div>
-        </div>
-        <Dialog open={drawer} onOpenChange={setDrawer}>
-          <DialogContent
-            side="left"
-            dialogClassName="w-[92vw] max-w-none"
-            className="flex gap-2 p-2"
-            showCloseButton={false}
-          >
-            <DialogTitle className="sr-only">Navigation</DialogTitle>
-            <div className="w-[70px] shrink-0">
-              <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
-            </div>
-            <div className="min-w-0 flex-1">
-              {/* Locking re-renders this before the space page lets go of its space. */}
-              {spaceId && vault.status === 'unlocked' && (
-                <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+              <span className="font-extrabold">
+                Wiki<span className="text-primary">Stow</span>
+              </span>
+              <OfflinePill />
+              {vault.status === 'unlocked' && (
+                <button
+                  type="button"
+                  aria-label="Search"
+                  onClick={() => search()}
+                  className="ml-auto grid size-9 place-items-center rounded-control hover:tint active:tint-strong"
+                >
+                  <Search className="size-5" strokeWidth={1.75} />
+                </button>
               )}
+            </header>
+            <div
+              data-region="main"
+              className="min-h-0 p-2 min-[900px]:py-3.5 min-[900px]:pr-3.5 min-[900px]:pl-0"
+            >
+              {children}
             </div>
-          </DialogContent>
-        </Dialog>
-        {vault.status === 'unlocked' && (
-          <SearchDialog
-            ctx={vault.ctx}
-            open={searchIn === vault.ctx}
-            query={searchFor}
-            onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
-          />
-        )}
-        {vault.status === 'unlocked' && (
-          <RenderedMarkdown drawings={plugins.markdown} Reader={reader} />
-        )}
-        <SafeModeBanner />
-        <RestoreNotice />
-        {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
-        {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}
-        {signOutFailed && (
-          <div
-            role="alert"
-            className="fixed bottom-4 left-4 z-50 grid max-w-sm gap-3 rounded-card bg-card px-4 py-2 text-sm shadow-card min-[900px]:left-20"
-          >
-            <p className="text-destructive">
-              {signOutFailed === 'refused'
-                ? 'Couldn’t sign out. Try again.'
-                : 'Couldn’t reach the server to sign out, so the session there is still open. Try again.'}
-            </p>
-            {signOutFailed === 'gone' && signOutHere && <SignOutHere signOutHere={signOutHere} />}
           </div>
-        )}
-      </SearchOpener>
+          <Dialog open={drawer} onOpenChange={setDrawer}>
+            <DialogContent
+              side="left"
+              dialogClassName="w-[92vw] max-w-none"
+              className="flex gap-2 p-2"
+              showCloseButton={false}
+            >
+              <DialogTitle className="sr-only">Navigation</DialogTitle>
+              <div className="w-[70px] shrink-0">
+                <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
+              </div>
+              <div className="min-w-0 flex-1">
+                {/* Locking re-renders this before the space page lets go of its space. */}
+                {spaceId && vault.status === 'unlocked' && (
+                  <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          {vault.status === 'unlocked' && (
+            <SearchDialog
+              ctx={vault.ctx}
+              open={searchIn === vault.ctx}
+              query={searchFor}
+              onOpenChange={(open) => setSearchIn(open ? vault.ctx : null)}
+            />
+          )}
+          {vault.status === 'unlocked' && (
+            <RenderedMarkdown drawings={plugins.markdown} Reader={reader} />
+          )}
+          <SafeModeBanner />
+          <RestoreNotice />
+          {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
+          {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}
+          {signOutFailed && (
+            <div
+              role="alert"
+              className="fixed bottom-4 left-4 z-50 grid max-w-sm gap-3 rounded-card bg-card px-4 py-2 text-sm shadow-card min-[900px]:left-20"
+            >
+              <p className="text-destructive">
+                {signOutFailed === 'refused'
+                  ? 'Couldn’t sign out. Try again.'
+                  : 'Couldn’t reach the server to sign out, so the session there is still open. Try again.'}
+              </p>
+              {signOutFailed === 'gone' && signOutHere && <SignOutHere signOutHere={signOutHere} />}
+            </div>
+          )}
+        </SearchOpener>
+      </PaletteOffersProvider>
     </SlotContext>
   );
+}
+
+/**
+ * What the palette offers anywhere: locking, the theme, which Settings
+ * changes, and each plugin's settings.
+ */
+function AppCommands() {
+  const navigate = useNavigate();
+  const satisfies = requirementsHere();
+  const pluginSettings = usePluginSettingsEntries();
+  usePaletteEntries([
+    ...pluginSettings,
+    {
+      command: lockVault,
+      satisfies,
+      title: 'Lock vault',
+      run: () => void runCommand(lockVault, {}, { satisfies }),
+    },
+    {
+      command: setTheme,
+      satisfies,
+      title: 'Change theme…',
+      run: () => void navigate({ to: '/settings', hash: 'appearance' }),
+    },
+  ]);
+  return null;
 }
 
 /** Put this space's sidebar in the phone drawer while the caller is mounted. */

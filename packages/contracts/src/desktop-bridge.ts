@@ -21,6 +21,10 @@ export type InstalledPlugin = {
    * folder or development install, whose choices stay on this computer.
    */
   library: boolean;
+  /**
+   * Whether it runs here: for a library plugin, on for the account and not
+   * turned off on this device (#312).
+   */
   enabled: boolean;
   /**
    * The regions where the person chose the app's own part over this
@@ -245,6 +249,9 @@ export type DesktopBridge = {
   /** Each folder or development install's settings for this account (`host.settings`), where it has any. */
   pluginSettings(accountId: string): Promise<Record<string, Settings>>;
   setPluginSettings(accountId: string, pluginId: string, settings: Settings): Promise<void>;
+  /** The library plugins this account turned off on this computer only (#312), by ID. */
+  pluginsOffHere(accountId: string): Promise<string[]>;
+  setPluginsOffHere(accountId: string, pluginIds: string[]): Promise<void>;
   /**
    * Hold a copy of each library plugin the account approved (ADR 0002):
    * those this computer lacks are downloaded through the app's session,
@@ -329,6 +336,8 @@ export const DESKTOP_CHANNELS = {
   setPluginAccess: 'wikistow:set-plugin-access',
   pluginSettings: 'wikistow:plugin-settings',
   setPluginSettings: 'wikistow:set-plugin-settings',
+  pluginsOffHere: 'wikistow:plugins-off-here',
+  setPluginsOffHere: 'wikistow:set-plugins-off-here',
   libraryPlugins: 'wikistow:library-plugins',
   pluginUpload: 'wikistow:plugin-upload',
   setSafeMode: 'wikistow:set-safe-mode',

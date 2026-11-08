@@ -18,7 +18,7 @@ import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
 import { contentChanged } from './content-changed';
 import { keepChanged, pageOpened } from './keeper';
-import { pageQuery, queueOf, treeQuery } from './queries';
+import { pageQuery, queueOf, trashQuery, treeQuery } from './queries';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
@@ -27,9 +27,10 @@ export const queueChoices = (ctx: ClientContext): queueOperations.QueueChoices |
   ctx.keptContent?.queue ?? null;
 
 /**
- * How the app writes drafts, new pages and folders, and files for `ctx`'s
- * session: to the server, or into the queue while the app is offline
- * (`connection`) or what's written on has a change waiting.
+ * How the app writes drafts, new pages and folders, files, folder renames,
+ * deletes, moves and publishing for `ctx`'s session: to the server, or into
+ * the queue while the app is offline (`connection`) or what's written on
+ * has a change waiting.
  */
 export const pageWriter = (ctx: ClientContext): PageWriter =>
   createPageWriter({
@@ -76,6 +77,7 @@ const CHANNEL = 'wikistow-kept-queue';
 const Told = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('saved') }),
   z.object({ kind: z.literal('changed'), spaceId: SpaceId, id: z.union([PageId, FolderId]) }),
+  z.object({ kind: z.literal('sent'), spaceId: SpaceId }),
   z.object({
     kind: z.enum(['recorded', 'landed']),
     spaceId: SpaceId,
@@ -112,6 +114,11 @@ function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
     void queryClient.invalidateQueries({
       queryKey: pageQuery(ctx, PageId.parse(event.id)).queryKey,
     });
+    return;
+  }
+  if (event.kind === 'sent') {
+    void contentChanged(queryClient, ctx, { spaceId: event.spaceId });
+    void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
     return;
   }
   void contentChanged(queryClient, ctx, { spaceId: event.spaceId, pageId: event.pageId });
