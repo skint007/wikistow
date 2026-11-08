@@ -9,6 +9,7 @@ import {
   newFolderMetadata,
   newPayload,
   openSession,
+  FolderId as FolderIdSchema,
   PageId,
   pageOperations as pages,
   type FolderId,
@@ -382,7 +383,7 @@ describe('renames and deletes made offline', () => {
     expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Holidays');
   });
 
-  it('wait as a conflict over someone else’s rename, and go on top once the person chooses theirs', async () => {
+  it('wait as a conflict over someone else’s rename, and go on top of it once the person keeps their own', async () => {
     const { ctx, queue, spaceId, folderId, current } = await withFolder();
     await queue.rename({ spaceId, folderId, current, changes: { name: 'Mine' } });
     // Meanwhile, from another device.
@@ -442,6 +443,29 @@ describe('renames and deletes made offline', () => {
     await pages.deleteNode(ctx, { spaceId, nodeId: page.pageId });
     expect(await queue.send(ctx)).toBe('sent');
     expect((await queue.entries())[0]).toMatchObject({ kind: 'delete', failure: { kind: 'gone' } });
+  });
+
+  it('rename, then trash, a folder whose request to make it lost its answer', async () => {
+    const { ctx, queue, spaceId, current } = await withFolder();
+    // The app's own create landed, but got no answer (`PageWriter.newFolder`).
+    const folderId = newId(FolderIdSchema);
+    const metadata = newFolderMetadata('New folder');
+    await spaces.createFolderAs(ctx, { spaceId, parentId: null, folderId, metadata });
+    await queue.newFolder({ spaceId, parentId: null, metadata, folderId, tried: true });
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Recipes' } });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Recipes');
+
+    // Made the same way, then deleted offline: it may be on the server, so it goes to the trash.
+    const again = newId(FolderIdSchema);
+    await spaces.createFolderAs(ctx, { spaceId, parentId: null, folderId: again, metadata });
+    await queue.newFolder({ spaceId, parentId: null, metadata, folderId: again, tried: true });
+    expect(await queue.delete({ spaceId, id: again, node: 'folder', name: 'New folder' })).toBe(
+      'waiting',
+    );
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await trash.loadTrash(ctx)).map((item) => item.nodeId)).toEqual([again]);
   });
 
   it('drop a folder made offline, and what was made in it, without sending anything', async () => {

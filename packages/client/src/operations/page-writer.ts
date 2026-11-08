@@ -192,7 +192,7 @@ export function createPageWriter({
         await server.createFolder({ spaceId, parentId, folderId, metadata });
       } catch (error) {
         if (!queue || !noAnswer(error)) throw error;
-        await queue.newFolder({ spaceId, parentId, metadata, folderId });
+        await queue.newFolder({ spaceId, parentId, metadata, folderId, tried: true });
       }
       return folderId;
     },
@@ -275,10 +275,9 @@ export function createPageWriter({
 
     async renameFolder({ spaceId, folderId, current, changes }) {
       const device = await onDevice(folderId);
+      const image = changes.extensions?.[ICON_NAMESPACE] !== undefined;
       if (device) {
-        if (changes.extensions?.[ICON_NAMESPACE] !== undefined) {
-          throw new Error('A folder’s image is changed online only');
-        }
+        if (image) throw new Error('A folder’s image is changed online only');
         await device.rename({ spaceId, folderId, current, changes });
         return 'waiting';
       }
@@ -288,7 +287,8 @@ export function createPageWriter({
         await server.updateMetadata({ spaceId, subject, current, changes, metadataRevisionId });
         return 'saved';
       } catch (error) {
-        if (!queue || !noAnswer(error)) throw error;
+        // An image is never kept in the queue: the person tries again online.
+        if (!queue || !noAnswer(error) || image) throw error;
         await queue.rename({ spaceId, folderId, current, changes, metadataRevisionId });
         return 'waiting';
       }

@@ -101,6 +101,8 @@ const QueuedFolderJson = z.strictObject({
   metadata: NodeMetadata,
   /** What the tree names its name by until it is made. */
   head: MetadataRevisionId,
+  /** A request to make it got no answer: it may be on the server already. */
+  tried: z.literal(true).exactOptional(),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -173,6 +175,11 @@ const CHANGE_KINDS = ['rename', 'delete'] as const satisfies readonly QueueEntry
 /** Whether `entry` is the item itself made offline, which the server doesn't have yet. */
 export const madeOffline = (entry: QueueEntry): entry is QueuedFolder | QueuedPage =>
   entry.kind === 'folder' || (entry.kind === 'page' && entry.newPage !== null);
+
+// Whether an item made offline may be on the server after all: a request
+// to make it went, and its answer was lost.
+const mayHaveLanded = (entry: QueuedFolder | QueuedPage) =>
+  entry.kind === 'folder' ? entry.tried === true : entry.sending !== null;
 
 /**
  * What changed in the queue, for whatever shows it: a draft saved into an
@@ -520,11 +527,14 @@ export class OfflineQueue {
     parentId,
     metadata,
     folderId = newId(FolderId),
+    tried = false,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     metadata: NodeMetadata;
     folderId?: FolderId;
+    /** A request to make it already went, and got no answer. */
+    tried?: boolean;
   }): Promise<QueuedFolder> {
     const entry: QueuedFolder = {
       kind: 'folder',
@@ -533,6 +543,7 @@ export class OfflineQueue {
       parentId,
       metadata,
       head: newId(MetadataRevisionId),
+      ...(tried && { tried: true }),
       failure: null,
       at: this.#at(),
     };
@@ -567,10 +578,10 @@ export class OfflineQueue {
         const metadata = reviseMetadata({ kind: 'current', metadata: own.metadata }, changes);
         return this.#write({ ...own, metadata });
       }
+      // Renamed again while one waits, stopped or not: added to it, and a
+      // conflict still waits for the person's choice.
       const before = await this.#rename(folderId);
-      // Renamed again after seeing theirs, which the tree shows while it waits for a choice.
-      const seenTheirs = before?.failure?.kind === 'conflict';
-      if (before && !seenTheirs) {
+      if (before) {
         return this.#write({ ...before, changes: mergeChanges(before.changes, changes) });
       }
       if (current.opened.kind !== 'current') {
@@ -586,7 +597,7 @@ export class OfflineQueue {
         changes,
         sending: metadataRevisionId ? { metadataRevisionId, changes } : null,
         failure: null,
-        at: before?.at ?? this.#at(),
+        at: this.#at(),
       });
     });
     this.#emit({ kind: 'changed', spaceId, id: folderId });
@@ -596,7 +607,8 @@ export class OfflineQueue {
    * Delete a page or folder on this device. One made offline goes with its
    * entry, and whatever was made offline in it, as the server never had
    * them (`'dropped'`). Another waits to go to the trash, after the
-   * changes made before it (`'waiting'`).
+   * changes made before it (`'waiting'`), as does one made offline whose
+   * request may have landed: it is made, then put in the trash.
    */
   async delete({
     spaceId,
@@ -611,7 +623,7 @@ export class OfflineQueue {
   }): Promise<'dropped' | 'waiting'> {
     const { outcome, gone } = await this.#store.queueExclusive(async () => {
       const own = await this.entry(id);
-      if (own && madeOffline(own)) {
+      if (own && madeOffline(own) && !mayHaveLanded(own)) {
         const entries = await this.entries();
         const parents = new Map<string, FolderId | null>(
           entries.flatMap((entry) => (madeOffline(entry) ? [[entry.id, parentOf(entry)]] : [])),
@@ -752,8 +764,8 @@ export class OfflineQueue {
 
   /**
    * For a rename stopped because someone changed the folder since
-   * (`conflict`), the person chose theirs: send it again on top of
-   * `theirs`, the folder's metadata now.
+   * (`conflict`), the person chose to keep their own (Yours): send it
+   * again on top of `theirs`, the folder's metadata now.
    */
   async renameOnTop(folderId: FolderId, theirs: LoadedMetadata): Promise<void> {
     if (theirs.opened.kind !== 'current') return;
@@ -899,10 +911,18 @@ export class OfflineQueue {
     entries: readonly QueueEntry[],
   ): Promise<'offline' | void> {
     const { id: folderId, spaceId, parentId, metadata } = entry;
+    if (!entry.tried) {
+      await this.#store.queueExclusive(async () => {
+        const current = await this.entry(folderId);
+        if (current?.kind === 'folder') await this.#write({ ...current, tried: true });
+      });
+    }
+    let duplicate = false;
     try {
       await createFolderAs(ctx, { spaceId, parentId, folderId, metadata });
     } catch (error) {
-      if (!(error instanceof ApiError && error.code === 'duplicate')) {
+      duplicate = error instanceof ApiError && error.code === 'duplicate';
+      if (!duplicate) {
         const failure = failureOf(error);
         if (!failure) return 'offline';
         // An empty folder made offline whose parent is gone just goes.
@@ -913,7 +933,50 @@ export class OfflineQueue {
         return this.#stop(entry, failure);
       }
     }
+    // Made by an earlier request whose answer was lost, or renamed while
+    // this one went: the name and look it holds now go too.
+    const now = await this.entry(folderId);
+    const renamed =
+      now?.kind === 'folder' && JSON.stringify(now.metadata) !== JSON.stringify(metadata);
+    if (now?.kind === 'folder' && (duplicate || renamed)) {
+      const owed = await this.#renameMade(ctx, now);
+      if (owed === 'offline') return 'offline';
+      if (owed === 'stopped') return;
+    }
     await this.discard(entry);
+  }
+
+  // A folder made offline, on the server already: the name and look its
+  // entry holds now, sent if the server's differ.
+  async #renameMade(
+    ctx: ClientContext,
+    entry: QueuedFolder,
+  ): Promise<'sent' | 'offline' | 'stopped'> {
+    const { spaceId, id: folderId, metadata } = entry;
+    try {
+      const { folders } = await loadStructure(ctx, spaceId);
+      const now = folders.find((folder) => folder.id === folderId)?.metadata;
+      if (!now || now.opened.kind !== 'current') return 'sent';
+      const changes = {
+        name: metadata.name,
+        emoji: metadata.emoji ?? null,
+        ...(metadata.tint !== undefined && { tint: metadata.tint }),
+        extensions: metadata.extensions,
+      };
+      if (reads(now.opened.metadata, changes)) return 'sent';
+      await updateMetadata(ctx, {
+        spaceId,
+        subject: { kind: 'folder', folderId },
+        current: now,
+        changes,
+      });
+      return 'sent';
+    } catch (error) {
+      const failure = failureOf(error);
+      if (!failure) return 'offline';
+      await this.#stop(entry, failure);
+      return 'stopped';
+    }
   }
 
   async #sendRename(ctx: ClientContext, entry: QueuedRename): Promise<'offline' | void> {
@@ -1258,12 +1321,11 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   const drafts = new Map(
     here.flatMap((entry) => (entry.kind === 'page' && !entry.newPage ? [[entry.id, entry]] : [])),
   );
-  // One stopped over someone else's waits for the person, who sees theirs here.
+  // Only one on its way: a stopped one waits for the person, and the tree
+  // shows what the server has, as theirs in a conflict.
   const renames = new Map(
     here.flatMap((entry) =>
-      entry.kind === 'rename' && entry.failure?.kind !== 'conflict'
-        ? [[entry.id, entry.changes]]
-        : [],
+      entry.kind === 'rename' && entry.failure === null ? [[entry.id, entry.changes]] : [],
     ),
   );
   const deleted = new Set<string>(

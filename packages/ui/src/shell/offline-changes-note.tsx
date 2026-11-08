@@ -15,6 +15,7 @@ import {
 import { queueChoices, queueQuery } from '../data/offline-changes';
 import { queueOf, spaceOrderQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
+import { FolderTile, folderLook } from './folder-look';
 
 type Entry = queueOperations.QueueEntry;
 
@@ -229,14 +230,16 @@ function RenameConflict({
   onTheirs: () => void;
 }) {
   const { data: tree } = useQuery(treeQuery(ctx, entry.spaceId));
-  const theirs = tree?.folders.find((folder) => folder.id === entry.id)?.metadata;
-  const theirName = theirs?.opened.kind === 'current' ? theirs.opened.metadata.name : null;
-  const mine = nameOf(entry);
+  const theirs = tree?.folders.find((folder) => folder.id === entry.id)?.metadata ?? null;
+  const mine: spaceOperations.LoadedMetadata = {
+    ...entry.base,
+    opened: { kind: 'current', metadata: queueOperations.renamedMetadata(entry) },
+  };
   return (
     <div className="grid gap-2">
       <p>
-        <span className="font-bold">A folder you renamed offline</span> was changed by someone else
-        meanwhile. Which name stays?
+        <span className="font-bold">A folder you changed offline</span> was changed by someone else
+        meanwhile. Which stays?
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -245,22 +248,30 @@ function RenameConflict({
           disabled={!theirs}
           onClick={() => theirs && onMine(theirs)}
         >
-          {/* One span, as the button spaces out its children. */}
-          <span>
-            Yours: “<Name>{mine}</Name>”
-          </span>
+          Yours: <Look metadata={mine} />
         </Button>
         <Button size="sm" variant="outline" onClick={onTheirs}>
-          {theirName === null ? (
-            'Theirs'
-          ) : (
-            <span>
-              Theirs: “<Name>{theirName}</Name>”
-            </span>
+          Theirs
+          {theirs && (
+            <>
+              : <Look metadata={theirs} />
+            </>
           )}
         </Button>
       </div>
     </div>
+  );
+}
+
+/** A folder's tile and name, as the sidebar shows them, so a change of look alone shows too. */
+function Look({ metadata }: { metadata: spaceOperations.LoadedMetadata }) {
+  if (metadata.opened.kind !== 'current') return null;
+  const { emoji, tint } = folderLook(metadata.opened.metadata);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <FolderTile metadata={metadata} emoji={emoji} tint={tint} className="size-5 text-xs" />
+      <Name>{metadata.opened.metadata.name}</Name>
+    </span>
   );
 }
 
