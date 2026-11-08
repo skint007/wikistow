@@ -149,7 +149,7 @@ export function createApp({
       RECENT_SIGN_IN_AUTH_PATHS.has(c.req.path) ||
       (current !== null && SESSION_CODE_PATHS.has(c.req.path));
     if (gated && !isRecentlyAuthenticated(current?.session.authenticatedAt)) {
-      throw new ApiError('reauth-required', 'Sign in again to change two-factor settings');
+      throw new ApiError('reauth-required', 'Sign in again to change how you sign in');
     }
     const headers = new Headers(c.req.raw.headers);
     headers.delete(CLIENT_ADDRESS_HEADER);
