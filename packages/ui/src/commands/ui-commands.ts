@@ -91,6 +91,22 @@ export const finishEditing: Command<
   },
 };
 
+/** Publish the draft in view; a page with a public link asks first. */
+export const publishPage: Command<typeof PageRef, CommandEnv & { publish: () => Promise<void> }> = {
+  id: 'page.publish',
+  input: PageRef,
+  requires: ['unlocked-vault', 'page-editor'],
+  run: async (_page, { publish }) => publish(),
+};
+
+/** Open Find on page over the page in view (Ctrl+F, Cmd+F on Apple systems). */
+export const findOnPage: Command<typeof NoInput, CommandEnv & { openFind: () => void }> = {
+  id: 'page.find',
+  input: NoInput,
+  requires: [],
+  run: async (_input, { openFind }) => openFind(),
+};
+
 /** Open the banner picker on the draft in view. */
 export const changeBanner: Command<typeof PageRef, CommandEnv & { openBannerPicker: () => void }> =
   {

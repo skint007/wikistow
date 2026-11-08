@@ -23,7 +23,7 @@ export const breadcrumb = (path: searchOperations.SearchPage['path']) =>
 
 /** What the search dialog says before a query: what it searches, and how to filter. */
 export const SEARCH_HELP =
-  'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress".';
+  'Search the titles and text of every page you can read. Filter by tag:soup, or by any property: status:"in progress". Type > for commands.';
 
 /** What the search dialog says above its results. */
 export function searchStatus({
@@ -72,3 +72,7 @@ export const isSearchKey = (
   (apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
   !event.altKey &&
   !event.shiftKey;
+
+/** What the command palette says above its commands. */
+export const commandStatus = (count: number) =>
+  count === 0 ? 'No commands match.' : `${count} command${count === 1 ? '' : 's'}`;

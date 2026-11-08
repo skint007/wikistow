@@ -1,6 +1,6 @@
 import type { spaceOperations, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Avatar } from '@/components/avatar';
 import { Name } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -22,12 +22,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { usePaletteEntries } from '../commands/palette-entries';
+import { createShare, deleteSpace } from '../commands/sharing-commands';
+import { exportMarkdown, requirementsHere } from '../commands/ui-commands';
 import { sharesQuery, spaceKeysQuery, spaceOrderQuery } from '../data/queries';
 import { OwnerDialog, type OwnerAction } from '../sharing/owner-dialog';
 import { askAgain, useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
 import { useClient } from '../vault/store';
-import { useNeedsConnection } from './availability';
+import { NEEDS_CONNECTION, useNeedsConnection } from './availability';
 import { SpaceIcon, SpaceLookDialog } from './space-look';
 
 /**
@@ -40,7 +43,7 @@ import { SpaceIcon, SpaceLookDialog } from './space-look';
  * question instead (section 6.5). Keyed by space, so a dialog open in one
  * space doesn't follow to the next. Someone who holds only folders of a
  * space sees no space name (section 7.7), just that the folders were
- * shared with them.
+ * shared with them. The palette offers the menu's commands too.
  */
 export function SpaceHeader({
   spaceId,
@@ -71,8 +74,32 @@ export function SpaceHeader({
   const needs = useNeedsConnection();
   const { data: order } = useQuery(spaceOrderQuery(ctx));
   const deletable = owner && order !== undefined && order.homeId !== spaceId;
+  const satisfies = requirementsHere({ owner });
+  const waiting = needs.offline ? NEEDS_CONNECTION : null;
+  // Only from the sidebar shown: the wide layout's stays mounted, hidden, on phones.
+  const shown = useRef<HTMLDivElement>(null);
+  usePaletteEntries(
+    [
+      { command: exportMarkdown, satisfies, title: 'Export space…', waiting, run: onExport },
+      ...(onShare
+        ? [{ command: createShare, satisfies, title: 'Share space…', waiting, run: onShare }]
+        : []),
+      ...(deletable
+        ? [
+            {
+              command: deleteSpace,
+              satisfies,
+              title: 'Delete space…',
+              waiting,
+              run: () => setAction({ kind: 'delete' }),
+            },
+          ]
+        : []),
+    ],
+    shown,
+  );
   return (
-    <div className="flex items-center gap-3 px-1">
+    <div ref={shown} className="flex items-center gap-3 px-1">
       <span className="grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-tile bg-linear-to-br from-primary-2 to-primary text-sm font-extrabold text-primary-foreground">
         {name === null ? (
           <Users className="size-4" strokeWidth={1.75} />
