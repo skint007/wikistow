@@ -239,29 +239,37 @@ export const putDraftBuild = {
  */
 export const MAX_DRAFT_WORKSHOP_BYTES = 768 * 1024;
 
+/** Counts each save and clear of a draft's kept workshop, from 0. */
+const WorkshopRevision = z.number().int().nonnegative();
+
 /**
  * What the workshop keeps with a draft (#314): its conversation, versions
  * and sample pages, plain text like the draft's files. The app that wrote
  * it reads it; the server only keeps it, within `MAX_DRAFT_WORKSHOP_BYTES`.
- * Null when nothing is kept.
+ * `workshop` is null when nothing is kept. A save names the `revision` it
+ * follows.
  */
 export const getDraftWorkshop = {
   method: 'GET',
   path: '/api/plugin-drafts/:draftId/workshop',
   params: DraftParams,
-  response: z.strictObject({ workshop: z.json().nullable() }),
+  response: z.strictObject({ workshop: z.json().nullable(), revision: WorkshopRevision }),
 } as const satisfies RouteDef;
 
-/** Keep `workshop` with the draft, in place of what was kept. It doesn't move `updatedAt`. */
+/**
+ * Keep `workshop` with the draft, in place of what was kept, if `revision`
+ * is still the latest: else `stale-head`, as when another device kept its
+ * own meanwhile. Answers the new revision. It doesn't move `updatedAt`.
+ */
 export const putDraftWorkshop = {
   method: 'PUT',
   path: '/api/plugin-drafts/:draftId/workshop',
   params: DraftParams,
-  body: z.strictObject({ workshop: z.json() }),
-  response: z.object({ ok: z.literal(true) }),
+  body: z.strictObject({ workshop: z.json(), revision: WorkshopRevision }),
+  response: z.strictObject({ revision: WorkshopRevision }),
 } as const satisfies RouteDef;
 
-/** Forget the draft's kept workshop, for **Clear conversation**. Its files stay. */
+/** Forget the draft's kept workshop, for **Clear conversation**, whatever its revision. Its files stay. */
 export const clearDraftWorkshop = {
   method: 'DELETE',
   path: '/api/plugin-drafts/:draftId/workshop',

@@ -402,23 +402,34 @@ export async function changePluginDraft(
   });
 }
 
-/** The workshop kept with a draft (#314), as the app sent it, or null. */
+/** The workshop kept with a draft (#314), as the app sent it, or null, and its revision. */
 export async function readPluginDraftWorkshop(db: Database, { accountId, draftId }: Draft) {
   const [row] = await db
-    .select({ workshop: pluginDrafts.workshop })
+    .select({ workshop: pluginDrafts.workshop, revision: pluginDrafts.workshopRevision })
     .from(pluginDrafts)
     .where(and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)));
   if (!row) throw notFound();
-  return row.workshop === null ? null : z.json().parse(JSON.parse(row.workshop));
+  return {
+    workshop: row.workshop === null ? null : z.json().parse(JSON.parse(row.workshop)),
+    revision: row.revision,
+  };
 }
 
 /**
  * Keep `workshop` with a draft, or with null forget it, refused past
- * `MAX_DRAFT_WORKSHOP_BYTES`. The draft stays where it is in the list.
+ * `MAX_DRAFT_WORKSHOP_BYTES`. A save names the `revision` it follows, and
+ * is refused with `stale-head` after another; a clear (`null`) names
+ * none. The new revision. The draft stays where it is in the list.
  */
 export async function putPluginDraftWorkshop(
   db: Database,
-  { workshop, ...draft }: Draft & { workshop: Json | null },
+  {
+    workshop,
+    revision,
+    ...draft
+  }:
+    | (Draft & { workshop: Json; revision: number })
+    | (Draft & { workshop: null; revision?: undefined }),
 ) {
   const text = workshop === null ? null : JSON.stringify(workshop);
   if (text !== null && Buffer.byteLength(text) > MAX_DRAFT_WORKSHOP_BYTES) {
@@ -427,12 +438,18 @@ export async function putPluginDraftWorkshop(
       `A draft keeps ${MAX_DRAFT_WORKSHOP_BYTES / KB} KB of its workshop at most.`,
     );
   }
-  const kept = await db
+  const yours = and(eq(pluginDrafts.id, draft.draftId), eq(pluginDrafts.ownerId, draft.accountId));
+  const [kept] = await db
     .update(pluginDrafts)
-    .set({ workshop: text })
-    .where(and(eq(pluginDrafts.id, draft.draftId), eq(pluginDrafts.ownerId, draft.accountId)))
-    .returning({ id: pluginDrafts.id });
-  if (kept.length === 0) throw notFound();
+    .set({ workshop: text, workshopRevision: sql`${pluginDrafts.workshopRevision} + 1` })
+    .where(revision === undefined ? yours : and(yours, eq(pluginDrafts.workshopRevision, revision)))
+    .returning({ revision: pluginDrafts.workshopRevision });
+  if (kept) return kept.revision;
+  await summaryOf(db, draft);
+  throw new ContentError(
+    'stale-head',
+    'The workshop was kept from another device since. Open the draft again to carry on from there.',
+  );
 }
 
 /** Delete a draft with its files, build and kept workshop. */

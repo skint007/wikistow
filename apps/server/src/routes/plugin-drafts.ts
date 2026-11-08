@@ -130,25 +130,20 @@ export function mountPluginDraftRoutes(
 
   routes.account(
     pluginDraftRoutes.getDraftWorkshop,
-    async ({ params }, { principal }) => ({
-      workshop: await readPluginDraftWorkshop(db, {
-        accountId: principal.accountId,
-        ...params,
-      }).catch(toApiError),
-    }),
+    ({ params }, { principal }) =>
+      readPluginDraftWorkshop(db, { accountId: principal.accountId, ...params }).catch(toApiError),
     { rateLimit: LIMIT },
   );
 
   routes.account(
     pluginDraftRoutes.putDraftWorkshop,
-    async ({ params, body }, { principal }) => {
-      await putPluginDraftWorkshop(db, {
+    async ({ params, body }, { principal }) => ({
+      revision: await putPluginDraftWorkshop(db, {
         accountId: principal.accountId,
         ...params,
-        workshop: body.workshop,
-      }).catch(toApiError);
-      return { ok: true as const };
-    },
+        ...body,
+      }).catch(toApiError),
+    }),
     { rateLimit: WORKSHOP_LIMIT },
   );
 

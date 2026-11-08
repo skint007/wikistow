@@ -1,5 +1,5 @@
 {
-  "id": "f4a6317b-96f9-46c5-919b-818f02b67172",
+  "id": "dc98ce27-4898-40a4-8f40-10649f5e8020",
   "prevId": "7fa91308-4967-4880-990f-e9ffe2bd14a3",
   "version": "7",
   "dialect": "postgresql",
@@ -5984,6 +5984,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "workshop_revision": {
+          "name": "workshop_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",

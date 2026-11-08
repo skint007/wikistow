@@ -27,6 +27,8 @@ export const pluginDrafts = pgTable(
      * and sample pages, without copies of real pages. Plain, like its files.
      */
     workshop: text(),
+    /** Counts each save and clear of `workshop`: a save names the one it follows. */
+    workshopRevision: integer().notNull().default(0),
     createdAt: timestamptz().notNull().defaultNow(),
     updatedAt: timestamptz().notNull().defaultNow(),
   },

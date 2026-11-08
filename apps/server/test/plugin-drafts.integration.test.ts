@@ -280,43 +280,46 @@ describe('plugin drafts', () => {
     const cal = await signedInPerson(t);
     const { draft } = await create(cal);
     const params = { draftId: draft.id };
-    const read = async () =>
-      (await api(cal).call(pluginDraftRoutes.getDraftWorkshop, { params })).workshop;
-    const keep = (workshop: unknown) =>
-      errorCode(
-        api(cal).call(pluginDraftRoutes.putDraftWorkshop, {
-          params,
-          body: {
-            workshop: pluginDraftRoutes.putDraftWorkshop.body.shape.workshop.parse(workshop),
-          },
-        }),
-      );
-    expect(await read()).toBeNull();
+    const read = () => api(cal).call(pluginDraftRoutes.getDraftWorkshop, { params });
+    const keep = (workshop: unknown, revision: number) =>
+      api(cal).call(pluginDraftRoutes.putDraftWorkshop, {
+        params,
+        body: {
+          workshop: pluginDraftRoutes.putDraftWorkshop.body.shape.workshop.parse(workshop),
+          revision,
+        },
+      });
+    expect(await read()).toEqual({ workshop: null, revision: 0 });
 
     const kept = { kept: 1, messages: [{ role: 'user', text: 'Make a clock' }], made: 2 };
-    expect(await keep(kept)).toBe('ok');
-    expect(await read()).toEqual(kept);
+    expect(await keep(kept, 0)).toEqual({ revision: 1 });
+    expect(await read()).toEqual({ workshop: kept, revision: 1 });
     // Keeping it leaves the draft where it was in the list.
     expect((await api(cal).call(pluginDraftRoutes.getDraft, { params })).draft).toEqual(draft);
+    // A device that read revision 0 doesn't keep its own over another's.
+    expect(await errorCode(keep({ kept: 1, messages: [] }, 0))).toBe('stale-head');
     // Another person's draft is not found, as a missing one is.
     expect(await errorCode(api(bob).call(pluginDraftRoutes.getDraftWorkshop, { params }))).toBe(
       'not-found',
     );
     expect(
       await errorCode(
-        api(bob).call(pluginDraftRoutes.putDraftWorkshop, { params, body: { workshop: 1 } }),
+        api(bob).call(pluginDraftRoutes.putDraftWorkshop, {
+          params,
+          body: { workshop: 1, revision: 1 },
+        }),
       ),
     ).toBe('not-found');
 
     // Past the limit it is refused, and what was kept stays.
     const long = 'x'.repeat(pluginDraftRoutes.MAX_DRAFT_WORKSHOP_BYTES);
-    expect(await keep({ text: long })).toBe('payload-too-large');
-    expect(await read()).toEqual(kept);
+    expect(await errorCode(keep({ text: long }, 1))).toBe('payload-too-large');
+    expect(await read()).toEqual({ workshop: kept, revision: 1 });
 
-    // Clear conversation forgets it; the draft stays.
+    // Clear conversation forgets it, whatever the revision; the draft stays.
     await api(cal).call(pluginDraftRoutes.clearDraftWorkshop, { params });
-    expect(await read()).toBeNull();
-    expect(await keep(kept)).toBe('ok');
+    expect(await read()).toEqual({ workshop: null, revision: 2 });
+    expect(await keep(kept, 2)).toEqual({ revision: 3 });
     await api(cal).call(pluginDraftRoutes.deleteDraft, { params });
     expect(await errorCode(read())).toBe('not-found');
   });
