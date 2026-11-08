@@ -425,7 +425,7 @@ At `/workshop`, in the browser, on phones and in the desktop app, reached by **B
 - **Sample pages.** A button per sample and **New sample**, then the sample as a page card: a toolbar with "Sample page" or "A copy of "Title"", **Editor** and **Reader**, the plugin's toolbar views and its **Plugins** menu; its header views, title, text (the visual editor or the reader), footer views, and its asides beside it.
 - **Its other places.** Its rail items as a line of text, and a button per plugin page and its settings (declared, with its sections), kept in the workshop only, and for each part of the app it replaces outside a page (the rail, the samples' page tree, the space's home), which draws it below. A replaced page's text shows in the sample's Reader.
 - **Versions.** Newest first: **vN**, name and version or **Didn't build**, **In the preview**, the SHA-256, and **Preview** for one that built, and on the desktop **Export…**.
-- **Draft files.** A button per file, showing its text below.
+- **Draft files.** **Add file…** beside the heading, which adds fonts and images (`.woff2 .woff .png .jpg .webp .gif`, 1 MB each) to `public/`, one or several, under their own names, with a muted line saying so and that the assistant can list and delete them but not write them; a file that won't do is named in a destructive alert. Then a button per file, showing a text file's text below, or for a font or image its size and its place in the built plugin.
 
 ## Passkeys
 
