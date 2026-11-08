@@ -178,7 +178,7 @@ describe('writing Markdown links', () => {
       '[see [[Plan]]](https://example.com)',
       '[[A/B]] [[Work/Notes]] [[Home/Notes]]',
       '| [[Plan|in a table]] |\n| - |',
-      '![[photo.png|A cat]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
+      '![[photo.png|A cat]] ![[photo.png|300]] ![[manual.pdf]] ![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
     ].join('\n\n');
     const self = {
       id: 'p-self',
@@ -229,7 +229,8 @@ describe('writing Markdown links', () => {
         '[see [[Plan]]](https://example.com)',
         '[A/B](A_B.md) [notes](../Work/notes%20%282%29.md) [Notes](Notes.md)',
         '| [in a table](../Work/Plan.md) |\n| - |',
-        '![A cat](../attachments/photo.png) [manual.pdf](../attachments/manual.pdf) ' +
+        '![A cat](../attachments/photo.png) ![photo.png](../attachments/photo.png) ' +
+          '[manual.pdf](../attachments/manual.pdf) ' +
           '![[Plan]] [[Plan#^block]] [[Nowhere]] [[Elsewhere]]',
       ].join('\n\n'),
       wikilinks: 5,

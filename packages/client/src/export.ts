@@ -634,8 +634,11 @@ function wikilinkEdits(
       if (path === undefined || !ref) return undefined;
       const url = pathUrl(relativePath(links.dir, path));
       const image = ref.mediaType.startsWith('image/');
-      // Its text as the reader shows it: an image's alt, a file's link.
-      const text = `${image ? '!' : ''}[${escapeText(link.shown ?? ref.name)}](${url})`;
+      // Its own text, an image's alt or a file's link, unless it is
+      // Obsidian's size (`|300`, `|640x480`), as import reads it.
+      const size = link.shown !== null && /^\d+(?:x\d+)?$/.test(link.shown);
+      const shown = link.shown === null || size ? ref.name : link.shown;
+      const text = `${image ? '!' : ''}[${escapeText(shown)}](${url})`;
       return { ...at, text, reads: { markdown: url, image } };
     }
     const path = links.pagePath(id);
