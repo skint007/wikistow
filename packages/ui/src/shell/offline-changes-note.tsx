@@ -1,4 +1,9 @@
-import { queueOperations, type ClientContext } from '@wikistow/client';
+import {
+  queueOperations,
+  reviseMetadata,
+  type ClientContext,
+  type spaceOperations,
+} from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -13,22 +18,51 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { queueChoices, queueQuery } from '../data/offline-changes';
-import { queueOf, spaceOrderQuery } from '../data/queries';
+import { queueOf, spaceOrderQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
+import { FolderTile, folderLook } from './folder-look';
 
 type Entry = queueOperations.QueueEntry;
 
-const nameOf = (entry: Entry) =>
-  (entry.kind === 'page' ? entry.payload.title : entry.metadata.name) || 'Untitled';
+function nameOf(entry: Entry): string {
+  switch (entry.kind) {
+    case 'page':
+      return entry.payload.title || 'Untitled';
+    case 'folder':
+      return entry.metadata.name;
+    case 'rename':
+      return queueOperations.renamedMetadata(entry).name;
+    case 'delete':
+      return entry.name || 'Untitled';
+  }
+}
+
+/** What the note says of a change the server refused as gone or out of reach. */
+function goneText(entry: Entry): string {
+  switch (entry.kind) {
+    case 'page':
+      return entry.newPage
+        ? 'The folder this was made in was deleted, or you lost access to it, while you were offline.'
+        : 'This page was deleted, or you lost access to it, while you were offline.';
+    case 'folder':
+      return 'The folder this was made in was deleted, or you lost access to it, while you were offline.';
+    case 'rename':
+      return 'This folder was deleted, or you lost access to it, while you were offline, so it wasn’t renamed.';
+    case 'delete':
+      return 'This was deleted already, or you lost access to it.';
+  }
+}
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /**
  * The changes made offline that stopped and wait for the person (ADR 0009,
  * decision 7), in the bottom corner while the vault is open: pages someone
- * changed meanwhile, which open to the conflict prompt; pages or folders
+ * changed meanwhile, which open to the conflict prompt; folders someone
+ * renamed meanwhile, with both names to choose from; pages or folders
  * gone or out of reach, with Try again, Save as a new page in my space,
- * Copy text and Discard; and changes the server refused, with its reason.
+ * Copy text and Discard, or for a rename or delete, which has nothing left
+ * to save, only OK; and changes the server refused, with its reason.
  */
 export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const { data: entries } = useQuery(queueQuery(ctx));
@@ -39,9 +73,17 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const queue = queueChoices(ctx);
   if (stopped.length === 0 || !queue) return null;
   const conflicts = stopped.filter(
-    (entry): entry is queueOperations.QueuedPage => entry.failure?.kind === 'conflict',
+    (entry): entry is queueOperations.QueuedPage =>
+      entry.kind === 'page' && entry.failure?.kind === 'conflict',
+  );
+  const renamed = stopped.filter(
+    (entry): entry is queueOperations.QueuedRename =>
+      entry.kind === 'rename' && entry.failure?.kind === 'conflict',
   );
   const others = stopped.filter((entry) => entry.failure?.kind !== 'conflict');
+  // Nothing is left to save of a rename or delete of what's gone: the person is told, and it goes.
+  const nothingLeft = (entry: Entry) =>
+    (entry.kind === 'rename' || entry.kind === 'delete') && entry.failure?.kind === 'gone';
   const copy = (entry: queueOperations.QueuedPage) =>
     navigator.clipboard.writeText(queueOperations.changeText(entry.payload));
   const act = async (work: () => Promise<unknown>) => {
@@ -80,7 +122,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => void act(() => queue.retry(entry.id))}
+                    onClick={() => void act(() => queue.retry(entry))}
                   >
                     Try again
                   </Button>
@@ -90,7 +132,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => void act(() => queue.discard(entry.id))}
+                    onClick={() => void act(() => queue.discard(entry))}
                   >
                     Discard
                   </Button>
@@ -100,44 +142,63 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
           </ul>
         </div>
       )}
+      {renamed.map((entry) => (
+        <RenameConflict
+          key={entry.id}
+          ctx={ctx}
+          entry={entry}
+          onMine={(theirs) => void act(() => queue.renameOnTop(entry.id, theirs))}
+          onTheirs={() => void act(() => queue.discard(entry))}
+        />
+      ))}
       {others.map((entry) => (
-        <div key={entry.id} className="grid gap-2">
+        <div key={`${entry.kind} ${entry.id}`} className="grid gap-2">
           <p>
             <span className="font-bold">
               <Name>{nameOf(entry)}</Name>
             </span>{' '}
             {entry.failure?.kind === 'gone'
-              ? entry.kind === 'folder' || entry.newPage
-                ? 'The folder this was made in was deleted, or you lost access to it, while you were offline.'
-                : 'This page was deleted, or you lost access to it, while you were offline.'
+              ? goneText(entry)
               : `Couldn’t be saved. ${entry.failure?.kind === 'refused' ? entry.failure.message : ''}`}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void act(() => queue.retry(entry.id))}
-            >
-              Try again
-            </Button>
-            {entry.kind === 'page' && entry.failure?.kind === 'gone' && order?.homeId && (
-              <Button size="sm" variant="outline" onClick={() => setSaving(entry)}>
-                Save as a new page in my space
+          {nothingLeft(entry) ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void act(() => queue.discard(entry))}
+              >
+                OK
               </Button>
-            )}
-            {entry.kind === 'page' && (
-              <Button size="sm" variant="outline" onClick={() => void act(() => copy(entry))}>
-                Copy text
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void act(() => queue.retry(entry))}
+              >
+                Try again
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void act(() => queue.discard(entry.id))}
-            >
-              Discard
-            </Button>
-          </div>
+              {entry.kind === 'page' && entry.failure?.kind === 'gone' && order?.homeId && (
+                <Button size="sm" variant="outline" onClick={() => setSaving(entry)}>
+                  Save as a new page in my space
+                </Button>
+              )}
+              {entry.kind === 'page' && (
+                <Button size="sm" variant="outline" onClick={() => void act(() => copy(entry))}>
+                  Copy text
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void act(() => queue.discard(entry))}
+              >
+                Discard
+              </Button>
+            </div>
+          )}
         </div>
       ))}
       {error && (
@@ -154,6 +215,75 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
         />
       )}
     </section>
+  );
+}
+
+/**
+ * A folder renamed offline that someone changed meanwhile: both names, and
+ * which stays. Theirs is the tree's, which leaves the waiting rename out
+ * while it waits for this choice.
+ */
+function RenameConflict({
+  ctx,
+  entry,
+  onMine,
+  onTheirs,
+}: {
+  ctx: ClientContext;
+  entry: queueOperations.QueuedRename;
+  onMine: (theirs: spaceOperations.LoadedMetadata) => void;
+  onTheirs: () => void;
+}) {
+  const { data: tree } = useQuery(treeQuery(ctx, entry.spaceId));
+  const theirs = tree?.folders.find((folder) => folder.id === entry.id)?.metadata ?? null;
+  // As Yours sends it: the changes on top of theirs.
+  const mine: spaceOperations.LoadedMetadata = {
+    ...entry.base,
+    opened: {
+      kind: 'current',
+      metadata:
+        theirs?.opened.kind === 'current'
+          ? reviseMetadata(theirs.opened, entry.changes)
+          : queueOperations.renamedMetadata(entry),
+    },
+  };
+  return (
+    <div className="grid gap-2">
+      <p>
+        <span className="font-bold">A folder you changed offline</span> was changed by someone else
+        meanwhile. Which stays?
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!theirs}
+          onClick={() => theirs && onMine(theirs)}
+        >
+          Yours: <Look metadata={mine} />
+        </Button>
+        <Button size="sm" variant="outline" onClick={onTheirs}>
+          Theirs
+          {theirs && (
+            <>
+              : <Look metadata={theirs} />
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A folder's tile and name, as the sidebar shows them, so a change of look alone shows too. */
+function Look({ metadata }: { metadata: spaceOperations.LoadedMetadata }) {
+  if (metadata.opened.kind !== 'current') return null;
+  const { emoji, tint } = folderLook(metadata.opened.metadata);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <FolderTile metadata={metadata} emoji={emoji} tint={tint} className="size-5 text-xs" />
+      <Name>{metadata.opened.metadata.name}</Name>
+    </span>
   );
 }
 

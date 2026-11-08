@@ -30,6 +30,9 @@ const TABLE: Record<ActionKind, [string, string, string, string, string, string]
   into: /*                    */ [OK, OK, HELD, OK, OK, HELD],
   tick: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
   'chat-edit': /*             */ [OK, CHAT_SENDS_FIRST, CHAT_SENDS_FIRST, NEEDS, NEEDS, NEEDS],
+  rename: /*                  */ [OK, OK, OK, OK, OK, OK],
+  picture: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  delete: /*                  */ [OK, OK, OK, OK, OK, OK],
   server: /*                  */ [OK, OK, HELD, NEEDS, NEEDS, NEEDS],
 };
 
@@ -46,11 +49,13 @@ describe('what can run now', () => {
     expect(got).toEqual(expected);
   });
 
-  it('counts a page made offline, and a folder, as made, and a draft saved offline as changed', () => {
+  it('counts a page made offline, and a folder, as made, and other changes as changed', () => {
     const made = { parentId: null, revisionId: RevisionId.parse('A'.repeat(22)) };
-    expect(waitingOf(null)).toBe('none');
-    expect(waitingOf({ kind: 'page', newPage: null })).toBe('changed');
-    expect(waitingOf({ kind: 'page', newPage: made })).toBe('made');
-    expect(waitingOf({ kind: 'folder' })).toBe('made');
+    expect(waitingOf([])).toBe('none');
+    expect(waitingOf([{ kind: 'page', newPage: null }])).toBe('changed');
+    expect(waitingOf([{ kind: 'page', newPage: made }])).toBe('made');
+    expect(waitingOf([{ kind: 'folder' }])).toBe('made');
+    expect(waitingOf([{ kind: 'rename' }])).toBe('changed');
+    expect(waitingOf([{ kind: 'page', newPage: null }, { kind: 'delete' }])).toBe('changed');
   });
 });

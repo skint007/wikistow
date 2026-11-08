@@ -1,24 +1,38 @@
 // The one place the app's offline-capable writes go through (ADR 0009,
-// decision 7): drafts, new pages, new folders and files. It decides whether
+// decision 7): drafts, new pages, new folders, files, folder renames and
+// deletes. It decides whether
 // each goes to the server or into this device's queue, and falls back to
 // the queue when the server doesn't answer.
-import { FolderId, PageId, RevisionId, type SpaceId } from '@wikistow/contracts';
+import {
+  FolderId,
+  MetadataRevisionId,
+  PageId,
+  RevisionId,
+  type SpaceId,
+} from '@wikistow/contracts';
 import { ApiError, noAnswer } from '../api/client.ts';
 import { newId } from '../ids.ts';
-import { newFolderMetadata, type FolderLook, type FolderPicture } from '../metadata.ts';
+import {
+  ICON_NAMESPACE,
+  newFolderMetadata,
+  type FolderLook,
+  type FolderPicture,
+} from '../metadata.ts';
 import { newPayload, type AttachmentRef } from '../payload.ts';
 import { OWNER_REGION } from '../regions.ts';
 import {
   createPage,
+  deleteNode,
   saveDraft,
   uploadAttachment,
   uploadBlob,
   type PageRef,
   type Written,
 } from './pages.ts';
-import type { OfflineQueue } from './queue.ts';
+import type { FolderChanges, OfflineQueue } from './queue.ts';
+import type { LoadedMetadata } from './records.ts';
 import type { ClientContext } from './session.ts';
-import { createFolderAs } from './spaces.ts';
+import { createFolderAs, updateMetadata } from './spaces.ts';
 
 type File = { name: string; mediaType: string; bytes: Uint8Array };
 
@@ -40,6 +54,8 @@ export type ServerWrites = {
   uploadAttachment(page: PageRef, file: File): Promise<AttachmentRef>;
   /** Upload a draft file sealed already, as the queue holds it. */
   uploadBlob(page: PageRef, blob: Uint8Array): Promise<void>;
+  updateMetadata(input: Parameters<typeof updateMetadata>[1]): Promise<unknown>;
+  deleteNode(input: Parameters<typeof deleteNode>[1]): Promise<void>;
 };
 
 /** The server operations for `ctx`'s session. */
@@ -49,6 +65,8 @@ export const serverWrites = (ctx: ClientContext): ServerWrites => ({
   saveDraft: (input) => saveDraft(ctx, input),
   uploadAttachment: (page, file) => uploadAttachment(ctx, page, file),
   uploadBlob: (page, blob) => uploadBlob(ctx, page, 'draft', blob),
+  updateMetadata: (input) => updateMetadata(ctx, input),
+  deleteNode: (input) => deleteNode(ctx, input),
 });
 
 /**
@@ -102,14 +120,39 @@ export type PageWriter = {
   attach(page: PageRef, file: File): Promise<AttachmentRef>;
   /** Saves of `page`'s draft, by a view that opened its waiting change at version `seen`, or none. */
   draft(page: PageRef, { seen }: { seen: number | null }): DraftWriter;
+  /**
+   * Rename a folder, or change its look: `changes` on top of `current`, its
+   * metadata as the tree shows it. On the server (`'saved'`), or on this
+   * device (`'waiting'`), as for a draft. An image is changed online only.
+   */
+  renameFolder(input: {
+    spaceId: SpaceId;
+    folderId: FolderId;
+    current: LoadedMetadata;
+    changes: FolderChanges;
+  }): Promise<'saved' | 'waiting'>;
+  /**
+   * Put a page or folder in the trash (`'trashed'`), or, on this device, wait
+   * to (`'waiting'`), or drop it with what's in it if it was made offline and
+   * isn't sent yet (`'dropped'`). `dropChanges` drops the page's draft
+   * waiting here first, which otherwise goes before, into the trash with it.
+   */
+  deleteNode(input: {
+    spaceId: SpaceId;
+    nodeId: PageId | FolderId;
+    node: 'page' | 'folder';
+    name: string;
+    dropChanges?: boolean;
+  }): Promise<'trashed' | 'waiting' | 'dropped'>;
 };
 
 /**
  * The writer over `queue` (none where the device keeps nothing: then every
  * write goes to the server) and `server`. A write goes into the queue
  * offline (`isOnline`), and online too while what it writes on has a
- * change waiting: the page itself for a draft or a file, the folder it
- * goes in for a new page or folder, which the server doesn't know yet.
+ * change waiting, so it goes after: the page itself for a draft or a
+ * file, the folder it goes in for a new page or folder, the folder or
+ * page renamed or deleted.
  */
 export function createPageWriter({
   queue,
@@ -122,7 +165,7 @@ export function createPageWriter({
 }): PageWriter {
   // The queue, if what's written on `id` goes there.
   const onDevice = async (id: PageId | FolderId | null) =>
-    queue && (!isOnline() || (id !== null && (await queue.entry(id)) !== null)) ? queue : null;
+    queue && (!isOnline() || (id !== null && (await queue.waiting(id)).length > 0)) ? queue : null;
 
   const writer: PageWriter = {
     async newPage({ spaceId, parentId, title }) {
@@ -149,7 +192,7 @@ export function createPageWriter({
         await server.createFolder({ spaceId, parentId, folderId, metadata });
       } catch (error) {
         if (!queue || !noAnswer(error)) throw error;
-        await queue.newFolder({ spaceId, parentId, metadata, folderId });
+        await queue.newFolder({ spaceId, parentId, metadata, folderId, tried: true });
       }
       return folderId;
     },
@@ -228,6 +271,41 @@ export function createPageWriter({
         },
         conflictWithDevice: () => otherWindow,
       };
+    },
+
+    async renameFolder({ spaceId, folderId, current, changes }) {
+      const device = await onDevice(folderId);
+      const image = changes.extensions?.[ICON_NAMESPACE] !== undefined;
+      if (device) {
+        if (image) throw new Error('A folder’s image is changed online only');
+        await device.rename({ spaceId, folderId, current, changes });
+        return 'waiting';
+      }
+      const metadataRevisionId = newId(MetadataRevisionId);
+      const subject = { kind: 'folder' as const, folderId };
+      try {
+        await server.updateMetadata({ spaceId, subject, current, changes, metadataRevisionId });
+        return 'saved';
+      } catch (error) {
+        // An image is never kept in the queue: the person tries again online.
+        if (!queue || !noAnswer(error) || image) throw error;
+        await queue.rename({ spaceId, folderId, current, changes, metadataRevisionId });
+        return 'waiting';
+      }
+    },
+
+    async deleteNode({ spaceId, nodeId, node, name, dropChanges = false }) {
+      const own = dropChanges ? await queue?.entry(nodeId) : null;
+      if (own?.kind === 'page' && !own.newPage) await queue?.discard(own);
+      const device = await onDevice(nodeId);
+      if (device) return device.delete({ spaceId, id: nodeId, node, name });
+      try {
+        await server.deleteNode({ spaceId, nodeId });
+        return 'trashed';
+      } catch (error) {
+        if (!queue || !noAnswer(error)) throw error;
+        return queue.delete({ spaceId, id: nodeId, node, name, tried: true });
+      }
     },
   };
   return writer;

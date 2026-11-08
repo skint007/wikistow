@@ -110,7 +110,7 @@ import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
 import type { ShownPage } from '../../../../../../plugins/runtime';
 import { shareCovering } from '../../../../../../sharing/model';
-import { useOwnerStanding } from '../../../../../../sharing/owner-standing';
+import { mayDelete, useOwnerStanding } from '../../../../../../sharing/owner-standing';
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
 import {
   availability as availabilityOf,
@@ -366,7 +366,8 @@ function PageBody({
   const crumbsNav = useRef<HTMLElement>(null);
   const [sharing, setSharing] = useState(false);
   // Sharing waits until a new owner has confirmed who added them.
-  const sharer = useOwnerStanding(page.spaceId) === 'owner';
+  const standing = useOwnerStanding(page.spaceId);
+  const sharer = standing === 'owner';
   // Nothing can be made or shared at the top of a space whose own name
   // failed its checks; one in a newer format still opened.
   const topOpened = !!tree?.space?.metadata;
@@ -489,7 +490,7 @@ function PageBody({
   // too, unless it is theirs, saved by another window.
   const viewTheirs = async ({ keepQueued }: { keepQueued: boolean }) => {
     if (change && !keepQueued) {
-      await queueChoices(ctx)?.discard(page.pageId);
+      await queueChoices(ctx)?.discard({ kind: 'page', id: page.pageId });
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
     }
     await onReopen();
@@ -896,10 +897,10 @@ function PageBody({
                       Unpublish…
                     </DropdownMenuItem>
                   )}
-                  {sharer && (
+                  {mayDelete(standing, availability.offline) && (
                     <DropdownMenuItem
                       variant="destructive"
-                      {...here.select('server', () => setDeleting(true))}
+                      {...here.select('delete', () => setDeleting(true))}
                     >
                       Delete page
                     </DropdownMenuItem>

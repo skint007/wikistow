@@ -20,6 +20,9 @@ export const NEEDS_CONNECTION = 'Needs the connection';
  */
 export const SENDS_FIRST = 'Waits until your change made offline is sent';
 
+/** What a dialog whose change waits on this device offline adds to what it says. */
+export const SAVED_HERE = 'Offline, it’s saved on this device and sent when you’re back online.';
+
 /** What the chat says when the person approves its edit to a page with a change waiting. */
 export const CHAT_SENDS_FIRST =
   'Your own edit to this page is saved on this device only. Try again once it is sent.';
@@ -45,7 +48,13 @@ export type ActionKind =
   | 'tick'
   /** The chat's edit to a page, once approved. */
   | 'chat-edit'
-  /** Anything else that needs the server: renaming, sharing, deleting, Settings… */
+  /** A folder's name, emoji, colour or icon changed. */
+  | 'rename'
+  /** A folder's image changed, which the folder's metadata holds, and so its tree. */
+  | 'picture'
+  /** A page or folder put in the trash. */
+  | 'delete'
+  /** Anything else that needs the server: sharing, Settings… */
   | 'server';
 
 /**
@@ -80,6 +89,11 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   into: { offline: true, holds: 'made' },
   tick: { offline: false, holds: 'changed' },
   'chat-edit': { offline: false, holds: 'changed' },
+  // Wait on this device, after the changes before them (#330). The writer
+  // folds them into an item made offline, or drops it.
+  rename: { offline: true, holds: 'never' },
+  delete: { offline: true, holds: 'never' },
+  picture: { offline: false, holds: 'changed' },
   server: { offline: false, holds: 'made' },
 };
 
@@ -96,14 +110,20 @@ export function availability(
   return { allowed: true };
 }
 
-/** What waits for an item, given its entry in the queue. */
+type Entry = queueOperations.QueueEntry;
+
+/** What waits for an item, given its entries in the queue (`OfflineQueue.waiting`). */
 export const waitingOf = (
-  entry:
+  entries: readonly (
     | Pick<queueOperations.QueuedPage, 'kind' | 'newPage'>
-    | Pick<queueOperations.QueuedFolder, 'kind'>
-    | null
-    | undefined,
-): Waiting => (!entry ? 'none' : entry.kind === 'folder' || entry.newPage ? 'made' : 'changed');
+    | Pick<Exclude<Entry, queueOperations.QueuedPage>, 'kind'>
+  )[],
+): Waiting =>
+  entries.some((entry) => entry.kind === 'folder' || (entry.kind === 'page' && entry.newPage))
+    ? 'made'
+    : entries.length > 0
+      ? 'changed'
+      : 'none';
 
 /** A control waiting, dimmed, saying why in its hint, and doing nothing. */
 const waitingProps = (hint: string) =>
@@ -149,9 +169,9 @@ export function useAvailability() {
   const ctx = useClient();
   const offline = useOffline();
   const { data: entries } = useQuery(queueQuery(ctx));
-  const byId = useMemo(() => new Map(entries?.map((entry) => [entry.id, entry])), [entries]);
+  const byId = useMemo(() => Map.groupBy(entries ?? [], (entry) => entry.id), [entries]);
   const waiting = (id: PageId | FolderId | null): Waiting =>
-    waitingOf(id === null ? null : byId.get(id));
+    waitingOf((id !== null && byId.get(id)) || []);
   return { offline, waiting, of: (id: PageId | FolderId | null) => controls(offline, waiting(id)) };
 }
 
