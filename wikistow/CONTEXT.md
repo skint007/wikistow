@@ -170,6 +170,10 @@ _Avoid_: Store, marketplace (nothing is sold or rated).
 A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person.
 _Avoid_: Draft on its own (pages have drafts), workspace, project.
 
+**Plugin proposal**
+A copy of someone else's plugin, sent back from its draft to the plugin's owner under the original ID: its files, against the version the copy started from. The owner reviews what changed by file, then opens it as a **plugin draft** of their own, to publish as a new version, or declines it.
+_Avoid_: Proposal on its own (a chat assistant's are **proposals**), pull request, fork.
+
 **Theme plugin**, **script plugin**, **app plugin**
 A plugin's trust level, from what it contains: styles only; code in an isolated worker that reaches pages only through checked requests; or code running in the app's page with the app's own trust.
 _Avoid_: Sandboxed app plugin; app plugins aren't isolated.

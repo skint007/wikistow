@@ -39,6 +39,7 @@ import { DeclaredSettings } from '../plugins/declared-settings';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
+import { Propose } from './proposals';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import { OLD_SERVER, type Workshop } from './workshop';
 
@@ -67,6 +68,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   return (
     <div className="grid content-start gap-5">
       <Status workshop={workshop} />
+      <Propose workshop={workshop} />
       {state.running && (
         <PluginsContext value={workshop.preview}>
           <Problems workshop={workshop} />

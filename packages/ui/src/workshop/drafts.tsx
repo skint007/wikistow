@@ -1,6 +1,6 @@
 import { toBase64 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { pluginDraftRoutes } from '@wikistow/contracts';
+import { pluginDraftRoutes, pluginProposalRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -27,14 +27,22 @@ import { OLD_SERVER } from './workshop';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
 
+/** What proposals' queries are kept under (#315). */
+export const PROPOSALS_KEY = ['plugin-proposals'];
+
 /** The person's plugin drafts (ADR 0004), most recently changed first. */
 export const draftsQuery = queryOptions({
   queryKey: ['plugin-drafts'],
   queryFn: async () => (await api.call(pluginDraftRoutes.listDrafts)).drafts,
 });
 
-/** What a new draft starts from: nothing, a library version (`from`), or `files` and `binary`. */
-export type DraftStart = Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>;
+/**
+ * What a new draft starts from: nothing, a library version (`from`),
+ * `files` and `binary`, or a proposal for one of the person's plugins.
+ */
+export type DraftStart =
+  | Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>
+  | { proposal: string };
 
 /** Open the workshop on draft `draftId`, in place of any conversation, with its panel open. */
 export function openWorkshop(draftId: string) {
@@ -69,18 +77,32 @@ export function useNewDraft(): {
 
   const create = async (from: DraftStart, replaces?: string) => {
     try {
-      const { draft } = await api.call(pluginDraftRoutes.createDraft, {
-        body: replaces ? { ...from, replaces } : from,
-      });
+      const { draft } =
+        'proposal' in from
+          ? await api.call(pluginProposalRoutes.openProposal, {
+              params: { proposalId: from.proposal },
+              body: replaces ? { replaces } : {},
+            })
+          : await api.call(pluginDraftRoutes.createDraft, {
+              body: replaces ? { ...from, replaces } : from,
+            });
       openWorkshop(draft.id);
       return true;
     } catch (failure) {
       // A server from before fonts and images in drafts refuses `binary` as a field it doesn't know.
-      const old = failure instanceof ApiError && failure.code === 'invalid-request' && from.binary;
+      const old =
+        failure instanceof ApiError &&
+        failure.code === 'invalid-request' &&
+        'binary' in from &&
+        from.binary;
       setError(old ? OLD_SERVER : errorMessage(failure));
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
+      // The list only: the review's own query would answer not-found while it closes.
+      if ('proposal' in from) {
+        await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY, exact: true });
+      }
     }
   };
 

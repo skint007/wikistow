@@ -26,6 +26,7 @@ export * from './content/vault.ts';
 export * from './blobs/store.ts';
 export * from './plugins/development.ts';
 export * from './plugins/drafts.ts';
+export * from './plugins/proposals.ts';
 export * from './plugins/library.ts';
 export * from './plugins/store.ts';
 export * from './content/pages.ts';
