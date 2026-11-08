@@ -10,6 +10,15 @@
   margin-inline: auto;
 }
 
+/* The width its settings choose; Medium is the one above. */
+:root[data-reading-room-width='narrow']:not([data-reading-room-wide]) [data-region='page.content'] {
+  max-width: 36rem;
+}
+
+:root[data-reading-room-width='roomy']:not([data-reading-room-wide]) [data-region='page.content'] {
+  max-width: 54rem;
+}
+
 .page-body :is(p, li) {
   line-height: 1.8;
 }
@@ -61,4 +70,11 @@
 
 .reading-room-toggle[aria-pressed='true'] {
   background: var(--primary-soft);
+}
+
+.reading-room-link {
+  justify-self: start;
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 0.875rem;
 }

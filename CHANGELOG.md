@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Mermaid diagrams now draw in the browser after an offline reload. The diagram frame's files are named by their hashes under `/assets/diagram/`, so the browser's cache keeps them, and the service worker fetches them once when it installs. A diagram that can't draw offline shows its source and says so at once, instead of "Drawing diagram…" for two minutes. (#342)
 
+#### Plugins
+
+- Plugins can keep settings for the person, the same on each of their devices: `host.settings` (`get`, `set`, `update`, `on('changed')`), one JSON object of at most 16 KB per plugin, kept encrypted beside the plugin's approval in the account's record, or on the computer for a desktop folder install. A manifest's `settings` declares text, number, on/off and choice fields, which Settings → Plugins draws under the plugin's **Settings**, so scripts get settings without a view. Settings sections get `{ settings }`, `host.app.navigate({ kind: 'settings' })` opens the plugin's own, and the page's Plugins menu has ***Plugin* settings…**. An update keeps them and Remove deletes them. `reading-room` declares its column's width and reading speed. The library lists versions with `settings` only to apps that send `manifest=3`. (#344)
+
 ## 0.24.0 - 2026-11-07
 
 ### Highlights
