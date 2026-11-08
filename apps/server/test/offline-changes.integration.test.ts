@@ -703,13 +703,34 @@ describe('moves and publishes made offline', () => {
       message: expect.stringContaining('changed after you pressed Publish'),
     });
     expect(await published(ctx, page)).toBeNull();
-
     await queue.discard({ kind: 'publish', id: page.pageId });
-    await pages.publishPage(ctx, page);
-    await links.turnOn(ctx, page.pageId);
+
+    // Changed meanwhile, its draft comes back as a conflict, and the publish stops too.
     const head = (await pages.loadPage(ctx, page.pageId)).heads.draftHead;
     if (!head) throw new Error('No draft');
+    await queue.saveDraft({
+      page,
+      basedOn: head,
+      region: null,
+      payload: newPayload({ title: 'Plan', markdown: 'mine' }),
+      seen: null,
+    });
     await queue.publish({ page, title: 'Plan', draftHead: head });
+    await pages.editDraft(ctx, page, { markdown: 'theirs' });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries()).map((entry) => [entry.kind, entry.failure?.kind])).toEqual([
+      ['page', 'conflict'],
+      ['publish', 'refused'],
+    ]);
+    expect(await published(ctx, page)).toBeNull();
+    await queue.discard({ kind: 'page', id: page.pageId });
+    await queue.discard({ kind: 'publish', id: page.pageId });
+
+    await pages.publishPage(ctx, page);
+    await links.turnOn(ctx, page.pageId);
+    const now = (await pages.loadPage(ctx, page.pageId)).heads.draftHead;
+    if (!now) throw new Error('No draft');
+    await queue.publish({ page, title: 'Plan', draftHead: now });
     expect(await queue.send(ctx)).toBe('sent');
     expect((await queue.entries())[0]?.failure).toMatchObject({
       kind: 'refused',

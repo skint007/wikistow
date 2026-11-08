@@ -1521,6 +1521,12 @@ export class OfflineQueue {
       // Put on top of theirs meanwhile (Save mine on top): sent next, on that.
       const rebased = entry.kind === 'page' && current.basedOn !== entry.basedOn;
       await this.#write({ ...current, failure: rebased ? null : failure, sending: null });
+      // Someone changed the page since Publish was pressed: the person looks
+      // it over and publishes again, whatever they keep.
+      const publish = await this.#publish(current.id);
+      if (!rebased && failure.kind === 'conflict' && publish && !publish.failure) {
+        await this.#write({ ...publish, failure: PUBLISH_CHANGED, sending: null });
+      }
     });
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
   }
