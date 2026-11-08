@@ -24,6 +24,7 @@ import {
 import { copyNode } from './commands/copy.ts';
 import { exportMarkdown } from './commands/export.ts';
 import { importNotes } from './commands/import.ts';
+import { moveNode, renameFolder } from './commands/move.ts';
 import { search } from './commands/search.ts';
 import { classify, CliError, EXIT, type ExitStatus } from './exit.ts';
 import { WINDOWS } from './files.ts';
@@ -77,6 +78,8 @@ const COMMANDS = {
     options: { space: { type: 'string' }, folder: { type: 'string' } },
     positionals: 1,
   },
+  'folder move': { options: { folder: { type: 'string' } }, positionals: 1 },
+  'folder rename': { options: { name: { type: 'string' } }, positionals: 1 },
   'page read': {
     options: { draft: { type: 'boolean' }, revision: { type: 'string' } },
     positionals: 1,
@@ -129,6 +132,7 @@ const COMMANDS = {
     options: { space: { type: 'string' }, folder: { type: 'string' } },
     positionals: 1,
   },
+  'page move': { options: { folder: { type: 'string' } }, positionals: 1 },
   'page history': { options: {}, positionals: 1 },
   'page links': { options: {}, positionals: 1 },
   'page download-attachment': {
@@ -188,6 +192,21 @@ function permissionVersionOf(values: Values): number | null {
     );
   }
   return Number(value);
+}
+
+/** `--folder` of a move: a folder ID, or `top` for the top of the space. */
+function destinationOf(values: Values): FolderId | null {
+  const folder = required(values, 'folder');
+  return folder === 'top' ? null : id(FolderId, folder, 'folder');
+}
+
+/** `--name` of a folder: trimmed, as WikiStow's New folder trims it, and as long as one may be. */
+function folderNameOf(values: Values): string {
+  const name = required(values, 'name').trim();
+  if (name === '' || name.length > 200) {
+    throw new CliError('usage', '--name takes a name of 1 to 200 characters');
+  }
+  return name;
 }
 
 /** `--attachments`: all, none, or attachment IDs between commas. */
@@ -302,16 +321,19 @@ function parse(argv: readonly string[]) {
   const changes = [
     'folder create',
     'folder copy',
+    'folder move',
+    'folder rename',
     'page create',
     'page draft',
     'page publish',
     'page attach',
     'page copy',
+    'page move',
   ];
   if (key !== null && !changes.includes(name)) {
     throw new CliError(
       'usage',
-      '--idempotency-key is only for create, draft, publish, attach and copy',
+      '--idempotency-key is only for create, draft, publish, attach, copy, move and rename',
     );
   }
   const unlock = unlockOf(values);
@@ -488,11 +510,7 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
       if (space === null && parent === null) {
         throw new CliError('usage', 'folder create takes --space, --parent or both');
       }
-      // Trimmed, as WikiStow's New folder trims it, and as long as a folder's name may be.
-      const name = required(values, 'name').trim();
-      if (name === '' || name.length > 200) {
-        throw new CliError('usage', '--name takes a name of 1 to 200 characters');
-      }
+      const name = folderNameOf(values);
       return createFolder(
         io,
         out,
@@ -526,6 +544,25 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
         deps,
       );
     }
+    case 'folder move':
+    case 'page move': {
+      const parentId = destinationOf(values);
+      return moveNode(
+        io,
+        out,
+        name === 'page move'
+          ? { ...content, kind: 'page', nodeId: id(PageId, first, 'page'), parentId }
+          : { ...content, kind: 'folder', nodeId: id(FolderId, first, 'folder'), parentId },
+        deps,
+      );
+    }
+    case 'folder rename':
+      return renameFolder(
+        io,
+        out,
+        { ...content, folderId: id(FolderId, first, 'folder'), name: folderNameOf(values) },
+        deps,
+      );
     case 'page read': {
       const revision = optional(values, 'revision');
       return readPage(

@@ -56,8 +56,8 @@ PowerShell 5.1, so accents become ?, and its > writes UTF-16). cmd's < and
   : '';
 
 const RETRYING = `Retrying a change:
-  Give create, draft, attach, publish and copy --idempotency-key KEY, a
-  new KEY for each new change. Running the same command again with the
+  Give create, draft, attach, publish, copy, move and rename
+  --idempotency-key KEY, a new KEY for each new change. Running the same command again with the
   same KEY and the same input never makes the change twice: if the first
   run's answer came back, it is reported again and nothing is sent; if
   not, the first run's exact request is sent again. So retrying with the
@@ -65,7 +65,7 @@ const RETRYING = `Retrying a change:
   says "outcomeUnknown": true: no answer came back, or the server failed,
   so the change may have happened. After any other failure nothing
   changed, and the key is free again. The same KEY with other input
-  (another file, title or revision) is refused while the first run's
+  (another file, title, revision or folder) is refused while the first run's
   change may still land, or has landed.
   The server keeps KEY for a day. A change first sent over a day ago and
   refused now may have been made by the first run, and be what is in the
@@ -97,6 +97,8 @@ Commands:
   import PATH [--space SPACE_ID] [--folder FOLDER_ID] [--from obsidian|joplin]
   folder create --name NAME [--space SPACE_ID] [--parent FOLDER_ID]
   folder copy FOLDER_ID [--space SPACE_ID] [--folder FOLDER_ID]
+  folder move FOLDER_ID --folder FOLDER_ID|top
+  folder rename FOLDER_ID --name NAME
   page read PAGE_ID [--draft] [--revision REVISION_ID]
   page create --folder FOLDER_ID --title TITLE --file PATH|- [--space SPACE_ID]
   page draft PAGE_ID --base REVISION_ID --file PATH|- [--title TITLE]
@@ -108,6 +110,7 @@ Commands:
                   (--preview | --base-copy PUBLISHED_ID|none --attachments all|none|ID,...
                                [--permission-version N])
   page copy PAGE_ID [--space SPACE_ID] [--folder FOLDER_ID]
+  page move PAGE_ID --folder FOLDER_ID|top
   page history PAGE_ID
   page links PAGE_ID
   page download-attachment PAGE_ID ATTACHMENT_ID --out PATH|- [--draft] [--revision REVISION_ID]
@@ -147,7 +150,8 @@ ${
                             command (3<<<..., echo ... |): shell history keeps it`
 }
   --use-passphrase          ask for the passphrase even if a secret store is configured
-  --idempotency-key KEY     for create, draft, attach, publish and copy (see below)
+  --idempotency-key KEY     for create, draft, attach, publish, copy, move and
+                            rename (see below)
   --help                    more about the command
 
 ${RETRYING}
@@ -263,6 +267,37 @@ The same KEY with another ${noun}, --space or --folder makes another copy.
 Without a KEY, look in tree before running a copy again whose outcome is
 unknown.
 `;
+};
+
+/** `page move` and `folder move`'s help, for `page` or `folder`. */
+const moveHelp = (noun: 'page' | 'folder') => {
+  const ID = `${noun.toUpperCase()}_ID`;
+  const what =
+    noun === 'page'
+      ? `Move the page into another folder of its space, or with --folder top,
+to the top of the space, as Move to... does in WikiStow.`
+      : `Move the folder, with every folder and page in it, into another folder
+of its space, or with --folder top, to the top of the space, as Move to...
+does in WikiStow. A folder can't move into itself or a folder in it
+(exit 2).`;
+  return `Usage: ${PROGRAM} ${noun} move ${ID} --folder FOLDER_ID|top
+
+${what} It keeps its ID and every version, so links to it still
+lead to it.
+
+The agent must be able to edit it where it is and where it goes: its
+share and its person both. A move into or out of a shared folder changes
+who can read it, so it is for the space's owners, and refused as
+"forbidden" (exit 1). This agent never moves anything into another space
+either. For those, ask its person: they can use Move to... in WikiStow.
+
+One that is in that folder already is left as it is, and "moved" is
+false. If someone moves it while the move is sent, nothing moves: exit 3,
+and detail.parentId names where it is now. With --json:
+  {"kind":"${noun}","spaceId":"...","nodeId":"...","parentId":"...","moved":true}
+parentId is null for the top of the space.
+
+${RETRYING}`;
 };
 
 /** Each command's own help. */
@@ -462,6 +497,18 @@ For a page an earlier run saved, it lists the links its draft still
 holds as written. encrypted counts the export's encrypted items.
 `,
   'folder copy': copyHelp('folder'),
+  'folder move': moveHelp('folder'),
+  'folder rename': `Usage: ${PROGRAM} folder rename FOLDER_ID --name NAME
+
+Give a folder this agent may edit a new name: its share and its person
+must both allow editing there. Its emoji, colour and image stay as they
+are. NAME is trimmed, and must be 1 to 200 characters. A folder may share
+its name with another beside it. The name it has already changes nothing,
+and "renamed" is false. If someone changes the folder's name or look
+while the rename is sent, nothing is overwritten: exit 3. With --json:
+  {"spaceId":"...","folderId":"...","name":"...","renamed":true}
+
+${RETRYING}`,
   'page read': `Usage: ${PROGRAM} page read PAGE_ID [--draft] [--revision REVISION_ID]
 
 One version's title, Markdown and attachments. Without --draft, the
@@ -630,6 +677,7 @@ the draft with --draft, or --revision. Attachment IDs are listed under
 attachments by page read --json.${PIPES}
 `,
   'page copy': copyHelp('page'),
+  'page move': moveHelp('page'),
   'page history': `Usage: ${PROGRAM} page history PAGE_ID
 
 The published versions, newest first, and who published each.

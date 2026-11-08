@@ -381,6 +381,9 @@ wikistow export --space SPACE_ID --out ~/notes-export --json
 wikistow page read PAGE_ID --draft --json
 wikistow page links PAGE_ID --json
 wikistow folder create --space SPACE_ID --parent FOLDER_ID --name "Network" --json
+wikistow folder rename FOLDER_ID --name "Home network" --idempotency-key KEY --json
+wikistow page move PAGE_ID --folder FOLDER_ID --idempotency-key KEY --json
+wikistow folder move FOLDER_ID --folder top --idempotency-key KEY --json
 wikistow page create --folder FOLDER_ID --title "Network notes" --file network.md --json
 wikistow page attach PAGE_ID --file router-photo.jpg --json
 wikistow page draft PAGE_ID --file network.md --base REVISION_ID --json

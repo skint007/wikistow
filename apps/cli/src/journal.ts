@@ -22,6 +22,7 @@ import {
 import {
   IDEMPOTENCY_KEY_KEPT_MS,
   pageRoutes,
+  sharingRoutes,
   structureRoutes,
   type RouteDef,
 } from '@wikistow/contracts';
@@ -40,12 +41,17 @@ export const IDEMPOTENCY_KEY = /^[A-Za-z0-9_.:-]{1,200}$/;
 /** How long the server surely keeps a key after it went out, less an hour for clocks that differ. */
 const KEY_SURELY_KEPT_MS = IDEMPOTENCY_KEY_KEPT_MS - 60 * 60 * 1000;
 
-/** The changes that take a key: making a folder or page, saving a draft, publishing. */
+/**
+ * The changes that take a key: making a folder or page, saving a draft,
+ * publishing, moving, and renaming a folder.
+ */
 const KEYED: readonly RouteDef[] = [
   structureRoutes.createFolder,
   pageRoutes.createPage,
   pageRoutes.saveDraft,
   pageRoutes.publish,
+  sharingRoutes.move,
+  structureRoutes.updateMetadata,
 ];
 
 const pattern = (route: RouteDef) =>
