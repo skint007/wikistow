@@ -640,6 +640,42 @@ describe('moves and publishes made offline', () => {
     expect(await published(ctx, page)).toEqual({ markdown: 'all done', count: 1 });
   });
 
+  it('send the draft a publish saved first, whose answer was lost, as the page’s own when published again', async () => {
+    const { ctx, queue, page, based, draft, losing, payload } = await device();
+    const ready = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('ready'),
+      seen: null,
+    });
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    const more = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('more'),
+      seen: ready,
+    });
+    const path = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
+    // The draft as it stood lands, but its answer is lost.
+    expect(await queue.send(losing(path))).toBe('offline');
+    expect((await draft()).markdown).toBe('ready');
+
+    // Typed on, and published again.
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('final'),
+      seen: more,
+    });
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await published(ctx, page)).toEqual({ markdown: 'final', count: 1 });
+  });
+
   it('stop a publish of a page changed meanwhile, or given a public link, with why', async () => {
     const { ctx, queue, page, based } = await device();
     await queue.publish({ page, title: 'Plan', draftHead: based });

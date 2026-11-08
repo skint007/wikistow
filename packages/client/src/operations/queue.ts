@@ -439,6 +439,22 @@ export class OfflineQueue {
   }
 
   /**
+   * A publish about to go, or be replaced, while the draft it was saving
+   * first may have landed, its answer lost: the page's change takes that
+   * save on as its own, so it is sent again under the same ID, and what was
+   * typed after goes on top of it, never as a conflict with itself. Only
+   * from within `queueExclusive`.
+   */
+  async #handOver(publish: QueuedPublish) {
+    if (!publish.draft || !publish.sending) return;
+    const change = await this.#page(publish.id);
+    if (!change || change.sending) return;
+    const { revisionId } = publish.sending;
+    const { version, payload } = publish.draft;
+    await this.#write({ ...change, sending: { revisionId, version, payload, partial: false } });
+  }
+
+  /**
    * Save `payload`, the draft of `page` as typed, on this device. Into the
    * page's entry if it has one, keeping its base, unless the person chose
    * to save theirs on top of someone else's after a conflict (`onTop`, or
@@ -730,6 +746,7 @@ export class OfflineQueue {
       await toTrash({ id, node, spaceId, name, ...(tried && { tried: true }) });
       // A page deleted isn't published first.
       const publish = node === 'page' ? await this.#keyed({ kind: 'publish', id }) : null;
+      if (publish?.kind === 'publish') await this.#handOver(publish);
       if (publish) await this.#remove(publish);
       return { outcome: 'waiting' as const, gone: [] };
     });
@@ -794,6 +811,7 @@ export class OfflineQueue {
       const change = await this.#page(page.pageId);
       if (change?.newPage) throw new Error('A page made offline is published once it is made');
       const before = await this.#publish(page.pageId);
+      if (before) await this.#handOver(before);
       await this.#write({
         kind: 'publish',
         id: page.pageId,
@@ -895,6 +913,7 @@ export class OfflineQueue {
   async discard(key: QueueKey): Promise<void> {
     const entry = await this.#store.queueExclusive(async () => {
       const entry = await this.#keyed(key);
+      if (entry?.kind === 'publish') await this.#handOver(entry);
       if (entry) await this.#remove(entry);
       return entry;
     });
