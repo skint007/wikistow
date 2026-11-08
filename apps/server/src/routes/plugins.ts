@@ -2,10 +2,13 @@ import { pluginRoutes } from '@wikistow/contracts';
 import { fileType } from '@wikistow/plugin-sdk/files';
 import {
   listPlugins,
+  pluginDevelopmentFile,
   pluginDraftBuildFile,
   pluginFile,
   privatePlugins,
+  putPluginDevelopment,
   removePlugin,
+  removePluginDevelopment,
   setPluginVisibility,
   uploadPlugin,
   type Database,
@@ -22,6 +25,9 @@ const UPLOAD_LIMIT = { windowSeconds: 600, max: 20 };
 // Each version's files in base64, with room for 500 paths around them.
 const UPLOAD_BODY = 15 * 1024 * 1024;
 const WRITE_LIMIT = { windowSeconds: 60, max: 60 };
+// A development folder's build at each Reload, up to 10 MB, as often as a
+// draft's preview.
+const DEVELOPMENT_LIMIT = { windowSeconds: 600, max: 120 };
 const FETCH_LIMIT = { windowSeconds: 60, max: 120 };
 // A few plugins' files on each page load, cached for good after that; or
 // a desktop fetching every file of the versions it installs (up to 500 each).
@@ -30,6 +36,8 @@ const FILE_LIMIT = { windowSeconds: 60, max: 2000 };
 const FILE = /^\/plugins\/([^/]+)\/([^/]+)\/(.+)$/;
 // A draft build's key (ADR 0004), apart from the installed copy's bare hash.
 const DRAFT_KEY = /^draft-([0-9a-f]{64})$/;
+// A development build's key (#317).
+const DEVELOPMENT_KEY = /^dev-([0-9a-f]{64})$/;
 
 /** The plugin library (ADR 0002, `pluginRoutes`): people only, never agents. */
 export function mountPluginRoutes(
@@ -100,12 +108,39 @@ export function mountPluginRoutes(
     { rateLimit: WRITE_LIMIT },
   );
 
+  routes.account(
+    pluginRoutes.putDevelopment,
+    ({ params, body }, { principal }) =>
+      putPluginDevelopment(db, {
+        accountId: principal.accountId,
+        pluginId: params.pluginId,
+        files: body.files.map(({ path, data }) => ({ path, data: Buffer.from(data, 'base64url') })),
+      }).catch(toApiError),
+    { rateLimit: DEVELOPMENT_LIMIT, bodyLimit: UPLOAD_BODY },
+  );
+
+  routes.account(
+    pluginRoutes.removeDevelopment,
+    async ({ params }, { principal }) => {
+      await removePluginDevelopment(db, {
+        accountId: principal.accountId,
+        pluginId: params.pluginId,
+      });
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
   // A library version's file under its hash, or one of the caller's own
-  // draft builds' under `draft-<hash>`.
+  // draft builds' under `draft-<hash>` or development builds' under `dev-<hash>`.
   const fileFor = (accountId: string, pluginId: string, key: string, path: string) => {
     const draft = DRAFT_KEY.exec(key)?.[1];
     if (draft !== undefined) {
       return pluginDraftBuildFile(db, { accountId, pluginId, hash: draft, path });
+    }
+    const development = DEVELOPMENT_KEY.exec(key)?.[1];
+    if (development !== undefined) {
+      return pluginDevelopmentFile(db, { accountId, pluginId, hash: development, path });
     }
     return pluginRoutes.PluginHash.safeParse(key).success
       ? pluginFile(db, plugins, { pluginId, hash: key, path })

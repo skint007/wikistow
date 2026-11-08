@@ -26,4 +26,5 @@ export * from './copies.ts';
 export * from './public-links.ts';
 export * from './plugins.ts';
 export * from './plugin-drafts.ts';
+export * from './plugin-development.ts';
 export * from './relations.ts';
