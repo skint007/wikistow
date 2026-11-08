@@ -11,7 +11,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Mermaid diagrams now draw in the browser after an offline reload. The diagram frame's files are named by their hashes under `/assets/diagram/`, so the browser's cache keeps them, and the service worker fetches them once when it installs. A diagram that can't draw offline shows its source and says so at once, instead of "Drawing diagram…" for two minutes. (#342)
 - The search box is a command palette too: type `>` first, or open it with Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, to run what you could do where you are by typing its name. It lists the page's commands, such as Edit page, Publish, Move to… and Find on page, the space's (Export space…, and for owners Share space… and Delete space…), Lock vault, Change theme…, each plugin's settings, and the running plugins' commands under their plugin's name. Letters match in order, best matches first, then the commands you ran last, kept on this device. (#345)
 
-- Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#330)
+- Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#347)
 
 #### Plugins
 
