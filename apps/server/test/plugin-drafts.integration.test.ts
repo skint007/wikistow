@@ -1,12 +1,14 @@
 // Plugin drafts on the server (ADR 0004, D2): only their owner reaches a
 // draft or its build's files, an 11th draft needs `replaces`, and a draft
 // keeps within the workshop's limits. Agents are refused with every other
-// people-only route in agents.integration.test.ts.
+// people-only route in agents.integration.test.ts. A shared draft (#315)
+// reaches the people its owner names, each with their own build and workshop.
 import { ApiError, createApiClient } from '@wikistow/client';
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import { pluginHash } from '@wikistow/plugin-sdk/files';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
+import { personWithVault } from './support/content.ts';
 import { Browser, createTestApp, type TestApp } from './support/harness.ts';
 
 let t: TestApp;
@@ -322,5 +324,104 @@ describe('plugin drafts', () => {
     expect(await keep(kept, 2)).toEqual({ revision: 3 });
     await api(cal).call(pluginDraftRoutes.deleteDraft, { params });
     expect(await errorCode(read())).toBe('not-found');
+  });
+});
+
+describe('shared plugin drafts (#315)', () => {
+  it('reach the people their owner names, each with their own build and workshop', async () => {
+    const [ann, bob, cal] = await Promise.all([
+      personWithVault(t),
+      personWithVault(t),
+      personWithVault(t),
+    ]);
+    const idOf = (person: typeof ann) => person.vault.identity.public.id;
+    const { draft } = await create(ann, {
+      files: [{ path: 'wikistow-plugin.json', text: MANIFEST }],
+    });
+    const params = { draftId: draft.id };
+    const share = (person: Person, identityId: string) =>
+      api(person).call(pluginDraftRoutes.shareDraft, { params, body: { identityId } });
+    const unshare = (person: Person, identityId: string) =>
+      api(person).call(pluginDraftRoutes.unshareDraft, { params: { ...params, identityId } });
+    const read = (person: Person) => api(person).call(pluginDraftRoutes.getDraft, { params });
+
+    // Only the owner shares, and not with themselves.
+    expect(await errorCode(share(bob, idOf(bob)))).toBe('not-found');
+    expect(await errorCode(share(ann, idOf(ann)))).toBe('invalid-request');
+    expect(await errorCode(read(bob))).toBe('not-found');
+    const bobName = bob.email.split('@')[0];
+    expect((await share(ann, idOf(bob))).people).toEqual([
+      { identityId: idOf(bob), name: bobName },
+    ]);
+    expect((await share(ann, idOf(bob))).people).toHaveLength(1);
+
+    // Bob reads and changes its files, and lists it apart from his own drafts.
+    expect((await read(bob)).files.map((f) => f.path)).toEqual(['wikistow-plugin.json']);
+    await api(bob).call(pluginDraftRoutes.changeDraft, {
+      params,
+      body: { put: [{ path: 'src/ui.tsx', text: 'export {};' }] },
+    });
+    expect((await read(ann)).files.map((f) => f.path)).toEqual([
+      'src/ui.tsx',
+      'wikistow-plugin.json',
+    ]);
+    expect((await api(bob).call(pluginDraftRoutes.listDrafts)).drafts).toEqual([]);
+    expect((await api(bob).call(pluginDraftRoutes.listSharedDrafts)).drafts).toEqual([
+      { draft: (await read(ann)).draft, owner: { name: ann.email.split('@')[0] } },
+    ]);
+    // Cal still reaches nothing; Bob doesn't delete it, share it, or see whom it's shared with.
+    expect(await errorCode(read(cal))).toBe('not-found');
+    expect(await status(bob, `/api/plugin-drafts/${draft.id}`, 'DELETE')).toBe(404);
+    expect(await errorCode(share(bob, idOf(cal)))).toBe('not-found');
+    expect(await status(bob, `/api/plugin-drafts/${draft.id}/shares`)).toBe(404);
+
+    // Each keeps a workshop of their own, which the other never reads.
+    const keep = (person: Person, workshop: { who: string }, revision: number) =>
+      api(person).call(pluginDraftRoutes.putDraftWorkshop, {
+        params,
+        body: { workshop, revision },
+      });
+    const kept = (person: Person) =>
+      api(person).call(pluginDraftRoutes.getDraftWorkshop, { params });
+    expect(await keep(ann, { who: 'ann' }, 0)).toEqual({ revision: 1 });
+    expect(await kept(bob)).toEqual({ workshop: null, revision: 0 });
+    expect(await keep(bob, { who: 'bob' }, 0)).toEqual({ revision: 1 });
+    expect(await kept(ann)).toEqual({ workshop: { who: 'ann' }, revision: 1 });
+    expect(await errorCode(keep(bob, { who: 'bob' }, 0))).toBe('stale-head');
+
+    // Each has a build of their own, served to them alone.
+    const buildOf = async (person: Person, text: string) => {
+      const files = { 'wikistow-plugin.json': MANIFEST, 'ui.js': text };
+      const { hash } = await api(person).call(pluginDraftRoutes.putDraftBuild, {
+        params,
+        body: {
+          files: Object.entries(files).map(([path, data]) => ({
+            path,
+            data: Buffer.from(data).toString('base64url'),
+          })),
+        },
+      });
+      return pluginDraftRoutes.draftFileUrl('notes', hash, 'ui.js');
+    };
+    const annBuild = await buildOf(ann, 'export const v = 1;');
+    const bobBuild = await buildOf(bob, 'export const v = 2;');
+    expect(await status(ann, annBuild)).toBe(200);
+    expect(await status(bob, bobBuild)).toBe(200);
+    expect(await status(bob, annBuild)).toBe(404);
+    expect(await status(ann, bobBuild)).toBe(404);
+
+    // Bob leaves it, taking his build and workshop; Ann's stay.
+    await unshare(bob, idOf(bob));
+    expect(await errorCode(read(bob))).toBe('not-found');
+    expect(await status(bob, bobBuild)).toBe(404);
+    expect(await status(ann, annBuild)).toBe(200);
+    await share(ann, idOf(bob));
+    expect(await kept(bob)).toEqual({ workshop: null, revision: 0 });
+    // Ann stops sharing it; her own things stay.
+    await unshare(ann, idOf(bob));
+    await unshare(ann, idOf(ann));
+    expect(await errorCode(read(bob))).toBe('not-found');
+    expect((await api(ann).call(pluginDraftRoutes.getDraftShares, { params })).people).toEqual([]);
+    expect(await kept(ann)).toEqual({ workshop: { who: 'ann' }, revision: 1 });
   });
 });

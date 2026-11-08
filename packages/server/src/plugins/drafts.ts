@@ -1,14 +1,18 @@
 import { pluginDraftRoutes } from '@wikistow/contracts';
 import type { Json } from '@wikistow/plugin-sdk';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
-import { and, count, desc, eq, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { ContentError } from '../content/errors.ts';
 import type { Database } from '../db/client.ts';
 import {
+  identities,
   pluginDraftBuildFiles,
+  pluginDraftBuilds,
   pluginDraftFiles,
   pluginDrafts,
+  pluginDraftShares,
+  pluginDraftWorkshops,
   plugins,
   pluginVersions,
   users,
@@ -18,9 +22,10 @@ import type { PluginStore } from './store.ts';
 
 /*
  * Plugin drafts (ADR 0004): the workshop's files as the assistant last
- * saved them, at most `MAX_DRAFTS` per account, each with the one build a
- * browser last previewed. Every function takes the caller's account, and
- * another account's draft is `not-found`, the same as a missing one.
+ * saved them, at most `MAX_DRAFTS` per account, each with the build each
+ * person's browser last previewed. Every function takes the caller's
+ * account. A draft reaches its owner and the people they shared it with
+ * (#315); anyone else's is `not-found`, the same as a missing one.
  */
 
 const {
@@ -28,6 +33,7 @@ const {
   DraftFile,
   isBinaryDraftPath,
   MAX_DRAFTS,
+  MAX_DRAFT_SHARES,
   MAX_DRAFT_BINARY_FILE_BYTES,
   MAX_DRAFT_BYTES,
   MAX_DRAFT_FILE_BYTES,
@@ -46,6 +52,13 @@ type DraftBytes = { path: string; data: Uint8Array };
 type Draft = { accountId: string; draftId: string };
 
 const notFound = () => new ContentError('not-found', 'No such plugin draft');
+
+/** Drafts `accountId` reaches: their own, and those shared with them. */
+const reaches = (accountId: string) =>
+  or(
+    eq(pluginDrafts.ownerId, accountId),
+    sql`exists (select 1 from ${pluginDraftShares} where ${pluginDraftShares.draftId} = ${pluginDrafts.id} and ${pluginDraftShares.accountId} = ${accountId})`,
+  );
 const invalid = (message: string) => new ContentError('invalid-plugin', message);
 
 // The manifest's `id` and `name`, when its JSON has them as strings.
@@ -132,33 +145,45 @@ async function summaries(db: Database, where: SQL | undefined) {
   }));
 }
 
+/** A draft the caller reaches. */
 async function summaryOf(db: Database, { accountId, draftId }: Draft) {
-  const [summary] = await summaries(
-    db,
-    and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)),
-  );
+  const [summary] = await summaries(db, and(eq(pluginDrafts.id, draftId), reaches(accountId)));
   if (!summary) throw notFound();
   return summary;
 }
 
-/** The draft, locked for this transaction, if it is the caller's. */
+/** The draft, locked for this transaction, if the caller reaches it. */
 async function lockDraft(tx: Database, { accountId, draftId }: Draft) {
   const [draft] = await tx
     .select({ id: pluginDrafts.id })
     .from(pluginDrafts)
-    .where(and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)))
+    .where(and(eq(pluginDrafts.id, draftId), reaches(accountId)))
     .for('update');
   if (!draft) throw notFound();
 }
 
-/** Whether `draftId` is the caller's: checked before a large body is read. */
-export async function checkPluginDraftOwner(db: Database, draft: Draft) {
+/** Whether the caller reaches `draftId`: checked before a large body is read. */
+export async function checkPluginDraftAccess(db: Database, draft: Draft) {
   await summaryOf(db, draft);
 }
 
 /** The caller's drafts, most recently changed first. */
 export const listPluginDrafts = (db: Database, accountId: string) =>
   summaries(db, eq(pluginDrafts.ownerId, accountId));
+
+/** Drafts others shared with the caller, most recently changed first, with their owners' names. */
+export async function listSharedPluginDrafts(db: Database, accountId: string) {
+  const shared = await db
+    .select({ draftId: pluginDraftShares.draftId, owner: users.name })
+    .from(pluginDraftShares)
+    .innerJoin(pluginDrafts, eq(pluginDrafts.id, pluginDraftShares.draftId))
+    .innerJoin(users, eq(users.id, pluginDrafts.ownerId))
+    .where(eq(pluginDraftShares.accountId, accountId));
+  if (shared.length === 0) return [];
+  const owners = new Map(shared.map(({ draftId, owner }) => [draftId, owner]));
+  const drafts = await summaries(db, inArray(pluginDrafts.id, [...owners.keys()]));
+  return drafts.map((draft) => ({ draft, owner: { name: owners.get(draft.id) ?? '' } }));
+}
 
 /** A draft and every text file's text, by path. */
 export async function readPluginDraft(db: Database, draft: Draft) {
@@ -402,24 +427,31 @@ export async function changePluginDraft(
   });
 }
 
-/** The workshop kept with a draft (#314), as the app sent it, or null, and its revision. */
-export async function readPluginDraftWorkshop(db: Database, { accountId, draftId }: Draft) {
+/**
+ * The workshop the caller keeps with a draft (#314), as their app sent it,
+ * or null, and its revision: their own, whoever else reaches the draft.
+ */
+export async function readPluginDraftWorkshop(db: Database, draft: Draft) {
+  await summaryOf(db, draft);
   const [row] = await db
-    .select({ workshop: pluginDrafts.workshop, revision: pluginDrafts.workshopRevision })
-    .from(pluginDrafts)
-    .where(and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)));
-  if (!row) throw notFound();
+    .select({ workshop: pluginDraftWorkshops.workshop, revision: pluginDraftWorkshops.revision })
+    .from(pluginDraftWorkshops)
+    .where(yourWorkshop(draft));
   return {
-    workshop: row.workshop === null ? null : z.json().parse(JSON.parse(row.workshop)),
-    revision: row.revision,
+    workshop: row?.workshop == null ? null : z.json().parse(JSON.parse(row.workshop)),
+    revision: row?.revision ?? 0,
   };
 }
 
+const yourWorkshop = ({ accountId, draftId }: Draft) =>
+  and(eq(pluginDraftWorkshops.draftId, draftId), eq(pluginDraftWorkshops.accountId, accountId));
+
 /**
- * Keep `workshop` with a draft, or with null forget it, refused past
- * `MAX_DRAFT_WORKSHOP_BYTES`. A save names the `revision` it follows, and
- * is refused with `stale-head` after another; a clear (`null`) names
- * none. The new revision. The draft stays where it is in the list.
+ * Keep `workshop` with a draft for the caller, or with null forget it,
+ * refused past `MAX_DRAFT_WORKSHOP_BYTES`. A save names the `revision` it
+ * follows, 0 before the first, and is refused with `stale-head` after
+ * another; a clear (`null`) names none. The new revision. The draft stays
+ * where it is in the list.
  */
 export async function putPluginDraftWorkshop(
   db: Database,
@@ -438,21 +470,33 @@ export async function putPluginDraftWorkshop(
       `A draft keeps ${MAX_DRAFT_WORKSHOP_BYTES / KB} KB of its workshop at most.`,
     );
   }
-  const yours = and(eq(pluginDrafts.id, draft.draftId), eq(pluginDrafts.ownerId, draft.accountId));
-  const [kept] = await db
-    .update(pluginDrafts)
-    .set({ workshop: text, workshopRevision: sql`${pluginDrafts.workshopRevision} + 1` })
-    .where(revision === undefined ? yours : and(yours, eq(pluginDrafts.workshopRevision, revision)))
-    .returning({ revision: pluginDrafts.workshopRevision });
-  if (kept) return kept.revision;
   await summaryOf(db, draft);
+  const next = sql`${pluginDraftWorkshops.revision} + 1`;
+  const [kept] =
+    revision === undefined || revision === 0
+      ? // The first save makes the row; a clear, whatever the revision, counts one more.
+        await db
+          .insert(pluginDraftWorkshops)
+          .values({ ...draft, workshop: text, revision: 1 })
+          .onConflictDoUpdate({
+            target: [pluginDraftWorkshops.draftId, pluginDraftWorkshops.accountId],
+            set: { workshop: text, revision: next },
+            ...(revision === 0 ? { where: eq(pluginDraftWorkshops.revision, 0) } : {}),
+          })
+          .returning({ revision: pluginDraftWorkshops.revision })
+      : await db
+          .update(pluginDraftWorkshops)
+          .set({ workshop: text, revision: next })
+          .where(and(yourWorkshop(draft), eq(pluginDraftWorkshops.revision, revision)))
+          .returning({ revision: pluginDraftWorkshops.revision });
+  if (kept) return kept.revision;
   throw new ContentError(
     'stale-head',
     'The workshop was kept from another device since. Open the draft again to carry on from there.',
   );
 }
 
-/** Delete a draft with its files, build and kept workshop. */
+/** Delete one of the caller's own drafts with its files, builds, kept workshops and shares. */
 export async function deletePluginDraft(db: Database, { accountId, draftId }: Draft) {
   const gone = await db
     .delete(pluginDrafts)
@@ -462,8 +506,8 @@ export async function deletePluginDraft(db: Database, { accountId, draftId }: Dr
 }
 
 /**
- * Replace the draft's build with a built folder, checked as a library
- * upload is (`checkUpload`). Its hash.
+ * Replace the caller's build of a draft they reach with a built folder,
+ * checked as a library upload is (`checkUpload`). Its hash.
  */
 export async function putPluginDraftBuild(
   db: Database,
@@ -472,21 +516,27 @@ export async function putPluginDraftBuild(
   const { byPath, hash } = await checkUpload(files);
   await db.transaction(async (tx) => {
     await lockDraft(tx, draft);
-    await tx.delete(pluginDraftBuildFiles).where(eq(pluginDraftBuildFiles.draftId, draft.draftId));
+    // Its files go with it.
+    await tx
+      .delete(pluginDraftBuilds)
+      .where(
+        and(
+          eq(pluginDraftBuilds.draftId, draft.draftId),
+          eq(pluginDraftBuilds.accountId, draft.accountId),
+        ),
+      );
+    await tx.insert(pluginDraftBuilds).values({ ...draft, hash });
     await tx
       .insert(pluginDraftBuildFiles)
-      .values([...byPath].map(([path, data]) => ({ draftId: draft.draftId, path, data })));
-    await tx
-      .update(pluginDrafts)
-      .set({ buildHash: hash })
-      .where(eq(pluginDrafts.id, draft.draftId));
+      .values([...byPath].map(([path, data]) => ({ ...draft, path, data })));
   });
   return { hash };
 }
 
 /**
- * A file of the caller's own draft build with that hash, if its manifest
- * names `pluginId`: what the file route serves under `draft-<hash>`.
+ * A file of the caller's own build of a draft with that hash, if its
+ * manifest names `pluginId`: what the file route serves under
+ * `draft-<hash>`. Someone a draft is no longer shared with has no build of it.
  */
 export async function pluginDraftBuildFile(
   db: Database,
@@ -500,11 +550,17 @@ export async function pluginDraftBuildFile(
   const rows = await db
     .select({ path: pluginDraftBuildFiles.path, data: pluginDraftBuildFiles.data })
     .from(pluginDraftBuildFiles)
-    .innerJoin(pluginDrafts, eq(pluginDrafts.id, pluginDraftBuildFiles.draftId))
+    .innerJoin(
+      pluginDraftBuilds,
+      and(
+        eq(pluginDraftBuilds.draftId, pluginDraftBuildFiles.draftId),
+        eq(pluginDraftBuilds.accountId, pluginDraftBuildFiles.accountId),
+      ),
+    )
     .where(
       and(
-        eq(pluginDrafts.ownerId, accountId),
-        eq(pluginDrafts.buildHash, hash),
+        eq(pluginDraftBuilds.accountId, accountId),
+        eq(pluginDraftBuilds.hash, hash),
         inArray(pluginDraftBuildFiles.path, [MANIFEST_FILE, path]),
       ),
     );
@@ -514,4 +570,115 @@ export async function pluginDraftBuildFile(
   if (manifestFields(new TextDecoder().decode(manifest.data)).id !== pluginId) return null;
   // A copy on its own `ArrayBuffer`, as a response body takes.
   return new Uint8Array(file.data);
+}
+
+/** The account of a person's live identity, or null. */
+async function accountOf(db: Database, identityId: string) {
+  const [row] = await db
+    .select({ accountId: identities.accountId })
+    .from(identities)
+    .where(
+      and(
+        eq(identities.id, identityId),
+        eq(identities.kind, 'human'),
+        isNull(identities.revokedAt),
+      ),
+    );
+  return row?.accountId ?? null;
+}
+
+/** One of the caller's own drafts, locked for this transaction. */
+async function lockOwn(tx: Database, { accountId, draftId }: Draft) {
+  const [draft] = await tx
+    .select({ id: pluginDrafts.id })
+    .from(pluginDrafts)
+    .where(and(eq(pluginDrafts.id, draftId), eq(pluginDrafts.ownerId, accountId)))
+    .for('update');
+  if (!draft) throw notFound();
+}
+
+/** The people a draft is shared with, by name, oldest share first. */
+async function sharesOf(db: Database, draftId: string) {
+  return db
+    .select({ identityId: identities.id, name: users.name })
+    .from(pluginDraftShares)
+    .innerJoin(users, eq(users.id, pluginDraftShares.accountId))
+    .innerJoin(
+      identities,
+      and(
+        eq(identities.accountId, pluginDraftShares.accountId),
+        eq(identities.kind, 'human'),
+        isNull(identities.revokedAt),
+      ),
+    )
+    .where(eq(pluginDraftShares.draftId, draftId))
+    .orderBy(pluginDraftShares.createdAt);
+}
+
+/** Whom the caller's own draft is shared with. */
+export async function readPluginDraftShares(db: Database, draft: Draft) {
+  await lockOwn(db, draft);
+  return sharesOf(db, draft.draftId);
+}
+
+/**
+ * Share the caller's own draft with the person of `identityId`, up to
+ * `MAX_DRAFT_SHARES`; again does nothing. Whom it's shared with.
+ */
+export async function sharePluginDraft(
+  db: Database,
+  { identityId, ...draft }: Draft & { identityId: string },
+) {
+  return db.transaction(async (tx) => {
+    await lockOwn(tx, draft);
+    const person = await accountOf(tx, identityId);
+    if (!person) throw new ContentError('not-found', 'No such person');
+    if (person === draft.accountId) throw invalid('This draft is yours already.');
+    const [held] = await tx
+      .select({ n: count() })
+      .from(pluginDraftShares)
+      .where(eq(pluginDraftShares.draftId, draft.draftId));
+    if ((held?.n ?? 0) >= MAX_DRAFT_SHARES) {
+      throw invalid(`A draft is shared with ${MAX_DRAFT_SHARES} people at most.`);
+    }
+    await tx
+      .insert(pluginDraftShares)
+      .values({ draftId: draft.draftId, accountId: person })
+      .onConflictDoNothing();
+    return sharesOf(tx, draft.draftId);
+  });
+}
+
+/**
+ * Stop sharing a draft with the person of `identityId`: the owner stops
+ * sharing with anyone, or the person leaves it. Their build and kept
+ * workshop of it go too.
+ */
+export async function unsharePluginDraft(
+  db: Database,
+  { identityId, ...draft }: Draft & { identityId: string },
+) {
+  const person = await accountOf(db, identityId);
+  await db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ ownerId: pluginDrafts.ownerId })
+      .from(pluginDrafts)
+      .where(and(eq(pluginDrafts.id, draft.draftId), reaches(draft.accountId)))
+      .for('update');
+    if (!row || (row.ownerId !== draft.accountId && person !== draft.accountId)) throw notFound();
+    // Not shared with someone who isn't a person; the owner's own things stay.
+    if (!person || person === row.ownerId) return;
+    const { draftId } = draft;
+    await tx
+      .delete(pluginDraftShares)
+      .where(and(eq(pluginDraftShares.draftId, draftId), eq(pluginDraftShares.accountId, person)));
+    await tx
+      .delete(pluginDraftBuilds)
+      .where(and(eq(pluginDraftBuilds.draftId, draftId), eq(pluginDraftBuilds.accountId, person)));
+    await tx
+      .delete(pluginDraftWorkshops)
+      .where(
+        and(eq(pluginDraftWorkshops.draftId, draftId), eq(pluginDraftWorkshops.accountId, person)),
+      );
+  });
 }
