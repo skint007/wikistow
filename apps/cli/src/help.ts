@@ -376,7 +376,9 @@ standard input is the client's.`
       : `, or with
 --passphrase-fd N, read once when it starts and kept in memory until it
 stops (not 0: standard input is the client's). It can't ask for the
-passphrase.`
+passphrase. A client opens no descriptor for it, so start it through a
+shell that does, with a file only you can read:
+  sh -c 'exec ${PROGRAM} mcp --passphrase-fd 3 3<"$HOME/.${PROGRAM}-passphrase"'`
   }
 
 When it starts, it unlocks the key file once. If that fails (not
