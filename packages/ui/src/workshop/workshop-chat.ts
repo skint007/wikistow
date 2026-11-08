@@ -25,6 +25,8 @@ const REFERENCE = [
 
 /** A moment after the last change, the workshop is kept with its draft. */
 const KEEP_AFTER_MS = 1500;
+/** And within this of the first unkept one, while changes keep coming. */
+const KEEP_WITHIN_MS = 10_000;
 
 /**
  * One message the person sent, as they wrote it; the page they copied into
@@ -76,6 +78,8 @@ export class WorkshopChat {
   readonly #restored: Promise<void>;
   #keeping: Keeping = { status: 'reading', problem: null };
   #timer: ReturnType<typeof setTimeout> | undefined;
+  /** When the first change not yet sent was made. */
+  #unkeptSince: number | null = null;
   /** What was last sent to be kept, to send nothing when nothing changed. */
   #lastKept: string | null = null;
   /** Saves whose answers were lost since the last that wasn't, any of which may have landed. */
@@ -172,7 +176,8 @@ export class WorkshopChat {
   #changed(now = false) {
     if (this.#done) return;
     clearTimeout(this.#timer);
-    if (now) this.#keep();
+    this.#unkeptSince ??= Date.now();
+    if (now || Date.now() - this.#unkeptSince >= KEEP_WITHIN_MS) this.#keep();
     else this.#timer = setTimeout(() => this.#keep(), KEEP_AFTER_MS);
   }
 
@@ -200,6 +205,7 @@ export class WorkshopChat {
   /** Send the workshop as it is now to be kept, after any save under way. */
   #keep() {
     clearTimeout(this.#timer);
+    this.#unkeptSince = null;
     if (this.#keeping.status !== 'kept' || this.session.state().status === 'closed') return;
     // Ended while opening, with nothing done here: nothing to keep.
     if (!this.#opened && !this.#touched) return;
