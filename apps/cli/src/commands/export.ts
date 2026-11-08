@@ -1,5 +1,5 @@
 // `wikistow export`: what this agent can read, as Markdown files on disk.
-import { exportOperations, type FolderId, type SpaceId } from '@wikistow/client';
+import { exportOperations, type FolderId, type LinkStyle, type SpaceId } from '@wikistow/client';
 import {
   closeSync,
   constants,
@@ -23,7 +23,8 @@ import { spaceOfFolder, withAgent, type ContentArgs } from './content.ts';
  * `export [--space S] [--folder F] --out DIR`: every page this agent can
  * read, each as `page read` would show it (the draft if it edits the page),
  * as one `.md` file in folders that mirror the tree, with attachments in
- * `attachments/` and wikilinks naming the files written. `--space` exports
+ * `attachments/` and wikilinks naming the files written, or with `--links
+ * markdown`, relative Markdown links to them. `--space` exports
  * one space, `--folder` one folder; without either, each space goes in a
  * folder of its own. DIR must be empty or not exist yet. Folders are made
  * mode 700 and files 600, never over anything there, and if the export
@@ -33,7 +34,12 @@ import { spaceOfFolder, withAgent, type ContentArgs } from './content.ts';
 export async function exportMarkdown(
   io: Io,
   out: Printer,
-  args: ContentArgs & { spaceId: SpaceId | null; folderId: FolderId | null; out: string },
+  args: ContentArgs & {
+    spaceId: SpaceId | null;
+    folderId: FolderId | null;
+    out: string;
+    links: LinkStyle;
+  },
   deps: Deps,
 ) {
   const dir = new OutDir(args.out);
@@ -48,6 +54,7 @@ export async function exportMarkdown(
           : { spaceId, ...(args.folderId === null ? {} : { folderId: args.folderId }) };
       return exportOperations.exportMarkdown(ctx, {
         ...(scope ? { scope } : {}),
+        links: args.links,
         write: (entry) =>
           entry.kind === 'dir' ? dir.mkdir(entry.path) : dir.write(entry.path, entry.bytes),
       });
@@ -56,10 +63,24 @@ export async function exportMarkdown(
     dir.undo();
     throw error;
   }
-  const { pages, attachments, skipped, unread } = summary;
-  out.result({ out: args.out, pages, attachments, skipped, unread }, () => {
+  const { pages, attachments, skipped, unread, wikilinks } = summary;
+  const markdown = args.links === 'markdown';
+  const result = {
+    out: args.out,
+    pages,
+    attachments,
+    skipped,
+    unread,
+    ...(markdown && { wikilinks }),
+  };
+  out.result(result, () => {
     const files = `${pages.length} page${pages.length === 1 ? '' : 's'} and ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`;
     out.line(`Exported ${files} to ${args.out}`);
+    if (markdown && wikilinks > 0) {
+      out.note(
+        `${wikilinks} wikilink${wikilinks === 1 ? '' : 's'} left as written: page embeds, and links to pages not exported or not found`,
+      );
+    }
     for (const item of skipped) {
       if (!('attachmentId' in item)) {
         out.note(`Left out page ${item.pageId}: it couldn't be opened`);
