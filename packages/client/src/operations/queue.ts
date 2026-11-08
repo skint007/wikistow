@@ -5,6 +5,7 @@ import {
   type InstallationId,
   MetadataRevisionId,
   PageId,
+  publicLinkRoutes,
   RevisionId,
   SpaceId,
   type pageRoutes,
@@ -21,11 +22,14 @@ import { parsePayload, type AttachmentRef, type PagePayload } from '../payload.t
 import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.ts';
 import { resealAttachment, sealAttachment } from '../revision.ts';
 import type { ReadWikilinks } from '../link-table.ts';
+import { moveNode, previewMove } from './moves.ts';
 import {
   attachmentTarget,
   createPage,
   deleteNode,
   labelCover,
+  loadPage,
+  publishPage,
   saveDraft,
   uploadBlob,
   type PageRef,
@@ -156,13 +160,61 @@ const QueuedDeleteJson = z.strictObject({
 });
 export type QueuedDelete = z.output<typeof QueuedDeleteJson>;
 
+/**
+ * A page or folder the server has, moved within its space offline (#331):
+ * under `parentId`, or to the top of the space for null. Only a move
+ * within one share waits here, as one across a share's edge changes who
+ * can read it. A later move takes the place of this one. `name` names it
+ * should the server refuse. Nothing is recorded before its request: the
+ * item's place says whether a move whose answer was lost landed.
+ */
+const QueuedMoveJson = z.strictObject({
+  kind: z.literal('move'),
+  id: z.union([PageId, FolderId]),
+  node: z.enum(['page', 'folder']),
+  spaceId: SpaceId,
+  name: z.string(),
+  parentId: FolderId.nullable(),
+  failure: Failure.nullable(),
+  at: z.number(),
+});
+export type QueuedMove = z.output<typeof QueuedMoveJson>;
+
+/**
+ * A page published offline (#331): the draft it publishes, `draftHead`,
+ * once the server has it, and until then the page's change as it stood
+ * when the person pressed Publish (`draft`, at that change's `version`),
+ * so what is typed after goes after it. `sending` is the version about to
+ * be sent, under its ID: that draft's, then the publication's.
+ */
+const QueuedPublishJson = z.strictObject({
+  kind: z.literal('publish'),
+  id: PageId,
+  spaceId: SpaceId,
+  title: z.string(),
+  draftHead: RevisionId.nullable(),
+  draft: z.strictObject({ version: z.number().int(), payload: Payload }).nullable(),
+  sending: z.strictObject({ revisionId: RevisionId }).nullable(),
+  failure: Failure.nullable(),
+  at: z.number(),
+});
+export type QueuedPublish = z.output<typeof QueuedPublishJson>;
+
 const QueueEntryJson = z.discriminatedUnion('kind', [
   QueuedPageJson,
   QueuedFolderJson,
   QueuedRenameJson,
   QueuedDeleteJson,
+  QueuedMoveJson,
+  QueuedPublishJson,
 ]);
-export type QueueEntry = QueuedPage | QueuedFolder | QueuedRename | QueuedDelete;
+export type QueueEntry =
+  | QueuedPage
+  | QueuedFolder
+  | QueuedRename
+  | QueuedDelete
+  | QueuedMove
+  | QueuedPublish;
 
 /**
  * Which entry: a page or folder has at most one of each kind. Its own
@@ -172,7 +224,12 @@ export type QueueEntry = QueuedPage | QueuedFolder | QueuedRename | QueuedDelete
 export type QueueKey = Pick<QueueEntry, 'kind' | 'id'>;
 
 // The kinds of change a page or folder can have waiting beside its own entry.
-const CHANGE_KINDS = ['rename', 'delete'] as const satisfies readonly QueueEntry['kind'][];
+const CHANGE_KINDS = [
+  'rename',
+  'delete',
+  'move',
+  'publish',
+] as const satisfies readonly QueueEntry['kind'][];
 
 /** Whether `entry` is the item itself made offline, which the server doesn't have yet. */
 export const madeOffline = (entry: QueueEntry): entry is QueuedFolder | QueuedPage =>
@@ -222,6 +279,15 @@ export async function queuedChanges(store: KeptStore): Promise<number> {
   const items = await store.queue.list();
   return items.filter((item) => item.name.startsWith(ENTRY)).length;
 }
+
+// The files an entry names, by hash: a draft's, and the one being sent.
+const filesOf = (entry: QueueEntry): string[] =>
+  (entry.kind === 'page'
+    ? [...entry.payload.attachments, ...(entry.sending?.payload.attachments ?? [])]
+    : entry.kind === 'publish' && entry.draft
+      ? entry.draft.payload.attachments
+      : []
+  ).map((ref) => ref.blobHash);
 
 // Whether a page made offline needs two steps: uploads need the page.
 const hasFiles = (payload: PagePayload) => payload.attachments.length > 0;
@@ -365,6 +431,11 @@ export class OfflineQueue {
   async #rename(folderId: FolderId): Promise<QueuedRename | null> {
     const entry = await this.#keyed({ kind: 'rename', id: folderId });
     return entry?.kind === 'rename' ? entry : null;
+  }
+
+  async #publish(pageId: PageId): Promise<QueuedPublish | null> {
+    const entry = await this.#keyed({ kind: 'publish', id: pageId });
+    return entry?.kind === 'publish' ? entry : null;
   }
 
   /**
@@ -633,6 +704,10 @@ export class OfflineQueue {
     /** A request for it already went, and got no answer. */
     tried?: boolean;
   }): Promise<'dropped' | 'waiting'> {
+    const toTrash = async (entry: Omit<QueuedDelete, 'kind' | 'failure' | 'at'>) => {
+      if (await this.#keyed({ kind: 'delete', id: entry.id })) return;
+      await this.#write({ kind: 'delete', ...entry, failure: null, at: this.#at() });
+    };
     const { outcome, gone } = await this.#store.queueExclusive(async () => {
       const own = await this.entry(id);
       if (own && droppedOnDelete(own)) {
@@ -644,25 +719,93 @@ export class OfflineQueue {
           at === id || (at != null && inside(parents.get(at)));
         const gone = entries.filter((entry) => madeOffline(entry) && inside(entry.id));
         for (const entry of gone) await this.#remove(entry);
+        // What was moved into it goes to the trash with it, as it would online.
+        for (const entry of entries) {
+          if (entry.kind !== 'move' || !inside(entry.parentId)) continue;
+          await this.#remove(entry);
+          await toTrash({ id: entry.id, node: entry.node, spaceId, name: entry.name });
+        }
         return { outcome: 'dropped' as const, gone };
       }
-      if (!(await this.#keyed({ kind: 'delete', id }))) {
-        await this.#write({
-          kind: 'delete',
-          id,
-          node,
-          spaceId,
-          name,
-          ...(tried && { tried: true }),
-          failure: null,
-          at: this.#at(),
-        });
-      }
+      await toTrash({ id, node, spaceId, name, ...(tried && { tried: true }) });
+      // A page deleted isn't published first.
+      const publish = node === 'page' ? await this.#keyed({ kind: 'publish', id }) : null;
+      if (publish) await this.#remove(publish);
       return { outcome: 'waiting' as const, gone: [] };
     });
     for (const entry of gone) this.#emit({ kind: 'changed', spaceId, id: entry.id });
     this.#emit({ kind: 'changed', spaceId, id });
     return outcome;
+  }
+
+  /**
+   * Move a page or folder within its space on this device, under `parentId`
+   * (null: the top of the space), within one share (#331). One made offline,
+   * and never sent, moves in its own entry. Another waits in its move entry,
+   * after the changes made before it, a later move taking the place of an
+   * earlier one.
+   */
+  async move({
+    spaceId,
+    id,
+    node,
+    name,
+    parentId,
+  }: {
+    spaceId: SpaceId;
+    id: PageId | FolderId;
+    node: 'page' | 'folder';
+    name: string;
+    parentId: FolderId | null;
+  }): Promise<void> {
+    await this.#store.queueExclusive(async () => {
+      const own = await this.entry(id);
+      if (own?.kind === 'folder' && !mayHaveLanded(own)) return this.#write({ ...own, parentId });
+      if (own?.kind === 'page' && own.newPage && !mayHaveLanded(own)) {
+        return this.#write({ ...own, newPage: { ...own.newPage, parentId } });
+      }
+      const before = await this.#keyed({ kind: 'move', id });
+      await this.#write(
+        before?.kind === 'move'
+          ? { ...before, parentId, failure: null }
+          : { kind: 'move', id, node, spaceId, name, parentId, failure: null, at: this.#at() },
+      );
+    });
+    this.#emit({ kind: 'changed', spaceId, id });
+  }
+
+  /**
+   * Publish a page on this device (#331): its draft as it stands now, the
+   * page's change waiting here if it has one, else `draftHead`, the
+   * server's. Sent after that change, and before what is typed after.
+   * Publishing again takes the place of a publish still waiting.
+   */
+  async publish({
+    page,
+    title,
+    draftHead,
+  }: {
+    page: PageRef;
+    title: string;
+    draftHead: RevisionId;
+  }): Promise<void> {
+    await this.#store.queueExclusive(async () => {
+      const change = await this.#page(page.pageId);
+      if (change?.newPage) throw new Error('A page made offline is published once it is made');
+      const before = await this.#publish(page.pageId);
+      await this.#write({
+        kind: 'publish',
+        id: page.pageId,
+        spaceId: page.spaceId,
+        title: change?.payload.title ?? title,
+        draftHead: change ? null : draftHead,
+        draft: change ? { version: change.version, payload: change.payload } : null,
+        sending: null,
+        failure: null,
+        at: before?.at ?? this.#at(),
+      });
+    });
+    this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
   }
 
   /**
@@ -701,15 +844,11 @@ export class OfflineQueue {
    * about to name it. Only from within `queueExclusive`.
    */
   async #remove(entry: QueueEntry) {
-    const files = (page: QueuedPage) =>
-      [...page.payload.attachments, ...(page.sending?.payload.attachments ?? [])].map(
-        (ref) => ref.blobHash,
-      );
     const others = (await this.entries()).filter(
       (other) => other.id !== entry.id || other.kind !== entry.kind,
     );
-    const named = new Set(others.flatMap((other) => (other.kind === 'page' ? files(other) : [])));
-    const own = entry.kind === 'page' ? [...new Set(files(entry))] : [];
+    const named = new Set(others.flatMap(filesOf));
+    const own = [...new Set(filesOf(entry))];
     const names = own.filter((blobHash) => !named.has(blobHash)).map((h) => this.#blobName(h));
     await this.#store.queue.remove([this.#entryName(entry), ...names]);
   }
@@ -743,11 +882,7 @@ export class OfflineQueue {
     const held = await this.held(refs);
     if (held.length === 0) return;
     await this.#store.queueExclusive(async () => {
-      const named = new Set(
-        (await this.entries()).flatMap((entry) =>
-          entry.kind === 'page' ? entry.payload.attachments.map((ref) => ref.blobHash) : [],
-        ),
-      );
+      const named = new Set((await this.entries()).flatMap(filesOf));
       const names = held
         .filter((ref) => !named.has(ref.blobHash))
         .map((ref) => this.#blobName(ref.blobHash));
@@ -881,20 +1016,37 @@ export class OfflineQueue {
       const folders = new Map(
         entries.flatMap((entry) => (entry.kind === 'folder' ? [[entry.id, entry]] : [])),
       );
+      const drafts = new Map(
+        entries.flatMap((entry) => (entry.kind === 'page' ? [[entry.id, entry]] : [])),
+      );
+      const publishes = new Map(
+        entries.flatMap((entry) => (entry.kind === 'publish' ? [[entry.id, entry]] : [])),
+      );
       let next: QueueEntry | undefined;
       for (const entry of entries) {
         if (entry.failure) continue;
-        const parentId = madeOffline(entry) ? parentOf(entry) : null;
+        // Where it goes, made offline: a folder that must be made first.
+        const parentId = madeOffline(entry)
+          ? parentOf(entry)
+          : entry.kind === 'move'
+            ? entry.parentId
+            : null;
         const parent = parentId ? folders.get(parentId) : undefined;
         if (parent?.failure?.kind === 'gone') {
           await this.#stop(entry, { kind: 'gone' });
           continue;
         }
         if (parent) continue;
-        // A delete waits while a change to the same item waits for the
-        // person, as its draft goes first, into the trash with it.
+        // A delete or publish waits while a change to the same item waits
+        // for the person, as its draft goes first.
         const held = entries.some((other) => other.id === entry.id && other.failure);
-        if (entry.kind === 'delete' && held) continue;
+        if ((entry.kind === 'delete' || entry.kind === 'publish') && held) continue;
+        // A publish goes between its draft as it stood and what was typed after.
+        if (entry.kind === 'page' && publishesFirst(publishes.get(entry.id), entry)) continue;
+        if (entry.kind === 'publish' && entry.draft) {
+          const change = drafts.get(entry.id);
+          if (change && !publishesFirst(entry, change)) continue;
+        }
         next = entry;
         break;
       }
@@ -919,6 +1071,10 @@ export class OfflineQueue {
         return this.#sendRename(ctx, entry);
       case 'delete':
         return this.#sendDelete(ctx, entry);
+      case 'move':
+        return this.#sendMove(ctx, entry);
+      case 'publish':
+        return this.#sendPublish(ctx, entry, entries, read);
     }
   }
 
@@ -1093,6 +1249,137 @@ export class OfflineQueue {
     this.#emit({ kind: 'sent', spaceId: entry.spaceId });
   }
 
+  async #sendMove(ctx: ClientContext, entry: QueuedMove): Promise<'offline' | void> {
+    const { spaceId, id: nodeId, parentId } = entry;
+    try {
+      // Checked as online: where it is now, and whether keys would change.
+      const preview = await previewMove(ctx, { spaceId, nodeId, parentId });
+      // There already: moved by this, whose answer was lost, or by someone else.
+      if (preview.fromParentId !== parentId) {
+        if (preview.crossing) return this.#stop(entry, MOVES_ACROSS);
+        await moveNode(ctx, { preview });
+      }
+    } catch (error) {
+      const failure = failureOf(error);
+      if (!failure) return 'offline';
+      // Into itself, or it moved meanwhile: the person moves it again.
+      return this.#stop(entry, failure.kind === 'conflict' ? refused(error) : failure);
+    }
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#keyed(entry);
+      // Moved again while this went: the next round sends that.
+      if (current?.kind === 'move' && current.parentId === parentId) await this.#remove(current);
+    });
+    this.#emit({ kind: 'changed', spaceId, id: nodeId });
+    this.#emit({ kind: 'sent', spaceId });
+  }
+
+  async #sendPublish(
+    ctx: ClientContext,
+    entry: QueuedPublish,
+    entries: readonly QueueEntry[],
+    read: ReadWikilinks | undefined,
+  ): Promise<'offline' | void> {
+    const page = { spaceId: entry.spaceId, pageId: entry.id };
+    const change = entries.find(
+      (other): other is QueuedPage => other.kind === 'page' && other.id === entry.id,
+    );
+    if (entry.draft) {
+      // Its draft went without it: discarded, or sent with what was typed after.
+      const basedOn = change?.basedOn;
+      if (!change || !basedOn) return this.#stop(entry, PUBLISH_CHANGED);
+      return this.#sendPublishedDraft(ctx, entry, entry.draft, { ...change, basedOn }, read);
+    }
+    const draftHead = entry.draftHead;
+    if (!draftHead) return this.#stop(entry, PUBLISH_CHANGED);
+    const sending = entry.sending ?? (await this.#recordPublish(entry));
+    if (!sending) return;
+    try {
+      const { heads } = await loadPage(ctx, entry.id);
+      // Published already: by this, whose answer was lost.
+      if (heads.publishedHead !== sending.revisionId) {
+        // Its public copy changes too, which the person checks online (ADR 0005).
+        const { links } = await ctx.api.call(publicLinkRoutes.list, {
+          params: { spaceId: entry.spaceId },
+        });
+        if (links.some((link) => link.pageId === entry.id)) return this.#stop(entry, LINKED);
+        await publishPage(ctx, page, {
+          expected: { draftHead, publishedHead: heads.publishedHead },
+          revisionId: sending.revisionId,
+          ...(read && { read }),
+        });
+      }
+    } catch (error) {
+      const failure = failureOf(error);
+      if (!failure) return 'offline';
+      return this.#stop(entry, failure.kind === 'conflict' ? PUBLISH_CHANGED : failure);
+    }
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#publish(entry.id);
+      // Published again while this went: the next round sends that.
+      if (current?.sending?.revisionId === sending.revisionId) await this.#remove(current);
+    });
+    this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
+    this.#emit({ kind: 'sent', spaceId: entry.spaceId });
+  }
+
+  // A publish's draft as it stood, saved before what was typed after it,
+  // which then goes on top of it.
+  async #sendPublishedDraft(
+    ctx: ClientContext,
+    entry: QueuedPublish,
+    draft: NonNullable<QueuedPublish['draft']>,
+    change: QueuedPage & { basedOn: RevisionId },
+    read: ReadWikilinks | undefined,
+  ): Promise<'offline' | void> {
+    const page = { spaceId: entry.spaceId, pageId: entry.id };
+    const sending = entry.sending ?? (await this.#recordPublish(entry));
+    if (!sending) return;
+    const { revisionId } = sending;
+    this.#emit({ kind: 'recorded', spaceId: entry.spaceId, pageId: entry.id, revisionId });
+    try {
+      await this.upload(draft.payload.attachments, (blob) => uploadBlob(ctx, page, 'draft', blob));
+      await saveDraft(ctx, {
+        page,
+        basedOn: change.basedOn,
+        payload: draft.payload,
+        revisionId,
+        ...(change.region && { tableRegion: change.region }),
+        linkChoices: new Map(Object.entries(change.picks)),
+        ...(read && { read }),
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === 'duplicate')) {
+        const failure = failureOf(error);
+        if (!failure) return 'offline';
+        return this.#stop(entry, failure.kind === 'conflict' ? PUBLISH_CHANGED : failure);
+      }
+    }
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#publish(entry.id);
+      if (current?.draft?.version === draft.version) {
+        await this.#write({ ...current, draftHead: revisionId, draft: null, sending: null });
+      }
+      const after = await this.#page(entry.id);
+      if (after?.basedOn === change.basedOn && !after.sending) {
+        await this.#write({ ...after, basedOn: revisionId });
+      }
+    });
+    this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
+  }
+
+  // Record what the next publish request sends, before it is sent.
+  async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish['sending']> {
+    return this.#store.queueExclusive(async () => {
+      const current = await this.#publish(entry.id);
+      if (!current || current.failure) return null;
+      if (current.sending) return current.sending;
+      const sending = { revisionId: newId(RevisionId) };
+      await this.#write({ ...current, sending });
+      return sending;
+    });
+  }
+
   async #sendPage(
     ctx: ClientContext,
     entry: QueuedPage,
@@ -1168,6 +1455,11 @@ export class OfflineQueue {
   // was a new page's first step. Then it is based on what landed, and sent next.
   async #landed(entry: QueuedPage, sent: Sending) {
     await this.#store.queueExclusive(async () => {
+      // A publish of the draft as it stood then publishes what landed.
+      const publish = await this.#publish(entry.id);
+      if (publish?.draft?.version === sent.version && !sent.partial) {
+        await this.#write({ ...publish, draftHead: sent.revisionId, draft: null });
+      }
       const current = await this.#page(entry.id);
       if (!current) return;
       if (current.version === sent.version && !sent.partial) {
@@ -1191,10 +1483,12 @@ export class OfflineQueue {
     await this.#store.queueExclusive(async () => {
       const current = await this.#keyed(entry);
       if (!current) return;
-      if (current.kind === 'folder' || current.kind === 'delete') {
+      if (current.kind === 'folder' || current.kind === 'delete' || current.kind === 'move') {
         return this.#write({ ...current, failure });
       }
-      if (current.kind === 'rename') return this.#write({ ...current, failure, sending: null });
+      if (current.kind === 'rename' || current.kind === 'publish') {
+        return this.#write({ ...current, failure, sending: null });
+      }
       // Put on top of theirs meanwhile (Save mine on top): sent next, on that.
       const rebased = entry.kind === 'page' && current.basedOn !== entry.basedOn;
       await this.#write({ ...current, failure: rebased ? null : failure, sending: null });
@@ -1266,6 +1560,39 @@ function failureOf(error: unknown): QueueFailure | null {
   return { kind: 'refused', message: error instanceof Error ? error.message : String(error) };
 }
 
+/** The server's refusal, as the person reads it. */
+const refused = (error: unknown): QueueFailure => ({
+  kind: 'refused',
+  message: error instanceof Error ? error.message : String(error),
+});
+
+// Why a move or publish made offline stopped, beyond what the server said.
+const MOVES_ACROSS: QueueFailure = {
+  kind: 'refused',
+  message:
+    'Moving it there now changes who can read it, so it moves online only, where you can check who gains and loses access.',
+};
+const PUBLISH_CHANGED: QueueFailure = {
+  kind: 'refused',
+  message: 'The page changed after you pressed Publish. Look it over, then publish it again.',
+};
+const LINKED: QueueFailure = {
+  kind: 'refused',
+  message:
+    'It has a public link now, so it’s published online only, where you can check its public copy.',
+};
+
+/**
+ * Whether `publish` goes before `change`, its page's draft waiting here:
+ * when the draft it publishes is on the server already, or when what was
+ * typed after Publish waits in the change, not on its way yet. Then the
+ * publish sends its own draft first, and the change goes on top of it.
+ */
+const publishesFirst = (publish: QueuedPublish | undefined, change: QueuedPage): boolean =>
+  publish !== undefined &&
+  publish.failure === null &&
+  (publish.draft === null || (publish.draft.version < change.version && change.sending === null));
+
 /** Where a page or folder made offline goes. */
 const parentOf = (entry: QueuedFolder | QueuedPage): FolderId | null =>
   entry.kind === 'folder' ? entry.parentId : (entry.newPage?.parentId ?? null);
@@ -1300,7 +1627,8 @@ type Tree = Awaited<ReturnType<typeof loadTree>>;
  * folders and pages made offline under their parents, marked by their
  * queue entries, pages with a draft saved on this device labelled from
  * it, as their draft is that entry while it waits, folders renamed with
- * their new name and look, and without what was deleted, nor what is in it.
+ * their new name and look, pages and folders moved in their new place, and
+ * without what was deleted, nor what is in it.
  */
 export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly QueueEntry[]): Tree {
   const here = entries.filter((entry) => entry.spaceId === spaceId);
@@ -1312,6 +1640,18 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   for (const entry of here) {
     if (madeOffline(entry)) parents.set(entry.id, parentOf(entry));
   }
+  // Only one on its way, into a place the tree has: a stopped one shows
+  // where the server has it.
+  const moved = new Map<string, FolderId | null>();
+  for (const entry of here) {
+    const { id } = entry;
+    if (entry.kind !== 'move' || entry.failure !== null || !listed.has(id)) continue;
+    if (entry.parentId !== null && !parents.has(entry.parentId)) continue;
+    moved.set(id, entry.parentId);
+    parents.set(id, entry.parentId);
+  }
+  const placed = <N extends { id: string; parentId: FolderId | null }>(node: N): N =>
+    moved.has(node.id) ? { ...node, parentId: moved.get(node.id) ?? null } : node;
   const regionUnder = (parentId: string | null): Region | null => {
     try {
       return regionInTree({
@@ -1372,7 +1712,7 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   return {
     ...tree,
     folders: [
-      ...tree.folders.map((folder) => {
+      ...tree.folders.map(placed).map((folder) => {
         const changes = renames.get(folder.id);
         const opened = folder.metadata?.opened;
         if (!changes || !folder.metadata || opened?.kind !== 'current') return folder;
@@ -1385,7 +1725,7 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
       ...folders,
     ].filter((folder) => kept(folder.id)),
     pages: [
-      ...tree.pages.map((page) => {
+      ...tree.pages.map(placed).map((page) => {
         const entry = drafts.get(page.id);
         if (!entry || page.draftHead === null || page.region === null) return page;
         return {

@@ -12,6 +12,8 @@ import {
   FolderId as FolderIdSchema,
   PageId,
   pageOperations as pages,
+  publicLinkOperations as links,
+  sharingOperations as sharing,
   type FolderId,
   type SpaceId,
   RevisionId,
@@ -20,7 +22,7 @@ import {
   utf8,
   type ClientContext,
 } from '@wikistow/client';
-import { pageRoutes, structureRoutes } from '@wikistow/contracts';
+import { pageRoutes, sharingRoutes, structureRoutes } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -505,5 +507,162 @@ describe('renames and deletes made offline', () => {
     expect(await queue.send(ctx)).toBe('sent');
     const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
     expect(tree.folders).toEqual([]);
+  });
+});
+
+// Moves within a space and publishing made offline (#331): sent in order
+// after the changes they need, a lost answer told by where the item is, or
+// by the publication's recorded ID, and a move across a share's edge, or a
+// publish of a page that changed or got a public link, stopped with why.
+describe('moves and publishes made offline', () => {
+  const parentNow = async (ctx: ClientContext, spaceId: SpaceId, id: string) => {
+    const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+    return [...tree.folders, ...tree.pages].find((node) => node.id === id)?.parentId;
+  };
+  const published = async (ctx: ClientContext, page: pages.PageRef) => {
+    const { heads } = await pages.loadPage(ctx, page.pageId);
+    if (!heads.publishedHead) return null;
+    const opened = await pages.openRevisionOf(ctx, page, 'published', heads.publishedHead);
+    return opened.opened.kind === 'current'
+      ? { markdown: opened.opened.payload.markdown, count: heads.publishedCount }
+      : null;
+  };
+
+  it('move a page after its draft, into a folder made offline, landing a lost answer once', async () => {
+    const { ctx, queue, spaceId, page, based, draft, losing, payload } = await device();
+    const folder = await queue.newFolder({
+      spaceId,
+      parentId: null,
+      metadata: newFolderMetadata('Trips'),
+    });
+    // A folder made offline moves in its own entry.
+    const inner = await queue.newFolder({
+      spaceId,
+      parentId: null,
+      metadata: newFolderMetadata('Gear'),
+    });
+    await queue.move({ spaceId, id: inner.id, node: 'folder', name: 'Gear', parentId: folder.id });
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('moved words'),
+      seen: null,
+    });
+    await queue.move({ spaceId, id: page.pageId, node: 'page', name: 'Plan', parentId: inner.id });
+    expect((await queue.entries()).map((entry) => entry.kind)).toEqual([
+      'folder',
+      'folder',
+      'page',
+      'move',
+    ]);
+
+    const path = sharingRoutes.move.path
+      .replace(':spaceId', spaceId)
+      .replace(':nodeId', page.pageId);
+    expect(await queue.send(losing(path))).toBe('offline');
+    expect(await parentNow(ctx, spaceId, page.pageId)).toBe(inner.id);
+    // Sent again, it is where it was asked to go: landed.
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await parentNow(ctx, spaceId, inner.id)).toBe(folder.id);
+    expect((await draft()).markdown).toBe('moved words');
+  });
+
+  it('stop a move across a shared folder’s edge, or into a folder gone meanwhile', async () => {
+    const { ctx, queue, spaceId, page } = await device();
+    const shared = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Shared' });
+    await sharing.shareFolder(ctx, {
+      preview: await sharing.previewShare(ctx, { spaceId, rootId: shared }),
+      people: [],
+    });
+    await queue.move({ spaceId, id: page.pageId, node: 'page', name: 'Plan', parentId: shared });
+    expect(await queue.send(ctx)).toBe('sent');
+    const [across] = await queue.entries();
+    expect(across?.failure).toMatchObject({
+      kind: 'refused',
+      message: expect.stringContaining('who can read it'),
+    });
+    expect(await parentNow(ctx, spaceId, page.pageId)).toBeNull();
+
+    await queue.discard({ kind: 'move', id: page.pageId });
+    const gone = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Old' });
+    await queue.move({ spaceId, id: page.pageId, node: 'page', name: 'Plan', parentId: gone });
+    await pages.deleteNode(ctx, { spaceId, nodeId: gone });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]).toMatchObject({ kind: 'move', failure: { kind: 'gone' } });
+  });
+
+  it('publish the draft as it stood when Publish was pressed, before what was typed after', async () => {
+    const { ctx, queue, page, based, draft, payload } = await device();
+    const first = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('ready words'),
+      seen: null,
+    });
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('half typed'),
+      seen: first,
+    });
+
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await published(ctx, page)).toEqual({ markdown: 'ready words', count: 1 });
+    const now = await draft();
+    expect(now.markdown).toBe('half typed');
+    // On top of the draft it published, which went first.
+    const { heads } = await pages.loadPage(ctx, page.pageId);
+    const history = await pages.loadHistory(ctx, page);
+    const publication = history.find((version) => version.revisionId === heads.publishedHead);
+    expect(now.basedOn).toBe(publication?.basedOn);
+  });
+
+  it('publish the draft after its change, and once when the answer was lost', async () => {
+    const { ctx, queue, page, based, losing, payload } = await device();
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('all done'),
+      seen: null,
+    });
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    const path = pageRoutes.publish.path.replace(':pageId', page.pageId);
+    expect(await queue.send(losing(path))).toBe('offline');
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await published(ctx, page)).toEqual({ markdown: 'all done', count: 1 });
+  });
+
+  it('stop a publish of a page changed meanwhile, or given a public link, with why', async () => {
+    const { ctx, queue, page, based } = await device();
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    // Meanwhile, from another device.
+    await pages.editDraft(ctx, page, { markdown: 'someone else’s words' });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      kind: 'refused',
+      message: expect.stringContaining('changed after you pressed Publish'),
+    });
+    expect(await published(ctx, page)).toBeNull();
+
+    await queue.discard({ kind: 'publish', id: page.pageId });
+    await pages.publishPage(ctx, page);
+    await links.turnOn(ctx, page.pageId);
+    const head = (await pages.loadPage(ctx, page.pageId)).heads.draftHead;
+    if (!head) throw new Error('No draft');
+    await queue.publish({ page, title: 'Plan', draftHead: head });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      kind: 'refused',
+      message: expect.stringContaining('public link'),
+    });
+    expect((await published(ctx, page))?.count).toBe(1);
   });
 });
