@@ -344,11 +344,11 @@ export function mountContentRoutes(
 
   routes.content(
     sharingRoutes.move,
-    async ({ params, body }, { actor }) => {
-      await moveNode(db, { actor, ...params, ...body }, report).catch(toApiError);
+    async ({ params, body }, { actor, once }) => {
+      await moveNode(db, { actor, ...params, ...body, once }, report).catch(toApiError);
       return { ok: true as const };
     },
-    { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: moverFirst },
+    { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: moverFirst, idempotent: true },
   );
 
   routes.account(
@@ -659,18 +659,20 @@ export function mountContentRoutes(
     { rateLimit: WRITE_LIMIT, idempotent: true },
   );
 
-  routes.account(
+  // Agents rename folders where they edit (section 9.5).
+  routes.content(
     structureRoutes.updateMetadata,
-    async ({ params, body }, { principal }) => {
+    async ({ params, body }, { actor, once }) => {
       await updateMetadata(db, {
-        accountId: principal.accountId,
+        actor,
         spaceId: params.spaceId,
         storageBytes: limits.storageBytes,
         ...body,
+        once,
       }).catch(toApiError);
       return { metadataRevisionId: body.metadata.record.metadataRevisionId };
     },
-    { rateLimit: WRITE_LIMIT },
+    { rateLimit: WRITE_LIMIT, idempotent: true },
   );
 
   routes.content(

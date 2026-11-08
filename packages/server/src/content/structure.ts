@@ -324,31 +324,31 @@ export async function createFolder(
 /**
  * A new version of a space's or folder's metadata (rename, emoji, tint),
  * based on the current head. Renaming a space is for its owners; renaming a
- * folder needs edit rights there (section 5.4).
+ * folder needs edit rights there (section 5.4), which an agent may have
+ * within its cap (section 9.5), never an owner's. With `once`, a retry
+ * answers as the first did.
  */
 export async function updateMetadata(
   db: Database,
   input: {
-    accountId: string;
+    actor: Actor;
     spaceId: string;
     permissionVersion: number;
     storageBytes: number;
+    once?: Once | undefined;
   } & MetadataCommit,
 ): Promise<void> {
   const { record } = input.metadata;
-  await db.transaction(async (tx) => {
-    const identity = await requireIdentity(tx, input.accountId);
+  await transactOnce(db, input.once, async (tx) => {
+    const caller = await requireCaller(tx, input.actor);
+    const { identity } = caller;
     const folderId = record.subjectKind === 'folder' ? record.subjectId : null;
     // A group is renamed through its own route.
     if (record.subjectKind === 'group') throw new ContentError('binding-mismatch');
     if (record.subjectKind === 'space' && record.subjectId !== input.spaceId)
       throw new ContentError('binding-mismatch');
     await lockSpace(tx, input.spaceId);
-    const access = await requireAccess(
-      tx,
-      { identity, personId: null },
-      { spaceId: input.spaceId, nodeId: folderId },
-    );
+    const access = await requireAccess(tx, caller, { spaceId: input.spaceId, nodeId: folderId });
     const allowed: (a: Access) => boolean = folderId === null ? (a) => a.role === 'owner' : canEdit;
     if (!allowed(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
@@ -364,7 +364,7 @@ export async function updateMetadata(
       basedOn: subject.metadataHead,
       share,
     });
-    await storeMetadata(tx, input, input);
+    await storeMetadata(tx, input, { ...input, accountId: caller.accountId });
     const head = { metadataHead: record.metadataRevisionId };
     if (folderId === null) await tx.update(spaces).set(head).where(eq(spaces.id, input.spaceId));
     else await tx.update(nodes).set(head).where(eq(nodes.id, folderId));

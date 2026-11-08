@@ -46,6 +46,7 @@ import {
 } from './sharing.ts';
 import type { ReportUnreadable } from './stored.ts';
 import { requireCaller, type Actor } from './identities.ts';
+import { transactOnce, type Once } from '../idempotency.ts';
 
 type Move = z.output<typeof sharingRoutes.move.body>;
 
@@ -90,15 +91,17 @@ export async function checkMover(
  * move on, all at once. Envelope signatures are checked before the lock,
  * so nothing in the space waits on them. A stored record of the subtree
  * that today's schemas refuse is reported and refuses the move
- * (`binding-mismatch`), rather than being left without keys.
+ * (`binding-mismatch`), rather than being left without keys. With `once`, a
+ * retry with the same key and body answers as the first did (protocol
+ * section 16), so an agent whose answer was lost doesn't move it twice.
  */
 export async function moveNode(
   db: Database,
-  input: { actor: Actor; spaceId: string; nodeId: string } & Move,
+  input: { actor: Actor; spaceId: string; nodeId: string; once?: Once | undefined } & Move,
   report: ReportUnreadable,
 ): Promise<void> {
   await verifyGrants(db, input, report);
-  await db.transaction(async (tx) => {
+  await transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
     const { spaceId, nodeId, parentId } = input;
