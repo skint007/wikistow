@@ -5,6 +5,7 @@ import type {
   PluginUploadFile,
 } from '@wikistow/contracts';
 import type { PluginApproval } from '@wikistow/client';
+import type { Settings } from '@wikistow/plugin-sdk';
 
 /**
  * What the approval dialog shows for a version: a plugin folder read for
@@ -36,6 +37,8 @@ export type PluginListing = {
   plugins: InstalledPlugin[] | null;
   /** The open account's page access, by plugin; empty while the vault is locked. */
   access: Readonly<Record<string, readonly PluginScope[]>>;
+  /** The open account's settings, by plugin, as stored (`host.settings`); empty while the vault is locked. */
+  settings: Readonly<Record<string, Settings>>;
   /** Plugins it knows of but couldn't load, by ID, with why. */
   unavailable: Readonly<Record<string, string>>;
 };
@@ -47,7 +50,8 @@ export type PluginListing = {
  * desktop's folder and development installs (on/off per computer, page
  * access per account), the account's contacts record for library plugins.
  * ADR 0011's **Use the app's own** is kept the same way as on/off, as
- * `ownParts` beside `enabled` in each.
+ * `ownParts` beside `enabled` in each. Settings (#310) are kept as page
+ * access is: per account, in `plugins.json` or beside the approval.
  *
  * `Version` is what the store approves. Approving an installed ID updates
  * it, keeping its page access. A library update keeps on/off too; a folder
@@ -60,9 +64,11 @@ export type PluginStore<Version> = {
   approve(version: Version): Promise<void>;
   enable(plugin: PluginRef, on: boolean): Promise<void>;
   setAccess(plugin: PluginRef, scopes: readonly PluginScope[]): Promise<void>;
+  /** Replace the plugin's settings for the open account, as checked by the runtime. */
+  setSettings(plugin: PluginRef, settings: Settings): Promise<void>;
   /** The regions where the app's own part shows in place of the plugin's (`InstalledPlugin.ownParts`). */
   setOwnParts(plugin: PluginRef, regions: readonly string[]): Promise<void>;
-  /** Pages keep its blocks and data. */
+  /** Its page access and settings go; pages keep its blocks and data. */
   remove(plugin: PluginRef): Promise<void>;
 };
 
@@ -93,23 +99,35 @@ export type AppPluginStore = PluginStore<PluginCandidate | LibraryRequest> & {
 /**
  * A store held in memory, for tests. Approving a plugin installs it, or
  * updates the one of its ID as the library does, keeping on/off, own
- * parts and page access.
+ * parts, page access and settings. The workshop's preview keeps its
+ * settings in one, so trying a version leaves the real ones as they are.
  */
 export function memoryStore({
   plugins = [],
   access = {},
+  settings = {},
   safeMode = false,
 }: {
   plugins?: InstalledPlugin[];
   access?: Record<string, readonly PluginScope[]>;
+  settings?: Record<string, Settings>;
   safeMode?: boolean;
 } = {}): PluginStore<InstalledPlugin> {
   let held = [...plugins];
   let scopes = { ...access };
+  let kept = { ...settings };
   const is = (ref: PluginRef) => (plugin: InstalledPlugin) =>
     plugin.manifest.id === ref.id && plugin.library === ref.library;
+  const without = <T>(record: Record<string, T>, id: string) =>
+    Object.fromEntries(Object.entries(record).filter(([key]) => key !== id));
   return {
-    list: async () => ({ safeMode, plugins: [...held], access: { ...scopes }, unavailable: {} }),
+    list: async () => ({
+      safeMode,
+      plugins: [...held],
+      access: { ...scopes },
+      settings: { ...kept },
+      unavailable: {},
+    }),
     async approve(version) {
       const before = held.find(is(refOf(version)));
       held = [
@@ -128,9 +146,13 @@ export function memoryStore({
     async setAccess(ref, list) {
       scopes = { ...scopes, [ref.id]: [...list] };
     },
+    async setSettings(ref, value) {
+      kept = { ...kept, [ref.id]: value };
+    },
     async remove(ref) {
       held = held.filter((plugin) => !is(ref)(plugin));
-      scopes = Object.fromEntries(Object.entries(scopes).filter(([id]) => id !== ref.id));
+      scopes = without(scopes, ref.id);
+      kept = without(kept, ref.id);
     },
   };
 }

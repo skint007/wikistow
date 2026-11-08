@@ -7,6 +7,7 @@ import {
   type WorkshopFile,
   type WorkshopVersion,
 } from '@wikistow/contracts';
+import type { Settings } from '@wikistow/plugin-sdk';
 import { MANIFEST_FILE, type Manifest } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { api } from '../api';
@@ -182,6 +183,12 @@ export class Workshop {
   #holding = false;
   /** Builds under way, a stopped one included until it answers. */
   #building = 0;
+  /**
+   * Its plugin's settings, by ID, while the workshop is open: in memory, so
+   * the person's own settings for an installed version stay as they are.
+   * Kept from one version to the next, as an update keeps them.
+   */
+  #settings: Record<string, Settings> = {};
   /** The stylesheet of the theme this workshop shows across the app, while it does. */
   #theming: string | null = null;
   readonly #unwatchTheme: () => void;
@@ -192,9 +199,10 @@ export class Workshop {
     const versions: PluginStore<number> = {
       list: async () => {
         const safeMode = desktop ? (await desktop.plugins()).safeMode : tabSafeMode.on();
-        const none = { safeMode, plugins: [], access: {}, unavailable: {} };
+        const none = { safeMode, plugins: [], access: {}, settings: {}, unavailable: {} };
         const running = this.#state.running?.plugin;
         if (!running || this.#holding) return none;
+        const settings = { ...this.#settings };
         const manifest = this.#state.appCode ? running.manifest : withoutUi(running.manifest);
         // The samples' whole space, to the manifest's access.
         const access =
@@ -203,7 +211,7 @@ export class Workshop {
             : {
                 [manifest.id]: [{ spaceId: SAMPLE_SPACE, folderId: null, access: manifest.access }],
               };
-        return { ...none, plugins: [{ ...running, manifest }], access };
+        return { ...none, plugins: [{ ...running, manifest }], access, settings };
       },
       approve: (version) => this.load(version),
       enable: async (_plugin, on) => {
@@ -213,6 +221,10 @@ export class Workshop {
       setAccess: async () => {},
       // The preview draws whatever the version replaces: there is no Settings to choose in.
       setOwnParts: async () => {},
+      // Kept here only, so trying a version leaves the person's settings as they are.
+      setSettings: async ({ id }, settings) => {
+        this.#settings = { ...this.#settings, [id]: settings };
+      },
       remove: () => this.unload(),
     };
     this.preview = createRuntime(versions, {

@@ -268,7 +268,7 @@ const PLACES: { [R in keyof Regions]: (drawing: Drawing<R>) => ReactNode } = {
             <h3 className="font-bold">{title}</h3>
             <p className="text-muted-foreground">From {nameOf(pluginId)}.</p>
           </div>
-          <PluginView pluginId={pluginId} name={nameOf(pluginId)} view={view} props={NO_SETTINGS} />
+          <SettingsView pluginId={pluginId} name={nameOf(pluginId)} view={view} />
         </section>
       )),
   // Each in a box that clicks rather than moves the window.
@@ -283,8 +283,23 @@ const PLACES: { [R in keyof Regions]: (drawing: Drawing<R>) => ReactNode } = {
     )),
 };
 
-const NO_SETTINGS: SettingsViewProps = {};
 const NO_TITLEBAR: TitlebarViewProps = {};
+
+/** A settings section, given the plugin's settings (`host.settings`) while it runs. */
+function SettingsView({
+  pluginId,
+  name,
+  view,
+}: {
+  pluginId: string;
+  name: string;
+  view: View<SettingsViewProps>;
+}) {
+  const props = usePluginRuntime().settingsViewProps(pluginId);
+  // Sections are listed only while their plugin runs.
+  if (!props) return null;
+  return <PluginView pluginId={pluginId} name={name} view={view} props={props} />;
+}
 
 /**
  * One of the places plugins draw into, with the app's own parts there.

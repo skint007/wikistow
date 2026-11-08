@@ -4,10 +4,11 @@ import { PluginError } from '@wikistow/plugin-sdk';
 /** The version of a page shown where its route draws it, as `page.shown` tells of it. */
 export type PageShown = PluginEvents['page.shown'];
 
-/** Where `navigate` goes: a plugin's destination, with its own plugin's ID for a plugin page. */
+/** Where `navigate` goes: a plugin's destination, with its own plugin's ID for a plugin page or its settings. */
 export type Place =
-  | Exclude<Destination, { kind: 'plugin' }>
-  | { kind: 'plugin'; pluginId: string; viewId: string };
+  | Exclude<Destination, { kind: 'plugin' | 'settings' }>
+  | { kind: 'plugin'; pluginId: string; viewId: string }
+  | { kind: 'settings'; pluginId: string };
 
 const OTHER: AppLocation = { kind: 'other' };
 

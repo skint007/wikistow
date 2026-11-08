@@ -100,6 +100,8 @@ async function navigateTo(router: AppRouter, to: Place): Promise<void> {
         to: '/plugin/$pluginId/$viewId',
         params: { pluginId: to.pluginId, viewId: z.string().min(1).parse(to.viewId) },
       });
+    case 'settings':
+      return router.navigate({ to: '/settings/plugins', search: { plugin: to.pluginId } });
     default:
       // A plugin's code isn't checked by its types.
       throw new PluginError('invalid', 'No such place to go');

@@ -155,7 +155,7 @@ type LibraryFiles = (
 
 /**
  * The library plugins the account approved, kept in its contacts record
- * (ADR 0002) with their on/off, own parts and page access, so they follow
+ * (ADR 0002) with their on/off, own parts, page access and settings, so they follow
  * the person to every device and are known only while the vault is open.
  * `files` says which of them can run here.
  */
@@ -165,9 +165,10 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
       const safeMode = tabSafeMode.on();
       const vault = vaultStore.get();
       if (vault.status !== 'unlocked')
-        return { safeMode, plugins: null, access: {}, unavailable: {} };
+        return { safeMode, plugins: null, access: {}, settings: {}, unavailable: {} };
       const approvals = pluginOperations.listPluginApprovals(vault.ctx);
       const access = Object.fromEntries(approvals.map(({ id, access }) => [id, access]));
+      const settings = Object.fromEntries(approvals.map(({ id, settings }) => [id, settings]));
       const held = await files(vault.ctx, approvals);
       // The record's choices, whichever copy runs: the desktop's main keeps none of them.
       const plugins =
@@ -175,7 +176,7 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
           ...plugin,
           ownParts: approvals.find(({ id }) => id === plugin.manifest.id)?.ownParts ?? [],
         })) ?? null;
-      return { safeMode, unavailable: {}, ...held, plugins, access };
+      return { safeMode, unavailable: {}, ...held, plugins, access, settings };
     },
     // A new install is turned on with no page access; for an ID already
     // approved, the new hash replaces the old, keeping access and on/off.
@@ -193,6 +194,9 @@ export function libraryStore(files: LibraryFiles): PluginStore<LibraryRequest> {
     },
     async setOwnParts({ id }, regions) {
       await pluginOperations.setPluginOwnParts(openCtx(), id, regions);
+    },
+    async setSettings({ id }, settings) {
+      await pluginOperations.setPluginSettings(openCtx(), id, settings);
     },
     async remove({ id }) {
       await pluginOperations.removePlugin(openCtx(), id);

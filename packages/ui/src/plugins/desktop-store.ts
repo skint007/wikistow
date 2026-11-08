@@ -5,8 +5,8 @@ import type { AppPluginStore } from './store';
 
 /**
  * The desktop's plugins: folder and development installs on this computer,
- * with their on/off kept there and their page access kept there per
- * account (`plugins.json`), and, while the vault is open, the library
+ * with their on/off kept there and their page access and settings kept
+ * there per account (`plugins.json`), and, while the vault is open, the library
  * plugins the account approved (ADR 0002), which main downloads, checks
  * against their hashes and keeps copies of. Those keep their choices in
  * the account's contacts record, as in a browser. A folder or development
@@ -31,11 +31,12 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
     async list() {
       const state = await bridge.plugins();
       const account = accountId();
-      if (account === null) return { ...state, access: {}, unavailable: {} };
+      if (account === null) return { ...state, access: {}, settings: {}, unavailable: {} };
       const here = new Set(state.plugins.map(({ manifest }) => manifest.id));
-      const [held, folders] = await Promise.all([
+      const [held, folders, folderSettings] = await Promise.all([
         library.list(),
         bridge.pluginAccess(account).catch(() => ({})),
+        bridge.pluginSettings(account).catch(() => ({})),
       ]);
       const notHere = <T>(record: Readonly<Record<string, T>>) =>
         Object.fromEntries(Object.entries(record).filter(([id]) => !here.has(id)));
@@ -46,6 +47,7 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
           ...(held.plugins ?? []).filter(({ manifest }) => !here.has(manifest.id)),
         ],
         access: { ...folders, ...notHere(held.access) },
+        settings: { ...folderSettings, ...notHere(held.settings) },
         unavailable: held.unavailable,
       };
     },
@@ -65,6 +67,11 @@ export function desktopStore(bridge: DesktopBridge): AppPluginStore {
       if (plugin.library) return library.setAccess(plugin, scopes);
       const account = accountId();
       if (account !== null) await bridge.setPluginAccess(account, plugin.id, [...scopes]);
+    },
+    async setSettings(plugin, settings) {
+      if (plugin.library) return library.setSettings(plugin, settings);
+      const account = accountId();
+      if (account !== null) await bridge.setPluginSettings(account, plugin.id, settings);
     },
     async remove(plugin) {
       if (plugin.library) await library.remove(plugin);

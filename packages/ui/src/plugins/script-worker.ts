@@ -3,8 +3,7 @@ import {
   type Disposer,
   type PageHandle,
   type PageRef,
-  type PluginEvent,
-  type PluginEvents,
+  type PluginSettings,
 } from '@wikistow/plugin-sdk';
 import {
   METHODS,
@@ -13,9 +12,13 @@ import {
   type HostMessage,
   type Method,
   type OutputResult,
+  type ScriptEvent,
 } from '@wikistow/plugin-sdk/protocol';
 import { pluginError, type HostPages } from './pages';
 import type { EventOf } from './registry';
+
+/** What a script reaches of its settings: `host.settings` but its `on`, which it listens for as an event. */
+export type ScriptSettings = Omit<PluginSettings, 'on'>;
 
 /** How long a script's command or event handler may take, from asking to its answer, and its activation. */
 export const SCRIPT_BUDGET_MS = 10_000;
@@ -52,7 +55,7 @@ export type ScriptRegistry = {
     spec: BlockSpec,
     calculate: (page: PageRef, values: Record<string, number | string>) => Promise<Outputs>,
   ): Disposer;
-  listen<E extends keyof PluginEvents>(
+  listen<E extends ScriptEvent['event']>(
     event: E,
     run: (event: EventOf<E>) => Promise<void>,
   ): Disposer;
@@ -114,7 +117,7 @@ export class ScriptWorker {
   /** Its activation finished; until then `#started` waits, settled as it does or the worker ends. */
   #ready = false;
   #started = Promise.withResolvers<void>();
-  #listening = new Map<keyof PluginEvents, Disposer>();
+  #listening = new Map<ScriptEvent['event'], Disposer>();
   #invocations = new Map<number, Invocation>();
   #next = 0;
   #failures: number[] = [];
@@ -122,7 +125,12 @@ export class ScriptWorker {
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(launch: LaunchScript, pages: HostPages, registry: ScriptRegistry) {
+  constructor(
+    launch: LaunchScript,
+    pages: HostPages,
+    settings: ScriptSettings,
+    registry: ScriptRegistry,
+  ) {
     this.#launch = launch;
     this.#registry = registry;
     this.#calls = {
@@ -153,6 +161,12 @@ export class ScriptWorker {
         const [markdown] = METHODS['page.insert'].parse(args);
         return editorOf(page).insert(markdown);
       },
+      'settings.get': async (args) => {
+        METHODS['settings.get'].parse(args);
+        return settings.get();
+      },
+      'settings.set': (args) => settings.set(...METHODS['settings.set'].parse(args)),
+      'settings.update': (args) => settings.update(...METHODS['settings.update'].parse(args)),
     };
   }
 
@@ -213,7 +227,7 @@ export class ScriptWorker {
     );
   }
 
-  async #deliver(event: PluginEvent): Promise<void> {
+  async #deliver(event: ScriptEvent): Promise<void> {
     await this.#invoke({ kind: 'event', ...event }, null);
   }
 
