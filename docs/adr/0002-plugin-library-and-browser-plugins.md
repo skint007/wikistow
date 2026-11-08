@@ -13,7 +13,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 ## What changes in ADR 0001
 
 - Plugins can come from the server's library as well as from a folder. Folder installs and development loading stay, on the desktop only.
-- Approvals of library plugins, with their page access and on/off state, are kept per account and follow the person. Folder and development installs stay per device.
+- Approvals of library plugins, with their page access and on/off state, are kept per account and follow the person. Folder and development installs stay per device. A device can also turn a library plugin off for itself only (#312).
 - In the browser and on the desktop, a script's worker runs in a sandboxed frame, not on the app's origin. Its consequence about needing "an origin of its own" is met by an opaque origin, not a `wikistow-plugin:` scheme.
 - The app's CSP gains `frame-src 'self'`. Nothing else in it changes.
 
@@ -54,7 +54,7 @@ This amends [ADR 0001](0001-desktop-plugin-runtime.md), whose rule was that the 
 
 ### Out of scope
 
-Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins (#312), private library entries, uploading from a phone, development loading (#317) or the workshop in the browser, storage for plugins (settings since built in #310, kept beside the approval; nothing else), and sandboxing app plugins.
+Plugins from other servers, search or ratings, signing by authors, updates without approval, per-device on/off for library plugins (built in #312, off only: a device can turn off a plugin the account has on, not turn on one it has off, kept in browser storage or the desktop's `plugins.json`), private library entries, uploading from a phone, development loading (#317) or the workshop in the browser, storage for plugins (settings since built in #310, kept beside the approval; nothing else), and sandboxing app plugins.
 
 ## Spike evidence (2026-10-15)
 
