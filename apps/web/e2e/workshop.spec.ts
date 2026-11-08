@@ -39,10 +39,12 @@ test('a plugin draft is built, previewed, opened again and published', async ({
   await page.getByLabel('Project folder').setInputFiles(CALCULATOR);
   await expect(status).toContainText('Previewing v1', { timeout: 60_000 });
   await preview;
-  await expect(page.getByRole('region', { name: 'Draft files' }).getByRole('button')).toHaveText([
-    'src/script.ts',
-    'wikistow-plugin.json',
-  ]);
+  await expect(
+    page
+      .getByRole('region', { name: 'Draft files' })
+      .getByRole('group', { name: 'Files' })
+      .getByRole('button'),
+  ).toHaveText(['src/script.ts', 'wikistow-plugin.json']);
 
   // The conversation goes with the reload; the draft stays, and builds again.
   await page.reload();
