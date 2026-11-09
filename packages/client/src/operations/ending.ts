@@ -112,6 +112,17 @@ export class UnreadableInShare extends Error {
   }
 }
 
+// The failures that mean the record itself is bad, which only deleting it
+// gets past. Others, such as a key change to review or a newer format, have
+// their own way out.
+const BROKEN = new Set<CryptoError['code']>([
+  'key-commitment',
+  'decrypt-failed',
+  'hash-mismatch',
+  'bad-signature',
+  'wrong-recipient',
+]);
+
 /** What an ending did. */
 export type Ended = {
   /** Whether the trash holds anything from the share, which now restores to the owners. */
@@ -178,7 +189,7 @@ export async function endShare(
       },
       { onProgress, from, onUnreadable: (nodeId) => (unreadable = nodeId) },
     ).catch((error: unknown) => {
-      throw unreadable !== null && error instanceof CryptoError
+      throw unreadable !== null && error instanceof CryptoError && BROKEN.has(error.code)
         ? new UnreadableInShare(unreadable, error)
         : error;
     });
