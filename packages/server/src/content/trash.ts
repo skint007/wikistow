@@ -10,6 +10,9 @@ import type { BlobStore } from '../blobs/store.ts';
 import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import {
+  comments,
+  commentVersions,
+  commentWraps,
   metadataRevisions,
   metadataWraps,
   nodes,
@@ -301,9 +304,9 @@ function depthOf(held: readonly { id: string; parentId: string | null }[], nodeI
 }
 
 // The share each record of `nodeIds` is wrapped in (null: the owners'
-// envelopes), with the node it is of: page versions and folder names.
-// `sealed` says whether it has envelopes, which a record whose share was
-// deleted, taking its wraps, lacks.
+// envelopes), with the node it is of: page versions, folder names and
+// comments' current versions (section 5.9). `sealed` says whether it has
+// envelopes, which a record whose share was deleted, taking its wraps, lacks.
 async function recordShares(tx: Database, nodeIds: readonly string[]) {
   const sealed = (kind: 'revision' | 'metadata', id: unknown) =>
     sql<boolean>`exists (select 1 from key_envelopes e
@@ -328,7 +331,18 @@ async function recordShares(tx: Database, nodeIds: readonly string[]) {
     .where(
       and(eq(metadataRevisions.subjectKind, 'folder'), anyId(metadataRevisions.subjectId, nodeIds)),
     );
-  return [...pages, ...folders];
+  const notes = await tx
+    .select({
+      nodeId: comments.pageId,
+      shareId: commentWraps.shareId,
+      sealed: sql<boolean>`exists (select 1 from comment_envelopes e
+        where e.version_id = ${commentVersions.id})`,
+    })
+    .from(commentVersions)
+    .innerJoin(comments, eq(comments.id, commentVersions.commentId))
+    .leftJoin(commentWraps, eq(commentWraps.versionId, commentVersions.id))
+    .where(anyId(comments.pageId, nodeIds));
+  return [...pages, ...folders, ...notes];
 }
 
 /**

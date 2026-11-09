@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { PositiveInt } from '../records/encoding.ts';
 import {
   AgentId,
+  CommentId,
   FolderId,
   GroupId,
   HumanId,
@@ -16,10 +17,12 @@ import {
 import {
   MetadataEnvelope,
   MetadataEnvelopeV2,
+  SealedComment,
   SealedMetadata,
   SealedMetadataV2,
 } from '../records/metadata.ts';
 import {
+  Audience,
   KeyEnvelope,
   KeyEnvelopeV2,
   SealedRevision,
@@ -109,12 +112,23 @@ export const listShares = {
   }),
 } as const satisfies RouteDef;
 
-/** Which record a key wrap is for, when a share is made. */
+/**
+ * Which record a key wrap is for, when a share is made or something moves
+ * into one: a page version, a name, or a comment's current version
+ * (section 5.9), which older apps never send.
+ */
 export const SubjectWrap = z.strictObject({
-  subjectKind: z.enum(['revision', 'metadata']),
+  subjectKind: z.enum(['revision', 'metadata', 'comment']),
   versionId: z.union([RevisionId, MetadataRevisionId]),
   wrap: KeyWrap,
 });
+
+/**
+ * Envelopes to the owners for comments' current versions (section 5.9),
+ * beside `metadataEnvelopes`, in the requests that seal a subtree to the
+ * owner region. Older apps never send them.
+ */
+export const CommentEnvelopes = z.array(MetadataEnvelopeV2).max(500_000).default([]);
 
 /**
  * Make a folder, or the whole space (`rootId: null`), a share (section 6.7):
@@ -176,7 +190,8 @@ export const makeShare = {
  * no keys, and an editor may move within their share. Across a region
  * boundary it is for owners, and carries every record of the subtree again:
  * `wraps` under the destination share's current key version, or, into the
- * owner region, `keyEnvelopes` and `metadataEnvelopes` to every owner. A
+ * owner region, `keyEnvelopes`, `metadataEnvelopes` and `commentEnvelopes`
+ * to every owner. A
  * record written meanwhile is missing from them (`stale-head`): scan again,
  * and send the move with it too. Shares never nest (`share-nesting`).
  */
@@ -196,6 +211,7 @@ export const move = {
     wraps: z.array(SubjectWrap).max(500_000).default([]),
     keyEnvelopes: z.array(KeyEnvelopeV2).max(500_000).default([]),
     metadataEnvelopes: z.array(MetadataEnvelopeV2).max(500_000).default([]),
+    commentEnvelopes: CommentEnvelopes,
   }),
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
@@ -272,7 +288,8 @@ export const sharedWithMe = {
 
 // A Milestone 1 record comes with its payload, which the owner decrypts to
 // check the content key: v1 records don't commit to it. A v2 record's key
-// commitment is enough.
+// commitment is enough. A comment always comes whole: the owner's app opens
+// it in full to take its audience from it (section 5.9).
 const ScannedRevision = z.union([SealedRevision, SealedRevisionV2.omit({ payload: true })]);
 const ScannedMetadata = z.union([SealedMetadata, SealedMetadataV2.omit({ payload: true })]);
 
@@ -283,7 +300,10 @@ const ScannedMetadata = z.union([SealedMetadata, SealedMetadataV2.omit({ payload
  * or the whole space), add a co-owner (`owner-region`), or end a share
  * (`share`: every record wrapped under share `shareId`, the trash included,
  * but a copy's hidden nodes'). In parts: ask again from `next` until it is
- * null.
+ * null. With `comments=1`, comments' current versions come too (section
+ * 5.9), with the page, thread and audience the server records for each;
+ * without it, a scope that holds a comment is `invalid-request`, which
+ * released apps show as "Update the app".
  */
 export const records = {
   method: 'GET',
@@ -295,6 +315,7 @@ export const records = {
       rootId: NodeId.optional(),
       shareId: ShareId.optional(),
       after: z.string().max(200).optional(),
+      comments: z.literal('1').optional(),
     })
     .refine((query) => (query.scope === 'share') === (query.shareId !== undefined), {
       message: 'A share scan names its share, and only it',
@@ -313,6 +334,15 @@ export const records = {
           metadata: ScannedMetadata,
           wrap: KeyWrap.nullable(),
           envelopes: z.array(z.union([MetadataEnvelope, MetadataEnvelopeV2])),
+        }),
+        z.strictObject({
+          kind: z.literal('comment'),
+          comment: SealedComment,
+          pageId: PageId,
+          thread: CommentId.nullable(),
+          audience: Audience,
+          wrap: KeyWrap.nullable(),
+          envelopes: z.array(MetadataEnvelopeV2),
         }),
       ]),
     ),
@@ -340,6 +370,7 @@ export const endShare = {
     permissionVersion: z.number().int(),
     keyEnvelopes: z.array(KeyEnvelopeV2).max(500_000),
     metadataEnvelopes: z.array(MetadataEnvelopeV2).max(500_000),
+    commentEnvelopes: CommentEnvelopes,
   }),
   response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;

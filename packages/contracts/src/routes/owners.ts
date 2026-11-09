@@ -6,7 +6,7 @@ import { FolderKeyEnvelope, OwnerStatement } from '../records/share.ts';
 import { PositiveInt } from '../records/encoding.ts';
 import type { RouteDef } from '../route.ts';
 import { DirectoryPerson } from './people.ts';
-import { Rotation } from './sharing.ts';
+import { CommentEnvelopes, Rotation } from './sharing.ts';
 
 const SpaceParams = z.object({ spaceId: SpaceId });
 
@@ -58,8 +58,9 @@ export const addStatement = {
 /**
  * Add a co-owner, or re-add one whose key changed (section 7.6): every key
  * version of every share in the space and every owner-region record's key,
- * sealed to them by the caller, and the caller's statement naming them. The
- * server adds them only if the envelopes cover all of it.
+ * comments' in `commentEnvelopes` (section 5.9), sealed to them by the
+ * caller, and the caller's statement naming them. The server adds them
+ * only if the envelopes cover all of it.
  */
 export const addOwner = {
   method: 'POST',
@@ -72,6 +73,7 @@ export const addOwner = {
     folderKeyEnvelopes: z.array(FolderKeyEnvelope).max(100_000),
     keyEnvelopes: z.array(KeyEnvelopeV2).max(500_000),
     metadataEnvelopes: z.array(MetadataEnvelopeV2).max(500_000),
+    commentEnvelopes: CommentEnvelopes,
     permissionVersion: z.number().int(),
   }),
   response: z.strictObject({ ok: z.literal(true) }),

@@ -1,4 +1,5 @@
 import {
+  commentRoutes,
   contactsRoutes,
   copyRoutes,
   groupRoutes,
@@ -13,6 +14,13 @@ import {
   type ErrorCode,
 } from '@wikistow/contracts';
 import {
+  addComment,
+  deleteComment,
+  editComment,
+  listComments,
+  markSeen,
+  newComments,
+  resolveThread,
   ContentError,
   CryptoError,
   createFolder,
@@ -137,6 +145,7 @@ const CONTENT_ERRORS = {
   'last-owner': 'last-owner',
   'home-space': 'home-space',
   'invalid-plugin': 'invalid-request',
+  'invalid-request': 'invalid-request',
 } as const satisfies Record<ContentFailure, ErrorCode>;
 
 export function toApiError(error: unknown): never {
@@ -160,6 +169,9 @@ const DOWNLOAD_LIMIT = { windowSeconds: 60, max: 600 };
 // Opening pages and loading the tree. Each answer carries at most a couple of
 // megabytes, so this also bounds how much one account can pull a minute.
 const FETCH_LIMIT = { windowSeconds: 60, max: 120 };
+// Comments are typed by people, a few a minute even in a lively thread.
+// The limit is also what keeps one member from flooding a page (ADR 0014).
+const COMMENT_LIMIT = { windowSeconds: 60, max: 30 };
 // Finding people by exact email, or listing them for a sharing dialog:
 // enough to share with a household in a sitting.
 const LOOKUP_LIMIT = { windowSeconds: 600, max: 30 };
@@ -312,6 +324,7 @@ export function mountContentRoutes(
           rootId: query.rootId ?? null,
           shareId: query.shareId ?? null,
           after: query.after ?? null,
+          comments: query.comments === '1',
         },
         report,
       ).catch(toApiError),
@@ -877,6 +890,81 @@ export function mountContentRoutes(
   // Old addresses of what a move took into another space.
   routes.content(copyRoutes.moved, async ({ params }, { actor }) =>
     movedPlace(db, actor, params).catch(toApiError),
+  );
+
+  // Comments (section 5.9). Anyone who reads a page comments on it, agents
+  // within their grants; agents never edit, delete or resolve, which the
+  // operations refuse them, and only people keep seen marks.
+  routes.content(
+    commentRoutes.listComments,
+    async ({ params }, { actor }) =>
+      listComments(db, actor, params.pageId, report).catch(toApiError),
+    { rateLimit: FETCH_LIMIT },
+  );
+
+  routes.content(
+    commentRoutes.addComment,
+    async ({ params, body }, { actor }) => {
+      await addComment(db, {
+        actor,
+        pageId: params.pageId,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError);
+      return { commentId: body.commentId };
+    },
+    { rateLimit: COMMENT_LIMIT },
+  );
+
+  routes.content(
+    commentRoutes.editComment,
+    async ({ params, body }, { actor }) => {
+      await editComment(db, {
+        actor,
+        commentId: params.commentId,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: COMMENT_LIMIT },
+  );
+
+  routes.content(
+    commentRoutes.deleteComment,
+    async ({ params }, { actor }) => {
+      await deleteComment(db, { actor, commentId: params.commentId }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.content(
+    commentRoutes.resolveThread,
+    async ({ params, body }, { actor }) => {
+      await resolveThread(db, { actor, commentId: params.commentId, ...body }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    commentRoutes.markSeen,
+    async ({ params }, { principal }) => {
+      await markSeen(db, { accountId: principal.accountId, pageId: params.pageId }).catch(
+        toApiError,
+      );
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT },
+  );
+
+  routes.account(
+    commentRoutes.newComments,
+    async (_input, { principal }) => ({
+      threads: await newComments(db, principal.accountId, report).catch(toApiError),
+    }),
+    { rateLimit: FETCH_LIMIT },
   );
 
   routes.content(pageRoutes.history, async ({ params }, { actor }) => ({

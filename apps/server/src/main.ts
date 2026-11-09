@@ -45,9 +45,16 @@ await lock.migrate(config.migrationsDir ?? MIGRATIONS_DIR);
 stdoutLog({ level: 'info', event: 'migrated' });
 const { db, close } = connect(config.databaseUrl);
 const blobs = fileBlobStore(config.blobDir);
-const { app, treeChanges, renderer } = createApp({ db, config, log: stdoutLog, blobs });
+const { app, treeChanges, commentChanges, renderer } = createApp({
+  db,
+  config,
+  log: stdoutLog,
+  blobs,
+});
 // Should the database go away, losing the lock above stops the server too.
-const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.changed);
+const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.changed, {
+  onComment: commentChanges.changed,
+});
 
 // Each sweep on its own, so one failing doesn't stop the others: attachment
 // data nothing uses, and publications into another space nobody finished
@@ -105,6 +112,7 @@ const shutdown = () => {
       .then(() => process.exit(0));
   });
   treeChanges.close();
+  commentChanges.close();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);

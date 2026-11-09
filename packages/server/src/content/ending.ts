@@ -46,8 +46,9 @@ type Ending = z.output<typeof sharingRoutes.endShare.body>;
  * - the root's permission version, or the space's, is current
  *   (`permission-version`), so a change of access or owners since the
  *   preview is previewed again;
- * - every record wrapped under the share, but a copy's hidden nodes', has
- *   exactly one envelope to each current owner, granted by the caller
+ * - every record wrapped under the share, but a copy's hidden nodes', its
+ *   comments included, has exactly one envelope to each current owner,
+ *   granted by the caller
  *   (`recipients-mismatch`, `bad-signature`). One left without is
  *   `stale-head`, and so is an envelope for a record no longer wrapped
  *   under the share: the app scans again.
@@ -126,7 +127,7 @@ export async function endShare(
         members: members.map((row) => row.id),
         agents: agents.map((row) => row.id),
         groups: groups.map((row) => row.id),
-        records: records.revision.length + records.metadata.length,
+        records: records.revision.length + records.metadata.length + records.comment.length,
       },
     });
   });

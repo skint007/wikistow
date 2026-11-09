@@ -3,7 +3,7 @@ import {
   FolderKeyEnvelope,
   KeyWrap,
   type IdentityId,
-  type MetadataRecord,
+  type MetadataRecordV2,
   type RevisionRecord,
   type ShareId,
   type SpaceId,
@@ -47,8 +47,12 @@ export const folderKeyOf = <K extends { draftKey: Uint8Array | null; publishedKe
 export type WrapSubject = {
   spaceId: SpaceId;
   audienceClass: AudienceClass;
-  /** A group's name is never wrapped (section 7.8); the server keeps it in the owner region. */
-  subjectKind: 'page' | MetadataRecord['subjectKind'];
+  /**
+   * A group's name is never wrapped (section 7.8); the server keeps it in
+   * the owner region. A comment's wrap has its audience as its class
+   * (section 5.9).
+   */
+  subjectKind: 'page' | MetadataRecordV2['subjectKind'] | 'comment';
   subjectId: string;
   versionId: string;
 };
@@ -64,7 +68,7 @@ export const revisionWrapSubject = (
 });
 
 export const metadataWrapSubject = (
-  r: Pick<MetadataRecord, 'spaceId' | 'subjectKind' | 'subjectId' | 'metadataRevisionId'>,
+  r: Pick<MetadataRecordV2, 'spaceId' | 'subjectKind' | 'subjectId' | 'metadataRevisionId'>,
 ): WrapSubject => ({
   spaceId: r.spaceId,
   audienceClass: 'metadata',

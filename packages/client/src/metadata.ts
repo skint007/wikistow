@@ -6,6 +6,7 @@ import {
   MetadataRecordV2,
   SealedMetadata,
   SealedMetadataV2,
+  type CommentRecord,
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { z } from 'zod';
@@ -247,7 +248,7 @@ export function reviseMetadata(previous: OpenedMetadata, changes: MetadataChange
 
 /** The fields a writer chooses; the rest of the record is derived when sealing. */
 export type MetadataTarget = Pick<
-  MetadataRecord,
+  MetadataRecordV2,
   'installationId' | 'spaceId' | 'subjectKind' | 'subjectId' | 'metadataRevisionId' | 'basedOn'
 >;
 
@@ -267,7 +268,18 @@ export const metadataRecordBytes = (r: MetadataRecord) =>
   ]);
 
 // Binds the ciphertext to its subject, version, and author, like page payloads.
-const metadataAd = (r: Omit<MetadataRecord, 'protocol' | 'basedOn' | 'payloadHash'>) =>
+const metadataAd = (
+  r: Pick<
+    MetadataRecordV2,
+    | 'installationId'
+    | 'spaceId'
+    | 'subjectKind'
+    | 'subjectId'
+    | 'metadataRevisionId'
+    | 'authorId'
+    | 'authorKeyVersion'
+  >,
+) =>
   canonical('metadata-payload/v1', [
     r.installationId,
     r.spaceId,
@@ -294,8 +306,8 @@ export const metadataEnvelopeBytes = (
     e.granterKeyVersion,
   ]);
 
-/** The bytes an author signs for a v2 metadata record. */
-export const metadataRecordV2Bytes = (r: MetadataRecordV2) =>
+/** The bytes an author signs for a v2 metadata record: a name's, or a comment's (section 5.9). */
+export const metadataRecordV2Bytes = (r: MetadataRecordV2 | CommentRecord) =>
   canonical('metadata-record/v2', [
     r.protocol,
     r.installationId,
@@ -328,7 +340,8 @@ export const metadataEnvelopeV2Bytes = (
   ]);
 
 /**
- * Encrypt one metadata version under a fresh key sealed to each recipient.
+ * Encrypt one metadata version under a fresh key sealed to each recipient,
+ * as Milestone 1 did: a space's or folder's name only.
  * `recipients` must come from `TrustStore.recipients`, never the directory.
  */
 export function sealMetadata({
@@ -342,10 +355,13 @@ export function sealMetadata({
   metadata: NodeMetadata;
   recipients: readonly PublicIdentity[];
 }): { metadata: SealedMetadata; envelopes: MetadataEnvelope[] } {
+  const { subjectKind } = target;
+  if (subjectKind === 'group') throw new CryptoError('malformed', 'A group’s name is a v2 record');
   const { binding, payload, key } = encryptMetadata({ author, target, metadata });
   const record: MetadataRecord = {
     protocol: 1,
     ...binding,
+    subjectKind,
     payloadHash: hash(sealedBytes(payload)),
   };
   const envelopes = recipients.map((recipient) => {
@@ -473,7 +489,7 @@ export function grantMetadataKeyV2({
 }
 
 export type ExpectedMetadata = Pick<
-  MetadataRecord,
+  MetadataRecordV2,
   'installationId' | 'spaceId' | 'subjectKind' | 'subjectId' | 'metadataRevisionId'
 >;
 

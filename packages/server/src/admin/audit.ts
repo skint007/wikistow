@@ -120,6 +120,12 @@ const DETAILS = {
     nodeId: z.string(),
     sharedBy: z.string(),
   }),
+  // An owner deleted someone else's comment (section 5.9): whose, and where, by ID.
+  'comment.deleted': z.strictObject({
+    spaceId: z.string(),
+    pageId: z.string(),
+    authorId: z.string(),
+  }),
   'space.owner-added': z.strictObject({ identityId: z.string(), keyVersion: z.number().int() }),
   'space.owner-removed': z.strictObject({ identityId: z.string(), shares: z.number().int() }),
   // How much went with it, never what.
@@ -146,7 +152,16 @@ export async function audit<A extends AuditAction>(
     actor: string | null;
     action: A;
     target: {
-      kind: 'account' | 'agent' | 'group' | 'invitation' | 'node' | 'settings' | 'share' | 'space';
+      kind:
+        | 'account'
+        | 'agent'
+        | 'comment'
+        | 'group'
+        | 'invitation'
+        | 'node'
+        | 'settings'
+        | 'share'
+        | 'space';
       id: string;
     };
     details: z.input<(typeof DETAILS)[A]>;
