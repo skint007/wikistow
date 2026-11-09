@@ -1200,6 +1200,7 @@ function PageBody({
             region={draftFrom.region}
             queued={draftFrom.queued}
             onReload={(options) => void viewTheirs(options)}
+            onMerged={coverEditor.show}
             hiddenAttachments={coverParts}
             toolbar={<Place name="editor.toolbar" shown={pluginShown} />}
           />

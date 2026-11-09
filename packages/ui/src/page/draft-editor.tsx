@@ -12,6 +12,7 @@ import {
   type RevisionId,
 } from '@wikistow/client';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { flushSync } from 'react-dom';
 import { Paperclip, Trash2 } from 'lucide-react';
 import {
   useCallback,
@@ -46,6 +47,8 @@ import { useMovedLinks } from './moved-links';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
+import { MergeView } from './merge/merge-view';
+import { openOnlineMerge, type OpenedMerge } from './merge/online-merge';
 import { useNotKept } from '../data/connection';
 import { useAvailability } from '../shell/availability';
 
@@ -115,6 +118,7 @@ export function DraftEditor({
   region,
   queued = null,
   onReload,
+  onMerged,
   hiddenAttachments = NONE,
   toolbar,
   ref,
@@ -135,6 +139,8 @@ export function DraftEditor({
    * when theirs is a change another window saved on this device.
    */
   onReload: (options: { keepQueued: boolean }) => void;
+  /** A merge was saved: the draft is `payload` now, its banner and icon included. */
+  onMerged?: (payload: PagePayload) => void;
   /** Attachments kept out of the list because something else manages them (the banner, the icon). */
   hiddenAttachments?: readonly string[];
   /** Plugins' buttons for the editor's format toolbar (`editor.toolbar`). */
@@ -210,147 +216,225 @@ export function DraftEditor({
   );
 
   const failed = snapshot.status === 'error' ? saveFailure(snapshot.saveError) : null;
+  const merging = useMerging(ctx, page, session);
+  // Merge… for a draft someone else saved over the person's unsaved text
+  // (ADR 0013, decision 1). A change waiting on this device merges from
+  // the offline changes instead.
+  const canMerge = snapshot.status === 'conflict' && session.hasUnsaved() && !onDevice;
+  const merge = merging.state?.status === 'ready' ? merging.state.opened : null;
+  const mergeButton = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="flex flex-1 flex-col gap-4">
-      {/* Until it saves, or someone else's save stops it saving. */}
-      {snapshot.tooLarge !== null && snapshot.status !== 'conflict' && (
-        <p
-          role="alert"
-          className="rounded-control bg-status-draft p-3 text-sm text-status-draft-foreground"
-        >
-          {snapshot.tooLarge} Your changes aren’t saved. Make it shorter and they will be.
+      {merge && (
+        <MergeView
+          key={merge.revisionId}
+          merge={merge.merge}
+          theirs={merge.theirs}
+          pictures={{ ctx, page, attachments: merge.attachments }}
+          onCancel={() => {
+            flushSync(merging.cancel);
+            mergeButton.current?.focus();
+          }}
+          onSave={(payload) => {
+            merging.cancel();
+            onMerged?.(payload);
+            void session.saveMerged(merge.revisionId, payload, merge.region);
+          }}
+        />
+      )}
+      {merging.state?.status === 'loading' && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Merging…
         </p>
       )}
-      {(snapshot.status === 'conflict' || snapshot.status === 'error') && (
-        <div
-          role="alert"
-          className="grid gap-3 rounded-control bg-status-draft p-3 text-sm text-status-draft-foreground"
-        >
-          <p>
-            {failed
-              ? failed.message
-              : session.hasUnsaved()
-                ? 'Someone else saved this draft while you were editing. Your changes are not saved yet.'
-                : 'Someone else saved a newer version of this draft.'}
+      {/* Kept on screen while merging, so the person's text stays as it is. */}
+      <div
+        className={cn(
+          'flex flex-1 flex-col gap-4',
+          merging.state?.status !== 'failed' && merging.state && 'hidden',
+        )}
+      >
+        {/* Until it saves, or someone else's save stops it saving. */}
+        {snapshot.tooLarge !== null && snapshot.status !== 'conflict' && (
+          <p
+            role="alert"
+            className="rounded-control bg-status-draft p-3 text-sm text-status-draft-foreground"
+          >
+            {snapshot.tooLarge} Your changes aren’t saved. Make it shorter and they will be.
           </p>
-          {snapshot.status === 'conflict' ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void session.saveMineOnTop()}>
-                Save mine on top
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onReload({ keepQueued: conflictWithDevice() })}
-              >
-                Discard mine and view theirs
-              </Button>
-            </div>
-          ) : (
-            failed?.retry && (
+        )}
+        {(snapshot.status === 'conflict' || snapshot.status === 'error') && (
+          <div
+            role="alert"
+            className="grid gap-3 rounded-control bg-status-draft p-3 text-sm text-status-draft-foreground"
+          >
+            <p>
+              {failed
+                ? failed.message
+                : session.hasUnsaved()
+                  ? 'Someone else saved this draft while you were editing. Your changes are not saved yet.'
+                  : 'Someone else saved a newer version of this draft.'}
+            </p>
+            {merging.state?.status === 'failed' && <p>{merging.state.message}</p>}
+            {snapshot.status === 'conflict' ? (
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void session.retry()}>
-                  Try again
+                {canMerge && (
+                  <Button ref={mergeButton} size="sm" onClick={merging.start}>
+                    Merge…
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant={canMerge ? 'outline' : 'default'}
+                  onClick={() => void session.saveMineOnTop()}
+                >
+                  Save mine on top
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onReload({ keepQueued: conflictWithDevice() })}
+                >
+                  Discard mine and view theirs
                 </Button>
               </div>
-            )
-          )}
-        </div>
-      )}
-      <label className="sr-only" htmlFor="page-title">
-        Title
-      </label>
-      <input
-        id="page-title"
-        value={snapshot.title}
-        onChange={(event) => session.setTitle(event.target.value)}
-        placeholder="Untitled"
-        {...notCredential}
-        className="w-full bg-transparent text-[32px] leading-tight font-extrabold outline-none placeholder:text-muted-foreground"
-      />
-      <PageEditor
-        ref={surface}
-        initial={snapshot.markdown}
-        onChange={(markdown) => session.edit(markdown)}
-        onEditing={() => session.editing()}
-        links={links.assist}
-        attachments={attachments}
-        page={page}
-        propertyKeys={propertyKeys}
-        otherPages={others}
-        queryTable={queryTable}
-        toolbar={toolbar}
-        onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
-        status={
-          <span role="status" aria-live="polite">
-            {snapshot.status === 'saved' && onDevice
-              ? 'Saved on this device'
-              : STATUS_TEXT[snapshot.status]}
-          </span>
-        }
-      />
-      {links.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {links.error}
-        </p>
-      )}
-      <LinkChooser {...links.chooser} />
-      <section aria-label="Attachments" className="grid gap-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-bold">Attachments</h2>
-          <label className={cn(uploadButtonClass, 'ml-auto')}>
-            <Paperclip className="size-4" strokeWidth={1.75} />
-            {snapshot.uploading ? 'Encrypting…' : 'Attach files'}
-            <input
-              type="file"
-              multiple
-              className="sr-only"
-              disabled={snapshot.uploading}
-              onChange={(event) => {
-                session.attach(Array.from(event.target.files ?? []));
-                event.target.value = '';
-              }}
-            />
-          </label>
-        </div>
-        {snapshot.uploadError && (
+            ) : (
+              failed?.retry && (
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => void session.retry()}>
+                    Try again
+                  </Button>
+                </div>
+              )
+            )}
+          </div>
+        )}
+        <label className="sr-only" htmlFor="page-title">
+          Title
+        </label>
+        <input
+          id="page-title"
+          value={snapshot.title}
+          onChange={(event) => session.setTitle(event.target.value)}
+          placeholder="Untitled"
+          {...notCredential}
+          className="w-full bg-transparent text-[32px] leading-tight font-extrabold outline-none placeholder:text-muted-foreground"
+        />
+        <PageEditor
+          ref={surface}
+          initial={snapshot.markdown}
+          onChange={(markdown) => session.edit(markdown)}
+          onEditing={() => session.editing()}
+          links={links.assist}
+          attachments={attachments}
+          page={page}
+          propertyKeys={propertyKeys}
+          otherPages={others}
+          queryTable={queryTable}
+          toolbar={toolbar}
+          onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
+          status={
+            <span role="status" aria-live="polite">
+              {snapshot.status === 'saved' && onDevice
+                ? 'Saved on this device'
+                : STATUS_TEXT[snapshot.status]}
+            </span>
+          }
+        />
+        {links.error && (
           <p role="alert" className="text-sm text-destructive">
-            {snapshot.uploadError}
+            {links.error}
           </p>
         )}
-        {listed.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            None. Files are encrypted before they leave this device.
-          </p>
-        ) : (
-          <ul className="grid gap-1">
-            {listed.map((attachment) => (
-              <li
-                key={attachment.id}
-                className="flex items-center gap-2 rounded-row bg-muted px-3 py-1.5 text-sm"
-              >
-                <span className="min-w-0 flex-1 truncate">
-                  <Name>{attachment.name}</Name>
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {Math.ceil(attachment.size / 1024)} KB
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${plainText(attachment.name)}`}
-                  onClick={() => session.removeAttachment(attachment.id)}
-                  className="rounded-row p-1 text-muted-foreground hover:tint active:tint-strong"
+        <LinkChooser {...links.chooser} />
+        <section aria-label="Attachments" className="grid gap-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold">Attachments</h2>
+            <label className={cn(uploadButtonClass, 'ml-auto')}>
+              <Paperclip className="size-4" strokeWidth={1.75} />
+              {snapshot.uploading ? 'Encrypting…' : 'Attach files'}
+              <input
+                type="file"
+                multiple
+                className="sr-only"
+                disabled={snapshot.uploading}
+                onChange={(event) => {
+                  session.attach(Array.from(event.target.files ?? []));
+                  event.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {snapshot.uploadError && (
+            <p role="alert" className="text-sm text-destructive">
+              {snapshot.uploadError}
+            </p>
+          )}
+          {listed.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              None. Files are encrypted before they leave this device.
+            </p>
+          ) : (
+            <ul className="grid gap-1">
+              {listed.map((attachment) => (
+                <li
+                  key={attachment.id}
+                  className="flex items-center gap-2 rounded-row bg-muted px-3 py-1.5 text-sm"
                 >
-                  <Trash2 className="size-4" strokeWidth={1.75} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  <span className="min-w-0 flex-1 truncate">
+                    <Name>{attachment.name}</Name>
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {Math.ceil(attachment.size / 1024)} KB
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${plainText(attachment.name)}`}
+                    onClick={() => session.removeAttachment(attachment.id)}
+                    className="rounded-row p-1 text-muted-foreground hover:tint active:tint-strong"
+                  >
+                    <Trash2 className="size-4" strokeWidth={1.75} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
+}
+
+type Merging =
+  | { status: 'loading' }
+  | { status: 'failed'; message: string }
+  | { status: 'ready'; opened: OpenedMerge };
+
+/** The merge the person opened from the conflict prompt, while it loads and shows. */
+function useMerging(
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  session: ReturnType<typeof useDraftSession>['session'],
+) {
+  const queryClient = useQueryClient();
+  const [state, setState] = useState<Merging | null>(null);
+  // Each opening, so one cancelled while it loads shows nothing.
+  const opening = useRef(0);
+  const start = useCallback(() => {
+    const mine = ++opening.current;
+    const set = (next: Merging) => opening.current === mine && setState(next);
+    setState({ status: 'loading' });
+    openOnlineMerge(ctx, page, session, queryClient).then(
+      (opened) => set({ status: 'ready', opened }),
+      (error: unknown) => set({ status: 'failed', message: errorMessage(error) }),
+    );
+  }, [ctx, page, session, queryClient]);
+  const cancel = useCallback(() => {
+    opening.current++;
+    setState(null);
+  }, []);
+  return { state, start, cancel };
 }
 
 // Long enough for a slow tree to load; after it, the link just stays

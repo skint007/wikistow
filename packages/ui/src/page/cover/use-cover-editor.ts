@@ -135,6 +135,9 @@ export function useCoverEditor({
     shown,
     uploading,
     error,
+    /** The draft became `payload` from elsewhere, as a merge saved: show its cover. */
+    show: (payload: PagePayload) =>
+      setChosen({ cover: coverOf(payload), attachments: payload.attachments }),
     setBanner: (banner: BannerChoice | null) => {
       bannerChoices.current += 1;
       apply({ banner });
