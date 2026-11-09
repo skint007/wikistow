@@ -207,8 +207,10 @@ export async function endShare(
   }
   ctx.marks.raise(spaceId, shareId, ENDED);
   forgetSpaces(ctx);
-  // The tree lists nothing in the trash, so what it doesn't list came from there.
-  const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+  // The tree lists nothing in the trash, so what it doesn't list came from
+  // there. It is only a hint: the share has ended whether or not it loads.
+  const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } }).catch(() => null);
+  if (!tree) return { fromTrash: false };
   const listed = new Set<string>([
     spaceId,
     ...tree.folders.map((f) => f.id),

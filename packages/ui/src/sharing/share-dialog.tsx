@@ -1,4 +1,4 @@
-import type { FolderId, SpaceId } from '@wikistow/client';
+import type { FolderId, ShareId, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Name } from '@/components/name';
@@ -43,7 +43,11 @@ export function ShareDialog({
   const [shown, setShown] = useState(rootId);
   // What stopping sharing did. Opened from the folder above, the dialog goes
   // back to it, which can be shared now; opened on the share, it says only that.
-  const [ended, setEnded] = useState<{ message: ReactNode; alone: boolean } | null>(null);
+  const [ended, setEnded] = useState<{
+    message: ReactNode;
+    alone: boolean;
+    shareId: ShareId;
+  } | null>(null);
   useEffect(() => {
     if (open) {
       setShown(rootId);
@@ -88,7 +92,7 @@ export function ShareDialog({
             owners={owners}
             review={review}
             onEnded={(message) => {
-              setEnded({ message, alone: shown === rootId });
+              setEnded({ message, alone: shown === rootId, shareId: target.share.shareId });
               setShown(rootId);
             }}
           />
@@ -170,7 +174,11 @@ export function ShareDialog({
                 {ended.message}
               </p>
             )}
-            {open && !ended?.alone && body()}
+            {/* Until the list drops the ended share, the folder still looks held by it. */}
+            {open &&
+              !ended?.alone &&
+              !(ended && live?.some((share) => share.shareId === ended.shareId)) &&
+              body()}
           </div>
         </HoldOpen>
       </DialogContent>
