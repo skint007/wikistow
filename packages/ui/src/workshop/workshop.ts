@@ -36,9 +36,12 @@ const {
   MAX_DRAFT_FILES,
 } = pluginDraftRoutes;
 
-/** What to say when a server from before fonts and images in drafts (#313) refuses one. */
+/**
+ * What to say when a server refuses a draft's fonts and images: one from
+ * before them (#313), or from before `.ttf`, `.otf` and `.jpeg` (#363).
+ */
 export const OLD_SERVER =
-  'Your WikiStow server doesn’t take fonts and images in plugin drafts yet.';
+  'Your WikiStow server doesn’t take these fonts or images in plugin drafts yet.';
 
 /** Errors from the previewed plugin's code kept for the report, newest last. */
 const MAX_ERRORS = 20;

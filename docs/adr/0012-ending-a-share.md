@@ -23,7 +23,7 @@ In short:
 - **Wraps and folder key envelopes cascade with their share.** Deleting a `shares` row deletes its `revision_wraps`, `metadata_wraps`, envelopes, members and grants.
 - **The trash keeps its records under the keys they had.** A node deleted from under a share keeps its wraps, and restoring it checks they still fit where it goes (protocol section 10, **The trash**).
 - **Public links end when their sharer can't publish the page** (ADR 0005, decision 8), in the transaction of the change that took the right away.
-- **The offline queue** seals each draft when it is sent, in the region of that moment, but a folder rename in the region it was queued in (#359), and treats `not-found` and `forbidden` as a page out of reach (ADR 0009, decision 7).
+- **The offline queue** seals each draft and folder rename when it is sent, in the region of that moment (a rename refused with `region-mismatch` is sealed again for the region its folder's name is in, #359), and treats `not-found` and `forbidden` as a page out of reach (ADR 0009, decision 7).
 - **One request is capped at 64 MiB** (`BULK_BODY` in `apps/server/src/routes/content.ts`), for making a share, a move and adding a co-owner. Past it the server answers `payload-too-large`.
 
 ## Decisions
@@ -92,7 +92,7 @@ No new check is needed. Each case meets one that exists:
 - **A former member, or their agent,** has no access: `not-found`, or `forbidden` for a page they could still name.
 - **An owner's app** that still holds a version opened through the share's wrap sends a wrap for a page now in the owner region, which the server refuses (`region-mismatch`, section 6.8). A draft save opens its base again, finds it sealed to the owners, and writes there (`saveDraft` already retries this way); any other write gives the error it gives after a move today, and the person tries again. The app that ended the share refuses before sending, through its mark.
 - **A write the ending races** waits for the space lock. One that landed before it, after the app's scan, makes the ending `stale-head` instead (decision 4).
-- **Offline changes** (ADR 0009): an owner's drafts are sealed when sent, with the keys of that moment, so they go to the owner region. A folder rename queued before the ending keeps the region it was queued in and stays refused, as after a move today (#359); nothing goes under the old keys. A former member's changes come back as a page out of reach, with **Save as a new page in my space**, **Copy text** and **Discard**.
+- **Offline changes** (ADR 0009): an owner's drafts are sealed when sent, with the keys of that moment, so they go to the owner region. A folder rename queued before the ending is refused with `region-mismatch` before anything is sealed, then sealed again for the owner region, as after a move (#359); nothing goes under the old keys. A former member's changes come back as a page out of reach, with **Save as a new page in my space**, **Copy text** and **Discard**.
 - **Kept pages** on a former member's device are dropped once it is online again, as after any removal (A13).
 - **Unfinished copies** into the folder fail at their finish, as for a share made at the destination (protocol section 10). A move out of it, opened before, fails as its source's permission version moved on; a copy out of it by a former member fails its finish's check of who may copy.
 

@@ -858,8 +858,11 @@ function Files({ workshop }: { workshop: Workshop }) {
       }
     } catch (error) {
       // Only a server from before fonts and images in drafts has no route for them: it
-      // answers 404, or 413 past its usual 1 MiB body. The limits were checked here first.
-      const old = error instanceof ApiError && (error.status === 404 || error.status === 413);
+      // answers 404, or 413 past its usual 1 MiB body. One from before #363 refuses a kind
+      // it doesn't know as invalid. The path and limits were checked here first.
+      const old =
+        error instanceof ApiError &&
+        (error.status === 404 || error.status === 413 || error.code === 'invalid-request');
       setProblem(old ? OLD_SERVER : message(error));
     }
     try {

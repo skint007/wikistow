@@ -95,7 +95,8 @@ export function useNewDraft(): {
       openWorkshop(draft.id);
       return true;
     } catch (failure) {
-      // A server from before fonts and images in drafts refuses `binary` as a field it doesn't know.
+      // A server from before fonts and images in drafts refuses `binary` as a field it doesn't
+      // know, and one from before #363 a kind it doesn't know.
       const old =
         failure instanceof ApiError &&
         failure.code === 'invalid-request' &&
