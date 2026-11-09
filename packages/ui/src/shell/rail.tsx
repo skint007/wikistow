@@ -48,7 +48,8 @@ import { desktop, desktopServerQuery, desktopUpdateQuery, linkHint } from '../de
 import { changesNotSent, forgetKept, signOutWarning } from '../data/kept-store';
 import { connection } from '../data/connection';
 import { useNeedsConnection } from './availability';
-import { NODE_DRAG_TYPE, nodeDrag } from './node-drag';
+import { useStartMove } from '../page/move-dialog';
+import { copying, NODE_DRAG_TYPE, nodeDrag, type DraggedNode } from './node-drag';
 import { DropMoveOpener } from './space-moves';
 import { nameOf } from '../sharing/names';
 import { OfflinePill } from './offline-pill';
@@ -204,8 +205,8 @@ function moved<T>(ids: T[], from: number, to: number) {
  * other tile to a new place; the tile menu's Move up and Move down do the
  * same from the keyboard. The rail shows the new order at once, and puts the
  * old one back if saving it fails. A page or folder dragged from the sidebar
- * onto another space where the person can make pages opens Move to…, or
- * Copy to…, with that space chosen (#338); nothing moves on the drop alone.
+ * onto another space where the person can make pages moves to its top, or
+ * copies there (#338, #376), as the sidebar's drops do.
  */
 function SpaceTiles({
   vault,
@@ -229,7 +230,7 @@ function SpaceTiles({
     spaceId: SpaceId;
     hint: { text: string; top: number; left: number } | null;
   } | null>(null);
-  const openDropped = use(DropMoveOpener);
+  const startMove = useStartMove(use(DropMoveOpener));
   useEffect(() => {
     if (!failed) return;
     const timer = setTimeout(() => setFailed(false), 6000);
@@ -287,28 +288,46 @@ function SpaceTiles({
       nameOf(space.metadata) !== null;
     return takes ? node : null;
   };
+  // A move for an owner of the space it's in, else a copy, and a copy with Ctrl held (#376).
+  const actionOf = (event: DragEvent, node: DraggedNode) =>
+    copying(event) || !node.movesAcross ? 'copy' : 'move';
   // For dragenter as well as dragover, as in the sidebar.
   const nodeDragOver = (event: DragEvent<HTMLElement>, space: (typeof spaces)[number]) => {
     const node = nodeFor(event, space);
     if (!node) return setNodeOver(null);
-    if (node.hint === null) {
+    const action = actionOf(event, node);
+    const hint = node.hints[action];
+    if (hint === null) {
       event.preventDefault();
-      event.dataTransfer.dropEffect = node.action;
+      event.dataTransfer.dropEffect = action;
     }
-    if (nodeOver?.spaceId === space.id) return;
+    if (nodeOver?.spaceId === space.id && (nodeOver.hint?.text ?? null) === hint) return;
     // Hints show on hover, which a drag doesn't fire, so this one is drawn here.
     const { top, height, right } = event.currentTarget.getBoundingClientRect();
     setNodeOver({
       spaceId: space.id,
-      hint: node.hint === null ? null : { text: node.hint, top: top + height / 2, left: right + 8 },
+      hint: hint === null ? null : { text: hint, top: top + height / 2, left: right + 8 },
     });
   };
+  // It goes to the top of that space at once, or while asking before moves, opens Move to… there.
   const nodeDrop = (event: DragEvent, space: (typeof spaces)[number]) => {
     const node = nodeFor(event, space);
     setNodeOver(null);
-    if (!node || node.hint !== null) return;
+    if (!node) return;
+    const action = actionOf(event, node);
+    if (node.hints[action] !== null) return;
     event.preventDefault();
-    openDropped(node.spaceId, { ...node.moving, action: node.action, into: space.id });
+    nodeDrag.set(null);
+    startMove({
+      spaceId: node.spaceId,
+      moving: node.moving,
+      action,
+      to: {
+        spaceId: space.id,
+        spaceName: nameOf(space.metadata) ?? 'Space',
+        place: { parentId: null, path: [] },
+      },
+    });
   };
 
   return (

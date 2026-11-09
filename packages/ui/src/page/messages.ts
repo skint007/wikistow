@@ -7,9 +7,9 @@ import { sharingMessage } from '../sharing/messages';
 // always means nothing moved.
 const MOVE_REFUSED: Partial<Record<ApiError['code'], string>> = {
   'stale-head':
-    'It moved, or something in it changed, since you looked, so nothing moved. Look at the move again.',
+    'It moved, or something in it changed, since you looked, so nothing moved. Try again.',
   'permission-version':
-    'Who has access here changed while you were looking, so nothing moved. Look at the move again.',
+    'Who has access here changed while you were looking, so nothing moved. Try again.',
   'key-version': 'The folder’s keys changed while you were looking, so nothing moved. Try again.',
   forbidden:
     'You can’t move it there, so nothing moved. You need to be able to edit where it is and where it goes, and only an owner of the space moves things into or out of a shared folder.',
@@ -17,7 +17,7 @@ const MOVE_REFUSED: Partial<Record<ApiError['code'], string>> = {
   'too-deep': 'That would put something more than 256 folders deep, so nothing moved.',
   'not-found': 'That page or folder, or where it was going, isn’t there any more.',
   'binding-mismatch':
-    'The server turned the move down as not matching what is there, so nothing moved. Look at the move again.',
+    'The server turned the move down as not matching what is there, so nothing moved. Try again.',
 };
 
 // A move across a share carries new keys for every saved version, so a big one can't go at once.

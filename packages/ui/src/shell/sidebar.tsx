@@ -44,6 +44,7 @@ import {
   useMovedInto,
 } from '../page/delete-dialog';
 import {
+  copyDestinationsIn,
   destinationsIn,
   MoveDialog,
   moveRoute,
@@ -86,7 +87,7 @@ import {
   type PageInfo,
 } from './tree-menus';
 import { useAvailability } from './availability';
-import { NODE_DRAG_TYPE, nodeDrag } from './node-drag';
+import { copying, NODE_DRAG_TYPE, nodeDrag } from './node-drag';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -246,12 +247,14 @@ type PageDialog = {
 };
 
 /**
- * A page or folder being dragged in the tree, where it can be dropped, and
- * the place it is over now, if it can go there.
+ * A page or folder being dragged in the tree, where it can be moved, and
+ * copied while Ctrl is held (Option on a Mac), and the place it is over
+ * now, if it can go there.
  */
 type Dragging = {
   moving: Moving;
   to: Map<FolderId | null, Destination<FolderId>>;
+  copyTo: Map<FolderId | null, Destination<FolderId>>;
   over: Destination<FolderId> | null;
 };
 
@@ -281,7 +284,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [restyling, setRestyling] = useState<FolderId | null>(null);
   const [sharing, setSharing] = useState<{ rootId: FolderId | null } | null>(null);
   const [moving, setMoving] = useState<Moving | null>(null);
-  const startMove = useStartMove(spaceId, setMoving);
+  const startMove = useStartMove((_, next) => setMoving(next));
   const [exporting, setExporting] = useState<Exporting | null>(null);
   const [importing, setImporting] = useState<Importing | null>(null);
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
@@ -402,12 +405,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     }
   }
 
-  // Drag and drop moves, for a mouse: a drop opens the move preview on the
-  // place dropped on, as Move to… does once that place is chosen, or moves at
-  // once if the person turned asking before moves off. Keyboard
-  // users have Move to… in the menus. A drop on a page is a drop beside it,
-  // and one below the rows is at the top of the space. A drop on another
-  // space in the rail is the rail's, from what `nodeDrag` holds (#338).
+  // Drag and drop moves, for a mouse, at once, or copies with Ctrl held
+  // (Option on a Mac), and a notice offers Undo (#376). While **Ask before
+  // moving** is on, a drop opens Move to… on the place dropped on instead.
+  // Keyboard users have Move to… in the menus. A drop on a page is a drop
+  // beside it, and one below the rows is at the top of the space. A drop on
+  // another space in the rail is the rail's, from what `nodeDrag` holds (#338).
   // A drag whose row went away meanwhile, moved or deleted elsewhere, is
   // over: the row's dragend never reaches the tree.
   if (dragging && !rows.some((r) => r.id === dragging.moving.id)) {
@@ -415,7 +418,6 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     nodeDrag.set(null);
   }
   const startDrag = (event: DragEvent, moving: Moving) => {
-    // A copy, for a drop on another space's tile in the rail.
     event.dataTransfer.effectAllowed = 'copyMove';
     event.dataTransfer.setData(NODE_DRAG_TYPE, '');
     // Where Move to… offers: offline, only within its share (`moveRoute`).
@@ -423,27 +425,39 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     const places = destinationsIn(tree, moving, owner).filter(
       (d) => moveRoute(tree, moving, d.parentId, availability).route !== null,
     );
-    setDragging({ moving, to: new Map(places.map((d) => [d.parentId, d])), over: null });
+    // Where Copy to… offers in this space: a copy needs the server.
+    const copyHint = availability.of(moving.id).hint('copy');
+    const copies =
+      copyHint === null
+        ? copyDestinationsIn(tree, moving).filter((d) => availability.of(d.parentId).can('into'))
+        : [];
+    setDragging({
+      moving,
+      to: new Map(places.map((d) => [d.parentId, d])),
+      copyTo: new Map(copies.map((d) => [d.parentId, d])),
+      over: null,
+    });
     // Into another space, as Move to… offers it: a move for an owner of this space, else a copy.
     const movesAcross = tree.space?.role === 'owner';
     const across = availability.move(moving.id, null, { across: true });
     nodeDrag.set({
       spaceId,
       moving,
-      action: movesAcross ? 'move' : 'copy',
-      hint: !movesAcross
-        ? availability.of(moving.id).hint('copy')
-        : across.route === null
-          ? across.hint
-          : null,
+      movesAcross,
+      hints: {
+        move: across.route === null ? across.hint : null,
+        copy: copyHint,
+      },
     });
   };
   const pointAt = (over: Destination<FolderId> | null) =>
     setDragging((current) => (current && current.over !== over ? { ...current, over } : current));
-  // Only a drag from this tree, and only where Move to… would offer: not onto
-  // itself, inside itself, or where it is.
+  // Only a drag from this tree, and only where Move to… or Copy to… would
+  // offer: a move not onto itself, inside itself, or where it is.
   const placeAt = (event: DragEvent, parentId: FolderId | null) =>
-    event.dataTransfer.types.includes(NODE_DRAG_TYPE) ? (dragging?.to.get(parentId) ?? null) : null;
+    event.dataTransfer.types.includes(NODE_DRAG_TYPE)
+      ? ((copying(event) ? dragging?.copyTo : dragging?.to)?.get(parentId) ?? null)
+      : null;
   // For dragenter as well as dragover: a browser takes a drop on whatever
   // took either last, and moving onto a new element fires only dragenter.
   const dragOver = (event: DragEvent, parentId: FolderId | null) => {
@@ -452,14 +466,22 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     pointAt(destination);
     if (!destination) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
+    // The copy cursor while Ctrl is held; letting go of it makes it a move again.
+    event.dataTransfer.dropEffect = copying(event) ? 'copy' : 'move';
   };
   const drop = (event: DragEvent, parentId: FolderId | null) => {
     event.preventDefault();
     event.stopPropagation();
     const destination = placeAt(event, parentId);
-    if (dragging && destination) void startMove({ ...dragging.moving, to: destination });
+    if (dragging && destination)
+      startMove({
+        spaceId,
+        moving: dragging.moving,
+        action: copying(event) ? 'copy' : 'move',
+        to: { spaceId, spaceName: spaceName ?? 'this space', place: destination },
+      });
     setDragging(null);
+    nodeDrag.set(null);
   };
   const dropTarget = (row: Row) => (row.kind === 'folder' ? row.id : row.parentId);
 
