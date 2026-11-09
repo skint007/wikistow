@@ -1,0 +1,292 @@
+---
+status: proposed
+---
+
+# Comments on pages
+
+People want to ask a question about a page, or suggest a change, without editing it (#320). Today they edit the page or talk outside the wiki. This ADR decides how anyone who can read a page comments on it, end-to-end encrypted like the page: who can comment and who reads what, which keys seal a comment, what a comment points at, threads, and what moves, shares, copies, public links, the trash, offline, agents and the CLI do with comments.
+
+In short:
+- **Anyone who can read a page can comment on it,** readers included. A comment made while reading the page is **for readers**: everyone who can read the page reads it. One made in the draft view is **for editors**: only the page's editors and owners read it. Replies go to the thread's own audience.
+- **No new keys.** A comment is sealed like a version of its page, under the keys of the page's region: in a share, a comment for readers under the share's published key and one for editors under its draft key, so readers never read editors' comments; outside shares, to the owners.
+- **No new record format.** A comment is a metadata record v2 with `subjectKind: "comment"`, as a group's name is. Its encrypted payload names its page, its thread, its audience, and the passage it is on, if any. No new domain strings.
+- **A comment belongs to the page,** not a version. It may point at a passage, by the text it quotes. When that text changes, the comment says so and keeps its quote.
+- **Threads** of one level, with replies. The thread's starter or the page's editors resolve it. Authors edit their own comments; authors and the space's owners delete them.
+- **Telling people** stays in the app: a count and a dot on the page's **Comments** button, and a **Comments** list in the rail of threads with something new for the person. No mail.
+- **Comments go where their page goes** within a space, rewrapped with its versions. Copies, publications into other spaces and public links never carry them. A move into another space deletes them with the source page. Offline, they need the connection.
+- **Agents and the CLI** list and add comments, as themselves.
+
+## What the code supports today
+
+- **There are no comments.** `wikistow.md` says comments are later work (#320). No table, route or interface exists.
+- **Readers write nothing.** Every write route needs edit rights at the node. Changes made while reading (ADR 0008) need an editor who can publish, and are published versions. So a reader's app has never chosen a key version to write under.
+- **Key classes** (`AudienceClass` in `packages/contracts/src/records/share.ts`): `draft`, `published` and `metadata`. Readers hold only published keys, editors and owners both (protocol sections 6.2 and 7.1). Outside shares, the owners hold every content key (section 6.6).
+- **Metadata records v2** (`packages/contracts/src/records/metadata.ts`) take `subjectKind` `space`, `folder` or `group`. A group's name was added as a new `subjectKind` with no new domain strings (protocol section 1, **What Milestone 5 adds**). An app from before it refuses one strictly, and so can't scan an owner region that holds one until it updates.
+- **The scan route** (`GET /api/spaces/:spaceId/records`, `records` in `packages/contracts/src/routes/sharing.ts`) lists records of kind `revision` or `metadata`, strictly parsed. Making a share, a move across a region boundary, ending a share and adding a co-owner all use it, and the server checks that their key material covers every record it lists.
+- **Pinning** happens the first time an app verifies a record someone wrote (protocol section 8.3), so readers already pin the editors whose versions they read.
+- **The page's side column** holds the chat: a 380px card after the page card on windows 1200px and wider, otherwise a sheet from the right (`wikistow/ui-design.md`, Page chat).
+- **The live tree** (`GET /api/me/tree-changes`) streams `{spaceIds}`, a strict object, from Postgres `NOTIFY`.
+- **Mail** goes out only for accounts: invitations, password resets and email changes (`apps/server/src/mail/mailer.ts`).
+- **Copies** bring a page's current draft and published version and nothing else (protocol section 10). A **public link's copy** holds the published title, body, cover and the files they show (ADR 0005, decision 1).
+- **The CLI** has `page` subcommands (`page history`, `page move`, …), and `wikistow mcp` offers each command as a tool (`page history` is `page_history`).
+
+## Decisions
+
+### 1. Who comments, and who reads what
+
+- **Anyone who can read the page comments on it**: readers, editors, publishers, owners and agents, within their access. Readers asking questions is the main use, so leaving them out would miss the point of #320.
+- **Two audiences, from the two key classes there already are.**
+  - A comment **for readers** is made from the published view. Everyone who can read the page reads it: its readers, editors and owners. It needs the page to be published.
+  - A comment **for editors** is made from the draft view. Only those who can read the draft read it: editors, publishers and owners. Readers never see it, nor that it exists.
+- **The audience follows the view,** so nobody chooses: the box says which it is ("Comment for everyone who reads this page", or "Comment for editors"). A reply takes its thread's audience, wherever it is written, so a reader always sees the answer to their question.
+- **Editors see every thread** in both views, those for editors marked **Editors**.
+- **Unpublishing** hides the comments for readers from readers, as it hides the page (protocol section 11). They come back with the next publish.
+
+### 2. Keys: the page's region, by audience
+
+A comment is sealed as a version of its page is, under the keys of the page's region (protocol section 6.1):
+
+| Region | For readers | For editors |
+| --- | --- | --- |
+| In a share | content key wrapped with the share's **published key** | content key wrapped with the share's **draft key** |
+| Owner region | v2 envelopes to the sealing owners | v2 envelopes to the sealing owners |
+
+So a comment for editors needs the draft key, which readers never hold (section 6.4), and readers can read comments for readers and write them: they hold the published key. In the owner region only owners read the page, so both audiences go to the owners, and the audience matters once the folder is shared.
+
+Each comment version has a fresh content key, wrapped under the share's current key version, with the key version check of section 6.8 and the **No going back** mark. A reader's app now chooses a key version to write under, by the same rule as any writer's: the highest it holds whose envelope an accepted owner it hasn't removed sealed (section 6.5, **Writing**).
+
+### 3. The record and the payload
+
+**The record** is a metadata record v2 (protocol sections 5.4 and 5.7) with `subjectKind: "comment"`, `subjectId` the comment's ID (`newId`), and `metadataRevisionId` the ID of this version. The first version has `basedOn: null`, and an edit is based on the current version. It is signed by its author.
+
+**The key material** is a key wrap (section 6.3) with `audienceClass` the comment's audience (`"draft"` or `"published"`, never `"metadata"`), `subjectKind: "comment"`, `subjectId` the comment ID and `versionId` the version ID; or, in the owner region, v2 metadata envelopes (section 5.8).
+
+**The payload**, comment format 1.0:
+
+```
+{ format: {major: 1, minor: 0}, pageId, thread: CommentId | null, audience: "draft" | "published",
+  text: string,
+  quote?: { revisionId, exact: string, prefix: string, suffix: string },
+  extensions: {} }
+```
+
+- `pageId` is the page it is on, and `thread` the thread's first comment, or `null` for a first comment. `audience` is its audience: `"published"` for readers, `"draft"` for editors.
+- `text` is 1 to 10,000 characters of Markdown.
+- `quote` is the passage, if any (decision 5).
+
+**Why the payload binds the page, thread and audience.** The signed record has no field for them, and the payload is bound to the author's signature through `payloadHash` and `keyCommitment`. So a server that serves a comment on another page, in another thread, or for another audience is caught when the app opens it (decision 4), with no new signed layout. That is how the group's name was added, and it keeps the frozen domains as they are. A new `comment-record/v1` would sign these fields in the record, but would need its own payload AD and envelope domains too (see **Considered options**, Decide 3).
+
+### 4. Writing and opening
+
+**Writing a comment.** The app opens the page's version on screen anyway, and takes the comment's region from it, as section 6.1 does for a write with `basedOn: null` on an existing page: the region of the draft it opened, otherwise of the publication. An edit is in the region of the version it is based on. It sends the comment with the page's permission version. The server checks, under the same locks as a save:
+- the caller can read the page for the comment's audience: for readers, the page is published and the caller can read it; for editors, the caller can edit the page; an agent within its grant and its person's access (section 9.5);
+- the key material is what section 6.8 requires in the page's region, at the current key version, and the permission version is current;
+- a reply's thread is a first comment on the same page, for the same audience, and not deleted;
+- the comment and version IDs are new (`duplicate` otherwise, which also covers a request sent again after a lost answer);
+- the sealed payload is at most 64 KB (`too-large`), and the caller is within a rate limit.
+
+**Opening a comment** runs the checks of a metadata record v2 (sections 5.4, 5.7 and 6.3), asking for `subjectKind: "comment"` and the comment's ID, then:
+1. the wrap opens with the AD for the audience the server lists for the comment; in the owner region, the envelopes are granted by an accepted owner;
+2. the payload parses as comment format 1.0 (a newer major format shows as "Update the app to read this comment");
+3. `pageId` is the page asked for, `thread` is the thread the server lists (`null` for a first comment), `audience` is the one the wrap opened under (in the owner region, the one the server lists), and a reply's audience is its first comment's. Otherwise `binding-mismatch`.
+
+A comment that fails shows in its place as "This comment can't be opened", so a thread stays whole. Its author is the record's signed author, shown by the pinned label (section 8.2), or as "agent (for person)" (section 9.5).
+
+**Rendering.** The text is Markdown read as the reader reads a page, without raw HTML, images, embeds, plugin blocks, query tables or diagrams, so a comment loads nothing and runs nothing. Links and wikilinks work; a wikilink resolves by title in the viewer's own tree, since a comment has no link table.
+
+### 5. The page, not a version; passages by quote
+
+A comment belongs to the page. It stays through edits, publishes and restores, and shows on every version.
+
+A comment may point at a **passage**: the person selects text in the published view, or in the visual editor in the draft view, and presses **Comment**. The payload keeps the passage as text, not as a position:
+- `exact`: the text selected, as it reads (1 to 500 characters);
+- `prefix` and `suffix`: up to 64 characters before and after it, to tell repeats apart;
+- `revisionId`: the version it was made on.
+
+This is the W3C Web Annotation text quote selector, which Hypothesis uses. A position would break with the first edit above it.
+
+The app finds the passage in the version on screen by its text: `exact` where `prefix` and `suffix` fit best, or else its first match. Found, the passage is underlined in the published view, and the thread sits beside it. **When the text it points at changes** so that `exact` isn't there any more, the thread stays, marked "The text this was on has changed", with its quote shown. Its starter or an editor resolves it once it is dealt with. **View version N** opens the version it was made on, for anyone who can open that version.
+
+In the draft view, a thread on a passage shows its quote, and **Show** selects the passage in the editor when it is still there. The source editor makes comments on the page only, since its selection holds Markdown markers rather than text as it reads.
+
+### 6. Threads, resolving, editing and deleting
+
+- **Threads have one level.** A first comment starts a thread; replies follow it in order. There are no replies to replies.
+- **Resolving** folds a thread away. The thread's starter, or anyone who can edit the page, resolves it or opens it again, and a new reply opens it again. Resolving is server state, `resolvedAt` and `resolvedBy`, not signed: it changes nothing anyone reads, and the server already decides who sees what (A1).
+- **Editing.** Only a comment's author edits it, by a new version based on the current one (`stale-head` otherwise), with the same page, thread and audience, which both the app and the server check. The server keeps only the current version, so there is no edit history, and the comment shows "edited". Anyone who read the old text keeps it (A3).
+- **Deleting.** A comment's author, and the space's owners, delete it. It goes for good, with its key material. A first comment that has replies leaves "Comment deleted" in its place, until its last reply goes too, and its thread takes no new replies. Nobody else deletes others' comments: owners are the moderators a family space needs.
+- **Order.** Open threads go in the order of their passages in the page, then threads on the whole page and those whose text changed, oldest first; resolved threads fold under "2 resolved" at the end. The order is the server's, as history's is (Q5), and a thread's comments go by the server's time.
+
+### 7. Where comments go when their page goes
+
+A comment's current version is a **retained record of its page**. Every operation that covers every retained revision and metadata version of a subtree covers it too:
+
+- **Making a share** (section 6.7) wraps each comment under version 1, by its audience. The share preview's line about history says members also get the comments for them: readers those for readers, editors all.
+- **A move across a region boundary** (section 10) rewraps them with the page's versions. A move within one region changes nothing.
+- **Ending a share** (section 6.9) seals them to the owners with the rest. **Adding a co-owner** (section 7.6) seals the owner region's comments to them.
+- **A rotation** rewraps nothing, as for versions. New comments go under the new key version, so a removed person reads none written after it.
+- **The owner's app takes each comment's audience from its payload** before it wraps it, never from the server. So the scan route serves comments with their payloads, as it serves v1 records (decision 12). A server that lies about a comment's audience can't get an editors' comment wrapped under a published key: the app reads `"draft"` in the payload and wraps under the draft key. Through a share's wrap, the lie only makes the wrap fail to open, which stops the operation, as an unopenable record does today.
+- **The trash.** A page in the trash takes its comments with it, hidden like the page. Restoring brings them back; deleting it for good, emptying the trash, the 30-day sweep and **Delete space** delete them.
+- **Copies.** A copy, of kind `copy` or `move` (section 10), brings none, as it brings no earlier version. A move into another space deletes them with the source, and its line about what it ends names comments with earlier versions. They can't come along: a copy is sealed again by the person copying, and their signature would replace each commenter's.
+- **Publications into another space** (section 13) carry none. The destination page has comments of its own, from its own readers.
+- **Public links** never carry comments: the public page has none, and no comment is ever stored readable.
+- **Unpublishing** hides comments for readers from readers (decision 1); **restoring a version** changes nothing.
+
+### 8. Telling people
+
+- **On the page.** The **Comments** button in the page's toolbar shows how many open threads the person can see, with a dot when any has a comment from someone else since they last opened the page's comments.
+- **In the rail.** A **Comments** item, with the same dot, opens **New comments** (`/comments`): threads with a comment the person hasn't seen, from someone else, that concern them. Those are threads they started or replied to, and, on pages they can edit, new threads. Each row shows the page's title, who wrote, when, and the first line, which the app decrypts. Opening the page's comments marks that page as seen.
+- **Seen marks** are kept on the server, one time per person and page, so they follow the person to every device. The server knows who wrote each comment and when already; it now also knows when each person last read a page's comments (A7).
+- **Live.** A stream of its own, `GET /api/me/comment-changes`, names the pages whose comments changed that the person can read, from Postgres `NOTIFY` as the tree's is. The tree's stream sends a strict `{spaceIds}`, which released apps parse, so comments don't join it.
+- **No mail.** The server can't read the comment or the page's title, so mail could say only that there is something new. That is a later choice, as a daily summary each person turns on, holding nothing but the count and a link to **New comments** (Decide 6).
+
+### 9. Offline
+
+Comments need the connection at first. Offline, the **Comments** button says "Needs the connection" (ADR 0009, decision 8), and nothing about comments is kept or queued. A device that keeps a page for offline (ADR 0009, decision 1) keeps no comments, so A13 doesn't change. Keeping and queueing them later would follow ADR 0009: kept sealed like any item, and sent when back online, under the keys of that moment.
+
+### 10. Agents, the CLI, export, search and plugins
+
+- **Agents** read and add comments within their grant and their person's access (protocol section 9.5): comments for readers where they can read, comments for editors where they can edit. They comment as themselves, shown as "agent (for person)". They don't resolve threads or delete others' comments. A chat assistant doesn't comment yet: its changes are proposals, and comments aren't among them.
+- **The CLI.** `wikistow page comments <page>` lists the page's threads and comments: ID, author, time, quote, resolved and the text, as text and with `--json`, under the foreign-text rules (section 9.3). `wikistow page comment <page> --text TEXT [--reply-to ID]` adds one: for readers on a published page, and for editors with `--for editors`, or on a page not published. A reply takes its thread's audience. `wikistow mcp` offers both, as `page_comments` and `page_comment`.
+- **Export** leaves comments out. A Markdown export is the pages as written; comments would need a format of their own.
+- **Search** doesn't index comments.
+- **Plugins** have no comments API. The comments panel isn't a replaceable region (ADR 0011).
+
+### 11. Older apps
+
+Released apps never ask for comments, so they never see one, with one exception: the scan route serves comments to the owner operations that cover a subtree, and an older app parses that answer strictly and refuses it. So until it updates, an older app can't make a share, move across a shared folder's edge, end a share or add a co-owner where a page has comments. It asks the person to update (protocol section 1). That fails closed, as a group's name did in Milestone 5: an older app that skipped comments would leave them under keys the new region doesn't use, and the server would refuse the request anyway. Everything else works: reading, editing, publishing, moves within a region, copies and deletes. The CLI never scans, since agents can't cross regions.
+
+### 12. Routes
+
+New routes only; no existing response gains a field.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/pages/:pageId/comments` | The page's threads, each comment with its record, payload and the caller's key material (a wrap, or their own envelopes), its thread, its audience, its author ID, when it was made and edited, and for a first comment whether it is resolved, by whom, and whether it was deleted. Only what the caller can read: comments for editors only to those who can edit the page. Also the caller's seen time. |
+| `POST /api/pages/:pageId/comments {commentId, thread, audience, metadata, wrap \| envelopes, permissionVersion}` | Adds a comment (decision 4). |
+| `PUT /api/comments/:commentId {metadata, wrap \| envelopes, permissionVersion}` | Its author edits it. |
+| `DELETE /api/comments/:commentId` | Its author or an owner deletes it. |
+| `POST /api/comments/:commentId/resolve {resolved}` | Resolves or opens a thread. |
+| `POST /api/pages/:pageId/comments/seen` | Marks the page's comments as seen now. |
+| `GET /api/me/comments` | **New comments** (decision 8): `[{spaceId, pageId, thread, count, latestAt}]`, only what the caller can read. |
+| `GET /api/me/comment-changes` | The stream (decision 8): `{pageIds}`. |
+| `GET /api/spaces/:spaceId/records` | Gains entries of kind `comment`, each with its payload, in every scope that covers their page (decision 11). |
+
+The requests that rewrap or seal a subtree (making a share, a move across regions, ending a share, adding a co-owner) carry comments' wraps and envelopes beside the metadata versions', and the server's coverage check counts them. The audit log records `comment.deleted` when an owner deletes someone else's comment, with IDs only.
+
+### 13. Where it shows
+
+**The button.** **Comments** (a speech-bubble icon with the count) sits in the page's toolbar beside **History**, in both views, for everyone who can read the page. Offline it says "Needs the connection".
+
+**The panel** takes the chat's place: a 380px card beside the page card on windows 1200px and wider, otherwise a sheet from the right, the whole width on phones. Opening one closes the other. At the top, the box for a new comment on the page, which says its audience; **Comment** (or Ctrl+Enter, Cmd+Enter on a Mac) sends it. Then the threads (decision 6). Each comment shows its author, when, and its text, with "edited" when it was. A thread on a passage starts with its quote, dimmed. Under a thread, **Reply…** opens a one-line box. A comment's ⋯ menu has **Edit** and **Delete** for its author, and **Delete** for owners. A thread has **Resolve** (✓) for its starter and editors. A thread for editors has the **Editors** pill.
+
+**A passage.** Selecting text in the published view, or the visual editor, shows a small **Comment** button above the selection; on phones, above the selection's own menu. It opens the panel with the quote above the box. Passages with open threads are underlined in the published view; clicking one opens its thread.
+
+**New comments** (`/comments`): rows grouped by space, newest first, each opening the page with its thread.
+
+```
+Computer (1200px and wider)
+┌───────────────────────────────────────────────┐ ┌───────────────────────────────┐
+│ Lasagne          [History] [Comments 3 •] [⋯] │ │ Comments                    ✕ │
+│ (Published v4)                                │ │ ┌───────────────────────────┐ │
+│                                               │ │ │ Comment for everyone who  │ │
+│ ## Method                                     │ │ │ reads this page           │ │
+│ 1. Brown the mince with the onion.            │ │ └──────────────────[Comment]┘ │
+│ 2. Bake at 180 °C for 45 minutes.             │ │ ┌───────────────────────────┐ │
+│              ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾          │ │ │ "180 °C for 45 minutes"   │ │
+│ 3. Rest for 10 minutes before cutting.        │ │ │ Rita · 2 h            [✓] │ │
+│                                               │ │ │ Fan oven or not?          │ │
+│                                               │ │ │   Sam · 1 h               │ │
+│                                               │ │ │   Fan: 170 °C.            │ │
+│                                               │ │ │   Reply…                  │ │
+│                                               │ │ └───────────────────────────┘ │
+│                                               │ │ ┌───────────────────────────┐ │
+│                                               │ │ │ (Editors) Olive · 1 d     │ │
+│                                               │ │ │ Add the vegetarian one?   │ │
+│                                               │ │ │   Reply…                  │ │
+│                                               │ │ └───────────────────────────┘ │
+│                                               │ │ ▸ 2 resolved                  │
+└───────────────────────────────────────────────┘ └───────────────────────────────┘
+
+Phone                                  Selecting text (phone)
+┌──────────────────────────┐           ┌──────────────────────────┐
+│ ←  Comments · 3        ✕ │           │ 2. Bake at ▐180 °C for▌  │
+│ ┌──────────────────────┐ │           │    [Comment] [Copy] [⋯]  │
+│ │ Comment for everyone │ │           │    45 minutes.           │
+│ │ who reads this page  │ │           │                          │
+│ └─────────────[Comment]┘ │           └──────────────────────────┘
+│ "180 °C for 45 minutes"  │
+│ Rita · 2 h           [✓] │           Text that changed
+│ Fan oven or not?         │           ┌──────────────────────────┐
+│   Sam · 1 h              │           │ "Bake for an hour"       │
+│   Fan: 170 °C.           │           │ The text this was on has │
+│   Reply…                 │           │ changed. View version 3  │
+│ (Editors) Olive · 1 d    │           │ Rita · 3 d               │
+│ Add the vegetarian one?  │           │ Is an hour right?    [✓] │
+│ ▸ 2 resolved             │           └──────────────────────────┘
+└──────────────────────────┘
+```
+
+(The editors' thread shows only to an editor; a reader sees the first thread alone, and "Comments · 1".) Rendered mockups at both sizes are in the PR.
+
+### Out of scope
+
+Replies to replies; mentions (`@name`); reactions; images and files in comments; mail (Decide 6); keeping or queueing comments offline (decision 9); comments from the chat assistant and plugins; exporting and searching comments; carrying comments into another space with a move.
+
+## Threat model
+
+Comments are content, protected as a page's versions are: the server can't read them, and no comment reaches anyone without a key for it. Nothing in section 2.3 changes. In particular, **readers never get draft keys**, so they never read comments for editors, and no operation wraps a comment for editors under a published key, since the owner's app takes the audience from the signed payload (decision 7).
+
+- **What the server learns** (A7, extended): who commented on which page, in which thread, for which audience, when, and how long; edits and deletions; who resolved what; and when each person last read a page's comments. Never the text or the passage.
+- **What a malicious server can do** (A1, A2): hide comments, show them in another order, drop replies, show a resolved thread as open, keep a deleted comment or an old version and serve it again, and delete comments. It can't write one: a comment opens only through a wrap under a folder key, or an envelope from an accepted owner, and the server holds neither. It can't move a comment to another page or thread, or present a reply as a first comment, without the app refusing it (`binding-mismatch`). A comment it says is for readers but is for editors fails to open for readers, who lack the draft key.
+- **A malicious member.** Readers now write something others read. A reader's comment is signed by them and shown by their label, so it can't pass as someone else's, and its domain and `subjectKind` keep it from opening as a page version or a folder's name. It can hold misleading text and links, as any page can; it loads no images and runs nothing (decision 4), so it can't tell its author who read it. An editor can copy the text of a comment for editors into one for readers, as they can copy a draft; one who rewraps another person's comment for editors under the published key gets it refused, since its payload says `"draft"`. Spam is for the owners, who delete it, and the server's rate limit.
+- **A removed member** keeps the comments they read and the key versions they held (A3). A comment written after the rotation is under a key version they don't hold. A server that hides the rotation from a writer, and accepts the write under the old version, is A2, as for a save.
+- **A compromised agent host** reads and writes comments as the agent can (A6).
+- **First sight** (A4). Readers now verify the signatures of other readers, so their apps pin more people at first sight than before. A server that substitutes a key at first sight still can't post a comment, since it holds no folder key; only a member colluding with it can, under the name the directory gave at that first sight.
+- **Public links** (A12) never hold comments. **Kept for offline** (A13) holds none either (decision 9).
+- **Mail** carries nothing about comments (decision 8).
+
+## Considered options
+
+- **One audience for every comment, under the published key.** Simpler, one kind of comment, but an editor's note about the draft ("Shall we drop the part about Gran's recipe?") would reach every reader. The two key classes already draw the line readers and editors expect.
+- **A key of its own per page, for comments.** It would let comments ignore the page's audience, but it is a new key class, sealed to every reader of the page by an owner's app and again at every change of members, which is what folder keys already do.
+- **Sealing each comment to the people in its thread.** New members and rotations would never reach it, and every reply would need everyone's keys.
+- **A new record format, `comment-record/v1`,** with the page, thread and audience signed in the record. Clearer to read, but it needs its own payload AD and envelope domains too, and the payload already binds these fields to the author's signature (decision 3). Decide 3.
+- **Comments inside the page's Markdown**, as Obsidian's `%%comments%%`. Readers can't write the page, every comment would be a new version, and comments would conflict with edits.
+- **Comments on a version.** Each publish would leave every comment behind on an old version.
+- **Passages by position** (offsets in the text). They break with the first edit above them; a quote with its context survives most edits and says when it doesn't.
+- **Keeping edit history.** More stored versions for every rewrap to cover, for something nobody asked for.
+- **Mail now.** The server can't say which page, so a mail could only say that something is new, and would need settings to turn it off. Decide 6.
+- **Signing resolved and deleted.** They change nothing anyone reads, and the server already decides what each person sees.
+- **Comments offline now.** It adds a kind of kept item and a kind of queue entry, with their rules, to a first version that works without them. Decision 9.
+
+## Consequences
+
+- Now, with this ADR: `wikistow/protocol.md` gains section 5.9, **Comments**, and notes in sections 1, 2.4 (A7, A12), 3.5, 5.4, 6.1, 6.2, 6.3, 6.7, 6.9, 7.1, 7.6, 9.5 and 10, and Q13, all marked proposed. `protocol-review.md` logs it after the freeze. `wikistow.md`'s line on later work points here, `ui-design.md`'s page views name the **Comments** button, and `CONTEXT.md` gains **Comment**, all marked proposed.
+- Once built: `wikistow.md` gains a Comments section; `ui-design.md` a Comments section with the panel, the passage button, **New comments** and the phone layout; ADR 0009 decision 8 names comments among what needs the connection; ADR 0007 decision 6 names comments in what a move into another space ends; the agents guide and the CLI's help name the two commands.
+- The server gains comment tables and a migration, the routes of decision 12, the scan's `comment` entries, comments in the coverage checks of the four subtree requests, and the stream.
+- `packages/client` gains a comments module (seal, open, the checks of decision 4) and comments in the rewrap of making a share, moves, ending a share and adding a co-owner. `packages/ui` gains the panel, the passage button, the rail item and **New comments**.
+- Older apps fail closed on the four subtree operations where a page has comments, until they update (decision 11).
+- Readers' apps write under folder keys for the first time, and so choose key versions and keep **No going back** marks as writers do.
+
+## Implementation, in pull requests
+
+1. **This ADR, the spec and the protocol.**
+2. **The server.** Tables and a migration, the routes, the scan's `comment` entries in every scope, the coverage checks, the trash, deletes, copies and moves into another space, the stream and seen marks, with integration tests: a reader can't fetch a comment for editors, nor post one; a reply in the wrong audience or thread is refused; a share, a move across regions, an ending and a co-owner are refused without the comments' key material; a page in the trash hides its comments; and the content-leak sweep finds no comment text.
+3. **The client and the panel, on the page.** The comments module and the checks of decision 4, comments in the four rewraps, the **Comments** button and panel with threads, replies, editing, deleting and resolving, the rail's **New comments**, and the spec. E2e with two browser contexts: a reader asks, an editor answers from the draft view, the reader sees the answer, and never sees a comment for editors; then the folder moves out of its share and the owner still reads every comment.
+4. **Passages.** The quote, the **Comment** button over a selection in the published view and the visual editor, underlines in the published view, **Show** in the draft view, and "The text this was on has changed". E2e: a comment on a passage, then the passage edited away.
+5. **The CLI and MCP.** `page comments`, `page comment`, their tools, help and the agents guide.
+
+Step 3 needs step 2; steps 4 and 5 need step 3.
+
+## Decide
+
+1. **Can readers comment?** Recommended: yes, everyone who can read the page. Questions from readers are the main reason for comments.
+2. **Comments for editors only, from the draft view?** Recommended: yes, sealed with the draft key, so readers never see them, with the audience following the view and a reply taking its thread's. The other way, one audience for all, would show editors' notes on drafts to readers.
+3. **The record: a metadata record v2 with `subjectKind: "comment"`, or a new `comment-record/v1`?** Recommended: the metadata record, with the page, thread and audience in the payload (decision 3). No new domain strings, and the same path a group's name took.
+4. **A comment on the page, pointing at a passage by quote?** Recommended: yes (decision 5), with passages as their own step (4), so page comments can ship first.
+5. **Who resolves, edits and deletes?** Recommended: the thread's starter and the page's editors resolve; only the author edits, with no edit history; the author and the space's owners delete (decision 6).
+6. **Notifications: none, in the app, or mail?** Recommended: in the app only, with the count and dot on the page's **Comments** button and the rail's **New comments** (decision 8). Mail later, if wanted, as a daily summary each person turns on, holding only a count and a link.
+7. **Offline?** Recommended: comments need the connection at first (decision 9).
+8. **A move into another space: delete the comments?** Recommended: yes, and say so in its line about what it ends (decision 7). Copies and publications leave them behind; carrying them would make the mover sign everyone's comments.
+9. **Agents and the CLI?** Recommended: they list and add comments, as themselves (decision 10); the chat assistant and plugins don't yet. Export leaves comments out.

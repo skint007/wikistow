@@ -123,6 +123,10 @@ _Avoid_: Recycle bin, archive.
 **Attachment**
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 
+**Comment**
+A note on a page by someone who can read it, about the whole page or a passage it quotes, in a thread of replies that can be resolved. One **for readers** is read by everyone who reads the page; one **for editors** only by those who can read its draft. Proposed in ADR 0014.
+_Avoid_: Annotation, note, remark.
+
 **Conflict**
 A save over a page's draft that someone else saved after the version the save was based on. Nothing is saved until the person chooses what the draft should be.
 _Avoid_: Collision, sync error.
