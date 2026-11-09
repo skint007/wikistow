@@ -271,6 +271,9 @@ importers:
       '@wikistow/plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
+      diff:
+        specifier: 8.0.4
+        version: 8.0.4
       fflate:
         specifier: 0.8.3
         version: 0.8.3
