@@ -133,9 +133,10 @@ export type CopyPreview = {
   losses: AccessChange[];
   /**
    * Who can read more there than they can of it now: people the
-   * destination's verified audience names, beyond what the source's regions
-   * give them. Someone who doesn't own the source space can't list who reads
-   * it, so for them only they count as reading it now. Empty when it stays in
+   * destination's verified audience names, beyond the least the source's
+   * regions give them, so someone who reads only a shared folder inside it
+   * gains the rest. Someone who doesn't own the source space can't list who
+   * reads it, so for them only they count as reading it now. Empty when it stays in
    * the region it is in; null when that can't be told, for an unlisted
    * audience, or an agent's copy.
    */
@@ -334,13 +335,22 @@ export async function previewCopy(
   const audience = ctx.agent ? null : await destinationAudience(ctx, destTree, target);
   const isMove = kind === 'move';
   const regions = regionsOf(moving);
-  // Who reads it now, where this app can list them: an owner of the space can.
-  const before =
+  // Who reads it now, region by region, where this app can list them: an owner of the space can.
+  const held =
     audience?.kind === 'verified' || isMove
       ? tree.space?.role === 'owner'
-        ? await sourceAudience(ctx, source.spaceId, regions)
-        : new Map<IdentityId, Reach>([[ctx.identity.public.id, 'drafts']])
-      : new Map<IdentityId, Reach>();
+        ? await sourceAudiences(ctx, source.spaceId, regions)
+        : [new Map<IdentityId, Reach>([[ctx.identity.public.id, 'drafts']])]
+      : [];
+  // Someone loses what they read anywhere in it, and gains what they couldn't read all of.
+  const most = new Map<IdentityId, Reach>();
+  for (const region of held)
+    for (const [id, reach] of region) if (rank(reach) > rank(most.get(id))) most.set(id, reach);
+  const least = (id: IdentityId) =>
+    held.reduce<Reach | null>((low, region) => {
+      const reach = region.get(id) ?? null;
+      return rank(reach) < rank(low) ? reach : low;
+    }, 'drafts');
   // Two spaces' owner regions are alike to `sameRegion`, so another space is never the same region.
   const staysIn = sameSpace && regions.every((region) => sameRegion(region, target.region));
   return {
@@ -361,13 +371,13 @@ export async function previewCopy(
     bringsPublished,
     nodes,
     audience,
-    losses: isMove ? lossesOf(before, audience, ctx.identity.public.id) : [],
+    losses: isMove ? lossesOf(most, audience, ctx.identity.public.id) : [],
     gains: staysIn
       ? []
       : audience?.kind === 'verified'
         ? audience.people.flatMap(({ identityId, reach }) => {
-            const held = before.get(identityId) ?? null;
-            return rank(reach) > rank(held) ? [{ identityId, before: held, after: reach }] : [];
+            const now = held.length === 0 ? null : least(identityId);
+            return rank(reach) > rank(now) ? [{ identityId, before: now, after: reach }] : [];
           })
         : null,
     unpublished,
@@ -418,16 +428,12 @@ function regionsOf(moving: ReturnType<typeof subtreeOf>): Region[] {
 const RANK: Record<Reach, number> = { published: 1, drafts: 2 };
 const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 
-/** Who holds keys in `regions` of `spaceId` now, each by the most they hold, for an owner of it. */
-async function sourceAudience(ctx: ClientContext, spaceId: SpaceId, regions: readonly Region[]) {
+/** Who holds keys in each of `regions` of `spaceId` now, and how much, for an owner of it. */
+async function sourceAudiences(ctx: ClientContext, spaceId: SpaceId, regions: readonly Region[]) {
   const keys = await spaceKeys(ctx, spaceId);
-  const before = new Map<IdentityId, Reach>();
-  for (const region of regions) {
-    for (const [id, reach] of await audienceOf(ctx, keys, region)) {
-      if (rank(reach) > rank(before.get(id))) before.set(id, reach);
-    }
-  }
-  return before;
+  const held = [];
+  for (const region of regions) held.push(await audienceOf(ctx, keys, region));
+  return held;
 }
 
 /**

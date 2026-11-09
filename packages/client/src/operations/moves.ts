@@ -1,6 +1,6 @@
 // Moving a page or folder (protocol section 10). Within one region a move
-// changes no keys. Across a share boundary an owner's app shows who gains
-// and who loses access, then rewraps every record of what moves under the
+// changes no keys. Across a share boundary an owner's app works out who
+// gains and who loses access, then rewraps every record of what moves under the
 // destination's keys, or seals it to the owners, and sends it all at once.
 import {
   FolderKeyEnvelope,
