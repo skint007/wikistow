@@ -54,6 +54,16 @@ const DETAILS = {
     /** The group whose change made the rotation, if one did. */
     groupId: z.string().optional(),
   }),
+  // A share ended (section 6.9): everyone it named lost access, and its
+  // records went to the owner region.
+  'share.ended': z.strictObject({
+    spaceId: z.string(),
+    rootId: z.string().nullable(),
+    members: z.array(z.string()),
+    agents: z.array(z.string()),
+    groups: z.array(z.string()),
+    records: z.number().int(),
+  }),
   'share.group-added': z.strictObject({
     groupId: z.string(),
     role: z.enum(['reader', 'editor']),

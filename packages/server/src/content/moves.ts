@@ -12,6 +12,7 @@ import {
 } from '@wikistow/contracts';
 import { keyEnvelopeV2Bytes, metadataEnvelopeV2Bytes, verifySignature } from '@wikistow/client';
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import { anyId } from '../db/any.ts';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
@@ -49,6 +50,11 @@ import { requireCaller, type Actor } from './identities.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 
 type Move = z.output<typeof sharingRoutes.move.body>;
+
+/** The key material a request carries for records changing region. */
+type KeyMaterial = Pick<Move, 'wraps' | 'keyEnvelopes' | 'metadataEnvelopes'>;
+/** Envelopes to the owners, for records moving into the owner region. */
+type OwnerMaterial = Pick<Move, 'keyEnvelopes' | 'metadataEnvelopes'>;
 
 /**
  * For a move's large body, before it is read: the caller (a person with a
@@ -255,16 +261,45 @@ async function checkRewrap(
   if (move.wraps.length > 0) {
     throw new ContentError('region-mismatch', 'Content outside shares is sealed to its owners');
   }
+  await requireOwnerEnvelopes(tx, move, records, { spaceId, identity, report });
+  return true;
+}
+
+/**
+ * Envelopes for records going into the owner region, whose signatures
+ * `verifyGrants` checked: exactly one for each of `records` to each current
+ * owner (`checkOwnerEnvelopes`). A record left without them was written
+ * meanwhile (`stale-head`), unless no app could read it, so none could
+ * grant: that one is reported and refuses the change (`binding-mismatch`),
+ * as it would otherwise lose its keys. An envelope for a record outside
+ * `records` is `elsewhere`, `binding-mismatch` unless given.
+ */
+export async function requireOwnerEnvelopes(
+  tx: Database,
+  material: OwnerMaterial,
+  records: { revision: readonly string[]; metadata: readonly string[] },
+  {
+    spaceId,
+    identity,
+    report,
+    elsewhere = new ContentError('binding-mismatch', 'An envelope is for something else'),
+  }: {
+    spaceId: string;
+    identity: PublicIdentity;
+    report: ReportUnreadable;
+    elsewhere?: ContentError;
+  },
+) {
   const owners = await currentOwners(tx, spaceId);
-  const granted = { owners, granter: identity };
+  const granted = { owners, granter: identity, elsewhere };
   const missing = {
-    revisions: await checkOwnerEnvelopes(tx, move.keyEnvelopes, {
+    revisions: await checkOwnerEnvelopes(tx, material.keyEnvelopes, {
       ...granted,
       subjectKind: 'revision',
       records: records.revision,
       versionOf: (e) => e.revisionId,
     }),
-    metadata: await checkOwnerEnvelopes(tx, move.metadataEnvelopes, {
+    metadata: await checkOwnerEnvelopes(tx, material.metadataEnvelopes, {
       ...granted,
       subjectKind: 'metadata',
       records: records.metadata,
@@ -272,13 +307,10 @@ async function checkRewrap(
     }),
   };
   if (missing.revisions.length > 0 || missing.metadata.length > 0) {
-    // One no app could read, so none could grant, refuses the move: it
-    // would otherwise lose its keys. Any other was written meanwhile.
     await recordParts(tx, 'revisions', spaceId, missing.revisions, report);
     await recordParts(tx, 'metadata_revisions', spaceId, missing.metadata, report);
     throw new ContentError('stale-head', 'The folder changed since you loaded it');
   }
-  return true;
 }
 
 // The parts of a stored record its envelopes are signed over.
@@ -321,16 +353,19 @@ async function recordParts(
 const VERIFY_BATCH = 200;
 
 /**
- * Check the signature of every owner envelope a move carries, before its
- * lock: each by the caller at their current key, over the stored record it
- * names (section 5.8), a batch at a time. Stored records never change, and
- * under its lock the move requires the envelopes' key to be the caller's
- * current one still, so the check holds there.
+ * Check the signature of every owner envelope a move (or a share's ending)
+ * carries, before its lock: each by the caller at their current key, over
+ * the stored record it names (section 5.8), a batch at a time. Stored
+ * records never change, and under its lock the move requires the
+ * envelopes' key to be the caller's current one still, so the check holds
+ * there. An envelope naming no record stored in the space is `missing` if
+ * given, else as `uncovered` decides.
  */
-async function verifyGrants(
+export async function verifyGrants(
   db: Database,
-  move: { actor: Actor; spaceId: string } & Move,
+  move: { actor: Actor; spaceId: string } & OwnerMaterial,
   report: ReportUnreadable,
+  { missing }: { missing?: ContentError } = {},
 ) {
   if (move.keyEnvelopes.length === 0 && move.metadataEnvelopes.length === 0) return;
   // Only an owner's move carries envelopes, and an agent is never an owner.
@@ -350,6 +385,7 @@ async function verifyGrants(
     ),
     versionOf: (e) => e.revisionId,
     signedBytes: keyEnvelopeV2Bytes,
+    missing,
   });
   await verifyEach(db, move.metadataEnvelopes, {
     granter,
@@ -363,6 +399,7 @@ async function verifyGrants(
     ),
     versionOf: (e) => e.metadataRevisionId,
     signedBytes: metadataEnvelopeV2Bytes,
+    missing,
   });
 }
 
@@ -375,18 +412,21 @@ async function verifyEach<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
     records,
     versionOf,
     signedBytes,
+    missing,
   }: {
     granter: PublicIdentity;
     subjectKind: 'revision' | 'metadata';
     records: ReadonlyMap<string, RecordParts>;
     versionOf: (envelope: E) => string;
     signedBytes: (record: RecordParts, envelope: E) => Uint8Array;
+    missing: ContentError | undefined;
   },
 ) {
   for (const [i, envelope] of envelopes.entries()) {
     if (i > 0 && i % VERIFY_BATCH === 0) await setImmediate();
     const record = records.get(versionOf(envelope));
     if (!record) {
+      if (missing) throw missing;
       throw await uncovered(
         db,
         subjectKind,
@@ -406,9 +446,9 @@ async function verifyEach<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
  * v2 envelopes the moving owner grants for existing records (section 5.8),
  * whose signatures `verifyGrants` checked: for each of `records`, exactly
  * one to each of `owners` at their current key, from `granter` at their
- * current key. One for anything else is `binding-mismatch`, or `stale-head`
- * for a removed draft checkpoint (`uncovered`). Returns the records left
- * without them.
+ * current key. One for anything else is `elsewhere`, or `stale-head` for a
+ * removed draft checkpoint (`uncovered`). Returns the records left without
+ * them.
  */
 async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
   tx: Database,
@@ -419,12 +459,14 @@ async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>
     owners,
     granter,
     versionOf,
+    elsewhere,
   }: {
     subjectKind: 'revision' | 'metadata';
     records: readonly string[];
     owners: readonly PublicIdentity[];
     granter: PublicIdentity;
     versionOf: (envelope: E) => string;
+    elsewhere: ContentError;
   },
 ): Promise<string[]> {
   const wanted = new Set(records);
@@ -432,14 +474,7 @@ async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>
   const given = new Map<string, Set<string>>();
   for (const envelope of envelopes) {
     const id = versionOf(envelope);
-    if (!wanted.has(id)) {
-      throw await uncovered(
-        tx,
-        subjectKind,
-        id,
-        new ContentError('binding-mismatch', 'An envelope is for something else'),
-      );
-    }
+    if (!wanted.has(id)) throw await uncovered(tx, subjectKind, id, elsewhere);
     const to = given.get(id) ?? new Set();
     if (
       current.get(envelope.recipientId) !== envelope.recipientKeyVersion ||
@@ -457,29 +492,31 @@ async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>
   return records.filter((id) => (given.get(id)?.size ?? 0) !== owners.length);
 }
 
-/** Replace the subtree's wraps and envelopes with the checked ones of the move. */
-async function replaceKeyMaterial(tx: Database, move: Move, records: Records) {
+/** Replace the records' wraps and envelopes with the checked ones of the move. */
+export async function replaceKeyMaterial(
+  tx: Database,
+  move: KeyMaterial,
+  records: Pick<Records, 'revision' | 'metadata'>,
+) {
   if (records.revision.length > 0) {
-    await tx.delete(revisionWraps).where(inArray(revisionWraps.revisionId, records.revision));
+    await tx.delete(revisionWraps).where(anyId(revisionWraps.revisionId, records.revision));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'revision'),
-          inArray(keyEnvelopes.subjectId, records.revision),
+          anyId(keyEnvelopes.subjectId, records.revision),
         ),
       );
   }
   if (records.metadata.length > 0) {
-    await tx
-      .delete(metadataWraps)
-      .where(inArray(metadataWraps.metadataRevisionId, records.metadata));
+    await tx.delete(metadataWraps).where(anyId(metadataWraps.metadataRevisionId, records.metadata));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'metadata'),
-          inArray(keyEnvelopes.subjectId, records.metadata),
+          anyId(keyEnvelopes.subjectId, records.metadata),
         ),
       );
   }

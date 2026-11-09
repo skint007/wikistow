@@ -625,6 +625,40 @@ export async function endLapsedWhere(tx: Database, where: Lapsing, actor: string
   return { links: endedIds.size, copies: ended.copies };
 }
 
+/**
+ * The public links of the pages under `under` in a space (all of it for
+ * null), each with whether it would end were `accounts` the only people
+ * left able to publish there, as `endLapsedWhere` would judge it then: for
+ * an owner's preview of a change that leaves only them (ADR 0012, decision
+ * 6). Someone who can't publish the page now can't then either.
+ */
+export async function linksIfOnly(
+  db: Database,
+  { spaceId, under }: { spaceId: string; under: string | null },
+  accounts: ReadonlySet<string>,
+) {
+  const links = await db
+    .select({ pageId: publicLinks.pageId, sharedBy: publicLinks.sharedBy })
+    .from(publicLinks)
+    .innerJoin(nodes, eq(nodes.id, publicLinks.pageId))
+    .where(
+      under === null
+        ? eq(nodes.spaceId, spaceId)
+        : sql`${nodes.id} in (${subtreeOf(spaceId, under)} select id from subtree)`,
+    )
+    .orderBy(publicLinks.pageId);
+  const publishers = await publishing(
+    db,
+    links
+      .filter((link) => accounts.has(link.sharedBy))
+      .map(({ sharedBy, pageId }) => ({ accountId: sharedBy, pageId, spaceId })),
+  );
+  return links.map(({ pageId, sharedBy }) => ({
+    pageId,
+    ends: !publishers.has(personPage(sharedBy, pageId)),
+  }));
+}
+
 /** The most other pages a copy links to; see `stageCopy`. */
 const MAX_TARGET_PAGES = 50;
 /** The most public pages staging checks for those; see `stageCopy`. */

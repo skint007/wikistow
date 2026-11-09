@@ -190,6 +190,42 @@ export async function recordsUnder(tx: Database, spaceId: string, rootId: string
   };
 }
 
+/**
+ * Every retained record wrapped under `shareId`, by key material (section
+ * 6.9, step 2): the pages and folder names under its root, the space's
+ * name for a space share, and those of nodes in the trash, but a copy's
+ * hidden nodes', which count for nothing outside their copy.
+ */
+export async function recordsWrappedUnder(tx: Database, spaceId: string, shareId: string) {
+  const hidden = tx
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(and(eq(nodes.spaceId, spaceId), isNotNull(nodes.copyId)));
+  const pageVersions = await tx
+    .select({ id: revisions.id })
+    .from(revisions)
+    .innerJoin(revisionWraps, eq(revisionWraps.revisionId, revisions.id))
+    .where(
+      and(
+        eq(revisions.spaceId, spaceId),
+        eq(revisionWraps.shareId, shareId),
+        notInArray(revisions.pageId, hidden),
+      ),
+    );
+  const names = await tx
+    .select({ id: metadataRevisions.id })
+    .from(metadataRevisions)
+    .innerJoin(metadataWraps, eq(metadataWraps.metadataRevisionId, metadataRevisions.id))
+    .where(
+      and(
+        eq(metadataRevisions.spaceId, spaceId),
+        eq(metadataWraps.shareId, shareId),
+        notInArray(metadataRevisions.subjectId, hidden),
+      ),
+    );
+  return { revision: pageVersions.map((row) => row.id), metadata: names.map((row) => row.id) };
+}
+
 /** Bump the permission versions of the space and of `nodeIds`, so writes prepared before fail. */
 export async function bumpPermissions(tx: Database, spaceId: string, nodeIds: readonly string[]) {
   await tx
@@ -1319,8 +1355,8 @@ const SCAN_BYTES = 2 * 1024 * 1024;
 /**
  * Every retained record in a scope, with the caller's key material for it,
  * for an owner about to make a share over a subtree (`rootId`, or the whole
- * space) or to add a co-owner (the owner region). In parts, ordered by kind
- * and ID; the next part starts after `next`, whether or not that record
+ * space), to add a co-owner (the owner region), or to end share `shareId`
+ * (what is wrapped under it). In parts, ordered by kind and ID; the next part starts after `next`, whether or not that record
  * still exists. A v2 record comes without its payload: its key commitment
  * is enough to check a key against it.
  */
@@ -1329,18 +1365,24 @@ export async function scanRecords(
   accountId: string,
   input: {
     spaceId: string;
-    scope: 'subtree' | 'owner-region';
+    scope: 'subtree' | 'owner-region' | 'share';
     rootId: string | null;
+    shareId: string | null;
     after: string | null;
   },
   report: ReportUnreadable,
 ) {
   const identity = await requireIdentity(db, accountId);
   await requireOwner(db, identity, input.spaceId);
-  let ids: Awaited<ReturnType<typeof recordsUnder>>;
+  let ids: Pick<Awaited<ReturnType<typeof recordsUnder>>, 'revision' | 'metadata'>;
   if (input.scope === 'subtree') {
-    ids = await recordsUnder(db, input.spaceId, input.rootId);
-    if (input.rootId !== null && ids.nodeIds.length === 0) throw new ContentError('not-found');
+    const under = await recordsUnder(db, input.spaceId, input.rootId);
+    if (input.rootId !== null && under.nodeIds.length === 0) throw new ContentError('not-found');
+    ids = under;
+  } else if (input.scope === 'share') {
+    const share = input.shareId === null ? undefined : await requireShare(db, input.shareId);
+    if (share?.spaceId !== input.spaceId) throw new ContentError('not-found');
+    ids = await recordsWrappedUnder(db, input.spaceId, share.id);
   } else {
     // But a copy's hidden nodes', as adding an owner leaves them out.
     const hidden = db
@@ -1370,7 +1412,6 @@ export async function scanRecords(
         ),
       );
     ids = {
-      nodeIds: [],
       revision: pageVersions.map((r) => r.id),
       metadata: names.map((r) => r.id),
     };

@@ -1,5 +1,7 @@
 // People sharing a library of pages, for tests of shares and owners.
 import {
+  grantMetadataKeyV2,
+  grantRevisionKeyV2,
   pageOperations as pages,
   sharingOperations as sharing,
   spaceOperations,
@@ -8,7 +10,7 @@ import {
   type PageId,
   type SpaceId,
 } from '@wikistow/client';
-import type { RouteDef } from '@wikistow/contracts';
+import type { KeyEnvelopeV2, MetadataEnvelopeV2, RouteDef, ShareId } from '@wikistow/contracts';
 import type { personWithVault } from './content.ts';
 
 export type Person = Awaited<ReturnType<typeof personWithVault>>;
@@ -149,3 +151,36 @@ export const draftHead = async (person: Person, page: { pageId: PageId }) => {
   if (!heads.draftHead) throw new Error('expected a draft');
   return heads.draftHead;
 };
+
+/**
+ * The envelopes an owner's app sends to end a share (section 6.9, step 2):
+ * every record the server scans as wrapped under it, opened through its
+ * wrap and sealed to each sealing owner.
+ */
+export async function sealEnding(
+  ctx: ClientContext,
+  { spaceId, shareId }: { spaceId: SpaceId; shareId: ShareId },
+) {
+  const keys = await sharing.ownerKeys(ctx, spaceId);
+  const owners = keys.owners.sealingOwners();
+  const keyEnvelopes: KeyEnvelopeV2[] = [];
+  const metadataEnvelopes: MetadataEnvelopeV2[] = [];
+  await sharing.forEachRecordKey(
+    ctx,
+    keys,
+    spaceId,
+    { scope: 'share', shareId },
+    (item, contentKey) => {
+      for (const recipient of owners) {
+        const grant = { granter: ctx.identity, contentKey, recipient };
+        if (item.kind === 'revision') {
+          keyEnvelopes.push(grantRevisionKeyV2({ ...grant, record: item.record }));
+        } else {
+          metadataEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
+        }
+      }
+    },
+    { from: { kind: 'share', spaceId, shareId } },
+  );
+  return { keyEnvelopes, metadataEnvelopes };
+}

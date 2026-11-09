@@ -52,6 +52,8 @@ import {
   listPeople,
   lookupPerson,
   makeShare,
+  endShare,
+  shareEnding,
   checkMover,
   moveNode,
   cancelCopy,
@@ -308,6 +310,7 @@ export function mountContentRoutes(
           spaceId: params.spaceId,
           scope: query.scope,
           rootId: query.rootId ?? null,
+          shareId: query.shareId ?? null,
           after: query.after ?? null,
         },
         report,
@@ -380,6 +383,25 @@ export function mountContentRoutes(
       bodyPool: 'rotation',
       beforeBody: shareOwnerFirst,
     },
+  );
+
+  // Ending a share carries an envelope to each owner for every record
+  // wrapped under it (section 6.9).
+  routes.account(
+    sharingRoutes.endShare,
+    async ({ params, body }, { principal }) => {
+      await endShare(
+        db,
+        { accountId: principal.accountId, shareId: params.shareId, ...body },
+        report,
+      ).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: shareOwnerFirst },
+  );
+
+  routes.account(sharingRoutes.shareEnding, async ({ params }, { principal }) =>
+    shareEnding(db, principal.accountId, params.shareId).catch(toApiError),
   );
 
   routes.content(sharingRoutes.versionEnvelopes, async ({ params }, { actor }) => ({
