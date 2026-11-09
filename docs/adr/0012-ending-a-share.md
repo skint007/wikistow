@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Ending a share
@@ -144,7 +144,7 @@ Ending only narrows who can read: content moves from a share's audience to the o
 
 ## Consequences
 
-- `wikistow/protocol.md` gains section 6.9, **Ending a share**, and notes in sections 2.4 (A2), 5.5, 6.1, 6.8, 9.5, 10 (**The trash**, and its hidden nodes), 12.2 and Q8, marked proposed. `protocol-review.md` logs it. `wikistow.md`'s Sharing, `ui-design.md`'s Sharing and `CONTEXT.md`'s **Share** say an owner can stop sharing.
+- `wikistow/protocol.md` gains section 6.9, **Ending a share**, and notes in sections 2.4 (A2), 5.5, 6.1, 6.8, 9.5, 10 (**The trash**, and its hidden nodes), 12.2 and Q8, marked accepted. `protocol-review.md` logs it. `wikistow.md`'s Sharing, `ui-design.md`'s Sharing and `CONTEXT.md`'s **Share** say an owner can stop sharing.
 - The server gains `POST /api/shares/:shareId/end`, `GET /api/shares/:shareId/ending`, the scan route's `share` scope, and the audit action `share.ended`. No existing response gains a field: a listing just loses the share.
 - The client gains an ending operation, built from the move's rewrapper and preview, and an ended value for a share's **No going back** mark, which writing, rotating, moving and sealing to agents at unlock all check.
 - Older apps meet an ended share as a share they lost access to, or, for an owner, as content that moved into the owner region, which they already handle.
@@ -157,9 +157,10 @@ Ending only narrows who can read: content moves from a share's audience to the o
 
 Step 3 needs step 2.
 
-## Decide
+## Decided (2026-11-09)
 
-Scott decides these before building. Each has a recommendation.
+Scott accepted every recommendation below on 2026-11-09.
+
 
 1. **Rewrap into the owner region, or retire the share in place?** Recommended: rewrap (decision 2). Retiring is cheaper but keeps the folder above from being shared, which is the point of #329.
 2. **The space share too?** Recommended: yes, with the same steps and dialog. Its members then lose the whole space, and the space's name goes back to the owners.
