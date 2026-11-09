@@ -1,6 +1,9 @@
 // Ending a share (protocol section 6.9, ADR 0012): the server's checks and
 // transaction, driven by an owner's app as the client operation will be.
 import {
+  ApiError,
+  ENDED,
+  endingOperations as ending,
   moveOperations as moves,
   newId,
   newPayload,
@@ -620,5 +623,63 @@ describe('the trash, when a share ends', () => {
     expect(await rejection(trash.restoreTrash(alice.ctx, await trashIdOf(later)))).toBe(
       'region-mismatch',
     );
+  });
+});
+
+describe('the owner’s app ending a share', () => {
+  it('scans again after a save meanwhile, counts a lost answer as done, and marks the share ended', async () => {
+    const [alice, ed] = await Promise.all([personWithVault(t), personWithVault(t)]);
+    const lib = await library(alice);
+    const { spaceId, page } = lib;
+    const shareId = await shareFolder(alice.ctx, {
+      spaceId,
+      rootId: lib.shared,
+      people: [await invite(alice, ed, 'editor')],
+    });
+    const binned = await pages.createPage(alice.ctx, {
+      spaceId,
+      parentId: lib.shared,
+      title: 'Binned',
+    });
+    await pages.deleteNode(alice.ctx, { spaceId, nodeId: binned });
+
+    const preview = await ending.previewEnding(alice.ctx, { spaceId, shareId });
+    expect(preview.people).toEqual([idOf(ed)]);
+
+    // Ed saves after the scan; then the answer to the send that ends it is lost.
+    let sends = 0;
+    let saved: RevisionId | null = null;
+    const flaky = lyingServer(
+      alice.ctx,
+      new Map([
+        [
+          sharingRoutes.endShare,
+          async (input, send) => {
+            sends += 1;
+            if (sends === 1) {
+              ({ revisionId: saved } = await pages.editDraft(ed.ctx, page, {
+                markdown: 'meanwhile',
+              }));
+            }
+            const answer = await send(input);
+            if (sends === 2) throw new ApiError(0, 'network', 'The answer was lost');
+            return answer;
+          },
+        ],
+      ]),
+    );
+    const ended = await ending.endShare(flaky.ctx, { preview });
+    // Refused as stale-head, sent again and ended, then found gone on the resend.
+    expect(sends).toBe(3);
+    expect(ended).toEqual({ fromTrash: true });
+    expect(await leftOf(shareId)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(alice.ctx.marks.get(spaceId, shareId)).toBe(ENDED);
+    if (!saved) throw new Error('expected the save');
+    const opened = await pages.openRevisions(alice.ctx, page, 'draft', [saved], { fresh: true });
+    expect(opened.get(saved)?.opened).toMatchObject({ payload: { markdown: 'meanwhile' } });
+    // What was deleted from it restores, now the owners'.
+    const [item] = (await trash.loadTrash(alice.ctx)).filter((i) => i.nodeId === binned);
+    if (!item) throw new Error('expected it in the trash');
+    await trash.restoreTrash(alice.ctx, item.trashId);
   });
 });
