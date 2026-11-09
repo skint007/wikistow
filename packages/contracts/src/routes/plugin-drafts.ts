@@ -46,7 +46,17 @@ export const DRAFT_FILE_KINDS = [
  * images, kept as bytes. The person adds them; the model lists and deletes
  * them but can't write them.
  */
-export const DRAFT_BINARY_KINDS = ['.woff2', '.woff', '.png', '.jpg', '.webp', '.gif'];
+export const DRAFT_BINARY_KINDS = [
+  '.woff2',
+  '.woff',
+  '.ttf',
+  '.otf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+];
 
 /**
  * Folders and names of letters, digits, `_`, `.` and `-`, each starting
