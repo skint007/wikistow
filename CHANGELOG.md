@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Plugins
+
+- Plugin drafts take `.ttf` and `.otf` fonts and `.jpeg` images under `public/` too, 1 MB each, from **Upload project folder…**, **Add file…** and **Change with the assistant**. (#PR)
+
 ## 0.25.0-beta.2 - 2026-11-09
 
 ### Highlights
