@@ -1,4 +1,4 @@
-import { CryptoError } from '@wikistow/client';
+import { CryptoError, sharingOperations } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { knownMessage, stopMessage } from '../errors';
 
@@ -66,10 +66,27 @@ const STOPPED: Partial<Record<CryptoError['code'], string>> = {
 const GENERIC = 'Something went wrong, so nothing changed. Try again.';
 
 /**
+ * What a comment that stops an owner's operation says (ADR 0014, decision
+ * 7), naming its page by `title` where the caller knows it. Owners delete
+ * it under the message (`UnreadableCommentFix`), or in the page's comments.
+ */
+export function unreadableCommentMessage(
+  error: sharingOperations.UnreadableComment,
+  title?: string | null,
+): string {
+  const on = title ? `on “${title}”` : 'on a page here';
+  return error.newerFormat
+    ? `A comment ${on} was written by a newer version of WikiStow, so nothing changed. Update the app, or delete the comment, then try again.`
+    : `A comment ${on} can’t be opened, so nothing changed. Delete it, then try again.`;
+}
+
+/**
  * A short message for a failed sharing or ownership action: always this
  * app's own words, never the server's or an exception's.
  */
 export function sharingMessage(error: unknown): string {
+  // A comment stops an owner's operation over its page until it is deleted (ADR 0014, decision 7).
+  if (error instanceof sharingOperations.UnreadableComment) return unreadableCommentMessage(error);
   if (error instanceof ApiError) return REFUSED[error.code] ?? knownMessage(error.code) ?? GENERIC;
   if (error instanceof CryptoError) return STOPPED[error.code] ?? stopMessage(error) ?? GENERIC;
   return knownMessage(error) ?? GENERIC;

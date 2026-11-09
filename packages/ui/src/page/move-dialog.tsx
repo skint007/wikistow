@@ -28,6 +28,7 @@ import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
 import { movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
+import { UnreadableCommentFix } from '../comments/unreadable';
 import { PLAIN, useClient } from '../vault/store';
 import { askBeforeMoves } from './ask-before-moves';
 import { ConfirmCopy, openPlace, type Chosen } from './confirm-copy';
@@ -714,7 +715,7 @@ function MoveHere({
   const queryClient = useQueryClient();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const availability = useAvailability();
-  const { busy, error, run } = useAction((caught) =>
+  const { busy, error, failure, run } = useAction((caught) =>
     caught instanceof MoveRefused ? caught.message : moveMessage(caught, moving.kind),
   );
   useEffect(() => onBusy(busy), [busy, onBusy]);
@@ -823,6 +824,7 @@ function MoveHere({
             : null)
         }
       />
+      <UnreadableCommentFix failure={failure} spaceId={spaceId} />
       <DialogFooter>
         {preview.isError && !busy && (
           <Button

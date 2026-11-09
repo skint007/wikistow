@@ -103,7 +103,7 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
           {error ?? (busy ? 'Putting it back…' : notice.message)}
         </span>
         {notice.notes && !error && !busy && (
-          <span className="text-muted-foreground">{notice.notes}</span>
+          <div className="text-muted-foreground">{notice.notes}</div>
         )}
       </div>
       {takeBack && (

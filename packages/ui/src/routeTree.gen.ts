@@ -22,6 +22,7 @@ import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppDesktopSignInRouteImport } from './routes/_app/desktop-sign-in'
 import { Route as AppWhatsNewRouteImport } from './routes/_app/whats-new'
 import { Route as AppVaultIndexRouteImport } from './routes/_app/_vault/index'
+import { Route as AppVaultCommentsRouteImport } from './routes/_app/_vault/comments'
 import { Route as AppVaultSharedRouteImport } from './routes/_app/_vault/shared'
 import { Route as AppVaultTrashRouteImport } from './routes/_app/_vault/trash'
 import { Route as AppVaultWorkshopRouteImport } from './routes/_app/_vault/workshop'
@@ -105,6 +106,11 @@ const AppWhatsNewRoute = AppWhatsNewRouteImport.update({
 const AppVaultIndexRoute = AppVaultIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppVaultRoute,
+} as any)
+const AppVaultCommentsRoute = AppVaultCommentsRouteImport.update({
+  id: '/comments',
+  path: '/comments',
   getParentRoute: () => AppVaultRoute,
 } as any)
 const AppVaultSharedRoute = AppVaultSharedRouteImport.update({
@@ -229,6 +235,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRouteWithChildren
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
+  '/comments': typeof AppVaultCommentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/trash': typeof AppVaultTrashRoute
   '/workshop': typeof AppVaultWorkshopRoute
@@ -262,6 +269,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/desktop-sign-in': typeof AppDesktopSignInRoute
   '/whats-new': typeof AppWhatsNewRoute
+  '/comments': typeof AppVaultCommentsRoute
   '/shared': typeof AppVaultSharedRoute
   '/trash': typeof AppVaultTrashRoute
   '/workshop': typeof AppVaultWorkshopRoute
@@ -297,6 +305,7 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/desktop-sign-in': typeof AppDesktopSignInRoute
   '/_app/whats-new': typeof AppWhatsNewRoute
+  '/_app/_vault/comments': typeof AppVaultCommentsRoute
   '/_app/_vault/shared': typeof AppVaultSharedRoute
   '/_app/_vault/trash': typeof AppVaultTrashRoute
   '/_app/_vault/workshop': typeof AppVaultWorkshopRoute
@@ -334,6 +343,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/desktop-sign-in'
     | '/whats-new'
+    | '/comments'
     | '/shared'
     | '/trash'
     | '/workshop'
@@ -367,6 +377,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/desktop-sign-in'
     | '/whats-new'
+    | '/comments'
     | '/shared'
     | '/trash'
     | '/workshop'
@@ -401,6 +412,7 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/desktop-sign-in'
     | '/_app/whats-new'
+    | '/_app/_vault/comments'
     | '/_app/_vault/shared'
     | '/_app/_vault/trash'
     | '/_app/_vault/workshop'
@@ -527,6 +539,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppVaultIndexRouteImport
+      parentRoute: typeof AppVaultRoute
+    }
+    '/_app/_vault/comments': {
+      id: '/_app/_vault/comments'
+      path: '/comments'
+      fullPath: '/comments'
+      preLoaderRoute: typeof AppVaultCommentsRouteImport
       parentRoute: typeof AppVaultRoute
     }
     '/_app/_vault/shared': {
@@ -701,6 +720,7 @@ const AppVaultSSpaceIdRouteWithChildren =
   AppVaultSSpaceIdRoute._addFileChildren(AppVaultSSpaceIdRouteChildren)
 
 interface AppVaultRouteChildren {
+  AppVaultCommentsRoute: typeof AppVaultCommentsRoute
   AppVaultSharedRoute: typeof AppVaultSharedRoute
   AppVaultTrashRoute: typeof AppVaultTrashRoute
   AppVaultWorkshopRoute: typeof AppVaultWorkshopRoute
@@ -712,6 +732,7 @@ interface AppVaultRouteChildren {
 }
 
 const AppVaultRouteChildren: AppVaultRouteChildren = {
+  AppVaultCommentsRoute: AppVaultCommentsRoute,
   AppVaultSharedRoute: AppVaultSharedRoute,
   AppVaultTrashRoute: AppVaultTrashRoute,
   AppVaultWorkshopRoute: AppVaultWorkshopRoute,

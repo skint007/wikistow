@@ -53,18 +53,22 @@ export function useAction(describe: (error: unknown) => string = sharingMessage)
   const hold = use(Hold);
   const [running, setRunning] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // What the last run threw, for a failure that offers a way past it.
+  const [failure, setFailure] = useState<unknown>(null);
   const holding = useMemo(() => runHold(hold), [hold]);
   useEffect(() => () => holding.drop(), [holding]);
   const run = useCallback(
     async (action: () => Promise<void>): Promise<boolean> => {
       setRunning((n) => n + 1);
       setError(null);
+      setFailure(null);
       const finish = holding.start();
       try {
         await action();
         return true;
       } catch (caught) {
         setError(describe(caught));
+        setFailure(caught);
         return false;
       } finally {
         setRunning((n) => n - 1);
@@ -73,7 +77,7 @@ export function useAction(describe: (error: unknown) => string = sharingMessage)
     },
     [holding, describe],
   );
-  return { busy: running > 0, error, setError, run };
+  return { busy: running > 0, error, failure, setError, run };
 }
 
 /** A failure line under a form. */

@@ -16,6 +16,7 @@ import { onSignedOutElsewhere } from '../data/kept-store';
 import { OfflinePill } from './offline-pill';
 import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
+import { useCommentChanges } from '../comments/changes';
 import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
 import { useAppPlugins } from '../plugins/app-plugins';
@@ -67,6 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useConfirmSession();
   const confirmed = useSessionConfirmed(ctx);
   useTreeChanges(confirmed ? ctx : null);
+  useCommentChanges(confirmed ? ctx : null);
   // Changes made offline go once the server answers and the session is confirmed.
   useOfflineChanges(ctx, confirmed);
   // Another tab signing out deletes what's kept: this one stops keeping first.

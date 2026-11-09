@@ -1,5 +1,6 @@
 import {
   bannerAttachment,
+  CommentId,
   coverOf,
   linkablePages,
   linkTableOf,
@@ -37,6 +38,7 @@ import {
   editPage,
   findOnPage,
   finishEditing,
+  openComments,
   publishPage,
   requirementsHere,
 } from '../../../../../../commands/ui-commands';
@@ -52,6 +54,8 @@ import { usePaletteEntries } from '../../../../../../commands/palette-entries';
 import { usePluginPaletteEntries } from '../../../../../../commands/plugin-palette';
 import { AgentName, agentPersonName } from '../../../../../../agents/agent-name';
 import { AssistantButton, useChatPage } from '../../../../../../ai/chat-column';
+import { CommentsButton, useCommentsPage } from '../../../../../../comments/button';
+import { commentsStore } from '../../../../../../comments/store';
 import { ago } from '../../../../../../agents/model';
 import {
   historyQuery,
@@ -140,6 +144,8 @@ export const Route = createFileRoute('/_app/_vault/s/$spaceId/p/$pageId')({
   validateSearch: z.object({
     view: z.enum(['draft', 'published']).optional().catch(undefined),
     rev: RevisionId.optional().catch(undefined),
+    // A thread to show in the page's comments, as New comments links to.
+    thread: CommentId.optional().catch(undefined),
   }),
   component: PageView,
 });
@@ -608,6 +614,24 @@ function PageBody({
         : null;
   const canEdit = info.role !== 'reader';
   const { publishedHead } = info.heads;
+  // The comments panel shows this page and view, checked against the version on screen.
+  const commentsPage = {
+    spaceId: page.spaceId,
+    pageId: page.pageId,
+    view: model.view,
+    region: (model.view === 'draft' ? draftFrom?.region : revision?.region) ?? null,
+    version: { revisionId, audience: model.view },
+    editor: canEdit,
+    published: publishedHead !== null,
+  };
+  useCommentsPage(commentsPage);
+  // New comments opens the page with its thread, once: the address lets it go.
+  const showThread = Route.useSearch({ select: (search) => search.thread });
+  useEffect(() => {
+    if (!showThread) return;
+    commentsStore.open(showThread);
+    void navigate({ to: '.', search: (prev) => ({ ...prev, thread: undefined }), replace: true });
+  }, [showThread, navigate]);
   const title = pageTitle(payload?.title ?? null);
   const latest = model.view === 'published' && revisionId === publishedHead;
   const readMarkdown = payload?.markdown ?? null;
@@ -760,6 +784,12 @@ function PageBody({
       run: () => void publish(),
     },
     { command: findOnPage, title: 'Find on page', keys: 'Mod-f', run: () => find.open() },
+    {
+      command: openComments,
+      title: 'Comments',
+      waiting: needs.offline ? NEEDS_CONNECTION : null,
+      run: () => commentsStore.open(),
+    },
     editingCover && {
       command: changeBanner,
       title: 'Change banner',
@@ -845,6 +875,7 @@ function PageBody({
                   <Icon strokeWidth={1.75} /> <span className="max-[899px]:sr-only">{label}</span>
                 </Button>
               ))}
+              <CommentsButton page={commentsPage} />
               <Place name="page.toolbar" shown={pluginShown} />
               <PagePlugins shown={pluginShown} onOpenPanel={setPanel} />
               {shareable && (
