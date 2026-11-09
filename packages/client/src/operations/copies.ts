@@ -106,7 +106,7 @@ export type MoveEnds = {
   publications: { pageId: PageId; spaceId: SpaceId }[];
 };
 
-/** A copy or move worked out for the person to confirm. Nothing is sealed or sent yet. */
+/** A copy or move worked out, for the app to say what applies of it. Nothing is sealed or sent yet. */
 export type CopyPreview = {
   kind: 'copy' | 'move';
   copyId: string;
@@ -628,7 +628,7 @@ export type MadeCopy = {
 const FINISH_TRIES = 5;
 
 /**
- * Make a copy or move the person confirmed (`previewCopy`): open it, seal
+ * Make a copy or move as worked out (`previewCopy`): open it, seal
  * every node again for the destination and send them a batch at a time,
  * then finish. `onProgress` hears how far it has got. For a move, a source
  * head that moved on meanwhile is `stale-head` naming its nodes: those are
