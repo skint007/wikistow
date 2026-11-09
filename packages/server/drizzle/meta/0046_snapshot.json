@@ -1,5 +1,5 @@
 {
-  "id": "fad410f3-9ceb-4b5b-84f5-31caf4634de6",
+  "id": "e8772098-f91d-408e-8587-330ec215e9d1",
   "prevId": "dc98ce27-4898-40a4-8f40-10649f5e8020",
   "version": "7",
   "dialect": "postgresql",
@@ -5825,12 +5825,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
         "path": {
           "name": "path",
           "type": "text",
@@ -5846,65 +5840,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "plugin_draft_build_files_build_fk": {
-          "name": "plugin_draft_build_files_build_fk",
+        "plugin_draft_build_files_draft_id_plugin_drafts_id_fk": {
+          "name": "plugin_draft_build_files_draft_id_plugin_drafts_id_fk",
           "tableFrom": "plugin_draft_build_files",
-          "tableTo": "plugin_draft_builds",
-          "columnsFrom": [
-            "draft_id",
-            "account_id"
-          ],
-          "columnsTo": [
-            "draft_id",
-            "account_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "plugin_draft_build_files_draft_id_account_id_path_pk": {
-          "name": "plugin_draft_build_files_draft_id_account_id_path_pk",
-          "columns": [
-            "draft_id",
-            "account_id",
-            "path"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.plugin_draft_builds": {
-      "name": "plugin_draft_builds",
-      "schema": "",
-      "columns": {
-        "draft_id": {
-          "name": "draft_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "plugin_draft_builds_draft_id_plugin_drafts_id_fk": {
-          "name": "plugin_draft_builds_draft_id_plugin_drafts_id_fk",
-          "tableFrom": "plugin_draft_builds",
           "tableTo": "plugin_drafts",
           "columnsFrom": [
             "draft_id"
@@ -5914,27 +5852,14 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "plugin_draft_builds_account_id_users_id_fk": {
-          "name": "plugin_draft_builds_account_id_users_id_fk",
-          "tableFrom": "plugin_draft_builds",
-          "tableTo": "users",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "plugin_draft_builds_draft_id_account_id_pk": {
-          "name": "plugin_draft_builds_draft_id_account_id_pk",
+        "plugin_draft_build_files_draft_id_path_pk": {
+          "name": "plugin_draft_build_files_draft_id_path_pk",
           "columns": [
             "draft_id",
-            "account_id"
+            "path"
           ]
         }
       },
@@ -6013,162 +5938,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.plugin_draft_shares": {
-      "name": "plugin_draft_shares",
-      "schema": "",
-      "columns": {
-        "draft_id": {
-          "name": "draft_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "plugin_draft_shares_account_idx": {
-          "name": "plugin_draft_shares_account_idx",
-          "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "plugin_draft_shares_draft_id_plugin_drafts_id_fk": {
-          "name": "plugin_draft_shares_draft_id_plugin_drafts_id_fk",
-          "tableFrom": "plugin_draft_shares",
-          "tableTo": "plugin_drafts",
-          "columnsFrom": [
-            "draft_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "plugin_draft_shares_account_id_users_id_fk": {
-          "name": "plugin_draft_shares_account_id_users_id_fk",
-          "tableFrom": "plugin_draft_shares",
-          "tableTo": "users",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "plugin_draft_shares_draft_id_account_id_pk": {
-          "name": "plugin_draft_shares_draft_id_account_id_pk",
-          "columns": [
-            "draft_id",
-            "account_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.plugin_draft_workshops": {
-      "name": "plugin_draft_workshops",
-      "schema": "",
-      "columns": {
-        "draft_id": {
-          "name": "draft_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "workshop": {
-          "name": "workshop",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "plugin_draft_workshops_draft_id_plugin_drafts_id_fk": {
-          "name": "plugin_draft_workshops_draft_id_plugin_drafts_id_fk",
-          "tableFrom": "plugin_draft_workshops",
-          "tableTo": "plugin_drafts",
-          "columnsFrom": [
-            "draft_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "plugin_draft_workshops_account_id_users_id_fk": {
-          "name": "plugin_draft_workshops_account_id_users_id_fk",
-          "tableFrom": "plugin_draft_workshops",
-          "tableTo": "users",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "plugin_draft_workshops_draft_id_account_id_pk": {
-          "name": "plugin_draft_workshops_draft_id_account_id_pk",
-          "columns": [
-            "draft_id",
-            "account_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.plugin_drafts": {
       "name": "plugin_drafts",
       "schema": "",
@@ -6203,6 +5972,25 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "build_hash": {
+          "name": "build_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workshop": {
+          "name": "workshop",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workshop_revision": {
+          "name": "workshop_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "created_at": {
           "name": "created_at",
@@ -6249,6 +6037,191 @@
           "tableTo": "users",
           "columnsFrom": [
             "owner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.plugin_proposal_files": {
+      "name": "plugin_proposal_files",
+      "schema": "",
+      "columns": {
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "plugin_proposal_files_proposal_id_plugin_proposals_id_fk": {
+          "name": "plugin_proposal_files_proposal_id_plugin_proposals_id_fk",
+          "tableFrom": "plugin_proposal_files",
+          "tableTo": "plugin_proposals",
+          "columnsFrom": [
+            "proposal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "plugin_proposal_files_proposal_id_path_pk": {
+          "name": "plugin_proposal_files_proposal_id_path_pk",
+          "columns": [
+            "proposal_id",
+            "path"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "plugin_proposal_files_text_or_data": {
+          "name": "plugin_proposal_files_text_or_data",
+          "value": "(\"plugin_proposal_files\".\"text\" is null) <> (\"plugin_proposal_files\".\"data\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.plugin_proposals": {
+      "name": "plugin_proposals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "plugin_id": {
+          "name": "plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_id": {
+          "name": "sender_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_hash": {
+          "name": "from_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "plugin_proposals_sender_plugin_idx": {
+          "name": "plugin_proposals_sender_plugin_idx",
+          "columns": [
+            {
+              "expression": "sender_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "plugin_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plugin_proposals_plugin_idx": {
+          "name": "plugin_proposals_plugin_idx",
+          "columns": [
+            {
+              "expression": "plugin_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "plugin_proposals_plugin_id_plugins_id_fk": {
+          "name": "plugin_proposals_plugin_id_plugins_id_fk",
+          "tableFrom": "plugin_proposals",
+          "tableTo": "plugins",
+          "columnsFrom": [
+            "plugin_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "plugin_proposals_sender_id_users_id_fk": {
+          "name": "plugin_proposals_sender_id_users_id_fk",
+          "tableFrom": "plugin_proposals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "sender_id"
           ],
           "columnsTo": [
             "id"

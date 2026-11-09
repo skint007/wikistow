@@ -1,17 +1,23 @@
-import { pluginDraftRoutes } from '@wikistow/contracts';
+import { pluginDraftRoutes, pluginProposalRoutes } from '@wikistow/contracts';
 import {
   changePluginDraft,
   checkPluginDraftAccess,
   createPluginDraft,
+  declinePluginProposal,
   deletePluginDraft,
   listPluginDrafts,
+  listPluginProposals,
   listSharedPluginDrafts,
+  openPluginProposal,
+  proposePluginDraft,
   putPluginDraftBuild,
   readPluginDraft,
   readPluginDraftBinaryFiles,
   readPluginDraftShares,
   readPluginDraftWorkshop,
   putPluginDraftWorkshop,
+  readDraftProposal,
+  readPluginProposal,
   sharePluginDraft,
   unsharePluginDraft,
   type Database,
@@ -41,8 +47,10 @@ const BUILD_LIMIT = { windowSeconds: 600, max: 120 };
 const BUILD_BODY = 15 * 1024 * 1024;
 
 /**
- * Plugin drafts (ADR 0004, `pluginDraftRoutes`): people only, never
- * agents, each their own drafts and those shared with them (#315). The changes route keeps the app's usual
+ * Plugin drafts (ADR 0004, `pluginDraftRoutes`), and proposals of copies
+ * back to their plugins' owners (#315, `pluginProposalRoutes`): people
+ * only, never agents, each their own drafts and those shared with them
+ * (#315). The changes route keeps the app's usual
  * 1 MiB body, so the model's writes never wait for a large-body slot; a
  * font or image the person adds takes one. The library's file route
  * serves the builds (`mountPluginRoutes`).
@@ -209,6 +217,64 @@ export function mountPluginDraftRoutes(
     pluginDraftRoutes.unshareDraft,
     async ({ params }, { principal }) => {
       await unsharePluginDraft(db, { accountId: principal.accountId, ...params }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: LIMIT },
+  );
+
+  routes.account(
+    pluginProposalRoutes.getDraftProposal,
+    ({ params }, { principal }) =>
+      readDraftProposal(db, { accountId: principal.accountId, ...params }).catch(toApiError),
+    { rateLimit: LIMIT },
+  );
+
+  // Sending one is rare, as making a draft is. Its files are read from the draft, not the body.
+  routes.account(
+    pluginProposalRoutes.proposeDraft,
+    async ({ params }, { principal }) => ({
+      proposal: await proposePluginDraft(db, { accountId: principal.accountId, ...params }).catch(
+        toApiError,
+      ),
+    }),
+    { rateLimit: CREATE_LIMIT },
+  );
+
+  routes.account(
+    pluginProposalRoutes.listProposals,
+    async (_input, { principal }) => ({
+      proposals: await listPluginProposals(db, principal.accountId),
+    }),
+    { rateLimit: LIMIT },
+  );
+
+  routes.account(
+    pluginProposalRoutes.getProposal,
+    ({ params }, { principal }) =>
+      readPluginProposal(db, plugins, { accountId: principal.accountId, ...params }).catch(
+        toApiError,
+      ),
+    { rateLimit: LIMIT },
+  );
+
+  routes.account(
+    pluginProposalRoutes.openProposal,
+    async ({ params, body }, { principal }) => ({
+      draft: await openPluginProposal(db, {
+        accountId: principal.accountId,
+        ...params,
+        ...body,
+      }).catch(toApiError),
+    }),
+    { rateLimit: CREATE_LIMIT },
+  );
+
+  routes.account(
+    pluginProposalRoutes.declineProposal,
+    async ({ params }, { principal }) => {
+      await declinePluginProposal(db, { accountId: principal.accountId, ...params }).catch(
+        toApiError,
+      );
       return { ok: true as const };
     },
     { rateLimit: LIMIT },
