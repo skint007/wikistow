@@ -11,7 +11,8 @@ import {
   type sharingRoutes,
 } from '@wikistow/contracts';
 import { keyEnvelopeV2Bytes, metadataEnvelopeV2Bytes, verifySignature } from '@wikistow/client';
-import { and, eq, inArray, sql, type AnyColumn } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import { anyId } from '../db/any.ts';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
@@ -353,11 +354,12 @@ const VERIFY_BATCH = 200;
 
 /**
  * Check the signature of every owner envelope a move (or a share's ending)
- * carries, before its lock. An envelope naming no record stored in the
- * space is `missing` if given, else as `uncovered` decides: each by the caller at their current key, over the stored record it
- * names (section 5.8), a batch at a time. Stored records never change, and
- * under its lock the move requires the envelopes' key to be the caller's
- * current one still, so the check holds there.
+ * carries, before its lock: each by the caller at their current key, over
+ * the stored record it names (section 5.8), a batch at a time. Stored
+ * records never change, and under its lock the move requires the
+ * envelopes' key to be the caller's current one still, so the check holds
+ * there. An envelope naming no record stored in the space is `missing` if
+ * given, else as `uncovered` decides.
  */
 export async function verifyGrants(
   db: Database,
@@ -496,29 +498,25 @@ export async function replaceKeyMaterial(
   move: KeyMaterial,
   records: Pick<Records, 'revision' | 'metadata'>,
 ) {
-  // One array parameter each: a subtree can hold more records than a
-  // statement may have parameters.
-  const among = (column: AnyColumn, ids: readonly string[]) =>
-    sql`${column} = any(${sql.param([...ids])}::text[])`;
   if (records.revision.length > 0) {
-    await tx.delete(revisionWraps).where(among(revisionWraps.revisionId, records.revision));
+    await tx.delete(revisionWraps).where(anyId(revisionWraps.revisionId, records.revision));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'revision'),
-          among(keyEnvelopes.subjectId, records.revision),
+          anyId(keyEnvelopes.subjectId, records.revision),
         ),
       );
   }
   if (records.metadata.length > 0) {
-    await tx.delete(metadataWraps).where(among(metadataWraps.metadataRevisionId, records.metadata));
+    await tx.delete(metadataWraps).where(anyId(metadataWraps.metadataRevisionId, records.metadata));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'metadata'),
-          among(keyEnvelopes.subjectId, records.metadata),
+          anyId(keyEnvelopes.subjectId, records.metadata),
         ),
       );
   }
