@@ -63,6 +63,10 @@
   --status-draft-foreground: #9a6200;
   --draft-dot: #d97706;           /* tree marker for unpublished changes; 3:1 against white */
   --update-dot: #2563eb;          /* desktop app: a newer release is out, on the account avatar */
+  --diff-added: #dcf3e3;          /* text a merge adds, and its colour */
+  --diff-added-foreground: #17603a;
+  --diff-removed: #fbe3e3;        /* text a merge takes out, and its colour */
+  --diff-removed-foreground: #a12222;
 
   --note: #fff7c2;
   --note-foreground: #5c4a00;
@@ -128,6 +132,10 @@
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
   --update-dot: #60a5fa;
+  --diff-added: rgba(74, 222, 128, 0.16);
+  --diff-added-foreground: #86efac;
+  --diff-removed: rgba(248, 113, 113, 0.16);
+  --diff-removed-foreground: #fca5a5;
 
   --note: #2b2a17;
   --note-foreground: #efe2a0;
@@ -193,6 +201,10 @@
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
   --update-dot: #60a5fa;
+  --diff-added: rgba(74, 222, 128, 0.16);
+  --diff-added-foreground: #86efac;
+  --diff-removed: rgba(248, 113, 113, 0.16);
+  --diff-removed-foreground: #fca5a5;
 
   --note: #352d13;
   --note-foreground: #f3e3a3;
@@ -258,6 +270,10 @@
   --status-draft-foreground: #fcd34d;
   --draft-dot: #f59e0b;
   --update-dot: #60a5fa;
+  --diff-added: rgba(74, 222, 128, 0.16);
+  --diff-added-foreground: #86efac;
+  --diff-removed: rgba(248, 113, 113, 0.16);
+  --diff-removed-foreground: #fca5a5;
 
   --note: #2a2614;
   --note-foreground: #efe2a0;
@@ -351,6 +367,10 @@
   --color-status-draft-foreground: var(--status-draft-foreground);
   --color-draft-dot: var(--draft-dot);
   --color-update-dot: var(--update-dot);
+  --color-diff-added: var(--diff-added);
+  --color-diff-added-foreground: var(--diff-added-foreground);
+  --color-diff-removed: var(--diff-removed);
+  --color-diff-removed-foreground: var(--diff-removed-foreground);
   --color-note: var(--note);
   --color-note-foreground: var(--note-foreground);
   --color-table: var(--table);

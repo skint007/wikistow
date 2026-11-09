@@ -96,6 +96,7 @@ A theme is styles only: it runs no code and gets no page access. It can't load a
 | `--primary`, `--primary-2`, `--primary-foreground`, `--primary-soft`, `--primary-ink` | The brand colour, its gradient start, text on it, its soft fill and text on that |
 | `--strong`, `--strong-foreground`, `--destructive`, `--destructive-foreground`, `--destructive-badge-foreground` | Dark buttons and avatars, and destructive buttons and badges |
 | `--status-published`, `--status-published-foreground`, `--status-draft`, `--status-draft-foreground`, `--draft-dot`, `--update-dot` | Status pills and dots |
+| `--diff-added`, `--diff-added-foreground`, `--diff-removed`, `--diff-removed-foreground` | Text added and taken out, where a merge shows what changed |
 | `--note`, `--note-foreground`, `--table`, `--table-head`, `--tree-guide` | Notes, tables and the sidebar's tree lines |
 | `--glass`, `--glass-foreground`, `--cover` | The banner's toolbar and the palette's own banner |
 | `--folder-green`, `--folder-orange`, `--folder-blue`, `--folder-pink`, `--folder-purple` | Folder tints |
