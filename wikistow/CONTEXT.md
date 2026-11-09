@@ -128,7 +128,7 @@ A save over a page's draft that someone else saved after the version the save wa
 _Avoid_: Collision, sync error.
 
 **Merge**
-Combining two drafts made from the same version into one: changes to different parts of the page are kept from both, and the person chooses where both changed the same part, then reviews the result before it saves. Proposed in ADR 0013.
+Combining two drafts made from the same version into one: changes to different parts of the page are kept from both, and the person chooses where both changed the same part, then reviews the result before it saves. Accepted in ADR 0013.
 _Avoid_: Auto-merge, rebase, sync.
 
 **Kept for offline**

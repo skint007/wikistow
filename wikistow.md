@@ -196,7 +196,7 @@ If a person loses the passphrase, recovery key, and every unlocked authorized de
 
 ## Drafts and publication
 
-Each draft save creates a revision with an expected previous draft ID and permission version. The server commits the new head only if both still match. Otherwise it returns a conflict. The client preserves its unsaved text and presents the competing revisions. The CLI returns structured conflict details and a nonzero exit status. Do not silently merge or retry with a newer base. A merge the person reviews before it saves is proposed in [ADR 0013](docs/adr/0013-merging-conflicting-edits.md) (#334).
+Each draft save creates a revision with an expected previous draft ID and permission version. The server commits the new head only if both still match. Otherwise it returns a conflict. The client preserves its unsaved text and presents the competing revisions. The CLI returns structured conflict details and a nonzero exit status. Do not silently merge or retry with a newer base. A merge the person reviews before it saves is accepted in [ADR 0013](docs/adr/0013-merging-conflicting-edits.md) (#334).
 
 Publishing names an exact draft revision. The publishing client decrypts it and prepares a fresh published payload for the published audience. A transaction checks the actor's publish permission, expected draft and published heads, permission version, and attachment availability before advancing the published head. Readers never briefly see an incomplete publication. Retry using an idempotency key cannot create duplicate versions.
 

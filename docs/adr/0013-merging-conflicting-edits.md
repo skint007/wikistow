@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Merging conflicting edits
@@ -264,9 +264,10 @@ When both edits fell in the same block, at different words (near: 19 list items,
 - `packages/client` gains the merge module and the `diff` dependency. `packages/ui` gains the merge view, and `theme.css` the diff tokens.
 - Nothing changes on the server, in the protocol, or for the CLI, agents and plugins.
 
-## Decide
+## Decided (2026-11-09)
 
-Scott decides these before building. Each has a recommendation.
+Scott accepted every recommendation below on 2026-11-09.
+
 
 1. **Keep Save mine on top and Discard mine beside Merge…?** Recommended: yes, with **Merge…** first. Save mine on top is still the quick way when the person knows theirs should win, and Discard mine when theirs should.
 2. **Two additions at the same place: keep both without asking?** Recommended: yes, theirs first, with blocks they both start or end with shown once (decision 4). The spike's line merge stopped on 221 of 222 of these, and they are the most common case in lists and tables. The review shows the order.
