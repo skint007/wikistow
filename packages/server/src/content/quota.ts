@@ -2,6 +2,8 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import {
   blobs,
+  comments,
+  commentVersions,
   contactsRecords,
   identities,
   metadataRevisions,
@@ -20,8 +22,8 @@ const total = async (query: Promise<{ bytes: string }[]>) => Number((await query
 
 /**
  * Everything stored on an account's behalf: attachments it uploaded, page
- * and metadata versions it wrote, what is kept of its contacts record, and
- * the files of public copies it uploaded.
+ * and metadata versions and comments it wrote, what is kept of its contacts
+ * record, and the files of public copies it uploaded.
  * The sums run one after another: in a transaction they share a connection.
  */
 export async function usedBytes(db: Database, accountId: string): Promise<number> {
@@ -51,6 +53,13 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
           ),
         )
         .where(eq(identities.accountId, accountId)),
+    ),
+    await total(
+      db
+        .select({ bytes: sum(commentVersions.payloadSize) })
+        .from(commentVersions)
+        .innerJoin(comments, eq(comments.id, commentVersions.commentId))
+        .where(eq(comments.authorAccountId, accountId)),
     ),
     await total(
       db

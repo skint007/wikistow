@@ -161,8 +161,20 @@ type ScanScope =
   | { scope: 'subtree' | 'owner-region'; rootId?: FolderId | PageId }
   | { scope: 'share'; shareId: ShareId };
 
-const scanPage = (ctx: ClientContext, spaceId: SpaceId, query: ScanScope & { after?: string }) =>
-  ctx.api.call(sharingRoutes.records, { params: { spaceId }, query });
+// This app doesn't ask for comments (`comments=1`), so a server that sends
+// one anyway is answering another request.
+async function scanPage(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  query: ScanScope & { after?: string },
+) {
+  const page = await ctx.api.call(sharingRoutes.records, { params: { spaceId }, query });
+  const records = page.records.flatMap((item) => (item.kind === 'comment' ? [] : [item]));
+  if (records.length !== page.records.length) {
+    throw new CryptoError('malformed', 'The server sent comments this app didn’t ask for');
+  }
+  return { ...page, records };
+}
 
 /**
  * Every retained record in a scope, part by part, with each one's content

@@ -32,7 +32,8 @@ export type ContentFailure =
   | 'draft-limit'
   | 'last-owner'
   | 'home-space'
-  | 'invalid-plugin';
+  | 'invalid-plugin'
+  | 'invalid-request';
 
 export class ContentError extends Error {
   readonly code: ContentFailure;

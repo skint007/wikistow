@@ -49,6 +49,7 @@ import { highest } from './effective.ts';
 import { ContentError } from './errors.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
+import { isCommentVersion } from './comments.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { latestAgentEdit, listPages, requirePublished } from './pages.ts';
 import { charge } from './quota.ts';
@@ -140,6 +141,10 @@ export async function storeMetadata(
   { accountId, storageBytes }: { accountId: string; storageBytes: number | null },
 ) {
   const { record } = metadata;
+  // Comment versions and metadata versions are one set of IDs (section 5.9).
+  if (await isCommentVersion(tx, record.metadataRevisionId)) {
+    throw new ContentError('duplicate', 'That version ID is taken');
+  }
   if (storageBytes !== null) {
     await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
   }
@@ -321,12 +326,16 @@ export async function createFolder(
   });
 }
 
+/** What the metadata route renames: a space's or a folder's name, never a group's or anything else. */
+const RENAMED: ReadonlySet<string> = new Set(['space', 'folder']);
+
 /**
  * A new version of a space's or folder's metadata (rename, emoji, tint),
  * based on the current head. Renaming a space is for its owners; renaming a
  * folder needs edit rights there (section 5.4), which an agent may have
- * within its cap (section 9.5), never an owner's. With `once`, a retry
- * answers as the first did.
+ * within its cap (section 9.5), never an owner's. Only those, by a list of
+ * what it takes: a group is renamed through its own route. With `once`, a
+ * retry answers as the first did.
  */
 export async function updateMetadata(
   db: Database,
@@ -343,8 +352,7 @@ export async function updateMetadata(
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
     const folderId = record.subjectKind === 'folder' ? record.subjectId : null;
-    // A group is renamed through its own route.
-    if (record.subjectKind === 'group') throw new ContentError('binding-mismatch');
+    if (!RENAMED.has(record.subjectKind)) throw new ContentError('binding-mismatch');
     if (record.subjectKind === 'space' && record.subjectId !== input.spaceId)
       throw new ContentError('binding-mismatch');
     await lockSpace(tx, input.spaceId);

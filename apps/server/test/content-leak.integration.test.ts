@@ -35,6 +35,7 @@ import { schema } from '@wikistow/server';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
+import { postComment } from './support/comments.ts';
 import { openCopy } from './support/copies.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -110,11 +111,21 @@ const allRevisions = async () =>
 
 const AnyEnvelope = z.union([KeyEnvelope, MetadataEnvelope, KeyEnvelopeV2, MetadataEnvelopeV2]);
 
-/** Page and metadata envelopes alike. */
+/** Page, metadata and comment envelopes alike. */
 const allEnvelopes = async () =>
-  (await t.db.select({ envelope: schema.keyEnvelopes.envelope }).from(schema.keyEnvelopes)).map(
-    (row) => AnyEnvelope.parse(row.envelope),
-  );
+  [
+    ...(await t.db.select({ envelope: schema.keyEnvelopes.envelope }).from(schema.keyEnvelopes)),
+    ...(await t.db
+      .select({ envelope: schema.commentEnvelopes.envelope })
+      .from(schema.commentEnvelopes)),
+  ].map((row) => AnyEnvelope.parse(row.envelope));
+
+/** Comments' text, as their writers typed it (protocol section 5.9). */
+const COMMENTS = {
+  owner: 'PLAINTEXT-COMMENT-OWNER-2e4f',
+  reader: 'PLAINTEXT-COMMENT-READER-6a8c',
+  editors: 'PLAINTEXT-COMMENT-EDITORS-0b1d',
+};
 
 describe('an administrator', () => {
   it('can neither see nor change anyone else’s pages, by any route', async () => {
@@ -803,6 +814,13 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
     expect(opened).toMatchObject({
       payload: { title: COPY.title, markdown: COPY.body, attachments: [{ name: COPY.file }] },
     });
+    // Comments outside shares, sealed to the owner, and in one, wrapped by audience.
+    await postComment(owner.ctx, world.page, { audience: 'draft', text: COMMENTS.owner });
+    const question = await postComment(m.reader.ctx, m.insidePage, {
+      audience: 'published',
+      text: COMMENTS.reader,
+    });
+    await postComment(m.owner.ctx, m.insidePage, { audience: 'draft', text: COMMENTS.editors });
     const corpus = readableCorpus(await snapshot(t));
 
     for (const marker of Object.values(MARKERS)) {
@@ -816,6 +834,7 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
       ...Object.values(NAMES),
       ...Object.values(OUTSIDE),
       ...Object.values(COPY),
+      ...Object.values(COMMENTS),
       GROUP,
     ];
     // The copy's record of where it came from is inside its payload too.
@@ -852,6 +871,7 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
     expect(exposes(corpus, fromBase64(identity.public.boxPublicKey))).toBe(true);
     expect(corpus.includes(utf8(world.page.pageId))).toBe(true);
     expect(corpus.includes(utf8(m.copy.pageId))).toBe(true);
+    expect(corpus.includes(utf8(question.commentId))).toBe(true);
     expect(t.logs.length).toBeGreaterThan(0);
     expect(t.mails.length).toBeGreaterThan(0);
   });

@@ -21,6 +21,7 @@ export * from './vault-wrappers.ts';
 export * from './blobs.ts';
 export * from './contacts.ts';
 export * from './revisions.ts';
+export * from './comments.ts';
 export * from './agents.ts';
 export * from './publications.ts';
 export * from './copies.ts';

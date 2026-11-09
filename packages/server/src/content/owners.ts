@@ -26,6 +26,7 @@ import type { BlobStore } from '../blobs/store.ts';
 import type { Database } from '../db/client.ts';
 import {
   blobs,
+  commentEnvelopes,
   folderKeyEnvelopes,
   groupMembers,
   groups,
@@ -51,10 +52,12 @@ import {
   applyRotation,
   bumpPermissions,
   checkFolderEnvelopes,
+  insertChunked,
   lockSpaceForUpdate,
   requireOwner,
   storeFolderEnvelopes,
   uncovered,
+  type RecordKind,
 } from './sharing.ts';
 import { ContentError } from './errors.ts';
 import { deleteUnlistedFile } from './pages.ts';
@@ -167,7 +170,8 @@ type RecordParts = z.output<typeof RecordParts>;
 
 /**
  * The signed record of every owner-region version in the space, by ID:
- * every page and metadata version with no key wrap. These are what a new
+ * every page and metadata version with no key wrap, and every comment's
+ * current version with none (section 5.9). These are what a new
  * co-owner must get an envelope for (section 7.6, step 2). A copy's hidden
  * nodes count for nothing outside it (section 10): adding an owner moves
  * on the permission versions their records were written at, so the copy
@@ -194,6 +198,13 @@ async function ownerRegionRecords(tx: Database, spaceId: string) {
       }),
     );
   };
+  // Comments' current versions, under a kind of their own (section 5.9).
+  const notes = await tx.execute<{ id: string; record: unknown }>(sql`
+    select v.id, v.sealed -> 'record' as record from comment_versions v
+    join comments c on c.id = v.comment_id
+    where v.space_id = ${spaceId}
+      and not exists (select 1 from comment_wraps w where w.version_id = v.id)
+      and not exists (select 1 from nodes n where n.id = c.page_id and n.copy_id is not null)`);
   return {
     revision: await read('revisions', 'revision_wraps', 'revision_id', 'page_id'),
     metadata: await read(
@@ -201,6 +212,12 @@ async function ownerRegionRecords(tx: Database, spaceId: string) {
       'metadata_wraps',
       'metadata_revision_id',
       'subject_id',
+    ),
+    comment: new Map(
+      [...notes].flatMap((row) => {
+        const record = RecordParts.safeParse(row.record);
+        return record.success ? [[row.id, record.data] as const] : [];
+      }),
     ),
   };
 }
@@ -257,7 +274,7 @@ async function checkGrantedEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV
     signedBytes,
     ahead,
   }: GrantCheck<E> & {
-    subjectKind: 'revision' | 'metadata';
+    subjectKind: RecordKind;
     recipient: PublicIdentity;
     ahead: { granter: PublicIdentity; verified: ReadonlyMap<E, string> };
   },
@@ -371,6 +388,7 @@ export async function addOwner(
     folderKeyEnvelopes: readonly FolderKeyEnvelope[];
     keyEnvelopes: readonly KeyEnvelopeV2[];
     metadataEnvelopes: readonly MetadataEnvelopeV2[];
+    commentEnvelopes: readonly MetadataEnvelopeV2[];
     permissionVersion: number;
   },
 ): Promise<void> {
@@ -395,6 +413,11 @@ export async function addOwner(
     metadata: verifyGrantedAhead(input.metadataEnvelopes, {
       ...metadataGrants,
       records: current.metadata,
+      granter: caller,
+    }),
+    comments: verifyGrantedAhead(input.commentEnvelopes, {
+      ...metadataGrants,
+      records: current.comment,
       granter: caller,
     }),
   };
@@ -455,6 +478,14 @@ export async function addOwner(
       recipient: added,
       granter: identity,
       ahead: { granter: caller, verified: ahead.metadata },
+    });
+    await checkGrantedEnvelopes(tx, input.commentEnvelopes, {
+      ...metadataGrants,
+      subjectKind: 'comment',
+      records: records.comment,
+      recipient: added,
+      granter: identity,
+      ahead: { granter: caller, verified: ahead.comments },
     });
 
     await tx
@@ -519,6 +550,19 @@ export async function addOwner(
           .onConflictDoNothing();
       }
     }
+    await insertChunked(input.commentEnvelopes, (chunk) =>
+      tx
+        .insert(commentEnvelopes)
+        .values(
+          chunk.map((envelope) => ({
+            versionId: envelope.metadataRevisionId,
+            recipientIdentityId: added.id,
+            recipientKeyVersion: added.keyVersion,
+            envelope,
+          })),
+        )
+        .onConflictDoNothing(),
+    );
     await storeStatement(tx, input.statement);
     await bumpPermissions(
       tx,

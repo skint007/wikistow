@@ -24,20 +24,40 @@ export function connect(url: string, { max = 10 }: { max?: number } = {}) {
 /** The tree listener's session, as `pg_stat_activity` names it. */
 export const TREE_LISTENER_APPLICATION = 'wikistow-tree-changes';
 
+/** A comment change as the database names it: its page, audience and reader history. */
+export type CommentChange = {
+  pageId: string;
+  audience: 'draft' | 'published';
+  readerHistoryFrom: number;
+};
+
 /**
  * Call `onChange` with a space's ID after each committed change to its tree,
  * once per space and transaction, until `close`. The `wikistow_tree_changed`
- * trigger names it (migration 0034); nothing says what changed. postgres.js
+ * trigger names it (migration 0034); nothing says what changed. With
+ * `onComment`, also each change to a comment, as the `wikistow_comment_changed`
+ * trigger names it (migration 0048), on the same connection. postgres.js
  * listens on a connection of its own, which stays open, and listens again if
  * that one drops. Changes made while it is down are missed.
  */
-export async function listenForTreeChanges(url: string, onChange: (spaceId: string) => void) {
+export async function listenForTreeChanges(
+  url: string,
+  onChange: (spaceId: string) => void,
+  { onComment }: { onComment?: (change: CommentChange) => void } = {},
+) {
   const sql = postgres(url, {
     max: 1,
     connection: { application_name: TREE_LISTENER_APPLICATION },
     onnotice: () => {},
   });
   await sql.listen('wikistow_tree', onChange);
+  if (onComment) {
+    await sql.listen('wikistow_comments', (payload) => {
+      const [pageId, audience, from] = payload.split(' ');
+      if (!pageId || (audience !== 'draft' && audience !== 'published')) return;
+      onComment({ pageId, audience, readerHistoryFrom: Number(from) });
+    });
+  }
   return { close: () => sql.end({ timeout: 5 }) };
 }
 

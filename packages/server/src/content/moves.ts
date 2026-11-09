@@ -18,6 +18,8 @@ import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
   agentGrants,
+  commentEnvelopes,
+  commentWraps,
   keyEnvelopes,
   metadataWraps,
   nodes,
@@ -44,6 +46,8 @@ import {
   recordsUnder,
   requireCoverage,
   uncovered,
+  type RecordIds,
+  type RecordKind,
 } from './sharing.ts';
 import type { ReportUnreadable } from './stored.ts';
 import { requireCaller, type Actor } from './identities.ts';
@@ -52,9 +56,9 @@ import { transactOnce, type Once } from '../idempotency.ts';
 type Move = z.output<typeof sharingRoutes.move.body>;
 
 /** The key material a request carries for records changing region. */
-type KeyMaterial = Pick<Move, 'wraps' | 'keyEnvelopes' | 'metadataEnvelopes'>;
+type KeyMaterial = Pick<Move, 'wraps' | 'keyEnvelopes' | 'metadataEnvelopes' | 'commentEnvelopes'>;
 /** Envelopes to the owners, for records moving into the owner region. */
-type OwnerMaterial = Pick<Move, 'keyEnvelopes' | 'metadataEnvelopes'>;
+type OwnerMaterial = Pick<Move, 'keyEnvelopes' | 'metadataEnvelopes' | 'commentEnvelopes'>;
 
 /**
  * For a move's large body, before it is read: the caller (a person with a
@@ -211,7 +215,7 @@ export async function moveNode(
           spaceId,
           fromShare: from?.id ?? null,
           toShare: to?.id ?? null,
-          records: records.revision.length + records.metadata.length,
+          records: records.revision.length + records.metadata.length + records.comment.length,
         },
       });
     }
@@ -219,7 +223,10 @@ export async function moveNode(
 }
 
 const carriesKeys = (move: Move) =>
-  move.wraps.length > 0 || move.keyEnvelopes.length > 0 || move.metadataEnvelopes.length > 0;
+  move.wraps.length > 0 ||
+  move.keyEnvelopes.length > 0 ||
+  move.metadataEnvelopes.length > 0 ||
+  move.commentEnvelopes.length > 0;
 
 type Records = Awaited<ReturnType<typeof recordsUnder>>;
 
@@ -241,7 +248,11 @@ async function checkRewrap(
   }: { spaceId: string; to: ShareRow | null; identity: PublicIdentity; report: ReportUnreadable },
 ): Promise<true> {
   if (to) {
-    if (move.keyEnvelopes.length > 0 || move.metadataEnvelopes.length > 0) {
+    if (
+      move.keyEnvelopes.length > 0 ||
+      move.metadataEnvelopes.length > 0 ||
+      move.commentEnvelopes.length > 0
+    ) {
       throw new ContentError('region-mismatch', 'Content in a share carries key wraps');
     }
     if (
@@ -277,7 +288,7 @@ async function checkRewrap(
 export async function requireOwnerEnvelopes(
   tx: Database,
   material: OwnerMaterial,
-  records: { revision: readonly string[]; metadata: readonly string[] },
+  records: RecordIds,
   {
     spaceId,
     identity,
@@ -305,10 +316,17 @@ export async function requireOwnerEnvelopes(
       records: records.metadata,
       versionOf: (e) => e.metadataRevisionId,
     }),
+    comments: await checkOwnerEnvelopes(tx, material.commentEnvelopes, {
+      ...granted,
+      subjectKind: 'comment',
+      records: records.comment,
+      versionOf: (e) => e.metadataRevisionId,
+    }),
   };
-  if (missing.revisions.length > 0 || missing.metadata.length > 0) {
+  if (missing.revisions.length > 0 || missing.metadata.length > 0 || missing.comments.length > 0) {
     await recordParts(tx, 'revisions', spaceId, missing.revisions, report);
     await recordParts(tx, 'metadata_revisions', spaceId, missing.metadata, report);
+    await recordParts(tx, 'comment_versions', spaceId, missing.comments, report);
     throw new ContentError('stale-head', 'The folder changed since you loaded it');
   }
 }
@@ -328,7 +346,7 @@ type RecordParts = z.output<typeof RecordParts>;
  */
 async function recordParts(
   db: Database,
-  table: 'revisions' | 'metadata_revisions',
+  table: 'revisions' | 'metadata_revisions' | 'comment_versions',
   spaceId: string,
   ids: readonly string[],
   report: ReportUnreadable,
@@ -367,7 +385,13 @@ export async function verifyGrants(
   report: ReportUnreadable,
   { missing }: { missing?: ContentError } = {},
 ) {
-  if (move.keyEnvelopes.length === 0 && move.metadataEnvelopes.length === 0) return;
+  if (
+    move.keyEnvelopes.length === 0 &&
+    move.metadataEnvelopes.length === 0 &&
+    move.commentEnvelopes.length === 0
+  ) {
+    return;
+  }
   // Only an owner's move carries envelopes, and an agent is never an owner.
   const { identity: granter } = await requireCaller(db, move.actor);
   const named = <E>(envelopes: readonly E[], versionOf: (envelope: E) => string) => [
@@ -401,6 +425,20 @@ export async function verifyGrants(
     signedBytes: metadataEnvelopeV2Bytes,
     missing,
   });
+  await verifyEach(db, move.commentEnvelopes, {
+    granter,
+    subjectKind: 'comment',
+    records: await recordParts(
+      db,
+      'comment_versions',
+      move.spaceId,
+      named(move.commentEnvelopes, (e) => e.metadataRevisionId),
+      report,
+    ),
+    versionOf: (e) => e.metadataRevisionId,
+    signedBytes: metadataEnvelopeV2Bytes,
+    missing,
+  });
 }
 
 async function verifyEach<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
@@ -415,7 +453,7 @@ async function verifyEach<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
     missing,
   }: {
     granter: PublicIdentity;
-    subjectKind: 'revision' | 'metadata';
+    subjectKind: RecordKind;
     records: ReadonlyMap<string, RecordParts>;
     versionOf: (envelope: E) => string;
     signedBytes: (record: RecordParts, envelope: E) => Uint8Array;
@@ -461,7 +499,7 @@ async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>
     versionOf,
     elsewhere,
   }: {
-    subjectKind: 'revision' | 'metadata';
+    subjectKind: RecordKind;
     records: readonly string[];
     owners: readonly PublicIdentity[];
     granter: PublicIdentity;
@@ -493,11 +531,7 @@ async function checkOwnerEnvelopes<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>
 }
 
 /** Replace the records' wraps and envelopes with the checked ones of the move. */
-export async function replaceKeyMaterial(
-  tx: Database,
-  move: KeyMaterial,
-  records: Pick<Records, 'revision' | 'metadata'>,
-) {
+export async function replaceKeyMaterial(tx: Database, move: KeyMaterial, records: RecordIds) {
   if (records.revision.length > 0) {
     await tx.delete(revisionWraps).where(anyId(revisionWraps.revisionId, records.revision));
     await tx
@@ -520,7 +554,12 @@ export async function replaceKeyMaterial(
         ),
       );
   }
-  const wraps = (kind: 'revision' | 'metadata') => move.wraps.filter((w) => w.subjectKind === kind);
+  // A comment's own kind, never with names' (section 5.9).
+  if (records.comment.length > 0) {
+    await tx.delete(commentWraps).where(anyId(commentWraps.versionId, records.comment));
+    await tx.delete(commentEnvelopes).where(anyId(commentEnvelopes.versionId, records.comment));
+  }
+  const wraps = (kind: RecordKind) => move.wraps.filter((w) => w.subjectKind === kind);
   await insertChunked(wraps('revision'), (chunk) =>
     tx.insert(revisionWraps).values(
       chunk.map(({ versionId, wrap }) => ({
@@ -540,6 +579,25 @@ export async function replaceKeyMaterial(
         wrap,
       })),
     ),
+  );
+  await insertChunked(wraps('comment'), (chunk) =>
+    tx.insert(commentWraps).values(
+      chunk.map(({ versionId, wrap }) => ({
+        versionId,
+        shareId: wrap.shareId,
+        keyVersion: wrap.keyVersion,
+        wrap,
+      })),
+    ),
+  );
+  await insertChunked(
+    move.commentEnvelopes.map((envelope) => ({
+      versionId: envelope.metadataRevisionId,
+      recipientIdentityId: envelope.recipientId,
+      recipientKeyVersion: envelope.recipientKeyVersion,
+      envelope,
+    })),
+    (chunk) => tx.insert(commentEnvelopes).values(chunk),
   );
   const envelopeRows = [
     ...move.keyEnvelopes.map((envelope) => ({

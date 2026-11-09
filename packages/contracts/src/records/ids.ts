@@ -50,6 +50,12 @@ export const RevisionId = id.brand<'RevisionId'>();
 export type RevisionId = z.infer<typeof RevisionId>;
 export const MetadataRevisionId = id.brand<'MetadataRevisionId'>();
 export type MetadataRevisionId = z.infer<typeof MetadataRevisionId>;
+/**
+ * A comment on a page (protocol section 5.9). Made by clients, unique
+ * across the installation. Its versions take metadata version IDs.
+ */
+export const CommentId = id.brand<'CommentId'>();
+export type CommentId = z.infer<typeof CommentId>;
 /** A folder or page: anything in a space's tree. */
 export const NodeId = id;
 export const AttachmentId = id.brand<'AttachmentId'>();

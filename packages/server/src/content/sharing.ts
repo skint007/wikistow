@@ -11,10 +11,14 @@ import { folderKeyEnvelopeBytes, verifySignature } from '@wikistow/client';
 import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
+import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import {
   agentGrants,
   agentProfiles,
+  commentEnvelopes,
+  commentVersions,
+  commentWraps,
   folderKeyEnvelopes,
   groupMembers,
   groups,
@@ -44,6 +48,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { endAgentGrants, requireOwnAgents, storeNewShareGrants } from './agents.ts';
+import { commentSizes, commentsInRegion, commentsOn, scannedComments } from './comments.ts';
 import {
   groupAccess,
   highest,
@@ -62,6 +67,8 @@ type Member = z.output<typeof sharingRoutes.Member>;
 type Rotation = z.output<typeof sharingRoutes.Rotation>;
 type NewAgentGrant = z.output<typeof sharingRoutes.makeShare.body>['agentGrants'][number];
 type NewGroupGrant = z.output<typeof sharingRoutes.makeShare.body>['groups'][number];
+/** A key wrap a request carries for one record. */
+export type SubjectWrap = { subjectKind: RecordKind; versionId: string; wrap: KeyWrap };
 
 /** Inserts are split so no statement passes Postgres's limit on parameters. */
 const CHUNK = 2000;
@@ -138,10 +145,17 @@ export async function nodesUnder(tx: Database, spaceId: string, rootId: string |
   return rows.map((row) => row.id);
 }
 
+/** Which kind of record key material is for: a page version, a name, or a comment. */
+export type RecordKind = 'revision' | 'metadata' | 'comment';
+
+/** Retained records by kind, by version ID. */
+export type RecordIds = Record<RecordKind, readonly string[]>;
+
 /**
  * Every retained page and metadata version a share over `rootId` covers
  * (section 6.7): of every page and folder in its subtree, and for a space
- * share, the space's own name too. Group names stay in the owner region.
+ * share, the space's own name too, and the current version of every
+ * comment on its pages (section 5.9). Group names stay in the owner region.
  */
 export async function recordsUnder(tx: Database, spaceId: string, rootId: string | null) {
   const ids = await nodesUnder(tx, spaceId, rootId);
@@ -187,14 +201,15 @@ export async function recordsUnder(tx: Database, spaceId: string, rootId: string
     nodeIds: ids,
     revision: pageVersions.map((row) => row.id),
     metadata: names.map((row) => row.id),
+    comment: await commentsOn(tx, spaceId, ids),
   };
 }
 
 /**
  * Every retained record wrapped under `shareId`, by key material (section
- * 6.9, step 2): the pages and folder names under its root, the space's
- * name for a space share, and those of nodes in the trash, but a copy's
- * hidden nodes', which count for nothing outside their copy.
+ * 6.9, step 2): the pages, folder names and comments under its root, the
+ * space's name for a space share, and those of nodes in the trash, but a
+ * copy's hidden nodes', which count for nothing outside their copy.
  */
 export async function recordsWrappedUnder(tx: Database, spaceId: string, shareId: string) {
   const hidden = tx
@@ -223,7 +238,11 @@ export async function recordsWrappedUnder(tx: Database, spaceId: string, shareId
         notInArray(metadataRevisions.subjectId, hidden),
       ),
     );
-  return { revision: pageVersions.map((row) => row.id), metadata: names.map((row) => row.id) };
+  return {
+    revision: pageVersions.map((row) => row.id),
+    metadata: names.map((row) => row.id),
+    comment: await commentsInRegion(tx, spaceId, shareId),
+  };
 }
 
 /** Bump the permission versions of the space and of `nodeIds`, so writes prepared before fail. */
@@ -526,7 +545,7 @@ export async function makeShare(
     spaceId: string;
     shareId: string;
     rootId: string | null;
-    wraps: readonly { subjectKind: 'revision' | 'metadata'; versionId: string; wrap: KeyWrap }[];
+    wraps: readonly SubjectWrap[];
     envelopes: readonly FolderKeyEnvelope[];
     members: readonly Member[];
     agentGrants: readonly NewAgentGrant[];
@@ -635,7 +654,7 @@ export async function makeShare(
     if (!made) throw new Error('the share just made is gone');
     await storeNewShareGrants(tx, made, input.accountId, input.agentGrants);
     await storeFolderEnvelopes(tx, input.envelopes);
-    const wrapRows = (kind: 'revision' | 'metadata') =>
+    const wrapRows = (kind: RecordKind) =>
       input.wraps
         .filter((w) => w.subjectKind === kind)
         .map((w) => ({ id: w.versionId, keyVersion: w.wrap.keyVersion, wrap: w.wrap }));
@@ -659,6 +678,16 @@ export async function makeShare(
         })),
       ),
     );
+    await insertChunked(wrapRows('comment'), (chunk) =>
+      tx.insert(commentWraps).values(
+        chunk.map((w) => ({
+          versionId: w.id,
+          shareId: input.shareId,
+          keyVersion: w.keyVersion,
+          wrap: w.wrap,
+        })),
+      ),
+    );
     for (const [kind, ids] of [
       ['revision', records.revision],
       ['metadata', records.metadata],
@@ -667,6 +696,9 @@ export async function makeShare(
       await tx
         .delete(keyEnvelopes)
         .where(and(eq(keyEnvelopes.subjectKind, kind), inArray(keyEnvelopes.subjectId, ids)));
+    }
+    if (records.comment.length > 0) {
+      await tx.delete(commentEnvelopes).where(anyId(commentEnvelopes.versionId, records.comment));
     }
     await bumpPermissions(tx, input.spaceId, records.nodeIds);
     await audit(tx, {
@@ -722,19 +754,19 @@ async function requireNoNesting(tx: Database, spaceId: string, rootId: string | 
 /**
  * The error for key material naming a record outside what it must cover. A
  * revision no longer stored was an old draft checkpoint removed since the
- * app read it (`stale-head`, so the app reloads); anything else is `refused`.
+ * app read it, and a comment version no longer stored was edited or deleted
+ * since (`stale-head`, so the app reloads); anything else is `refused`.
  */
 export async function uncovered(
   tx: Database,
-  subjectKind: 'revision' | 'metadata',
+  subjectKind: RecordKind,
   id: string,
   refused: ContentError,
 ) {
-  if (subjectKind === 'revision') {
-    const [kept] = await tx
-      .select({ id: revisions.id })
-      .from(revisions)
-      .where(eq(revisions.id, id));
+  const table =
+    subjectKind === 'revision' ? revisions : subjectKind === 'comment' ? commentVersions : null;
+  if (table) {
+    const [kept] = await tx.select({ id: table.id }).from(table).where(eq(table.id, id));
     if (!kept) return new ContentError('stale-head', 'The content changed since you loaded it');
   }
   return refused;
@@ -748,13 +780,14 @@ export async function uncovered(
  */
 export async function requireCoverage(
   tx: Database,
-  wraps: readonly { subjectKind: 'revision' | 'metadata'; versionId: string; wrap: KeyWrap }[],
-  records: { revision: readonly string[]; metadata: readonly string[] },
+  wraps: readonly SubjectWrap[],
+  records: RecordIds,
   { shareId, keyVersion }: { shareId: string; keyVersion: number },
 ) {
   const wanted = new Set([
     ...records.revision.map((id) => `revision:${id}`),
     ...records.metadata.map((id) => `metadata:${id}`),
+    ...records.comment.map((id) => `comment:${id}`),
   ]);
   const given = new Set<string>();
   for (const { subjectKind, versionId, wrap } of wraps) {
@@ -1348,7 +1381,7 @@ async function memberShares(db: Database, identityId: string) {
   );
 }
 
-/** How many records a scan sends at most, and how many bytes of Milestone 1 payloads. */
+/** How many records a scan sends at most, and how many bytes of payloads. */
 const SCAN_BATCH = 500;
 const SCAN_BYTES = 2 * 1024 * 1024;
 
@@ -1356,9 +1389,12 @@ const SCAN_BYTES = 2 * 1024 * 1024;
  * Every retained record in a scope, with the caller's key material for it,
  * for an owner about to make a share over a subtree (`rootId`, or the whole
  * space), to add a co-owner (the owner region), or to end share `shareId`
- * (what is wrapped under it). In parts, ordered by kind and ID; the next part starts after `next`, whether or not that record
- * still exists. A v2 record comes without its payload: its key commitment
- * is enough to check a key against it.
+ * (what is wrapped under it). In parts, ordered by kind and ID; the next
+ * part starts after `next`, whether or not that record still exists. A v2
+ * record comes without its payload: its key commitment is enough to check
+ * a key against it. Comments come whole, and only with `comments`; without
+ * it, a scope that holds one is `invalid-request`, so an app from before
+ * comments says to update rather than leave them out (section 5.9).
  */
 export async function scanRecords(
   db: Database,
@@ -1369,12 +1405,13 @@ export async function scanRecords(
     rootId: string | null;
     shareId: string | null;
     after: string | null;
+    comments: boolean;
   },
   report: ReportUnreadable,
 ) {
   const identity = await requireIdentity(db, accountId);
   await requireOwner(db, identity, input.spaceId);
-  let ids: Pick<Awaited<ReturnType<typeof recordsUnder>>, 'revision' | 'metadata'>;
+  let ids: RecordIds;
   if (input.scope === 'subtree') {
     const under = await recordsUnder(db, input.spaceId, input.rootId);
     if (input.rootId !== null && under.nodeIds.length === 0) throw new ContentError('not-found');
@@ -1414,15 +1451,20 @@ export async function scanRecords(
     ids = {
       revision: pageVersions.map((r) => r.id),
       metadata: names.map((r) => r.id),
+      comment: await commentsInRegion(db, input.spaceId, null),
     };
   }
+  if (!input.comments && ids.comment.length > 0) {
+    throw new ContentError('invalid-request', 'Update the app: a page here has comments');
+  }
   const ordered = [
-    ...ids.metadata.sort().map((id) => ({ kind: 'metadata' as const, id })),
-    ...ids.revision.sort().map((id) => ({ kind: 'revision' as const, id })),
+    ...[...ids.comment].sort().map((id) => ({ kind: 'comment' as const, id })),
+    ...[...ids.metadata].sort().map((id) => ({ kind: 'metadata' as const, id })),
+    ...[...ids.revision].sort().map((id) => ({ kind: 'revision' as const, id })),
   ];
   // The next part starts after `after` in this order, even if that record
-  // was deleted since: `metadata:` sorts before `revision:`, and IDs in the
-  // order JavaScript compares strings.
+  // was deleted since: `comment:` sorts before `metadata:`, and that before
+  // `revision:`, with IDs in the order JavaScript compares strings.
   const after = input.after;
   const found = after === null ? 0 : ordered.findIndex((r) => `${r.kind}:${r.id}` > after);
   const start = found === -1 ? ordered.length : found;
@@ -1441,45 +1483,38 @@ export async function scanRecords(
             wanted.map((id) => sql`${id}`),
             sql`, `,
           )}]::text[]`})`);
+  const of = (kind: RecordKind) => candidates.filter((c) => c.kind === kind).map((c) => c.id);
   const pageRows = new Map(
-    [
-      ...(await sealedOf(
-        'revisions',
-        candidates.filter((c) => c.kind === 'revision').map((c) => c.id),
-      )),
-    ].map((row) => [row.id, row]),
+    [...(await sealedOf('revisions', of('revision')))].map((row) => [row.id, row]),
   );
   const nameRows = new Map(
-    [
-      ...(await sealedOf(
-        'metadata_revisions',
-        candidates.filter((c) => c.kind === 'metadata').map((c) => c.id),
-      )),
-    ].map((row) => [row.id, row]),
+    [...(await sealedOf('metadata_revisions', of('metadata')))].map((row) => [row.id, row]),
   );
+  const commentBytes = await commentSizes(db, of('comment'));
+  const sizeOf = (candidate: (typeof candidates)[number]) =>
+    candidate.kind === 'comment'
+      ? (commentBytes.get(candidate.id) ?? 0)
+      : Number((candidate.kind === 'revision' ? pageRows : nameRows).get(candidate.id)?.size ?? 0);
   const sent: typeof candidates = [];
   let bytes = 0;
   for (const candidate of candidates) {
-    const row = (candidate.kind === 'revision' ? pageRows : nameRows).get(candidate.id);
-    const size = Number(row?.size ?? 0);
+    const size = sizeOf(candidate);
     if (sent.length > 0 && bytes + size > SCAN_BYTES) break;
     bytes += size;
     sent.push(candidate);
   }
-  const pageKeys = await revisionKeyMaterial(
-    db,
-    identity,
-    sent.filter((c) => c.kind === 'revision').map((c) => c.id),
-    report,
-  );
-  const names = await servedMetadata(
-    db,
-    identity,
-    sent.filter((c) => c.kind === 'metadata').map((c) => c.id),
-    report,
-  );
+  const sentOf = (kind: RecordKind) => sent.filter((c) => c.kind === kind).map((c) => c.id);
+  const pageKeys = await revisionKeyMaterial(db, identity, sentOf('revision'), report);
+  const names = await servedMetadata(db, identity, sentOf('metadata'), report);
+  const notes = await scannedComments(db, identity, sentOf('comment'), report);
   const Scanned = sharingRoutes.records.response.shape.records.element;
   const out = sent.flatMap((candidate) => {
+    if (candidate.kind === 'comment') {
+      const note = notes.get(candidate.id);
+      const item =
+        note && readStored(Scanned, note, { table: 'comment_versions', id: candidate.id }, report);
+      return item ? [item] : [];
+    }
     const stored = {
       table: candidate.kind === 'revision' ? 'revisions' : 'metadata_revisions',
       id: candidate.id,

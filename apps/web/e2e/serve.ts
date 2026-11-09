@@ -68,7 +68,7 @@ const database = await createMigratedDatabase('wikistow_e2e');
 const blobDir = await mkdtemp(join(tmpdir(), 'wikistow-e2e-blobs-'));
 const { db, close } = connect(database.url);
 
-const { app, treeChanges } = createApp({
+const { app, treeChanges, commentChanges } = createApp({
   db,
   config: {
     databaseUrl: database.url,
@@ -92,7 +92,9 @@ const { app, treeChanges } = createApp({
   blobs: fileBlobStore(blobDir),
 });
 // Sidebars load again as trees change, as with the real server.
-const treeListener = await listenForTreeChanges(database.url, treeChanges.changed);
+const treeListener = await listenForTreeChanges(database.url, treeChanges.changed, {
+  onComment: commentChanges.changed,
+});
 // Loopback only: the control port can reset accounts and dump the database.
 const server = serve({ fetch: app.fetch, port: APP_PORT, hostname: '127.0.0.1' });
 
@@ -176,6 +178,7 @@ const shutdown = () => {
       .then(() => process.exit(0));
   });
   treeChanges.close();
+  commentChanges.close();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);
