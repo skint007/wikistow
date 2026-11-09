@@ -49,11 +49,13 @@ export function ShareDialog({
     shareId: ShareId;
   } | null>(null);
   useEffect(() => {
-    if (open) {
-      setShown(rootId);
-      setEnded(null);
-    }
+    if (open) setShown(rootId);
   }, [open, rootId]);
+  // Only on opening: a page's folder changes when the share above it ends,
+  // and the outcome stays.
+  useEffect(() => {
+    if (open) setEnded(null);
+  }, [open]);
   const tree = useQuery({ ...treeQuery(ctx, spaceId), enabled: open });
   const shares = useQuery({ ...sharesQuery(ctx, spaceId), enabled: open });
   const keys = useQuery({ ...spaceKeysQuery(ctx, spaceId), enabled: open });
