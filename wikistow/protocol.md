@@ -134,7 +134,8 @@ These further risks are accepted too:
 
 | Action | Server alone | Section |
 |---|---|---|
-| Read titles, Markdown, attachments, folder or space names (and, as proposed, comments) | **No**, except a page with a public link | 2.3, A12 |
+| Read titles, Markdown, attachments, folder or space names | **No**, except a page with a public link | 2.3, A12 |
+| Read comments (as proposed) | **No**, a page with a public link included | 5.9, A12 |
 | See IDs, the tree, sizes, times, emails, public keys, shares, members and roles | Yes | A7 |
 | Refuse any request, or serve stale or partial data | Yes | A2 |
 | Let someone do what their role forbids, with keys they already hold | Yes | A1 |
@@ -719,7 +720,7 @@ A **comment** is a note on one page, by anyone who can read it for the comment's
 ```
 
 - `pageId` is the page the comment is on. `thread` is the thread's first comment, or `null` for a first comment. Only a first comment may have a `quote`; a reply with one is `malformed`. `audience` is the comment's audience; a writer gives a reply its first comment's, as it opened it.
-- `text` is Markdown, 1 to 10,000 characters, counted as section 3.3, rule 5 counts them; its list of refused code points applies to names only, so `text` and a quote may hold line breaks and tabs. `quote` names a passage of the page, chosen only in the app's own reader or editor, never over a plugin's view: `exact` (1 to 500 characters) is the passage in the page's own text, `prefix` and `suffix` (0 to 64 characters each) that text just before and after it, cut on character boundaries, and `revisionId` the version it was chosen in. **The page's own text** is the body's words as the reader shows them, with U+000A between blocks, but with wikilinks, property references, query tables, plugin blocks, claimed inline code, diagrams and math as their source is written, never the titles or values a viewer's tree, index or plugins draw there, which may come from drafts or from pages the comment's audience can't open (section 5.5, ADR 0006). Writers refuse a payload outside these limits, and readers count it as `malformed`.
+- `text` is Markdown, 1 to 10,000 characters, counted as section 3.3, rule 5 counts them; its list of refused code points applies to names only, so `text` and a quote may hold line breaks and tabs. `quote` names a passage of the page, chosen only in the app's own reader or editor, never over a plugin's view: `exact` (1 to 500 characters) is the passage in the page's own text, `prefix` and `suffix` (0 to 64 characters each) that text just before and after it, cut on character boundaries, and `revisionId` the version it was chosen in, which the writer's app opened, and which is of the comment's audience: a published version for `"published"`, a draft for `"draft"`. **The page's own text** is the body's words as the reader shows them, with U+000A between blocks, but with wikilinks, property references, query tables, plugin blocks, claimed inline code, diagrams and math as their source is written, never the titles or values a viewer's tree, index or plugins draw there, which may come from drafts or from pages the comment's audience can't open (section 5.5, ADR 0006). Writers refuse a payload outside these limits, and readers count it as `malformed`.
 - The payload is loose and follows section 5.5's format rules: an edit keeps fields and `extensions` it doesn't know. It holds no key material and no attachments.
 - **Why these are in the payload.** The record signs no page, thread or audience. The payload is bound to the author's signature by `payloadHash` and `keyCommitment`, so naming them there binds them as firmly, with no new signed layout.
 
