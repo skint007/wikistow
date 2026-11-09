@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Server
+
+- The server can end a share (ADR 0012): `POST /api/shares/:shareId/end` takes every record wrapped under the share sealed again to the space's owners, then deletes the share with its members, groups' access, agents' picks and keys, and ends the public links of people who can no longer publish. `GET /api/shares/:shareId/ending` tells an owner which public links end and which publications stay, and the record scan gains a `share` scope. The app's **Stop sharing** comes next. (#PR)
+
 ## 0.25.0-beta.2 - 2026-11-09
 
 ### Highlights

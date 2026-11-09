@@ -156,11 +156,13 @@ export type Progress = (progress: { records: number; total: number }) => void;
 /** One page of a scope's records, with this person's key material for each. */
 type Scanned = Awaited<ReturnType<typeof scanPage>>['records'][number];
 
-const scanPage = (
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  query: { scope: 'subtree' | 'owner-region'; rootId?: FolderId | PageId; after?: string },
-) => ctx.api.call(sharingRoutes.records, { params: { spaceId }, query });
+/** What a scan covers: a subtree, the owner region, or what is wrapped under one share. */
+type ScanScope =
+  | { scope: 'subtree' | 'owner-region'; rootId?: FolderId | PageId }
+  | { scope: 'share'; shareId: ShareId };
+
+const scanPage = (ctx: ClientContext, spaceId: SpaceId, query: ScanScope & { after?: string }) =>
+  ctx.api.call(sharingRoutes.records, { params: { spaceId }, query });
 
 /**
  * Every retained record in a scope, part by part, with each one's content
@@ -175,7 +177,7 @@ export async function forEachRecordKey(
   ctx: ClientContext,
   keys: SpaceKeys,
   spaceId: SpaceId,
-  scope: { scope: 'subtree' | 'owner-region'; rootId?: FolderId | PageId },
+  scope: ScanScope,
   use: (
     item:
       | { kind: 'revision'; record: ReturnType<typeof unsealRevisionKey>['record'] }

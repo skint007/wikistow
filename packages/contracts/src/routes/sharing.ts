@@ -8,6 +8,7 @@ import {
   IdentityId,
   MetadataRevisionId,
   NodeId,
+  PageId,
   RevisionId,
   ShareId,
   SpaceId,
@@ -279,18 +280,25 @@ const ScannedMetadata = z.union([SealedMetadata, SealedMetadataV2.omit({ payload
  * Every retained record in a scope, with the caller's key material for it,
  * for an owner about to make a share or move something across a region
  * boundary (`subtree`: the folder or page `rootId` and everything under it,
- * or the whole space) or add a co-owner (`owner-region`). In parts: ask
- * again from `next` until it is null.
+ * or the whole space), add a co-owner (`owner-region`), or end a share
+ * (`share`: every record wrapped under share `shareId`, the trash included,
+ * but a copy's hidden nodes'). In parts: ask again from `next` until it is
+ * null.
  */
 export const records = {
   method: 'GET',
   path: '/api/spaces/:spaceId/records',
   params: SpaceParams,
-  query: z.object({
-    scope: z.enum(['subtree', 'owner-region']),
-    rootId: NodeId.optional(),
-    after: z.string().max(200).optional(),
-  }),
+  query: z
+    .object({
+      scope: z.enum(['subtree', 'owner-region', 'share']),
+      rootId: NodeId.optional(),
+      shareId: ShareId.optional(),
+      after: z.string().max(200).optional(),
+    })
+    .refine((query) => (query.scope === 'share') === (query.shareId !== undefined), {
+      message: 'A share scan names its share, and only it',
+    }),
   response: z.strictObject({
     records: z.array(
       z.discriminatedUnion('kind', [
@@ -311,5 +319,47 @@ export const records = {
     next: z.string().nullable(),
     /** How many records the scope held when this part was read, for showing progress. */
     total: z.number().int(),
+  }),
+} as const satisfies RouteDef;
+
+/**
+ * End a share (section 6.9): every record wrapped under it, but a copy's
+ * hidden nodes', sealed again to every current owner in v2 envelopes the
+ * caller grants, with the permission version of the share's root, or of the
+ * space for a space share. The share goes, with its members, groups'
+ * access, agents' picks, folder key envelopes and wraps. A record saved
+ * since the scan, or one no longer wrapped under the share, is `stale-head`:
+ * scan again. A request sent again after its answer was lost finds the
+ * share gone (`not-found`).
+ */
+export const endShare = {
+  method: 'POST',
+  path: '/api/shares/:shareId/end',
+  params: ShareParams,
+  body: z.object({
+    permissionVersion: z.number().int(),
+    keyEnvelopes: z.array(KeyEnvelopeV2).max(500_000),
+    metadataEnvelopes: z.array(MetadataEnvelopeV2).max(500_000),
+  }),
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/**
+ * What ending a share would end and keep, for an owner's preview (section
+ * 6.9, step 1), of the pages under its root: each public link, and whether
+ * it ends because who turned it on can't publish the page afterwards
+ * (ADR 0005, decision 8); the pages with a live publication into another
+ * space (`publishedFrom`); and the pages that are one from another space
+ * (`publishedInto`). Who loses access comes from `listShares` and the
+ * share's envelopes, as for a move.
+ */
+export const shareEnding = {
+  method: 'GET',
+  path: '/api/shares/:shareId/ending',
+  params: ShareParams,
+  response: z.strictObject({
+    links: z.array(z.strictObject({ pageId: PageId, ends: z.boolean() })),
+    publishedFrom: z.array(PageId),
+    publishedInto: z.array(PageId),
   }),
 } as const satisfies RouteDef;
