@@ -131,7 +131,7 @@ export type MoveAvailability = { route: 'server' | 'device' } | { route: null; h
  * How moving an item with `item` waiting to a place with `place` waiting
  * goes (ADR 0009, decision 8; #331). `across` is a move that changes who can
  * read it, across a shared folder's edge, or one into another space: the
- * server works out who gains and loses access, or copies it, so it goes
+ * app rewraps its keys with the server, or copies it, so it goes
  * online only, never after a change waiting here, nor into a folder made
  * offline. Any other move waits on this device while the app is offline,
  * while the item has something waiting, or into a folder made offline: it

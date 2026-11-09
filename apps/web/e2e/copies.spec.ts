@@ -77,7 +77,9 @@ test('copying and moving pages and folders between spaces', async ({
     await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
     await expect(owner).toHaveURL(new RegExp(`/s/${work}/f/`));
-    await expect(owner.getByRole('status').filter({ hasText: 'Copied “Garden” to Work.' })).toBeVisible();
+    await expect(
+      owner.getByRole('status').filter({ hasText: 'Copied “Garden” to Work.' }),
+    ).toBeVisible();
 
     await openFolder(owner, 'Garden');
     await owner.getByRole('treeitem', { name: 'Plan' }).click();

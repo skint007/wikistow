@@ -162,13 +162,14 @@ export function ConfirmCopy({
           made,
           moving: node,
           fromParentId,
+          ownsDestination: destTree?.space?.role === 'owner',
         });
         noteMoved(ctx, {
           moving: node,
           to: chosen,
           sameSpace: chosen.spaceId === sourceSpaceId,
           copy,
-          undo: {
+          undo: undo && {
             ...undo,
             // A copy undone goes to the trash: off it, back to what it copied.
             run: async () => {
@@ -201,7 +202,7 @@ export function ConfirmCopy({
     !busy &&
     !unsure &&
     ((shown !== undefined && shown.copyId === spent) ||
-      (preview.isError && !isStale(preview.error)));
+      (preview.isError && (!isStale(preview.error) || !onBack)));
   // Focus moves on from a button that goes: from Stop, once it has run, to
   // Look again or Back; from Look again, once looked at again, to Copy or
   // Move. After a failed preview, Look again goes before Copy can be pressed.
@@ -252,7 +253,9 @@ export function ConfirmCopy({
         <ErrorLine
           error={
             isStale(preview.error)
-              ? 'Something changed since you chose where it goes. Choose again.'
+              ? onBack
+                ? 'Something changed since you chose where it goes. Go back and check again.'
+                : 'Something changed since you chose where it goes. Look again.'
               : copyMessage(preview.error, copy, false)
           }
         />

@@ -818,12 +818,25 @@ function MoveHere({
           error ??
           (preview.error
             ? isStale(preview.error)
-              ? 'Something changed since you chose where it goes. Choose again.'
+              ? 'Something changed since you chose where it goes. Look again.'
               : moveMessage(preview.error, moving.kind)
             : null)
         }
       />
       <DialogFooter>
+        {preview.isError && !busy && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              // Where it can go, and what it crosses, from the tree as it is now.
+              void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+              void preview.refetch();
+            }}
+          >
+            Look again
+          </Button>
+        )}
         <Button type="button" disabled={busy || !ready} onClick={() => void move()}>
           Move
         </Button>

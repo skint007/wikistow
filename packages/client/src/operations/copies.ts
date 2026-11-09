@@ -341,7 +341,8 @@ export async function previewCopy(
         ? await sourceAudience(ctx, source.spaceId, regions)
         : new Map<IdentityId, Reach>([[ctx.identity.public.id, 'drafts']])
       : new Map<IdentityId, Reach>();
-  const staysIn = regions.every((region) => sameRegion(region, target.region));
+  // Two spaces' owner regions are alike to `sameRegion`, so another space is never the same region.
+  const staysIn = sameSpace && regions.every((region) => sameRegion(region, target.region));
   return {
     kind,
     copyId: copyRoutes.CopyId.parse(copyId),
