@@ -92,8 +92,9 @@ async function drop(page: Page, from: Locator, to: Locator, copy = false) {
 }
 
 /**
- * A drag moves at once and Ctrl+drag copies, with no dialog, and the notice's
- * Undo takes each back (#376).
+ * A drag moves at once and Ctrl+drag copies, with no dialog, and so does a
+ * drop on another space in the rail, and the notice's Undo takes each back,
+ * the move into another space by moving it back (#376).
  */
 test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   page: owner,
@@ -103,6 +104,7 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   test.setTimeout(180_000);
   const adminPage = await adminTab(freshPage, admin.email);
   await memberWithVault(owner, adminPage);
+  await newSpace(owner, 'Work');
   await newSpace(owner, 'Family');
   await newFolder(owner, 'Garden');
   await newFolder(owner, 'Kitchen');
@@ -133,4 +135,12 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   await notice.getByRole('button', { name: 'Undo' }).click();
   await expect(notice).toHaveCount(0, { timeout: 30_000 });
   await expect(beans).toHaveCount(1);
+
+  const work = owner.getByRole('status').filter({ hasText: 'Moved “Beans” to Work.' });
+  await drop(owner, beans, owner.getByRole('link', { name: 'Work', exact: true }));
+  await expect(work).toContainText('Its earlier versions don’t go with it.', { timeout: 30_000 });
+  await expect(beans).toHaveCount(0);
+  await work.getByRole('button', { name: 'Undo' }).click();
+  await expect(work).toHaveCount(0, { timeout: 30_000 });
+  await expect.poll(under).toBe('Garden');
 });
