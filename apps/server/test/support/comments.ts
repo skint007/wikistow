@@ -49,7 +49,10 @@ export type TestComment = {
   commentId: CommentId;
   versionId: MetadataRevisionId;
   spaceId: SpaceId;
+  pageId: PageId;
+  thread: CommentId | null;
   audience: Audience;
+  text: string;
   record: CommentRecord;
   contentKey: Uint8Array;
 };
@@ -139,7 +142,10 @@ export async function sealComment(
     commentId,
     versionId,
     spaceId: page.spaceId,
+    pageId: page.pageId,
+    thread,
     audience,
+    text,
     record,
     contentKey,
   };
@@ -272,7 +278,9 @@ export async function textOf(
  * `ctx` as an owner's app that handles comments in the operations that
  * cover a subtree (section 5.9), before the app does: its scans ask for
  * comments, check that the scan served each of `comments` as it was
- * written, and leave them out of what the operation sees; and its requests
+ * written, on its page, in its thread, for its audience, and opening
+ * through the key material served to its text, and leave them out of what
+ * the operation sees; and its requests
  * carry the key material of `comments` too, for the region the operation
  * puts them in. With `send: false`, the server sees an app that asked for
  * comments and forgot them.
@@ -322,8 +330,8 @@ export function handlingComments(
     keyEnvelopes?: unknown[];
     metadataEnvelopes?: unknown[];
   };
-  // The comments the scans served, by version.
-  const scanned = new Map<string, { audience: Audience; thread: string | null }>();
+  // The comments the scans served as written, by version.
+  const scanned = new Set<string>();
   const servedEvery = () => {
     if (comments.some((comment) => !scanned.has(comment.versionId))) {
       throw new Error('The scan didn’t serve every comment');
@@ -382,8 +390,14 @@ export function handlingComments(
     for (const item of page.records) {
       if (item.kind !== 'comment') continue;
       const written = comments.find((c) => c.versionId === item.comment.record.metadataRevisionId);
-      if (written && item.audience !== written.audience) throw new Error('Another audience');
-      scanned.set(item.comment.record.metadataRevisionId, item);
+      if (!written) continue;
+      const same =
+        item.pageId === written.pageId &&
+        item.thread === written.thread &&
+        item.audience === written.audience &&
+        (await textOf(ctx, item, item.audience)) === written.text;
+      if (!same) throw new Error('The scan served a comment otherwise than it was written');
+      scanned.add(written.versionId);
     }
     return { ...page, records: page.records.filter((item) => item.kind !== 'comment') };
   }) as ClientContext['api']['call'];

@@ -212,22 +212,32 @@ describe('the owner operations that cover a subtree', () => {
       audience: 'draft',
       text: 'for editors',
     });
-    const both = [forReaders, forEditors];
+    const reply = await postComment(owner.ctx, lib.page, {
+      audience: 'published',
+      text: 'a reply',
+      thread: forReaders.commentId,
+      threadAuthor: authorOf(owner),
+    });
+    const written = [forReaders, forEditors, reply];
     // An app from before comments; one that asks for them and leaves them
     // out of its request; and one that carries them.
     const older = (ctx: ClientContext) => ctx;
-    const forgets = (ctx: ClientContext) => handlingComments(ctx, both, { send: false });
-    const carries = (ctx: ClientContext) => handlingComments(ctx, both);
+    const forgets = (ctx: ClientContext) => handlingComments(ctx, written, { send: false });
+    const carries = (ctx: ClientContext) => handlingComments(ctx, written);
     const refusals = async (operation: (ctx: ClientContext) => Promise<unknown>) => [
       await rejection(operation(older(owner.ctx))),
       await rejection(operation(forgets(owner.ctx))),
     ];
+    // Each thread's comments in order, opened as `person` is served them.
     const texts = async (person: Person) =>
       Promise.all(
-        (await threadsOf(person.ctx, lib.page.pageId)).threads.map(async ({ first, audience }) => {
-          if (!first.sealed) throw new Error('expected the comment');
-          return textOf(person.ctx, first.sealed, audience);
-        }),
+        (await threadsOf(person.ctx, lib.page.pageId)).threads.flatMap(
+          ({ first, replies, audience }) =>
+            [first, ...replies].map(async ({ sealed }) => {
+              if (!sealed) throw new Error('expected the comment');
+              return textOf(person.ctx, sealed, audience);
+            }),
+        ),
       );
 
     // Making a share wraps each by its audience.
@@ -235,7 +245,7 @@ describe('the owner operations that cover a subtree', () => {
     const share = (ctx: ClientContext) => shareFolder(ctx, { spaceId, rootId: lib.shared, people });
     expect(await refusals(share)).toEqual(['invalid-request', 'stale-head']);
     await share(carries(owner.ctx));
-    expect(await texts(reader)).toEqual(['for readers']);
+    expect(await texts(reader)).toEqual(['for readers', 'a reply']);
     const [made] = await t.db
       .select({ id: schema.shares.id })
       .from(schema.shares)
@@ -249,10 +259,10 @@ describe('the owner operations that cover a subtree', () => {
       });
     expect(await refusals(move(lib.above))).toEqual(['invalid-request', 'stale-head']);
     await move(lib.above)(carries(owner.ctx));
-    expect(await texts(owner)).toEqual(['for readers', 'for editors']);
+    expect(await texts(owner)).toEqual(['for readers', 'a reply', 'for editors']);
     expect(await rejection(threadsOf(reader.ctx, lib.page.pageId))).toBe('not-found');
     await move(lib.shared)(carries(owner.ctx));
-    expect(await texts(reader)).toEqual(['for readers']);
+    expect(await texts(reader)).toEqual(['for readers', 'a reply']);
 
     // Ending the share seals them to the owners.
     const end = async (ctx: ClientContext) =>
@@ -261,17 +271,17 @@ describe('the owner operations that cover a subtree', () => {
       });
     expect(await refusals(end)).toEqual(['invalid-request', 'stale-head']);
     await end(carries(owner.ctx));
-    expect(await texts(owner)).toEqual(['for readers', 'for editors']);
+    expect(await texts(owner)).toEqual(['for readers', 'a reply', 'for editors']);
 
     // Adding a co-owner seals them to the new owner too.
     const person = await find(owner, bob);
     const add = (ctx: ClientContext) => owners.addCoOwner(ctx, { spaceId, person });
     expect(await refusals(add)).toEqual(['invalid-request', 'stale-head']);
-    await add(handlingComments(owner.ctx, both, { newOwner: bob.ctx.identity.public }));
+    await add(handlingComments(owner.ctx, written, { newOwner: bob.ctx.identity.public }));
     const adder = await owners.ownerToConfirm(bob.ctx, spaceId);
     if (!adder) throw new Error('expected the co-owner dialog');
     await owners.confirmOwner(bob.ctx, { spaceId, adder });
-    expect(await texts(bob)).toEqual(['for readers', 'for editors']);
+    expect(await texts(bob)).toEqual(['for readers', 'a reply', 'for editors']);
   });
 });
 
