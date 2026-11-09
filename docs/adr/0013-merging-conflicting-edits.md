@@ -295,3 +295,10 @@ Scott accepted every recommendation below on 2026-11-09.
 4. **Offline and other windows.** **Merge…** for a queue entry that came back as a conflict (its kept base) and for another window's change, the entry taking the merged payload. An e2e: an edit offline, a change online meanwhile, then the merge.
 
 Step 3 needs step 2, and step 4 needs step 3.
+
+**As built (step 3, 2026-11-09).** The merge view is `packages/ui/src/page/merge/`: `MergeView` takes a merge, whose theirs is, and what saving and cancelling do, so step 4 opens it with a queue entry's versions. `DraftSession` gains `mergeVersions()` and `saveMerged()`. Where it differs from the decisions above:
+- **Merge…** shows only while no change for the page waits on the device. The prompt's test for an offline entry (decision 1) comes with step 4.
+- Theirs is named by its author's contact label. An agent, or someone the app can't name, is "the other version".
+- **Merge…** shows before theirs is opened, so for theirs in a newer format it says so when pressed ("Update to merge it"), and the other two choices stay.
+- Other data is named by its namespace ("Data recipe-cards"), as the payload doesn't say which plugin wrote it.
+- Each unchanged run in the review keeps the line next to a change showing, for context, and folds the rest.

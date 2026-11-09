@@ -188,9 +188,11 @@ export class DraftSession {
    */
   #trim(): Promise<void> | null {
     if (this.#trimming === 'done') return null;
-    this.#trimming ??= linksInUse(this.#payload, this.#ports.readLinks).then((inUse) => {
+    const trimmed = this.#payload;
+    this.#trimming ??= linksInUse(trimmed, this.#ports.readLinks).then((inUse) => {
       this.#trimming = 'done';
-      this.#payload = inUse;
+      // A merge saved meanwhile replaced the payload whole.
+      if (this.#payload === trimmed) this.#payload = inUse;
       this.#set({ links: this.#table() });
     });
     return this.#trimming;
@@ -461,6 +463,51 @@ export class DraftSession {
     // Their draft may be in another region by now: open it fresh.
     this.#region = null;
     this.#theirs = null;
+    this.#autosave.resume();
+    this.#schedule();
+    await this.#autosave.flush();
+  }
+
+  /**
+   * What a merge of the conflict on screen reads (ADR 0013, decision 2):
+   * the draft this session's text is based on, the newer draft the prompt
+   * is about, and the person's own, unsaved text included. Null when there
+   * is no newer draft to merge with.
+   */
+  async mergeVersions(): Promise<{
+    base: RevisionId;
+    theirs: RevisionId;
+    yours: PagePayload;
+  } | null> {
+    // A file still uploading goes in first, so the merge has it.
+    await Promise.all(this.#uploads);
+    this.#pull();
+    const base = this.#base;
+    const theirs = this.#theirs ?? (await this.#ports.draftHead());
+    return theirs && theirs !== base ? { base, theirs, yours: this.#current() } : null;
+  }
+
+  /**
+   * Save `merged`, a merge the person reviewed, on top of `theirs`, the
+   * draft the merge read as theirs, which was opened in `region` (ADR 0013,
+   * decision 7). The whole payload is taken, not only its text, so theirs'
+   * banner or data isn't put back to the base's. If someone saved again
+   * meanwhile, it stops at the conflict as usual, with `theirs` the base.
+   */
+  async saveMerged(theirs: RevisionId, merged: PagePayload, region: Region) {
+    this.#payload = merged;
+    this.#tableRegion = region;
+    this.#extensions = {};
+    const { title, markdown, attachments } = merged;
+    this.#content = { title, markdown, attachments };
+    this.#unreported = false;
+    if (this.#live) this.#surface.current?.replace(markdown);
+    this.#base = theirs;
+    this.#known.add(theirs);
+    this.#ports.onTopOf?.(theirs);
+    this.#region = null;
+    this.#theirs = null;
+    this.#set({ title, markdown, attachments, links: this.#table() });
     this.#autosave.resume();
     this.#schedule();
     await this.#autosave.flush();

@@ -4,6 +4,7 @@ import {
   adminTab,
   choosePassphrase,
   expectSource,
+  fillSource,
   MARKERS,
   memberWithVault,
   newPage,
@@ -184,6 +185,59 @@ test('two tabs editing one draft never overwrite each other', async ({
   await waitForSave(page);
   await other.reload();
   await expectSource(other, 'first, edited further');
+});
+
+test('a draft someone else saved meanwhile merges with what was typed here', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  // Two browsers each unlock the vault at the real key-derivation cost.
+  test.slow();
+  const { email } = await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Picnic');
+  const base = '- milk\n- eggs\n\nBring snacks.\n\nSee you at noon.\n';
+  await fillSource(page, base);
+  await waitForSave(page);
+  const other = await sameAccountElsewhere(freshPage, email, page.url());
+  await expectSource(other, base);
+  const theirs = '- milk\n- eggs\n\nBring snacks and water.\n\nSee you at one.\n';
+  await fillSource(other, theirs);
+  await waitForSave(other);
+
+  await fillSource(page, '- oat milk\n- eggs\n\nBring fruit.\n\nSee you at noon.\n');
+  await expect(page.getByRole('alert')).toContainText('Someone else saved this draft');
+  await page.getByRole('button', { name: 'Merge…' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Merge your changes with your other version' }),
+  ).toBeFocused();
+  // The list and the last line combine on their own; the paragraph both changed is for the person.
+  await expect(
+    page.getByText('1 of your changes and 1 of your other version’s combined.'),
+  ).toBeVisible();
+  const place = page.getByRole('listitem', { name: '1 of 1' });
+  await expect(place.getByRole('deletion')).toHaveText(['snacks']);
+  await expect(place.getByRole('insertion')).toHaveText(['fruit', /and water/]);
+  await place.getByRole('button', { name: 'Use both' }).click();
+  await expect(place.getByRole('button', { name: 'Use both' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'Review merged draft' }).click();
+
+  await expect(page.getByText('Saving makes these changes to your other version.')).toBeVisible();
+  const changes = page.getByRole('list', { name: 'Changes' });
+  await expect(changes.getByRole('insertion')).toHaveText(['oat', 'Bring fruit.']);
+  // Nothing is saved before Save merged draft.
+  await other.reload();
+  await expectSource(other, theirs);
+  await page.getByRole('button', { name: 'Save merged draft' }).click();
+  const merged =
+    '- oat milk\n- eggs\n\nBring snacks and water.\n\nBring fruit.\n\nSee you at one.\n';
+  await expectSource(page, merged);
+  await waitForSave(page);
+  await other.reload();
+  await expectSource(other, merged);
 });
 
 test('typing carries on through autosaves without losing a keystroke or focus', async ({
