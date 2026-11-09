@@ -442,7 +442,7 @@ function useMerging(
     const set = (next: Merging) => opening.current === mine && setState(next);
     setState({ status: 'loading' });
     (conflictWithDevice()
-      ? openWindowMerge(session)
+      ? openWindowMerge(ctx, page, session, queryClient)
       : openOnlineMerge(ctx, page, session, queryClient)
     ).then(
       (opened) => set({ status: 'ready', opened }),

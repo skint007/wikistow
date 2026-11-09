@@ -509,18 +509,22 @@ export class DraftSession {
    * What a merge with another window's change reads, when the conflict on
    * screen is with that change (ADR 0013, decision 2): the payload both
    * windows' text grew from, as this session last saved or opened it, the
-   * change as it waits now, and the person's own. Null when the page has no
-   * change waiting any more.
+   * person's own, and theirs: the change as it waits now, or, once it was
+   * sent, the draft it landed as, which this session builds on since.
    */
   async windowMergeVersions(): Promise<{
     base: PagePayload;
-    theirs: WaitingChange;
+    theirs: ({ kind: 'window' } & WaitingChange) | { kind: 'draft'; revisionId: RevisionId };
     yours: PagePayload;
-  } | null> {
+  }> {
     await Promise.all(this.#uploads);
     this.#pull();
-    const theirs = (await this.#ports.waitingChange?.()) ?? null;
-    return theirs && { base: this.#windowBase ?? this.#payload, theirs, yours: this.#current() };
+    const change = await this.#ports.waitingChange?.();
+    return {
+      base: this.#windowBase ?? this.#payload,
+      theirs: change ? { kind: 'window', ...change } : { kind: 'draft', revisionId: this.#base },
+      yours: this.#current(),
+    };
   }
 
   /**
@@ -544,11 +548,9 @@ export class DraftSession {
       this.#known.add(over.revisionId);
       this.#ports.onTopOf?.(over.revisionId);
     } else {
-      // Into that change, at the version read, on the draft it stands for.
-      if (over.head) {
-        this.#base = over.head;
-        this.#known.add(over.head);
-      }
+      // Into that change, at the version read. Its base stays its own, and
+      // the draft it stands for is this session's too.
+      if (over.head) this.#known.add(over.head);
       this.#windowBase = over.payload;
       this.#ports.mergedWith?.(over.version);
     }

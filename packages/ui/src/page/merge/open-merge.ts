@@ -29,6 +29,7 @@ export type OpenedMerge = {
 export class CantMerge extends Error {}
 
 const NOTHING = 'There’s nothing to merge with now.';
+const NEWER = 'The other version was written by a newer version of WikiStow. Update to merge it.';
 
 /**
  * A merge with the draft someone else saved. The base is the draft the
@@ -47,9 +48,7 @@ export async function openOnlineMerge(
     queryClient.fetchQuery(revisionQuery(ctx, page, 'draft', revisionId));
   const [base, theirs] = await Promise.all([open(versions.base), open(versions.theirs)]);
   if (base.opened.kind !== 'current' || theirs.opened.kind !== 'current')
-    throw new CantMerge(
-      'The other version was written by a newer version of WikiStow. Update to merge it.',
-    );
+    throw new CantMerge(NEWER);
   return {
     merge: pageMerge.mergePayloads(base.opened.payload, versions.yours, theirs.opened.payload),
     theirs: await whoseIs(ctx, queryClient, theirs.record.authorId),
@@ -58,16 +57,31 @@ export async function openOnlineMerge(
   };
 }
 
-/** A merge with the change another window saved into this device's queue. */
-export async function openWindowMerge(session: DraftSession): Promise<OpenedMerge> {
-  const versions = await session.windowMergeVersions();
-  if (!versions) throw new CantMerge(NOTHING);
-  const { base, theirs, yours } = versions;
+/**
+ * A merge with the change another window saved into this device's queue,
+ * or with the draft it landed as, if it was sent meanwhile.
+ */
+export async function openWindowMerge(
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  session: DraftSession,
+  queryClient: QueryClient,
+): Promise<OpenedMerge> {
+  const { base, theirs, yours } = await session.windowMergeVersions();
+  if (theirs.kind === 'window')
+    return {
+      merge: pageMerge.mergePayloads(base, yours, theirs.payload),
+      theirs: { kind: 'window' },
+      over: theirs,
+      attachments: [...yours.attachments, ...theirs.payload.attachments],
+    };
+  const landed = await queryClient.fetchQuery(revisionQuery(ctx, page, 'draft', theirs.revisionId));
+  if (landed.opened.kind !== 'current') throw new CantMerge(NEWER);
   return {
-    merge: pageMerge.mergePayloads(base, yours, theirs.payload),
+    merge: pageMerge.mergePayloads(base, yours, landed.opened.payload),
     theirs: { kind: 'window' },
-    over: { kind: 'window', ...theirs },
-    attachments: [...yours.attachments, ...theirs.payload.attachments],
+    over: { kind: 'draft', revisionId: theirs.revisionId, region: landed.region },
+    attachments: [...yours.attachments, ...landed.opened.payload.attachments],
   };
 }
 

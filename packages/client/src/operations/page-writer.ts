@@ -257,6 +257,8 @@ export function createPageWriter({
       });
       return {
         async save(input) {
+          // A conflict with another window's change is the last save's only.
+          otherWindow = false;
           const device = await onDevice(page.pageId);
           if (device) {
             try {
