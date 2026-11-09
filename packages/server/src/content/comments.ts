@@ -708,7 +708,7 @@ export async function newComments(db: Database, accountId: string, report: Repor
         order by c.created_at desc, c.id desc
         limit 2000`)),
     ];
-    const kept = [];
+    const kept: typeof rows = [];
     for (const [spaceId, inSpace] of Map.groupBy(rows, (row) => row.space_id)) {
       const pageIds = [...new Set(inSpace.map((row) => row.page_id))];
       const access = await accessToPages(tx, caller, spaceId, pageIds);
@@ -732,6 +732,9 @@ export async function newComments(db: Database, accountId: string, report: Repor
         if (readable && (row.concerns || editor)) kept.push(row);
       }
     }
+    // Newest first across spaces, as the query had them before they were split by space.
+    const time = (row: (typeof rows)[number]) => new Date(row.created_at).getTime();
+    kept.sort((a, b) => time(b) - time(a) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     const byThread = Map.groupBy(kept, (row) => row.thread);
     const newest = [...byThread.values()]
       .map((thread) => ({ thread, latest: thread[0] }))
