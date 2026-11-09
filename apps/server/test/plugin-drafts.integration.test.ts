@@ -430,9 +430,9 @@ describe('shared plugin drafts (#315)', () => {
 describe('plugin proposals (#315)', () => {
   it('go from a copy to the plugin’s owner alone, who opens or declines them', async () => {
     const [ann, bob, cal] = await Promise.all([
-      signedInPerson(t),
-      signedInPerson(t),
-      signedInPerson(t),
+      personWithVault(t),
+      personWithVault(t),
+      personWithVault(t),
     ]);
     const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
     const text = (value: string) => new TextEncoder().encode(value);
@@ -475,7 +475,13 @@ describe('plugin proposals (#315)', () => {
     expect(await of(bob, copy.id)).toEqual({ to: { name: annName }, sent: null });
     expect(await of(ann, own.draft.id)).toEqual({ to: null, sent: null });
     expect(await errorCode(propose(ann, own.draft.id))).toBe('invalid-request');
-    // Nobody else proposes Bob's draft.
+    // Nobody else proposes Bob's draft, even someone he shared it with.
+    expect(await errorCode(propose(cal, copy.id))).toBe('not-found');
+    await api(bob).call(pluginDraftRoutes.shareDraft, {
+      params: { draftId: copy.id },
+      body: { identityId: cal.vault.identity.public.id },
+    });
+    expect(await errorCode(of(cal, copy.id))).toBe('not-found');
     expect(await errorCode(propose(cal, copy.id))).toBe('not-found');
 
     await api(bob).call(pluginDraftRoutes.changeDraft, {
