@@ -165,9 +165,11 @@ async function sameAccountElsewhere(freshPage: () => Promise<Page>, email: strin
  * answers (ADR 0009, decision 7). Someone saved the draft meanwhile, from
  * another device: it comes back as the usual conflict, listed in the
  * shell, and opens with the offline text as the unsaved changes. Nothing
- * is overwritten until the person chooses Save mine on top.
+ * is overwritten until the person chooses: Merge… combines the two from
+ * the draft the offline edit was based on, kept on this device (ADR 0013),
+ * and the change waiting here takes the merged draft and is sent.
  */
-test('a draft edited offline that someone changed meanwhile comes back as a conflict', async ({
+test('a draft edited offline that someone changed meanwhile comes back as a conflict, and merges', async ({
   page,
   context,
   freshPage,
@@ -176,18 +178,20 @@ test('a draft edited offline that someone changed meanwhile comes back as a conf
   test.setTimeout(180_000);
   const { email } = await memberWithVault(page, await adminTab(freshPage, admin.email));
   await newPage(page, 'Packing list');
-  await fillSource(page, 'tent');
+  const base = '- tent\n- stove\n\nLeave at nine.\n';
+  await fillSource(page, base);
   await waitForSave(page);
   // Kept from its first opening; loaded afresh, the keeper keeps its draft.
   await watchKeeping(page);
   await page.reload();
-  await expectSource(page, 'tent');
+  await expectSource(page, base);
   await expect(page.locator('html')).toHaveAttribute('data-keeping', 'done', { timeout: 30_000 });
   const other = await sameAccountElsewhere(freshPage, email, page.url());
-  await expectSource(other, 'tent');
+  await expectSource(other, base);
 
   await context.setOffline(true);
-  await fillSource(page, 'tent and stove');
+  const mine = '- tent\n- stove\n- matches\n\nLeave at nine.\n';
+  await fillSource(page, mine);
   await expect(saveStatus(page)).toHaveText('Saved on this device', { timeout: 15_000 });
   const offline = page.getByRole('status').filter({ hasText: 'Offline' });
   await expect(offline).toBeVisible();
@@ -197,7 +201,8 @@ test('a draft edited offline that someone changed meanwhile comes back as a conf
   );
 
   // Meanwhile, on the other device.
-  await fillSource(other, 'tent and tarp');
+  const theirs = '- tent\n- stove\n\nLeave at ten.\n';
+  await fillSource(other, theirs);
   await waitForSave(other);
 
   await context.setOffline(false);
@@ -208,18 +213,28 @@ test('a draft edited offline that someone changed meanwhile comes back as a conf
   });
   // Nothing was overwritten.
   await other.reload();
-  await expectSource(other, 'tent and tarp');
+  await expectSource(other, theirs);
 
   // Opened from the note, the draft view shows the offline text, unsaved, with the usual choice.
   await page.goto('/');
   await note.getByRole('link', { name: 'Packing list' }).click();
   await expect(page.getByRole('alert')).toContainText('Your changes are not saved yet');
-  await expectSource(page, 'tent and stove');
-  await page.getByRole('button', { name: 'Save mine on top' }).click();
+  await expectSource(page, mine);
+  await page.getByRole('button', { name: 'Merge…' }).click();
+  // Each side changed its own part, so it goes straight to the review.
+  await expect(
+    page.getByText('1 of your changes and 1 of your other version’s combined.'),
+  ).toBeVisible();
+  await expect(page.getByText('Saving makes these changes to your other version.')).toBeVisible();
+  const changes = page.getByRole('list', { name: 'Changes' });
+  await expect(changes.getByRole('insertion')).toHaveText([/matches/]);
+  await page.getByRole('button', { name: 'Save merged draft' }).click();
+  const merged = '- tent\n- stove\n- matches\n\nLeave at ten.\n';
+  await expectSource(page, merged);
   await waitForSave(page);
   await expect(note).toBeHidden();
   await other.reload();
-  await expectSource(other, 'tent and stove');
+  await expectSource(other, merged);
 });
 
 /**
