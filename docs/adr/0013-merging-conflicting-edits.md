@@ -241,6 +241,15 @@ When both edits fell in the same block, at different words (near: 19 list items,
 | add a different key at the end | 5 of 5 | 0 |
 | change the same key differently | 5 of 5 | 5 (right) |
 
+**The build's check (step 2, 2026-11-09).** The spike's cases ran again through `packages/client/src/merge`, with the app's parser and decisions 3 and 4 as built:
+- On all 236 pages the blocks join back byte for byte.
+- The 89 real cases stop 6 times, as above, and no block fails decision 4's check. Where the line merge stops, the block merge now gives exactly what the person made 7 times, where the spike gave it 6.
+- In the simulated edits, paragraphs stop nowhere and lists once, near or anywhere, typed in the source editor or written by the visual editor, and nothing comes out reading differently from what was expected. The one stop is two additions at one place, a nested item and an item after its list, where theirs first would have put the nested item under the other side's: the check sends it to the choosing step.
+- Tables stop 2 to 7 times in a run of about 590. Every stop, and the 2 results that differ in the visual editor's run, comes from the spike's own edits named above: rows added without the indent of a table inside a list item, or text after a row's last bar.
+- Results that differ only in their text, and read the same, come from tables that took rows from both sides being aligned again (decision 4), and from list items keeping their own numbers.
+
+The build lines up blocks with text first, and then only the blank lines a gap between them starts and ends with: every blank line reads the same, so lining them up anywhere would pair blocks by where they sit. It also checks which list each item is in, and which item a nested item is under, which block keys don't say: two neighbouring items must share a list, or not, and a nested item must be under the same item, as on a side that has them.
+
 **Libraries.**
 - `node-diff3` (MIT) does the three-way step, but stops at every pair of additions at one place, and has no word diff, which the marks need anyway.
 - `diff` (jsdiff, BSD-3, no dependencies, its own types) has both an array diff and a word diff.
