@@ -27,7 +27,7 @@ test('an agent enrolled from the browser reads, drafts and publishes, then is re
   admin,
 }) => {
   test.setTimeout(300_000);
-  await memberWithVault(page, await adminTab(freshPage, admin.email), 'Pat Person');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
   await newFolder(page, 'Kitchen');
   await publishedPageIn(page, 'Kitchen', 'Soup', TEXT.published);
   const cli = await cliInstall(bin);
@@ -61,6 +61,14 @@ test('an agent enrolled from the browser reads, drafts and publishes, then is re
 
   let pageId = '';
   let spaceId = '';
+  // Pat reads Soup while the agent works on it.
+  const activity = page.getByRole('region', { name: 'Agent activity' });
+  await page.getByRole('link', { name: 'Personal' }).click();
+  await openFolder(page, 'Kitchen');
+  await page.getByRole('treeitem', { name: 'Soup' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Soup' })).toBeVisible();
+  await expect(activity).toHaveCount(0);
+
   await test.step('the CLI reads the page and saves a draft', async () => {
     const spaces = await cli.json(['spaces', 'list']);
     expect(spaces.code, spaces.stderr).toBe(0);
@@ -84,10 +92,9 @@ test('an agent enrolled from the browser reads, drafts and publishes, then is re
   });
 
   await test.step('the browser opens the agent’s draft', async () => {
-    await page.getByRole('link', { name: 'Personal' }).click();
-    const activity = page.getByRole('region', { name: 'Agent activity' });
-    await openFolder(page, 'Kitchen');
-    await page.getByRole('treeitem', { name: 'Soup' }).click();
+    // The live tree shows the card, but doesn't load the open page's
+    // info again: the draft must still open on the agent's draft (#375).
+    await expect(activity).toBeVisible({ timeout: 15_000 });
     await activity.click();
     await expectSource(page, TEXT.drafted);
     await page.getByRole('button', { name: 'Done' }).click();
