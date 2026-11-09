@@ -33,7 +33,9 @@ const endingMessage = (error: unknown, nameOf: (nodeId: string) => string | null
       ? 'This folder is too big to stop sharing in one go.'
       : error instanceof ApiError && error.code === 'forbidden'
         ? 'Only an owner can stop sharing, and not while the folder is in the trash.'
-        : sharingMessage(error);
+        : error instanceof ApiError && error.code === 'stale-head'
+          ? 'Someone kept saving here meanwhile, so nothing changed. Try again.'
+          : sharingMessage(error);
 
 /** "A", "A and B", "A, B and C". */
 function listed(items: readonly ReactNode[]): ReactNode {
@@ -91,12 +93,7 @@ export function StopSharing({
     staleTime: 0,
     gcTime: 0,
   });
-  const { data: people } = useQuery(
-    peopleQuery(ctx, [
-      ...(preview.data?.people ?? []),
-      ...(preview.data?.agents.map((a) => a.personId) ?? []),
-    ]),
-  );
+  const { data: people } = useQuery(peopleQuery(ctx, preview.data?.people ?? []));
   const person = (id: string) => people?.get(id) ?? describePerson(ctx, id, null);
   const name = shareName(tree, rootId);
   const space = rootId === null;
