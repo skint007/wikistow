@@ -94,9 +94,10 @@ export class WorkshopChat {
   /** Closed, or clearing: nothing more is kept. */
   #done = false;
 
-  constructor(draftId: string) {
+  /** `sharedBy` names whoever shared the draft, or is null for the person's own. */
+  constructor(draftId: string, sharedBy: string | null = null) {
     // Read after the last workshop on this draft here kept its own, as it closed.
-    const workshop = new Workshop(draftId, closing.get(draftId));
+    const workshop = new Workshop(draftId, closing.get(draftId), sharedBy);
     this.workshop = workshop;
     const tools = workshopTools.workshopTools({
       files: () => workshop.files(),
@@ -301,7 +302,7 @@ export class WorkshopChat {
     const { copy } = this.workshop.state();
     const told =
       copy && !this.#toldCopy
-        ? `(This draft is a copy of the plugin ${copy.from}, under a new ID of my own, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
+        ? `(This draft is a copy of the plugin ${copy.from}, under a new ID${this.workshop.sharedBy === null ? ' of my own' : ''}, ${copy.id}, already in wikistow-plugin.json. It is a different plugin: pages’ plugin:${copy.from}/… blocks and plugin.${copy.from} data aren’t its own.)\n\n`
         : '';
     if (copy) this.#toldCopy = true;
     this.#turns = [

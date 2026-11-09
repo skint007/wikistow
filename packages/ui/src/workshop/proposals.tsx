@@ -52,18 +52,18 @@ function when(iso: string) {
 /**
  * **Propose to *owner*…** on a copy of someone else's plugin: its files go
  * to the plugin's owner, under its ID again, for them to open and publish
- * or decline. Nothing shows on another draft, or on a server without
- * proposals.
+ * or decline. Nothing shows on another draft, on a draft shared with the
+ * person (only its owner proposes it), or on a server without proposals.
  */
 export function Propose({ workshop }: { workshop: Workshop }) {
   const queryClient = useQueryClient();
   const { copy, phase } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const query = draftProposalQuery(workshop.draftId);
-  const { data } = useQuery({ ...query, enabled: copy !== null });
+  const { data } = useQuery({ ...query, enabled: copy !== null && workshop.sharedBy === null });
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!copy || phase !== 'ready' || !data?.to) return null;
+  if (!copy || workshop.sharedBy !== null || phase !== 'ready' || !data?.to) return null;
   const to = data.to.name;
   const propose = async () => {
     setBusy(true);

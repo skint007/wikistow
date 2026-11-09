@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -30,15 +31,6 @@ export const pluginDrafts = pgTable(
     /** The library version it started from, if any. Plain text: it may be removed since. */
     fromPluginId: text(),
     fromHash: text(),
-    /** The build a browser last previewed, held in `plugin_draft_build_files`. */
-    buildHash: text(),
-    /**
-     * The workshop kept with it (#314) as JSON: the conversation, versions
-     * and sample pages, without copies of real pages. Plain, like its files.
-     */
-    workshop: text(),
-    /** Counts each save and clear of `workshop`: a save names the one it follows. */
-    workshopRevision: integer().notNull().default(0),
     createdAt: timestamptz().notNull().defaultNow(),
     updatedAt: timestamptz().notNull().defaultNow(),
   },
@@ -70,17 +62,86 @@ export const pluginDraftFiles = pgTable(
   ],
 );
 
-/** The files of a draft's one build, as a library upload carries them. */
-export const pluginDraftBuildFiles = pgTable(
-  'plugin_draft_build_files',
+/**
+ * The people a draft's owner shared it with (#315): each reads and changes
+ * its files and runs the workshop on it. Only the owner shares, deletes and
+ * publishes it.
+ */
+export const pluginDraftShares = pgTable(
+  'plugin_draft_shares',
   {
     draftId: uuid()
       .notNull()
       .references(() => pluginDrafts.id, { onDelete: 'cascade' }),
+    accountId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.draftId, table.accountId] }),
+    index('plugin_draft_shares_account_idx').on(table.accountId),
+  ],
+);
+
+/**
+ * The build one person's browser last previewed of a draft, its files in
+ * `plugin_draft_build_files`: each person who reaches the draft has their
+ * own, so two previewing at once don't replace each other's.
+ */
+export const pluginDraftBuilds = pgTable(
+  'plugin_draft_builds',
+  {
+    draftId: uuid()
+      .notNull()
+      .references(() => pluginDrafts.id, { onDelete: 'cascade' }),
+    accountId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    hash: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.draftId, table.accountId] })],
+);
+
+/** The files of one person's build of a draft, as a library upload carries them. */
+export const pluginDraftBuildFiles = pgTable(
+  'plugin_draft_build_files',
+  {
+    draftId: uuid().notNull(),
+    accountId: uuid().notNull(),
     path: text().notNull(),
     data: bytea().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.draftId, table.path] })],
+  (table) => [
+    primaryKey({ columns: [table.draftId, table.accountId, table.path] }),
+    foreignKey({
+      name: 'plugin_draft_build_files_build_fk',
+      columns: [table.draftId, table.accountId],
+      foreignColumns: [pluginDraftBuilds.draftId, pluginDraftBuilds.accountId],
+    }).onDelete('cascade'),
+  ],
+);
+
+/**
+ * The workshop one person keeps with a draft (#314) as JSON: their
+ * conversation, versions and sample pages, without copies of real pages.
+ * Plain, like its files. Each person who reaches the draft keeps their
+ * own, which nobody else reads (#315).
+ */
+export const pluginDraftWorkshops = pgTable(
+  'plugin_draft_workshops',
+  {
+    draftId: uuid()
+      .notNull()
+      .references(() => pluginDrafts.id, { onDelete: 'cascade' }),
+    accountId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workshop: text(),
+    /** Counts each save and clear of `workshop`: a save names the one it follows. */
+    revision: integer().notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.draftId, table.accountId] })],
 );
 
 /**

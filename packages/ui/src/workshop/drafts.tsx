@@ -22,7 +22,9 @@ import { chatStore } from '../ai/chat';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
+import { useClient } from '../vault/store';
 import { WorkshopChat } from './workshop-chat';
+import { ShareDraft, sharedDraftsQuery } from './share-draft';
 import { OLD_SERVER } from './workshop';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
@@ -44,9 +46,13 @@ export type DraftStart =
   | Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>
   | { proposal: string };
 
-/** Open the workshop on draft `draftId`, in place of any conversation, with its panel open. */
-export function openWorkshop(draftId: string) {
-  chatStore.start(new WorkshopChat(draftId));
+/**
+ * Open the workshop on draft `draftId`, in place of any conversation, with
+ * its panel open. `sharedBy` names whoever shared it, for a draft not the
+ * person's own.
+ */
+export function openWorkshop(draftId: string, sharedBy: string | null = null) {
+  chatStore.start(new WorkshopChat(draftId, sharedBy));
   chatStore.setOpen(true);
 }
 
@@ -135,7 +141,8 @@ export function useNewDraft(): {
           <DialogTitle>Delete a draft to start this one?</DialogTitle>
           <DialogDescription>
             You have {pluginDraftRoutes.MAX_DRAFTS} drafts. Starting this one deletes “
-            <Name>{asking?.oldest.name ?? ''}</Name>”, the one you changed longest ago.
+            <Name>{asking?.oldest.name ?? ''}</Name>”, the one changed longest ago, for anyone you
+            shared it with too.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -247,15 +254,17 @@ function changed(iso: string) {
 }
 
 /**
- * The person's drafts, with how long ago each changed, **Open** and
- * **Delete**, beside **Upload project folder…** and **New plugin**. The draft the workshop has open says
- * so, and can't be deleted while it is.
+ * The person's drafts, with how long ago each changed, **Share…**,
+ * **Open** and **Delete**, beside **Upload project folder…** and **New
+ * plugin**. The draft the workshop has open says so, and can't be deleted
+ * while it is.
  */
 export function DraftsList({ open }: { open: string | null }) {
   const queryClient = useQueryClient();
   const { data: drafts, error: listError } = useQuery(draftsQuery);
   const newDraft = useNewDraft();
   const [deleting, setDeleting] = useState<DraftSummary | null>(null);
+  const [sharing, setSharing] = useState<DraftSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Forget what last went wrong, as another action starts. */
@@ -323,6 +332,9 @@ export function DraftsList({ open }: { open: string | null }) {
               <span className="flex-1 text-xs text-muted-foreground">
                 {changed(draft.updatedAt)}
               </span>
+              <Button size="sm" variant="ghost" onClick={() => setSharing(draft)}>
+                Share…
+              </Button>
               {draft.id === open ? (
                 <Badge>Open</Badge>
               ) : (
@@ -347,13 +359,15 @@ export function DraftsList({ open }: { open: string | null }) {
         </ul>
       )}
       {newDraft.dialog}
+      <ShareDraft draft={sharing} onClose={() => setSharing(null)} />
       <Dialog open={deleting !== null} onOpenChange={(next) => !next && !busy && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this draft?</DialogTitle>
             <DialogDescription>
               “<Name>{deleting?.name ?? ''}</Name>”, its files and its workshop’s conversation are
-              deleted from your WikiStow server. Versions you published stay in the library.
+              deleted from your WikiStow server, for everyone you shared it with too. Versions you
+              published stay in the library.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -373,6 +387,92 @@ export function DraftsList({ open }: { open: string | null }) {
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+/**
+ * Drafts other people shared with the person (#315), each with whose it
+ * is, how long ago it changed, **Open** and **Leave**. Nothing shows
+ * without any, or on a server without shared drafts.
+ */
+export function SharedDraftsList({ open }: { open: string | null }) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const { data: shared } = useQuery(sharedDraftsQuery);
+  const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState<DraftSummary | null>(null);
+  if (!shared || shared.length === 0) return null;
+  const leave = async (draft: DraftSummary) => {
+    setError(null);
+    setLeaving(null);
+    try {
+      await api.call(pluginDraftRoutes.unshareDraft, {
+        params: { draftId: draft.id, identityId: ctx.identity.public.id },
+      });
+    } catch (failure) {
+      setError(errorMessage(failure));
+    }
+    await queryClient.invalidateQueries({ queryKey: sharedDraftsQuery.queryKey });
+  };
+  return (
+    <section aria-label="Shared plugin drafts" className="grid gap-3">
+      <h2 className="text-sm font-bold">Drafts shared with you</h2>
+      {error && <FormMessage>{error}</FormMessage>}
+      <ul className="grid gap-2">
+        {shared.map(({ draft, owner }) => (
+          <li
+            key={draft.id}
+            aria-label={draft.name}
+            className="flex flex-wrap items-center gap-2 rounded-control border p-3 text-sm"
+          >
+            <strong className="min-w-0 truncate">
+              <Name>{draft.name}</Name>
+            </strong>
+            <span className="flex-1 text-xs text-muted-foreground">
+              Shared by <Name>{owner.name}</Name>. {changed(draft.updatedAt)}
+            </span>
+            {draft.id === open ? (
+              <Badge>Open</Badge>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setError(null);
+                    openWorkshop(draft.id, owner.name);
+                  }}
+                >
+                  Open
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setLeaving(draft)}>
+                  Leave
+                </Button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <Dialog open={leaving !== null} onOpenChange={(next) => !next && setLeaving(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Leave this draft?</DialogTitle>
+            <DialogDescription>
+              “<Name>{leaving?.name ?? ''}</Name>” goes from your workshop, with your conversation
+              on it. Its owner can share it with you again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaving(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => leaving && void leave(leaving)}>
+              Leave
             </Button>
           </DialogFooter>
         </DialogContent>

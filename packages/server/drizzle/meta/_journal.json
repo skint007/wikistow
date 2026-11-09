@@ -330,6 +330,13 @@
       "when": 1794174372774,
       "tag": "0046_plugin_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794182478218,
+      "tag": "0047_shared_drafts",
+      "breakpoints": true
     }
   ]
 }

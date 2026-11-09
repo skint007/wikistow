@@ -167,7 +167,7 @@ The plugins members uploaded to their server. Each is **Shared**, listed to ever
 _Avoid_: Store, marketplace (nothing is sold or rated).
 
 **Plugin draft**
-A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person.
+A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person. Its owner may share it with named people, who change its files and run the workshop on it, each with their own conversation; only the owner proposes or publishes it.
 _Avoid_: Draft on its own (pages have drafts), workspace, project.
 
 **Plugin proposal**

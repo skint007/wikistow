@@ -6,7 +6,7 @@ import { AgentChat, useChatStore } from '../../../ai/chat';
 import { AssistantButton, ChatColumn, useChatColumn } from '../../../ai/chat-column';
 import { aiStatusQuery } from '../../../ai/session';
 import { usePlugins } from '../../../plugins/runtime';
-import { draftsQuery, DraftsList } from '../../../workshop/drafts';
+import { draftsQuery, DraftsList, SharedDraftsList } from '../../../workshop/drafts';
 import { ProposalsList } from '../../../workshop/proposals';
 import type { Workshop } from '../../../workshop/workshop';
 import { WorkshopChat } from '../../../workshop/workshop-chat';
@@ -81,6 +81,7 @@ function WorkshopPage() {
               )}
               <ProposalsList />
               <DraftsList open={workshop?.workshop.draftId ?? null} />
+              <SharedDraftsList open={workshop?.workshop.draftId ?? null} />
               {workshop && (
                 <WorkshopDraft key={workshop.workshop.id} workshop={workshop.workshop} />
               )}

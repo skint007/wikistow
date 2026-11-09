@@ -116,9 +116,9 @@ export function WorkshopConversation({
       <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-4 py-3">
         {copy && (
           <p role="note" className="rounded-control border p-3 text-sm">
-            This draft is a copy of <strong>{copy.from}</strong>, with a new ID of your own,{' '}
-            <strong>{copy.id}</strong>. It publishes as a different plugin: pages’ blocks and data
-            of {copy.from} aren’t its own.
+            This draft is a copy of <strong>{copy.from}</strong>, with a new ID
+            {chat.workshop.sharedBy === null ? ' of your own' : ''}, <strong>{copy.id}</strong>. It
+            publishes as a different plugin: pages’ blocks and data of {copy.from} aren’t its own.
           </p>
         )}
         {ai.messages.length === 0 && <WorkshopDisclosure host={provider.host} />}
@@ -217,7 +217,7 @@ function ClearConversation({
     setError(null);
     try {
       await chat.clear();
-      openWorkshop(chat.workshop.draftId);
+      openWorkshop(chat.workshop.draftId, chat.workshop.sharedBy);
     } catch (failure) {
       setError(errorMessage(failure));
       setBusy(false);

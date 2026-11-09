@@ -180,6 +180,12 @@ export class Workshop {
   readonly id = crypto.randomUUID();
   /** The plugin draft it works on. */
   readonly draftId: string;
+  /**
+   * The name of the person who shared the draft (#315), or null for the
+   * person's own: they read, change and preview it, and only its owner
+   * publishes it.
+   */
+  readonly sharedBy: string | null;
   readonly samples = sampleStore();
   /**
    * Where the person is in the preview, as its plugin sees it: the sample
@@ -236,8 +242,13 @@ export class Workshop {
   /** What the draft keeps is read after this, a closed workshop's last save. */
   readonly #after: Promise<void>;
 
-  constructor(draftId: string, after: Promise<void> = Promise.resolve()) {
+  constructor(
+    draftId: string,
+    after: Promise<void> = Promise.resolve(),
+    sharedBy: string | null = null,
+  ) {
     this.draftId = draftId;
+    this.sharedBy = sharedBy;
     this.#after = after;
     // The workshop's versions: approving one runs it in the preview, in place of what runs.
     const versions: PluginStore<number> = {
