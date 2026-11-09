@@ -4,6 +4,22 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.25.0-beta.3 - 2026-11-09
+
+### Highlights
+
+#### Features
+
+- Owners can stop sharing a folder or the space, from its Share dialog or Members and owners. It goes back to the owners alone, so the folder above it can be shared. Members keep what they already read.
+- When your edit and someone else’s clash, Merge… combines them: changes to different parts combine on their own, and where you both changed the same part you pick yours, theirs, both, or edit it. It works for edits made offline and in another window too.
+- Moving and copying ask less. Move to… and Copy to… take one step, dragging moves at once and Ctrl+drag copies (Option on a Mac), with Undo for 10 seconds. Ask before moving is now off by default.
+- Plugin drafts take .ttf and .otf fonts and .jpeg images too.
+
+#### Fixes
+
+- A draft opened right after someone else saved it, as from Agent activity, opens on their draft, instead of an older one with a false conflict.
+- A folder renamed offline is renamed once you’re back online, even if someone moved it into or out of a shared folder meanwhile.
+
 ### Changes
 
 #### App
@@ -22,6 +38,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - The server can end a share (ADR 0012): `POST /api/shares/:shareId/end` takes every record wrapped under the share sealed again to the space's owners, then deletes the share with its members, groups' access, agents' picks and keys, and ends the public links of people who can no longer publish. `GET /api/shares/:shareId/ending` tells an owner which public links end and which publications stay, and the record scan gains a `share` scope. (#379)
+
+#### Development
+
+- ADR 0012 (ending a share) and ADR 0013 (merging conflicting edits) are accepted, and the merge module they build on is in `packages/client/src/merge/`. (#367, #370, #383)
 
 ## 0.25.0-beta.2 - 2026-11-09
 
