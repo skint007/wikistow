@@ -658,8 +658,9 @@ const NEW_THREADS = 100;
  * **New comments** (decision 8): for a person, threads they can read with
  * comments from someone else they haven't seen, which concern them:
  * threads they started or replied to, and, on pages they can edit, threads
- * started since they last opened the page's comments. A comment's author
- * is its account: an agent's comments are its person's own.
+ * started since they last opened the page's comments, with all of their
+ * comments. A comment's author is its account: an agent's comments are
+ * its person's own.
  */
 export async function newComments(db: Database, accountId: string, report: ReportUnreadable) {
   return readSnapshot(db, async (tx) => {
@@ -702,9 +703,11 @@ export async function newComments(db: Database, accountId: string, report: Repor
         where c.author_account_id is distinct from ${accountId}
           and (s.seen_at is null or c.created_at > s.seen_at)
           and (c.space_id in (${owned}) or c.space_id in (${member}))
-          and (c.thread_id is null or t.author_account_id = ${accountId} or exists (
-            select 1 from ${comments} r where r.thread_id = t.id and r.author_account_id = ${accountId}
-          ))
+          and (s.seen_at is null or t.created_at > s.seen_at
+            or t.author_account_id = ${accountId} or exists (
+              select 1 from ${comments} r
+              where r.thread_id = t.id and r.author_account_id = ${accountId}
+            ))
         order by c.created_at desc, c.id desc
         limit 2000`)),
     ];
