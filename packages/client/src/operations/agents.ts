@@ -17,6 +17,7 @@ import { sealForAgent, type MissingVersions } from '../agents.ts';
 import type { AgentShare, ContactsChange, ContactsPayloads, OwnAgent } from '../contacts.ts';
 import { enrollmentDeadline } from '../enrollment.ts';
 import { CryptoError } from '../errors.ts';
+import { ENDED } from '../key-versions.ts';
 import { sealFolderKeys } from '../folder-keys.ts';
 import {
   agentIdentityId,
@@ -360,6 +361,8 @@ async function resealAgent(
     if (error instanceof ApiError && error.code === 'not-found') return 0;
     throw error;
   }
+  // Never a share this app ended, which a server may list again (section 6.9).
+  missing = missing.filter(({ spaceId, shareId }) => ctx.marks.get(spaceId, shareId) !== ENDED);
   for (const spaceId of new Set(missing.map((m) => m.spaceId))) {
     if (!writes.has(spaceId)) writes.set(spaceId, await spaceKeys(ctx, spaceId, { refresh: true }));
   }

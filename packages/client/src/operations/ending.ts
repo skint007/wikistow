@@ -6,6 +6,7 @@
 import {
   groupRoutes,
   sharingRoutes,
+  structureRoutes,
   type FolderId,
   type GroupId,
   type IdentityId,
@@ -22,13 +23,11 @@ import { ENDED, requireNotBehind } from '../key-versions.ts';
 import { grantMetadataKeyV2 } from '../metadata.ts';
 import type { Region } from '../regions.ts';
 import { grantRevisionKeyV2 } from '../revision.ts';
-import { foldersUnder } from '../tree.ts';
 import { forgetSpaces } from './keys.ts';
 import { audienceOf } from './moves.ts';
 import { treeTarget } from './records.ts';
 import type { ClientContext } from './session.ts';
 import { forEachRecordKey, listShares, ownerKeys, type Progress } from './sharing.ts';
-import { loadTree } from './spaces.ts';
 
 /** An ending worked out for the owner to confirm (section 6.9, step 1). */
 export type EndingPreview = {
@@ -50,12 +49,6 @@ export type EndingPreview = {
   agents: sharingRoutes.ShareAgent[];
   /** The pages under the root with a public link, and whether it ends. */
   links: { pageId: PageId; ends: boolean }[];
-  /**
-   * The folders and pages under the root, and the space for a space share,
-   * as the tree lists them: a record of anything else the scan finds is in
-   * the trash.
-   */
-  inTree: ReadonlySet<string>;
 };
 
 /**
@@ -73,21 +66,12 @@ export async function previewEnding(
   if (!share) throw new ApiError(404, 'not-found', 'That folder isn’t shared any more');
   // An ended share is marked above every key version.
   requireNotBehind({ marks: ctx.marks, spaceId, shareId, keyVersion: share.currentKeyVersion });
-  const tree = await loadTree(ctx, spaceId);
+  // The tree lists nothing in the trash.
+  const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
   const { rootId } = share;
   if (rootId !== null && !tree.folders.some((f) => f.id === rootId)) {
     throw new ApiError(403, 'forbidden', 'Restore the folder from the trash first');
   }
-  const under = rootId === null ? null : foldersUnder(tree.folders, rootId);
-  const inTree = new Set<string>(
-    under === null
-      ? [spaceId, ...tree.folders.map((f) => f.id), ...tree.pages.map((p) => p.id)]
-      : [
-          ...under,
-          ...tree.pages.filter((p) => p.parentId && under.has(p.parentId)).map((p) => p.id),
-        ],
-  );
-
   const owners = new Set<string>([
     ...keys.listed.map((owner) => owner.identity.id),
     ...keys.owners.sealingOwners().map((owner) => owner.id),
@@ -110,7 +94,6 @@ export async function previewEnding(
       ({ agentId, personId, name }) => ({ agentId, personId, name }),
     ),
     links,
-    inTree,
   };
 }
 
@@ -224,5 +207,12 @@ export async function endShare(
   }
   ctx.marks.raise(spaceId, shareId, ENDED);
   forgetSpaces(ctx);
-  return { fromTrash: [...sealed.values()].some(({ node }) => !preview.inTree.has(node)) };
+  // The tree lists nothing in the trash, so what it doesn't list came from there.
+  const tree = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+  const listed = new Set<string>([
+    spaceId,
+    ...tree.folders.map((f) => f.id),
+    ...tree.pages.map((p) => p.id),
+  ]);
+  return { fromTrash: [...sealed.values()].some(({ node }) => !listed.has(node)) };
 }

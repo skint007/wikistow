@@ -203,8 +203,8 @@ test('stopping sharing a folder takes it from its members, and the folder above 
   test.setTimeout(300_000);
   const adminPage = await adminTab(freshPage, admin.email);
   const reader = await freshPage();
-  await memberWithVault(owner, adminPage, 'Olive Owner');
-  const { email: readerEmail } = await memberWithVault(reader, adminPage, 'Rita Reader');
+  await memberWithVault(owner, adminPage, 'Opal Owner');
+  const { email: readerEmail } = await memberWithVault(reader, adminPage, 'Rory Reader');
 
   await test.step('the owner shares Beans, inside Garden', async () => {
     await newSpace(owner, 'Family');
@@ -229,7 +229,7 @@ test('stopping sharing a folder takes it from its members, and the folder above 
     const stopping = shareDialog(owner, 'Beans');
     await expect(stopping.getByRole('heading', { name: 'Stop sharing “Beans”?' })).toBeVisible();
     await expect(stopping.getByRole('region', { name: 'What stopping sharing does' })).toHaveText(
-      'Rita Reader loses access. They keep what they already read or downloaded. Nothing saved from now on reaches them.',
+      'Rory Reader loses access. They keep what they already read or downloaded. Nothing saved from now on reaches them.',
     );
     await stopping.getByRole('button', { name: 'Stop sharing', exact: true }).click();
     // Back on Garden, which can be shared now.

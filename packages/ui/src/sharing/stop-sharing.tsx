@@ -91,11 +91,12 @@ export function StopSharing({
   const losing = preview.data
     ? [
         ...preview.data.people.map((id) => <Name key={id}>{person(id).name}</Name>),
-        ...preview.data.groups.map((groupId) => {
+        ...preview.data.groups.map((groupId, i) => {
           const group = groups.data?.groups.find((g) => g.groupId === groupId);
           return (
             <Fragment key={groupId}>
-              the group <Name>{group ? groupName(group) : 'Unnamed group'}</Name>
+              {i === 0 && preview.data?.people.length === 0 ? 'The' : 'the'} group{' '}
+              <Name>{group ? groupName(group) : 'Unnamed group'}</Name>
             </Fragment>
           );
         }),
@@ -129,12 +130,12 @@ export function StopSharing({
       } finally {
         setRecords(null);
       }
-      await refreshAccess(queryClient, ctx);
+      // Said before the access lists refresh, which take this step away.
       onEnded(
         <>
           Done. Only the space’s owners can open{' '}
           {space ? (
-            'it'
+            'the space'
           ) : (
             <>
               “<Name>{name}</Name>”
@@ -142,9 +143,10 @@ export function StopSharing({
           )}{' '}
           now.
           {fromTrash &&
-            ' Some of what was deleted from it is in the trash. Restore anything you want back before sharing the folder above.'}
+            ` Some of what was deleted from it is in the trash. Restore anything you want back before sharing ${space ? 'the space again' : 'the folder above'}.`}
         </>,
       );
+      await refreshAccess(queryClient, ctx);
     });
 
   return (
@@ -172,7 +174,7 @@ export function StopSharing({
                 {listed(losing)}
                 {agents > 0 &&
                   (agents === 1 ? ', with an agent,' : `, with ${agents} agents,`)}{' '}
-                {losing.length === 1 && agents === 0 ? 'loses' : 'lose'} access.
+                {losing.length === 1 ? 'loses' : 'lose'} access.
               </>
             ) : agents > 0 ? (
               <>{agents === 1 ? 'An agent loses' : `${agents} agents lose`} access.</>
