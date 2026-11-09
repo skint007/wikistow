@@ -139,7 +139,9 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
 
   const work = owner.getByRole('status').filter({ hasText: 'Moved “Beans” to Work.' });
   await drop(owner, beans, owner.getByRole('link', { name: 'Work', exact: true }));
-  await expect(work).toContainText('Its earlier versions don’t go with it.', { timeout: 30_000 });
+  await expect(work).toContainText('Its earlier versions and comments don’t go with it.', {
+    timeout: 30_000,
+  });
   // Beans was open, so the view follows it into Work.
   await expect(owner.getByRole('heading', { name: 'Work', level: 2 })).toBeVisible();
   await expect(owner.getByText(TEXT.beans)).toBeVisible();
