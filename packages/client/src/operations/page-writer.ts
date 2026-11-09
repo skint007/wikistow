@@ -19,7 +19,7 @@ import {
   type FolderLook,
   type FolderPicture,
 } from '../metadata.ts';
-import { newPayload, type AttachmentRef } from '../payload.ts';
+import { newPayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { OWNER_REGION } from '../regions.ts';
 import {
   createPage,
@@ -93,9 +93,23 @@ export type DraftWriter = {
    * change as it is now, so a conflict with another window's ends here.
    */
   waitingHead(): Promise<RevisionId | null>;
+  /**
+   * The page's draft change waiting on this device as it is now, for a
+   * merge with another window's (ADR 0013, decision 2): its version, the
+   * draft it stands for (as `waitingHead`), and its payload. Null if it has none.
+   */
+  waitingChange(): Promise<WaitingChange | null>;
+  /**
+   * The person merged with the waiting change at `version`: the next save
+   * goes into it, unless another tab or window saved into it since.
+   */
+  mergedWith(version: number): void;
   /** Whether the last save was refused over a change another tab or window saved here. */
   conflictWithDevice(): boolean;
 };
+
+/** A page's draft change waiting on this device, as `DraftWriter.waitingChange` reads it. */
+export type WaitingChange = { version: number; head: RevisionId | null; payload: PagePayload };
 
 export type PageWriter = {
   /**
@@ -283,6 +297,16 @@ export function createPageWriter({
           if (entry?.kind !== 'page' || entry.failure) return null;
           seen = entry.version;
           return entry.basedOn ?? entry.newPage?.revisionId ?? null;
+        },
+        async waitingChange() {
+          const entry = await queue?.entry(page.pageId);
+          if (entry?.kind !== 'page') return null;
+          const head = entry.basedOn ?? entry.newPage?.revisionId ?? null;
+          return { version: entry.version, head, payload: entry.payload };
+        },
+        mergedWith(version) {
+          seen = version;
+          otherWindow = false;
         },
         conflictWithDevice: () => otherWindow,
       };

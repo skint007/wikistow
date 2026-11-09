@@ -1,26 +1,26 @@
-// Opening a merge for a draft someone else saved (`stale-head`, ADR 0013,
-// decision 2): the three versions, merged, and whose theirs is.
+// Opening a merge (ADR 0013, decision 2): the three versions, merged, and
+// whose theirs is. For a draft someone else saved (`stale-head`), and for
+// a change made offline that came back as one, whose base is kept on this
+// device; or for another window's change waiting on this device.
 import {
   pageMerge,
   type AttachmentRef,
   type ClientContext,
   type pageOperations,
-  type Region,
   type RevisionId,
 } from '@wikistow/client';
 import type { QueryClient } from '@tanstack/react-query';
 import { revisionQuery } from '../../data/queries';
 import { peopleQuery } from '../../sharing/people';
-import type { DraftSession } from '../draft-session';
+import type { DraftSession, MergedOver } from '../draft-session';
 import type { Theirs } from './merge-model';
 
-/** A merge ready to show, and the version of theirs a save goes on top of. */
+/** A merge ready to show, and what a save goes on top of. */
 export type OpenedMerge = {
   merge: pageMerge.Merge;
   theirs: Theirs;
-  /** The revision the merge read as theirs, and the region it opened in. */
-  revisionId: RevisionId;
-  region: Region;
+  /** The version the merge read as theirs. */
+  over: MergedOver;
   /** Both sides' attachments, for the pictures a banner or icon overlap shows. */
   attachments: readonly AttachmentRef[];
 };
@@ -28,6 +28,13 @@ export type OpenedMerge = {
 /** Thrown when there is nothing to merge, or theirs can't be read here. */
 export class CantMerge extends Error {}
 
+const NOTHING = 'There’s nothing to merge with now.';
+
+/**
+ * A merge with the draft someone else saved. The base is the draft the
+ * person's text is based on, which the revision cache opens from this
+ * device first when it is kept, as an offline change's base is.
+ */
 export async function openOnlineMerge(
   ctx: ClientContext,
   page: pageOperations.PageRef,
@@ -35,7 +42,7 @@ export async function openOnlineMerge(
   queryClient: QueryClient,
 ): Promise<OpenedMerge> {
   const versions = await session.mergeVersions();
-  if (!versions) throw new CantMerge('There’s nothing to merge with now.');
+  if (!versions) throw new CantMerge(NOTHING);
   const open = (revisionId: RevisionId) =>
     queryClient.fetchQuery(revisionQuery(ctx, page, 'draft', revisionId));
   const [base, theirs] = await Promise.all([open(versions.base), open(versions.theirs)]);
@@ -46,9 +53,21 @@ export async function openOnlineMerge(
   return {
     merge: pageMerge.mergePayloads(base.opened.payload, versions.yours, theirs.opened.payload),
     theirs: await whoseIs(ctx, queryClient, theirs.record.authorId),
-    revisionId: versions.theirs,
-    region: theirs.region,
+    over: { kind: 'draft', revisionId: versions.theirs, region: theirs.region },
     attachments: [...versions.yours.attachments, ...theirs.opened.payload.attachments],
+  };
+}
+
+/** A merge with the change another window saved into this device's queue. */
+export async function openWindowMerge(session: DraftSession): Promise<OpenedMerge> {
+  const versions = await session.windowMergeVersions();
+  if (!versions) throw new CantMerge(NOTHING);
+  const { base, theirs, yours } = versions;
+  return {
+    merge: pageMerge.mergePayloads(base, yours, theirs.payload),
+    theirs: { kind: 'window' },
+    over: { kind: 'window', ...theirs },
+    attachments: [...yours.attachments, ...theirs.payload.attachments],
   };
 }
 

@@ -49,8 +49,9 @@ import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
 import { MergeView } from './merge/merge-view';
-import { openOnlineMerge, type OpenedMerge } from './merge/online-merge';
+import { openOnlineMerge, openWindowMerge, type OpenedMerge } from './merge/open-merge';
 import { useNotKept } from '../data/connection';
+import { pageChange, queueQuery } from '../data/offline-changes';
 import { useAvailability } from '../shell/availability';
 
 export type DraftEditorHandle = {
@@ -161,6 +162,9 @@ export function DraftEditor({
   });
   // Saved into this device's queue, not yet on the server (ADR 0009, decision 7).
   const onDevice = useAvailability().waiting(page.pageId) !== 'none';
+  // The page's draft change among them: the person's own text, saved there.
+  const { data: entries } = useQuery(queueQuery(ctx));
+  const draftWaiting = pageChange(entries, page.pageId) !== null;
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
   const propertyKeys = usePropertyKeys(ctx, page);
   const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
@@ -217,11 +221,12 @@ export function DraftEditor({
   );
 
   const failed = snapshot.status === 'error' ? saveFailure(snapshot.saveError) : null;
-  const merging = useMerging(ctx, page, session);
-  // Merge… for a draft someone else saved over the person's unsaved text
-  // (ADR 0013, decision 1). A change waiting on this device merges from
-  // the offline changes instead.
-  const canMerge = snapshot.status === 'conflict' && session.hasUnsaved() && !onDevice;
+  const merging = useMerging(ctx, page, session, conflictWithDevice);
+  // Merge… when there is something of the person's to merge (ADR 0013,
+  // decision 1): unsaved text, or text saved into the page's draft change
+  // waiting on this device. Not a move or publish waiting, which holds none.
+  const mine = session.hasUnsaved() || draftWaiting;
+  const canMerge = snapshot.status === 'conflict' && mine;
   const merge = merging.state?.status === 'ready' ? merging.state.opened : null;
   const mergeButton = useRef<HTMLButtonElement>(null);
   // Once the conflict is resolved another way, a merge that failed is forgotten.
@@ -235,7 +240,7 @@ export function DraftEditor({
     <div className="flex flex-1 flex-col gap-4">
       {merge && (
         <MergeView
-          key={merge.revisionId}
+          key={merge.over.kind === 'draft' ? merge.over.revisionId : merge.over.version}
           merge={merge.merge}
           theirs={merge.theirs}
           pictures={{ ctx, page, attachments: merge.attachments }}
@@ -246,7 +251,7 @@ export function DraftEditor({
           onSave={(payload) => {
             merging.cancel();
             onMerged?.(payload);
-            void session.saveMerged(merge.revisionId, payload, merge.region);
+            void session.saveMerged(merge.over, payload);
           }}
         />
       )}
@@ -279,9 +284,11 @@ export function DraftEditor({
             <p>
               {failed
                 ? failed.message
-                : session.hasUnsaved()
-                  ? 'Someone else saved this draft while you were editing. Your changes are not saved yet.'
-                  : 'Someone else saved a newer version of this draft.'}
+                : conflictWithDevice()
+                  ? 'You saved this page in another window while editing here. Your changes here are not saved yet.'
+                  : mine
+                    ? 'Someone else saved this draft while you were editing. Your changes are not saved yet.'
+                    : 'Someone else saved a newer version of this draft.'}
             </p>
             {merging.state?.status === 'failed' && <p>{merging.state.message}</p>}
             {snapshot.status === 'conflict' ? (
@@ -423,6 +430,8 @@ function useMerging(
   ctx: ClientContext,
   page: pageOperations.PageRef,
   session: ReturnType<typeof useDraftSession>['session'],
+  /** Whether theirs is a change another window saved on this device. */
+  conflictWithDevice: () => boolean,
 ) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<Merging | null>(null);
@@ -432,11 +441,14 @@ function useMerging(
     const mine = ++opening.current;
     const set = (next: Merging) => opening.current === mine && setState(next);
     setState({ status: 'loading' });
-    openOnlineMerge(ctx, page, session, queryClient).then(
+    (conflictWithDevice()
+      ? openWindowMerge(session)
+      : openOnlineMerge(ctx, page, session, queryClient)
+    ).then(
       (opened) => set({ status: 'ready', opened }),
       (error: unknown) => set({ status: 'failed', message: errorMessage(error) }),
     );
-  }, [ctx, page, session, queryClient]);
+  }, [ctx, page, session, queryClient, conflictWithDevice]);
   const cancel = useCallback(() => {
     opening.current++;
     setState(null);
