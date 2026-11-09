@@ -63,7 +63,7 @@ Identity key rotation, and its statement format, are left to a later milestone (
 
 ### What comments add (accepted)
 
-[ADR 0014](../docs/adr/0014-comments.md) proposes comments on pages (#320, section 5.9), not built yet. Nothing new is signed but the comments themselves, each a metadata record v2 with `subjectKind: "comment"` under its page's keys, with a payload format of their own. There are no new domain strings. A client from before them doesn't ask the scan route for comments, which then answers it `invalid-request` over a scope that holds one, so it can't make a share, move across a region boundary, end a share or add a co-owner over a page with comments until it updates.
+[ADR 0014](../docs/adr/0014-comments.md) accepts comments on pages (#320, section 5.9). The server's part is built; the app's isn't yet. Nothing new is signed but the comments themselves, each a metadata record v2 with `subjectKind: "comment"` under its page's keys, with a payload format of their own. There are no new domain strings. A client from before them doesn't ask the scan route for comments, which then answers it `invalid-request` over a scope that holds one, so it can't make a share, move across a region boundary, end a share or add a co-owner over a page with comments until it updates.
 
 Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
@@ -700,7 +700,7 @@ MetadataEnvelopeV2 = the same, with metadataRevisionId in place of revisionId, s
 
 ### 5.9 Comments
 
-**Status: accepted** in [ADR 0014](../docs/adr/0014-comments.md) (#320), not built yet.
+**Status: accepted** in [ADR 0014](../docs/adr/0014-comments.md) (#320). The server's part is built (step 2): the comment routes of the ADR's decision 12, the scan's `comment` entries, comments in the coverage checks of making a share, a move across regions, ending a share and adding a co-owner, the trash, and the stream. The app's part, which seals, opens and rewraps comments, isn't built yet, so the notes below marked "as accepted" for the owner's app still wait for it.
 
 A **comment** is a note on one page, by anyone who can read it for the comment's **audience**: `"published"`, for readers, read by everyone who can read the page's published versions; or `"draft"`, for editors, read only by those who can read its draft. A **thread** is a first comment and its replies, one level deep.
 
@@ -737,6 +737,8 @@ A **comment** is a note on one page, by anyone who can read it for the comment's
 - that the sealed payload's ciphertext, decoded, is at most 65,536 bytes (`payload-too-large`). The largest format 1.0 payload seals to about 64,100 bytes, so a later minor version must stay within the rest;
 - for a reply for readers, that its thread was started since the page's latest unpublish;
 - that the caller is a person, not an agent, for an edit, a delete or resolving a thread (section 9.5).
+
+Where the checks above name no code, the server answers: `forbidden` for a comment for editors from someone who can't edit the page, for one for readers from an editor while the page is unpublished, or from an agent that can't publish there, for a reply under a deleted first comment, and for a reply for readers under a thread started before the latest unpublish; `not-found` for a reader of a page they can't see unpublished, and for a reply under anything but a first comment of the same page that the caller sees, so a reader's reply learns nothing of a thread for editors; and `binding-mismatch` for a reply under a thread of another audience.
 
 The server can't open the wrap or read the payload, so it checks nothing of a comment's audience, page or thread itself. It records the audience and thread the request names, never changes them or the page, and serves the comment by them. The opening client checks them. An edit keeps the comment's page, thread, audience and quote.
 
@@ -1653,7 +1655,7 @@ These notes say what the next two PRs change. They add no rules; where they diff
 | Add a member, or share again with one whose key changed (7.3) | `POST /api/shares/:shareId/members {identityId, keyVersion, role, canPublish, envelopes}` | envelopes cover versions 1 to current at `keyVersion`; replaces the member's key version and deletes their envelopes for older key versions |
 | Reader to editor (7.4) | the same route, with draft keys | replaces that member's envelopes |
 | Rotate, remove or demote (7.5, 7.4) | `POST /api/shares/:shareId/rotate {expectedKeyVersion, removed: [identityId], demoted: [identityId], envelopes}` | the exact-set check of section 7.5, step 4 |
-| Add a co-owner (7.6) | `POST /api/spaces/:spaceId/owners {identityId, keyVersion, statement, folderKeyEnvelopes, keyEnvelopes, metadataEnvelopes}` (as accepted, with `commentEnvelopes` too, section 5.9) | the coverage check of section 7.6 |
+| Add a co-owner (7.6) | `POST /api/spaces/:spaceId/owners {identityId, keyVersion, statement, folderKeyEnvelopes, keyEnvelopes, metadataEnvelopes}`, with `commentEnvelopes` too (section 5.9) | the coverage check of section 7.6 |
 | The new owner's statement (6.5) | `POST /api/spaces/:spaceId/owner-statements {statement}` | the signer is the caller and an owner; the named owner is a human who is, or has been, an owner of the space |
 | Remove an owner (7.6) | `POST /api/spaces/:spaceId/owners/:identityId/remove {rotations: [{shareId, expectedKeyVersion, removed, demoted, envelopes}]}` | one rotation per share; the caller may be `identityId`; `last-owner`; ends the grants of `identityId`'s agents in the space. A retry after a failure is the same request, prepared again from the current versions (section 7.6); once the server no longer lists `identityId`, there is nothing to retry |
 | Transfer | the old owner adds a co-owner, then removes themself | two requests by one person (section 7.6) |
