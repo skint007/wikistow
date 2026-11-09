@@ -63,7 +63,12 @@ export async function endShare(
   report: ReportUnreadable,
 ): Promise<void> {
   const { spaceId } = await requireShare(db, input.shareId);
-  await verifyGrants(db, { actor: humanActor(input.accountId), spaceId, ...input }, report);
+  // An envelope for a record gone since the scan, such as a folder's name
+  // deleted for good from the trash, means the app scans again.
+  const changed = new ContentError('stale-head', 'The share changed since you loaded it');
+  await verifyGrants(db, { actor: humanActor(input.accountId), spaceId, ...input }, report, {
+    missing: changed,
+  });
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
     await lockSpaceForUpdate(tx, spaceId);
@@ -85,7 +90,7 @@ export async function endShare(
       spaceId,
       identity,
       report,
-      elsewhere: new ContentError('stale-head', 'The share changed since you loaded it'),
+      elsewhere: changed,
     });
 
     // Who loses access, by ID, for the audit log, before it cascades away.

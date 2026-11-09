@@ -330,14 +330,15 @@ describe('the preview of an ending', () => {
     });
 
     const ending = await alice.api.call(sharingRoutes.shareEnding, { params: { shareId } });
-    expect(ending).toEqual({
-      links: [
+    expect(ending.links).toHaveLength(2);
+    expect(ending.links).toEqual(
+      expect.arrayContaining([
         { pageId: page.pageId, ends: true },
         { pageId: owned, ends: false },
-      ].sort((a, b) => a.pageId.localeCompare(b.pageId)),
-      publishedFrom: [page.pageId],
-      publishedInto: [into.pageId],
-    });
+      ]),
+    );
+    expect(ending.publishedFrom).toEqual([page.pageId]);
+    expect(ending.publishedInto).toEqual([into.pageId]);
     const asked = (person: Person) =>
       rejection(person.api.call(sharingRoutes.shareEnding, { params: { shareId } }));
     expect(await asked(rae)).toBe('forbidden');
@@ -472,6 +473,27 @@ describe('an ending is refused', () => {
         alice.api.call(sharingRoutes.endShare, {
           params: { shareId: ending.shareId },
           body: { ...withOut, permissionVersion: now },
+        }),
+      ),
+    ).toBe('stale-head');
+
+    // A folder in the trash deleted for good since the scan: its name is gone.
+    const binned = await spaceOperations.createFolder(alice.ctx, {
+      spaceId,
+      parentId: lib.shared,
+      name: 'Binned',
+    });
+    await pages.deleteNode(alice.ctx, { spaceId, nodeId: binned });
+    const withBinned = {
+      permissionVersion: await rootVersion(spaceId, ending.rootId),
+      ...(await sealEnding(alice.ctx, ending)),
+    };
+    await trash.emptyTrash(alice.ctx, spaceId);
+    expect(
+      await rejection(
+        alice.api.call(sharingRoutes.endShare, {
+          params: { shareId: ending.shareId },
+          body: { ...withBinned, permissionVersion: await rootVersion(spaceId, ending.rootId) },
         }),
       ),
     ).toBe('stale-head');

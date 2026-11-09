@@ -353,7 +353,8 @@ const VERIFY_BATCH = 200;
 
 /**
  * Check the signature of every owner envelope a move (or a share's ending)
- * carries, before its lock: each by the caller at their current key, over the stored record it
+ * carries, before its lock. An envelope naming no record stored in the
+ * space is `missing` if given, else as `uncovered` decides: each by the caller at their current key, over the stored record it
  * names (section 5.8), a batch at a time. Stored records never change, and
  * under its lock the move requires the envelopes' key to be the caller's
  * current one still, so the check holds there.
@@ -362,6 +363,7 @@ export async function verifyGrants(
   db: Database,
   move: { actor: Actor; spaceId: string } & OwnerMaterial,
   report: ReportUnreadable,
+  { missing }: { missing?: ContentError } = {},
 ) {
   if (move.keyEnvelopes.length === 0 && move.metadataEnvelopes.length === 0) return;
   // Only an owner's move carries envelopes, and an agent is never an owner.
@@ -381,6 +383,7 @@ export async function verifyGrants(
     ),
     versionOf: (e) => e.revisionId,
     signedBytes: keyEnvelopeV2Bytes,
+    missing,
   });
   await verifyEach(db, move.metadataEnvelopes, {
     granter,
@@ -394,6 +397,7 @@ export async function verifyGrants(
     ),
     versionOf: (e) => e.metadataRevisionId,
     signedBytes: metadataEnvelopeV2Bytes,
+    missing,
   });
 }
 
@@ -406,18 +410,21 @@ async function verifyEach<E extends KeyEnvelopeV2 | MetadataEnvelopeV2>(
     records,
     versionOf,
     signedBytes,
+    missing,
   }: {
     granter: PublicIdentity;
     subjectKind: 'revision' | 'metadata';
     records: ReadonlyMap<string, RecordParts>;
     versionOf: (envelope: E) => string;
     signedBytes: (record: RecordParts, envelope: E) => Uint8Array;
+    missing: ContentError | undefined;
   },
 ) {
   for (const [i, envelope] of envelopes.entries()) {
     if (i > 0 && i % VERIFY_BATCH === 0) await setImmediate();
     const record = records.get(versionOf(envelope));
     if (!record) {
+      if (missing) throw missing;
       throw await uncovered(
         db,
         subjectKind,
