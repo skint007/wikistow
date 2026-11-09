@@ -11,7 +11,7 @@ import {
   type sharingRoutes,
 } from '@wikistow/contracts';
 import { keyEnvelopeV2Bytes, metadataEnvelopeV2Bytes, verifySignature } from '@wikistow/client';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql, type AnyColumn } from 'drizzle-orm';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
@@ -489,27 +489,29 @@ export async function replaceKeyMaterial(
   move: KeyMaterial,
   records: Pick<Records, 'revision' | 'metadata'>,
 ) {
+  // One array parameter each: a subtree can hold more records than a
+  // statement may have parameters.
+  const among = (column: AnyColumn, ids: readonly string[]) =>
+    sql`${column} = any(${sql.param([...ids])}::text[])`;
   if (records.revision.length > 0) {
-    await tx.delete(revisionWraps).where(inArray(revisionWraps.revisionId, records.revision));
+    await tx.delete(revisionWraps).where(among(revisionWraps.revisionId, records.revision));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'revision'),
-          inArray(keyEnvelopes.subjectId, records.revision),
+          among(keyEnvelopes.subjectId, records.revision),
         ),
       );
   }
   if (records.metadata.length > 0) {
-    await tx
-      .delete(metadataWraps)
-      .where(inArray(metadataWraps.metadataRevisionId, records.metadata));
+    await tx.delete(metadataWraps).where(among(metadataWraps.metadataRevisionId, records.metadata));
     await tx
       .delete(keyEnvelopes)
       .where(
         and(
           eq(keyEnvelopes.subjectKind, 'metadata'),
-          inArray(keyEnvelopes.subjectId, records.metadata),
+          among(keyEnvelopes.subjectId, records.metadata),
         ),
       );
   }
