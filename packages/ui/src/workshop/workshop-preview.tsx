@@ -15,6 +15,7 @@ import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Name } from '@/components/name';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,7 @@ import { DeclaredSettings } from '../plugins/declared-settings';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
+import { Propose } from './proposals';
 import { SAMPLE_SPACE, type Sample } from './samples';
 import { OLD_SERVER, type Workshop } from './workshop';
 
@@ -67,6 +69,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   return (
     <div className="grid content-start gap-5">
       <Status workshop={workshop} />
+      <Propose workshop={workshop} />
       {state.running && (
         <PluginsContext value={workshop.preview}>
           <Problems workshop={workshop} />
@@ -144,7 +147,13 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
-            <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            {workshop.sharedBy === null ? (
+              <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            ) : (
+              <span className="text-muted-foreground">
+                Only <Name>{workshop.sharedBy}</Name> publishes it.
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">
@@ -175,7 +184,7 @@ function Status({ workshop }: { workshop: Workshop }) {
           {problem}
         </p>
       )}
-      {latest && !latest.plugin && (
+      {latest && !latest.plugin && !latest.history && (
         <Alert variant="destructive">
           <AlertDescription className="grid gap-1.5">
             <p>
@@ -724,7 +733,11 @@ function PluginPlaces({
   );
 }
 
-/** Every build, newest first: preview any that built, or on the desktop export it, by its hash. */
+/**
+ * Every build, newest first: preview any that built, or on the desktop
+ * export it, by its hash. One kept from before whose build isn't kept is
+ * history only.
+ */
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
@@ -762,6 +775,13 @@ function Versions({ workshop }: { workshop: Workshop }) {
                 <span>
                   {version.plugin.manifest.name} {version.plugin.manifest.version}
                 </span>
+              ) : version.history ? (
+                <>
+                  <span>
+                    {version.history.name} {version.history.version}
+                  </span>
+                  <Badge variant="secondary">Build not kept</Badge>
+                </>
               ) : (
                 <Badge variant="destructive">Didn’t build</Badge>
               )}
@@ -794,7 +814,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
             {version.hash && (
               <p className="text-xs break-all text-muted-foreground">SHA-256 {version.hash}</p>
             )}
-            {version.plugin ? <Diagnostics version={version} /> : null}
+            {version.plugin || version.history ? <Diagnostics version={version} /> : null}
           </li>
         ))}
       </ul>

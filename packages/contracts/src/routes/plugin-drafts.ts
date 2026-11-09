@@ -1,15 +1,19 @@
 import { PluginFile, PluginId } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { Timestamp } from '../records/encoding.ts';
+import { IdentityId } from '../records/ids.ts';
 import type { RouteDef } from '../route.ts';
 import { PluginHash, UploadFile, MAX_VERSION_FILES } from './plugins.ts';
 
 /*
  * Plugin drafts (ADR 0004): the workshop's files, saved on the server as
  * the assistant writes them, so work carries over between devices. Each
- * draft also keeps the one build a browser last previewed, served from the
- * library's file route under `draft-<hash>` to its owner only. People
- * only, never agents; another person's draft answers `not-found`.
+ * draft also keeps, for each person, the build their browser last
+ * previewed, served from the library's file route under `draft-<hash>` to
+ * them only. People only, never agents. Its owner may share it with named
+ * people (#315), who read and change its files, build it and keep a
+ * workshop on it of their own; anyone else's draft answers `not-found`.
+ * Only the owner deletes or shares it.
  */
 
 /** The most drafts one account keeps. An 11th needs `replaces`. */
@@ -212,7 +216,7 @@ export const putDraftBinaryFile = {
   response: z.strictObject({ draft: DraftSummary }),
 } as const satisfies RouteDef;
 
-/** Delete a draft, with its files and build. */
+/** Delete one of the caller's own drafts, with its files, builds, kept workshops and shares. */
 export const deleteDraft = {
   method: 'DELETE',
   path: '/api/plugin-drafts/:draftId',
@@ -221,9 +225,9 @@ export const deleteDraft = {
 } as const satisfies RouteDef;
 
 /**
- * Replace the draft's build with a built folder, every file as a library
- * upload carries them, checked as one. Its files are then served at
- * `draftFileUrl(<manifest ID>, hash, path)` to the draft's owner only.
+ * Replace the caller's build of the draft with a built folder, every file
+ * as a library upload carries them, checked as one. Its files are then
+ * served at `draftFileUrl(<manifest ID>, hash, path)` to the caller only.
  */
 export const putDraftBuild = {
   method: 'PUT',
@@ -231,6 +235,106 @@ export const putDraftBuild = {
   params: DraftParams,
   body: z.strictObject({ files: z.array(UploadFile).min(1).max(MAX_VERSION_FILES) }),
   response: z.strictObject({ hash: PluginHash }),
+} as const satisfies RouteDef;
+
+/**
+ * The most a draft's kept workshop holds, as JSON in UTF-8: within the
+ * app's usual 1 MiB body, as is everything the model is sent in one request.
+ */
+export const MAX_DRAFT_WORKSHOP_BYTES = 768 * 1024;
+
+/** Counts each save and clear of a draft's kept workshop, from 0. */
+const WorkshopRevision = z.number().int().nonnegative();
+
+/**
+ * What the workshop keeps with a draft (#314) for the caller: their
+ * conversation, versions and sample pages, plain text like the draft's
+ * files. Each person who reaches the draft keeps their own (#315). The app that wrote
+ * it reads it; the server only keeps it, within `MAX_DRAFT_WORKSHOP_BYTES`.
+ * `workshop` is null when nothing is kept. A save names the `revision` it
+ * follows.
+ */
+export const getDraftWorkshop = {
+  method: 'GET',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.strictObject({ workshop: z.json().nullable(), revision: WorkshopRevision }),
+} as const satisfies RouteDef;
+
+/**
+ * Keep `workshop` with the draft, in place of what was kept, if `revision`
+ * is still the latest: else `stale-head`, as when another device kept its
+ * own meanwhile. Answers the new revision. It doesn't move `updatedAt`.
+ */
+export const putDraftWorkshop = {
+  method: 'PUT',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  body: z.strictObject({ workshop: z.json(), revision: WorkshopRevision }),
+  response: z.strictObject({ revision: WorkshopRevision }),
+} as const satisfies RouteDef;
+
+/** Forget the draft's kept workshop, for **Clear conversation**, whatever its revision. Its files stay. */
+export const clearDraftWorkshop = {
+  method: 'DELETE',
+  path: '/api/plugin-drafts/:draftId/workshop',
+  params: DraftParams,
+  response: z.object({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/** The most people one draft is shared with. */
+export const MAX_DRAFT_SHARES = 20;
+
+/** Someone a draft is shared with: their person's identity, and their name on the server. */
+export const DraftPerson = z.strictObject({ identityId: IdentityId, name: z.string() });
+export type DraftPerson = z.infer<typeof DraftPerson>;
+
+/**
+ * Drafts other people shared with the caller (#315), most recently changed
+ * first, each with its owner's name. Its own route: `listDrafts` keeps to
+ * the caller's own, which older apps offer to delete.
+ */
+export const listSharedDrafts = {
+  method: 'GET',
+  path: '/api/shared-plugin-drafts',
+  response: z.strictObject({
+    drafts: z.array(
+      z.strictObject({ draft: DraftSummary, owner: z.strictObject({ name: z.string() }) }),
+    ),
+  }),
+} as const satisfies RouteDef;
+
+/** Whom the caller's own draft is shared with, by name. */
+export const getDraftShares = {
+  method: 'GET',
+  path: '/api/plugin-drafts/:draftId/shares',
+  params: DraftParams,
+  response: z.strictObject({ people: z.array(DraftPerson).max(MAX_DRAFT_SHARES) }),
+} as const satisfies RouteDef;
+
+/**
+ * Share the caller's own draft with a person, named by the identity the
+ * people picker lists (`GET /api/people`), up to `MAX_DRAFT_SHARES`.
+ * Sharing again does nothing. Not with themselves, nor an agent.
+ */
+export const shareDraft = {
+  method: 'POST',
+  path: '/api/plugin-drafts/:draftId/shares',
+  params: DraftParams,
+  body: z.strictObject({ identityId: IdentityId }),
+  response: z.strictObject({ people: z.array(DraftPerson).max(MAX_DRAFT_SHARES) }),
+} as const satisfies RouteDef;
+
+/**
+ * Stop sharing a draft with one person: its owner removes any of them, or
+ * the person leaves it themselves. Their build and kept workshop
+ * of it go too.
+ */
+export const unshareDraft = {
+  method: 'DELETE',
+  path: '/api/plugin-drafts/:draftId/shares/:identityId',
+  params: z.object({ draftId: DraftId, identityId: IdentityId }),
+  response: z.object({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
 /** The file route's key for a draft build: not the bare hash, which an installed copy uses. */

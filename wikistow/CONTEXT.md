@@ -175,8 +175,12 @@ The plugins members uploaded to their server. Each is **Shared**, listed to ever
 _Avoid_: Store, marketplace (nothing is sold or rated).
 
 **Plugin draft**
-A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person.
+A plugin being made or changed in the workshop: its source files, saved on the server as the assistant writes them, so the work carries over between devices. Up to 10 per account. One starts empty, from a library version's source (**Change with the assistant**; someone else's plugin becomes a copy under a new ID of the person's own), or from a project folder. Publishing one uploads the version in the preview to the **plugin library** and installs it for the person. Its owner may share it with named people, who change its files and run the workshop on it, each with their own conversation; only the owner proposes or publishes it.
 _Avoid_: Draft on its own (pages have drafts), workspace, project.
+
+**Plugin proposal**
+A copy of someone else's plugin, sent back from its draft to the plugin's owner under the original ID: its files, against the version the copy started from. The owner reviews what changed by file, then opens it as a **plugin draft** of their own, to publish as a new version, or declines it.
+_Avoid_: Proposal on its own (a chat assistant's are **proposals**), pull request, fork.
 
 **Theme plugin**, **script plugin**, **app plugin**
 A plugin's trust level, from what it contains: styles only; code in an isolated worker that reaches pages only through checked requests; or code running in the app's page with the app's own trust.
@@ -199,7 +203,7 @@ A fenced code block in a page that names a plugin, which shows and edits it wher
 _Avoid_: Page script; pages never carry code.
 
 **Workshop**
-Where a person builds a plugin with the assistant, in the browser, on a phone or in the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples end with it; the draft stays.
+Where a person builds a plugin with the assistant, in the browser, on a phone or in the desktop app: a conversation on one **plugin draft**, numbered **versions** built from its files in the page, and a **preview** that runs one version against **sample pages**, the workshop's own disposable pages. A real page enters only as a copy the person makes. The conversation, its versions and samples are kept with the draft, copies left out, until **Clear conversation** or the draft is deleted.
 _Avoid_: Sandbox (the preview isn't one for app code), staging.
 
 **Safe mode**

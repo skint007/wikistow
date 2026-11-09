@@ -2,7 +2,7 @@ import { listAppAgents, type AiMessage, type AiSession, type IdentityId } from '
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Bot, FileText, Plus, Puzzle, Sparkles, Square, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { Picker } from '@/components/ui/picker';
@@ -24,7 +24,8 @@ import {
   type PageRef,
   type ProposalItem,
 } from './chat';
-import { foldDiff, lineDiff, toolActivity, toolResults } from './chat-model';
+import { toolActivity, toolResults } from './chat-model';
+import { LineDiff, Text } from './line-diff';
 import { aiStatusQuery } from './session';
 import { Working } from './working';
 
@@ -514,51 +515,13 @@ function ProposalDetail({ proposal }: { proposal: ProposalItem['proposal'] }) {
   }
 }
 
-/** An edit's change to the draft, as a line diff, worked out once per proposal. */
+/** An edit's change to the draft, as a line diff. */
 function EditDetail({ before, after }: { before: string; after: string }) {
-  const diff = useMemo(() => {
-    const lines = before === after ? null : lineDiff(before, after);
-    return lines && foldDiff(lines);
-  }, [before, after]);
   return (
     <>
       <p className="text-xs">A new draft of this page, on top of the draft it read.</p>
-      {before === after ? null : diff ? (
-        <pre
-          aria-label="Changes"
-          className="max-h-64 overflow-auto rounded-control bg-muted p-2 font-mono text-xs whitespace-pre-wrap"
-        >
-          {diff.map((line, index) =>
-            line.kind === 'fold' ? (
-              <div key={index} className="text-muted-foreground">
-                ⋯ {line.count} unchanged
-              </div>
-            ) : (
-              <div
-                key={index}
-                className={cn(
-                  line.kind === 'added' && 'bg-status-published/30',
-                  line.kind === 'removed' && 'bg-destructive/15 line-through',
-                )}
-              >
-                {line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '− ' : '  '}
-                {line.text}
-              </div>
-            ),
-          )}
-        </pre>
-      ) : (
-        <Text>{after}</Text>
-      )}
+      {before !== after && <LineDiff before={before} after={after} />}
     </>
-  );
-}
-
-function Text({ children }: { children: string }) {
-  return (
-    <pre className="max-h-64 overflow-auto rounded-control bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
-      {children}
-    </pre>
   );
 }
 
