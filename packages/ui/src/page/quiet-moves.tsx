@@ -353,7 +353,10 @@ export async function refreshCopied(
     { spaceId: preview.source.spaceId },
     { spaceId: made.spaceId },
   ]);
-  if (preview.kind === 'move') void refreshAccess(queryClient, ctx);
+  if (preview.kind !== 'move') return;
+  void refreshAccess(queryClient, ctx);
+  // A page open where it was is gone now: loaded again, it follows its old address.
+  void queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] });
 }
 
 /** Work out a copy, or a move into another space, reading links off the page's thread. */
