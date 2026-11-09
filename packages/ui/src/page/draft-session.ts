@@ -479,6 +479,8 @@ export class DraftSession {
     theirs: RevisionId;
     yours: PagePayload;
   } | null> {
+    // A file still uploading goes in first, so the merge has it.
+    await Promise.all(this.#uploads);
     this.#pull();
     const base = this.#base;
     const theirs = this.#theirs ?? (await this.#ports.draftHead());

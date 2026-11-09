@@ -34,7 +34,7 @@ type Merge = pageMerge.Merge;
 type Overlap = pageMerge.Overlap;
 type Review = pageMerge.Review;
 
-const MONO = 'font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words';
+const MONO = 'font-mono text-[13px] leading-relaxed whitespace-pre-wrap wrap-anywhere';
 
 /** Where the merge view finds the pictures a banner or icon overlap shows: the page's draft attachments. */
 export type MergePictures = {
@@ -206,7 +206,7 @@ function OverlapCard({
       {overlap.part === 'body' && overlap.before !== null && (
         <p className={cn(MONO, 'text-muted-foreground')}>{overlap.before}</p>
       )}
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Side title="Yours">
           <Value overlap={overlap} side="yours" pictures={pictures} />
         </Side>
@@ -264,7 +264,7 @@ function ChoiceButton({
 
 function Side({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="grid content-start gap-1 rounded-control bg-muted p-3">
+    <div className="grid min-w-0 content-start gap-1 rounded-control bg-muted p-3">
       <p className="text-sm font-bold">{title}</p>
       {children}
     </div>
@@ -399,7 +399,7 @@ function ReviewStep({
       {changes && (
         <ol
           aria-label="Changes"
-          className="grid overflow-hidden rounded-control border bg-card text-[13px]"
+          className="grid grid-cols-1 overflow-hidden rounded-control border bg-card text-[13px]"
         >
           {lines.map((line, index) => (
             <ReviewRow

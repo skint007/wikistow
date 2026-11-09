@@ -16,6 +16,7 @@ import { flushSync } from 'react-dom';
 import { Paperclip, Trash2 } from 'lucide-react';
 import {
   useCallback,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -223,6 +224,12 @@ export function DraftEditor({
   const canMerge = snapshot.status === 'conflict' && session.hasUnsaved() && !onDevice;
   const merge = merging.state?.status === 'ready' ? merging.state.opened : null;
   const mergeButton = useRef<HTMLButtonElement>(null);
+  // Once the conflict is resolved another way, a merge that failed is forgotten.
+  const { cancel: forgetMerge } = merging;
+  const conflict = snapshot.status === 'conflict';
+  useEffect(() => {
+    if (!conflict) forgetMerge();
+  }, [conflict, forgetMerge]);
 
   return (
     <div className="flex flex-1 flex-col gap-4">
