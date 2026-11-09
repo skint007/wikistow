@@ -95,7 +95,7 @@ async function browserStorage(page: Page) {
  * IDs), scroll positions and session cookie, and none of `secrets`.
  * The service worker keeps the app's own files in Cache Storage.
  * Settings kept on the device once changed, such as `wikistow.idleLock`,
- * `wikistow.askBeforeMoves` (`false`) and `wikistow.showProperties`
+ * `wikistow.askBeforeMoves` (`true`) and `wikistow.showProperties`
  * (`true`), aren't set here. While the vault is open, the tab
  * also keeps its unlock: the vault key sealed in sessionStorage, under a
  * wrapping key in IndexedDB that no script can read out, and, when it is

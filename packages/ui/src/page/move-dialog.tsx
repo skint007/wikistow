@@ -1,15 +1,14 @@
 import {
   foldersUnder,
   moveOperations,
-  type ClientContext,
   type FolderId,
   type PageId,
   type SpaceId,
   type spaceOperations,
 } from '@wikistow/client';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { failedToLoad, LoadFailed } from '@/components/load-failed';
 import { Name, plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -23,22 +22,14 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Picker } from '@/components/ui/picker';
-import { runCommand } from '../commands/command';
-import { moveNode } from '../commands/page-commands';
-import { requirementsHere } from '../commands/ui-commands';
-import { pageWriter } from '../data/offline-changes';
-import { refreshAccess, sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
-import { errorMessage } from '../errors';
+import { sharedWithMeQuery, spacesQuery, treeQuery } from '../data/queries';
 import { SAVED_HERE, useAvailability, type MoveAvailability } from '../shell/availability';
-import { THIS_DEVICE } from '../settings/rows';
-import { PreviewTree } from '../sharing/first-share';
 import { isStale } from '../sharing/messages';
 import { nameOf } from '../sharing/names';
 import { movesAsOwner, useOwnerStanding } from '../sharing/owner-standing';
-import { describePerson, peopleQuery } from '../sharing/people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
-import { askBeforeMoves, useAskBeforeMoves } from './ask-before-moves';
+import { askBeforeMoves } from './ask-before-moves';
 import { ConfirmCopy, openPlace, type Chosen } from './confirm-copy';
 import { moveMessage } from './messages';
 import {
@@ -49,13 +40,29 @@ import {
   type Destination,
   type MoveTree,
 } from './move-model';
+import {
+  moveNotes,
+  MoveNotesLines,
+  moveNow,
+  moveOnDevice,
+  MoveRefused,
+  noteMoved,
+  parentIn,
+  refreshMoved,
+  undoMove,
+  undoOnDevice,
+  unreadableIn,
+  unreadableMessage,
+  useQuietMove,
+  type Drop,
+} from './quiet-moves';
 
 /**
  * What is being moved or copied: a page or a folder, by the name the
- * person sees. A drop in the sidebar has already chosen where it goes
- * (`to`), in its own space, so the dialog opens on who gains and loses access.
- * A drop on another space's tile in the rail has chosen that space (`into`),
- * so the dialog opens on choosing where in it, its top first.
+ * person sees. While **Ask before moving** is on, a drop in the sidebar
+ * opens the dialog on the place dropped on (`to`), in its own space, and a
+ * drop on another space's tile in the rail on that space (`into`), its top
+ * picked.
  */
 export type Moving = {
   id: FolderId | PageId;
@@ -65,13 +72,6 @@ export type Moving = {
   action?: 'move' | 'copy';
   to?: Destination<FolderId>;
   into?: SpaceId;
-  /**
-   * Why a drop moving without asking stopped, for the dialog it opens on:
-   * something changed meanwhile, or what went wrong.
-   */
-  stopped?: 'stale' | { error: string };
-  /** What a drop moving without asking worked out, for the dialog showing its progress. */
-  preview?: moveOperations.MovePreview;
 };
 
 /**
@@ -112,6 +112,13 @@ export function destinationsIn(
   );
 }
 
+/** Where a copy of a page or folder in `tree` can go in that space: anywhere the person can make pages but inside itself. */
+export const copyDestinationsIn = (tree: Tree, moving: Pick<Moving, 'id' | 'kind'>) =>
+  copyDestinations(
+    moveTreeOf(tree),
+    moving.kind === 'folder' ? foldersUnder(tree.folders, moving.id) : new Set<string>(),
+  );
+
 /**
  * How moving `moving`, in `tree`, its space's, under `parentId` goes now:
  * on the server, or on this device while offline or after a change waiting
@@ -129,29 +136,15 @@ export function moveRoute(
   return availability.move(moving.id, parentId, { across });
 }
 
-/** Move it on this device, sent once the server answers (#331). */
-const moveOnDevice = (
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  moving: Moving,
-  parentId: FolderId | null,
-) =>
-  pageWriter(ctx).moveNode({
-    spaceId,
-    nodeId: moving.id,
-    node: moving.kind,
-    name: moving.name,
-    parentId,
-  });
-
 /**
- * Move or copy a page or folder: choose a space, then where in it it goes.
- * A move within its own space is the ordinary move (protocol section 10):
- * look over who gains and who loses access when that crosses a shared
- * folder's edge, then move it. A copy, or a move into another space, is a
- * copy (section 10, "Copies, and moves between spaces"; ADR 0007), which
- * always asks first. Opened from the page menu, the sidebar's menus, a
- * drop in the sidebar, and one on a space in the rail (`SpaceMoves`).
+ * Move or copy a page or folder, in one step (#376): choose a space and
+ * where in it it goes, then Move or Copy. A move within its own space is
+ * the ordinary move (protocol section 10); a copy, or a move into another
+ * space, is a copy (section 10, "Copies, and moves between spaces"; ADR
+ * 0007). Under the place chosen, a line says when more people will be able
+ * to read it, and another what a move ends. Then a notice offers Undo.
+ * Opened from the page menu, the sidebar's menus, and while **Ask before
+ * moving** is on, a drop in the sidebar or on a space in the rail (`SpaceMoves`).
  */
 export function MoveDialog({
   spaceId,
@@ -227,53 +220,24 @@ export function SpaceMoveDialog({
 }
 
 /**
- * Start a move whose place is already chosen, as a drop's is. With asking
- * before moves turned off it goes ahead at once, and `open`s the dialog only
- * when there is something to see there: the progress of a move that changes
- * keys, or why one stopped. Otherwise it opens the dialog to confirm.
+ * Start a drop's move or copy, whose place is already chosen (#376): at
+ * once, with a notice and Undo (`useQuietMove`), or, while **Ask before
+ * moving** is on, by `open`ing Move to… or Copy to… on that place, for one
+ * press of Move or Copy.
  */
-export function useStartMove(spaceId: SpaceId, open: (moving: Moving) => void) {
-  const ctx = useClient();
-  const queryClient = useQueryClient();
-  const availability = useAvailability();
-  return async (moving: Moving & { to: Destination<FolderId> }) => {
-    if (askBeforeMoves.get()) return open(moving);
-    const tree = queryClient.getQueryData(treeQuery(ctx, spaceId).queryKey);
-    if (tree && moveRoute(tree, moving, moving.to.parentId, availability).route === 'device') {
-      try {
-        await moveOnDevice(ctx, spaceId, moving, moving.to.parentId);
-      } catch (caught) {
-        open({ ...moving, stopped: { error: errorMessage(caught) } });
-      }
-      return;
-    }
-    try {
-      const preview = await moveOperations.previewMove(ctx, {
-        spaceId,
-        nodeId: moving.id,
-        parentId: moving.to.parentId,
-      });
-      // Rewrapping can take a while: the dialog shows how far it has got.
-      if (preview.crossing) return open({ ...moving, preview });
-      await runCommand(moveNode, { preview }, { satisfies: requirementsHere(), ctx });
-      await refreshMoved(queryClient, ctx);
-    } catch (caught) {
-      if (!isStale(caught))
-        return open({ ...moving, stopped: { error: moveMessage(caught, moving.kind) } });
-      // The dialog works it out again, never sent unseen.
-      void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-      open({ ...moving, stopped: 'stale' });
-    }
+export function useStartMove(open: (spaceId: SpaceId, moving: Moving) => void) {
+  const quiet = useQuietMove();
+  return (drop: Drop) => {
+    const { spaceId, moving, action, to } = drop;
+    if (!askBeforeMoves.get()) return quiet(drop);
+    open(
+      spaceId,
+      to.spaceId === spaceId
+        ? { ...moving, action, to: to.place }
+        : { ...moving, action, into: to.spaceId },
+    );
   };
 }
-
-// What a move changes: who has access to what, and where pages are.
-const refreshMoved = (queryClient: QueryClient, ctx: ClientContext) =>
-  Promise.all([
-    refreshAccess(queryClient, ctx),
-    queryClient.invalidateQueries({ queryKey: [PLAIN, 'page'] }),
-    queryClient.invalidateQueries({ queryKey: [PLAIN, 'history'] }),
-  ]);
 
 const DESCRIPTION = {
   move: {
@@ -286,7 +250,7 @@ const DESCRIPTION = {
   },
 };
 
-// Choosing where it goes, then confirming; Back keeps the choice.
+// Where it goes, in one step: pressing Move or Copy does it (#376).
 function MoveSteps({
   spaceId,
   moving,
@@ -296,76 +260,53 @@ function MoveSteps({
   moving: Moving;
   onDone: () => void;
 }) {
-  const ctx = useClient();
   const [action, setAction] = useState(moving.action ?? 'move');
-  // A drop stays in its own space, which ConfirmMove names itself.
-  const [chosen, setChosen] = useState<Chosen | null>(
-    moving.to ? { spaceId, spaceName: '', place: moving.to } : null,
-  );
-  const [confirming, setConfirming] = useState(moving.to !== undefined);
-  // What a drop moving without asking left, for the place dropped on only.
-  const [dropped, setDropped] = useState<Pick<Moving, 'stopped' | 'preview'>>(moving);
-  const back = () => {
-    setDropped({});
-    setConfirming(false);
-  };
-  // Offline, or after a change waiting here, a move within one share waits on this device.
-  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
-  const availability = useAvailability();
-  const onDevice =
-    chosen !== null &&
-    tree !== undefined &&
-    moveRoute(tree, moving, chosen.place.parentId, availability).route === 'device';
+  // While it runs, the place stays as chosen.
+  const [busy, setBusy] = useState(false);
+  const label = action === 'copy' ? 'Copy' : 'Move';
   return (
     <div className="grid gap-4">
       <DialogHeader>
         <DialogTitle>
-          {action === 'copy' ? 'Copy' : 'Move'} “<Name>{moving.name}</Name>”
+          {label} “<Name>{moving.name}</Name>”
         </DialogTitle>
         <DialogDescription>{DESCRIPTION[action][moving.kind]}</DialogDescription>
       </DialogHeader>
-      {chosen && confirming ? (
-        action === 'move' && chosen.spaceId === spaceId && onDevice ? (
-          <ConfirmOnDevice
-            spaceId={spaceId}
-            moving={moving}
-            destination={chosen.place}
-            error={typeof dropped.stopped === 'object' ? dropped.stopped.error : null}
-            onBack={back}
-            onDone={onDone}
-          />
-        ) : action === 'move' && chosen.spaceId === spaceId ? (
-          <ConfirmMove
-            spaceId={spaceId}
-            moving={moving}
-            destination={chosen.place}
-            dropped={dropped}
-            onBack={back}
-            onDone={onDone}
-          />
-        ) : (
-          <ConfirmCopy
-            sourceSpaceId={spaceId}
-            node={moving}
-            copy={action === 'copy'}
-            chosen={chosen}
-            onBack={back}
-            onDone={onDone}
-          />
-        )
-      ) : (
-        <ChooseDestination
-          spaceId={spaceId}
-          moving={moving}
-          action={action}
-          chosen={chosen}
-          onCopyInstead={() => setAction('copy')}
-          onChoose={(next) => {
-            setChosen(next);
-            setConfirming(true);
-          }}
-        />
-      )}
+      <ChooseDestination
+        spaceId={spaceId}
+        moving={moving}
+        action={action}
+        // A drop stays in its own space, whose name the picker shows.
+        chosen={moving.to ? { spaceId, spaceName: '', place: moving.to } : null}
+        disabled={busy}
+        onCopyInstead={() => setAction('copy')}
+        footer={(chosen) =>
+          !chosen ? (
+            <DialogFooter>
+              <Button disabled>{label}</Button>
+            </DialogFooter>
+          ) : action === 'move' && chosen.spaceId === spaceId ? (
+            <MoveHere
+              key={`${chosen.spaceId} ${chosen.place.parentId}`}
+              spaceId={spaceId}
+              moving={moving}
+              chosen={chosen}
+              onBusy={setBusy}
+              onDone={onDone}
+            />
+          ) : (
+            <ConfirmCopy
+              key={`${action} ${chosen.spaceId} ${chosen.place.parentId}`}
+              sourceSpaceId={spaceId}
+              node={moving}
+              copy={action === 'copy'}
+              chosen={chosen}
+              onBusy={setBusy}
+              onDone={onDone}
+            />
+          )
+        }
+      />
     </div>
   );
 }
@@ -376,8 +317,8 @@ const SPACE_DESCRIPTION = {
 };
 
 /**
- * Everything in a space, into another (#339): choosing where, then the
- * usual preview. After a move, the space is empty, and its owner is asked
+ * Everything in a space, into another (#339): choosing where, then a step
+ * of its own to confirm, as it can't be undone (#376). After a move, the space is empty, and its owner is asked
  * whether to delete it; it is never deleted unasked.
  */
 function SpaceSteps({
@@ -513,17 +454,24 @@ function ChooseDestination({
   moving,
   action,
   chosen,
+  disabled = false,
   onCopyInstead,
   onChoose,
+  footer,
 }: {
   spaceId: SpaceId;
   /** Null for everything in the space. */
   moving: Moving | null;
   action: 'move' | 'copy';
-  /** The place chosen before going back, shown chosen again. */
+  /** The place chosen at first: dropped on, or chosen before going back. */
   chosen: Chosen | null;
+  /** While a move or copy runs: the place stays as chosen. */
+  disabled?: boolean;
   onCopyInstead: () => void;
-  onChoose: (chosen: Chosen) => void;
+  /** Next, for a step after this one. */
+  onChoose?: (chosen: Chosen) => void;
+  /** In place of Next: what goes under the place picked, and the button that moves it there. */
+  footer?: (chosen: Chosen | null) => ReactNode;
 }) {
   const ctx = useClient();
   const id = useId();
@@ -618,6 +566,8 @@ function ChooseDestination({
   // Everything in a space needs something in it, and another space to go to.
   const empty =
     moving === null && source !== undefined && [...source.folders, ...source.pages].length === 0;
+  const picking =
+    space && place && !empty ? { spaceId: space.spaceId, spaceName: space.name, place } : null;
   const label = (d: Destination, spaceName: string) =>
     d.parentId === null ? `Top of ${plainText(spaceName)}` : d.path.map(plainText).join(' › ');
   return (
@@ -625,8 +575,7 @@ function ChooseDestination({
       className="grid gap-4"
       onSubmit={(event) => {
         event.preventDefault();
-        if (space && place && !empty)
-          onChoose({ spaceId: space.spaceId, spaceName: space.name, place });
+        if (picking) onChoose?.(picking);
       }}
     >
       <div className="grid gap-1.5">
@@ -647,6 +596,7 @@ function ChooseDestination({
             }`,
           }))}
           autoFocus
+          disabled={disabled}
           onChange={(value) => {
             const next = offered.find((c) => c.spaceId === value);
             if (!next) return;
@@ -670,6 +620,7 @@ function ChooseDestination({
             <Button
               type="button"
               variant="link"
+              disabled={disabled}
               className="h-auto p-0"
               onClick={() => {
                 onCopyInstead();
@@ -707,6 +658,7 @@ function ChooseDestination({
                 placeholder="Choose where it goes"
                 value={place ? String(index) : null}
                 options={places.map((d, i) => ({ value: String(i), label: label(d, space.name) }))}
+                disabled={disabled}
                 onChange={(value) => {
                   const next = places[Number(value)];
                   if (next) setPicked(next.parentId);
@@ -722,339 +674,136 @@ function ChooseDestination({
           )}
         </div>
       )}
-      <DialogFooter>
-        <Button type="submit" disabled={!place || !space || empty}>
-          Next
-        </Button>
-      </DialogFooter>
+      {footer ? (
+        footer(picking)
+      ) : (
+        <DialogFooter>
+          <Button type="submit" disabled={!picking}>
+            Next
+          </Button>
+        </DialogFooter>
+      )}
     </form>
   );
 }
 
-/** Where it goes, which focus goes to after Next, so a screen reader starts with what is being confirmed. */
-function MoveHeading({
-  spaceId,
-  destination,
-}: {
-  spaceId: SpaceId;
-  destination: Destination<FolderId>;
-}) {
-  const ctx = useClient();
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => heading.current?.focus(), []);
-  // Named as the picker named it.
-  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
-  const spaceName = nameOf(tree?.space?.metadata) ?? 'this space';
-  return (
-    <h3 ref={heading} tabIndex={-1} className="text-sm outline-none">
-      To{' '}
-      <strong>
-        {destination.parentId === null ? (
-          <>
-            the top of <Name>{spaceName}</Name>
-          </>
-        ) : (
-          // Each name kept apart, so one holding " › " or right-to-left text reads as one.
-          destination.path.map((folder, i) => (
-            <Fragment key={i}>
-              {i > 0 && ' › '}
-              <Name>{folder}</Name>
-            </Fragment>
-          ))
-        )}
-      </strong>
-      .
-    </h3>
-  );
-}
+const CHANGED =
+  'Something changed meanwhile, so nothing moved. Check where it goes, then press Move again.';
 
 /**
- * A move within one share, offline or after a change waiting here: nobody
- * gains or loses access, and it waits on this device, sent after what was
- * made before it (#331). The server checks it again then.
+ * A move within its own space, from the dialog: Move moves it. One that
+ * crosses a shared folder's edge is worked out first, so its notes show
+ * under the place before Move is pressed; it rewraps keys, which the dialog
+ * shows the progress of. Offline, or after a change waiting here, it waits
+ * on this device (#331). Then a notice says where it went, with Undo.
  */
-function ConfirmOnDevice({
+function MoveHere({
   spaceId,
   moving,
-  destination,
-  error: earlier,
-  onBack,
+  chosen,
+  onBusy,
   onDone,
 }: {
   spaceId: SpaceId;
   moving: Moving;
-  destination: Destination<FolderId>;
-  /** Why a drop moving without asking stopped. */
-  error: string | null;
-  onBack: () => void;
-  onDone: () => void;
-}) {
-  const ctx = useClient();
-  const { offline } = useAvailability();
-  const { busy, error, run } = useAction((caught) => moveMessage(caught, moving.kind));
-  const asking = useAskBeforeMoves();
-  const [dontAsk, setDontAsk] = useState(false);
-  const move = () =>
-    run(async () => {
-      if (dontAsk) askBeforeMoves.set(false);
-      await moveOnDevice(ctx, spaceId, moving, destination.parentId);
-      onDone();
-    });
-  return (
-    <div className="grid gap-4">
-      <MoveHeading spaceId={spaceId} destination={destination} />
-      <p className="rounded-control bg-muted p-3 text-sm">
-        Nobody gains or loses access: it stays with the same people.{' '}
-        {offline ? SAVED_HERE : 'It’s sent after your change made offline.'}
-      </p>
-      <ErrorLine error={error ?? earlier} />
-      {asking && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={dontAsk}
-            disabled={busy}
-            onChange={(event) => setDontAsk(event.target.checked)}
-          />
-          Don’t ask again on {THIS_DEVICE.toLowerCase()}
-        </label>
-      )}
-      <DialogFooter>
-        <Button variant="ghost" disabled={busy} onClick={onBack}>
-          Back
-        </Button>
-        <Button disabled={busy} onClick={() => void move()}>
-          Move
-        </Button>
-      </DialogFooter>
-    </div>
-  );
-}
-
-const REACH: Record<moveOperations.Reach, string> = {
-  drafts: 'drafts and published versions',
-  published: 'published versions',
-};
-
-const CHANGED = 'Something changed meanwhile. Check the move again, then confirm.';
-
-/**
- * Who gains and who loses, worked out afresh: it is what the person
- * confirms. With asking before moves turned off, it moves as soon as it's
- * worked out, unless a move made without asking stopped already.
- */
-function ConfirmMove({
-  spaceId,
-  moving,
-  destination,
-  dropped,
-  onBack,
-  onDone,
-}: {
-  spaceId: SpaceId;
-  moving: Moving;
-  destination: Destination<FolderId>;
-  dropped: Pick<Moving, 'stopped' | 'preview'>;
-  onBack: () => void;
+  chosen: Chosen;
+  onBusy: (busy: boolean) => void;
   onDone: () => void;
 }) {
   const ctx = useClient();
   const queryClient = useQueryClient();
-  const { busy, error, run } = useAction((caught) => moveMessage(caught, moving.kind));
+  const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const availability = useAvailability();
+  const { busy, error, run } = useAction((caught) =>
+    caught instanceof MoveRefused ? caught.message : moveMessage(caught, moving.kind),
+  );
+  useEffect(() => onBusy(busy), [busy, onBusy]);
   // How far the rewrapping has got, once the server has counted what moves.
   const [progress, setProgress] = useState<{ records: number; total: number | null } | null>(null);
-  const [notice, setNotice] = useState(dropped.stopped === 'stale' ? CHANGED : null);
-  const [earlier, setEarlier] = useState(
-    typeof dropped.stopped === 'object' ? dropped.stopped.error : null,
-  );
-  const asking = useAskBeforeMoves();
-  const [dontAsk, setDontAsk] = useState(false);
-  // As it was when this step opened, so Don't ask again doesn't move it too.
-  const [auto] = useState(() => !askBeforeMoves.get() && dropped.stopped === undefined);
-  const tried = useRef(false);
+  const [changed, setChanged] = useState(false);
+  const { parentId } = chosen.place;
+  const node =
+    tree?.folders.find((f) => f.id === moving.id) ?? tree?.pages.find((p) => p.id === moving.id);
+  const route = tree ? moveRoute(tree, moving, parentId, availability).route : null;
+  // Only a move across a share's edge has notes: who gains access, and agents' folders that end.
+  const crossing =
+    tree !== undefined && node !== undefined && crossesShare(moveTreeOf(tree), node, parentId);
   const preview = useQuery({
-    queryKey: [PLAIN, 'move-preview', spaceId, moving.id, destination.parentId],
-    queryFn: () =>
-      moveOperations.previewMove(ctx, {
-        spaceId,
-        nodeId: moving.id,
-        parentId: destination.parentId,
-      }),
-    // A drop's, worked out a moment ago, isn't worked out again.
-    initialData: dropped.preview,
-    staleTime: dropped.preview ? Infinity : 0,
+    queryKey: [PLAIN, 'move-preview', spaceId, moving.id, parentId],
+    queryFn: () => moveOperations.previewMove(ctx, { spaceId, nodeId: moving.id, parentId }),
+    enabled: route === 'server' && crossing,
     gcTime: 0,
     retry: false,
+    // Worked out again only when a move finds something changed.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const shown = preview.data;
-  const ids = shown
-    ? [
-        ...[...shown.gains, ...shown.losses].map((c) => c.identityId),
-        ...shown.endingPicks.map((a) => a.personId),
-      ]
-    : [];
-  const { data: people } = useQuery(peopleQuery(ctx, ids));
-  const name = (identityId: string) =>
-    (people?.get(identityId) ?? describePerson(ctx, identityId, null)).name;
-  // Only a move across matters: it gives access to what moves.
-  const unreadable = shown?.crossing
-    ? shown.folders.filter((f) => nameOf(f.metadata) === null).length +
-      shown.pages.filter((p) => p.title === null).length
-    : 0;
+  const unreadable = shown ? unreadableIn(shown) : 0;
+  const ready =
+    route === 'device' ||
+    (route === 'server' && (!crossing || (shown !== undefined && unreadable === 0)));
 
-  const move = (confirmed: moveOperations.MovePreview) => {
-    tried.current = true;
-    return run(async () => {
-      setProgress(confirmed.crossing ? { records: 0, total: null } : null);
-      setNotice(null);
-      setEarlier(null);
-      try {
-        await runCommand(
-          moveNode,
-          { preview: confirmed },
-          {
-            satisfies: requirementsHere(),
-            ctx,
-            onProgress: setProgress,
-          },
-        );
-      } catch (caught) {
-        if (!isStale(caught)) throw caught;
-        // Worked out again and shown again, never sent unseen.
-        await Promise.all([
-          preview.refetch(),
-          queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
-        ]);
-        setNotice(CHANGED);
-        return;
-      } finally {
-        setProgress(null);
+  const move = () =>
+    run(async () => {
+      if (!tree) return;
+      setChanged(false);
+      const back = { spaceId, moving, parentId: parentIn(tree, moving) };
+      let undo;
+      if (route === 'device') {
+        await moveOnDevice(ctx, spaceId, moving, parentId);
+        undo = undoOnDevice(ctx, back);
+      } else {
+        const confirmed =
+          shown ??
+          (await moveOperations.previewMove(ctx, { spaceId, nodeId: moving.id, parentId }));
+        // It crosses after all, which the tree didn't show: its notes come first.
+        if (confirmed.crossing && !shown) {
+          await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+          setChanged(true);
+          return;
+        }
+        setProgress(confirmed.crossing ? { records: 0, total: null } : null);
+        try {
+          await moveNow(ctx, confirmed, setProgress);
+        } catch (caught) {
+          if (!isStale(caught)) throw caught;
+          await Promise.all([
+            crossing && preview.refetch(),
+            queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+          ]);
+          setChanged(true);
+          return;
+        } finally {
+          setProgress(null);
+        }
+        await refreshMoved(queryClient, ctx);
+        undo = undoMove(ctx, queryClient, back);
       }
-      await refreshMoved(queryClient, ctx);
       onDone();
+      noteMoved(ctx, { moving, to: chosen, sameSpace: true, copy: false, undo });
     });
-  };
-  const movable = shown !== undefined && !preview.isError && unreadable === 0;
-  useEffect(() => {
-    if (auto && movable && !tried.current) void move(shown);
-  });
 
   return (
-    <div className="grid gap-4">
-      <MoveHeading spaceId={spaceId} destination={destination} />
-      {notice && !preview.isError && (
+    <>
+      {route === 'device' && (
+        <p className="text-sm text-muted-foreground">
+          {availability.offline ? SAVED_HERE : 'It’s sent after your change made offline.'}
+        </p>
+      )}
+      {shown && tree && <MoveNotesLines notes={moveNotes(tree, shown, chosen.spaceName)} />}
+      {crossing && preview.isPending && route === 'server' && (
+        <p className="text-sm text-muted-foreground">Checking where it goes…</p>
+      )}
+      {unreadable > 0 && (
+        <p role="alert" className="text-sm text-destructive">
+          {unreadableMessage(unreadable)}
+        </p>
+      )}
+      {changed && (
         <p role="status" className="text-sm font-bold">
-          {notice}
+          {CHANGED}
         </p>
-      )}
-      {preview.error && (
-        <ErrorLine
-          error={
-            isStale(preview.error)
-              ? 'Something changed since you chose where it goes. Go back and check again.'
-              : moveMessage(preview.error, moving.kind)
-          }
-        />
-      )}
-      {!shown && !preview.error && (
-        <p className="text-sm text-muted-foreground">Working out who gains and loses access…</p>
-      )}
-      {shown && !shown.crossing && (
-        <p className="rounded-control bg-muted p-3 text-sm">
-          Nobody gains or loses access: it stays with the same people, and no keys change.
-        </p>
-      )}
-      {shown?.crossing && (
-        <>
-          <section aria-label="Who gains access" className="grid gap-2">
-            <h3 className="text-sm font-bold text-subtle-foreground">
-              At least these people gain access
-            </h3>
-            {shown.gains.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nobody new.</p>
-            ) : (
-              <ul className="grid gap-1 text-sm">
-                {shown.gains.map((change) => (
-                  <li key={change.identityId}>
-                    <strong>
-                      <Name>{name(change.identityId)}</Name>
-                    </strong>{' '}
-                    gets {change.after ? REACH[change.after] : ''}
-                    {change.before && ` (has ${REACH[change.before]} only now)`}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="text-xs text-muted-foreground">
-              The server could keep someone with access from this list, so there may be more. Once
-              you move it, anyone who gains access keeps the keys to everything in it, even if you
-              move it back.
-            </p>
-          </section>
-          <section aria-label="Who loses access" className="grid gap-2">
-            <h3 className="text-sm font-bold text-subtle-foreground">These people lose access</h3>
-            {shown.losses.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nobody.</p>
-            ) : (
-              <ul className="grid gap-1 text-sm">
-                {shown.losses.map((change) => (
-                  <li key={change.identityId}>
-                    <strong>
-                      <Name>{name(change.identityId)}</Name>
-                    </strong>{' '}
-                    {change.after ? `keeps ${REACH[change.after]} only` : 'loses access'}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <p className="text-xs text-muted-foreground">
-              They keep anything they already read or downloaded, but not what is saved after the
-              move.
-            </p>
-          </section>
-          {shown.endingPicks.length > 0 && (
-            <section aria-label="Agents whose folder ends" className="grid gap-2">
-              <h3 className="text-sm font-bold text-subtle-foreground">
-                These agents lose the folder they were given
-              </h3>
-              <ul className="grid gap-1 text-sm">
-                {shown.endingPicks.map((agent) => (
-                  <li key={agent.agentId}>
-                    <strong>
-                      <Name>{agent.name}</Name>
-                    </strong>
-                    , <Name>{name(agent.personId)}</Name>’s agent
-                  </li>
-                ))}
-              </ul>
-              <p className="text-xs text-muted-foreground">
-                Each could reach a folder in what moves. Its person can add one again on the Agents
-                page.
-              </p>
-            </section>
-          )}
-          {/* From the preview, not the menu: what is shown here is what gets new keys. */}
-          <section aria-label="What moves" className="grid gap-2">
-            <h3 className="text-sm font-bold text-subtle-foreground">What moves</h3>
-            <PreviewTree
-              preview={{
-                spaceId,
-                rootId:
-                  shown.kind === 'folder'
-                    ? (shown.folders.find((f) => f.id === shown.nodeId)?.id ?? null)
-                    : shown.fromParentId,
-                folders: shown.folders,
-                pages: shown.pages,
-              }}
-            />
-          </section>
-          {unreadable > 0 && (
-            <p role="alert" className="text-sm text-destructive">
-              This app can’t read {unreadable === 1 ? 'one item' : `${unreadable} items`} here, so
-              it won’t move this across: you’d be giving access to something you can’t check.
-            </p>
-          )}
-        </>
       )}
       {progress !== null && (
         <p role="status" className="text-sm font-bold">
@@ -1064,41 +813,34 @@ function ConfirmMove({
           Keep this open until it’s done.
         </p>
       )}
-      <ErrorLine error={error ?? (preview.isError ? null : earlier)} />
-      {asking && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={dontAsk}
-            disabled={busy}
-            onChange={(event) => setDontAsk(event.target.checked)}
-          />
-          Don’t ask again on {THIS_DEVICE.toLowerCase()}
-        </label>
-      )}
+      <ErrorLine
+        error={
+          error ??
+          (preview.error
+            ? isStale(preview.error)
+              ? 'Something changed since you chose where it goes. Look again.'
+              : moveMessage(preview.error, moving.kind)
+            : null)
+        }
+      />
       <DialogFooter>
-        <Button
-          variant="ghost"
-          disabled={busy}
-          onClick={() => {
-            // Where it can go, from the tree as it is now.
-            void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-            onBack();
-          }}
-        >
-          Back
-        </Button>
-        <Button
-          disabled={busy || !movable}
-          onClick={() => {
-            if (!movable) return;
-            if (dontAsk) askBeforeMoves.set(false);
-            void move(shown);
-          }}
-        >
+        {preview.isError && !busy && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              // Where it can go, and what it crosses, from the tree as it is now.
+              void queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+              void preview.refetch();
+            }}
+          >
+            Look again
+          </Button>
+        )}
+        <Button type="button" disabled={busy || !ready} onClick={() => void move()}>
           Move
         </Button>
       </DialogFooter>
-    </div>
+    </>
   );
 }

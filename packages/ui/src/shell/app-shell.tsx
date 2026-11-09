@@ -33,7 +33,7 @@ import { lockVault, openSearch, requirementsHere, setTheme } from '../commands/u
 import { Rail, UpdateDot, useSignOut } from './rail';
 import { useConfirmSession, useSessionConfirmed } from '../vault/confirm';
 import { useVault, vaultStore } from '../vault/store';
-import { TrashNotice } from '../page/trash-notice';
+import { UndoNotice } from '../page/undo-notice';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
 import { SignOutHere } from './session-error';
@@ -212,7 +212,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
             <SafeModeBanner />
             <RestoreNotice />
-            {vault.status === 'unlocked' && <TrashNotice ctx={vault.ctx} />}
+            {vault.status === 'unlocked' && <UndoNotice ctx={vault.ctx} />}
             {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}
           </SpaceMoves>
           {signOutFailed && (

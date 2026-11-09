@@ -8,7 +8,8 @@ export const SpaceMoveOpener = createContext<(moving: MovingSpace) => void>(() =
 
 /**
  * Opens Move to… or Copy to… for a page or folder of `spaceId` dropped on
- * another space's tile in the rail (#338), held by `SpaceMoves` too.
+ * another space's tile in the rail while **Ask before moving** is on
+ * (#338, #376), held by `SpaceMoves` too.
  */
 export const DropMoveOpener = createContext<(spaceId: SpaceId, moving: Moving) => void>(() => {});
 

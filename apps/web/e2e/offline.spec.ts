@@ -341,7 +341,6 @@ test('a page moved and published offline goes once back online', async ({
     await page.getByRole('menuitem', { name: 'Move to…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Move “Bread”' });
     await pick(dialog.getByLabel('Folder'), 'Trips');
-    await dialog.getByRole('button', { name: 'Next' }).click();
     await expect(dialog).toContainText('saved on this device and sent when you’re back online');
     await dialog.getByRole('button', { name: 'Move', exact: true }).click();
     await expect(dialog).toBeHidden();

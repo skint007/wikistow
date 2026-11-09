@@ -137,7 +137,7 @@ export const deleteNote = ({
 
 /**
  * Moves a page or folder to the trash, then refreshes the tree and says so,
- * with Undo (`TrashNotice`). Offline, or after changes waiting for it, it
+ * with Undo (`UndoNotice`). Offline, or after changes waiting for it, it
  * waits on this device, and the queue refreshes the tree.
  */
 export function DeleteButton({
@@ -177,7 +177,7 @@ export function DeleteButton({
           contentChanged(queryClient, ctx, { spaceId }),
           queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
         ]);
-        noteTrashed({ ctx, spaceId, nodeId, name });
+        noteTrashed({ ctx, queryClient, spaceId, nodeId, name });
       }
       onDone();
     } catch (caught) {

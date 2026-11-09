@@ -3,7 +3,7 @@
 // source (protocol section 10, "Copies, and moves between spaces"; ADR 0007).
 // The source can be everything in a space too (#339), for its owners.
 //
-// `previewCopy` works out what the person confirms, sealing nothing. Then
+// `previewCopy` works it out, sealing nothing, for the app to say what applies. Then
 // `makeCopy` opens the copy, whose new nodes the server keeps hidden; seals
 // each source node's current name, or draft and publication, again as a new
 // node's first version in the destination's region, with every attachment
@@ -106,7 +106,7 @@ export type MoveEnds = {
   publications: { pageId: PageId; spaceId: SpaceId }[];
 };
 
-/** A copy or move worked out for the person to confirm. Nothing is sealed or sent yet. */
+/** A copy or move worked out, for the app to say what applies of it. Nothing is sealed or sent yet. */
 export type CopyPreview = {
   kind: 'copy' | 'move';
   copyId: string;
@@ -131,6 +131,16 @@ export type CopyPreview = {
   audience: CopyAudience;
   /** For a move, who loses access, by what the source's regions give them. */
   losses: AccessChange[];
+  /**
+   * Who can read more there than they can of it now: people the
+   * destination's verified audience names, beyond the least the source's
+   * regions give them, so someone who reads only a shared folder inside it
+   * gains the rest. Someone who doesn't own the source space can't list who
+   * reads it, so for them only they count as reading it now. Empty when it stays in
+   * the region it is in; null when that can't be told, for an unlisted
+   * audience, or an agent's copy.
+   */
+  gains: AccessChange[] | null;
   /** Pages published now that arrive with their draft alone, by source ID. */
   unpublished: { pageId: PageId; title: string | null }[];
   /**
@@ -232,7 +242,7 @@ function publishesIn(tree: Tree, region: Region) {
  * another space. A null `nodeId` is everything in the space, which only an
  * owner of it copies or moves, and only into another space (#339): each
  * node at its top goes under `parentId`, and the space stays, empty after a
- * move. Nothing is sealed or sent: the person confirms the
+ * move. Nothing is sealed or sent: the app says what applies of the
  * preview, then `makeCopy` makes it. Refuses a move within one space, which
  * is an ordinary move (`forbidden`), a destination inside what is copied
  * (`binding-mismatch`), a move by anyone but an owner of the source space,
@@ -324,6 +334,25 @@ export async function previewCopy(
 
   const audience = ctx.agent ? null : await destinationAudience(ctx, destTree, target);
   const isMove = kind === 'move';
+  const regions = regionsOf(moving);
+  // Who reads it now, region by region, where this app can list them: an owner of the space can.
+  const held =
+    audience?.kind === 'verified' || isMove
+      ? tree.space?.role === 'owner'
+        ? await sourceAudiences(ctx, source.spaceId, regions)
+        : [new Map<IdentityId, Reach>([[ctx.identity.public.id, 'drafts']])]
+      : [];
+  // Someone loses what they read anywhere in it, and gains what they couldn't read all of.
+  const most = new Map<IdentityId, Reach>();
+  for (const region of held)
+    for (const [id, reach] of region) if (rank(reach) > rank(most.get(id))) most.set(id, reach);
+  const least = (id: IdentityId) =>
+    held.reduce<Reach | null>((low, region) => {
+      const reach = region.get(id) ?? null;
+      return rank(reach) < rank(low) ? reach : low;
+    }, 'drafts');
+  // Two spaces' owner regions are alike to `sameRegion`, so another space is never the same region.
+  const staysIn = sameSpace && regions.every((region) => sameRegion(region, target.region));
   return {
     kind,
     copyId: copyRoutes.CopyId.parse(copyId),
@@ -342,7 +371,15 @@ export async function previewCopy(
     bringsPublished,
     nodes,
     audience,
-    losses: isMove ? await lossesOf(ctx, source.spaceId, moving, audience) : [],
+    losses: isMove ? lossesOf(most, audience, ctx.identity.public.id) : [],
+    gains: staysIn
+      ? []
+      : audience?.kind === 'verified'
+        ? audience.people.flatMap(({ identityId, reach }) => {
+            const now = held.length === 0 ? null : least(identityId);
+            return rank(reach) > rank(now) ? [{ identityId, before: now, after: reach }] : [];
+          })
+        : null,
     unpublished,
     links: sameSpace
       ? []
@@ -391,30 +428,29 @@ function regionsOf(moving: ReturnType<typeof subtreeOf>): Region[] {
 const RANK: Record<Reach, number> = { published: 1, drafts: 2 };
 const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 
-/**
- * Who holds less at the destination than in the source's regions now, for
- * a move, whose mover owns the source space. Only someone the destination
- * audience names counts as keeping access, so for a non-owner's preview of
- * the destination, everyone at the source is listed but the mover, who
- * writes there.
- */
-async function lossesOf(
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  moving: ReturnType<typeof subtreeOf>,
-  audience: CopyAudience,
-): Promise<AccessChange[]> {
+/** Who holds keys in each of `regions` of `spaceId` now, and how much, for an owner of it. */
+async function sourceAudiences(ctx: ClientContext, spaceId: SpaceId, regions: readonly Region[]) {
   const keys = await spaceKeys(ctx, spaceId);
-  const before = new Map<IdentityId, Reach>();
-  for (const region of regionsOf(moving)) {
-    for (const [id, reach] of await audienceOf(ctx, keys, region)) {
-      if (rank(reach) > rank(before.get(id))) before.set(id, reach);
-    }
-  }
+  const held = [];
+  for (const region of regions) held.push(await audienceOf(ctx, keys, region));
+  return held;
+}
+
+/**
+ * Who holds less at the destination than in the source's regions now
+ * (`before`), for a move, whose mover owns the source space. Only someone
+ * the destination audience names counts as keeping access, so for a
+ * non-owner's preview of the destination, everyone at the source is listed
+ * but the mover, who writes there.
+ */
+function lossesOf(
+  before: ReadonlyMap<IdentityId, Reach>,
+  audience: CopyAudience,
+  mover: IdentityId,
+): AccessChange[] {
   const after = new Map(
     audience?.kind === 'verified' ? audience.people.map((p) => [p.identityId, p.reach]) : [],
   );
-  const mover = ctx.identity.public.id;
   return [...before].flatMap(([identityId, reach]) => {
     if (audience?.kind === 'unlisted' && identityId === mover) return [];
     const kept = after.get(identityId) ?? null;
@@ -592,7 +628,7 @@ export type MadeCopy = {
 const FINISH_TRIES = 5;
 
 /**
- * Make a copy or move the person confirmed (`previewCopy`): open it, seal
+ * Make a copy or move as worked out (`previewCopy`): open it, seal
  * every node again for the destination and send them a batch at a time,
  * then finish. `onProgress` hears how far it has got. For a move, a source
  * head that moved on meanwhile is `stale-head` naming its nodes: those are

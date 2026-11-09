@@ -26,8 +26,8 @@ const Preview = z.custom<moveOperations.MovePreview>(
 );
 
 /**
- * Move a page or folder as previewed, once the person confirms it, or at
- * once if they turned asking before moves off. Who may is the server's to
+ * Move a page or folder as worked out, from Move to… or a drop (#376).
+ * Who may is the server's to
  * enforce: an editor within their share, an owner anywhere in the space.
  */
 export const moveNode: Command<z.ZodObject<{ preview: typeof Preview }>, PageEnv> = {
@@ -45,8 +45,8 @@ const CopyPreview = z.custom<copyOperations.CopyPreview>(
 
 /**
  * Copy a page or folder, with everything under it, or move one into
- * another space, as previewed, once the person confirms it: a move always
- * asks (ADR 0007). `onMade` hears where the copy is. Who may is the
+ * another space, as worked out, from Copy to…, Move to… or a drop (ADR
+ * 0007, #376). `onMade` hears where the copy is. Who may is the
  * server's to enforce: an editor of all of it copies, an owner of its space
  * moves, and both must be able to make pages where it goes.
  */
