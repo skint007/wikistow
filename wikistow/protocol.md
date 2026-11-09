@@ -487,7 +487,7 @@ On the server, a blob is labelled with its page and audience when it is uploaded
 
 ### 5.4 Metadata (space and folder names)
 
-**MetadataRecord** (`contracts/src/records/metadata.ts`): `protocol` (1), `installationId`, `spaceId`, `subjectKind` (`"space"` \| `"folder"` \| `"group"`), `subjectId` (the space ID, folder ID or group ID), `metadataRevisionId`, `basedOn`, `authorId`, `authorKeyVersion`, `payloadHash`. A group's name is only ever a v2 record (section 7.8). As accepted, `subjectKind` may also be `"comment"`, with `subjectId` a comment ID, only in a v2 record (section 5.9).
+**MetadataRecord** (`contracts/src/records/metadata.ts`): `protocol` (1), `installationId`, `spaceId`, `subjectKind` (`"space"` \| `"folder"`), `subjectId` (the space ID or folder ID), `metadataRevisionId`, `basedOn`, `authorId`, `authorKeyVersion`, `payloadHash`. A group's name is only ever a v2 record (section 7.8), so only `MetadataRecordV2` takes `"group"`, with `subjectId` the group ID. A comment is a v2 record too, with `subjectKind` `"comment"` and `subjectId` a comment ID, under a schema of its own, `CommentRecord` (section 5.9).
 
 Sealing works the same way as for revisions (`sealMetadata`):
 

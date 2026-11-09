@@ -253,12 +253,13 @@ export async function addComment(
       share,
     });
     if (input.thread !== null) {
-      // Held, so the thread's first comment can't go meanwhile.
+      // Held, so the thread's first comment can't go meanwhile, and replies
+      // to one thread, which may open it again, wait for each other.
       const [first] = await tx
         .select()
         .from(comments)
         .where(eq(comments.id, input.thread))
-        .for('share');
+        .for('no key update');
       // A thread the caller doesn't see, as a reader an editors' one, isn't there for them.
       if (
         !first ||
