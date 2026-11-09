@@ -40,10 +40,12 @@ export function showNotice(notice: Notice) {
   let current = notice;
   show(current);
   return {
+    /** False when another notice took its place, which it leaves be. */
     update(next: Notice) {
-      if (shown !== current) return;
+      if (shown !== current) return false;
       current = next;
       show(current);
+      return true;
     },
     close() {
       if (shown === current) show(null);
@@ -61,9 +63,14 @@ const SHOWN_MS = 10_000;
  */
 export function UndoNotice({ ctx }: { ctx: ClientContext }) {
   const notice = useSyncExternalStore(subscribe, () => shown);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => setError(null), [notice]);
+  // An Undo's progress and failure belong to its own notice, not a later one.
+  const [undoing, setUndoing] = useState<{
+    of: Notice;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
+  const busy = undoing !== null && undoing.of === notice && undoing.busy;
+  const error = undoing !== null && undoing.of === notice ? undoing.error : null;
   // Counted again once an Undo that failed is done, so its error is read.
   useEffect(() => {
     if (!notice || notice.running || busy) return;
@@ -73,18 +80,17 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
   if (!notice || notice.ctx !== ctx) return null;
 
   async function undo(item: Notice, run: () => Promise<void>) {
-    setBusy(true);
-    setError(null);
+    setUndoing({ of: item, busy: true, error: null });
     try {
       await run();
       if (shown === item) show(null);
+      setUndoing((now) => (now?.of === item ? null : now));
     } catch (caught) {
-      setError((item.undoMessage ?? errorMessage)(caught));
-    } finally {
-      setBusy(false);
+      const error = (item.undoMessage ?? errorMessage)(caught);
+      setUndoing((now) => (now?.of === item ? { of: item, busy: false, error } : now));
     }
   }
-  const { undo: undoing } = notice;
+  const { undo: takeBack } = notice;
   return (
     <div
       role={notice.failed || error ? 'alert' : 'status'}
@@ -98,12 +104,12 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
           <span className="text-muted-foreground">{notice.notes}</span>
         )}
       </div>
-      {undoing && (
+      {takeBack && (
         <Button
           variant="outline"
           size="sm"
           disabled={busy}
-          onClick={() => void undo(notice, undoing)}
+          onClick={() => void undo(notice, takeBack)}
         >
           Undo
         </Button>

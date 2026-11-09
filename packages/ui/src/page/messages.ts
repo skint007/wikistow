@@ -84,27 +84,31 @@ export class FinishUnknown extends Error {
 // or the app, deleting what it made, unless it may have finished
 // (`FinishUnknown`). The words differ only in what came of it: nothing, or
 // before it was tried, as a preview fails, that it can't go there. A failed
-// copy is never sent again unseen, so the way on is Look again.
+// copy is never sent again unseen, so the way on is Look again, or after a
+// drop, which has no dialog, dropping it again (`again`).
 const copyRefused = (
   nothing: string,
+  again = 'Look at it again.',
 ): Partial<Record<ApiError['code'] | CryptoError['code'], string>> => ({
-  'stale-head': `Something in it changed while it was going, so ${nothing}. Look at it again.`,
-  'permission-version': `Who has access changed while you were looking, so ${nothing}. Look at it again.`,
-  'key-version': `The keys where it was going changed meanwhile, so ${nothing}. Look at it again.`,
+  'stale-head': `Something in it changed while it was going, so ${nothing}. ${again}`,
+  'permission-version': `Who has access changed while you were looking, so ${nothing}. ${again}`,
+  'key-version': `The keys where it was going changed meanwhile, so ${nothing}. ${again}`,
   'not-found': `That page or folder, or where it was going, isn’t there any more, so ${nothing}.`,
   'binding-mismatch': `It can’t go inside itself, so ${nothing}.`,
   'too-deep': `That would put something more than 256 folders deep, so ${nothing}.`,
   'page-limit': `That would make more pages than your account may have, so ${nothing}.`,
   'folder-limit': `That would make more folders than your account may have, so ${nothing}.`,
   'storage-full': `Your storage is full, so ${nothing}. Free up some space, or ask your administrator for more.`,
-  'missing-blob': `An attachment didn’t arrive, so ${nothing}. Look at it again.`,
-  'rate-limited': `The server is busy, so ${nothing}. Wait a moment, then look at it again.`,
+  'missing-blob': `An attachment didn’t arrive, so ${nothing}. ${again}`,
+  'rate-limited': `The server is busy, so ${nothing}. Wait a moment, then ${again.toLowerCase()}`,
   'region-mismatch': `The server says that place is somewhere other than where this app found it, so ${nothing}. This could be an attack.`,
   'missing-key': `This app can’t open something in it, so ${nothing}.`,
   'unsupported-format': `Something in it was saved by a newer version of WikiStow, so ${nothing}. Update the app to copy it.`,
 });
 const COPY_REFUSED = copyRefused('nothing was copied');
 const MOVE_ACROSS_REFUSED = copyRefused('nothing moved');
+const COPY_DROP_REFUSED = copyRefused('nothing was copied', 'Try again.');
+const MOVE_DROP_REFUSED = copyRefused('nothing moved', 'Try again.');
 const previewRefused = (cant: string) => ({
   ...copyRefused(cant),
   'rate-limited': 'The server is busy. Wait a moment, then look at it again.',
@@ -116,9 +120,14 @@ const MOVE_PREVIEW_REFUSED = previewRefused('it can’t be moved there');
  * A short message for a failed copy, or move into another space (`copy`
  * false): this app's own words, never the server's. A refusal for the
  * pages it names (`PagesRefused`) is said here; the dialog lists them.
- * `tried` is false for a preview that failed, before anything was sent.
+ * `tried` is false for a preview that failed, before anything was sent;
+ * `'dropped'` is a drop's, which has no dialog to look at it again in.
  */
-export function copyMessage(error: unknown, copy: boolean, tried = true): string {
+export function copyMessage(
+  error: unknown,
+  copy: boolean,
+  tried: boolean | 'dropped' = true,
+): string {
   const nothing = copy ? 'nothing was copied' : 'nothing moved';
   if (error instanceof FinishUnknown) {
     return copy
@@ -146,13 +155,18 @@ export function copyMessage(error: unknown, copy: boolean, tried = true): string
         : 'It can’t be moved.';
     return `${error.message} ${after}`;
   }
-  const refused = tried
-    ? copy
-      ? COPY_REFUSED
-      : MOVE_ACROSS_REFUSED
-    : copy
-      ? COPY_PREVIEW_REFUSED
-      : MOVE_PREVIEW_REFUSED;
+  const refused =
+    tried === 'dropped'
+      ? copy
+        ? COPY_DROP_REFUSED
+        : MOVE_DROP_REFUSED
+      : tried
+        ? copy
+          ? COPY_REFUSED
+          : MOVE_ACROSS_REFUSED
+        : copy
+          ? COPY_PREVIEW_REFUSED
+          : MOVE_PREVIEW_REFUSED;
   if (error instanceof ApiError || error instanceof CryptoError) {
     return refused[error.code] ?? sharingMessage(error);
   }
