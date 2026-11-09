@@ -87,7 +87,9 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
       setUndoing((now) => (now?.of === item ? null : now));
     } catch (caught) {
       const error = (item.undoMessage ?? errorMessage)(caught);
-      setUndoing((now) => (now?.of === item ? { of: item, busy: false, error } : now));
+      // Its notice went meanwhile: the failure takes the corner itself.
+      if (shown !== item) showNotice({ ctx: item.ctx, message: error, failed: true });
+      else setUndoing((now) => (now?.of === item ? { of: item, busy: false, error } : now));
     }
   }
   const { undo: takeBack } = notice;

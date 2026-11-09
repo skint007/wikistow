@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, pick, test } from './fixtures';
 import {
   folderMenu,
@@ -75,4 +75,62 @@ test('moving a folder between shares changes who can read it', async ({
     await expect(rita.getByRole('treeitem', { name: 'Watering' })).toBeVisible();
     await expect(rita.getByRole('treeitem', { name: /Beans/ })).toHaveCount(0);
   });
+});
+
+/** Drag `from` onto `to` with the mouse, holding Ctrl while `copy`. */
+async function drop(page: Page, from: Locator, to: Locator, copy = false) {
+  const a = await from.boundingBox();
+  const b = await to.boundingBox();
+  if (!a || !b) throw new Error('Nothing to drag');
+  if (copy) await page.keyboard.down('Control');
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2, { steps: 4 });
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  await page.mouse.up();
+  if (copy) await page.keyboard.up('Control');
+}
+
+/**
+ * A drag moves at once and Ctrl+drag copies, with no dialog, and the notice's
+ * Undo takes each back (#376).
+ */
+test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
+  page: owner,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  const adminPage = await adminTab(freshPage, admin.email);
+  await memberWithVault(owner, adminPage);
+  await newSpace(owner, 'Family');
+  await newFolder(owner, 'Garden');
+  await newFolder(owner, 'Kitchen');
+  await publishedPageIn(owner, 'Garden', 'Beans', TEXT.beans);
+  await openFolder(owner, 'Kitchen');
+  const beans = owner.getByRole('treeitem', { name: 'Beans' });
+  const kitchen = owner.getByRole('treeitem', { name: /Kitchen/ });
+  const notice = owner.getByRole('status').filter({ hasText: '“Beans” to Kitchen.' });
+
+  // The tree is flat: Beans shows under the folder it is in.
+  const under = async () => {
+    const rows = await owner.getByRole('treeitem').allInnerTexts();
+    const at = rows.findIndex((row) => row.trim() === 'Beans');
+    return rows[at - 1]?.includes('Kitchen') ? 'Kitchen' : 'Garden';
+  };
+
+  await drop(owner, beans, kitchen);
+  await expect(notice).toContainText('Moved “Beans” to Kitchen.');
+  await expect(owner.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(under).toBe('Kitchen');
+  await notice.getByRole('button', { name: 'Undo' }).click();
+  await expect(notice).toHaveCount(0);
+  await expect.poll(under).toBe('Garden');
+
+  await drop(owner, beans, kitchen, true);
+  await expect(notice).toContainText('Copied “Beans” to Kitchen.', { timeout: 30_000 });
+  await expect(beans).toHaveCount(2);
+  await notice.getByRole('button', { name: 'Undo' }).click();
+  await expect(notice).toHaveCount(0, { timeout: 30_000 });
+  await expect(beans).toHaveCount(1);
 });

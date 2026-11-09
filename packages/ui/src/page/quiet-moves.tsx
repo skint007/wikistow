@@ -550,13 +550,13 @@ export function useQuietMove() {
       ),
       running: true,
     });
-    const done = (notes: MoveNotes | null, undo: Undo | null) =>
-      notice.update(movedNotice(ctx, { moving, to, sameSpace, copy, undo, notes }));
-    // A failure is said even after a later notice took the corner, so it isn't missed.
-    const failed = (message: string) => {
-      if (!notice.update({ ctx, message, failed: true }))
-        showNotice({ ctx, message, failed: true });
+    // Said even after a later notice took the corner, so neither its notes nor a failure are missed.
+    const say = (next: Notice) => {
+      if (!notice.update(next)) showNotice(next);
     };
+    const done = (notes: MoveNotes | null, undo: Undo | null) =>
+      say(movedNotice(ctx, { moving, to, sameSpace, copy, undo, notes }));
+    const failed = (message: string) => say({ ctx, message, failed: true });
 
     async function moveHere() {
       const tree = await queryClient.ensureQueryData(treeQuery(ctx, spaceId));
