@@ -1,7 +1,7 @@
 import { endingOperations, type ShareId, type SpaceId } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useState, type ReactNode } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,21 +15,25 @@ import {
 import { runCommand } from '../commands/command';
 import { endShare } from '../commands/sharing-commands';
 import { groupsQuery, refreshAccess, treeQuery } from '../data/queries';
+import { pageTitle } from '../shell/sidebar';
 import { PLAIN, useClient } from '../vault/store';
 import { groupName } from './groups';
 import { sharingMessage } from './messages';
-import { shareName } from './names';
+import { nameOf, shareName } from './names';
 import { useOwnerRequirements } from './owner-standing';
 import { describePerson, peopleQuery } from './people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from './use-action';
 
 // An ending's own words for the refusals that mean something else here.
-const endingMessage = (error: unknown) =>
-  error instanceof ApiError && error.code === 'payload-too-large'
-    ? 'This folder is too big to stop sharing in one go.'
-    : error instanceof ApiError && error.code === 'forbidden'
-      ? 'Only an owner can stop sharing, and not while the folder is in the trash.'
-      : sharingMessage(error);
+// `nameOf` names a page or folder this app can't open, which stops it.
+const endingMessage = (error: unknown, nameOf: (nodeId: string) => string | null = () => null) =>
+  error instanceof endingOperations.UnreadableInShare
+    ? `This app can’t open ${nameOf(error.nodeId) ?? 'something in the trash from this folder'}, so nothing changed. Delete it for good, then try again.`
+    : error instanceof ApiError && error.code === 'payload-too-large'
+      ? 'This folder is too big to stop sharing in one go.'
+      : error instanceof ApiError && error.code === 'forbidden'
+        ? 'Only an owner can stop sharing, and not while the folder is in the trash.'
+        : sharingMessage(error);
 
 /** "A", "A and B", "A, B and C". */
 function listed(items: readonly ReactNode[]): ReactNode {
@@ -66,9 +70,19 @@ export function StopSharing({
   const ctx = useClient();
   const satisfies = useOwnerRequirements(spaceId);
   const queryClient = useQueryClient();
-  const { busy, error, setError, run } = useAction(endingMessage);
-  const [records, setRecords] = useState<number | null>(null);
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
+  const describe = useCallback(
+    (caught: unknown) =>
+      endingMessage(caught, (nodeId) => {
+        const page = tree?.pages.find((p) => p.id === nodeId);
+        if (page) return `“${pageTitle(page.title)}”`;
+        const folder = tree?.folders.find((f) => f.id === nodeId);
+        return folder ? `the folder “${nameOf(folder.metadata) ?? 'Unnamed folder'}”` : null;
+      }),
+    [tree],
+  );
+  const { busy, error, setError, run } = useAction(describe);
+  const [records, setRecords] = useState<number | null>(null);
   const groups = useQuery(groupsQuery(ctx, spaceId));
   // Worked out afresh each time: it is what the owner confirms.
   const preview = useQuery({
@@ -86,7 +100,8 @@ export function StopSharing({
   const person = (id: string) => people?.get(id) ?? describePerson(ctx, id, null);
   const name = shareName(tree, rootId);
   const space = rootId === null;
-  const title = (pageId: string) => tree?.pages.find((p) => p.id === pageId)?.title ?? null;
+  const title = (pageId: string) =>
+    pageTitle(tree?.pages.find((p) => p.id === pageId)?.title ?? null);
 
   const losing = preview.data
     ? [
@@ -187,9 +202,7 @@ export function StopSharing({
           {ending.length > 0 && (
             <p>
               {ending.length === 1 ? 'The public link of ' : 'The public links of '}
-              {listed(
-                ending.map((l) => <Name key={l.pageId}>{title(l.pageId) ?? 'a page'}</Name>),
-              )}{' '}
+              {listed(ending.map((l) => <Name key={l.pageId}>{title(l.pageId)}</Name>))}{' '}
               {ending.length === 1 ? 'ends' : 'end'}.
             </p>
           )}

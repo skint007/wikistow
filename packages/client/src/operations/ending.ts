@@ -17,6 +17,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
+import { CryptoError } from '../errors.ts';
 import { metadataWrapSubject, revisionWrapSubject } from '../folder-keys.ts';
 import { isAgentId } from '../identity.ts';
 import { ENDED, requireNotBehind } from '../key-versions.ts';
@@ -97,6 +98,20 @@ export async function previewEnding(
   };
 }
 
+/**
+ * A record under the share that this app can't open, such as a version
+ * saved with a wrap that fails its checks, which stops the ending. Its
+ * owner deletes that page or folder for good to get past it.
+ */
+export class UnreadableInShare extends Error {
+  readonly nodeId: string;
+
+  constructor(nodeId: string, failure: CryptoError) {
+    super(`This app can't open a record of ${nodeId}`, { cause: failure });
+    this.nodeId = nodeId;
+  }
+}
+
 /** What an ending did. */
 export type Ended = {
   /** Whether the trash holds anything from the share, which now restores to the owners. */
@@ -131,6 +146,7 @@ export async function endShare(
   const scan = async () => {
     const seen = new Set<string>();
     let added = 0;
+    let unreadable: string | null = null;
     await forEachRecordKey(
       ctx,
       keys,
@@ -160,8 +176,12 @@ export async function endShare(
         }
         sealed.set(key, out);
       },
-      { onProgress, from },
-    );
+      { onProgress, from, onUnreadable: (nodeId) => (unreadable = nodeId) },
+    ).catch((error: unknown) => {
+      throw unreadable !== null && error instanceof CryptoError
+        ? new UnreadableInShare(unreadable, error)
+        : error;
+    });
     let dropped = 0;
     for (const key of sealed.keys()) {
       if (!seen.has(key)) {
