@@ -353,6 +353,9 @@ export async function editComment(
     const heads = await headsOf(tx, page.id);
     requireAudience(caller, access, heads, row.audience, { writing: true });
     if (!sees(canEdit(access), row, heads)) throw new ContentError('not-found');
+    // Held before its version, as a delete holds it.
+    const [held] = await tx.select().from(comments).where(eq(comments.id, row.id)).for('update');
+    if (!held || held.deletedAt !== null) throw new ContentError('not-found');
     if (row.authorIdentityId !== caller.identity.id) {
       throw new ContentError('forbidden', 'Only its author edits a comment');
     }
@@ -859,9 +862,9 @@ export async function scannedComments(
     .from(commentVersions)
     .innerJoin(comments, eq(comments.id, commentVersions.commentId))
     .where(anyId(commentVersions.id, versionIds));
-  for (const row of rows) {
-    const version = served.get(row.versionId);
-    if (version) out.set(row.versionId, { kind: 'comment', ...version, ...row });
+  for (const { versionId, ...place } of rows) {
+    const version = served.get(versionId);
+    if (version) out.set(versionId, { kind: 'comment', ...version, ...place });
   }
   return out;
 }

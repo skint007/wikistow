@@ -271,10 +271,11 @@ export async function textOf(
 /**
  * `ctx` as an owner's app that handles comments in the operations that
  * cover a subtree (section 5.9), before the app does: its scans ask for
- * comments and leave them out of what the operation sees, and its requests
+ * comments, check that the scan served each of `comments` as it was
+ * written, and leave them out of what the operation sees; and its requests
  * carry the key material of `comments` too, for the region the operation
- * puts them in. With `comments` left out of a request, the server sees an
- * app that asked for comments and forgot them.
+ * puts them in. With `send: false`, the server sees an app that asked for
+ * comments and forgot them.
  */
 export function handlingComments(
   ctx: ClientContext,
@@ -321,10 +322,27 @@ export function handlingComments(
     keyEnvelopes?: unknown[];
     metadataEnvelopes?: unknown[];
   };
+  // The comments the scans served, by version.
+  const scanned = new Map<string, { audience: Audience; thread: string | null }>();
+  const servedEvery = () => {
+    if (comments.some((comment) => !scanned.has(comment.versionId))) {
+      throw new Error('The scan didn’t serve every comment');
+    }
+  };
   const add = async (route: RouteDef, input: Sent): Promise<Sent> => {
     const spaceId = comments[0]?.spaceId;
-    if (!send || !spaceId) return input;
     const body = input.body as Body;
+    const covers =
+      route === sharingRoutes.makeShare ||
+      route === sharingRoutes.endShare ||
+      route === ownerRoutes.addOwner ||
+      (route === sharingRoutes.move &&
+        (body.wraps?.length ?? 0) +
+          (body.keyEnvelopes?.length ?? 0) +
+          (body.metadataEnvelopes?.length ?? 0) >
+          0);
+    if (covers) servedEvery();
+    if (!send || !spaceId || !covers) return input;
     if (route === sharingRoutes.makeShare) {
       // The new share's keys, from the envelope the owner seals to themself.
       const mine = FolderKeyEnvelope.array()
@@ -339,10 +357,6 @@ export function handlingComments(
       return { ...input, body: { ...body, wraps: [...(body.wraps ?? []), ...wraps] } };
     }
     if (route === sharingRoutes.move) {
-      const crossing =
-        (body.wraps?.length ?? 0) + (body.keyEnvelopes?.length ?? 0) > 0 ||
-        (body.metadataEnvelopes?.length ?? 0) > 0;
-      if (!crossing) return input;
       const to = await writeTargetOf(ctx, spaceId, FolderId.nullable().parse(body['parentId']));
       if (to.keyTarget.share) {
         const wraps = wrapped(to.keyTarget.share, to.keyTarget.share);
@@ -361,11 +375,16 @@ export function handlingComments(
   };
   const call = (async (route: RouteDef, input: Sent, options?: unknown) => {
     if (route !== sharingRoutes.records) return real(route, await add(route, input), options);
-    const page = (await real(
-      route,
-      { ...input, query: { ...input.query, comments: '1' } },
-      options,
-    )) as { records: { kind: string }[] };
+    const query = { ...input.query, comments: '1' };
+    const page = sharingRoutes.records.response.parse(
+      await real(route, { ...input, query }, options),
+    );
+    for (const item of page.records) {
+      if (item.kind !== 'comment') continue;
+      const written = comments.find((c) => c.versionId === item.comment.record.metadataRevisionId);
+      if (written && item.audience !== written.audience) throw new Error('Another audience');
+      scanned.set(item.comment.record.metadataRevisionId, item);
+    }
     return { ...page, records: page.records.filter((item) => item.kind !== 'comment') };
   }) as ClientContext['api']['call'];
   return { ...ctx, api: { ...ctx.api, call } };

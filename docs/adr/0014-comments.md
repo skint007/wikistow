@@ -179,7 +179,7 @@ New routes only; no existing response gains a field.
 | `DELETE /api/comments/:commentId` | Its author (for an agent's comment, the agent's person) or an owner deletes it. |
 | `POST /api/comments/:commentId/resolve {resolved}` | Resolves or opens a thread. |
 | `POST /api/pages/:pageId/comments/seen` | Marks the page's comments as seen now. |
-| `GET /api/me/comments` | **New comments** (decision 8): `[{spaceId, pageId, thread, count, latest}]`, only threads the caller can read, `count` the comments they haven't seen and `latest` the newest of them, as the page's route serves a comment, so no second request for the comment is needed; the app still opens the page's version to show its title and check the comment (decision 8). |
+| `GET /api/me/comments` | **New comments** (decision 8): `{threads: [{spaceId, pageId, thread, audience, count, latest}]}`, only threads the caller can read, `count` the comments they haven't seen and `latest` the newest of them, as the page's route serves a comment, so no second request for the comment is needed; the app still opens the page's version to show its title and check the comment (decision 8). |
 | `GET /api/me/comment-changes` | The stream (decision 8): `{pageIds}`, only for changes to comments the caller can read. |
 | `GET /api/spaces/:spaceId/records` | With `comments=1`, gains entries of kind `comment`, each with its record, payload, key material, and the page, thread and audience the server records, in every scope that covers their page. Without it, a scope that holds comments is `invalid-request` (decision 11). |
 
