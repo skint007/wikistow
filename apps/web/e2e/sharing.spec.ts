@@ -190,3 +190,81 @@ test('a shared folder: readers see publications, editors drafts, and removal tak
     await expect(reader.getByText(TEXT.apples)).toHaveCount(0);
   });
 });
+
+/**
+ * The owner shares a folder inside another, then stops sharing it from the
+ * folder above, which can be shared then (ADR 0012).
+ */
+test('stopping sharing a folder takes it from its members, and the folder above can be shared', async ({
+  page: owner,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(300_000);
+  const adminPage = await adminTab(freshPage, admin.email);
+  const reader = await freshPage();
+  await memberWithVault(owner, adminPage, 'Olive Owner');
+  const { email: readerEmail } = await memberWithVault(reader, adminPage, 'Rita Reader');
+
+  await test.step('the owner shares Beans, inside Garden', async () => {
+    await newSpace(owner, 'Family');
+    await newFolder(owner, 'Garden');
+    await folderMenu(owner, 'Garden', 'New folder here');
+    await owner.getByRole('dialog').getByLabel('Name').fill('Beans');
+    await owner.getByRole('button', { name: 'Create folder' }).click();
+    await publishedPageIn(owner, 'Beans', 'Planting plan', TEXT.published);
+    await shareFolder(owner, 'Beans', readerEmail, 'reader');
+    await owner.keyboard.press('Escape');
+    await openShared(reader, 'Beans', 'Planting plan');
+    await expect(reader.getByText(TEXT.published)).toBeVisible();
+  });
+
+  await test.step('from Garden’s Share dialog, the owner stops sharing Beans', async () => {
+    await folderMenu(owner, 'Garden', 'Share…');
+    const dialog = shareDialog(owner, 'Garden');
+    await expect(dialog).toContainText('“Beans”, inside “Garden”, is shared already.');
+    await dialog.getByRole('button', { name: 'Open its sharing' }).click();
+    await expect(shareDialog(owner, 'Beans')).toBeVisible();
+    await shareDialog(owner, 'Beans').getByRole('button', { name: 'Stop sharing' }).click();
+    const stopping = shareDialog(owner, 'Beans');
+    await expect(stopping.getByRole('heading', { name: 'Stop sharing “Beans”?' })).toBeVisible();
+    await expect(stopping.getByRole('region', { name: 'What stopping sharing does' })).toHaveText(
+      'Rita Reader loses access. They keep what they already read or downloaded. Nothing saved from now on reaches them.',
+    );
+    await stopping.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+    // Back on Garden, which can be shared now.
+    await expect(dialog.getByRole('status')).toHaveText(
+      'Done. Only the space’s owners can open “Beans” now.',
+      { timeout: 30_000 },
+    );
+    await expect(dialog.getByLabel('Email')).toBeVisible();
+
+    await reader.getByRole('link', { name: 'Shared', exact: true }).click();
+    await expect(reader.getByText('Nothing has been shared with you yet.')).toBeVisible();
+  });
+
+  await test.step('the owner shares Garden, and the reader gets Beans through it', async () => {
+    const dialog = shareDialog(owner, 'Garden');
+    await dialog.getByLabel('Email').fill(readerEmail);
+    await pick(dialog.getByLabel('Access'), 'Reader');
+    await dialog
+      .getByRole('list', { name: 'People' })
+      .getByRole('button', { name: readerEmail })
+      .click();
+    await expect(dialog.getByRole('region', { name: 'What will be shared' })).toContainText(
+      'Planting plan',
+    );
+    await dialog.getByRole('button', { name: 'Share', exact: true }).click();
+    await expect(dialog.getByRole('region', { name: 'People with access' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await owner.keyboard.press('Escape');
+
+    await reader.reload();
+    await reader.getByRole('link', { name: /Garden/ }).click();
+    await openFolder(reader, 'Garden');
+    await openFolder(reader, 'Beans');
+    await reader.getByRole('treeitem', { name: 'Planting plan' }).click();
+    await expect(reader.getByText(TEXT.published)).toBeVisible();
+  });
+});

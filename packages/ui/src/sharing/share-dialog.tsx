@@ -1,6 +1,6 @@
 import type { FolderId, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,7 +24,8 @@ import { HoldOpen, useHoldOpen } from './use-action';
  * The Share dialog for a folder, or the whole space for a null root: share
  * it the first time, or see and change who has access. Opened from the
  * page's Share button, the folder menu and the space menu, by owners only.
- * A folder inside a share points to that share instead: shares don't nest.
+ * A folder inside a share, or holding one, points to that share instead:
+ * shares don't nest, so that one stops being shared first.
  */
 export function ShareDialog({
   spaceId,
@@ -40,8 +41,14 @@ export function ShareDialog({
   const ctx = useClient();
   // The folder shown: a folder inside a share switches to that share.
   const [shown, setShown] = useState(rootId);
+  // What stopping sharing did. Opened from the folder above, the dialog goes
+  // back to it, which can be shared now; opened on the share, it says only that.
+  const [ended, setEnded] = useState<{ message: ReactNode; alone: boolean } | null>(null);
   useEffect(() => {
-    if (open) setShown(rootId);
+    if (open) {
+      setShown(rootId);
+      setEnded(null);
+    }
   }, [open, rootId]);
   const tree = useQuery({ ...treeQuery(ctx, spaceId), enabled: open });
   const shares = useQuery({ ...sharesQuery(ctx, spaceId), enabled: open });
@@ -75,7 +82,16 @@ export function ShareDialog({
         );
       case 'shared':
         return (
-          <AccessPanel spaceId={spaceId} share={target.share} owners={owners} review={review} />
+          <AccessPanel
+            spaceId={spaceId}
+            share={target.share}
+            owners={owners}
+            review={review}
+            onEnded={(message) => {
+              setEnded({ message, alone: shown === rootId });
+              setShown(rootId);
+            }}
+          />
         );
       case 'inside':
       case 'holds': {
@@ -116,14 +132,14 @@ export function ShareDialog({
                 </>
               )}{' '}
               {target.kind === 'inside'
-                ? 'Shares don’t nest, so it’s shared only through that one.'
-                : shown === null
-                  ? 'Shares don’t nest, so the whole space can’t be shared as well.'
-                  : 'Shares don’t nest, so this folder can’t be shared as well.'}
+                ? 'Shares don’t nest, so it can be shared on its own only once that one stops being shared.'
+                : held > 1
+                  ? `Shares don’t nest, so ${shown === null ? 'the whole space' : 'this folder'} can be shared once those stop being shared.`
+                  : `Shares don’t nest, so ${shown === null ? 'the whole space' : 'this folder'} can be shared once that one stops being shared.`}
             </p>
             <div>
               <Button variant="secondary" onClick={() => setShown(target.share.rootId)}>
-                Manage “<Name>{other}</Name>”
+                Open its sharing
               </Button>
             </div>
           </div>
@@ -149,7 +165,12 @@ export function ShareDialog({
                   : 'Everyone you add gets this folder and everything in it, never the folders above it.'}
               </DialogDescription>
             </DialogHeader>
-            {open && body()}
+            {open && ended && (ended.alone || target?.kind !== 'shared') && (
+              <p role="status" className="text-sm font-bold">
+                {ended.message}
+              </p>
+            )}
+            {open && !ended?.alone && body()}
           </div>
         </HoldOpen>
       </DialogContent>
