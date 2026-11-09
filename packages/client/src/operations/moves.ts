@@ -79,7 +79,7 @@ export type MovePreview = {
    * leaves their share (section 9.4), by the names the server lists.
    */
   endingPicks: sharingRoutes.ShareAgent[];
-  /** Everything that moves, by decrypted name, for an owner to look over when keys change. */
+  /** Everything that moves, by decrypted name: the app won't change keys for what it can't read. */
   folders: SharePreview['folders'];
   pages: SharePreview['pages'];
 };
@@ -90,7 +90,7 @@ const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 /**
  * Work out moving `nodeId`, with everything under it, under `parentId`, or
  * to the top of the space for `null` (section 10). Nothing is wrapped,
- * sealed or sent: the person confirms the preview, then `moveNode` makes
+ * sealed or sent: the app says what applies of it, then `moveNode` makes
  * the move. Refuses a destination inside what moves (`stale-head`: it went
  * there since it was chosen), one that would nest a share
  * (`share-nesting`), a move across a share

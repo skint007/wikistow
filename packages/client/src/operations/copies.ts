@@ -3,7 +3,7 @@
 // source (protocol section 10, "Copies, and moves between spaces"; ADR 0007).
 // The source can be everything in a space too (#339), for its owners.
 //
-// `previewCopy` works out what the person confirms, sealing nothing. Then
+// `previewCopy` works it out, sealing nothing, for the app to say what applies. Then
 // `makeCopy` opens the copy, whose new nodes the server keeps hidden; seals
 // each source node's current name, or draft and publication, again as a new
 // node's first version in the destination's region, with every attachment
@@ -242,7 +242,7 @@ function publishesIn(tree: Tree, region: Region) {
  * another space. A null `nodeId` is everything in the space, which only an
  * owner of it copies or moves, and only into another space (#339): each
  * node at its top goes under `parentId`, and the space stays, empty after a
- * move. Nothing is sealed or sent: the person confirms the
+ * move. Nothing is sealed or sent: the app says what applies of the
  * preview, then `makeCopy` makes it. Refuses a move within one space, which
  * is an ordinary move (`forbidden`), a destination inside what is copied
  * (`binding-mismatch`), a move by anyone but an owner of the source space,
