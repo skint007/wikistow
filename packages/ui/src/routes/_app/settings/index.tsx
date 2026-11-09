@@ -189,14 +189,18 @@ function RememberUnlock() {
   );
 }
 
-/** Whether a move waits on its confirmation step; Don’t ask again there turns it off. */
+/** Whether a drop opens Move to… on the place dropped on, instead of moving at once. */
 function AskBeforeMoves() {
   const asking = useAskBeforeMoves();
   return (
     <SettingRow
       name="Ask before moving"
       scope={THIS_DEVICE}
-      state="Before a page or folder moves, shows who gains and loses access, for you to confirm."
+      state={
+        asking
+          ? 'Dropping a page or folder opens Move to…, for you to press Move.'
+          : 'Dropping a page or folder moves it at once, with Undo.'
+      }
       action={
         <Switch
           aria-label="Ask before moving"

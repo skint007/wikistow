@@ -264,10 +264,11 @@ it('moves within the space, or for its owner into another, from one dialog', asy
   expect(shown('Space')).toBe('Personal (this space)');
   // Not where it is already.
   expect(await options('Folder')).toEqual(['Garden', 'Kitchen']);
+  // One step: a move that changes no keys has nothing to say first.
+  expect(button('Move').disabled).toBe(false);
 
   await choose('Space', 'Work');
   expect(await options('Folder')).toEqual(['Top of Work']);
-  expect(button('Next').disabled).toBe(false);
 });
 
 it('tells an editor who isn’t an owner that only owners move into another space', async () => {
@@ -347,5 +348,5 @@ it('still moves within the space when the other spaces fail to load', async () =
   ]);
   expect(await options('Space')).toEqual(['Family (this space)']);
   expect(await options('Folder')).toEqual(['Kitchen › Pantry']);
-  expect(button('Next').disabled).toBe(false);
+  expect(button('Move').disabled).toBe(false);
 });

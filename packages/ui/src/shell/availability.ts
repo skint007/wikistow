@@ -121,8 +121,7 @@ export function availability(
 }
 
 /**
- * How a move goes, if it can now: on the server, as online, once the person
- * looked it over (`server`), or on this device, sent after the changes
+ * How a move goes, if it can now: on the server, as online (`server`), or on this device, sent after the changes
  * before it (`device`), or not now, with the hint saying why.
  */
 export type MoveAvailability = { route: 'server' | 'device' } | { route: null; hint: string };
@@ -131,7 +130,7 @@ export type MoveAvailability = { route: 'server' | 'device' } | { route: null; h
  * How moving an item with `item` waiting to a place with `place` waiting
  * goes (ADR 0009, decision 8; #331). `across` is a move that changes who can
  * read it, across a shared folder's edge, or one into another space: the
- * server works out who gains and loses access, or copies it, so it goes
+ * app rewraps its keys with the server, or copies it, so it goes
  * online only, never after a change waiting here, nor into a folder made
  * offline. Any other move waits on this device while the app is offline,
  * while the item has something waiting, or into a folder made offline: it

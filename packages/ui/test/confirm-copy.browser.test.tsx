@@ -119,6 +119,7 @@ const previewOf = (copyId: string, more: Partial<Preview> = {}): Preview => ({
   ],
   audience: null,
   losses: [],
+  gains: [],
   unpublished: [],
   links: [],
   inbound: [],
@@ -137,7 +138,7 @@ afterEach(() => {
   fake.pages = [];
 });
 
-// Open the dialog on Bean plan, choose the top of Work, and go on to confirm.
+// Open the dialog on Bean plan, and choose the top of Work: Copy or Move is next, in the same step.
 async function confirmInWork(action: 'move' | 'copy') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: Infinity, retry: false } },
@@ -186,7 +187,6 @@ async function confirmInWork(action: 'move' | 'copy') {
     const options = document.querySelectorAll<HTMLElement>('[role="menuitemradio"]');
     [...options].find((o) => o.textContent === 'Work')?.click();
   });
-  await act(async () => button('Next').click());
   await settle();
 }
 
@@ -258,7 +258,7 @@ it('stops when Stop is pressed while it sends, and offers Look again', async () 
   expect(button('Copy').disabled).toBe(true);
 });
 
-it('says a finish that went unanswered or stayed busy may have made it, and offers only Back', async () => {
+it('says a finish that went unanswered or stayed busy may have made it, and offers only Close', async () => {
   fake.preview = (copyId) => previewOf(copyId);
   let progress: (p: Progress) => void = () => {};
   let fail: (error: unknown) => void = () => {};
@@ -284,7 +284,7 @@ it('says a finish that went unanswered or stayed busy may have made it, and offe
     'This app couldn’t tell whether the copy finished, so it may already be there. Check where it was going before you copy it again.',
   );
   expect(() => button('Look again')).toThrow();
-  expect(document.activeElement).toBe(button('Back'));
+  expect(document.activeElement).toBe(button('Close'));
   cleanup();
 
   fake.preview = (copyId) => previewOf(copyId, { kind: 'move' });

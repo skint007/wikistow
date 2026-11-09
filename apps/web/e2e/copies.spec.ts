@@ -20,15 +20,10 @@ async function openSpace(page: Page, name: string) {
   await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible();
 }
 
-/** Choose where an open Move or Copy dialog sends it, then look at the preview. */
-async function chooseAndPreview(
-  dialog: ReturnType<Page['getByRole']>,
-  space: string,
-  folder: string,
-) {
+/** Choose where an open Move or Copy dialog sends it: Move or Copy is next, in the same step. */
+async function choose(dialog: ReturnType<Page['getByRole']>, space: string, folder: string) {
   await pick(dialog.getByLabel(/^Space:/), space);
   await pick(dialog.getByLabel(/^Folder:/), folder);
-  await dialog.getByRole('button', { name: 'Next' }).click();
 }
 
 /**
@@ -74,13 +69,17 @@ test('copying and moving pages and folders between spaces', async ({
     await openSpace(owner, 'Family');
     await folderMenu(owner, 'Garden', 'Copy to…');
     const dialog = owner.getByRole('dialog', { name: 'Copy “Garden”' });
-    await chooseAndPreview(dialog, 'Work', 'Top of Work');
-    await expect(dialog.getByRole('region', { name: 'Who can open it there' })).toBeVisible();
-    // A copy ends nothing.
-    await expect(dialog.getByRole('region', { name: 'What the move ends' })).toHaveCount(0);
+    await choose(dialog, 'Work', 'Top of Work');
+    await expect(dialog.getByRole('button', { name: 'Copy', exact: true })).toBeEnabled();
+    // Nobody else reads Work, and a copy ends nothing.
+    await expect(dialog).not.toContainText('will be able to read it');
+    await expect(dialog).not.toContainText('It ends');
     await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
     await expect(owner).toHaveURL(new RegExp(`/s/${work}/f/`));
+    await expect(
+      owner.getByRole('status').filter({ hasText: 'Copied “Garden” to Work.' }),
+    ).toBeVisible();
 
     await openFolder(owner, 'Garden');
     await owner.getByRole('treeitem', { name: 'Plan' }).click();
@@ -98,8 +97,7 @@ test('copying and moving pages and folders between spaces', async ({
   await test.step('the owner copies Garden within Family', async () => {
     await folderMenu(owner, 'Garden', 'Copy to…');
     const dialog = owner.getByRole('dialog', { name: 'Copy “Garden”' });
-    await chooseAndPreview(dialog, 'Family (this space)', 'Top of Family');
-    await expect(dialog.getByRole('region', { name: 'Who can open it there' })).toBeVisible();
+    await choose(dialog, 'Family (this space)', 'Top of Family');
     await dialog.getByRole('button', { name: 'Copy', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
     await expect(owner).toHaveURL(new RegExp(`/s/${family}/f/`));
@@ -125,15 +123,10 @@ test('copying and moving pages and folders between spaces', async ({
     await owner.getByRole('button', { name: 'Page actions' }).click();
     await owner.getByRole('menuitem', { name: 'Move to…' }).click();
     const dialog = owner.getByRole('dialog', { name: 'Move “Shopping”' });
-    await chooseAndPreview(dialog, 'Work', 'Top of Work');
-    // The owner can publish there, so its public link goes with it.
-    await expect(
-      dialog.getByRole('region', { name: 'Public links that go with it' }),
-    ).toContainText('Shopping');
-    const ends = dialog.getByRole('region', { name: 'What the move ends' });
-    await expect(ends).toContainText('Every earlier version');
-    await expect(ends).not.toContainText('public link');
-    await expect(dialog.getByRole('region', { name: 'Who loses access' })).toContainText('Nobody');
+    await choose(dialog, 'Work', 'Top of Work');
+    // The owner can publish there, so its public link goes with it: only earlier versions end.
+    await expect(dialog).toContainText('Its earlier versions don’t go with it.');
+    await expect(dialog).not.toContainText('public link');
     await dialog.getByRole('button', { name: 'Move', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });
     await expect(owner).toHaveURL(new RegExp(`/s/${work}/p/`));
@@ -275,15 +268,18 @@ test('moving everything in a space into another, then deleting it', async ({
   const oldAddress = new URL(owner.url()).pathname;
   await folderMenu(owner, 'Garden', 'Copy to…');
   const copying = owner.getByRole('dialog', { name: 'Copy “Garden”' });
-  await chooseAndPreview(copying, 'Family (this space)', 'Top of Family');
+  await choose(copying, 'Family (this space)', 'Top of Family');
   await copying.getByRole('button', { name: 'Copy', exact: true }).click();
   await expect(owner).toHaveURL(/\/f\//, { timeout: 60_000 });
 
   await owner.getByRole('button', { name: 'Space menu' }).click();
   await owner.getByRole('menuitem', { name: 'Move space into…' }).click();
   const dialog = owner.getByRole('dialog', { name: 'Move everything in “Family”' });
-  await chooseAndPreview(dialog, 'Work', 'Archive');
-  await expect(dialog.getByRole('region', { name: 'What the move ends' })).toBeVisible();
+  await pick(dialog.getByLabel(/^Space:/), 'Work');
+  await pick(dialog.getByLabel(/^Folder:/), 'Archive');
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  // Everything in a space still asks, as it can't be undone.
+  await expect(dialog.getByRole('note')).toContainText('This can’t be undone.');
   await dialog.getByRole('button', { name: 'Move', exact: true }).click();
   await expect(dialog.getByRole('status')).toContainText('“Family” is empty now', {
     timeout: 60_000,

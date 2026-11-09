@@ -1,6 +1,6 @@
 // Moving a page or folder (protocol section 10). Within one region a move
-// changes no keys. Across a share boundary an owner's app shows who gains
-// and who loses access, then rewraps every record of what moves under the
+// changes no keys. Across a share boundary an owner's app works out who
+// gains and who loses access, then rewraps every record of what moves under the
 // destination's keys, or seals it to the owners, and sends it all at once.
 import {
   FolderKeyEnvelope,
@@ -51,7 +51,7 @@ export type Reach = 'drafts' | 'published';
 /** Someone whose access a move changes: what they hold before it, and after (null: nothing). */
 export type AccessChange = { identityId: IdentityId; before: Reach | null; after: Reach | null };
 
-/** A move worked out for the person to confirm. */
+/** A move worked out before anything is sealed: the app says what applies of it, then makes it. */
 export type MovePreview = {
   spaceId: SpaceId;
   nodeId: FolderId | PageId;
@@ -79,7 +79,7 @@ export type MovePreview = {
    * leaves their share (section 9.4), by the names the server lists.
    */
   endingPicks: sharingRoutes.ShareAgent[];
-  /** Everything that moves, by decrypted name, for an owner to look over when keys change. */
+  /** Everything that moves, by decrypted name: the app won't change keys for what it can't read. */
   folders: SharePreview['folders'];
   pages: SharePreview['pages'];
 };
@@ -90,7 +90,7 @@ const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 /**
  * Work out moving `nodeId`, with everything under it, under `parentId`, or
  * to the top of the space for `null` (section 10). Nothing is wrapped,
- * sealed or sent: the person confirms the preview, then `moveNode` makes
+ * sealed or sent: the app says what applies of it, then `moveNode` makes
  * the move. Refuses a destination inside what moves (`stale-head`: it went
  * there since it was chosen), one that would nest a share
  * (`share-nesting`), a move across a share
@@ -316,7 +316,7 @@ export async function audienceOf(
 }
 
 /**
- * Make a move the person confirmed (section 10). Within one region it just
+ * Make a move as worked out (section 10). Within one region it just
  * moves. Across a share boundary it rewraps every record of the subtree,
  * only those of the folders and pages the preview showed, under the
  * destination share's current key version, which must count for writing,
@@ -516,7 +516,7 @@ async function destinationKeys(
   return { kind: 'share', held };
 }
 
-// Refuse a preview the person couldn't have looked over: a name or title
+// Refuse a preview the app couldn't check: a name or title
 // this app couldn't open, a page move holding anything but that page, or a
 // folder move with a folder or page whose previewed parent folders don't
 // lead to what moves. Only folders hold things, so a page counts as moving
