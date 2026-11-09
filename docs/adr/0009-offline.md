@@ -131,7 +131,7 @@ Everything else, and the control says "Needs the connection" (a `data-hint`) rat
 
 ## Out of scope
 
-Agents and the CLI, which stay online; merging edits (#334); keeping older versions or history; offline sharing, moves across a shared folder's edge or between spaces, new spaces and templates (renames of folders and deletes are built, #330, and moves within a share and publishing, #331); background sync while the app is closed (the browser's Background Sync API); a storage cap.
+Agents and the CLI, which stay online; merging edits (#334, accepted in [ADR 0013](0013-merging-conflicting-edits.md)); keeping older versions or history; offline sharing, moves across a shared folder's edge or between spaces, new spaces and templates (renames of folders and deletes are built, #330, and moves within a share and publishing, #331); background sync while the app is closed (the browser's Background Sync API); a storage cap.
 
 ## Considered options
 
