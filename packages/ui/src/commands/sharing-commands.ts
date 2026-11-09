@@ -1,4 +1,5 @@
 import {
+  endingOperations,
   groupOperations,
   IdentityId,
   ownerOperations,
@@ -22,6 +23,8 @@ import { runCommand, type Command, type CommandEnv } from './command';
 export type SharingEnv = CommandEnv & {
   ctx: ClientContext;
   onProgress?: sharingOperations.Progress;
+  /** Hears what an ending did, once it is done. */
+  onEnded?: (ended: endingOperations.Ended) => void;
 };
 
 // Plans, previews and lookups come from the client's own operations, which
@@ -63,6 +66,23 @@ export const createShare = command(
       groups,
       ...(onProgress ? { onProgress } : {}),
     });
+  },
+);
+
+/**
+ * Stop sharing a folder, or the space, once the owner has looked over who
+ * loses access and what ends: it is the owners' alone again.
+ */
+export const endShare = command(
+  'share.end',
+  z.object({ preview: made<endingOperations.EndingPreview>() }),
+  owner,
+  async ({ preview }, { ctx, onProgress, onEnded }) => {
+    const ended = await endingOperations.endShare(ctx, {
+      preview,
+      ...(onProgress ? { onProgress } : {}),
+    });
+    onEnded?.(ended);
   },
 );
 

@@ -17,6 +17,13 @@ export interface KeyVersionMarks {
   raise(spaceId: SpaceId, shareId: ShareId, keyVersion: number): void;
 }
 
+/**
+ * The mark of a share this app ended (section 6.9): above every key
+ * version, so nothing is written under it again, and stored as a plain
+ * positive number, which older apps keep and compare like any other mark.
+ */
+export const ENDED = Number.MAX_SAFE_INTEGER;
+
 /** Marks kept in memory, for one session: a desktop app's without a trusted keyring, and tests'. */
 export class MemoryKeyVersionMarks implements KeyVersionMarks {
   readonly #marks = new Map<string, number>();
@@ -89,6 +96,12 @@ export function requireNotBehind({
     throw new CryptoError('malformed', `${String(keyVersion)} is not a key version`);
   }
   const mark = marks.get(spaceId, shareId);
+  if (mark === ENDED) {
+    throw new CryptoError(
+      'key-version',
+      `This app ended share ${shareId}, but the server still lists it`,
+    );
+  }
   if (keyVersion < mark) {
     throw new CryptoError(
       'key-version',

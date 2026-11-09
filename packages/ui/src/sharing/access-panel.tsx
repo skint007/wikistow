@@ -54,6 +54,7 @@ import { describePerson, peopleQuery, type Person } from './people';
 import { AccessSelect, PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { NotInAnyShare, RotationConfirm } from './rotation-confirm';
+import { StopSharing } from './stop-sharing';
 import { ErrorLine, useAction } from './use-action';
 
 export type ListedShare = Awaited<ReturnType<typeof sharingOperations.listShares>>[number];
@@ -63,6 +64,7 @@ type PersonAccess = groupOperations.PersonAccess;
 
 /** A change that needs the owner's confirmation before anything is sealed or rotated. */
 type Pending =
+  | { kind: 'stop' }
   | { kind: 'add'; found: Found }
   | { kind: 'promote'; identityId: IdentityId; person: Person; access: Access }
   | {
@@ -101,18 +103,21 @@ type Pending =
  * space's groups that have it, with their access; and each person's
  * effective access with where it comes from. A person's picker changes
  * only their direct grant. Add someone gives a person a direct grant, or
- * shares with a group.
+ * shares with a group. Stop sharing ends the share (section 6.9), and
+ * `onEnded` hears what to say then, as this panel goes with it.
  */
 export function AccessPanel({
   spaceId,
   share,
   owners,
   review,
+  onEnded,
 }: {
   spaceId: SpaceId;
   share: ListedShare;
   owners: readonly string[];
   review: (person: Person) => Promise<KeyOutcome>;
+  onEnded: (message: ReactNode) => void;
 }) {
   const ctx = useClient();
   const satisfies = useOwnerRequirements(spaceId);
@@ -451,6 +456,18 @@ export function AccessPanel({
     return outcome;
   };
 
+  if (pending?.kind === 'stop') {
+    return (
+      <StopSharing
+        spaceId={spaceId}
+        shareId={shareId}
+        rootId={share.rootId}
+        onCancel={() => setPending(null)}
+        onEnded={onEnded}
+      />
+    );
+  }
+
   if (pending?.kind === 'rotation') {
     return (
       <RotationConfirm
@@ -729,6 +746,17 @@ export function AccessPanel({
           </ul>
         </section>
       )}
+      <div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-destructive"
+          disabled={busy}
+          onClick={() => ask({ kind: 'stop' })}
+        >
+          {share.rootId === null ? 'Stop sharing space' : 'Stop sharing'}
+        </Button>
+      </div>
       {done && (
         <p role="status" className="text-sm font-bold">
           {done}
@@ -774,7 +802,7 @@ export function AccessPanel({
 }
 
 /** The "More" menu at the end of a row in an access list. */
-function MoreMenu({
+export function MoreMenu({
   label,
   disabled,
   children,

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Ending a share
@@ -121,6 +121,8 @@ Writes go on meanwhile, as they do while the app scans today; the finish's cover
 - **Members and owners** lists each shared folder with the same **Stop sharing** in its menu.
 - **The CLI** has none: agents can't share.
 
+As built (#329, step 3), the confirm step says less than this, as moves do after #376. One sentence names who loses access (people and groups by name, agents by count) and says they keep what they already read or downloaded, and nothing saved from then on reaches them, but through the public links that stay. A second line, only when there are any, names the pages whose public link ends. Publications aren't listed: they stay, and nobody needs to act on who sends them now. The line about the trash comes with the outcome instead, when the ending sealed anything from the trash, since only the scan tells that without another request. The pointer from a nested share says the folder can be shared once that share stops, with **Open its sharing**; stopping it from there goes back to the folder above, ready to share. Members and owners has **Stop sharing** in each shared folder's **More** menu. The client operation is `endingOperations` (`packages/client/src/operations/ending.ts`), and the ended mark is `ENDED` in `key-versions.ts`.
+
 ### Out of scope
 
 Ending a share by folding it into a share of the folder above, in one rewrap, with its members carried over (see Considered options). A share rooted in the trash. Sending in parts (#328, decision 9).
@@ -152,8 +154,8 @@ Ending only narrows who can read: content moves from a share's audience to the o
 ## Implementation, in pull requests
 
 1. **This ADR, the spec and the protocol.**
-2. **The server:** the routes, the scan scope, and the transaction, with integration tests for the checks, a stale writer, an owner's stale wrap, the trash and the content-leak sweep after an ending.
-3. **The client operation and the dialog:** preview, scan, seal, send and retries, the Share dialog's **Stop sharing**, the pointer from a nested share and Members and owners, with an e2e test that stops sharing a folder and then shares the folder above.
+2. **The server** (built, PR #379): the routes, the scan scope, and the transaction, with integration tests for the checks, a stale writer, an owner's stale wrap, the trash and the content-leak sweep after an ending.
+3. **The client operation and the dialog** (built): preview, scan, seal, send and retries, the Share dialog's **Stop sharing**, the pointer from a nested share and Members and owners, with an e2e test that stops sharing a folder and then shares the folder above.
 
 Step 3 needs step 2.
 

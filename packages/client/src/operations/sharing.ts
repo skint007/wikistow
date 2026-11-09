@@ -172,6 +172,8 @@ const scanPage = (ctx: ClientContext, spaceId: SpaceId, query: ScanScope & { aft
  * says is elsewhere isn't where the operation thinks it is. `use` gets the
  * record and its key, which is wiped as soon as it returns. After each
  * part, `onProgress` gets how many records were done so far, and of how many.
+ * `onUnreadable` hears the page or folder of a record that fails to open,
+ * before the failure is thrown.
  */
 export async function forEachRecordKey(
   ctx: ClientContext,
@@ -184,7 +186,15 @@ export async function forEachRecordKey(
       | { kind: 'metadata'; record: ReturnType<typeof unsealMetadataKey>['record'] },
     contentKey: Uint8Array,
   ) => void,
-  { onProgress, from = OWNER_REGION }: { onProgress?: Progress | undefined; from?: Region } = {},
+  {
+    onProgress,
+    from = OWNER_REGION,
+    onUnreadable,
+  }: {
+    onProgress?: Progress | undefined;
+    from?: Region;
+    onUnreadable?: (nodeId: string) => void;
+  } = {},
 ): Promise<void> {
   let after: string | undefined;
   let done = 0;
@@ -206,7 +216,7 @@ export async function forEachRecordKey(
         owners: keys.owners.opens,
         ...servedKeyMaterial({ wrap: item.wrap, envelopes: item.envelopes, keyring: ctx.keyring }),
       };
-      const opened =
+      const open = () =>
         item.kind === 'revision'
           ? {
               kind: 'revision' as const,
@@ -235,6 +245,17 @@ export async function forEachRecordKey(
                 },
               }),
             };
+      let opened: ReturnType<typeof open>;
+      try {
+        opened = open();
+      } catch (error) {
+        if (error instanceof CryptoError) {
+          onUnreadable?.(
+            item.kind === 'revision' ? item.revision.record.pageId : item.metadata.record.subjectId,
+          );
+        }
+        throw error;
+      }
       try {
         if (!sameRegion(opened.region, from)) {
           throw new CryptoError(

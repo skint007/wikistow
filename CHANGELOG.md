@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - A folder renamed offline is renamed once you're back online even if someone moved it into or out of a shared folder meanwhile. Before, its change was refused and could only be discarded. (#377)
+- Owners can stop sharing a folder or the space, from its Share dialog or Members and owners. It goes back to the owners alone, so the folder above it can be shared. Its members keep what they already read or downloaded, and nothing saved afterwards reaches them. (#381)
 - Moving and copying ask less. **Move to…** and **Copy to…** take one step: pick the place, then **Move** or **Copy**. Dragging a page or folder in the sidebar moves it at once, within the space or onto a space in the rail, and Ctrl+drag (Option on a Mac) copies it. A notice says where it went, with **Undo** for 10 seconds. Nothing lists who gains or loses access any more: one line says when more people will be able to read it, and one what a move ends. **Ask before moving** is now off by default; turned on, a drop opens **Move to…** on that place. Moving everything in a space still asks first. (#380)
 - A draft opened right after someone else saved it, as from **Agent activity**, opens on their draft. Before, it could open an older draft and say someone else saved a newer version. (#382)
 
@@ -18,7 +19,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Server
 
-- The server can end a share (ADR 0012): `POST /api/shares/:shareId/end` takes every record wrapped under the share sealed again to the space's owners, then deletes the share with its members, groups' access, agents' picks and keys, and ends the public links of people who can no longer publish. `GET /api/shares/:shareId/ending` tells an owner which public links end and which publications stay, and the record scan gains a `share` scope. The app's **Stop sharing** comes next. (#379)
+- The server can end a share (ADR 0012): `POST /api/shares/:shareId/end` takes every record wrapped under the share sealed again to the space's owners, then deletes the share with its members, groups' access, agents' picks and keys, and ends the public links of people who can no longer publish. `GET /api/shares/:shareId/ending` tells an owner which public links end and which publications stay, and the record scan gains a `share` scope. (#379)
 
 ## 0.25.0-beta.2 - 2026-11-09
 

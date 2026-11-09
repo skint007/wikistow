@@ -66,6 +66,7 @@ export * as spaceOperations from './operations/spaces.ts';
 export * as sharingOperations from './operations/sharing.ts';
 export * as groupOperations from './operations/groups.ts';
 export * as moveOperations from './operations/moves.ts';
+export * as endingOperations from './operations/ending.ts';
 export * as publicationOperations from './operations/publications.ts';
 export * as copyOperations from './operations/copies.ts';
 export * as movedOperations from './operations/moved.ts';
