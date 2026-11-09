@@ -267,10 +267,11 @@ export const metadataRecordBytes = (r: MetadataRecord) =>
     r.payloadHash,
   ]);
 
-// Binds the ciphertext to its subject, version, and author, like page payloads.
-const metadataAd = (
+// Binds the ciphertext to its subject, version, and author, like page
+// payloads. A comment's payload takes it too (section 5.9).
+export const metadataAd = (
   r: Pick<
-    MetadataRecordV2,
+    MetadataRecordV2 | CommentRecord,
     | 'installationId'
     | 'spaceId'
     | 'subjectKind'

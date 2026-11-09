@@ -102,3 +102,16 @@ export function headingTexts(markdown: string): string[] {
   }
   return texts;
 }
+
+/**
+ * A comment's text, read as the reader reads a page but with only GitHub's
+ * syntax and wikilinks (ADR 0014, decision 4): no raw HTML, math, alerts
+ * or heading ids. What the tree holds is drawn plainly; nothing in it
+ * loads or runs.
+ */
+export function readComment(text: string): Root {
+  const processor = unified().use(remarkParse).use([remarkGfm, remarkWikilinks]);
+  const tree = processor.parse(text);
+  processor.runSync(tree);
+  return tree;
+}

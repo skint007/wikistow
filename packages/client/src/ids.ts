@@ -4,6 +4,7 @@ import { sodium } from './sodium.ts';
 export {
   AccountId,
   AttachmentId,
+  CommentId,
   FolderId,
   IdentityId,
   InstallationId,

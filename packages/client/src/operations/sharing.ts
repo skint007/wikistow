@@ -7,6 +7,9 @@ import {
   groupRoutes,
   peopleRoutes,
   sharingRoutes,
+  type Audience,
+  type CommentId,
+  type CommentRecord,
   type FolderId,
   type FolderKeyEnvelope,
   type GroupId,
@@ -18,6 +21,7 @@ import {
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { pinLabel } from '../contacts.ts';
+import { commentWrapSubject, openCommentKey } from '../comments.ts';
 import { CryptoError } from '../errors.ts';
 import {
   folderKeyOf,
@@ -29,6 +33,7 @@ import {
   wrapContentKey,
   type FolderKeys,
   type HeldKeyVersion,
+  type WrapSubject,
 } from '../folder-keys.ts';
 import { isAgentId, keyHash, type PublicIdentity } from '../identity.ts';
 import { FolderId as FolderIdSchema, newId, ShareId as ShareIdSchema } from '../ids.ts';
@@ -161,20 +166,50 @@ type ScanScope =
   | { scope: 'subtree' | 'owner-region'; rootId?: FolderId | PageId }
   | { scope: 'share'; shareId: ShareId };
 
-// This app doesn't ask for comments (`comments=1`), so a server that sends
-// one anyway is answering another request.
-async function scanPage(
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  query: ScanScope & { after?: string },
-) {
-  const page = await ctx.api.call(sharingRoutes.records, { params: { spaceId }, query });
-  const records = page.records.flatMap((item) => (item.kind === 'comment' ? [] : [item]));
-  if (records.length !== page.records.length) {
-    throw new CryptoError('malformed', 'The server sent comments this app didn’t ask for');
+// Comments come too (section 5.9): this app opens and rewraps them.
+const scanPage = (ctx: ClientContext, spaceId: SpaceId, query: ScanScope & { after?: string }) =>
+  ctx.api.call(sharingRoutes.records, {
+    params: { spaceId },
+    query: { ...query, comments: '1' },
+  });
+
+/**
+ * A comment in a scope that this app can't open, or that is in a newer
+ * major format (`newerFormat`), which stops an owner's operation there
+ * (ADR 0014, decision 7). An owner deletes it to get past it.
+ */
+export class UnreadableComment extends Error {
+  readonly pageId: PageId;
+  readonly commentId: CommentId;
+  /** The record's author: signed for a comment in a newer format, only claimed for one that didn't open. */
+  readonly authorId: IdentityId;
+  readonly newerFormat: boolean;
+
+  constructor(
+    item: { pageId: PageId; commentId: CommentId; authorId: IdentityId },
+    failure: CryptoError | null,
+  ) {
+    super(
+      failure
+        ? `This app can't open comment ${item.commentId} on ${item.pageId}`
+        : `Comment ${item.commentId} on ${item.pageId} is in a newer format`,
+      failure ? { cause: failure } : {},
+    );
+    this.pageId = item.pageId;
+    this.commentId = item.commentId;
+    this.authorId = item.authorId;
+    this.newerFormat = failure === null;
   }
-  return { ...page, records };
 }
+
+// Failures with a way out of their own, which an unopenable comment doesn't
+// take away: a key change to review, or keys to work out again.
+const NOT_THE_COMMENT = new Set<CryptoError['code']>([
+  'identity-key-changed',
+  'missing-key',
+  'unaccepted-owner',
+  'key-version',
+]);
 
 /**
  * Every retained record in a scope, part by part, with each one's content
@@ -186,6 +221,10 @@ async function scanPage(
  * part, `onProgress` gets how many records were done so far, and of how many.
  * `onUnreadable` hears the page or folder of a record that fails to open,
  * before the failure is thrown.
+ *
+ * Comments come too, each opened in full (section 5.9), with the audience
+ * it opened under. Its page must be one the scan lists records of. One that
+ * doesn't open, or is in a newer major format, is `UnreadableComment`.
  */
 export async function forEachRecordKey(
   ctx: ClientContext,
@@ -195,7 +234,8 @@ export async function forEachRecordKey(
   use: (
     item:
       | { kind: 'revision'; record: ReturnType<typeof unsealRevisionKey>['record'] }
-      | { kind: 'metadata'; record: ReturnType<typeof unsealMetadataKey>['record'] },
+      | { kind: 'metadata'; record: ReturnType<typeof unsealMetadataKey>['record'] }
+      | ScannedComment,
     contentKey: Uint8Array,
   ) => void,
   {
@@ -210,18 +250,36 @@ export async function forEachRecordKey(
 ): Promise<void> {
   let after: string | undefined;
   let done = 0;
+  // The pages the scan lists versions of, and those its comments are on.
+  const pages = new Set<string>();
+  const commentPages = new Set<string>();
   do {
     const page = await scanPage(ctx, spaceId, { ...scope, ...(after ? { after } : {}) });
     await pinAuthors(
       ctx,
       page.records.map((item: Scanned) =>
-        item.kind === 'revision' ? item.revision.record : item.metadata.record,
+        item.kind === 'revision'
+          ? item.revision.record
+          : item.kind === 'metadata'
+            ? item.metadata.record
+            : item.comment.record,
       ),
     );
     for (const item of page.records) {
       if ((item.wrap === null) !== (from.kind === 'owner')) {
         throw new CryptoError('region-mismatch', `A record there isn't in ${describeRegion(from)}`);
       }
+      if (item.kind === 'comment') {
+        commentPages.add(item.pageId);
+        const { opened, contentKey } = openScannedComment(ctx, keys, spaceId, item, from);
+        try {
+          use(opened, contentKey);
+        } finally {
+          sodium.memzero(contentKey);
+        }
+        continue;
+      }
+      if (item.kind === 'revision') pages.add(item.revision.record.pageId);
       const common = {
         reader: ctx.identity,
         trust: ctx.trust,
@@ -289,6 +347,92 @@ export async function forEachRecordKey(
     onProgress?.({ records: done, total: Math.max(done, page.total) });
     after = page.next ?? undefined;
   } while (after);
+  // In every scope, a comment's page is in the same scan, so the comment's
+  // keys are in the region of that page's records (section 5.9).
+  if ([...commentPages].some((pageId) => !pages.has(pageId))) {
+    throw new CryptoError('binding-mismatch', 'A comment there is on a page outside the scan');
+  }
+}
+
+/** A comment's current version as a scan lists it, opened, with the audience it opened under. */
+export type ScannedComment = {
+  kind: 'comment';
+  record: CommentRecord;
+  pageId: PageId;
+  audience: Audience;
+};
+
+// Open a scanned comment in full in region `from`, or say why it stops the operation.
+function openScannedComment(
+  ctx: ClientContext,
+  keys: SpaceKeys,
+  spaceId: SpaceId,
+  item: Extract<Scanned, { kind: 'comment' }>,
+  from: Region,
+): { opened: ScannedComment; contentKey: Uint8Array } {
+  const commentId = item.comment.record.subjectId;
+  const named = { pageId: item.pageId, commentId, authorId: item.comment.record.authorId };
+  let result: ReturnType<typeof openCommentKey>;
+  try {
+    result = openCommentKey({
+      reader: ctx.identity,
+      trust: ctx.trust,
+      owners: keys.owners.opens,
+      installationId: ctx.installationId,
+      keyring: ctx.keyring,
+      sealed: { comment: item.comment, wrap: item.wrap, envelopes: item.envelopes },
+      listed: {
+        spaceId,
+        pageId: item.pageId,
+        commentId,
+        thread: item.thread,
+        audience: item.audience,
+      },
+      region: from,
+    });
+  } catch (error) {
+    if (error instanceof CryptoError && !NOT_THE_COMMENT.has(error.code)) {
+      throw new UnreadableComment(named, error);
+    }
+    throw error;
+  }
+  const { opened, contentKey } = result;
+  if (opened.kind === 'newer-format') {
+    sodium.memzero(contentKey);
+    throw new UnreadableComment(named, null);
+  }
+  return {
+    opened: {
+      kind: 'comment',
+      record: opened.record,
+      pageId: item.pageId,
+      // Through a wrap, the class it opened under; in the owner region, its
+      // payload's, which `openCommentKey` checked against the listed one.
+      audience: opened.payload.audience,
+    },
+    contentKey,
+  };
+}
+
+/**
+ * What a scanned record's wrap binds to: a page version by its audience, a
+ * name under the metadata class, and a comment by its audience (section
+ * 5.9, **For the build**).
+ */
+export function subjectOf(
+  item:
+    | { kind: 'revision'; record: ReturnType<typeof unsealRevisionKey>['record'] }
+    | { kind: 'metadata'; record: ReturnType<typeof unsealMetadataKey>['record'] }
+    | ScannedComment,
+): WrapSubject {
+  if (item.kind === 'revision') return revisionWrapSubject(item.record);
+  if (item.kind === 'metadata') return metadataWrapSubject(item.record);
+  return commentWrapSubject({
+    spaceId: item.record.spaceId,
+    audience: item.audience,
+    commentId: item.record.subjectId,
+    versionId: item.record.metadataRevisionId,
+  });
 }
 
 const describeRegion = (region: Region) =>
@@ -490,7 +634,11 @@ export async function shareFolder(
   }
   const folderKeys = newFolderKeys();
   try {
-    const wraps: { subjectKind: 'revision' | 'metadata'; versionId: string; wrap: KeyWrap }[] = [];
+    const wraps: {
+      subjectKind: 'revision' | 'metadata' | 'comment';
+      versionId: string;
+      wrap: KeyWrap;
+    }[] = [];
     await forEachRecordKey(
       ctx,
       keys,
@@ -502,17 +650,17 @@ export async function shareFolder(
         const node =
           item.kind === 'revision'
             ? pages.has(item.record.pageId) && item.record.pageId
-            : item.record.subjectKind === 'space'
-              ? rootId === null && item.record.subjectId === spaceId && spaceId
-              : folders.has(item.record.subjectId) && item.record.subjectId;
+            : item.kind === 'comment'
+              ? pages.has(item.pageId) && item.pageId
+              : item.record.subjectKind === 'space'
+                ? rootId === null && item.record.subjectId === spaceId && spaceId
+                : folders.has(item.record.subjectId) && item.record.subjectId;
         if (!node) {
           throw new CryptoError('binding-mismatch', 'A record there is outside the preview');
         }
-        unseen.delete(node);
-        const subject =
-          item.kind === 'revision'
-            ? revisionWrapSubject(item.record)
-            : metadataWrapSubject(item.record);
+        // A page is seen by its versions; its comments come with them.
+        if (item.kind !== 'comment') unseen.delete(node);
+        const subject = subjectOf(item);
         const folderKey = folderKeyOf(folderKeys, subject.audienceClass);
         if (!folderKey) throw new CryptoError('missing-key', 'A new share has every key');
         wraps.push({
