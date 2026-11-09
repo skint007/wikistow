@@ -6,6 +6,9 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- A folder renamed offline is renamed once you're back online even if someone moved it into or out of a shared folder meanwhile. Before, its change was refused and could only be discarded. (#377)
 #### Plugins
 
 - Plugin drafts take `.ttf` and `.otf` fonts and `.jpeg` images under `public/` too, 1 MB each, from **Upload project folder…**, **Add file…** and **Change with the assistant**. (#378)

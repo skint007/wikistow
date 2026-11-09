@@ -1189,19 +1189,31 @@ export class OfflineQueue {
     const sending = entry.sending ?? (await this.#recordRename(entry));
     if (!sending) return;
     const { spaceId, id: folderId, base } = entry;
-    let landed: LoadedMetadata;
-    try {
-      landed = await updateMetadata(ctx, {
+    const send = (region: Region) =>
+      updateMetadata(ctx, {
         spaceId,
         subject: { kind: 'folder', folderId },
-        current: {
-          head: base.head,
-          opened: { kind: 'current', metadata: base.metadata },
-          region: base.region,
-        },
+        current: { head: base.head, opened: { kind: 'current', metadata: base.metadata }, region },
         changes: sending.changes,
         metadataRevisionId: sending.metadataRevisionId,
       });
+    let landed: LoadedMetadata;
+    try {
+      try {
+        landed = await send(base.region);
+      } catch (error) {
+        // Moved into or out of a share since it was queued, as `saveDraft`
+        // finds: sealed again for the region its name is in now. The check
+        // refused it before anything was sealed under the keys it had.
+        const moved =
+          (error instanceof ApiError || error instanceof CryptoError) &&
+          error.code === 'region-mismatch';
+        if (!moved) throw error;
+        const { folders } = await loadStructure(ctx, spaceId);
+        const now = folders.find((folder) => folder.id === folderId)?.metadata;
+        if (!now) throw error;
+        landed = await send(now.region);
+      }
     } catch (error) {
       const failure = failureOf(error);
       if (!failure) return 'offline';
