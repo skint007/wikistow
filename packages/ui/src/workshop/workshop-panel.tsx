@@ -4,12 +4,22 @@ import { Copy, Puzzle, Square } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { chatStore, useChatStore } from '../ai/chat';
 import { useWide } from '../ai/chat-column';
 import { toolActivity, toolResults } from '../ai/chat-model';
 import { Working } from '../ai/working';
+import { errorMessage } from '../errors';
 import { useClient } from '../vault/store';
+import { openWorkshop } from './drafts';
 import type { WorkshopChat } from './workshop-chat';
 
 /** Where a workshop's conversation goes, for anyone about to send one. */
@@ -24,9 +34,10 @@ export function WorkshopDisclosure({ host }: { host: string }) {
       </p>
       <p>
         The plugin’s files are saved as a draft on your WikiStow server as the assistant writes
-        them, so you can carry on from any device. Like library plugins, they’re plain text on the
-        server. The conversation isn’t saved: it ends when you end the workshop, lock your vault,
-        sign out, or reload or close the app.
+        them, and the conversation, its versions and sample pages are kept with it, so you can carry
+        on from any device. Like library plugins, they’re plain text on the server. A page you copy
+        into the preview isn’t kept: the conversation only notes that you copied one. What the
+        assistant writes is kept, so if it repeats some of a copy, that part is.
       </p>
     </div>
   );
@@ -48,6 +59,8 @@ export function WorkshopConversation({
   const subscribe = useCallback((listener: () => void) => session.subscribe(listener), [session]);
   const ai = useSyncExternalStore(subscribe, session.state);
   const turns = useSyncExternalStore(chat.subscribe, chat.turns);
+  const keeping = useSyncExternalStore(chat.subscribe, chat.keeping);
+  const [clearing, setClearing] = useState(false);
   const { copy } = useSyncExternalStore(chat.workshop.subscribe, chat.workshop.state);
   const onWorkshop = useLocation({ select: (location) => location.pathname === '/workshop' });
   // Below the column's width the conversation is a sheet over the preview: this closes it.
@@ -79,6 +92,17 @@ export function WorkshopConversation({
               Open the preview
             </Link>
           )}
+          {(ai.messages.length > 0 ||
+            keeping.status === 'unreadable' ||
+            keeping.status === 'stale') && (
+            <button
+              type="button"
+              onClick={() => setClearing(true)}
+              className="font-bold text-primary hover:underline"
+            >
+              Clear conversation
+            </button>
+          )}
           <button
             type="button"
             onClick={() => chatStore.end()}
@@ -88,15 +112,35 @@ export function WorkshopConversation({
           </button>
         </span>
       </div>
+      <ClearConversation chat={chat} open={clearing} onClose={() => setClearing(false)} />
       <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto px-4 py-3">
         {copy && (
           <p role="note" className="rounded-control border p-3 text-sm">
-            This draft is a copy of <strong>{copy.from}</strong>, with a new ID of your own,{' '}
-            <strong>{copy.id}</strong>. It publishes as a different plugin: pages’ blocks and data
-            of {copy.from} aren’t its own.
+            This draft is a copy of <strong>{copy.from}</strong>, with a new ID
+            {chat.workshop.sharedBy === null ? ' of your own' : ''}, <strong>{copy.id}</strong>. It
+            publishes as a different plugin: pages’ blocks and data of {copy.from} aren’t its own.
           </p>
         )}
         {ai.messages.length === 0 && <WorkshopDisclosure host={provider.host} />}
+        {keeping.status === 'old-server' && (
+          <p role="note" className="text-xs text-muted-foreground">
+            Your WikiStow server doesn’t keep the workshop’s conversation yet: it ends when you end
+            the workshop or reload.
+          </p>
+        )}
+        {keeping.status === 'unread' && (
+          <p role="note" className="text-xs text-muted-foreground">
+            The conversation kept with this draft couldn’t be read just now, so this one isn’t kept.
+            Open the draft again to carry on from it.
+          </p>
+        )}
+        {keeping.status === 'unreadable' && (
+          <p role="note" className="text-xs text-muted-foreground">
+            The conversation kept with this draft can’t be read in this version of the app, so it
+            stays as it is and this one isn’t kept. Clear conversation deletes it and starts one
+            that is.
+          </p>
+        )}
         {ai.messages.map((message, index) => {
           if (message.role === 'user') {
             const sent = turns[turn++];
@@ -104,7 +148,13 @@ export function WorkshopConversation({
               <div key={index} className="grid justify-items-end gap-1">
                 {sent?.copied && (
                   <span className="text-xs text-muted-foreground">
-                    Copied “<Name>{sent.copied}</Name>” into the preview
+                    {sent.copied.title === null ? (
+                      'Copied one of your pages into the preview. The copy isn’t kept.'
+                    ) : (
+                      <>
+                        Copied “<Name>{sent.copied.title}</Name>” into the preview
+                      </>
+                    )}
                   </span>
                 )}
                 <p className="max-w-[90%] rounded-card bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">
@@ -128,10 +178,76 @@ export function WorkshopConversation({
             {ai.failure.message}
           </p>
         )}
+        {keeping.status === 'stale' && (
+          <p role="alert" className="text-xs text-destructive">
+            This draft’s conversation went on from another device, so what’s new here isn’t kept.
+            End the workshop and open the draft again to carry on from there.
+          </p>
+        )}
+        {keeping.problem && (
+          <p role="alert" className="text-xs text-destructive">
+            {keeping.problem}
+          </p>
+        )}
         <div ref={end} />
       </div>
       <Composer chat={chat} running={ai.status === 'running'} />
     </div>
+  );
+}
+
+/**
+ * **Clear conversation**, once the person confirms: what the draft keeps
+ * of the workshop is forgotten, and the draft opens afresh, its files as
+ * they are.
+ */
+function ClearConversation({
+  chat,
+  open,
+  onClose,
+}: {
+  chat: WorkshopChat;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const clear = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await chat.clear();
+      openWorkshop(chat.workshop.draftId, chat.workshop.sharedBy);
+    } catch (failure) {
+      setError(errorMessage(failure));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Clear the conversation?</DialogTitle>
+          <DialogDescription>
+            The conversation, its versions and sample pages are deleted, and the workshop starts
+            over on the draft’s files, which stay as they are.
+          </DialogDescription>
+        </DialogHeader>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="destructive" disabled={busy} onClick={() => void clear()}>
+            Clear conversation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

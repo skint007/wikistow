@@ -538,7 +538,7 @@ Rules (`payload.ts`, `metadata.ts`):
 { format: 1, mediaType: "image/webp" | "image/jpeg" | "image/png", data: base64url }
 ```
 
-- A folder's or space's own image, shown in place of its emoji. The writer resizes it to fit 144 by 144 pixels and encodes it afresh (an SVG is drawn as pixels; SVG is never stored). `data` is the encoded image, at most 16 KB (16,384 bytes), since every tree load carries each folder's current metadata, and the spaces list each space's.
+- A folder's or space's own image, shown in place of its emoji. The writer resizes it to fit 144 by 144 pixels and encodes it afresh (an SVG is drawn as pixels; SVG is never stored). `data` is the encoded image, at most 16 KB (16,384 bytes), since every tree load carries each folder's current metadata, and the spaces list each space's. Copying an icon already in the same space to another folder, space or page keeps its bytes as they are.
 - It has no key of its own: it is encrypted with the rest of the metadata, so it reaches exactly the people who can read the folder's or space's name, and moves, shares and rotations need nothing more. The key-material rule above is unchanged.
 - Readers show it only when `format` is 1, `mediaType` is one of the three, and `data` decodes to 1 to 16,384 bytes. Anything else, or an image that fails to decode, counts as no image, and the folder or space shows its emoji (a space without one, the initials of its name); it never makes the metadata `malformed`. Writers refuse what readers would not show.
 - Extensions are merged into the next version, so removing the image writes `wikistow.icon: null`. Choosing an emoji removes the image; choosing an image keeps the emoji, which older clients and failed loads show. A space's emoji can be removed too, which leaves `emoji` out of the next version.
@@ -1262,6 +1262,8 @@ An agent is a CLI installation, or a chat assistant its person's own app runs (s
 2. **During enrollment** (section 9.2, steps 3 and 4), server text is always written as ASCII only, whatever the locale.
 3. **`--json` output** is written by a serializer that emits only printable ASCII inside strings: every code point outside U+0020–U+007E as a lowercase `\uXXXX` escape. A plain `JSON.stringify` is not enough.
 4. **Raw output** of decrypted content is allowed only when stdout isn't a terminal.
+
+`wikistow mcp` (#323) answers each tool call with what its command prints with `--json`, so by rule 3, and writes its own messages to stderr by rule 1.
 
 These encoders disarm escape sequences, operating-system commands such as OSC 52 and OSC 8, carriage returns and backspaces, which could otherwise draw a forged fingerprint or prompt. The encoders of PR #29 stay (`cli-text.ts`), with the fingerprint in place of the safety-code words.
 

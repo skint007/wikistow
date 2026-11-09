@@ -642,7 +642,24 @@ const UPDATE_ROUTES = {
     ),
     link: 'Release notes',
   },
+  apt: {
+    how: (
+      <>
+        Update it with <span className="whitespace-nowrap">sudo apt update</span> and{' '}
+        <span className="whitespace-nowrap">sudo apt upgrade</span>.
+      </>
+    ),
+    link: 'Release notes',
+  },
   deb: { how: 'Download the new .deb and install it.', link: 'Release notes and download' },
+  dnf: {
+    how: (
+      <>
+        Update it with <span className="whitespace-nowrap">sudo dnf upgrade --refresh</span>.
+      </>
+    ),
+    link: 'Release notes',
+  },
   rpm: { how: 'Download the new .rpm and install it.', link: 'Release notes and download' },
   windows: { how: 'Download the new installer and run it.', link: 'Download the installer' },
   mac: {

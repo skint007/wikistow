@@ -1,3 +1,4 @@
+import { passkeyClient } from '@better-auth/passkey/client';
 import { twoFactorClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 import { desktop } from '../desktop';
@@ -12,9 +13,9 @@ const sendToOwnOrigin = (input: string | URL | Request, init?: RequestInit) => {
   return fetch(`${url.pathname}${url.search}`, init);
 };
 
-/** Better Auth's browser client: sign-in, two-factor, passwords, and sign-out. */
+/** Better Auth's browser client: sign-in, two-factor, passkeys, passwords, and sign-out. */
 export const authClient = createAuthClient({
   basePath: '/api/auth',
-  plugins: [twoFactorClient()],
+  plugins: [twoFactorClient(), passkeyClient()],
   ...(desktop && { baseURL: STAND_IN, fetchOptions: { customFetchImpl: sendToOwnOrigin } }),
 });

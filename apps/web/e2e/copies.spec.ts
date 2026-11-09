@@ -54,7 +54,18 @@ test('copying and moving pages and folders between spaces', async ({
     await publishedPageIn(owner, 'Garden', 'Plan', 'Read [[Seeds]] before sowing.');
     await newFolder(owner, 'Errands');
     await publishedPageIn(owner, 'Errands', 'Shopping', 'Buy more beans.');
-    await publishedPageIn(owner, 'Errands', 'List', 'Then the [[Shopping]].');
+    await publishedPageIn(
+      owner,
+      'Errands',
+      'List',
+      '---\nrelated: "[[Shopping]]"\n---\nThen the [[Shopping]].',
+    );
+    await publishedPageIn(
+      owner,
+      'Errands',
+      'Overview',
+      '```wikistow-query\nfrom: Errands\nshow: related\n```\n',
+    );
     await newSpace(owner, 'Work');
     work = spaceIn(owner);
   });
@@ -165,6 +176,30 @@ test('copying and moving pages and folders between spaces', async ({
     await expect(owner.getByText('Buy more beans.')).toBeVisible();
     // Opened by a link to where it is now, it doesn't say it moved.
     await expect(owner.getByText('This page moved to Work.')).toHaveCount(0);
+  });
+
+  await test.step('the folder table and a query block left behind link to it in Work', async () => {
+    await openSpace(owner, 'Family');
+    await folderMenu(owner, 'Errands', 'Open');
+    // An editor's table cells edit their values: the list's open their links.
+    const folder = owner.getByRole('region', { name: 'Folder' });
+    await folder
+      .getByRole('group', { name: 'Show as' })
+      .getByRole('button', { name: 'List' })
+      .click();
+    await folder
+      .getByRole('listitem')
+      .filter({ hasText: 'List' })
+      .getByRole('link', { name: 'Shopping' })
+      .click();
+    await expect(owner).toHaveURL(new RegExp(`${newAddress}$`));
+
+    await openSpace(owner, 'Family');
+    await openFolder(owner, 'Errands');
+    await owner.getByRole('treeitem', { name: 'Overview' }).click();
+    const query = owner.locator('.query-table');
+    await query.getByRole('row', { name: /List/ }).getByRole('link', { name: 'Shopping' }).click();
+    await expect(owner).toHaveURL(new RegExp(`${newAddress}$`));
   });
 });
 

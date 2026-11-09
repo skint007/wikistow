@@ -1,4 +1,6 @@
-import { pluginDraftRoutes } from '@wikistow/contracts';
+import { toBase64 } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
+import { pluginDraftRoutes, pluginProposalRoutes } from '@wikistow/contracts';
 import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -20,9 +22,15 @@ import { chatStore } from '../ai/chat';
 import { api } from '../api';
 import { errorMessage } from '../errors';
 import { ChooseFolder, pathInFolder } from '../plugins/choose-folder';
+import { useClient } from '../vault/store';
 import { WorkshopChat } from './workshop-chat';
+import { ShareDraft, sharedDraftsQuery } from './share-draft';
+import { OLD_SERVER } from './workshop';
 
 type DraftSummary = pluginDraftRoutes.DraftSummary;
+
+/** What proposals' queries are kept under (#315). */
+export const PROPOSALS_KEY = ['plugin-proposals'];
 
 /** The person's plugin drafts (ADR 0004), most recently changed first. */
 export const draftsQuery = queryOptions({
@@ -30,12 +38,21 @@ export const draftsQuery = queryOptions({
   queryFn: async () => (await api.call(pluginDraftRoutes.listDrafts)).drafts,
 });
 
-/** What a new draft starts from: nothing, a library version (`from`), or `files`. */
-export type DraftStart = Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>;
+/**
+ * What a new draft starts from: nothing, a library version (`from`),
+ * `files` and `binary`, or a proposal for one of the person's plugins.
+ */
+export type DraftStart =
+  | Omit<z.input<typeof pluginDraftRoutes.createDraft.body>, 'replaces'>
+  | { proposal: string };
 
-/** Open the workshop on draft `draftId`, in place of any conversation, with its panel open. */
-export function openWorkshop(draftId: string) {
-  chatStore.start(new WorkshopChat(draftId));
+/**
+ * Open the workshop on draft `draftId`, in place of any conversation, with
+ * its panel open. `sharedBy` names whoever shared it, for a draft not the
+ * person's own.
+ */
+export function openWorkshop(draftId: string, sharedBy: string | null = null) {
+  chatStore.start(new WorkshopChat(draftId, sharedBy));
   chatStore.setOpen(true);
 }
 
@@ -66,16 +83,32 @@ export function useNewDraft(): {
 
   const create = async (from: DraftStart, replaces?: string) => {
     try {
-      const { draft } = await api.call(pluginDraftRoutes.createDraft, {
-        body: replaces ? { ...from, replaces } : from,
-      });
+      const { draft } =
+        'proposal' in from
+          ? await api.call(pluginProposalRoutes.openProposal, {
+              params: { proposalId: from.proposal },
+              body: replaces ? { replaces } : {},
+            })
+          : await api.call(pluginDraftRoutes.createDraft, {
+              body: replaces ? { ...from, replaces } : from,
+            });
       openWorkshop(draft.id);
       return true;
     } catch (failure) {
-      setError(errorMessage(failure));
+      // A server from before fonts and images in drafts refuses `binary` as a field it doesn't know.
+      const old =
+        failure instanceof ApiError &&
+        failure.code === 'invalid-request' &&
+        'binary' in from &&
+        from.binary;
+      setError(old ? OLD_SERVER : errorMessage(failure));
       return false;
     } finally {
       await queryClient.invalidateQueries({ queryKey: draftsQuery.queryKey });
+      // The list only: the review's own query would answer not-found while it closes.
+      if ('proposal' in from) {
+        await queryClient.invalidateQueries({ queryKey: PROPOSALS_KEY, exact: true });
+      }
     }
   };
 
@@ -108,7 +141,8 @@ export function useNewDraft(): {
           <DialogTitle>Delete a draft to start this one?</DialogTitle>
           <DialogDescription>
             You have {pluginDraftRoutes.MAX_DRAFTS} drafts. Starting this one deletes “
-            <Name>{asking?.oldest.name ?? ''}</Name>”, the one you changed longest ago.
+            <Name>{asking?.oldest.name ?? ''}</Name>”, the one changed longest ago, for anyone you
+            shared it with too.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -137,17 +171,38 @@ export function useNewDraft(): {
   return { start, busy: making || busy, error, clear: () => setError(null), dialog };
 }
 
-const { draftPathProblem, MAX_DRAFT_BYTES, MAX_DRAFT_FILE_BYTES, MAX_DRAFT_FILES } =
-  pluginDraftRoutes;
+const {
+  draftPathProblem,
+  isBinaryDraftPath,
+  MAX_DRAFT_BINARY_FILE_BYTES,
+  MAX_DRAFT_BYTES,
+  MAX_DRAFT_FILE_BYTES,
+  MAX_DRAFT_FILES,
+} = pluginDraftRoutes;
+
+/** Why a draft can't take a chosen file of `size` bytes at `path`, or null when it can. */
+function draftFileProblem(path: string, size: number) {
+  const problem = draftPathProblem(path);
+  if (problem) return problem;
+  if (isBinaryDraftPath(path)) {
+    return size > MAX_DRAFT_BINARY_FILE_BYTES
+      ? `${path} is too large: a font or image in a draft is 1 MB at most.`
+      : null;
+  }
+  return size > MAX_DRAFT_FILE_BYTES
+    ? `${path} is too large: a draft file holds 256 KB at most.`
+    : null;
+}
 
 /**
  * A plugin project's files, as a new draft's (ADR 0004): its
  * `wikistow-plugin.json` and every file under `src/` and `public/`, chosen
  * by path before anything is read, leaving out the rest (`package.json`,
- * `node_modules`, `dist`, dotfiles). A file the draft can't hold, or the
- * limits, refuse the whole folder, naming the file.
+ * `node_modules`, `dist`, dotfiles). Fonts and images under `public/` go
+ * as bytes. A file the draft can't hold, or the limits, refuse the whole
+ * folder, naming the file.
  */
-async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[]> {
+async function readProject(chosen: File[]): Promise<DraftStart> {
   const files = chosen
     .map((file) => ({ file, path: pathInFolder(file) }))
     .filter(
@@ -160,26 +215,36 @@ async function readProject(chosen: File[]): Promise<pluginDraftRoutes.DraftFile[
   if (files.length > MAX_DRAFT_FILES)
     throw new Error(`A draft holds ${MAX_DRAFT_FILES} files at most.`);
   for (const { file, path } of files) {
-    const problem = draftPathProblem(path);
+    const problem = draftFileProblem(path, file.size);
     if (problem) throw new Error(problem);
-    if (file.size > MAX_DRAFT_FILE_BYTES)
-      throw new Error(`${path} is too large: a draft file holds 256 KB at most.`);
   }
   if (files.reduce((total, { file }) => total + file.size, 0) > MAX_DRAFT_BYTES)
     throw new Error('A draft holds 4 MB at most.');
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  return Promise.all(
-    files.map(async ({ file, path }) => {
-      let text: string;
-      try {
-        text = decoder.decode(await file.arrayBuffer());
-      } catch {
-        throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
-      }
-      if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
-      return { path, text };
-    }),
+  const binary = await Promise.all(
+    files
+      .filter(({ path }) => isBinaryDraftPath(path))
+      .map(async ({ file, path }) => ({
+        path,
+        data: toBase64(new Uint8Array(await file.arrayBuffer())),
+      })),
   );
+  const texts = await Promise.all(
+    files
+      .filter(({ path }) => !isBinaryDraftPath(path))
+      .map(async ({ file, path }) => {
+        let text: string;
+        try {
+          text = decoder.decode(await file.arrayBuffer());
+        } catch {
+          throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+        }
+        if (text.includes('\0')) throw new Error(`${path} isn’t text, so a draft can’t hold it.`);
+        return { path, text };
+      }),
+  );
+  // Only with some: a server older than fonts and images refuses the field.
+  return binary.length > 0 ? { files: texts, binary } : { files: texts };
 }
 
 /** When a draft's files last changed, as the list says it. */
@@ -189,15 +254,17 @@ function changed(iso: string) {
 }
 
 /**
- * The person's drafts, with how long ago each changed, **Open** and
- * **Delete**, beside **Upload project folder…** and **New plugin**. The draft the workshop has open says
- * so, and can't be deleted while it is.
+ * The person's drafts, with how long ago each changed, **Share…**,
+ * **Open** and **Delete**, beside **Upload project folder…** and **New
+ * plugin**. The draft the workshop has open says so, and can't be deleted
+ * while it is.
  */
 export function DraftsList({ open }: { open: string | null }) {
   const queryClient = useQueryClient();
   const { data: drafts, error: listError } = useQuery(draftsQuery);
   const newDraft = useNewDraft();
   const [deleting, setDeleting] = useState<DraftSummary | null>(null);
+  const [sharing, setSharing] = useState<DraftSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Forget what last went wrong, as another action starts. */
@@ -226,7 +293,7 @@ export function DraftsList({ open }: { open: string | null }) {
           onFolder={async (chosen) => {
             fresh();
             try {
-              await newDraft.start({ files: await readProject(chosen) });
+              await newDraft.start(await readProject(chosen));
             } catch (failure) {
               setError(errorMessage(failure));
             }
@@ -265,6 +332,9 @@ export function DraftsList({ open }: { open: string | null }) {
               <span className="flex-1 text-xs text-muted-foreground">
                 {changed(draft.updatedAt)}
               </span>
+              <Button size="sm" variant="ghost" onClick={() => setSharing(draft)}>
+                Share…
+              </Button>
               {draft.id === open ? (
                 <Badge>Open</Badge>
               ) : (
@@ -289,13 +359,15 @@ export function DraftsList({ open }: { open: string | null }) {
         </ul>
       )}
       {newDraft.dialog}
+      <ShareDraft draft={sharing} onClose={() => setSharing(null)} />
       <Dialog open={deleting !== null} onOpenChange={(next) => !next && !busy && setDeleting(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this draft?</DialogTitle>
             <DialogDescription>
-              “<Name>{deleting?.name ?? ''}</Name>” and its files are deleted from your WikiStow
-              server. Versions you published stay in the library.
+              “<Name>{deleting?.name ?? ''}</Name>”, its files and its workshop’s conversation are
+              deleted from your WikiStow server, for everyone you shared it with too. Versions you
+              published stay in the library.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -315,6 +387,92 @@ export function DraftsList({ open }: { open: string | null }) {
               }}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+/**
+ * Drafts other people shared with the person (#315), each with whose it
+ * is, how long ago it changed, **Open** and **Leave**. Nothing shows
+ * without any, or on a server without shared drafts.
+ */
+export function SharedDraftsList({ open }: { open: string | null }) {
+  const ctx = useClient();
+  const queryClient = useQueryClient();
+  const { data: shared } = useQuery(sharedDraftsQuery);
+  const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState<DraftSummary | null>(null);
+  if (!shared || shared.length === 0) return null;
+  const leave = async (draft: DraftSummary) => {
+    setError(null);
+    setLeaving(null);
+    try {
+      await api.call(pluginDraftRoutes.unshareDraft, {
+        params: { draftId: draft.id, identityId: ctx.identity.public.id },
+      });
+    } catch (failure) {
+      setError(errorMessage(failure));
+    }
+    await queryClient.invalidateQueries({ queryKey: sharedDraftsQuery.queryKey });
+  };
+  return (
+    <section aria-label="Shared plugin drafts" className="grid gap-3">
+      <h2 className="text-sm font-bold">Drafts shared with you</h2>
+      {error && <FormMessage>{error}</FormMessage>}
+      <ul className="grid gap-2">
+        {shared.map(({ draft, owner }) => (
+          <li
+            key={draft.id}
+            aria-label={draft.name}
+            className="flex flex-wrap items-center gap-2 rounded-control border p-3 text-sm"
+          >
+            <strong className="min-w-0 truncate">
+              <Name>{draft.name}</Name>
+            </strong>
+            <span className="flex-1 text-xs text-muted-foreground">
+              Shared by <Name>{owner.name}</Name>. {changed(draft.updatedAt)}
+            </span>
+            {draft.id === open ? (
+              <Badge>Open</Badge>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setError(null);
+                    openWorkshop(draft.id, owner.name);
+                  }}
+                >
+                  Open
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setLeaving(draft)}>
+                  Leave
+                </Button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <Dialog open={leaving !== null} onOpenChange={(next) => !next && setLeaving(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Leave this draft?</DialogTitle>
+            <DialogDescription>
+              “<Name>{leaving?.name ?? ''}</Name>” goes from your workshop, with your conversation
+              on it. Its owner can share it with you again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLeaving(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => leaving && void leave(leaving)}>
+              Leave
             </Button>
           </DialogFooter>
         </DialogContent>

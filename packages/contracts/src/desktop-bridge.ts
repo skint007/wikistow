@@ -74,8 +74,11 @@ export type BuildDiagnostic = {
   message: string;
 };
 
-/** A file in a workshop's plugin draft: its path from the top, with `/` between names. */
-export type WorkshopFile = { path: string; size: number };
+/**
+ * A file in a workshop's plugin draft: its path from the top, with `/`
+ * between names, its size, and `binary` for a font or image.
+ */
+export type WorkshopFile = { path: string; size: number; binary?: true };
 
 /** One build of a workshop's plugin draft, numbered from 1 in its conversation, failed builds included. */
 export type WorkshopVersion = {
@@ -99,8 +102,12 @@ export type DesktopUpdate = {
   version: string;
   /** Its release page, with the notes and the downloads; for a Windows install, its installer. */
   url: string;
-  /** How this copy was installed (`install-source`), or null when the app can't tell. */
-  source: 'aur' | 'deb' | 'rpm' | 'windows' | 'mac' | null;
+  /**
+   * How this copy was installed (`install-source`), or null when the app
+   * can't tell: `apt` and `dnf` are a .deb or .rpm with WikiStow's
+   * repository added.
+   */
+  source: 'aur' | 'apt' | 'deb' | 'dnf' | 'rpm' | 'windows' | 'mac' | null;
 };
 
 /**

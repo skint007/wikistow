@@ -4,6 +4,45 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.25.0-beta.2 - 2026-11-09
+
+### Highlights
+
+#### Features
+
+- Sign in with a passkey, with Use a passkey on the sign-in page, also when signing in the desktop app. It counts as both factors, so there’s no two-factor code. Add and remove passkeys in Settings → Security.
+- Agent tools that speak MCP can use WikiStow through `wikistow mcp`, with the same commands and checks as the CLI.
+- Share a plugin draft with people you name, or send a change to someone else’s plugin back to them with Propose to its owner.
+- The plugin workshop keeps its conversation, versions and sample pages, so you can reload or switch devices and carry on. Drafts can hold fonts and images.
+- Load development folder… works in a computer’s browser too.
+- The icon picker’s Image tab offers the images already used in the space, and Shared with me shows each folder’s and space’s own look.
+- Links in folder tables and query blocks open a page that moved to another space.
+
+### Changes
+
+#### App
+
+- Sign in with a passkey, a fingerprint, face, screen lock or security key, with **Use a passkey** on the sign-in page, and in the browser when signing in the desktop app. It counts as both factors, so there's no two-factor code. Add, name and remove passkeys in Settings → Security; the desktop app lists and removes them. Passwords keep working, and your vault passphrase is still asked for. (#366)
+- The icon picker's **Image** tab has an **In this space** row of the images already used in the space, its folders and its pages, each once. Picking one copies it, so the same picture can go on several folders or pages without uploading it again. (#360)
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#362)
+- A link in a folder table or a query block to a page moved to another space opens it there, as the linking page's own link does. A query block's links also follow a renamed page now. (#369)
+
+#### Plugins
+
+- **Load development folder…** in Settings → Plugins works in a computer's browser too: choose a plugin's built `dist/` folder, approve it, and press **Reload** after each build. Chrome and Edge read the folder again; Firefox and Safari ask for it again at each **Reload…**. The plugin runs in that tab only, labelled Development, until you close or reload the tab or remove it, and replaces a library plugin of the same ID there. Each build goes to the server as your own development build, served only to you and dropped a week after the last Reload (migration `0042_plugin_development`). (#364)
+- Plugin drafts hold fonts and images (`.woff2 .woff .png .jpg .webp .gif`, 1 MB each) under `public/`, so a theme with its own font or a plugin with an icon can be made in the workshop. **Add file…** in the workshop adds one; **Upload project folder…** and **Change with the assistant** bring them along; a build copies them as `wikistow-plugin build` does. The assistant can list and delete them, but not write them (migration `0044_draft_binary_files`). (#365)
+- The plugin workshop keeps its conversation, versions and sample pages with the draft, so you can reload or switch devices and carry on. A page you copied into the preview isn't kept, only a note that you copied one. The newest version comes back to preview; older ones are listed as history. **Clear conversation** starts over on the draft's files (migration `0045_draft_workshop`). (#371)
+- In the workshop, a copy of someone else's plugin offers **Propose to *owner*…**, which sends your changes back to them. They see what changed by file on their workshop page, and can open it as a draft of their own and publish it as a new version, or decline it (migration `0046_plugin_proposals`). (#372)
+- Share a plugin draft with people you name, with **Share…** in the workshop. They find it under **Drafts shared with you**, can change its files and preview it, each with a conversation of their own, and only you publish it. When two people change one file, the last change wins (migration `0047_shared_drafts`). (#373)
+
+#### CLI
+
+- `wikistow mcp` serves the agent's commands as the tools of an MCP server, over standard input and output, for agent tools that speak MCP. Each tool runs its command with `--json`, with the same checks, idempotency keys and exit statuses. `wikistow mcp --help` says how to add it to Claude Code, Codex and other clients. (#368)
+
+#### Releases and packaging
+
+- Signed apt and dnf repositories for the desktop app on GitHub Pages, published after each stable release, and an update notice that says to use apt or dnf for them. (#361)
+
 ## 0.25.0-beta.1 - 2026-11-08
 
 ### Highlights

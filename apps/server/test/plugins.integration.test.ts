@@ -1,6 +1,7 @@
 // The plugin library on the server (ADR 0002, PR 1): what an upload must
 // be, its limits, who owns an ID and may remove it, the headers a library
 // file is served with, and who an Only me plugin is listed to (ADR 0004).
+// Development builds (#317) are served to their uploader only.
 import { createApiClient } from '@wikistow/client';
 import { pluginRoutes } from '@wikistow/contracts';
 import { pluginHash } from '@wikistow/plugin-sdk/files';
@@ -316,6 +317,47 @@ describe('the plugin library', () => {
     expect(await ids(2)).not.toContain('tuned');
     expect(await ids(pluginRoutes.MANIFEST_READ)).toEqual(
       expect.arrayContaining(['stars', 'home', 'tuned']),
+    );
+  });
+
+  it('serves a development build to its uploader only, apart from the library', async () => {
+    // Bob loads Ann's ID for development: the library's owner doesn't matter.
+    const load = (person: Person, files: Files, pluginId = 'notes') =>
+      createApiClient({ fetch: person.browser.fetch }).call(pluginRoutes.putDevelopment, {
+        params: { pluginId },
+        body: {
+          files: Object.entries(files).map(([path, data]) => ({
+            path,
+            data: Buffer.from(bytesOf(data)).toString('base64url'),
+          })),
+        },
+      });
+    const first = notes('9.0.0');
+    const { hash } = await load(bob, first);
+    expect(hash).toBe(await hashOf(first));
+    const at = (key: string) => `/plugins/notes/${key}/script.js`;
+    const served = await bob.browser.request(at(pluginRoutes.developmentKey(hash, 1)));
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(first['script.js']);
+    expect(served.headers.get('content-security-policy')).toBe("default-src 'none'");
+    // Nobody else gets it, not under the bare hash either, and the library doesn't list it.
+    expect((await ann.browser.request(at(pluginRoutes.developmentKey(hash, 1)))).status).toBe(404);
+    expect((await bob.browser.request(at(hash))).status).toBe(404);
+    expect(
+      (await list(bob)).flatMap(({ versions }) => versions).some((each) => each.hash === hash),
+    ).toBe(false);
+
+    // A Reload replaces it; the folder must hold the ID it is loaded as.
+    const next = await load(bob, notes('9.0.1'));
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(hash, 1)))).status).toBe(404);
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash, 2)))).status).toBe(
+      200,
+    );
+    await expect(load(bob, notes(), 'other')).rejects.toMatchObject({ code: 'invalid-request' });
+
+    expect((await remove(bob, 'notes/development')).status).toBe(200);
+    expect((await bob.browser.request(at(pluginRoutes.developmentKey(next.hash, 2)))).status).toBe(
+      404,
     );
   });
 });

@@ -6,7 +6,7 @@
 // changes nothing and shows nothing. The app never installs anything itself.
 import type { DesktopUpdate } from '@wikistow/contracts';
 import { net } from 'electron';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { packagedFolder } from './install.ts';
@@ -31,6 +31,16 @@ const Kept = z.object({ version: z.string() });
 const Source = z.enum(['aur', 'deb', 'rpm', 'windows', 'mac']);
 
 /**
+ * The files docs/desktop.md has people add for WikiStow's apt and dnf
+ * repositories (scripts/package-repos.sh). With one, the .deb or .rpm
+ * updates with the system's other packages.
+ */
+const REPOSITORIES = {
+  deb: { source: 'apt', file: '/etc/apt/sources.list.d/wikistow.sources' },
+  rpm: { source: 'dnf', file: '/etc/yum.repos.d/wikistow.repo' },
+} as const;
+
+/**
  * How this copy was installed, from its `install-source`. On Linux, trusted
  * only when it runs from where the packages put it. The Windows installer
  * and the Mac app keep it in `resources`, beside `app.asar`.
@@ -42,7 +52,14 @@ async function installSource(appPath: string): Promise<DesktopUpdate['source']> 
   const file = join(packaged ?? dirname(appPath), 'install-source');
   const word = await readFile(file, 'utf8').catch(() => '');
   const source = Source.safeParse(word.trim());
-  return source.success ? source.data : null;
+  if (!source.success) return null;
+  if (source.data !== 'deb' && source.data !== 'rpm') return source.data;
+  const repository = REPOSITORIES[source.data];
+  const added = await access(repository.file).then(
+    () => true,
+    () => false,
+  );
+  return added ? repository.source : source.data;
 }
 
 /** The channel the Linux package says, from its `channel` beside `install-source`, or null. */
@@ -50,6 +67,13 @@ async function packagedChannel(appPath: string): Promise<string | null> {
   const packaged = packagedFolder(appPath);
   if (!packaged) return null;
   return readFile(join(packaged, 'channel'), 'utf8').catch(() => null);
+}
+
+/** How a repository install gets a release the repository doesn't hold. */
+function downloaded(source: DesktopUpdate['source']): DesktopUpdate['source'] {
+  if (source === 'apt') return 'deb';
+  if (source === 'dnf') return 'rpm';
+  return source;
 }
 
 /** Where the notice sends the person: the installer for this computer on Windows, else the release page. */
@@ -106,7 +130,9 @@ export function desktopUpdates(userData: string, installed: string, appPath: str
     async state(): Promise<DesktopUpdate | null> {
       await started;
       if (!latest || !newer(latest, installed)) return null;
-      return { installed, version: latest, url: releaseLink(latest, source), source };
+      // The repositories hold stable releases only, so a beta comes from its download.
+      const from = isPrerelease(latest) ? downloaded(source) : source;
+      return { installed, version: latest, url: releaseLink(latest, from), source: from };
     },
   };
 }

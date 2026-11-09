@@ -85,6 +85,45 @@ test('a sign-in with two-factor turned on asks for a code', async ({ freshPage, 
   await expectSignedIn(other);
 });
 
+test('a passkey signs in on its own, without the password or a two-factor code', async ({
+  freshPage,
+  admin,
+}) => {
+  const { page } = await invited(freshPage, admin.email);
+  // Chromium's virtual authenticator answers the browser's passkey prompts,
+  // checking it's the person (user verification) each time.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  await page.goto('/settings');
+  await page.getByRole('button', { name: 'Manage two-factor sign-in' }).click();
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  await page.getByRole('button', { name: 'Set up two-factor' }).click();
+  const key = await page.locator('code').first().textContent();
+  await page.getByLabel('Code').fill(totp(secretFromUri(`otpauth://totp/x?secret=${key ?? ''}`)));
+  await page.getByRole('button', { name: 'Turn on' }).click();
+  await expect(page.getByRole('list', { name: 'Backup codes' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Manage passkeys' }).click();
+  await page.getByLabel('Name (optional)').fill('Test key');
+  await page.getByRole('button', { name: 'Add a passkey' }).click();
+  await expect(page.getByRole('list', { name: 'Passkeys' })).toContainText('Test key');
+
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Use a passkey' }).click();
+  await expectSignedIn(page);
+});
+
 test('a session check the server doesn’t answer as WikiStow shows its own screen, with Try again', async ({
   page,
   admin,

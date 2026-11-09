@@ -4,20 +4,23 @@ import { Button } from '@/components/ui/button';
 /**
  * A button that chooses a whole folder, on a computer: `onFolder` gets
  * its files, each with its path under the folder's own name in
- * `webkitRelativePath`. Phones can't choose folders, so they see `phone`
- * instead, on a line of their own in a wrapping row. `name` labels the
- * hidden input.
+ * `webkitRelativePath`. With `onPick`, the button calls that instead, to
+ * choose it another way (the File System Access picker). Phones can't
+ * choose folders, so they see `phone` instead, on a line of their own in
+ * a wrapping row. `name` labels the hidden input.
  */
 export function ChooseFolder({
   label,
   name,
   phone,
   onFolder,
+  onPick,
 }: {
   label: string;
   name: string;
   phone: string;
   onFolder: (files: File[]) => Promise<void>;
+  onPick?: (() => void) | undefined;
 }) {
   const input = useRef<HTMLInputElement | null>(null);
   const [computer] = useState(() => window.matchMedia('(any-pointer: fine)').matches);
@@ -25,7 +28,11 @@ export function ChooseFolder({
     return <p className="order-last basis-full text-sm text-muted-foreground">{phone}</p>;
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => input.current?.click()}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => (onPick ? onPick() : input.current?.click())}
+      >
         {label}
       </Button>
       <input
@@ -52,3 +59,11 @@ export function ChooseFolder({
 export const pathInFolder = (file: File) =>
   // The chosen folder's own name comes first.
   file.webkitRelativePath.split('/').slice(1).join('/') || file.name;
+
+/** A folder input's files, each with its path from the chosen folder's top and as the person sees it. */
+export const folderFiles = (files: File[]) =>
+  files.map((file) => ({
+    file,
+    shown: file.webkitRelativePath || file.name,
+    path: pathInFolder(file),
+  }));

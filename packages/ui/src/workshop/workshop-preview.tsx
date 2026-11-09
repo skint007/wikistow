@@ -9,11 +9,13 @@ import {
   type PropertyValue,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import type { pluginRoutes, WorkshopVersion } from '@wikistow/contracts';
+import { pluginDraftRoutes, type pluginRoutes, type WorkshopVersion } from '@wikistow/contracts';
 import { PluginError, type AppViewProps } from '@wikistow/plugin-sdk';
+import { MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Name } from '@/components/name';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,8 +40,9 @@ import { DeclaredSettings } from '../plugins/declared-settings';
 import { PluginsContext, usePlugins, type ShownPage } from '../plugins/runtime';
 import { PickAPage } from '../shell/pick-a-page';
 import { useClient } from '../vault/store';
+import { Propose } from './proposals';
 import { SAMPLE_SPACE, type Sample } from './samples';
-import type { Workshop } from './workshop';
+import { OLD_SERVER, type Workshop } from './workshop';
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'Something went wrong.';
@@ -66,6 +69,7 @@ export function WorkshopPreview({ workshop }: { workshop: Workshop }) {
   return (
     <div className="grid content-start gap-5">
       <Status workshop={workshop} />
+      <Propose workshop={workshop} />
       {state.running && (
         <PluginsContext value={workshop.preview}>
           <Problems workshop={workshop} />
@@ -143,7 +147,13 @@ function Status({ workshop }: { workshop: Workshop }) {
             <Button size="sm" variant="outline" onClick={() => void workshop.unload()}>
               Unload
             </Button>
-            <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            {workshop.sharedBy === null ? (
+              <Publish workshop={workshop} version={running} onNotice={setPublished} />
+            ) : (
+              <span className="text-muted-foreground">
+                Only <Name>{workshop.sharedBy}</Name> publishes it.
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">
@@ -174,7 +184,7 @@ function Status({ workshop }: { workshop: Workshop }) {
           {problem}
         </p>
       )}
-      {latest && !latest.plugin && (
+      {latest && !latest.plugin && !latest.history && (
         <Alert variant="destructive">
           <AlertDescription className="grid gap-1.5">
             <p>
@@ -723,7 +733,11 @@ function PluginPlaces({
   );
 }
 
-/** Every build, newest first: preview any that built, or on the desktop export it, by its hash. */
+/**
+ * Every build, newest first: preview any that built, or on the desktop
+ * export it, by its hash. One kept from before whose build isn't kept is
+ * history only.
+ */
 function Versions({ workshop }: { workshop: Workshop }) {
   const { versions, running } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null);
@@ -761,6 +775,13 @@ function Versions({ workshop }: { workshop: Workshop }) {
                 <span>
                   {version.plugin.manifest.name} {version.plugin.manifest.version}
                 </span>
+              ) : version.history ? (
+                <>
+                  <span>
+                    {version.history.name} {version.history.version}
+                  </span>
+                  <Badge variant="secondary">Build not kept</Badge>
+                </>
               ) : (
                 <Badge variant="destructive">Didn’t build</Badge>
               )}
@@ -793,7 +814,7 @@ function Versions({ workshop }: { workshop: Workshop }) {
             {version.hash && (
               <p className="text-xs break-all text-muted-foreground">SHA-256 {version.hash}</p>
             )}
-            {version.plugin ? <Diagnostics version={version} /> : null}
+            {version.plugin || version.history ? <Diagnostics version={version} /> : null}
           </li>
         ))}
       </ul>
@@ -801,29 +822,110 @@ function Versions({ workshop }: { workshop: Workshop }) {
   );
 }
 
-/** The draft's files as saved, to read what the assistant wrote. */
+/** Fonts and images as an Add file… input takes them. */
+const BINARY_ACCEPT = pluginDraftRoutes.DRAFT_BINARY_KINDS.join(',');
+
+const kilobytes = (size: number) => `${Math.max(1, Math.round(size / 1024))} KB`;
+
+/**
+ * The draft's files as saved, to read what the assistant wrote, and
+ * **Add file…**, which adds fonts and images under `public/`: the model
+ * can't write those.
+ */
 function Files({ workshop }: { workshop: Workshop }) {
-  const { files } = useSyncExternalStore(workshop.subscribe, workshop.state);
+  const { phase, files, binary } = useSyncExternalStore(workshop.subscribe, workshop.state);
   const [path, setPath] = useState<string | null>(null);
-  if (files.size === 0) return null;
+  const [adding, setAdding] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement | null>(null);
+  if (phase !== 'ready') return null;
+  const add = async (chosen: File[]) => {
+    setProblem(null);
+    setAdding(true);
+    let added = false;
+    try {
+      // One at a time: each is its own upload.
+      for (const file of chosen) {
+        const path = `public/${file.name}`;
+        // The person chose a file, not a path: say what its name needs.
+        if (pluginDraftRoutes.draftPathProblem(path)) {
+          throw new Error(
+            `“${file.name}” can’t be added: a font or image’s name uses only letters, digits, _, . and -, and ends in ${pluginDraftRoutes.DRAFT_BINARY_KINDS.join(', ')}. Rename it and add it again.`,
+          );
+        }
+        await workshop.addBinary(path, new Uint8Array(await file.arrayBuffer()));
+        added = true;
+      }
+    } catch (error) {
+      // Only a server from before fonts and images in drafts has no route for them: it
+      // answers 404, or 413 past its usual 1 MiB body. The limits were checked here first.
+      const old = error instanceof ApiError && (error.status === 404 || error.status === 413);
+      setProblem(old ? OLD_SERVER : message(error));
+    }
+    try {
+      // Built and previewed at once, as on opening, so Publish carries what was added.
+      if (added && workshop.state().files.has(MANIFEST_FILE)) await workshop.buildAndPreview();
+    } catch (error) {
+      setProblem(message(error));
+    } finally {
+      setAdding(false);
+    }
+  };
   const text = path === null ? undefined : files.get(path);
+  const bytes = path === null ? undefined : binary.get(path);
+  const paths = [...files.keys(), ...binary.keys()].sort();
   return (
     <section aria-label="Draft files" className="grid gap-2">
-      <h2 className="text-sm font-bold">Draft files</h2>
-      <div className="flex flex-wrap gap-1">
-        {[...files.keys()].sort().map((file) => (
-          <Button
-            key={file}
-            size="sm"
-            variant={path === file ? 'secondary' : 'ghost'}
-            aria-pressed={path === file}
-            onClick={() => setPath(path === file ? null : file)}
-            className="font-mono"
-          >
-            {file}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="flex-1 text-sm font-bold">Draft files</h2>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={adding}
+          onClick={() => input.current?.click()}
+        >
+          Add file…
+        </Button>
+        <input
+          ref={input}
+          type="file"
+          hidden
+          multiple
+          accept={BINARY_ACCEPT}
+          aria-label="Font or image"
+          onChange={(event) => {
+            const chosen = [...(event.target.files ?? [])];
+            // So choosing the same file again sends it again.
+            event.target.value = '';
+            if (chosen.length > 0) void add(chosen);
+          }}
+        />
       </div>
+      <p className="text-xs text-muted-foreground">
+        Add fonts and images ({pluginDraftRoutes.DRAFT_BINARY_KINDS.join(' ')}, 1 MB each) to
+        public/. The assistant can list and delete them, but not write them.
+      </p>
+      {problem && (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      )}
+      {paths.length > 0 && (
+        <div role="group" aria-label="Files" className="flex flex-wrap gap-1">
+          {paths.map((file) => (
+            <Button
+              key={file}
+              size="sm"
+              variant={path === file ? 'secondary' : 'ghost'}
+              aria-pressed={path === file}
+              onClick={() => setPath(path === file ? null : file)}
+              className="font-mono"
+            >
+              {file}
+            </Button>
+          ))}
+        </div>
+      )}
       {path && text !== undefined && (
         <pre
           aria-label={path}
@@ -831,6 +933,12 @@ function Files({ workshop }: { workshop: Workshop }) {
         >
           {text}
         </pre>
+      )}
+      {path && bytes !== undefined && (
+        <p aria-label={path} className="text-sm text-muted-foreground">
+          A font or image, {kilobytes(bytes.length)}, at {path.slice('public/'.length)} in the built
+          plugin.
+        </p>
       )}
     </section>
   );

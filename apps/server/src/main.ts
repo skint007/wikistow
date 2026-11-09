@@ -11,6 +11,7 @@ import {
   sweepBlobs,
   sweepDrafts,
   sweepPasswordBudgets,
+  sweepPluginDevelopment,
   sweepPlugins,
   sweepPublicLinks,
   sweepTrash,
@@ -51,7 +52,8 @@ const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.
 // Each sweep on its own, so one failing doesn't stop the others: attachment
 // data nothing uses, and publications into another space nobody finished
 // (see sweepBlobs); library plugin files no version lists (see
-// sweepPlugins); old draft checkpoints nothing needs (see sweepDrafts);
+// sweepPlugins), and development builds nobody reloaded for a week (see
+// sweepPluginDevelopment); old draft checkpoints nothing needs (see sweepDrafts);
 // password allowances that are full again (see sweepPasswordBudgets);
 // public copies nobody finished, or whose sharer or uploader can no
 // longer publish their page (see sweepPublicLinks), every 10 minutes; and
@@ -60,6 +62,7 @@ const sweeps = [
   scheduleSweep(stdoutLog, 'blob-sweep', () => sweepBlobs(db, blobs)),
   scheduleSweep(stdoutLog, 'plugin-sweep', async () => ({
     versions: await sweepPlugins(db, filePluginStore(config.blobDir)),
+    development: await sweepPluginDevelopment(db),
   })),
   scheduleSweep(stdoutLog, 'draft-sweep', async () => ({
     drafts: await sweepDrafts(db, { retentionMs: config.draftRetentionMs }),

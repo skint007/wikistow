@@ -17,7 +17,7 @@ This ADR settles how that changes. A library plugin is **Shared** or **Only me**
 - An upload installs the plugin for its owner. ADR 0002's uploads installed nothing.
 - The workshop, which ADR 0002 kept out of the browser, comes to the browser and to phones. Its build runs in a worker in the page, in every client. Phones still can't upload a plugin folder, but they can publish a draft, which needs no folder.
 - The file route also serves the caller's own plugin draft builds, as `/plugins/<id>/draft-<hash>/…`, so the browser previews a draft the way it loads a library plugin. The app's CSP doesn't change.
-- On the desktop, main no longer keeps workspaces or builds. Installing a workshop version as a folder install, and the workshop's own **Share to library…**, give way to **Publish**. Folder installs, development loading and export to a folder stay.
+- On the desktop, main no longer keeps workspaces or builds. Installing a workshop version as a folder install, and the workshop's own **Share to library…**, give way to **Publish**. Folder installs, development loading and export to a folder stay. (A browser's development folders, since #317, have a development slot of their own on the server, not a draft's build.)
 
 Nothing here changes what the server can do to a person's plugins: approvals stay in the person's encrypted account record, and the desktop still checks every library download against the approved hash.
 
@@ -60,36 +60,68 @@ plugin_drafts
   name            text not null    -- the manifest's name as last saved, else "Untitled plugin"
   from_plugin_id  text             -- what it started from: a library version, or null
   from_hash       text             --   plain text, since the version may be removed later
-  build_hash      text             -- the build a browser last previewed (decision 5), or null
   created_at, updated_at timestamptz
   index (owner_id, updated_at)
 
 plugin_draft_files
   draft_id uuid references plugin_drafts on delete cascade, path text, text text, size integer
+  data bytea                       -- a font or image (#313), in place of text
   primary key (draft_id, path)
+
+plugin_draft_shares               -- since #315: the people the owner shared it with
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  created_at timestamptz
+  primary key (draft_id, account_id)
+
+plugin_draft_builds               -- since #315: the build each person's browser last previewed
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  hash text
+  primary key (draft_id, account_id)
 
 plugin_draft_build_files
-  draft_id uuid references plugin_drafts on delete cascade, path text, data bytea
-  primary key (draft_id, path)
+  draft_id uuid, account_id uuid, path text, data bytea
+  primary key (draft_id, account_id, path)
+  foreign key (draft_id, account_id) references plugin_draft_builds on delete cascade
+
+plugin_draft_workshops            -- since #315: each person's kept workshop (#314)
+  draft_id uuid references plugin_drafts on delete cascade
+  account_id uuid references users on delete cascade
+  workshop text, revision integer
+  primary key (draft_id, account_id)
 ```
 
-**Files in Postgres, not `BLOB_DIR`.** A draft's files are small text files changed one at a time. As rows, each change is one transaction that also checks the limits, deleting a draft or an account takes its files, nothing needs an orphan sweep, and `pg_dump` carries them, so `backup.sh`, `restore.sh` and the backup's check need no change. The build is up to 10 MB of bytes, still well within what one row holds; it goes with its draft the same way. The library keeps `BLOB_DIR` for its versions, which are immutable and served by hash for good.
+Until #315 (migration `0047_shared_drafts`), `plugin_drafts` held the one build's hash (`build_hash`) and the kept workshop (`workshop`, `workshop_revision`), and build files were keyed by draft and path.
 
-**Limits.** The workshop's limits move from `apps/desktop/src/workshop/workshop.ts` into `packages/contracts`, and the server checks them: at most 200 files, 256 KB a file (in UTF-8) and 4 MB in all, each path plain (names of letters, digits, `_`, `.` and `-`, starting with a letter, digit or `_`, at most 64 characters, at most five folders deep), of a text kind, and not also a folder's name, as a build's paths can't be. A build is held to the library's limits (10 MB, 500 files, `script` at most 1 MB) and checked with `checkPlugin`. Drafts don't count against the storage quota; these limits bound them at about 140 MB per account.
+**Files in Postgres, not `BLOB_DIR`.** A draft's files are small text files changed one at a time, and since #313 a few fonts and images as bytes. As rows, each change is one transaction that also checks the limits, deleting a draft or an account takes its files, nothing needs an orphan sweep, and `pg_dump` carries them, so `backup.sh`, `restore.sh` and the backup's check need no change. The build is up to 10 MB of bytes, still well within what one row holds; it goes with its draft the same way. The library keeps `BLOB_DIR` for its versions, which are immutable and served by hash for good.
 
-**Ten per account.** Creating an 11th draft is refused with `draft-limit`, unless the request names `replaces`, one of the person's own drafts, which is deleted in the same transaction. The workshop warns first, naming the least recently changed draft: "You have 10 drafts. Starting this one deletes “Name”, the one you changed longest ago." with **Delete it and start** and **Cancel**. This is the issue's suggestion, and the server deletes nothing the person wasn't shown by name. A person who would rather lose another draft deletes it from the list first. "Changed" means its files: `updated_at` moves with each file change, not with a build.
+**Limits.** The workshop's limits move from `apps/desktop/src/workshop/workshop.ts` into `packages/contracts`, and the server checks them: at most 200 files, 256 KB a file (in UTF-8) and 4 MB in all, each path plain (names of letters, digits, `_`, `.` and `-`, starting with a letter, digit or `_`, at most 64 characters, at most five folders deep), of a text kind, and not also a folder's name, as a build's paths can't be. Since #313 a draft also holds fonts and images (`.woff2 .woff .png .jpg .webp .gif`) under `public/` only, as bytes, at most 1 MB each, since a single weight of a full font is often past 256 KB (the app's own Noto Sans Math is 264 KB), within the same 4 MB in all. A build is held to the library's limits (10 MB, 500 files, `script` at most 1 MB) and checked with `checkPlugin`. Drafts don't count against the storage quota; these limits bound them at about 140 MB per account.
 
-**Routes** (`pluginDraftRoutes` in `packages/contracts/src/routes/plugin-drafts.ts`), people only, through `routes.account`. Agents never reach drafts. A draft that isn't the caller's answers `not-found`, the same as one that doesn't exist.
+**Ten per account.** Creating an 11th draft is refused with `draft-limit`, unless the request names `replaces`, one of the person's own drafts, which is deleted in the same transaction. The workshop warns first, naming the least recently changed draft: "You have 10 drafts. Starting this one deletes “Name”, the one changed longest ago, for anyone you shared it with too." (since #315) with **Delete it and start** and **Cancel**. This is the issue's suggestion, and the server deletes nothing the person wasn't shown by name. A person who would rather lose another draft deletes it from the list first. "Changed" means its files: `updated_at` moves with each file change, not with a build.
+
+**Routes** (`pluginDraftRoutes` in `packages/contracts/src/routes/plugin-drafts.ts`), people only, through `routes.account`. Agents never reach drafts. A draft that isn't the caller's, or shared with them (#315), answers `not-found`, the same as one that doesn't exist.
 
 | Route | What | Rate limit |
 | --- | --- | --- |
 | `GET /api/plugin-drafts` | The caller's drafts, most recently changed first: ID, name, what it started from, file count, size, `updatedAt` | 120 a minute |
-| `POST /api/plugin-drafts` | Create a draft, empty, from a library version (`from: { pluginId, hash }`) or from files (`files: [{ path, text }]`), with optional `replaces`. Answers its summary | 30 in 10 minutes, body 6 MB |
-| `GET /api/plugin-drafts/:draftId` | The draft's summary and every file's text | 120 a minute |
-| `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits | 120 a minute, the app's usual 1 MiB body |
-| `DELETE /api/plugin-drafts/:draftId` | Delete it, with its files and build | 120 a minute |
-| `PUT /api/plugin-drafts/:draftId/build` | Replace the draft's build: every file, as an upload carries them. Answers its hash | 120 in 10 minutes, body 15 MB |
-| `GET /plugins/<id>/draft-<hash>/<path>` | A file of the caller's own draft build with that hash and manifest ID, served by the library's file route | the file route's 2000 a minute |
+| `POST /api/plugin-drafts` | Create a draft, empty, from a library version (`from: { pluginId, hash }`) or from files (`files: [{ path, text }]`, and `binary: [{ path, data }]` for fonts and images in base64url, sent only when there are some), with optional `replaces`. Answers its summary | 30 in 10 minutes, body 6 MB |
+| `GET /api/plugin-drafts/:draftId` | The draft's summary and every text file's text | 120 a minute |
+| `GET /api/plugin-drafts/:draftId/binary-files` | Its fonts and images, `[{ path, data }]` in base64url (#313). Apart from the text, so an app older than them reads a draft as before; the workshop asks only when the summary counts more files than the text | 120 a minute |
+| `POST /api/plugin-drafts/:draftId/binary-files` | Add or replace one font or image, `{ path, data }`, within the limits. The workshop then builds and previews the draft, so **Publish** carries it | 120 a minute, body 2 MB |
+| `POST /api/plugin-drafts/:draftId/changes` | `{ put: [{ path, text }], remove: [path] }`, applied together within the limits; `remove` takes fonts and images too | 120 a minute, the app's usual 1 MiB body |
+| `DELETE /api/plugin-drafts/:draftId` | Delete one of the caller's own, with its files, and everyone's builds, kept workshops and shares | 120 a minute |
+| `GET /api/plugin-drafts/:draftId/workshop` | The caller's kept workshop of it (#314; each person's own since #315), `{ workshop, revision }`, `workshop` as JSON or null | 120 a minute |
+| `PUT /api/plugin-drafts/:draftId/workshop` | `{ workshop, revision }`, in place of what was kept, at most 768 KB as JSON, if `revision` is still the latest, else `stale-head`. Answers the new revision. Doesn't move `updatedAt` | 60 a minute, the app's usual 1 MiB body |
+| `DELETE /api/plugin-drafts/:draftId/workshop` | Forget it, for **Clear conversation**, whatever its revision; the files stay | 120 a minute |
+| `PUT /api/plugin-drafts/:draftId/build` | Replace the caller's build of the draft: every file, as an upload carries them. Answers its hash | 120 in 10 minutes, body 15 MB |
+| `GET /plugins/<id>/draft-<hash>/<path>` | A file of the caller's own build of a draft with that hash and manifest ID, served by the library's file route | the file route's 2000 a minute |
+| `GET /api/shared-plugin-drafts` | Drafts others shared with the caller (#315), `[{ draft, owner: { name } }]`, apart from the caller's own list | 120 a minute |
+| `GET /api/plugin-drafts/:draftId/shares` | Whom the caller's own draft is shared with, `[{ identityId, name }]` | 120 a minute |
+| `POST /api/plugin-drafts/:draftId/shares` | Share the caller's own draft with `{ identityId }`, a person the people picker lists, up to 20. Answers whom it's shared with | 120 a minute |
+| `DELETE /api/plugin-drafts/:draftId/shares/:identityId` | The owner removes that person, or the person leaves it; their build and kept workshop of it go too | 120 a minute |
+
+An app older than #313 reads a draft's text only, so it builds, previews and publishes a draft without its fonts and images, and makes a draft from a version without them; the draft itself keeps them. That is the price of not adding them to `getDraft`'s strict answer.
 
 A route with a body limit above the app's 1 MiB takes the account's one large-body slot for each request (`bodySlots` in `apps/server/src/http/mount.ts`), so the changes route, which carries one file of at most 256 KB, keeps the usual limit, and the model's writes never wait on an upload. The workshop sends its large uploads (a preview's build, Publish) one at a time.
 
@@ -111,11 +143,11 @@ Two devices changing one draft: the last write of each file wins. An open worksh
 
 **What a build makes doesn't change:** the manifest, `ui.js`, `script.js`, `public/`'s files at the top, and every draft file under `source/`, so a published version carries its source and can be changed with the assistant later. The page checks it with `checkPlugin` and the library's limits, so a build that couldn't be published fails as a build, and hashes it with `pluginHash`. The page keeps every version this conversation built, with its files, so any can be previewed again or published, as the Versions list does now. They go with the conversation.
 
-**Previewing in the browser.** The page uploads the version's files with `PUT …/build`. The server checks them as it checks a library upload and keeps them as the draft's one build, replacing the last. Its answer must be the hash the page computed. The preview's runtime then loads the version from `/plugins/<id>/draft-<hash>/…`, which the file route serves from the draft's build to its owner only, with the library's headers: `import()` for `ui.js`, `<link>` for styles, the sandboxed frame for `script.js`, exactly as it loads library plugins. The runtime is unchanged: a draft build's key is `draft-<hash>`. Not the bare hash, which the installed copy of the same version uses: browsers keep one module per URL, so a preview and an installed copy under one address would share a module, and with it the plugin's state and host. Caching it for good is right, since a hash's files never change.
+**Previewing in the browser.** The page uploads the version's files with `PUT …/build`. The server checks them as it checks a library upload and keeps them as the caller's one build of the draft, replacing their last. Since #315 each person who reaches the draft has one build of it of their own (`plugin_draft_builds`), so two people previewing one shared draft don't replace each other's. Its answer must be the hash the page computed. The preview's runtime then loads the version from `/plugins/<id>/draft-<hash>/…`, which the file route serves from that person's build of the draft to them only, with the library's headers: `import()` for `ui.js`, `<link>` for styles, the sandboxed frame for `script.js`, exactly as it loads library plugins. The runtime is unchanged: a draft build's key is `draft-<hash>`. Not the bare hash, which the installed copy of the same version uses: browsers keep one module per URL, so a preview and an installed copy under one address would share a module, and with it the plugin's state and host. Caching it for good is right, since a hash's files never change.
 
 **Previewing on the desktop.** The page hands the version's files to main (`workshopPreview(files)`). Main checks every path with `PluginFile`, refuses a file with a folder's name and the library's limits, as `uploadPlugin` and the plugin store do, since `checkPlugin` leaves paths and limits to its caller and app code runs in the same page, then checks the files with `checkPlugin`, keeps them in `userData/workshop/<hash>/`, and serves them under `app://wikistow/plugins/<id>/draft-<hash>/` as it serves workshop versions now. It deletes them when the window navigates and when the app starts, as now. Whether it holds any is what tells main a preview ran in the window, which its crash check uses to choose safe mode (`previewing` in `render-process-gone`, `workshop.open()` today). Handing the files over is shorter than having main fetch them from the server and check them, and main serves only what the page built. The desktop doesn't upload builds.
 
-So the draft's build on the server is the one a browser last previewed: a cache for serving, which nothing else reads. A draft opened on another device is built again in the page (about half a second to a second), never served from that cache unbuilt.
+So each person's build of a draft on the server is the one their browser last previewed: a cache for serving, which nothing else reads. A draft opened on another device is built again in the page (about half a second to a second), never served from that cache unbuilt.
 
 **Publishing** uploads the files of the version in the preview with the library's upload route, with the person's choice of Shared or Only me, then writes the approval (decision 2). It doesn't copy the server's draft build, since the desktop doesn't upload one, and the upload route already has every check. From a phone that is at most 10 MB, usually a few hundred KB. The draft stays after publishing, so the person can carry on and publish the next version.
 
@@ -123,11 +155,20 @@ So the draft's build on the server is the one a browser last previewed: a cache 
 
 ### 6. The workshop's lifetime and disclosure
 
-The conversation lasts as it does now: until **End workshop**, locking the vault, signing out, or reloading or closing the app. The draft stays; **End workshop** no longer deletes anything. The workshop page lists the person's drafts, with **Open**, **Delete** and how long ago each changed, beside **New plugin**.
+The conversation lasts as it does now: until **End workshop**, locking the vault, signing out, or reloading or closing the app. The draft stays; **End workshop** no longer deletes anything. Since #314 the conversation, its versions and sample pages are kept with the draft too (**The kept workshop**, below). The workshop page lists the person's drafts, with **Open**, **Delete** and how long ago each changed, beside **New plugin**.
 
-The disclosure in `workshop-panel.tsx` keeps its first paragraph and replaces the second with: "The plugin’s files are saved as a draft on your WikiStow server as the assistant writes them, so you can carry on from any device. Like library plugins, they’re plain text on the server. The conversation isn’t saved: it ends when you end the workshop, lock your vault, sign out, or reload or close the app." The model's system prompt drops "in the desktop app" and says the files are saved as they are written.
+The disclosure in `workshop-panel.tsx` keeps its first paragraph and replaces the second with: "The plugin’s files are saved as a draft on your WikiStow server as the assistant writes them, so you can carry on from any device. Like library plugins, they’re plain text on the server. The conversation isn’t saved: it ends when you end the workshop, lock your vault, sign out, or reload or close the app." The model's system prompt drops "in the desktop app" and says the files are saved as they are written. Since #314 the second paragraph says the conversation, its versions and sample pages are kept too, that a copied page isn't, and that what the assistant writes is kept, so a part of a copy it repeats is too.
 
-**Sample pages stay on the device**, in the page's memory, and go with the conversation as now. They never go into the draft: a sample can be a copy of a real page, which is encrypted everywhere else. A new conversation on a draft starts with the default samples, and the model writes its own as before.
+**Sample pages are the workshop's own**, in the page's memory, and go with the conversation as now. They never go into the draft's files: a sample can be a copy of a real page, which is encrypted everywhere else. A new conversation on a draft starts with the default samples, and the model writes its own as before. Since #314 the samples that aren't copies are kept with the conversation on the server (below); copies are never kept there, though like everything in the preview they go to the AI provider.
+
+**The kept workshop (#314).** Scott decided on 2026-11-08 to keep the conversation, versions and sample pages with the draft, plain text like its files, leaving out copies of real pages. The workshop keeps one JSON document per draft, in `plugin_drafts.workshop` (migration `0045_draft_workshop`; since #315 one per person, in `plugin_draft_workshops`, below), through routes of its own, so `getDraft`'s strict answer stays as it was. The server only stores it, within 768 KB, which keeps a save within the app's usual 1 MiB body and so off the large-body slot; the model's request has the same 1 MiB cap, so a conversation near the limit is near the model's too. The app writes and reads it (`packages/ui/src/workshop/kept.ts`):
+
+- **What's kept.** The conversation as the model is sent it, each message the person sent as they wrote it, each version's number, diagnostics, hash and manifest name and version, the sample pages that aren't copies, and how many samples were made, so none is numbered again. It is saved a second and a half after each change, or ten seconds after the first while changes keep coming, at once as a reply ends, and as the workshop ends; a reload or a closed tab before then loses what changed since the last save. Building the files again on opening isn't a change: a device that only opens the draft sends nothing.
+- **What's left out.** A copied page's text, and its title: the person's message keeps "I copied one of my pages into the preview as sample page *n*", and in what the tools answered, a copy's place in the preview report says only that a copy was there; the copy itself isn't kept. What the model wrote over a copy goes the same way, and so do samples the previewed plugin made or changed while a copy was in the preview, since they may hold its text. Everything else the model writes is kept as written, its replies and other samples and files included, so a part of a copy it repeats there is kept too; the disclosure says so, and the system prompt asks it to put blocks for a copy on the copy and not carry its text elsewhere. The SDK reference is left out too, as the app's own text and the longest answer: the model is told to ask again.
+- **Versions.** Only the conversation and the last build are kept, not every version's build. On opening, the draft's files are built as before; a build with the newest kept version's hash is that version again, previewable, and a failed build saying what the newest failed one said is that one. The others come back as history: number, name and version, hash and diagnostics, marked **Build not kept**. Keeping every build would mean up to 10 MB a version on the server, a route to fetch them, and limits to drop old ones, for builds the person can make again from the files.
+- **Two devices.** Each save names the revision it follows. A workshop left open on another device, whose copy is out of date, is refused (`stale-head`) and keeps nothing more, saying so, rather than writing over the newer conversation; opening the draft again carries on from it. **Clear conversation** clears whatever the revision. A device that only opens the draft saves nothing until something changes on it (above), and one whose save's answer was lost checks whether it landed before it gives up.
+- **Past the limit,** the workshop doesn't send it (the server refuses one too) and the workshop says the conversation is too long to keep, until **Clear conversation**. **Clear conversation** deletes the kept document and opens the draft afresh, its files as they are. Deleting the draft deletes it with the row.
+- **Older apps and servers.** An app older than #314 never asks for it. Against a server older than #314 (a 404 for the route) the workshop keeps nothing, and says so. A document this app can't read is left alone and not overwritten; **Clear conversation** deletes it. If reading it fails otherwise, the draft opens as before and keeps nothing over it.
 
 ### 7. Change with the assistant
 
@@ -136,6 +177,17 @@ The disclosure in `workshop-panel.tsx` keeps its first paragraph and replaces th
 - **Someone else's plugin** gets a new ID of the person's own when the server makes the draft, so the preview and its sample blocks use it from the start. The server writes the first of `<id>-copy`, `<id>-copy-2`, `<id>-copy-3` and so on that no account has claimed (no `plugins` row, whether listed, Only me or with every version removed) and that none of the person's other drafts names in its manifest into the draft's `wikistow-plugin.json`, shortening `<id>` so the whole stays within the ID's 40 characters. It changes nothing else in the source.
 - **Checked at Publish.** IDs aren't reserved for drafts, so another copy may publish the same ID first. The upload route refuses an ID another account owns, and Publish shows its message ("Another account owns the plugin ID …"); the person asks the assistant for another ID and publishes again.
 - A copy is a different plugin: pages' `plugin:<old-id>/…` blocks and `plugin.<old-id>` data aren't its own. When a draft started from someone else's plugin, the workshop says so once, and the model is told the old and new IDs.
+- **Proposing a copy back (#315).** A copy's workshop offers **Propose to *owner*…**, which sends the draft's files as they are, text and fonts and images, to the plugin's owner, under the original ID again: the server sets the manifest's `id` back to the plugin's and writes its JSON out again. It is a read-only bundle in tables of its own (`plugin_proposals`, `plugin_proposal_files`, migration `0046_plugin_proposals`), through routes of its own (`pluginProposalRoutes`), so no draft answer changes. It names the version the copy started from. The conversation, versions, samples and build stay with the sender. Proposing again replaces the sender's earlier proposal for that plugin, so one person sends at most one per plugin. Proposals don't count against the owner's 10 drafts. The owner's workshop page lists them, and **Review** shows what changed by file against that version (a line diff for text, against the version's manifest laid out as the proposal's is, so a manifest that differs only in layout isn't listed and a changed one shows only what changed), whether that version is still the newest, and **Decline** or **Open as a draft**. Opening makes a draft of the owner's own from the proposal's files, `from` that version, asking first at 10 drafts as a new draft does, and forgets the proposal in the same transaction. Publishing it is the owner's usual **Publish**: a new hash, which everyone who installed the plugin approves as any update. Only the owner reads, opens or declines one; the sender sees only whether theirs is still waiting. Deleting either account deletes it. Removing every version of the plugin leaves it, its version shown as gone.
+
+### 7a. Shared drafts (#315)
+
+- **Who shares.** A draft's owner shares it with named people, chosen with the people picker (`GET /api/people`), as folders are: **Share…** on each of their drafts lists whom it's shared with, each with **Remove**, and up to 20 people. The server takes a person's identity ID and keeps their account in `plugin_draft_shares` (migration `0047_shared_drafts`). Only the owner shares; nobody shares a draft shared with them on.
+- **What they do.** A person it's shared with lists it under **Drafts shared with you** (`GET /api/shared-plugin-drafts`, apart from `listDrafts`, which older apps offer to delete), opens it, reads and changes its files, fonts and images included, and runs the workshop on it with the assistant. The same routes serve them as the owner, refusing everyone else as before. They don't delete it, share it, propose it (a copy is its owner's to propose), or see whom it's shared with, and they can **Leave** it. The draft doesn't count among their 10.
+- **Publishing stays the owner's.** A shared draft's workshop says "Only *owner* publishes it." in place of **Publish**. The library's upload doesn't know about drafts, so this is the app's rule, not the server's: for a draft whose plugin the owner already published, the upload would refuse anyone else anyway, since the ID is the owner's.
+- **Two people changing one file:** the last write wins, as between one person's devices. An open workshop sees the other's changes when the draft is opened again.
+- **Each person's workshop is their own.** The kept workshop is kept per person (`plugin_draft_workshops`, keyed by draft and account), which nobody else reads, so one person's conversation, and the samples and notes of copies in it, never reach another. A person starts the workshop on a shared draft with no conversation, and keeps their own from then on. The owner's kept workshop and build moved to the per-person tables in the migration. Keeping only the owner's would have meant the others' conversations ending at each reload, and showing the owner's to them would have shown one person's work with their pages to another.
+- **Builds.** Each person's preview build is their own (above), so one person's preview never replaces another's.
+- **Ending it.** The owner's **Remove**, or the person's **Leave**, ends their access and deletes their build and kept workshop of the draft. Deleting the draft, or the owner's account, deletes it all; deleting a shared person's account deletes only their share, build and kept workshop.
 
 ### 8. SDK projects
 
@@ -152,7 +204,9 @@ At phone sizes the `/workshop` page is one column at full width: the drafts list
 
 ### Out of scope
 
-Saving the conversation or the sample pages (#314), merging two devices' changes to one draft, drafts shared between accounts and proposing a change back to someone else's plugin (#315), sweeping drafts by age, encrypted drafts, binary files in drafts (#313), and a server-side publish from a draft's build.
+Binary files in drafts, once out of scope here, are built (#313): fonts and images under `public/`, above.
+
+Keeping the conversation, versions and sample pages, once out of scope here, is built (#314): **The kept workshop**, above. Proposing a change back to someone else's plugin, once out of scope here, is built (#315): **Proposing a copy back**, above. Drafts shared between accounts, once out of scope here, are built (#315): **Shared drafts**, above. Merging two devices' changes to one draft, sweeping drafts by age, encrypted drafts, and a server-side publish from a draft's build.
 
 ## Spike evidence (2026-10-16)
 
@@ -194,10 +248,10 @@ Scott decided the direction in #60 on 2026-10-16 and asked for it to be built an
 1. Visibility is a column on `plugins`, Shared by default, set by the owner at upload or with its own route.
 2. The listing takes the caller's approved hashes and lists an Only me plugin to its owner and to anyone who names one of its versions' hashes; its response keeps its shape. The file route stays as it is for library versions: the hash is the key.
 3. Every upload installs the plugin for its owner, with the hash the client computed, replacing an older approved version and keeping its access, after one confirmation that shows what the approval dialog shows.
-4. Plugin drafts live in Postgres, files and one build, with the workshop's limits, people only, in the backups through `pg_dump`.
+4. Plugin drafts live in Postgres, files and one build (since #315 one per person who reaches it), with the workshop's limits, people only, in the backups through `pg_dump`.
 5. At most 10 drafts; an 11th replaces the least recently changed one the person is shown and agrees to lose.
 6. Each model write saves at once; the last write of a file wins.
-7. The build runs in a module worker in the page, esbuild-wasm with `worker: false`, in every client. The browser previews from the file route under `draft-<hash>`, owner only; the desktop's main serves what the page hands it under the same key.
+7. The build runs in a module worker in the page, esbuild-wasm with `worker: false`, in every client. The browser previews from the file route under `draft-<hash>`, owner only (since #315 to whoever built it); the desktop's main serves what the page hands it under the same key.
 8. Publish uploads the previewed version from the page, Shared or Only me.
 9. A draft of someone else's plugin gets `<id>-copy` (or `-copy-2` and on) when it is made; the upload's ownership check is the final word.
 10. An SDK project becomes a draft from its `wikistow-plugin.json`, `src/` and `public/`.
