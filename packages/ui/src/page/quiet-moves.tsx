@@ -392,7 +392,10 @@ type Moved = {
   to: Chosen;
   sameSpace: boolean;
   copy: boolean;
-  /** Null for a move into a space the mover doesn't own, which only its owners move out of. */
+  /**
+   * Null in a space the person doesn't own: only its owners move things out
+   * of it, or delete them.
+   */
   undo: Undo | null;
   /** After a drop, which no dialog showed them before. */
   notes?: MoveNotes | null;
@@ -414,7 +417,8 @@ const movedNotice = (
         <MoveNotesLines notes={notes ?? null} />
         {!undo && (
           <p className="text-sm">
-            Only an owner of <Name>{to.spaceName}</Name> can move it out again.
+            Only an owner of <Name>{to.spaceName}</Name> can{' '}
+            {copy ? 'delete the copy' : 'move it out again'}.
           </p>
         )}
       </>
@@ -460,8 +464,8 @@ export const undoOnDevice = (
  * Take back a copy, by putting the copy in the trash, or a move into
  * another space, by moving it back where it was: its old addresses follow
  * it there (ADR 0007, decision 9), and its public links come back with it.
- * Only an owner of a space moves things out of it (decision 2), so a move
- * into a space the mover doesn't own has no Undo (null).
+ * Only an owner of a space moves things out of it (decision 2) or deletes
+ * them, so nothing made in a space the person doesn't own has Undo (null).
  */
 export function undoCopy(
   ctx: ClientContext,
@@ -478,10 +482,11 @@ export function undoCopy(
     moving: Moving;
     /** Where what moved was. */
     fromParentId: FolderId | null;
-    /** Whether the mover owns the space it went to. */
+    /** Whether the person owns the space it went to. */
     ownsDestination: boolean;
   },
 ): Undo | null {
+  if (!ownsDestination) return null;
   if (preview.kind === 'copy') {
     return {
       run: async () => {
@@ -499,7 +504,6 @@ export function undoCopy(
       message: errorMessage,
     };
   }
-  if (!ownsDestination) return null;
   return {
     run: async () => {
       const back = await previewCopy(ctx, {

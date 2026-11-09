@@ -277,8 +277,8 @@ function SpaceTiles({
     setDragging(null);
   };
 
-  // A page or folder from the sidebar, which another space takes where the
-  // person can make pages at all; where in it is the dialog's to say.
+  // A page or folder from the sidebar, which another space takes, at its
+  // top, where the person can make pages at all.
   const nodeFor = (event: DragEvent, space: (typeof spaces)[number]) => {
     const node = nodeDrag.get();
     if (!node || !event.dataTransfer.types.includes(NODE_DRAG_TYPE)) return null;

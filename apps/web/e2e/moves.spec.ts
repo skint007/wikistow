@@ -140,8 +140,13 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   const work = owner.getByRole('status').filter({ hasText: 'Moved “Beans” to Work.' });
   await drop(owner, beans, owner.getByRole('link', { name: 'Work', exact: true }));
   await expect(work).toContainText('Its earlier versions don’t go with it.', { timeout: 30_000 });
-  await expect(beans).toHaveCount(0);
+  // Beans was open, so the view follows it into Work.
+  await expect(owner.getByRole('heading', { name: 'Work', level: 2 })).toBeVisible();
+  await expect(owner.getByText(TEXT.beans)).toBeVisible();
   await work.getByRole('button', { name: 'Undo' }).click();
-  // Moved back from Work, under Garden again.
+  // Moved back from Work, and followed there, under Garden again.
+  await expect(owner.getByRole('heading', { name: 'Family', level: 2 })).toBeVisible({
+    timeout: 30_000,
+  });
   await expect.poll(under, { timeout: 30_000 }).toBe('Garden');
 });
