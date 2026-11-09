@@ -121,7 +121,7 @@ const MOVE_PREVIEW_REFUSED = previewRefused('it can’t be moved there');
  * false): this app's own words, never the server's. A refusal for the
  * pages it names (`PagesRefused`) is said here; the dialog lists them.
  * `tried` is false for a preview that failed, before anything was sent;
- * `'dropped'` is a drop's, which has no dialog to look at it again in.
+ * `'dropped'` is a drop's or an Undo's, which have no dialog to look at it again in.
  */
 export function copyMessage(
   error: unknown,

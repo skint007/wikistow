@@ -317,8 +317,8 @@ const SPACE_DESCRIPTION = {
 };
 
 /**
- * Everything in a space, into another (#339): choosing where, then the
- * usual preview. After a move, the space is empty, and its owner is asked
+ * Everything in a space, into another (#339): choosing where, then a step
+ * of its own to confirm, as it can't be undone (#376). After a move, the space is empty, and its owner is asked
  * whether to delete it; it is never deleted unasked.
  */
 function SpaceSteps({

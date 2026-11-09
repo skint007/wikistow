@@ -121,8 +121,7 @@ export function availability(
 }
 
 /**
- * How a move goes, if it can now: on the server, as online, once the person
- * looked it over (`server`), or on this device, sent after the changes
+ * How a move goes, if it can now: on the server, as online (`server`), or on this device, sent after the changes
  * before it (`device`), or not now, with the hint saying why.
  */
 export type MoveAvailability = { route: 'server' | 'device' } | { route: null; hint: string };

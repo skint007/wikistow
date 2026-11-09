@@ -1617,7 +1617,7 @@ const refused = (error: unknown): QueueFailure => ({
 const MOVES_ACROSS: QueueFailure = {
   kind: 'refused',
   message:
-    'Moving it there now changes who can read it, so it moves online only, where you can check who gains and loses access.',
+    'Moving it there now changes who can read it, so it moves online only. Move it there again once you’re back online.',
 };
 const PUBLISH_CHANGED: QueueFailure = {
   kind: 'refused',

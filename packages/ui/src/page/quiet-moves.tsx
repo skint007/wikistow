@@ -508,7 +508,7 @@ export function undoCopy(
       const returned = await copyNow(ctx, back);
       await refreshCopied(queryClient, ctx, back, returned);
     },
-    message: (caught) => copyMessage(caught, false),
+    message: (caught) => copyMessage(caught, false, 'dropped'),
   };
 }
 
