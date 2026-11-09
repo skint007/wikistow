@@ -131,6 +131,15 @@ export type CopyPreview = {
   audience: CopyAudience;
   /** For a move, who loses access, by what the source's regions give them. */
   losses: AccessChange[];
+  /**
+   * Who can read more there than they can of it now: people the
+   * destination's verified audience names, beyond what the source's regions
+   * give them. Someone who doesn't own the source space can't list who reads
+   * it, so for them only they count as reading it now. Empty when it stays in
+   * the region it is in; null when that can't be told, for an unlisted
+   * audience, or an agent's copy.
+   */
+  gains: AccessChange[] | null;
   /** Pages published now that arrive with their draft alone, by source ID. */
   unpublished: { pageId: PageId; title: string | null }[];
   /**
@@ -324,6 +333,15 @@ export async function previewCopy(
 
   const audience = ctx.agent ? null : await destinationAudience(ctx, destTree, target);
   const isMove = kind === 'move';
+  const regions = regionsOf(moving);
+  // Who reads it now, where this app can list them: an owner of the space can.
+  const before =
+    audience?.kind === 'verified' || isMove
+      ? tree.space?.role === 'owner'
+        ? await sourceAudience(ctx, source.spaceId, regions)
+        : new Map<IdentityId, Reach>([[ctx.identity.public.id, 'drafts']])
+      : new Map<IdentityId, Reach>();
+  const staysIn = regions.every((region) => sameRegion(region, target.region));
   return {
     kind,
     copyId: copyRoutes.CopyId.parse(copyId),
@@ -342,7 +360,15 @@ export async function previewCopy(
     bringsPublished,
     nodes,
     audience,
-    losses: isMove ? await lossesOf(ctx, source.spaceId, moving, audience) : [],
+    losses: isMove ? lossesOf(before, audience, ctx.identity.public.id) : [],
+    gains: staysIn
+      ? []
+      : audience?.kind === 'verified'
+        ? audience.people.flatMap(({ identityId, reach }) => {
+            const held = before.get(identityId) ?? null;
+            return rank(reach) > rank(held) ? [{ identityId, before: held, after: reach }] : [];
+          })
+        : null,
     unpublished,
     links: sameSpace
       ? []
@@ -391,30 +417,33 @@ function regionsOf(moving: ReturnType<typeof subtreeOf>): Region[] {
 const RANK: Record<Reach, number> = { published: 1, drafts: 2 };
 const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 
-/**
- * Who holds less at the destination than in the source's regions now, for
- * a move, whose mover owns the source space. Only someone the destination
- * audience names counts as keeping access, so for a non-owner's preview of
- * the destination, everyone at the source is listed but the mover, who
- * writes there.
- */
-async function lossesOf(
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  moving: ReturnType<typeof subtreeOf>,
-  audience: CopyAudience,
-): Promise<AccessChange[]> {
+/** Who holds keys in `regions` of `spaceId` now, each by the most they hold, for an owner of it. */
+async function sourceAudience(ctx: ClientContext, spaceId: SpaceId, regions: readonly Region[]) {
   const keys = await spaceKeys(ctx, spaceId);
   const before = new Map<IdentityId, Reach>();
-  for (const region of regionsOf(moving)) {
+  for (const region of regions) {
     for (const [id, reach] of await audienceOf(ctx, keys, region)) {
       if (rank(reach) > rank(before.get(id))) before.set(id, reach);
     }
   }
+  return before;
+}
+
+/**
+ * Who holds less at the destination than in the source's regions now
+ * (`before`), for a move, whose mover owns the source space. Only someone
+ * the destination audience names counts as keeping access, so for a
+ * non-owner's preview of the destination, everyone at the source is listed
+ * but the mover, who writes there.
+ */
+function lossesOf(
+  before: ReadonlyMap<IdentityId, Reach>,
+  audience: CopyAudience,
+  mover: IdentityId,
+): AccessChange[] {
   const after = new Map(
     audience?.kind === 'verified' ? audience.people.map((p) => [p.identityId, p.reach]) : [],
   );
-  const mover = ctx.identity.public.id;
   return [...before].flatMap(([identityId, reach]) => {
     if (audience?.kind === 'unlisted' && identityId === mover) return [];
     const kept = after.get(identityId) ?? null;
