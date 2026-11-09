@@ -410,6 +410,39 @@ describe('renames and deletes made offline', () => {
     expect(nameOf(await folderNow(ctx, spaceId, folderId))).toBe('Mine');
   });
 
+  it('seal a rename again for the region its folder moved to, into a share and out', async () => {
+    const { ctx, queue, spaceId, folderId, current } = await withFolder();
+    const shared = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Shared' });
+    await sharing.shareFolder(ctx, {
+      preview: await sharing.previewShare(ctx, { spaceId, rootId: shared }),
+      people: [],
+    });
+    const moveTo = async (parentId: FolderId | null) =>
+      moves.moveNode(ctx, {
+        preview: await moves.previewMove(ctx, { spaceId, nodeId: folderId, parentId }),
+      });
+
+    // Renamed offline in the owner region, then moved into the share elsewhere.
+    await queue.rename({ spaceId, folderId, current, changes: { name: 'Holidays' } });
+    await moveTo(shared);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    const inShare = await folderNow(ctx, spaceId, folderId);
+    expect(nameOf(inShare)).toBe('Holidays');
+    // Under the share's keys, as the tree puts it, never the owner region's it was queued in.
+    expect(inShare?.region.kind).toBe('share');
+
+    // And back out: renamed in the share, then moved to the top.
+    if (!inShare) throw new Error('No folder');
+    await queue.rename({ spaceId, folderId, current: inShare, changes: { name: 'Trips again' } });
+    await moveTo(null);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    const outside = await folderNow(ctx, spaceId, folderId);
+    expect(nameOf(outside)).toBe('Trips again');
+    expect(outside?.region.kind).toBe('owner');
+  });
+
   it('stop a rename of a folder gone meanwhile as gone', async () => {
     const { ctx, queue, spaceId, folderId, current } = await withFolder();
     await queue.rename({ spaceId, folderId, current, changes: { name: 'Holidays' } });
