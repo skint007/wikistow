@@ -111,7 +111,7 @@ Rules:
 - Publish appears only on the draft view, so the person publishing has the draft in front of them. Editors without publish permission see no Publish button.
 - A page with no published version opens on the draft view for editors, with a **Not published yet** pill instead of Published vN. Readers don't see it in the tree at all.
 - The view is part of the URL (for example `?view=draft`) so links to a draft work and the browser's Back button returns to the published view.
-- **Comments** (proposed in [ADR 0014](../docs/adr/0014-comments.md), not built yet) would sit in the toolbar of both views, with a count, opening a panel in the chat's place. Its section here comes with the build.
+- **Comments** (accepted in [ADR 0014](../docs/adr/0014-comments.md), not built yet) would sit in the toolbar of both views, with a count, opening a panel in the chat's place. Its section here comes with the build.
 - Access lives in the **Share** dialog, which shows and changes who can read, edit, and publish. **History** opens a side sheet with published versions and restore.
 - **Share** is for owners. On a page it opens the share the page is in, or offers its folder (the space, for a top-level page). See [Sharing](#sharing).
 - A page published from another page (a **copy**, see [Publishing to another space](#publishing-to-another-space)) has no draft until it is detached: editors see its published view with no **Edit**, and publishers get **Detach to edit…** in its place.

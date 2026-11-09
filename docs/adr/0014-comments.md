@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Comments on pages
@@ -273,7 +273,7 @@ Comments are content, protected as a page's versions are: the server can't read 
 
 ## Consequences
 
-- Now, with this ADR: `wikistow/protocol.md` gains section 5.9, **Comments**, and notes in sections 1, 2.1, 2.4 (A4, A7, A12), 2.5, 3.5, 5.4, 6.1, 6.2, 6.3, 6.7, 6.9, 7.1, 7.3, 7.6, 9.5, 10 and 16, and Q13, all marked proposed. `protocol-review.md` logs it after the freeze. `wikistow.md`'s line on later work points here, `ui-design.md`'s page views name the **Comments** button, and `CONTEXT.md` gains **Comment**, all marked proposed.
+- Now, with this ADR: `wikistow/protocol.md` gains section 5.9, **Comments**, and notes in sections 1, 2.1, 2.4 (A4, A7, A12), 2.5, 3.5, 5.4, 6.1, 6.2, 6.3, 6.7, 6.9, 7.1, 7.3, 7.6, 9.5, 10 and 16, and Q13, all marked accepted. `protocol-review.md` logs it after the freeze. `wikistow.md`'s line on later work points here, `ui-design.md`'s page views name the **Comments** button, and `CONTEXT.md` gains **Comment**, all marked accepted.
 - Once built: `wikistow.md` gains a Comments section; `ui-design.md` a Comments section with the panel, the passage button, **New comments** and the phone layout; ADR 0009 decision 8 names comments among what needs the connection; ADR 0007 decision 6 names comments in what a move into another space ends; the agents guide and the CLI's help name the two commands.
 - The server gains comment tables and a migration, the routes of decision 12, the scan's `comment` entries, comments in the coverage checks of the four subtree requests, and the stream.
 - `packages/client` gains a comments module (seal, open, the checks of decision 4) and comments in the rewrap of making a share, moves, ending a share and adding a co-owner. `packages/ui` gains the panel, the passage button, the rail item and **New comments**.
@@ -290,7 +290,9 @@ Comments are content, protected as a page's versions are: the server can't read 
 
 Step 3 needs step 2; steps 4 and 5 need step 3.
 
-## Decide
+## Decided (2026-11-09)
+
+Scott accepted every recommendation below on 2026-11-09.
 
 1. **Can readers comment?** Recommended: yes, everyone who can read the page. Questions from readers are the main reason for comments.
 2. **Comments for editors only, from the draft view?** Recommended: yes, sealed with the draft key, so readers never see them, with the audience following the view and a reply taking its thread's. The other way, one audience for all, would show editors' notes on drafts to readers.
