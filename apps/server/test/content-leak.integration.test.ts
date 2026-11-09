@@ -27,6 +27,7 @@ import {
   pageRoutes,
   peopleRoutes,
   RevisionRecordV2,
+  sharingRoutes,
   structureRoutes,
 } from '@wikistow/contracts';
 import { z } from 'zod';
@@ -39,7 +40,7 @@ import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { addToGroup, makeGroup, removeFromGroup, shareWithGroup } from './support/groups.ts';
 import { asAgentOf, asPerson, everyAnswer, keysOf, whatOpens } from './support/opens.ts';
-import { shareFolder } from './support/sharing.ts';
+import { sealEnding, shareFolder } from './support/sharing.ts';
 import { snapshot } from './support/snapshot.ts';
 
 let t: TestApp;
@@ -456,6 +457,50 @@ describe('a member of one folder', () => {
     expect(opens.names).toEqual(new Set([m.shared]));
     // A control: the owner's keys open the name above it.
     expect((await whatOpens(t, keysOf(m.owner))).names.has(m.above)).toBe(true);
+  });
+});
+
+/** What the owner writes once the reader's share has ended. */
+const AFTER = {
+  draft: 'PLAINTEXT-AFTER-ENDING-DRAFT-2d3e',
+  published: 'PLAINTEXT-AFTER-ENDING-PUB-4f5a',
+};
+
+describe('someone whose share was ended', () => {
+  it('is sent nothing saved after, by any route, and holds no key that opens it', async () => {
+    const m = await memberWorld();
+    const { owner, reader, spaceId, shareId, insidePage } = m;
+    await spaceOperations.loadTree(reader.ctx, spaceId);
+    const [root] = await t.db
+      .select({ version: schema.nodes.permissionVersion })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, m.shared));
+    if (!root) throw new Error('expected the folder');
+    await owner.api.call(sharingRoutes.endShare, {
+      params: { shareId },
+      body: {
+        permissionVersion: root.version,
+        ...(await sealEnding(owner.ctx, { spaceId, shareId })),
+      },
+    });
+    await pages.editDraft(owner.ctx, insidePage, { markdown: AFTER.published });
+    await pages.publishPage(owner.ctx, insidePage);
+    await pages.editDraft(owner.ctx, insidePage, { markdown: AFTER.draft });
+
+    const { text, statuses } = await everyAnswer(t, asPerson(reader), ownerOf(m));
+    for (const key of ['tree', 'myEnvelopes', `target:${m.shared}`, `page:${insidePage.pageId}`]) {
+      expect(statuses[key], key).toBe(404);
+    }
+    for (const marker of [...Object.values(AFTER), ...Object.values(OUTSIDE)]) {
+      expect(text).not.toContain(marker);
+    }
+    // The share's wraps went with it, and nothing is sealed to the reader.
+    const opens = await whatOpens(t, keysOf(reader));
+    expect(opens.revisions).toEqual([]);
+    expect(opens.names).toEqual(new Set());
+    // A control: the owner opens what was saved after.
+    const owners = await whatOpens(t, keysOf(owner));
+    expect(owners.revisions.some(({ text }) => text.includes(AFTER.draft))).toBe(true);
   });
 });
 

@@ -180,6 +180,11 @@ export async function everyAnswer(
   await get('agents', '/api/me/agents');
   await get('directory', `/api/directory?ids=${ownerId}`);
   for (const share of shares) {
+    await get(`ending:${share.id}`, `/api/shares/${share.id}/ending`);
+    await get(
+      `records:${share.id}`,
+      `/api/spaces/${spaceId}/records?scope=share&shareId=${share.id}`,
+    );
     for (let v = 1; v <= share.version; v++) {
       await get(`envelopes:${share.id}:${v}`, `/api/shares/${share.id}/versions/${v}/envelopes`);
     }
