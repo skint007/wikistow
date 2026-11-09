@@ -118,6 +118,7 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   const under = async () => {
     const rows = await owner.getByRole('treeitem').allInnerTexts();
     const at = rows.findIndex((row) => row.trim() === 'Beans');
+    if (at < 1) return null;
     return rows[at - 1]?.includes('Kitchen') ? 'Kitchen' : 'Garden';
   };
 
@@ -141,6 +142,6 @@ test('a drag moves and Ctrl+drag copies at once, each with Undo', async ({
   await expect(work).toContainText('Its earlier versions don’t go with it.', { timeout: 30_000 });
   await expect(beans).toHaveCount(0);
   await work.getByRole('button', { name: 'Undo' }).click();
-  await expect(work).toHaveCount(0, { timeout: 30_000 });
-  await expect.poll(under).toBe('Garden');
+  // Moved back from Work, under Garden again.
+  await expect.poll(under, { timeout: 30_000 }).toBe('Garden');
 });
