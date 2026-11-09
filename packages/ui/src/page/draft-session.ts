@@ -13,6 +13,7 @@ import {
   type ReadWikilinks,
   type Region,
   type RevisionId,
+  type WaitingChange,
   withoutLinkTable,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
@@ -43,6 +44,10 @@ export type DraftPorts = {
   draftHead(): Promise<RevisionId | null>;
   /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
   onTopOf?(revisionId: RevisionId): void;
+  /** The page's draft change waiting on this device, as another window may have saved it. */
+  waitingChange?(): Promise<WaitingChange | null>;
+  /** A merge with the waiting change at `version` is saved next (`DraftWriter.mergedWith`). */
+  mergedWith?(version: number): void;
   /** The revision cache's generation; a region opened in an earlier one may be stale. */
   generation(): number;
   /** The vault's epoch, which a lock moves on. */
@@ -71,6 +76,14 @@ export type DraftPorts = {
   /** How the draft's wikilinks are read as it opens, off the page's thread (`linksInUse`). */
   readLinks: ReadWikilinks;
 };
+
+/**
+ * What a merge was saved on top of: a draft, opened in `region`, or another
+ * window's change waiting on this device, as `windowMergeVersions` read it.
+ */
+export type MergedOver =
+  | { kind: 'draft'; revisionId: RevisionId; region: Region }
+  | ({ kind: 'window' } & WaitingChange);
 
 /** What the draft view shows. A new object whenever any of it changes. */
 export type DraftSnapshot = {
@@ -124,6 +137,10 @@ export class DraftSession {
   #tableRegion: Region;
   #content: Content;
   #extensions: PagePayload['extensions'] = {};
+  // Another window's change a merge was saved over, until a save lands: what
+  // a merge with that window's next change compares against, as the merged
+  // text grew from it (ADR 0013, decision 7). Until then, `#payload` is.
+  #windowBase: PagePayload | null = null;
   readonly #picks = new Map<string, PageId>();
   // Work still uploading, which saving waits for: files attached here, which
   // the draft shows as uploading, and any other (`track`). And whether the
@@ -346,6 +363,7 @@ export class DraftSession {
       });
       saved = { revisionId, basedOn, written, region };
       this.#known.add(revisionId);
+      this.#windowBase = null;
       // A save into this device's queue keeps its base, and one sent from
       // there may have landed meanwhile (`landed`): that one stays the base.
       if (this.#base === basedOn) {
@@ -488,23 +506,54 @@ export class DraftSession {
   }
 
   /**
-   * Save `merged`, a merge the person reviewed, on top of `theirs`, the
-   * draft the merge read as theirs, which was opened in `region` (ADR 0013,
-   * decision 7). The whole payload is taken, not only its text, so theirs'
-   * banner or data isn't put back to the base's. If someone saved again
-   * meanwhile, it stops at the conflict as usual, with `theirs` the base.
+   * What a merge with another window's change reads, when the conflict on
+   * screen is with that change (ADR 0013, decision 2): the payload both
+   * windows' text grew from, as this session last saved or opened it, the
+   * person's own, and theirs: the change as it waits now, or, once it was
+   * sent, the draft it landed as, which this session builds on since.
    */
-  async saveMerged(theirs: RevisionId, merged: PagePayload, region: Region) {
+  async windowMergeVersions(): Promise<{
+    base: PagePayload;
+    theirs: ({ kind: 'window' } & WaitingChange) | { kind: 'draft'; revisionId: RevisionId };
+    yours: PagePayload;
+  }> {
+    await Promise.all(this.#uploads);
+    this.#pull();
+    const change = await this.#ports.waitingChange?.();
+    return {
+      base: this.#windowBase ?? this.#payload,
+      theirs: change ? { kind: 'window', ...change } : { kind: 'draft', revisionId: this.#base },
+      yours: this.#current(),
+    };
+  }
+
+  /**
+   * Save `merged`, a merge the person reviewed, on top of what the merge
+   * read as theirs (ADR 0013, decision 7): a draft, which was opened in its
+   * region, or another window's change waiting on this device. The whole
+   * payload is taken, not only its text, so theirs' banner or data isn't
+   * put back to the base's. If someone saved again meanwhile, it stops at
+   * the conflict as usual, with theirs as read the base.
+   */
+  async saveMerged(over: MergedOver, merged: PagePayload) {
     this.#payload = merged;
-    this.#tableRegion = region;
     this.#extensions = {};
     const { title, markdown, attachments } = merged;
     this.#content = { title, markdown, attachments };
     this.#unreported = false;
     if (this.#live) this.#surface.current?.replace(markdown);
-    this.#base = theirs;
-    this.#known.add(theirs);
-    this.#ports.onTopOf?.(theirs);
+    if (over.kind === 'draft') {
+      this.#tableRegion = over.region;
+      this.#base = over.revisionId;
+      this.#known.add(over.revisionId);
+      this.#ports.onTopOf?.(over.revisionId);
+    } else {
+      // Into that change, at the version read. Its base stays its own, and
+      // the draft it stands for is this session's too.
+      if (over.head) this.#known.add(over.head);
+      this.#windowBase = over.payload;
+      this.#ports.mergedWith?.(over.version);
+    }
     this.#region = null;
     this.#theirs = null;
     this.#set({ title, markdown, attachments, links: this.#table() });

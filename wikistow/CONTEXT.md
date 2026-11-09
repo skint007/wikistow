@@ -128,7 +128,7 @@ A save over a page's draft that someone else saved after the version the save wa
 _Avoid_: Collision, sync error.
 
 **Merge**
-Combining two drafts made from the same version into one: changes to different parts of the page are kept from both, and the person chooses where both changed the same part, then reviews the result before it saves. ADR 0013: built for a draft someone else saved, accepted for offline changes and other windows.
+Combining two drafts made from the same version into one: changes to different parts of the page are kept from both, and the person chooses where both changed the same part, then reviews the result before it saves. Built as ADR 0013 decided: for a draft someone else saved, an offline change that came back as a conflict, and another window's change.
 _Avoid_: Auto-merge, rebase, sync.
 
 **Kept for offline**

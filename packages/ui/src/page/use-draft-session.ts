@@ -188,6 +188,8 @@ function appPorts(
   return {
     saveDraft: (input) => drafts.save({ read: readWikilinks, ...input }),
     onTopOf: (revisionId) => drafts.onTopOf(revisionId),
+    waitingChange: () => drafts.waitingChange(),
+    mergedWith: (version) => drafts.mergedWith(version),
     readLinks: readOpeningLinks,
     uploadAttachment: (file) => drafts.attach(file),
     // After a conflict with a change another window saved, this one's goes on top of it.
