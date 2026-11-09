@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- The server keeps comments on pages (ADR 0014, step 2), end-to-end encrypted, though nothing in the app shows them yet: routes to list, add, edit, delete and resolve them, seen marks, **New comments** and a stream of comment changes, comments in the record scan when asked for (`comments=1`), and their keys in making a share, moves across a share's edge, ending a share and adding a co-owner. An app from before comments is told to update for those four where a page has comments. (#PR)
+- The server keeps comments on pages (ADR 0014, step 2), end-to-end encrypted, though nothing in the app shows them yet: routes to list, add, edit, delete and resolve them, seen marks, **New comments** and a stream of comment changes, comments in the record scan when asked for (`comments=1`), and their keys in making a share, moves across a share's edge, ending a share and adding a co-owner. An app from before comments is told to update for those four where a page has comments. (#389)
 
 ## 0.25.0-beta.3 - 2026-11-09
 
