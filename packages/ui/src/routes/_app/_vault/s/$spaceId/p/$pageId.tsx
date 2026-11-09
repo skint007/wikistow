@@ -161,6 +161,40 @@ function PageView() {
   useChatPage(spaceId, pageId, tree?.pages.find((p) => p.id === pageId)?.title ?? null);
   // Bumped to open the draft afresh: after "view theirs", or a restore.
   const [opening, setOpening] = useState(0);
+  // The draft view keeps the draft head it opens on, so it opens on the
+  // page's info as the server has it now, loaded afresh (or the load already
+  // running). The cached info can be older: the live tree shows an agent's
+  // draft (the agent activity card) but leaves the open page's info as it
+  // is. Opened on that, the agent's draft would show as someone else's save
+  // over text the person never typed. Once per opening, so loads while the
+  // draft is open leave it be. The draft shows when asked for, and for a
+  // page not published, which opens on its draft from the tree.
+  const shown =
+    info &&
+    pageViewModel({
+      viewer: { role: info.role, canPublish: info.canPublish },
+      heads: info.heads,
+      requested: search,
+    });
+  const draftOpening = shown?.found && shown.view === 'draft' ? `${pageId}:${opening}` : null;
+  const [draftOpened, setDraftOpened] = useState<string | null>(null);
+  useEffect(() => {
+    if (draftOpening === null) {
+      setDraftOpened(null);
+      return;
+    }
+    if (draftOpening === draftOpened) return;
+    let live = true;
+    void queryClient
+      .fetchQuery({ ...pageQuery(ctx, pageId), staleTime: 0 })
+      // A failed load shows why, from the page's own query.
+      .catch(() => undefined)
+      .then(() => live && setDraftOpened(draftOpening));
+    return () => {
+      live = false;
+    };
+  }, [ctx, queryClient, pageId, draftOpening, draftOpened]);
+  const draftWaits = draftOpening !== null && draftOpening !== draftOpened;
   // The page whose public link dialog is open. It lives here, as the
   // published view mounts afresh for each publication, which mustn't close
   // it or forget an upload. Leaving the page closes it for good.
@@ -222,7 +256,7 @@ function PageView() {
         />
       </PageCard>
     );
-  if (!info || (unpublishedCopy && !history)) return <PageCard>{null}</PageCard>;
+  if (!info || (unpublishedCopy && !history) || draftWaits) return <PageCard>{null}</PageCard>;
   const model = pageViewModel({
     viewer: { role: info.role, canPublish: info.canPublish },
     heads: info.heads,
