@@ -78,6 +78,8 @@ Before anything is sealed, the app shows:
 
 A move always asks, even on a device where the person turned off confirming moves, because it deletes. A copy shows all but the items for a move. An agent's copy has no preview.
 
+**As changed by #376 (2026-11-09):** the app still works all of this out, but shows only two lines of it, each when it applies: that the members of the destination share or space (or its owners) will be able to read it, when someone there can read more than they can now, or when that can't be told; and for a move, what it ends, earlier versions always among them. Who loses access goes unsaid. **Move to…** and **Copy to…** show them under the place chosen, and Move or Copy does it in that one step; a drop shows them in the notice after. A move no longer always asks: a notice offers Undo for 10 seconds instead, which moves it back (decision 9 follows it there, and decision 10 brings its public links back), or for a copy, puts the copy in the trash. Earlier versions, shares, agent picks and publications a move ended don't come back. Everything in a space (decision 11) still stops on a confirmation, as it can't be undone.
+
 ### 7. Three steps, like a publication
 
 The protocol calls the whole operation a **copy**, of kind `copy` or `move`, since a move between spaces is a copy that deletes its source. ("Transfer" already means handing a space to another owner.)
@@ -100,6 +102,8 @@ So a folder of any size moves or copies, which also avoids the one-request limit
 ### 8. Where it shows
 
 - **Web and desktop:** **Move to…** and **Copy to…** in the page actions menu and in folder and page menus in the sidebar. One dialog with a space picker above the folder tree, in place of today's move dialog. **Move space into…** and **Copy space into…** in the space menu, for owners (decision 11). A page or folder dragged from the sidebar onto another space's tile in the rail opens that dialog with the space chosen and its top picked: **Move to…** for an owner of the source space, **Copy to…** for anyone else (decision 2). Nothing moves on the drop alone (#338, built).
+
+  **As changed by #376 (2026-11-09):** the drop now moves it to the top of that space at once, or copies it there with Ctrl held (Option on a Mac), or for anyone who isn't an owner of the source space; a notice offers Undo. With **Ask before moving** turned on, a device setting off by default, the drop opens that dialog instead, for one press of Move or Copy.
 - **CLI:** `wikistow page copy` and `wikistow folder copy`. The CLI acts as its agent (decision 2), so it copies within its picks and never moves between spaces; moves between spaces stay in the app. Moves within one space are `wikistow page move` and `wikistow folder move` (#318).
 - **The live tree** reports the finish in both spaces.
 - **The audit log** records `node.moved-between-spaces` and `node.copied`, with node and space IDs and counts only, and `node.public-link-moved` for each public link a move carries over (decision 10).
