@@ -654,8 +654,11 @@ function PageBody({
   usePassages(passages, model.view === 'published' ? shownBody : card, {
     underlined: model.view === 'published',
   });
-  // Readers comment while the page is published; in the draft view, its editors.
-  const commentable = model.view === 'published' ? publishedHead !== null : canEdit;
+  // Readers comment while the page is published; in the draft view, its
+  // editors, once no change of the page waits on this device, as the draft
+  // a quote names must hold its text.
+  const commentable =
+    model.view === 'published' ? publishedHead !== null : canEdit && waiting === 'none';
   const commentOn = async (quote: QuoteText) => {
     const key = unsentKey(commentsPage, 'new');
     if (model.view === 'published') {
