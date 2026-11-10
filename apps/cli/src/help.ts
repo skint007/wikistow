@@ -809,11 +809,12 @@ see it, and it takes no replies. author is as page history names a
 publisher: identityId, name, and for an agent agentName and its personId.
 quote is the passage a first comment is on, as its author quoted it, or
 null; the page may no longer hold it. text is the comment's Markdown.
-state is "opened", or "deleted" for a first comment deleted while its
-thread has replies, "newer-format" for one this CLI is too old to read,
-or "unreadable" for one that failed a check ("problem" says which), with
-text, author and quote null. Without --json, each thread's ID and
-audience, then each comment's ID, author, time and text.
+state is "opened"; "newer-format" for one this CLI is too old to read,
+with its author but no text or quote; or, with text, author and quote
+null, "deleted" for a first comment deleted while its thread has
+replies, or "unreadable" for one that failed a check ("problem" says
+which). Without --json, each thread's ID and audience, then each
+comment's ID, author, time and text.
 `,
   'page comment': `Usage: ${PROGRAM} page comment PAGE_ID --text TEXT --for readers|editors [--reply-to COMMENT_ID]
 
