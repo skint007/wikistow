@@ -1,6 +1,7 @@
 import {
   DIAGRAM_LANGUAGE,
   mayReferOtherPages,
+  ownSource,
   parsePropertyReference,
   QUERY_LANGUAGE,
   readProperties,
@@ -22,8 +23,14 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
+import ReactMarkdown, {
+  defaultUrlTransform,
+  type Components,
+  type ExtraProps,
+  type Options,
+} from 'react-markdown';
 import { blockLanguage, claimedBlock, claimedInline } from '@wikistow/plugin-sdk';
+import { fencedAsSource, QUOTE_BLOCK, QUOTE_ROOT, QUOTE_SOURCE } from '../comments/passages';
 import { ReaderBlock, ReaderSpan, textOf } from '../plugins/blocks';
 import { usePlugins } from '../plugins/runtime';
 import { markdownSyntaxes } from '../registries';
@@ -60,6 +67,40 @@ const urlTransform = (url: string) =>
 type Handlers = NonNullable<NonNullable<Options['remarkRehypeOptions']>['handlers']>;
 
 /**
+ * A part drawn from outside the version, marked with its source, which a
+ * comment's quote takes in its place (ADR 0014, decision 5).
+ */
+function OwnSource({
+  source,
+  block = false,
+  children,
+}: {
+  source: string;
+  block?: boolean;
+  children: ReactNode;
+}) {
+  const marks = { [QUOTE_SOURCE]: source, ...(block && { [QUOTE_BLOCK]: '' }) };
+  return block ? (
+    <div {...marks} className="contents">
+      {children}
+    </div>
+  ) : (
+    <span {...marks} className="contents">
+      {children}
+    </span>
+  );
+}
+
+/** A registered syntax's node as its source: wikilinks as written, math as Markdown. */
+function sourceOf(node: RootContent): { source: string; block: boolean } {
+  if (node.type === 'wikilink') return { source: node.source, block: false };
+  if (node.type === 'math') return { source: ownSource.math(node.value, true), block: true };
+  if (node.type === 'inlineMath')
+    return { source: ownSource.math(node.value, false), block: false };
+  return { source: '', block: false };
+}
+
+/**
  * Each registered syntax's nodes become an empty span, marked (`SYNTAX`)
  * with where `held` keeps what its Reader renders, which the `span`
  * component puts in its place. Only a mark gets through the page's HTML
@@ -71,7 +112,7 @@ const syntaxHandlers = (held: ReactElement[]): Handlers =>
       const handler: NonNullable<Handlers[keyof Handlers]> = (_state, node: RootContent) => {
         const syntax = render(node);
         if (!syntax) return undefined;
-        held.push(syntax);
+        held.push(<OwnSource {...sourceOf(node)}>{syntax}</OwnSource>);
         const properties = { [SYNTAX]: held.length - 1 };
         return { type: 'element', tagName: 'span', properties, children: [] };
       };
@@ -92,7 +133,9 @@ const referenceHandler =
     const reference = parsePropertyReference(node.value);
     if (reference) {
       held.push(
-        <PropertyReferenceView name={reference.name} page={reference.page} source={node.value} />,
+        <OwnSource source={ownSource.inlineCode(node.value)}>
+          <PropertyReferenceView name={reference.name} page={reference.page} source={node.value} />
+        </OwnSource>,
       );
       return {
         type: 'element',
@@ -103,7 +146,11 @@ const referenceHandler =
     }
     // Claimed by a plugin, perhaps: `ClaimedCode` knows which are running.
     if (claimedInline(node.value)) {
-      held.push(<ClaimedCode code={node.value} />);
+      held.push(
+        <OwnSource source={ownSource.inlineCode(node.value)}>
+          <ClaimedCode code={node.value} />
+        </OwnSource>,
+      );
       return {
         type: 'element',
         tagName: 'span',
@@ -165,17 +212,34 @@ const Table: NonNullable<Components['table']> = ({ node: _node, ...props }) => (
  * Only the reader's label has a button that copies the code.
  */
 const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
-  const { blocks } = usePlugins();
-  const body = use(PageBody);
   const code = node?.children.find((child) => child.type === 'element' && child.tagName === 'code');
-  if (code?.type !== 'element') return <pre {...props} />;
-  const { className } = code.properties;
-  const language = Array.isArray(className)
+  const own = <OwnCodeBlock node={node} {...props} />;
+  if (code?.type !== 'element') return own;
+  const language = languageOf(code.properties);
+  return fencedAsSource(language) ? (
+    <OwnSource source={ownSource.fence(language!, textOf(code))} block>
+      {own}
+    </OwnSource>
+  ) : (
+    own
+  );
+};
+
+function languageOf({ className }: { className?: unknown }) {
+  return Array.isArray(className)
     ? className
         .map(String)
         .find((name) => name.startsWith('language-'))
         ?.slice('language-'.length)
     : undefined;
+}
+
+function OwnCodeBlock({ node, ...props }: ComponentProps<'pre'> & ExtraProps) {
+  const { blocks } = usePlugins();
+  const body = use(PageBody);
+  const code = node?.children.find((child) => child.type === 'element' && child.tagName === 'code');
+  if (code?.type !== 'element') return <pre {...props} />;
+  const language = languageOf(code.properties);
   // A query block is its table; one that doesn't read, its code and why.
   if (language === QUERY_LANGUAGE && body) {
     const { attachments, pages, editing } = body;
@@ -206,7 +270,7 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
     return <ReaderBlock block={block} source={textOf(code)} page={body.attachments.page} />;
   }
   return <WrittenCode language={language} text={textOf(code)} pre={props} />;
-};
+}
 
 /**
  * A task's checkbox (`taskMarks`). Where the page can change while it's
@@ -395,7 +459,7 @@ export function Markdown({
               <StillReading />
             ) : read.isSuccess ? (
               <AsWritten source={body}>
-                <div className="page-body">
+                <div className="page-body" {...{ [QUOTE_ROOT]: '' }}>
                   <ReactMarkdown
                     remarkPlugins={[[readTree, read.data]]}
                     remarkRehypeOptions={{

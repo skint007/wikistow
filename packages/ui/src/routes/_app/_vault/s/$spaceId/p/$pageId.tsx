@@ -13,6 +13,7 @@ import {
   type OpenedPayload,
   type PagePayload,
   type queueOperations,
+  type QuoteText,
   type Region,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
@@ -55,7 +56,9 @@ import { usePluginPaletteEntries } from '../../../../../../commands/plugin-palet
 import { AgentName, agentPersonName } from '../../../../../../agents/agent-name';
 import { AssistantButton, useChatPage } from '../../../../../../ai/chat-column';
 import { CommentsButton, useCommentsPage } from '../../../../../../comments/button';
-import { commentsStore } from '../../../../../../comments/store';
+import { PassageButton, usePassages } from '../../../../../../comments/passage-button';
+import { QUOTE_ROOT, readerPassages, type Passages } from '../../../../../../comments/passages';
+import { commentsStore, unsentKey } from '../../../../../../comments/store';
 import { ago } from '../../../../../../agents/model';
 import {
   historyQuery,
@@ -625,6 +628,46 @@ function PageBody({
     published: publishedHead !== null,
   };
   useCommentsPage(commentsPage);
+  // Comments on passages (ADR 0014, decision 5): in the app's own reader,
+  // which a plugin's view of the text replaces, or in the visual editor.
+  const shownPassages = useMemo(
+    () => (shownBody ? readerPassages(() => shownBody.querySelector(`[${QUOTE_ROOT}]`)) : null),
+    [shownBody],
+  );
+  const draftPassages = useMemo<Passages | null>(
+    () =>
+      model.view === 'draft'
+        ? {
+            root: () => editor.current?.passages()?.root() ?? null,
+            quote: () => editor.current?.passages()?.quote() ?? null,
+            find: (quote) => editor.current?.passages()?.find(quote),
+            show: (quote) => editor.current?.passages()?.show(quote) ?? false,
+          }
+        : null,
+    [model.view],
+  );
+  const passages = model.view === 'published' ? shownPassages : draftPassages;
+  usePassages(commentsPage, passages, model.view === 'published' ? shownBody : card, {
+    underlined: model.view === 'published',
+  });
+  // Readers comment while the page is published; in the draft view, its editors.
+  const commentable = model.view === 'published' ? publishedHead !== null : canEdit;
+  const commentOn = async (quote: QuoteText) => {
+    const key = unsentKey(commentsPage, 'new');
+    if (model.view === 'published') {
+      commentsStore.comment(key, { revisionId, ...quote });
+      return;
+    }
+    // The draft is saved first, so the version the quote names holds its text.
+    try {
+      await editor.current?.flush();
+    } catch (caught) {
+      setActionError(errorMessage(caught));
+      return;
+    }
+    const saved = editor.current?.saved();
+    if (saved) commentsStore.comment(key, { revisionId: saved, ...quote });
+  };
   // New comments opens the page with its thread, once: the address lets it go.
   const showThread = Route.useSearch({ select: (search) => search.thread });
   useEffect(() => {
@@ -1284,6 +1327,7 @@ function PageBody({
         )}
         {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
       </PageColumns>
+      {commentable && !needs.offline && <PassageButton passages={passages} onComment={commentOn} />}
       <Place
         name="page.panel"
         shown={pluginShown}

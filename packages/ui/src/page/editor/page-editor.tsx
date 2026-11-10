@@ -439,6 +439,13 @@ export function PageEditor({
       },
       focus: () => surface.current?.focus(),
       selection: () => atCursor()?.selection?.() ?? '',
+      // The visual editor's, in either mode it shows in; none in the source editor.
+      passages: {
+        root: () => surface.current?.passages?.root() ?? null,
+        quote: () => surface.current?.passages?.quote() ?? null,
+        find: (quote) => surface.current?.passages?.find(quote),
+        show: (quote) => surface.current?.passages?.show(quote) ?? false,
+      },
       // A plugin's text, at the cursor as a paste goes, or at the body's end.
       insert(markdown) {
         const target = atCursor();

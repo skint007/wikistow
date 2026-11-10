@@ -8,6 +8,7 @@ import type {
 import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
 import type { Findable } from '../find/findable';
+import type { Passages } from '../../comments/passages';
 
 // An editor surface is one way of editing a page's Markdown body: the
 // source editor or the visual one. The draft session around it owns
@@ -163,4 +164,6 @@ export type EditorSurfaceHandle = {
   insert?(markdown: string): void;
   /** Find on page in it, once it's there (#276). */
   findable?: Findable;
+  /** Its text, for comments on passages: the visual editor's only (ADR 0014, decision 5). */
+  passages?: Passages;
 };

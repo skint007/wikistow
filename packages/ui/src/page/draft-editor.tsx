@@ -53,6 +53,7 @@ import { openOnlineMerge, openWindowMerge, type OpenedMerge } from './merge/open
 import { useNotKept } from '../data/connection';
 import { pageChange, queueQuery } from '../data/offline-changes';
 import { useAvailability } from '../shell/availability';
+import type { Passages } from '../comments/passages';
 
 export type DraftEditorHandle = {
   /**
@@ -77,6 +78,8 @@ export type DraftEditorHandle = {
   selection(): string;
   /** Put `markdown` in at the cursor as the person's edit (a plugin's `insert`). */
   insert(markdown: string): void;
+  /** Its text, for comments on passages, while the editor is there. */
+  passages(): Passages | null;
 };
 
 const NONE: readonly string[] = [];
@@ -216,6 +219,7 @@ export function DraftEditor({
       markdown: () => surface.current?.read() ?? markdown.current,
       selection: () => surface.current?.selection?.() ?? '',
       insert: (text) => surface.current?.insert?.(text),
+      passages: () => surface.current?.passages ?? null,
     }),
     [session],
   );
