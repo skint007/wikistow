@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
+import { showIn, visual } from './editor';
 import { expect, pick, test } from './fixtures';
 import {
   folderMenu,
@@ -8,7 +9,7 @@ import {
   publishedPageIn,
   shareFolder,
 } from './sharing';
-import { adminTab, memberWithVault } from './vault';
+import { adminTab, fillSource, memberWithVault, waitForSave } from './vault';
 
 const TEXT = {
   page: 'Bake at 180 °C for 45 minutes.',
@@ -136,5 +137,120 @@ test('a reader asks, an editor answers from the draft, and comments follow a mov
     await expect(published).toContainText(TEXT.question);
     await expect(published.getByText('Editors', { exact: true })).toBeVisible();
     await expect(published).toContainText(TEXT.note);
+  });
+});
+
+/**
+ * Select from where `start` begins to where `end` ends, as a person
+ * dragging over the text would, and have the visual editor read it at once.
+ */
+async function select(within: Locator, start: string, end: string) {
+  await within.evaluate(
+    (root, [start, end]) => {
+      const texts: Text[] = [];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node as Text);
+      const from = texts.find((t) => t.data.includes(start!));
+      const to = texts.find((t) => t.data.includes(end!));
+      if (!from || !to) throw new Error(`No “${start}” to “${end}” here`);
+      root.closest<HTMLElement>('#page-visual')?.focus();
+      const range = document.createRange();
+      range.setStart(from, from.data.indexOf(start!));
+      range.setEnd(to, to.data.indexOf(end!) + end!.length);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    },
+    [start, end],
+  );
+}
+
+/** How many passages are underlined on the page as read. */
+const underlined = (page: Page) =>
+  page.evaluate(() => CSS.highlights.get('comment-passage')?.size ?? 0);
+
+const PASSAGE = {
+  page: '## Method\n\n1. Brown the mince with the onion.\n2. Bake at [[Oven]] 180 °C for 45 minutes.\n3. Rest for 10 minutes.\n',
+  edited: '## Method\n\n1. Fry the mince.\n2. Bake for an hour.\n3. Rest for 10 minutes.\n',
+  // A wikilink in it reads as written, whatever title it shows (ADR 0014, decision 5).
+  baking: '“Bake at [[Oven]] 180 °C for 45 minutes”',
+  browning: '“Brown the mince with the onion”',
+};
+
+/**
+ * Comments on passages (ADR 0014, step 4): one chosen in the page as read,
+ * underlined there, and one chosen in the visual editor, which Show
+ * selects again. Then the passages are edited away: their threads stay,
+ * saying so, with the version the passage was chosen in.
+ */
+test('a comment on a passage, then the passage edited away', async ({ page, freshPage, admin }) => {
+  test.setTimeout(240_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newFolder(page, 'Recipes');
+  await publishedPageIn(page, 'Recipes', 'Lasagne', PASSAGE.page);
+  const body = page.locator('[data-quote-root]');
+  const panel = page.getByRole('complementary', { name: 'Comments' });
+  const thread = (text: string) =>
+    panel.getByRole('article', { name: 'Thread' }).filter({ hasText: text });
+
+  await test.step('a passage chosen as read is quoted and underlined', async () => {
+    await select(body, 'Bake at', '45 minutes');
+    await page.getByRole('button', { name: 'Comment on the selection' }).click();
+    await expect(panel.locator('form blockquote')).toHaveText(PASSAGE.baking);
+    await send(panel, 'Comment for everyone who reads this page', 'Fan oven or not?');
+    await expect(panel.locator('form blockquote')).toHaveCount(0);
+    await expect(thread('Fan oven').locator('blockquote')).toHaveText(PASSAGE.baking);
+    await expect.poll(() => underlined(page)).toBe(1);
+    // Clicked, the passage opens its thread.
+    await panel.getByRole('button', { name: 'Close comments' }).click();
+    const at = await body.evaluate((root) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const offset = node.textContent!.indexOf('180');
+        if (offset === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset + 3);
+        const { x, y, width, height } = range.getBoundingClientRect();
+        return { x: x + width / 2, y: y + height / 2 };
+      }
+      throw new Error('No passage');
+    });
+    await page.mouse.click(at.x, at.y);
+    await expect(thread('Fan oven')).toBeVisible();
+  });
+
+  await test.step('a passage chosen in the visual editor, which Show selects again', async () => {
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await showIn(page, 'Visual');
+    await select(visual(page), 'Brown', 'onion');
+    await page.getByRole('button', { name: 'Comment on the selection' }).click();
+    await expect(panel.locator('form blockquote')).toHaveText(PASSAGE.browning);
+    await send(panel, 'Comment for editors', 'Beef or lamb?');
+    await visual(page).getByText('Rest for').click();
+    await thread('Beef or lamb').getByRole('button', { name: 'Show' }).click();
+    await expect
+      .poll(() => page.evaluate(() => String(getSelection())))
+      .toBe('Brown the mince with the onion');
+  });
+
+  await test.step('edited away, each thread says so, with the version it was on', async () => {
+    await showIn(page, 'Source');
+    await fillSource(page, PASSAGE.edited);
+    await waitForSave(page);
+    await showIn(page, 'Visual');
+    await expect(thread('Beef or lamb')).toContainText('This passage isn’t in the page now.');
+    await expect(thread('Beef or lamb').getByRole('button', { name: 'Show' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Publish', exact: true }).click();
+    await expect(page.getByText('Published v2')).toBeVisible();
+    await expect(body).toContainText('Bake for an hour');
+    const baking = thread('Fan oven');
+    await expect(baking).toContainText('This passage isn’t in the page now.');
+    await expect(baking.locator('blockquote')).toHaveText(PASSAGE.baking);
+    await expect.poll(() => underlined(page)).toBe(0);
+    await baking.getByRole('link', { name: 'Made on version 1' }).click();
+    await expect(body).toContainText('Bake at Oven 180 °C');
+    // Both passages are there, the editors' too, which only editors see.
+    await expect.poll(() => underlined(page)).toBe(2);
   });
 });
