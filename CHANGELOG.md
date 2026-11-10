@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Comment on pages. **Comments** in a page's toolbar opens its comments beside the page, or over it on smaller screens. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only, and readers never see it. Reply, edit and delete your comments, and resolve threads you started, or any thread on a page you can edit. Owners can delete any comment. Comments are end-to-end encrypted like the page and follow it when it is shared or moved within its space. **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit. Comments need the connection.
+- Comment on pages. **Comments** in a page's toolbar opens its comments beside the page, or over it on smaller screens. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only, and readers never see it. Reply, edit and delete your comments, and resolve threads you started, or any thread on a page you can edit. Owners can delete any comment. Comments are end-to-end encrypted like the page and follow it when it is shared or moved within its space. **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit. Comments need the connection. (#390)
 
 #### Development
 
