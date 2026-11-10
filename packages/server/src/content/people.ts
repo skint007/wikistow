@@ -62,6 +62,15 @@ export async function directory(db: Database, actor: Actor, ids: readonly string
   return { people: [...people, ...persons], agents };
 }
 
+// Whether identity `id` wrote a comment wrapped in one of `shareIds`, on
+// the page `pageId` if given (section 5.9): readers write too.
+const commentedIn = (id: SQL, shareIds: SQL, pageId?: SQL) => sql`exists (
+  select 1 from comment_wraps w
+    join comment_versions v on v.id = w.version_id
+    join comments c on c.id = v.comment_id
+  where w.share_id in (${shareIds}) and c.author_identity_id = ${id}
+    ${pageId ? sql`and c.page_id = ${pageId}` : sql``})`;
+
 /**
  * People by identity ID, each at their live key, with the display name and
  * email their account shows, leaving out suspended accounts: the caller,
@@ -99,6 +108,8 @@ async function humanDirectory(db: Database, me: PublicIdentity, ids: readonly st
                        where r.space_id = owned.space_id and r.author_identity_id = i.id)
             or exists (select 1 from metadata_revisions r
                        where r.space_id = owned.space_id and r.author_identity_id = i.id)
+            or exists (select 1 from comments c
+                       where c.space_id = owned.space_id and c.author_identity_id = i.id)
             or exists (select 1 from folder_key_envelopes e
                        where e.space_id = owned.space_id and e.sealer_identity_id = i.id)
             or exists (select 1 from owner_statements st
@@ -116,7 +127,8 @@ async function humanDirectory(db: Database, me: PublicIdentity, ids: readonly st
                        where w.share_id = held.share_id and r.author_identity_id = i.id)
             or exists (select 1 from metadata_wraps w
                        join metadata_revisions r on r.id = w.metadata_revision_id
-                       where w.share_id = held.share_id and r.author_identity_id = i.id)))`);
+                       where w.share_id = held.share_id and r.author_identity_id = i.id)
+            or ${commentedIn(sql`i.id`, sql`held.share_id`)}))`);
   return [...rows].map(toPerson);
 }
 
@@ -126,7 +138,8 @@ const authoredIn = (id: SQL, shareIds: SQL) => sql`(
           where w.share_id in (${shareIds}) and r.author_identity_id = ${id})
   or exists (select 1 from metadata_wraps w
              join metadata_revisions r on r.id = w.metadata_revision_id
-             where w.share_id in (${shareIds}) and r.author_identity_id = ${id}))`;
+             where w.share_id in (${shareIds}) and r.author_identity_id = ${id})
+  or ${commentedIn(id, shareIds)})`;
 
 /** Where an agent reads: its grants in each share its person can still use. */
 type Pick = { spaceId: string; shareId: string; folderId: string | null };
@@ -175,7 +188,8 @@ function authoredInPicks(id: SQL, picks: readonly Pick[]): SQL {
             or exists (select 1 from metadata_wraps w
                        join metadata_revisions r on r.id = w.metadata_revision_id
                        where r.subject_kind = 'folder' and r.subject_id = s.id
-                         and w.share_id = ${shareId} and r.author_identity_id = ${id}))`;
+                         and w.share_id = ${shareId} and r.author_identity_id = ${id})
+            or ${commentedIn(id, sql`${shareId}`, sql`s.id`)})`;
   return sql`(${sql.join(picks.map(within), sql` or `)})`;
 }
 
@@ -212,6 +226,9 @@ async function agentAuthors(db: Database, caller: Caller, ids: readonly string[]
                        and o.identity_id = ${me} and o.removed_at is null)
           or exists (select 1 from metadata_revisions r join space_owners o on o.space_id = r.space_id
                      where r.author_identity_id = p.agent_id
+                       and o.identity_id = ${me} and o.removed_at is null)
+          or exists (select 1 from comments c join space_owners o on o.space_id = c.space_id
+                     where c.author_identity_id = p.agent_id
                        and o.identity_id = ${me} and o.removed_at is null)
           or ${authoredIn(
             sql`p.agent_id`,

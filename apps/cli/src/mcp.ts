@@ -163,6 +163,26 @@ const TOOLS: readonly Tool[] = [
   { command: 'page history', args: ['page-id'], reads: true, input: { 'page-id': ID('PAGE_ID') } },
   { command: 'page links', args: ['page-id'], reads: true, input: { 'page-id': ID('PAGE_ID') } },
   {
+    command: 'page comments',
+    args: ['page-id'],
+    reads: true,
+    input: { 'page-id': ID('PAGE_ID') },
+  },
+  {
+    command: 'page comment',
+    args: ['page-id'],
+    input: {
+      'page-id': ID('PAGE_ID'),
+      text: z.string().describe('--text TEXT: the comment, in Markdown'),
+      for: z
+        .enum(['readers', 'editors'])
+        .describe(
+          '--for readers|editors: readers reaches everyone who can read the page; for a reply, its thread\'s "for"',
+        ),
+      'reply-to': ID("--reply-to COMMENT_ID: a thread's first comment, to reply to it").optional(),
+    },
+  },
+  {
     command: 'page download-attachment',
     args: ['page-id', 'attachment-id'],
     input: {

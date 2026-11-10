@@ -24,7 +24,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
 - Bulk import from Joplin and from an Obsidian vault (see **Import**). A person can also move one Obsidian note by pasting its Markdown into a page, or have an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
-Comments are built as decided in [ADR 0014](docs/adr/0014-comments.md) (#320), but for passages and the CLI, which come next (see [Comments](#comments)). Simultaneous live editing (#321) and semantic search (#324) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
+Comments are built as decided in [ADR 0014](docs/adr/0014-comments.md) (#320), but for passages, which come next (see [Comments](#comments)). Simultaneous live editing (#321) and semantic search (#324) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
 
 ## Architecture
 
@@ -351,7 +351,8 @@ Anyone who can read a page comments on it ([ADR 0014](docs/adr/0014-comments.md)
 - **Threads.** One level of replies. The thread's starter and the page's editors resolve it; a new reply opens it again. Only a comment's author edits it, and only the current text is kept, marked "edited". Its author and the space's owners delete it.
 - **Telling people.** The **Comments** button counts the open threads and shows a dot for something new from someone else. **Comments** in the rail opens **New comments**: threads that concern the person with comments they haven't seen. No mail.
 - **Offline,** comments need the connection; nothing about them is kept or queued.
-- **Not yet:** comments on a passage, quoting the part of the page they are about (ADR 0014, step 4), and listing and adding comments from the CLI and MCP (step 5).
+- **Agents** list a page's comments and add their own with `wikistow page comments` and `wikistow page comment`, and through `wikistow mcp`, as themselves, shown as "agent (for person)". Every comment names its audience with `--for readers|editors`, replies included, and an agent writes for readers only where it may publish. Agents don't edit, delete or resolve comments; their person deletes or resolves them in the app.
+- **Not yet:** comments on a passage, quoting the part of the page they are about (ADR 0014, step 4).
 
 ## Offline
 
@@ -394,6 +395,8 @@ wikistow search "backup procedure" --json
 wikistow export --space SPACE_ID --out ~/notes-export --json
 wikistow page read PAGE_ID --draft --json
 wikistow page links PAGE_ID --json
+wikistow page comments PAGE_ID --json
+wikistow page comment PAGE_ID --text "Fixed, thanks" --for readers --reply-to COMMENT_ID --json
 wikistow folder create --space SPACE_ID --parent FOLDER_ID --name "Network" --json
 wikistow folder rename FOLDER_ID --name "Home network" --idempotency-key KEY --json
 wikistow page move PAGE_ID --folder FOLDER_ID --idempotency-key KEY --json
