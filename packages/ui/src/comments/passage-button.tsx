@@ -4,6 +4,7 @@ import { MessageSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { useNeedsConnection } from '../shell/availability';
 import { useClient } from '../vault/store';
 import { quoteOf } from './model';
@@ -21,10 +22,12 @@ import {
 // own selection menu too, which the app can't add to (decision 13).
 const GAP = 8;
 const TOUCH_GAP = 56;
+// The button's height and a margin: with less room above the selection, it goes below.
+const ROOM = 40;
 
 const TOO_LONG = 'Select at most 500 characters to comment on them';
 
-type Shown = { left: number; top: number; quote: QuoteText | 'too-long' };
+type Shown = { left: number; top: number; below: boolean; quote: QuoteText | 'too-long' };
 
 /**
  * The **Comment** button over a selection in the page's text (ADR 0014,
@@ -56,11 +59,13 @@ export function PassageButton({
         return;
       }
       const rect = range.getClientRects()[0] ?? range.getBoundingClientRect();
-      const touch = matchMedia('(pointer: coarse)').matches;
+      const gap = matchMedia('(pointer: coarse)').matches ? TOUCH_GAP : GAP;
+      const below = rect.top - gap < ROOM;
       const left = Math.min(Math.max(rect.left + rect.width / 2, 48), innerWidth - 48);
       setShown({
         left,
-        top: Math.max(rect.top - (touch ? TOUCH_GAP : GAP), 4),
+        top: below ? range.getBoundingClientRect().bottom + gap : rect.top - gap,
+        below,
         quote: quote.kind === 'quote' ? quote.quote : 'too-long',
       });
     };
@@ -94,7 +99,7 @@ export function PassageButton({
   const tooLong = shown.quote === 'too-long';
   return createPortal(
     <div
-      className="fixed z-40 -translate-x-1/2 -translate-y-full"
+      className={cn('fixed z-40 -translate-x-1/2', !shown.below && '-translate-y-full')}
       style={{ left: shown.left, top: shown.top }}
     >
       <Button
