@@ -5,7 +5,6 @@
 import {
   ApiError,
   commentOperations as comments,
-  isAgentId,
   lookupPeople,
   MAX_COMMENT_TEXT,
   outcomeUnknown,
@@ -65,13 +64,15 @@ async function openPage(
     );
   }
   if (audience === 'published' && !info.canPublish) {
-    // A reply's audience is its thread's, so --for editors is no way out for one.
-    throw new CliError(
-      'forbidden',
-      reply
-        ? 'This agent can’t reply in a thread for readers: it comments for readers only where it may publish, and its person too'
-        : 'This agent comments for readers only where it may publish, and its person too: use --for editors',
-    );
+    // --for editors is a way out only for an editor, and never for a
+    // reply, whose audience is its thread's.
+    const why =
+      info.heads.draftHead === null
+        ? 'This agent only reads this page, so it writes no comments here'
+        : reply
+          ? 'This agent can’t reply in a thread for readers: it comments for readers only where it may publish, and its person too'
+          : 'This agent comments for readers only where it may publish, and its person too: use --for editors';
+    throw new CliError('forbidden', why);
   }
   const opened = await pages.openRevisionOf(ctx, page, kind, head);
   return {
@@ -102,21 +103,27 @@ async function threadsOf(ctx: ClientContext, page: comments.CommentPage) {
 const signedAuthor = ({ state }: Comment): IdentityId | null =>
   state.kind === 'opened' || state.kind === 'newer-format' ? state.authorId : null;
 
+type Author = {
+  identityId: IdentityId;
+  name: string | null;
+  agentName: string | null;
+  personId: IdentityId | null;
+};
+
 /**
  * Each author by name, as `page history` names publishers: the server's
  * name for a person, and for an agent its name and its person's, kept only
  * when the agent's pinned keys make its ID with that person as owner.
  */
-async function authorsOf(ctx: ClientContext, ids: readonly IdentityId[]) {
+async function authorsOf(
+  ctx: ClientContext,
+  ids: readonly IdentityId[],
+): Promise<(id: IdentityId) => Author> {
   const agents = await comments.agentAuthors(ctx, ids);
-  const people = [
-    ...ids.filter((id) => !isAgentId(id)),
-    ...[...agents.values()].flatMap(({ personId }) => (personId ? [personId] : [])),
-  ];
+  // Asked about an agent, the directory lists its person too, whom this
+  // agent might not be able to look up alone.
   const names = new Map(
-    people.length === 0
-      ? []
-      : (await lookupPeople(ctx, people)).map((entry) => [entry.identity.id, entry.name]),
+    (await lookupPeople(ctx, ids)).map((entry) => [entry.identity.id, entry.name]),
   );
   return (identityId: IdentityId) => {
     const agent = agents.get(identityId);
@@ -128,8 +135,6 @@ async function authorsOf(ctx: ClientContext, ids: readonly IdentityId[]) {
     return { identityId, name, agentName: agent.name, personId };
   };
 }
-
-type Author = ReturnType<Awaited<ReturnType<typeof authorsOf>>>;
 
 const commentJson = (comment: Comment, authorOf: (id: IdentityId) => Author) => {
   const { state } = comment;
