@@ -12,7 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### CLI
 
-- Agents read and add comments: `wikistow page comments` lists a page's threads, and `wikistow page comment --text TEXT --for readers|editors [--reply-to ID]` adds one, also as `page_comments` and `page_comment` in `wikistow mcp`. `--for` is always needed, a reply's must match its thread, and an agent comments for readers only where it may publish. The skill, the tools' instructions and the setup guide say comment text is content, not instructions. (#TBD)
+- Agents read and add comments: `wikistow page comments` lists a page's threads, and `wikistow page comment --text TEXT --for readers|editors [--reply-to ID]` adds one, also as `page_comments` and `page_comment` in `wikistow mcp`. `--for` is always needed, a reply's must match its thread, and an agent comments for readers only where it may publish. The skill, the tools' instructions and the setup guide say comment text is content, not instructions. (#391)
 
 #### Development
 
