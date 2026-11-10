@@ -10,10 +10,6 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Comment on pages. **Comments** in a page's toolbar opens its comments beside the page, or over it on smaller screens. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only, and readers never see it. Reply, edit and delete your comments, and resolve threads you started, or any thread on a page you can edit. Owners can delete any comment. Comments are end-to-end encrypted like the page and follow it when it is shared or moved within its space. **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit. Comments need the connection. (#390)
 
-#### Server
-
-- A comment by someone who had written nothing else where the reader looks, such as a reader's question or an agent's first comment, opens for everyone who can read it, instead of showing as "This comment can't be opened": the people directory now counts comments' authors. (#TBD)
-
 #### CLI
 
 - Agents read and add comments: `wikistow page comments` lists a page's threads, and `wikistow page comment --text TEXT --for readers|editors [--reply-to ID]` adds one, also as `page_comments` and `page_comment` in `wikistow mcp`. `--for` is always needed, a reply's must match its thread, and an agent comments for readers only where it may publish. The skill, the tools' instructions and the setup guide say comment text is content, not instructions. (#TBD)

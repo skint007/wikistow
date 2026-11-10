@@ -37,15 +37,9 @@ const forOf = (audience: Audience): CommentsFor =>
  * and written in (decision 4): the publication for readers, the draft for
  * editors. Without an audience, the draft where this agent edits the page,
  * else the publication. Refused before anything is sent where the page has
- * no such version, or the agent may not write there (the server's word,
- * which only picks the message: the server refuses it anyway).
+ * no such version.
  */
-async function openPage(
-  ctx: ClientContext,
-  pageId: PageId,
-  audience: Audience | null,
-  { reply = false } = {},
-) {
+async function openPage(ctx: ClientContext, pageId: PageId, audience: Audience | null) {
   const info = await pages.loadPage(ctx, pageId);
   const page = { spaceId: info.spaceId, pageId };
   // A reader is listed no draft head.
@@ -63,22 +57,32 @@ async function openPage(
       'This agent only reads this page, so it can’t comment for editors',
     );
   }
-  if (audience === 'published' && !info.canPublish) {
-    // --for editors is a way out only for an editor, and never for a
-    // reply, whose audience is its thread's.
-    const why =
-      info.heads.draftHead === null
-        ? 'This agent only reads this page, so it writes no comments here'
-        : reply
-          ? 'This agent can’t reply in a thread for readers: it comments for readers only where it may publish, and its person too'
-          : 'This agent comments for readers only where it may publish, and its person too: use --for editors';
-    throw new CliError('forbidden', why);
-  }
   const opened = await pages.openRevisionOf(ctx, page, kind, head);
   return {
     info,
     page: { ...page, region: opened.region, version: { revisionId: head, audience: kind } },
   };
+}
+
+/**
+ * Why this agent can't write for readers on the page, or null if it can,
+ * by the server's word, which picks only the message: the server refuses
+ * it anyway. --for editors is a way out only for an editor's first
+ * comment, since a reply's audience is its thread's.
+ */
+function readersRefusal(
+  info: Awaited<ReturnType<typeof pages.loadPage>>,
+  { reply }: { reply: boolean },
+): CliError | null {
+  if (info.canPublish) return null;
+  return new CliError(
+    'forbidden',
+    info.heads.draftHead === null
+      ? 'This agent only reads this page, so it writes no comments here'
+      : reply
+        ? 'This agent can’t reply in a thread for readers: it comments for readers only where it may publish, and its person too'
+        : 'This agent comments for readers only where it may publish, and its person too: use --for editors',
+  );
 }
 
 /**
@@ -245,9 +249,15 @@ export function commentTextOf(text: string): string {
  * The thread `replyTo` names, whose first comment this agent opened, so
  * the reply takes its audience and signed author from it (decision 1),
  * and which takes replies: for `audience`, not deleted, and not from
- * before the page's latest unpublish.
+ * before the page's latest unpublish. `readers` is why this agent can't
+ * write for readers, if it can't.
  */
-function threadToAnswer(threads: readonly Thread[], replyTo: CommentId, audience: Audience) {
+function threadToAnswer(
+  threads: readonly Thread[],
+  replyTo: CommentId,
+  audience: Audience,
+  readers: CliError | null,
+) {
   const thread = threads.find((t) => t.thread === replyTo);
   if (!thread) {
     const within = threads.find((t) => t.replies.some((r) => r.commentId === replyTo));
@@ -278,6 +288,7 @@ function threadToAnswer(threads: readonly Thread[], replyTo: CommentId, audience
   }
   // Its audience as this agent opened it, never the server's word alone.
   const { payload } = state;
+  if (payload.audience === 'published' && readers) throw readers;
   if (payload.audience !== audience) {
     const now = forOf(payload.audience);
     throw new CliError(
@@ -312,13 +323,17 @@ export async function addComment(
 ) {
   const audience = AUDIENCE[args.for];
   const added = await withAgent(io, out, args, deps, async ({ ctx }) => {
-    const opened = await openPage(ctx, args.pageId, audience, { reply: args.replyTo !== null });
+    const opened = await openPage(ctx, args.pageId, audience);
     let { page } = opened;
     let reply = null;
-    if (args.replyTo !== null) {
+    if (args.replyTo === null) {
+      const refused = audience === 'published' && readersRefusal(opened.info, { reply: false });
+      if (refused) throw refused;
+    } else {
       const { threads, region } = await threadsOf(ctx, page);
       page = { ...page, region };
-      reply = threadToAnswer(threads, args.replyTo, audience);
+      const readers = readersRefusal(opened.info, { reply: true });
+      reply = threadToAnswer(threads, args.replyTo, audience, readers);
     }
     try {
       const commentId = await comments.addComment(ctx, page, { audience, text: args.text, reply });
