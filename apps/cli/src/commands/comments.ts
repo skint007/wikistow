@@ -41,7 +41,12 @@ const forOf = (audience: Audience): CommentsFor =>
  * no such version, or the agent may not write there (the server's word,
  * which only picks the message: the server refuses it anyway).
  */
-async function openPage(ctx: ClientContext, pageId: PageId, audience: Audience | null) {
+async function openPage(
+  ctx: ClientContext,
+  pageId: PageId,
+  audience: Audience | null,
+  { reply = false } = {},
+) {
   const info = await pages.loadPage(ctx, pageId);
   const page = { spaceId: info.spaceId, pageId };
   // A reader is listed no draft head.
@@ -60,9 +65,12 @@ async function openPage(ctx: ClientContext, pageId: PageId, audience: Audience |
     );
   }
   if (audience === 'published' && !info.canPublish) {
+    // A reply's audience is its thread's, so --for editors is no way out for one.
     throw new CliError(
       'forbidden',
-      'This agent comments for readers only where it may publish, and its person too: use --for editors',
+      reply
+        ? 'This agent can’t reply in a thread for readers: it comments for readers only where it may publish, and its person too'
+        : 'This agent comments for readers only where it may publish, and its person too: use --for editors',
     );
   }
   const opened = await pages.openRevisionOf(ctx, page, kind, head);
@@ -72,16 +80,21 @@ async function openPage(ctx: ClientContext, pageId: PageId, audience: Audience |
   };
 }
 
-/** The page's threads, or the server's lack of comments said plainly (decision 11). */
+/**
+ * A comments route's `not-found` for a page this agent opened just now,
+ * said plainly: the server has no comments yet (decision 11).
+ */
+const olderServer = (error: unknown) =>
+  error instanceof ApiError && error.code === 'not-found'
+    ? new CliError('failed', 'This server needs an update for comments', { cause: error })
+    : error;
+
+/** The page's threads, or the server's lack of comments said plainly. */
 async function threadsOf(ctx: ClientContext, page: comments.CommentPage) {
   try {
     return await comments.pageComments(ctx, page);
   } catch (error) {
-    // The page opened just now, so a page that isn't found is a route that isn't.
-    if (error instanceof ApiError && error.code === 'not-found') {
-      throw new CliError('failed', 'This server needs an update for comments', { cause: error });
-    }
-    throw error;
+    throw olderServer(error);
   }
 }
 
@@ -294,7 +307,7 @@ export async function addComment(
 ) {
   const audience = AUDIENCE[args.for];
   const added = await withAgent(io, out, args, deps, async ({ ctx }) => {
-    const opened = await openPage(ctx, args.pageId, audience);
+    const opened = await openPage(ctx, args.pageId, audience, { reply: args.replyTo !== null });
     let { page } = opened;
     let reply = null;
     if (args.replyTo !== null) {
@@ -308,7 +321,8 @@ export async function addComment(
     } catch (error) {
       // Sent again with the same IDs, it found no answer: it may have landed.
       if (outcomeUnknown(error)) throw new ChangeMayHaveHappened(error, 'comment');
-      throw error;
+      // A reply's thread was just listed, so the route is there: not-found is about the thread.
+      throw reply === null ? olderServer(error) : error;
     }
   });
   const result = { pageId: args.pageId, ...added, for: args.for };
