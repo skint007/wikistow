@@ -10,6 +10,7 @@ import type { Node } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { fencedAsSource, type Passages } from '../../../comments/passages';
+import { alertIn } from './alerts';
 
 // Passages in the visual editor (ADR 0014, decision 5): the page's own text
 // read from the document, as the reader reads it from what it shows. A
@@ -33,7 +34,18 @@ export function ownTextOf(doc: Node): OwnText {
     pieces.push({ from, to, at: text.length, length: piece.length, atom });
     text += piece;
   };
+  // An alert's marker and the line break after it, which the reader shows
+  // as its label, not as text.
+  let marker = { from: -1, to: -1 };
   doc.descendants((node, pos) => {
+    if (node.type.name === 'blockquote') {
+      const alert = alertIn(node);
+      if (alert) {
+        const from = pos + 2;
+        const to = from + alert.length + (alert.next?.type.name === 'hardbreak' ? 1 : 0);
+        marker = { from, to };
+      }
+    }
     if (node.type.name === 'math_block') {
       separate();
       add(pos, pos + node.nodeSize, ownSource.math(String(node.attrs['value']), true), true);
@@ -64,9 +76,14 @@ export function ownTextOf(doc: Node): OwnText {
         add(from, to, ownSource.inlineCode(value), true);
       else add(from, to, value, false);
     };
-    node.forEach((child, offset) => {
-      const at = pos + 1 + offset;
-      const end = at + child.nodeSize;
+    node.forEach((whole, offset) => {
+      const start = pos + 1 + offset;
+      const end = start + whole.nodeSize;
+      const inMarker = start < marker.to && end > marker.from;
+      if (inMarker && (!whole.isText || end <= marker.to)) return;
+      // Text going on after the marker, in the same node, from there.
+      const at = inMarker ? marker.to : start;
+      const child = inMarker ? whole.cut(marker.to - start) : whole;
       if (child.isText && child.marks.some((m) => m.type.name === 'inlineCode')) {
         if (code && code.to === at) {
           code.to = end;

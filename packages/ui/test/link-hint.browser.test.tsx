@@ -186,7 +186,9 @@ it('shows the hints on a link’s text above it in the reader', async () => {
     side: 'top',
   });
   const ambiguous = { text: 'More than one page has this title', side: 'top' };
-  expect(await hinted(container, '.page-body p > [data-quote-source] > span[data-hint]')).toEqual(ambiguous);
+  expect(await hinted(container, '.page-body p > [data-quote-source] > span[data-hint]')).toEqual(
+    ambiguous,
+  );
   // In a Markdown link's text.
   expect(await hinted(container, '.page-body a [data-hint]')).toEqual(ambiguous);
   // A reference's page link chip, as a property row shows one.

@@ -366,10 +366,17 @@ const TOO_SLOW = 'This page took too long to format, so here it is as written.';
 export function Markdown({
   source,
   bodyIn,
+  passages = false,
   ...context
 }: {
   source: string;
   bodyIn?: ((own: ReactNode, body: string) => ReactNode) | undefined;
+  /**
+   * Whether this is the page's own reading of the body, where a passage
+   * can be chosen to comment on (`QUOTE_ROOT`): never a plugin's, though it
+   * draws with this reader.
+   */
+  passages?: boolean;
 } & PageBodyContext) {
   const { frontmatter, body } = splitFrontmatter(source);
   const properties = useMemo(() => {
@@ -459,7 +466,7 @@ export function Markdown({
               <StillReading />
             ) : read.isSuccess ? (
               <AsWritten source={body}>
-                <div className="page-body" {...{ [QUOTE_ROOT]: '' }}>
+                <div className="page-body" {...(passages && { [QUOTE_ROOT]: '' })}>
                   <ReactMarkdown
                     remarkPlugins={[[readTree, read.data]]}
                     remarkRehypeOptions={{

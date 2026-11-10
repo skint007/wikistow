@@ -56,6 +56,12 @@ const SKIPPED =
 
 const inline = (display: string) => display.startsWith('inline') || display === 'contents';
 
+// Whether `node`, beside a run of spaces, starts or ends a line there, so
+// the spaces show as nothing: none, a block, or a line break.
+const endsLine = (node: Node | null) =>
+  !node ||
+  (node instanceof Element && (node.localName === 'br' || !inline(getComputedStyle(node).display)));
+
 const hidden = (element: Element) =>
   element.checkVisibility?.({ visibilityProperty: true }) === false &&
   getComputedStyle(element).display !== 'contents';
@@ -79,10 +85,14 @@ export function readOwnText(root: Element): OwnText {
   };
   const visit = (node: Node, keepsSpace: boolean) => {
     if (node instanceof Text) {
-      const parent = node.parentElement;
-      const block = !parent || !inline(getComputedStyle(parent).display);
-      // Space between blocks, as the HTML has it, which shows as nothing.
-      if (!keepsSpace && block && /^\s*$/.test(node.data)) return;
+      // Space between blocks, or at a line's start or end, as the HTML has
+      // it, which shows as nothing. Between words and inline parts it shows.
+      if (
+        !keepsSpace &&
+        /^\s*$/.test(node.data) &&
+        (endsLine(node.previousSibling) || endsLine(node.nextSibling))
+      )
+        return;
       const data = keepsSpace ? node.data : node.data.replace(/[\n\r\t]/g, ' ');
       pieces.push({ node, at: text.length, length: data.length, atom: false });
       text += data;

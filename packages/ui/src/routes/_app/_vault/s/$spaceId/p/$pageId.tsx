@@ -1293,6 +1293,7 @@ function PageBody({
               <ReadingChanges value={readingHere}>
                 <Markdown
                   source={shownMarkdown ?? payload.markdown}
+                  passages
                   attachments={{
                     ctx,
                     page,
