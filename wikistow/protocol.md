@@ -61,9 +61,9 @@ Identity key rotation, and its statement format, are left to a later milestone (
 - **groups** of people in a space, and their agents, which shares go to as one (sections 7.8, 7.9 and 9.4). Nothing new is signed but a group's name, which is a metadata record v2 with `subjectKind: "group"` in the owner region. There are no new domain strings. A client from before Milestone 5 parses such a record strictly and refuses it, so it can't scan an owner region that holds one (adding a co-owner) until it updates;
 - the agents' `groups` list in the contacts record (section 8.2), and the person's routes to confirm a group for their agent or take it out (section 9.4).
 
-### What comments add (accepted)
+### What comments add
 
-[ADR 0014](../docs/adr/0014-comments.md) accepts comments on pages (#320, section 5.9). The server's part, the app's comments on the page, passages (a comment's quote) and the CLI's are built. Nothing new is signed but the comments themselves, each a metadata record v2 with `subjectKind: "comment"` under its page's keys, with a payload format of their own. There are no new domain strings. A client from before them doesn't ask the scan route for comments, which then answers it `invalid-request` over a scope that holds one, so it can't make a share, move across a region boundary, end a share or add a co-owner over a page with comments until it updates.
+[ADR 0014](../docs/adr/0014-comments.md) adds comments on pages (#320, section 5.9), built. Nothing new is signed but the comments themselves, each a metadata record v2 with `subjectKind: "comment"` under its page's keys, with a payload format of their own. There are no new domain strings. A client from before them doesn't ask the scan route for comments, which then answers it `invalid-request` over a scope that holds one, so it can't make a share, move across a region boundary, end a share or add a co-owner over a page with comments until it updates.
 
 Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
@@ -700,7 +700,7 @@ MetadataEnvelopeV2 = the same, with metadataRevisionId in place of revisionId, s
 
 ### 5.9 Comments
 
-**Status: accepted** in [ADR 0014](../docs/adr/0014-comments.md) (#320). The server's part is built (step 2): the comment routes of the ADR's decision 12, the scan's `comment` entries, comments in the coverage checks of making a share, a move across regions, ending a share and adding a co-owner, the trash, and the stream. So is the app's part for comments on the page (step 3): sealing, opening and rewrapping comments, as the notes below for the owner's app say. So are passages (step 4): the app writes a first comment's `quote`, chosen in its own reader or visual editor, with the checks below. So are the CLI's and agents' comments (step 5): `page comments` and `page comment`, and their MCP tools, as section 9.5 says.
+**Status: built** ([ADR 0014](../docs/adr/0014-comments.md), #320).
 
 A **comment** is a note on one page, by anyone who can read it for the comment's **audience**: `"published"`, for readers, read by everyone who can read the page's published versions; or `"draft"`, for editors, read only by those who can read its draft. A **thread** is a first comment and its replies, one level deep.
 
