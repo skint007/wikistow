@@ -104,9 +104,10 @@ export class CliError extends Error {
  * keeping the key, which it may be only because it was made
  * (`Journal.inconclusive`), and would refuse it again. `again`: a command
  * that names the state it changes (unpublish, publish-to) finds its own
- * change done, or in the way, when it is run again as it was.
+ * change done, or in the way, when it is run again as it was. `comment`: a
+ * comment takes no key, so running it again could add it twice.
  */
-export type Retry = 'resend' | 'unkeyed' | 'check' | 'again';
+export type Retry = 'resend' | 'unkeyed' | 'check' | 'again' | 'comment';
 
 /**
  * A command failed after its change went out, with no answer or a server
@@ -210,6 +211,9 @@ const RETRY_MESSAGES: Record<Retry, string> = {
     'The change may have been made. Run the same command again: if it was made, that finds ' +
     'it done, or refuses it as stale and names what is there now, unless someone changes it ' +
     'there meanwhile',
+  comment:
+    'The comment may have been made. Check page comments before trying again: ' +
+    'running it again could add it twice',
 };
 
 /** How a failure ends the CLI: its status, code and what to say. */

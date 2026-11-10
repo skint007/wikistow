@@ -1,9 +1,17 @@
 // The command line: parse it, run the command, and turn whatever happened
 // into an exit status (`exit.ts`).
-import { AttachmentId, FolderId, PageId, RevisionId, SpaceId } from '@wikistow/contracts';
+import {
+  AttachmentId,
+  CommentId,
+  FolderId,
+  PageId,
+  RevisionId,
+  SpaceId,
+} from '@wikistow/contracts';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { cliFetch, systemSecretStore, type UnlockOptions } from './agent.ts';
 import { enroll, secretStore, status, type Deps } from './commands/agent.ts';
+import { addComment, commentTextOf, listComments } from './commands/comments.ts';
 import {
   attachFile,
   createFolder,
@@ -142,6 +150,11 @@ const COMMANDS = {
   'page move': { options: { folder: { type: 'string' } }, positionals: 1 },
   'page history': { options: {}, positionals: 1 },
   'page links': { options: {}, positionals: 1 },
+  'page comments': { options: {}, positionals: 1 },
+  'page comment': {
+    options: { text: { type: 'string' }, for: { type: 'string' }, 'reply-to': { type: 'string' } },
+    positionals: 1,
+  },
   'page download-attachment': {
     options: { draft: { type: 'boolean' }, revision: { type: 'string' }, out: { type: 'string' } },
     positionals: 2,
@@ -730,5 +743,27 @@ async function dispatch(io: Io, out: Printer, command: Parsed, deps: Deps) {
       return pageHistory(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
     case 'page links':
       return pageLinks(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
+    case 'page comments':
+      return listComments(io, out, { ...content, pageId: id(PageId, first, 'page') }, deps);
+    case 'page comment': {
+      // Always named, replies too, so nothing reaches readers by default (ADR 0014, decision 10).
+      const audience = required(values, 'for');
+      if (audience !== 'readers' && audience !== 'editors') {
+        throw new CliError('usage', '--for takes readers or editors');
+      }
+      const replyTo = optional(values, 'reply-to');
+      return addComment(
+        io,
+        out,
+        {
+          ...content,
+          pageId: id(PageId, first, 'page'),
+          text: commentTextOf(required(values, 'text')),
+          for: audience,
+          replyTo: replyTo === null ? null : id(CommentId, replyTo, 'comment'),
+        },
+        deps,
+      );
+    }
   }
 }
