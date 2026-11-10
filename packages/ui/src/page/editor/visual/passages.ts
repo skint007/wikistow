@@ -74,7 +74,7 @@ export function ownTextOf(doc: Node): OwnText {
       code = null;
       if (parsePropertyReference(value) || claimedInline(value))
         add(from, to, ownSource.inlineCode(value), true);
-      else add(from, to, value, false);
+      else add(from, to, value.replace(/[\n\r\t]/g, ' '), false);
     };
     node.forEach((whole, offset) => {
       const start = pos + 1 + offset;

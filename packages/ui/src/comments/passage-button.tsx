@@ -9,7 +9,7 @@ import { useClient } from '../vault/store';
 import { quoteOf } from './model';
 import { clearUnderlines, pointAt, selectedIn, underline, type Passages } from './passages';
 import { pageCommentsQuery } from './queries';
-import { commentsStore, type CommentsPage } from './store';
+import { commentsStore, passagesStore, useCommentsStore, type CommentsPage } from './store';
 
 // Above the selection, clear of it; on a touch screen, above the browser's
 // own selection menu too, which the app can't add to (decision 13).
@@ -59,14 +59,26 @@ export function PassageButton({
     const later = () => {
       if (!frame) frame = requestAnimationFrame(place);
     };
+    // A press that ends without a click, dragged off or turned into a
+    // scroll, lets the button follow the selection again.
+    const released = () =>
+      setTimeout(() => {
+        if (!pressing.current) return;
+        pressing.current = false;
+        later();
+      });
     document.addEventListener('selectionchange', later);
     addEventListener('scroll', later, { capture: true, passive: true });
     addEventListener('resize', later);
+    addEventListener('pointerup', released);
+    addEventListener('pointercancel', released);
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener('selectionchange', later);
       removeEventListener('scroll', later, { capture: true });
       removeEventListener('resize', later);
+      removeEventListener('pointerup', released);
+      removeEventListener('pointercancel', released);
       setShown(null);
     };
   }, [passages]);
@@ -121,26 +133,29 @@ export function usePassages(
 ) {
   const ctx = useClient();
   const needs = useNeedsConnection();
+  const { open } = useCommentsStore();
   const { data } = useQuery({
     ...pageCommentsQuery(ctx, page, { offline: needs.offline }),
     enabled: underlined,
   });
   useEffect(() => {
-    commentsStore.setPassages(passages);
+    passagesStore.set(passages);
     return () => {
-      if (commentsStore.get().passages === passages) commentsStore.setPassages(null);
+      if (passagesStore.get().passages === passages) passagesStore.set(null);
     };
   }, [passages]);
+  // The text is read again as it changes: for the underlines, and while the
+  // panel is open, for its threads. A draft changes as it's typed.
   const [read, setRead] = useState(0);
   useEffect(() => {
-    if (!watched) return;
+    if (!watched || !(underlined || open)) return;
     let frame = 0;
     const observer = new MutationObserver(() => {
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        commentsStore.reread();
-        setRead((n) => n + 1);
+        passagesStore.reread();
+        if (underlined) setRead((n) => n + 1);
       });
     });
     observer.observe(watched, { childList: true, subtree: true, characterData: true });
@@ -148,7 +163,7 @@ export function usePassages(
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [watched]);
+  }, [watched, underlined, open]);
   const threads = data?.threads;
   useEffect(() => {
     const root = underlined ? passages?.root() : null;

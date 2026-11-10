@@ -42,10 +42,6 @@ type State = {
    * from a version of it this app opened, and shown in no other box.
    */
   quotes: ReadonlyMap<string, CommentQuote>;
-  /** Where the page on screen shows its text, for passages, if anywhere. */
-  passages: Passages | null;
-  /** Counts changes to that text, as threads' passages may be found or lost by them. */
-  read: number;
   /** Counts asks to put the focus in the box for a new comment, as after choosing a passage. */
   composing: number;
 };
@@ -56,7 +52,7 @@ const CLOSED = {
   showing: null,
   quotes: new Map<string, CommentQuote>(),
 };
-let state: State = { ...CLOSED, passages: null, read: 0, composing: 0 };
+let state: State = { ...CLOSED, composing: 0 };
 const listeners = new Set<() => void>();
 
 function set(next: Partial<State>) {
@@ -115,9 +111,6 @@ export const commentsStore = {
     quotes.delete(key);
     set({ quotes });
   },
-  setPassages: (passages: Passages | null) => set({ passages, read: state.read + 1 }),
-  /** The page's text changed. */
-  reread: () => set({ read: state.read + 1 }),
   /** The thread was brought into view. */
   shown: () => set({ showing: null }),
   unsent: (key: string) => unsent.get(key) ?? '',
@@ -129,3 +122,35 @@ export const commentsStore = {
 
 export const useCommentsStore = () =>
   useSyncExternalStore(commentsStore.subscribe, commentsStore.get);
+
+/**
+ * Where the page on screen shows its text, for passages, if anywhere, and
+ * a count of changes to that text, as threads' passages may be found or
+ * lost by them. Apart from the panel's state, so the page's text changing
+ * as it is typed tells only the panel.
+ */
+type PassagesState = { passages: Passages | null; read: number };
+let shown: PassagesState = { passages: null, read: 0 };
+const readers = new Set<() => void>();
+
+export const passagesStore = {
+  get: () => shown,
+  subscribe: (listener: () => void) => {
+    readers.add(listener);
+    return () => {
+      readers.delete(listener);
+    };
+  },
+  set(passages: Passages | null) {
+    shown = { passages, read: shown.read + 1 };
+    for (const listener of readers) listener();
+  },
+  /** The page's text changed. */
+  reread() {
+    shown = { ...shown, read: shown.read + 1 };
+    for (const listener of readers) listener();
+  },
+};
+
+export const usePassagesStore = () =>
+  useSyncExternalStore(passagesStore.subscribe, passagesStore.get);

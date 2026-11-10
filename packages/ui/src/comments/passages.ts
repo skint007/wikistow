@@ -66,6 +66,9 @@ const hidden = (element: Element) =>
   element.checkVisibility?.({ visibilityProperty: true }) === false &&
   getComputedStyle(element).display !== 'contents';
 
+const skipped = (node: Node | null) =>
+  node instanceof Element && (node.matches(SKIPPED) || hidden(node));
+
 /** A text node of the body, or a part taken as its source, at its offset in the text. */
 type Piece = { node: Node; at: number; length: number; atom: boolean };
 
@@ -87,10 +90,13 @@ export function readOwnText(root: Element): OwnText {
     if (node instanceof Text) {
       // Space between blocks, or at a line's start or end, as the HTML has
       // it, which shows as nothing. Between words and inline parts it shows.
+      // So does the space after a task's box.
       if (
         !keepsSpace &&
         /^\s*$/.test(node.data) &&
-        (endsLine(node.previousSibling) || endsLine(node.nextSibling))
+        (endsLine(node.previousSibling) ||
+          endsLine(node.nextSibling) ||
+          skipped(node.previousSibling))
       )
         return;
       const data = keepsSpace ? node.data : node.data.replace(/[\n\r\t]/g, ' ');
@@ -98,8 +104,7 @@ export function readOwnText(root: Element): OwnText {
       text += data;
       return;
     }
-    if (!(node instanceof Element)) return;
-    if (node.matches(SKIPPED) || hidden(node)) return;
+    if (!(node instanceof Element) || skipped(node)) return;
     if (node.localName === 'br') {
       text += '\n';
       return;

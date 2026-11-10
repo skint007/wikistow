@@ -426,13 +426,16 @@ export function Markdown({
     pre: CodeBlock,
     table: Table,
     input: TaskBox,
+    // An image is no text of the page, whatever note stands in for it.
     img: ({ src, alt, width }) => (
-      <AttachmentImage
-        attachments={attachments}
-        src={typeof src === 'string' ? src : undefined}
-        alt={alt}
-        width={width}
-      />
+      <OwnSource source="">
+        <AttachmentImage
+          attachments={attachments}
+          src={typeof src === 'string' ? src : undefined}
+          alt={alt}
+          width={width}
+        />
+      </OwnSource>
     ),
     a: ({ href, id: anchor, children }) => {
       const id = attachmentId(href);

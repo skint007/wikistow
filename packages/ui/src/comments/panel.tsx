@@ -55,7 +55,13 @@ import {
 } from './model';
 import type { Passages } from './passages';
 import { commentsChanged, pageCommentsQuery } from './queries';
-import { commentsStore, unsentKey, useCommentsStore, type CommentsPage } from './store';
+import {
+  commentsStore,
+  unsentKey,
+  useCommentsStore,
+  usePassagesStore,
+  type CommentsPage,
+} from './store';
 
 type Thread = commentOperations.ShownThread;
 type Comment = commentOperations.ShownComment;
@@ -113,7 +119,8 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
   const queryClient = useQueryClient();
   const needs = useNeedsConnection();
   const owner = useOwnerStanding(page.spaceId) === 'owner';
-  const { showing, quotes, passages, read, composing } = useCommentsStore();
+  const { showing, quotes, composing } = useCommentsStore();
+  const { passages, read } = usePassagesStore();
   const viewer: Viewer = {
     me: ctx.identity.public.id,
     agents: new Set(ctx.contacts.book.payloads.shared.agents.map((a) => a.enrollment.agent.id)),
