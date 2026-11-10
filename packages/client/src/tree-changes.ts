@@ -1,4 +1,5 @@
-import { structureRoutes, type SpaceId } from '@wikistow/contracts';
+import { commentRoutes, structureRoutes, type PageId, type SpaceId } from '@wikistow/contracts';
+import type { z } from 'zod';
 import type { Fetch } from './api/client.ts';
 import { jsonLines } from './json-lines.ts';
 
@@ -23,20 +24,43 @@ const QUIET_MS = 45_000;
  *     onMissed: reloadAllTrees,
  *   });
  */
-export async function watchTreeChanges({
-  baseUrl = '',
-  fetch: send = (url, init) => globalThis.fetch(url, init),
-  signal,
+export const watchTreeChanges = ({
   onChange,
-  onMissed,
-}: {
+  ...options
+}: Watching & { onChange: (spaceIds: SpaceId[]) => void }): Promise<void> =>
+  watchStream(structureRoutes.treeChanges, options, ({ spaceIds }) => onChange(spaceIds));
+
+/**
+ * Hear which pages' comments change (`commentRoutes.commentChanges`, ADR
+ * 0014 decision 8), as `watchTreeChanges` hears the tree: `onChange` gets
+ * the pages each event names, and `onMissed` runs after a stream opened
+ * again.
+ */
+export const watchCommentChanges = ({
+  onChange,
+  ...options
+}: Watching & { onChange: (pageIds: PageId[]) => void }): Promise<void> =>
+  watchStream(commentRoutes.commentChanges, options, ({ pageIds }) => onChange(pageIds));
+
+type Watching = {
   baseUrl?: string;
   fetch?: Fetch;
   signal: AbortSignal;
-  onChange: (spaceIds: SpaceId[]) => void;
   onMissed: () => void;
-}): Promise<void> {
-  const { path, event } = structureRoutes.treeChanges;
+};
+
+// Read one stream route's events until `signal` aborts, opening it again
+// after a pause whenever it ends, fails or goes quiet.
+async function watchStream<E extends z.ZodType>(
+  { path, event }: { path: string; event: E },
+  {
+    baseUrl = '',
+    fetch: send = (url, init) => globalThis.fetch(url, init),
+    signal,
+    onMissed,
+  }: Watching,
+  onEvent: (event: z.output<E>) => void,
+): Promise<void> {
   let pause = FIRST_PAUSE_MS;
   let dropped = false;
   while (!signal.aborted) {
@@ -49,9 +73,7 @@ export async function watchTreeChanges({
       if (response.ok) {
         pause = FIRST_PAUSE_MS;
         if (dropped) onMissed();
-        for await (const { spaceIds } of jsonLines(response, event, signal, QUIET_MS)) {
-          onChange(spaceIds);
-        }
+        for await (const line of jsonLines(response, event, signal, QUIET_MS)) onEvent(line);
       } else {
         await response.body?.cancel();
       }

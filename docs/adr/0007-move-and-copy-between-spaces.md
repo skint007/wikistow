@@ -74,7 +74,7 @@ Before anything is sealed, the app shows:
 - pages that will arrive unpublished (decision 2);
 - links that won't work afterwards, wikilinks and address links (decision 5);
 - for a move, the public links that go with their pages (decision 10);
-- for a move, what ends: public links that don't go with their pages, saying why, publications into other spaces, shares and their members, and the pages' earlier history.
+- for a move, what ends: public links that don't go with their pages, saying why, publications into other spaces, shares and their members, and the pages' earlier history and, since [ADR 0014](0014-comments.md), their comments.
 
 A move always asks, even on a device where the person turned off confirming moves, because it deletes. A copy shows all but the items for a move. An agent's copy has no preview.
 

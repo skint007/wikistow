@@ -47,8 +47,8 @@ export function accessChange(from: Access, to: Access): AccessChange {
  */
 export function historyNotice(access: Access): string {
   return access === 'reader'
-    ? 'will get every published version kept here, older ones included, but no drafts.'
-    : 'will get every published version and every draft kept here, older ones included.';
+    ? 'will get every published version kept here, older ones included, and the comments for readers, but no drafts.'
+    : 'will get every published version and every draft kept here, older ones included, and every comment.';
 }
 
 /** A share as the tree lists it: a folder, or the whole space for a null root. */

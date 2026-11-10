@@ -165,6 +165,7 @@ export async function sealEnding(
   const owners = keys.owners.sealingOwners();
   const keyEnvelopes: KeyEnvelopeV2[] = [];
   const metadataEnvelopes: MetadataEnvelopeV2[] = [];
+  const commentEnvelopes: MetadataEnvelopeV2[] = [];
   await sharing.forEachRecordKey(
     ctx,
     keys,
@@ -175,6 +176,8 @@ export async function sealEnding(
         const grant = { granter: ctx.identity, contentKey, recipient };
         if (item.kind === 'revision') {
           keyEnvelopes.push(grantRevisionKeyV2({ ...grant, record: item.record }));
+        } else if (item.kind === 'comment') {
+          commentEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
         } else {
           metadataEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
         }
@@ -182,5 +185,5 @@ export async function sealEnding(
     },
     { from: { kind: 'share', spaceId, shareId } },
   );
-  return { keyEnvelopes, metadataEnvelopes };
+  return { keyEnvelopes, metadataEnvelopes, commentEnvelopes };
 }

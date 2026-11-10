@@ -2,7 +2,9 @@
 // served and may write which comments, and how comments' keys follow their
 // page through the owner operations that cover a subtree.
 import {
+  commentOperations,
   endingOperations as ending,
+  sharingOperations as sharing,
   moveOperations as moves,
   newFolderMetadata,
   ownerOperations as owners,
@@ -25,6 +27,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import {
   handlingComments,
+  olderApp,
   postComment,
   sealComment,
   sendComment,
@@ -194,6 +197,36 @@ describe('readers and editors', () => {
   });
 });
 
+describe('the app', () => {
+  it('shows a reply that names another thread’s author as one it can’t open', async () => {
+    const { reader, editor, lib } = await sharedLibrary();
+    const question = await postComment(reader.ctx, lib.page, {
+      audience: 'published',
+      text: 'question',
+    });
+    // Signed by the editor as an answer to the editor's own question: the
+    // server can't tell, the reader's app can.
+    await postComment(editor.ctx, lib.page, {
+      audience: 'published',
+      text: 'answer',
+      thread: question.commentId,
+      threadAuthor: authorOf(editor),
+    });
+    const { share } = await writeTargetOf(reader.ctx, lib.spaceId, lib.page.pageId).then(
+      ({ keyTarget }) => keyTarget,
+    );
+    if (!share) throw new Error('expected the page in a share');
+    const region = { kind: 'share' as const, spaceId: lib.spaceId, shareId: share.shareId };
+    const { threads } = await commentOperations.pageComments(reader.ctx, { ...lib.page, region });
+    const [thread] = threads;
+    expect(thread?.first.state).toMatchObject({ kind: 'opened', payload: { text: 'question' } });
+    expect(thread?.replies[0]?.state).toMatchObject({
+      kind: 'unreadable',
+      error: { code: 'binding-mismatch' },
+    });
+  });
+});
+
 describe('the owner operations that cover a subtree', () => {
   it('are refused without the comments’ key material, and carry it when given', async () => {
     const [owner, reader, bob] = await Promise.all([
@@ -220,10 +253,10 @@ describe('the owner operations that cover a subtree', () => {
     });
     const written = [forReaders, forEditors, reply];
     // An app from before comments; one that asks for them and leaves them
-    // out of its request; and one that carries them.
-    const older = (ctx: ClientContext) => ctx;
+    // out of its request; and this app, which carries them.
+    const older = olderApp;
     const forgets = (ctx: ClientContext) => handlingComments(ctx, written, { send: false });
-    const carries = (ctx: ClientContext) => handlingComments(ctx, written);
+    const carries = (ctx: ClientContext) => ctx;
     const refusals = async (operation: (ctx: ClientContext) => Promise<unknown>) => [
       await rejection(operation(older(owner.ctx))),
       await rejection(operation(forgets(owner.ctx))),
@@ -277,11 +310,28 @@ describe('the owner operations that cover a subtree', () => {
     const person = await find(owner, bob);
     const add = (ctx: ClientContext) => owners.addCoOwner(ctx, { spaceId, person });
     expect(await refusals(add)).toEqual(['invalid-request', 'stale-head']);
-    await add(handlingComments(owner.ctx, written, { newOwner: bob.ctx.identity.public }));
+    await add(carries(owner.ctx));
     const adder = await owners.ownerToConfirm(bob.ctx, spaceId);
     if (!adder) throw new Error('expected the co-owner dialog');
     await owners.confirmOwner(bob.ctx, { spaceId, adder });
     expect(await texts(bob)).toEqual(['for readers', 'a reply', 'for editors']);
+  });
+
+  it('stop at a comment the owner’s app can’t open, until it is deleted', async () => {
+    const [owner, reader] = await Promise.all([personWithVault(t), personWithVault(t)]);
+    const lib = await library(owner);
+    // Sealed for editors, but listed for readers: the server can't tell, the app can.
+    const sealed = await sealComment(owner.ctx, lib.page, { audience: 'draft', text: 'notes' });
+    await sendComment(owner.ctx, lib.page.pageId, sealed, { audience: 'published' });
+    const people = [await invite(owner, reader, 'reader')];
+    const share = () =>
+      shareFolder(owner.ctx, { spaceId: lib.spaceId, rootId: lib.shared, people });
+    const stopped = await share().catch((error: unknown) => error);
+    expect(stopped).toBeInstanceOf(sharing.UnreadableComment);
+    expect(stopped).toMatchObject({ pageId: lib.page.pageId, commentId: sealed.comment.commentId });
+    await commentOperations.deleteComment(owner.ctx, sealed.comment.commentId);
+    await share();
+    expect((await threadsOf(reader.ctx, lib.page.pageId)).threads).toEqual([]);
   });
 });
 

@@ -29,6 +29,7 @@ import { PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { RotationConfirm } from './rotation-confirm';
 import { ErrorLine, useAction, HoldOpen, useHoldOpen } from './use-action';
+import { UnreadableCommentFix } from '../comments/unreadable';
 
 /** An ownership change, or deleting the space, for an owner to confirm. */
 export type OwnerAction =
@@ -151,7 +152,7 @@ function AddOwner({
   const [found, setFound] = useState<Found | null>(null);
   const [added, setAdded] = useState(false);
   const [records, setRecords] = useState<number | null>(null);
-  const { busy, error, run } = useAction();
+  const { busy, error, failure, run } = useAction();
 
   if (!found) {
     return (
@@ -245,6 +246,7 @@ function AddOwner({
         </p>
       )}
       <ErrorLine error={error} />
+      <UnreadableCommentFix failure={failure} spaceId={spaceId} />
       <DialogFooter>
         <Button variant="ghost" disabled={busy} onClick={() => setFound(null)}>
           Back

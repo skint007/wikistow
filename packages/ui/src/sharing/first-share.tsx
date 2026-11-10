@@ -20,6 +20,7 @@ import { describePerson, type Person } from './people';
 import { PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { ErrorLine, useAction } from './use-action';
+import { UnreadableCommentFix } from '../comments/unreadable';
 
 type Preview = sharingOperations.SharePreview;
 
@@ -143,7 +144,7 @@ function ConfirmShare({
   const ctx = useClient();
   const satisfies = useOwnerRequirements(spaceId);
   const queryClient = useQueryClient();
-  const { busy, error, run } = useAction();
+  const { busy, error, failure, run } = useAction();
   const [records, setRecords] = useState<number | null>(null);
   // Looked over afresh every time: it is what the owner confirms.
   const preview = useQuery({
@@ -245,6 +246,7 @@ function ConfirmShare({
         </p>
       )}
       <ErrorLine error={error} />
+      <UnreadableCommentFix failure={failure} spaceId={spaceId} />
       <DialogFooter>
         <Button variant="ghost" disabled={busy} onClick={onBack}>
           Back

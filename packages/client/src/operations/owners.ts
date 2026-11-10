@@ -68,6 +68,7 @@ export async function addCoOwner(
   }
   const keyEnvelopes: KeyEnvelopeV2[] = [];
   const metadataEnvelopes: MetadataEnvelopeV2[] = [];
+  const commentEnvelopes: MetadataEnvelopeV2[] = [];
   await forEachRecordKey(
     ctx,
     keys,
@@ -77,6 +78,8 @@ export async function addCoOwner(
       const grant = { granter: ctx.identity, contentKey, recipient: added };
       if (item.kind === 'revision') {
         keyEnvelopes.push(grantRevisionKeyV2({ ...grant, record: item.record }));
+      } else if (item.kind === 'comment') {
+        commentEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
       } else {
         metadataEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
       }
@@ -97,6 +100,7 @@ export async function addCoOwner(
       folderKeyEnvelopes,
       keyEnvelopes,
       metadataEnvelopes,
+      commentEnvelopes,
       permissionVersion: keys.permissionVersion,
     },
   });

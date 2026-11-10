@@ -8,6 +8,7 @@ import {
   Lock,
   LogOut,
   Megaphone,
+  MessageSquare,
   Plus,
   Search,
   Settings,
@@ -54,6 +55,7 @@ import { DropMoveOpener } from './space-moves';
 import { nameOf } from '../sharing/names';
 import { OfflinePill } from './offline-pill';
 import { spaceOrderQuery, spacesQuery } from '../data/queries';
+import { newCommentsQuery } from '../comments/queries';
 import { errorMessage } from '../errors';
 import { Place, Replaceable } from '../plugins/places';
 import { isApple } from './search-model';
@@ -126,6 +128,7 @@ function OwnRail({ onNavigate, onSignOut, onSearch }: RailProps) {
             <Trash2 className="size-4" strokeWidth={1.75} />
             Trash
           </Link>
+          <CommentsLink vault={vault} onNavigate={onNavigate} />
         </>
       ) : (
         <SharedLink here={false} onNavigate={onNavigate} />
@@ -173,6 +176,35 @@ function SharedLink({ here, onNavigate }: { here: boolean; onNavigate: (() => vo
     >
       <Users className="size-4" strokeWidth={1.75} />
       Shared
+    </Link>
+  );
+}
+
+/**
+ * New comments (ADR 0014, decision 8), with a dot while any thread that
+ * concerns this person has a comment from someone else they haven't seen.
+ */
+function CommentsLink({
+  vault,
+  onNavigate,
+}: {
+  vault: Extract<VaultState, { status: 'unlocked' }>;
+  onNavigate: (() => void) | undefined;
+}) {
+  const needs = useNeedsConnection();
+  const { data: rows } = useQuery({ ...newCommentsQuery(vault.ctx), enabled: !needs.offline });
+  const fresh = !!rows && rows.length > 0;
+  return (
+    <Link
+      to="/comments"
+      aria-label={fresh ? 'Comments, new' : 'Comments'}
+      {...needs.click(() => onNavigate?.())}
+      className="relative flex w-14 flex-col items-center gap-1 rounded-control py-1.5 text-[10px] font-bold text-subtle-foreground hover:tint active:tint-strong aria-[current=page]:hover:bg-none aria-[current=page]:active:bg-none aria-disabled:opacity-50"
+      activeProps={{ className: 'text-primary-ink bg-primary-soft' }}
+    >
+      <MessageSquare className="size-4" strokeWidth={1.75} />
+      Comments
+      {fresh && <UpdateDot />}
     </Link>
   );
 }

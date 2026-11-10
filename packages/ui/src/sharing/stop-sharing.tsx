@@ -23,6 +23,7 @@ import { nameOf, shareName } from './names';
 import { useOwnerRequirements } from './owner-standing';
 import { describePerson, peopleQuery } from './people';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from './use-action';
+import { UnreadableCommentFix } from '../comments/unreadable';
 
 // An ending's own words for the refusals that mean something else here.
 // `nameOf` names a page or folder this app can't open, which stops it.
@@ -83,7 +84,7 @@ export function StopSharing({
       }),
     [tree],
   );
-  const { busy, error, setError, run } = useAction(describe);
+  const { busy, error, failure, setError, run } = useAction(describe);
   const [records, setRecords] = useState<number | null>(null);
   const groups = useQuery(groupsQuery(ctx, spaceId));
   // Worked out afresh each time: it is what the owner confirms.
@@ -211,6 +212,7 @@ export function StopSharing({
         </p>
       )}
       <ErrorLine error={error} />
+      <UnreadableCommentFix failure={failure} spaceId={spaceId} />
       <DialogFooter>
         <Button
           variant="ghost"

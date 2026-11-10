@@ -5,6 +5,7 @@ import { createFileRoute, Outlet, useNavigate, useParams } from '@tanstack/react
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { ChatColumn, useChatColumn } from '../../../../ai/chat-column';
+import { CommentsColumn, useCommentsColumn } from '../../../../comments/panel';
 import { treeQuery } from '../../../../data/queries';
 import { OwnerConfirm } from '../../../../sharing/owner-confirm';
 import { useShellSpace } from '../../../../shell/app-shell';
@@ -21,20 +22,22 @@ export const Route = createFileRoute('/_app/_vault/s/$spaceId')({
 });
 
 /**
- * The sidebar card beside the page card, and the assistant's beside that
- * while it's open; on phones the sidebar lives in the drawer, and the
- * assistant over the page. A new owner is asked to confirm who added them first.
+ * The sidebar card beside the page card, and the assistant's or the page's
+ * comments beside that while one is open; on phones the sidebar lives in
+ * the drawer, and the assistant or comments over the page. A new owner is
+ * asked to confirm who added them first.
  */
 function SpaceLayout() {
   const { spaceId } = Route.useParams();
   useShellSpace(spaceId);
   useLeaveWhenGone(spaceId);
   const chat = useChatColumn();
+  const comments = useCommentsColumn();
   return (
     <div
       className={cn(
         'grid h-full gap-3.5 min-[900px]:grid-cols-[var(--sidebar-width)_1fr]',
-        chat && 'min-[900px]:grid-cols-[var(--sidebar-width)_1fr_380px]',
+        (chat || comments) && 'min-[900px]:grid-cols-[var(--sidebar-width)_1fr_380px]',
       )}
     >
       <div data-region="sidebar" className="hidden min-h-0 min-[900px]:block">
@@ -42,6 +45,7 @@ function SpaceLayout() {
       </div>
       <Outlet />
       <ChatColumn />
+      <CommentsColumn />
       <OwnerConfirm key={spaceId} spaceId={spaceId} />
     </div>
   );

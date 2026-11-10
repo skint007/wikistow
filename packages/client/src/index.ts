@@ -84,3 +84,5 @@ export * from './operations/vault.ts';
 export * from './cli-text.ts';
 export * from './commands.ts';
 export * from './contacts.ts';
+export * from './comments.ts';
+export * as commentOperations from './operations/comments.ts';

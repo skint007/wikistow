@@ -107,6 +107,14 @@ export const findOnPage: Command<typeof NoInput, CommandEnv & { openFind: () => 
   run: async (_input, { openFind }) => openFind(),
 };
 
+/** Open the page's comments (ADR 0014), in the side column or a sheet. */
+export const openComments: Command<typeof NoInput, CommandEnv & { openComments: () => void }> = {
+  id: 'page.comments',
+  input: NoInput,
+  requires: ['unlocked-vault'],
+  run: async (_input, { openComments }) => openComments(),
+};
+
 /** Open the banner picker on the draft in view. */
 export const changeBanner: Command<typeof PageRef, CommandEnv & { openBannerPicker: () => void }> =
   {

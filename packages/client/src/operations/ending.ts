@@ -18,7 +18,6 @@ import {
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
-import { metadataWrapSubject, revisionWrapSubject } from '../folder-keys.ts';
 import { isAgentId } from '../identity.ts';
 import { ENDED, requireNotBehind } from '../key-versions.ts';
 import { grantMetadataKeyV2 } from '../metadata.ts';
@@ -28,7 +27,7 @@ import { forgetSpaces } from './keys.ts';
 import { audienceOf } from './moves.ts';
 import { treeTarget } from './records.ts';
 import type { ClientContext } from './session.ts';
-import { forEachRecordKey, listShares, ownerKeys, type Progress } from './sharing.ts';
+import { forEachRecordKey, listShares, ownerKeys, subjectOf, type Progress } from './sharing.ts';
 
 /** An ending worked out for the owner to confirm (section 6.9, step 1). */
 export type EndingPreview = {
@@ -151,7 +150,12 @@ export async function endShare(
   // Each record's envelopes, by its kind and version.
   const sealed = new Map<
     string,
-    { node: string; keyEnvelopes: KeyEnvelopeV2[]; metadataEnvelopes: MetadataEnvelopeV2[] }
+    {
+      node: string;
+      keyEnvelopes: KeyEnvelopeV2[];
+      metadataEnvelopes: MetadataEnvelopeV2[];
+      commentEnvelopes: MetadataEnvelopeV2[];
+    }
   >();
   // Returns whether anything changed since the last scan.
   const scan = async () => {
@@ -164,23 +168,28 @@ export async function endShare(
       spaceId,
       { scope: 'share', shareId },
       (item, contentKey) => {
-        const subject =
-          item.kind === 'revision'
-            ? revisionWrapSubject(item.record)
-            : metadataWrapSubject(item.record);
+        const subject = subjectOf(item);
         const key = `${item.kind}:${subject.versionId}`;
         seen.add(key);
         if (sealed.has(key)) return;
         added += 1;
         const out = {
-          node: item.kind === 'revision' ? item.record.pageId : item.record.subjectId,
+          node:
+            item.kind === 'revision'
+              ? item.record.pageId
+              : item.kind === 'comment'
+                ? item.pageId
+                : item.record.subjectId,
           keyEnvelopes: [] as KeyEnvelopeV2[],
           metadataEnvelopes: [] as MetadataEnvelopeV2[],
+          commentEnvelopes: [] as MetadataEnvelopeV2[],
         };
         for (const recipient of owners) {
           const grant = { granter: ctx.identity, contentKey, recipient };
           if (item.kind === 'revision') {
             out.keyEnvelopes.push(grantRevisionKeyV2({ ...grant, record: item.record }));
+          } else if (item.kind === 'comment') {
+            out.commentEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
           } else {
             out.metadataEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
           }
@@ -210,6 +219,7 @@ export async function endShare(
         permissionVersion: preview.permissionVersion,
         keyEnvelopes: all.flatMap((s) => s.keyEnvelopes),
         metadataEnvelopes: all.flatMap((s) => s.metadataEnvelopes),
+        commentEnvelopes: all.flatMap((s) => s.commentEnvelopes),
       },
     });
   };

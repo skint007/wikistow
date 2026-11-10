@@ -21,8 +21,6 @@ import { CryptoError } from '../errors.ts';
 import {
   folderKeyEnvelopeBytes,
   folderKeyOf,
-  metadataWrapSubject,
-  revisionWrapSubject,
   wrapContentKey,
   type HeldKeyVersion,
 } from '../folder-keys.ts';
@@ -40,6 +38,7 @@ import {
   forEachRecordKey,
   listShares,
   ownerKeys,
+  subjectOf,
   type Progress,
   type SharePreview,
 } from './sharing.ts';
@@ -347,6 +346,7 @@ export async function moveNode(
         wraps: [],
         keyEnvelopes: [],
         metadataEnvelopes: [],
+        commentEnvelopes: [],
         ...material,
       },
     });
@@ -381,9 +381,7 @@ export async function moveNode(
       ) {
         throw error;
       }
-      const before = rewrap.count();
-      await rewrap.scan(onProgress);
-      if (rewrap.count() === before) throw error;
+      if (!(await rewrap.scan(onProgress))) throw error;
     }
   }
   forgetSpaces(ctx);
@@ -393,18 +391,21 @@ type KeyMaterial = {
   wraps: z.input<typeof sharingRoutes.SubjectWrap>[];
   keyEnvelopes: KeyEnvelopeV2[];
   metadataEnvelopes: MetadataEnvelopeV2[];
+  commentEnvelopes: MetadataEnvelopeV2[];
 };
 
 /**
  * The destination's key material for each record of the move, gathered
- * scan by scan: a record already done isn't done again.
+ * scan by scan: a record already done isn't done again, and one a later
+ * scan no longer lists, such as a comment edited or deleted meanwhile, is
+ * dropped (section 5.9).
  */
 async function rewrapper(ctx: ClientContext, preview: MovePreview) {
   const { spaceId, nodeId, to } = preview;
   const keys = await ownerKeys(ctx, spaceId);
   const target = await destinationKeys(ctx, keys, to);
-  const done = new Set<string>();
-  const out: KeyMaterial = { wraps: [], keyEnvelopes: [], metadataEnvelopes: [] };
+  // Each record's key material, by its kind and version.
+  const done = new Map<string, KeyMaterial>();
   const folders = new Set<string>(preview.folders.map((folder) => folder.id));
   const pages = new Set<string>(preview.pages.map((page) => page.id));
   // One scan of the subtree: wraps what the preview showed and wasn't done,
@@ -414,6 +415,7 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
     onProgress: Progress | undefined,
     unseen: Set<string>,
     unshown: Set<string>,
+    listed: Set<string>,
   ) => {
     await forEachRecordKey(
       ctx,
@@ -421,24 +423,34 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
       spaceId,
       { scope: 'subtree', rootId: nodeId },
       (item, contentKey) => {
-        const node = item.kind === 'revision' ? item.record.pageId : item.record.subjectId;
+        const node =
+          item.kind === 'revision'
+            ? item.record.pageId
+            : item.kind === 'comment'
+              ? item.pageId
+              : item.record.subjectId;
         // Only what the person was shown moves (section 6.7, step 1).
         const shown =
-          item.kind === 'revision'
-            ? pages.has(node)
-            : item.record.subjectKind === 'folder' && folders.has(node);
+          item.kind === 'metadata'
+            ? item.record.subjectKind === 'folder' && folders.has(node)
+            : pages.has(node);
         if (!shown) {
           unshown.add(node);
           throw new CryptoError('binding-mismatch', 'A record there is outside the preview');
         }
-        unseen.delete(node);
-        const subject =
-          item.kind === 'revision'
-            ? revisionWrapSubject(item.record)
-            : metadataWrapSubject(item.record);
+        // A page is seen by its versions; its comments come with them.
+        if (item.kind !== 'comment') unseen.delete(node);
+        const subject = subjectOf(item);
         const key = `${item.kind}:${subject.versionId}`;
+        listed.add(key);
         if (done.has(key)) return;
-        done.add(key);
+        const out: KeyMaterial = {
+          wraps: [],
+          keyEnvelopes: [],
+          metadataEnvelopes: [],
+          commentEnvelopes: [],
+        };
+        done.set(key, out);
         if (target.kind === 'share') {
           const folderKey = folderKeyOf(target.held, subject.audienceClass);
           if (!folderKey) throw new CryptoError('missing-key', 'No draft key to wrap a draft');
@@ -460,6 +472,8 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
           const grant = { granter: ctx.identity, contentKey, recipient };
           if (item.kind === 'revision') {
             out.keyEnvelopes.push(grantRevisionKeyV2({ ...grant, record: item.record }));
+          } else if (item.kind === 'comment') {
+            out.commentEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
           } else {
             out.metadataEnvelopes.push(grantMetadataKeyV2({ ...grant, record: item.record }));
           }
@@ -469,13 +483,23 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
     );
   };
   return {
-    count: () => done.size,
-    material: () => out,
-    scan: async (onProgress?: Progress) => {
+    material: (): KeyMaterial => {
+      const all = [...done.values()];
+      return {
+        wraps: all.flatMap((m) => m.wraps),
+        keyEnvelopes: all.flatMap((m) => m.keyEnvelopes),
+        metadataEnvelopes: all.flatMap((m) => m.metadataEnvelopes),
+        commentEnvelopes: all.flatMap((m) => m.commentEnvelopes),
+      };
+    },
+    /** Scan again; resolves whether anything was added or dropped. */
+    scan: async (onProgress?: Progress): Promise<boolean> => {
       const unseen = new Set<string>([...folders, ...pages]);
       const unshown = new Set<string>();
+      const listed = new Set<string>();
+      const before = new Set(done.keys());
       try {
-        await scanOnce(onProgress, unseen, unshown);
+        await scanOnce(onProgress, unseen, unshown, listed);
       } catch (error) {
         // Someone added a page or folder there since the preview.
         if (unshown.size > 0 && (await changedMeanwhile(ctx, preview, { added: unshown }))) {
@@ -488,6 +512,8 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
         if (await changedMeanwhile(ctx, preview, { gone: unseen })) throw previewAgain();
         throw new CryptoError('binding-mismatch', 'The server left out records of the preview');
       }
+      for (const key of done.keys()) if (!listed.has(key)) done.delete(key);
+      return done.size !== before.size || [...done.keys()].some((key) => !before.has(key));
     },
   };
 }

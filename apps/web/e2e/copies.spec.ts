@@ -125,7 +125,7 @@ test('copying and moving pages and folders between spaces', async ({
     const dialog = owner.getByRole('dialog', { name: 'Move “Shopping”' });
     await choose(dialog, 'Work', 'Top of Work');
     // The owner can publish there, so its public link goes with it: only earlier versions end.
-    await expect(dialog).toContainText('Its earlier versions don’t go with it.');
+    await expect(dialog).toContainText('Its earlier versions and comments don’t go with it.');
     await expect(dialog).not.toContainText('public link');
     await dialog.getByRole('button', { name: 'Move', exact: true }).click();
     await expect(dialog).toBeHidden({ timeout: 60_000 });

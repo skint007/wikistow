@@ -1,6 +1,7 @@
 import {
   copyOperations,
   moveOperations,
+  sharingOperations,
   spaceOperations,
   type ClientContext,
   type FolderId,
@@ -18,7 +19,9 @@ import { contentChanged } from '../data/content-changed';
 import { pageWriter } from '../data/offline-changes';
 import { refreshAccess, spacesQuery, trashQuery, treeQuery } from '../data/queries';
 import { errorMessage } from '../errors';
-import { isStale } from '../sharing/messages';
+import { UnreadableCommentFix } from '../comments/unreadable';
+import { isStale, unreadableCommentMessage } from '../sharing/messages';
+import { pageTitle } from '../shell/sidebar';
 import { nameOf, shareName } from '../sharing/names';
 import { useAvailability } from '../shell/availability';
 import { PLAIN, useClient } from '../vault/store';
@@ -199,7 +202,8 @@ export function MoveNotesLines({ notes }: { notes: MoveNotes | null }) {
         <p className="text-sm">
           {ended.length > 0 && <>It ends {listed(ended)}</>}
           {ended.length > 0 && (ends.history ? ', and its' : '.')}
-          {ends.history && `${ended.length > 0 ? '' : 'Its'} earlier versions don’t go with it.`}
+          {ends.history &&
+            `${ended.length > 0 ? '' : 'Its'} earlier versions and comments don’t go with it.`}
         </p>
       )}
     </>
@@ -563,7 +567,8 @@ export function useQuietMove() {
     };
     const done = (notes: MoveNotes | null, undo: Undo | null) =>
       say(movedNotice(ctx, { moving, to, sameSpace, copy, undo, notes }));
-    const failed = (message: string) => say({ ctx, message, failed: true });
+    const failed = (message: string, notes?: ReactNode) =>
+      say({ ctx, message, failed: true, ...(notes ? { notes } : {}) });
 
     async function moveHere() {
       const tree = await queryClient.ensureQueryData(treeQuery(ctx, spaceId));
@@ -623,14 +628,28 @@ export function useQuietMove() {
     }
 
     const within = !copy && sameSpace;
-    void (within ? moveHere() : copyThere()).catch((caught: unknown) =>
+    // A comment that stops a move is named by its page, whose comments have Delete.
+    const commentPage = (pageId: string) => {
+      const listed = queryClient
+        .getQueryData(treeQuery(ctx, spaceId).queryKey)
+        ?.pages.find((p) => p.id === pageId);
+      return listed ? pageTitle(listed.title) : null;
+    };
+    void (within ? moveHere() : copyThere()).catch((caught: unknown) => {
+      if (caught instanceof sharingOperations.UnreadableComment) {
+        failed(
+          unreadableCommentMessage(caught, commentPage(caught.pageId)),
+          <UnreadableCommentFix failure={caught} spaceId={spaceId} />,
+        );
+        return;
+      }
       failed(
         caught instanceof MoveRefused
           ? caught.message
           : within
             ? moveMessage(caught, moving.kind)
             : copyMessage(caught, copy, 'dropped'),
-      ),
-    );
+      );
+    });
   };
 }

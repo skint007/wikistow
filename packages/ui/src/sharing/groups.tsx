@@ -40,7 +40,7 @@ export function sourcesText(state: SpaceGroups, sources: groupOperations.AccessS
 
 /** Readers get every publication kept, editors every draft too (protocol section 7.3). */
 export const HISTORY_NOTICE =
-  'Readers get every published version kept there, older ones included, but no drafts. Editors also get every draft.';
+  'Readers get every published version kept there, older ones included, and the comments for readers, but no drafts. Editors also get every draft and every comment.';
 
 /**
  * What a change leaves each of `personIds` with in each of `shareIds`, by

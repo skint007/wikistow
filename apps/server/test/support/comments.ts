@@ -1,5 +1,5 @@
-// Comments sealed as the comments module will seal them (protocol section
-// 5.9), for tests of the server before the app has that module: format 1.0
+// Comments sealed by hand as the app's comments module seals them (protocol
+// section 5.9), so a test can send one the app never would: format 1.0
 // payloads, metadata records v2 of kind `comment`, and key material in the
 // page's region by the comment's audience.
 import { randomBytes } from 'node:crypto';
@@ -275,8 +275,23 @@ export async function textOf(
 }
 
 /**
+ * `ctx` as an app from before comments: its scans don't ask for them
+ * (`comments=1`), so a scope that holds one is `invalid-request`.
+ */
+export function olderApp(ctx: ClientContext): ClientContext {
+  type Call = (route: RouteDef, input: Sent, options?: unknown) => Promise<unknown>;
+  const real = ctx.api.call as unknown as Call;
+  const call = (async (route: RouteDef, input: Sent, options?: unknown) => {
+    if (route !== sharingRoutes.records) return real(route, input, options);
+    const { comments: _asked, ...query } = input.query ?? {};
+    return real(route, { ...input, query }, options);
+  }) as ClientContext['api']['call'];
+  return { ...ctx, api: { ...ctx.api, call } };
+}
+
+/**
  * `ctx` as an owner's app that handles comments in the operations that
- * cover a subtree (section 5.9), before the app does: its scans ask for
+ * cover a subtree (section 5.9) by hand: its scans ask for
  * comments, check that the scan served each of `comments` as it was
  * written, on its page, in its thread, for its audience, and opening
  * through the key material served to its text, and leave them out of what
