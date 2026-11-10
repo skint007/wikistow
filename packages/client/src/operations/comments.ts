@@ -6,6 +6,7 @@ import {
   commentRoutes,
   CommentId,
   MetadataRevisionId,
+  pageRoutes,
   type Audience,
   type RevisionId,
   type IdentityId,
@@ -274,6 +275,7 @@ async function writeVersion(
     commentId,
     basedOn,
     payload,
+    check,
     reopen,
   }: {
     spaceId: SpaceId;
@@ -282,6 +284,8 @@ async function writeVersion(
     commentId: CommentId;
     basedOn: MetadataRevisionId | null;
     payload: CommentPayload;
+    /** The payload as it may be sent at the permission version this try sends, checked again on each. */
+    check?: (payload: CommentPayload) => Promise<CommentPayload>;
     /** The region as the version it goes by opens now, after a share or move. */
     reopen?: () => Promise<Region | null>;
   },
@@ -311,7 +315,7 @@ async function writeVersion(
         const sealed = sealComment({
           author: ctx.identity,
           target: { installationId: ctx.installationId, spaceId, commentId, versionId, basedOn },
-          payload,
+          payload: check ? await check(payload) : payload,
           ...keyTargetFor(ctx, keys, at, share),
         });
         await send({ ...sealed, permissionVersion });
@@ -341,10 +345,33 @@ async function writeVersion(
 }
 
 /**
+ * Whether readers can see version `revisionId` of the page now: it is
+ * published since the page's latest unpublish (decision 1). Asked after the
+ * permission version a write sends was read, so an unpublish since then
+ * refuses the write (`permission-version`) and this is asked again.
+ */
+async function readersSee(ctx: ClientContext, pageId: PageId, revisionId: RevisionId) {
+  const info = await ctx.api.call(pageRoutes.getPage, { params: { pageId } });
+  if (info.heads.publishedHead === null) return false;
+  // Readers are listed only their history; editors are told where it starts.
+  const { versions } = await ctx.api.call(pageRoutes.history, { params: { pageId } });
+  const version = versions.find((v) => v.revisionId === revisionId);
+  return (
+    !!version && (info.readerHistoryFrom === null || version.publishedSeq >= info.readerHistoryFrom)
+  );
+}
+
+/**
  * Add a comment for `audience`, the view's (decision 1): a first comment
  * on the page, in the region of its version on screen, or a reply to a
  * thread whose first comment this app opened, taking its audience and its
  * signed author from it. Returns the new comment's ID.
+ *
+ * A first comment may be on a passage (`quote`, decision 5), from a
+ * version of this page of its audience that this app opened. One for
+ * readers names a version readers can see now: before every send, retries
+ * included, a quote from a version an unpublish withdrew is dropped, and
+ * `onQuoteDropped` is told.
  */
 export async function addComment(
   ctx: ClientContext,
@@ -354,21 +381,34 @@ export async function addComment(
     text,
     reply = null,
     quote,
+    onQuoteDropped,
   }: {
     audience: Audience;
     text: string;
     reply?: { thread: CommentId; threadAuthor: IdentityId } | null;
-    quote?: CommentQuote;
+    quote?: CommentQuote | undefined;
+    onQuoteDropped?: () => void;
   },
 ): Promise<CommentId> {
   const commentId = newId(CommentId);
+  const passage = reply ? undefined : quote;
+  let dropped = false;
   await writeVersion(
     ctx,
     {
       ...page,
       commentId,
       basedOn: null,
-      payload: newCommentPayload({ pageId: page.pageId, audience, text, reply, quote }),
+      payload: newCommentPayload({ pageId: page.pageId, audience, text, reply, quote: passage }),
+      ...(passage &&
+        audience === 'published' && {
+          check: async (payload: CommentPayload) => {
+            if (await readersSee(ctx, page.pageId, passage.revisionId)) return payload;
+            dropped = true;
+            const { quote: _dropped, ...rest } = payload;
+            return rest;
+          },
+        }),
       reopen: () => regionNow(ctx, page),
     },
     ({ metadata, wrap, envelopes, permissionVersion }) =>
@@ -385,6 +425,7 @@ export async function addComment(
         },
       }),
   );
+  if (dropped) onQuoteDropped?.();
   return commentId;
 }
 
