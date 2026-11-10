@@ -1,7 +1,15 @@
-import type { CommentId, PageId, Region, RevisionId, SpaceId } from '@wikistow/client';
+import type {
+  CommentId,
+  CommentQuote,
+  PageId,
+  Region,
+  RevisionId,
+  SpaceId,
+} from '@wikistow/client';
 import { useSyncExternalStore } from 'react';
 import { chatStore } from '../ai/chat';
 import { vaultStore } from '../vault/store';
+import type { Passages } from './passages';
 
 /**
  * The page on screen, as its comments need it (ADR 0014, decision 13): its
@@ -28,9 +36,23 @@ type State = {
   page: CommentsPage | null;
   /** The thread to bring into view when the panel opens, as from New comments. */
   showing: CommentId | null;
+  /**
+   * Unsent comments' passages, by page and view (`unsentKey`), as the
+   * unsent text is kept (decision 13): chosen in that view of that page,
+   * from a version of it this app opened, and shown in no other box.
+   */
+  quotes: ReadonlyMap<string, CommentQuote>;
+  /** Counts asks to put the focus in the box for a new comment, as after choosing a passage. */
+  composing: number;
 };
 
-let state: State = { open: false, page: null, showing: null };
+const CLOSED = {
+  open: false,
+  page: null,
+  showing: null,
+  quotes: new Map<string, CommentQuote>(),
+};
+let state: State = { ...CLOSED, composing: 0 };
 const listeners = new Set<() => void>();
 
 function set(next: Partial<State>) {
@@ -47,7 +69,7 @@ const unsent = new Map<string, string>();
 vaultStore.subscribe(() => {
   if (vaultStore.get().status !== 'unlocked') {
     unsent.clear();
-    set({ open: false, page: null, showing: null });
+    set(CLOSED);
   }
 });
 
@@ -74,6 +96,21 @@ export const commentsStore = {
   },
   close: () => set({ open: false, showing: null }),
   setPage: (page: CommentsPage | null) => set({ page }),
+  /** Comment on a passage: its quote goes with the page and view's new comment, whose box gets the focus. */
+  comment(key: string, quote: CommentQuote) {
+    chatStore.setOpen(false);
+    set({
+      open: true,
+      quotes: new Map(state.quotes).set(key, quote),
+      composing: state.composing + 1,
+    });
+  },
+  dropQuote(key: string) {
+    if (!state.quotes.has(key)) return;
+    const quotes = new Map(state.quotes);
+    quotes.delete(key);
+    set({ quotes });
+  },
   /** The thread was brought into view. */
   shown: () => set({ showing: null }),
   unsent: (key: string) => unsent.get(key) ?? '',
@@ -85,3 +122,35 @@ export const commentsStore = {
 
 export const useCommentsStore = () =>
   useSyncExternalStore(commentsStore.subscribe, commentsStore.get);
+
+/**
+ * Where the page on screen shows its text, for passages, if anywhere, and
+ * a count of changes to that text, as threads' passages may be found or
+ * lost by them. Apart from the panel's state, so the page's text changing
+ * as it is typed tells only the panel.
+ */
+type PassagesState = { passages: Passages | null; read: number };
+let shown: PassagesState = { passages: null, read: 0 };
+const readers = new Set<() => void>();
+
+export const passagesStore = {
+  get: () => shown,
+  subscribe: (listener: () => void) => {
+    readers.add(listener);
+    return () => {
+      readers.delete(listener);
+    };
+  },
+  set(passages: Passages | null) {
+    shown = { passages, read: shown.read + 1 };
+    for (const listener of readers) listener();
+  },
+  /** The page's text changed. */
+  reread() {
+    shown = { ...shown, read: shown.read + 1 };
+    for (const listener of readers) listener();
+  },
+};
+
+export const usePassagesStore = () =>
+  useSyncExternalStore(passagesStore.subscribe, passagesStore.get);

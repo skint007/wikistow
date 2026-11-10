@@ -416,4 +416,11 @@
     background-color: var(--draft-dot);
     color: black;
   }
+  /* Passages with open comment threads, underlined as read (comments/passages.ts). */
+  ::highlight(comment-passage) {
+    text-decoration-line: underline;
+    text-decoration-thickness: 2px;
+    text-decoration-color: color-mix(in oklab, var(--primary) 70%, transparent);
+    text-underline-offset: 3px;
+  }
 }

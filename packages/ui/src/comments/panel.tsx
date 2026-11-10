@@ -7,7 +7,9 @@ import {
   linkablePages,
   type Audience,
   type ClientContext,
+  type CommentQuote,
   type IdentityId,
+  type QuoteText,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -27,7 +29,7 @@ import { cn } from '@/lib/utils';
 import { AgentName, agentPersonName } from '../agents/agent-name';
 import { ago } from '../agents/model';
 import { useWide } from '../ai/chat-column';
-import { treeQuery } from '../data/queries';
+import { historyQuery, treeQuery } from '../data/queries';
 import { errorMessage, stopMessage } from '../errors';
 import { useOwnerStanding } from '../sharing/owner-standing';
 import { peopleQuery } from '../sharing/people';
@@ -48,10 +50,18 @@ import {
   commentsBadge,
   ordered,
   pillOf,
+  quoteOf,
   type Viewer,
 } from './model';
+import type { Passages } from './passages';
 import { commentsChanged, pageCommentsQuery } from './queries';
-import { commentsStore, unsentKey, useCommentsStore, type CommentsPage } from './store';
+import {
+  commentsStore,
+  unsentKey,
+  useCommentsStore,
+  usePassagesStore,
+  type CommentsPage,
+} from './store';
 
 type Thread = commentOperations.ShownThread;
 type Comment = commentOperations.ShownComment;
@@ -109,7 +119,8 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
   const queryClient = useQueryClient();
   const needs = useNeedsConnection();
   const owner = useOwnerStanding(page.spaceId) === 'owner';
-  const { showing } = useCommentsStore();
+  const { showing, quotes, composing } = useCommentsStore();
+  const { passages, read } = usePassagesStore();
   const viewer: Viewer = {
     me: ctx.identity.public.id,
     agents: new Set(ctx.contacts.book.payloads.shared.agents.map((a) => a.enrollment.agent.id)),
@@ -157,7 +168,21 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
     [threads],
   );
   const names = useAuthorNames(ctx, authors);
-  const { open, resolved } = ordered(threads ?? []);
+  // Where each thread's passage is in the page on screen, as its text is now:
+  // null where it isn't there, undefined where that can't be told.
+  const found = useMemo(() => {
+    void read;
+    const at = new Map<string, number | null | undefined>();
+    for (const thread of threads ?? []) {
+      const quote = quoteOf(thread);
+      if (quote) at.set(thread.thread, passages ? passages.find(quote) : undefined);
+    }
+    return at;
+  }, [threads, passages, read]);
+  const { open, resolved } = ordered(threads ?? [], (t) => found.get(t.thread) ?? null);
+  const newKey = unsentKey(page, 'new');
+  const quote = quotes.get(newKey) ?? null;
+  const [dropped, setDropped] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
   // A thread New comments named comes into view, unfolded if resolved.
   useEffect(() => {
@@ -169,7 +194,14 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
     });
   }, [showing, threads, resolved]);
   const changed = () => commentsChanged(queryClient, [page.pageId]);
-  const shared = { page: { ...page, region }, viewer, names, pages, onChanged: changed };
+  const shared = {
+    page: { ...page, region },
+    viewer,
+    names,
+    pages,
+    passages,
+    onChanged: changed,
+  };
   const count = threads ? commentsBadge(threads, { me: viewer.me, seenAt: null }).count : null;
   const gone = query.error instanceof ApiError && query.error.code === 'not-found';
 
@@ -208,21 +240,54 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
           <>
             {canComment(viewer) && (
               <CommentBox
-                key={unsentKey(page, 'new')}
-                unsent={unsentKey(page, 'new')}
+                key={newKey}
+                unsent={newKey}
                 label={boxLabel(audienceOfView(page.view), 'comment')}
                 action="Comment"
                 rows={2}
+                focus={composing}
+                autoFocus={quote !== null}
+                quote={
+                  quote && (
+                    <div className="flex items-start gap-1">
+                      <QuoteShown quote={quote} className="flex-1" />
+                      <button
+                        type="button"
+                        aria-label="Comment on the page instead"
+                        data-hint="Comment on the page instead"
+                        onClick={() => commentsStore.dropQuote(newKey)}
+                        className="grid size-6 shrink-0 place-items-center rounded-control hover:tint active:tint-strong"
+                      >
+                        <X className="size-3.5" strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  )
+                }
                 send={async (text) => {
                   if (!region) throw new Error('The page is still opening');
+                  setDropped(false);
+                  let withoutQuote = false;
                   await commentOperations.addComment(
                     ctx,
                     { spaceId: page.spaceId, pageId: page.pageId, region, version: page.version },
-                    { audience: audienceOfView(page.view), text },
+                    {
+                      audience: audienceOfView(page.view),
+                      text,
+                      // Only this page and view's own, chosen here (decision 13).
+                      quote: quote ?? undefined,
+                      onQuoteDropped: () => (withoutQuote = true),
+                    },
                   );
+                  commentsStore.dropQuote(newKey);
+                  setDropped(withoutQuote);
                   changed();
                 }}
               />
+            )}
+            {dropped && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Sent without its passage: readers can’t see the version it was chosen in now.
+              </p>
             )}
             {query.error && !gone && (
               <p role="alert" className="text-sm text-destructive">
@@ -233,7 +298,12 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
               <p className="p-1 text-sm text-muted-foreground">No comments yet.</p>
             )}
             {open.map((thread) => (
-              <ThreadCard key={thread.thread} thread={thread} {...shared} />
+              <ThreadCard
+                key={thread.thread}
+                thread={thread}
+                at={found.get(thread.thread)}
+                {...shared}
+              />
             ))}
             {resolved.length > 0 && (
               <button
@@ -251,7 +321,12 @@ function CommentsPanel({ page, onClose }: { page: CommentsPage; onClose: () => v
             )}
             {unfolded &&
               resolved.map((thread) => (
-                <ThreadCard key={thread.thread} thread={thread} {...shared} />
+                <ThreadCard
+                  key={thread.thread}
+                  thread={thread}
+                  at={found.get(thread.thread)}
+                  {...shared}
+                />
               ))}
           </>
         )}
@@ -310,13 +385,108 @@ type Shared = {
   viewer: Viewer;
   names: Names;
   pages: Parameters<typeof CommentText>[0]['pages'];
+  /** Where the page on screen shows its text, for passages. */
+  passages: Passages | null;
   onChanged: () => void;
 };
 
-/** One thread: its pill, its first comment and replies, Resolve, and Reply…. */
-function ThreadCard({ thread, ...shared }: { thread: Thread } & Shared) {
+/** A passage's text, dimmed, as a comment's quote shows it. */
+function QuoteShown({ quote, className }: { quote: QuoteText; className?: string }) {
+  return (
+    <blockquote
+      className={cn(
+        'line-clamp-3 border-s-2 ps-2 text-sm whitespace-pre-line text-subtle-foreground',
+        className,
+      )}
+    >
+      “{quote.exact}”
+    </blockquote>
+  );
+}
+
+/**
+ * A thread's passage (decision 5): its quote, and where the page on screen
+ * no longer has it, saying so, with the version it was chosen in for
+ * anyone who can open that. In the draft view, **Show** selects it in the
+ * editor.
+ */
+function ThreadQuote({
+  quote,
+  at,
+  page,
+  passages,
+}: {
+  quote: CommentQuote;
+  at: number | null | undefined;
+  page: CommentsPage;
+  passages: Passages | null;
+}) {
   const ctx = useClient();
-  const { page, viewer, onChanged } = shared;
+  const wide = useWide();
+  const gone = at === null;
+  const { data: versions } = useQuery({
+    ...historyQuery(ctx, { spaceId: page.spaceId, pageId: page.pageId }),
+    enabled: gone,
+  });
+  // The page's history is checked against each version's signed record,
+  // so one it lists is of this page.
+  const made = versions?.find((v) => v.revisionId === quote.revisionId);
+  return (
+    <div className="grid gap-1">
+      <QuoteShown quote={quote} />
+      {gone && (
+        <p className="text-xs text-subtle-foreground">
+          This passage isn’t in the page now.
+          {made && (
+            <>
+              {' '}
+              <Link
+                to="/s/$spaceId/p/$pageId"
+                params={{ spaceId: page.spaceId, pageId: page.pageId }}
+                search={{ view: 'published', rev: made.revisionId }}
+                className="font-bold text-primary hover:underline"
+              >
+                Made on version {made.publishedSeq}
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+      {page.view === 'draft' && typeof at === 'number' && passages && (
+        <button
+          type="button"
+          onClick={() => {
+            if (wide) {
+              passages.show(quote);
+              return;
+            }
+            // On a narrow window the sheet covers the editor: it steps aside
+            // first, and the passage is selected once it has gone.
+            commentsStore.close();
+            requestAnimationFrame(() => requestAnimationFrame(() => passages.show(quote)));
+          }}
+          className="justify-self-start rounded-control px-1 text-sm font-bold text-subtle-foreground hover:text-foreground hover:underline"
+        >
+          Show
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** One thread: its pill, its first comment and replies, Resolve, and Reply…. */
+function ThreadCard({
+  thread,
+  at,
+  ...shared
+}: {
+  thread: Thread;
+  /** Where its passage is in the page on screen, if it has one (`found`). */
+  at: number | null | undefined;
+} & Shared) {
+  const ctx = useClient();
+  const { page, viewer, passages, onChanged } = shared;
+  const quote = quoteOf(thread);
   const [replying, setReplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pill = pillOf(thread, viewer);
@@ -358,6 +528,7 @@ function ThreadCard({ thread, ...shared }: { thread: Thread } & Shared) {
           )}
         </div>
       )}
+      {quote && <ThreadQuote quote={quote} at={at} page={page} passages={passages} />}
       <CommentItem
         comment={thread.first}
         audience={thread.audience}
@@ -566,6 +737,8 @@ function CommentBox({
   action,
   rows,
   autoFocus = false,
+  focus,
+  quote,
   onCancel,
   send,
 }: {
@@ -575,10 +748,28 @@ function CommentBox({
   action: string;
   rows: number;
   autoFocus?: boolean;
+  /** Changes whenever the box should take the focus, as after a passage is chosen. */
+  focus?: number;
+  /** The passage it comments on, above it. */
+  quote?: ReactNode;
   onCancel?: () => void;
   send: (text: string) => Promise<void>;
 }) {
   const [text, setText] = useState(() => commentsStore.unsent(unsent) || initial);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const focused = useRef(focus);
+  useEffect(() => {
+    if (focus === focused.current) return;
+    focused.current = focus;
+    box.current?.focus();
+  }, [focus]);
+  // In the sheet, which opens after what is in it, and then focuses its
+  // first control, the focus is asked for again once it has opened.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const frame = requestAnimationFrame(() => box.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const change = (next: string) => {
@@ -614,7 +805,9 @@ function CommentBox({
         void submit();
       }}
     >
+      {quote}
       <textarea
+        ref={box}
         aria-label={label}
         placeholder={label}
         value={text}

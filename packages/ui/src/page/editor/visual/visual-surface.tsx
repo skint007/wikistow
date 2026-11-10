@@ -30,6 +30,7 @@ import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
 import { endsInLine, inLineBreaks, withLf } from './fidelity';
 import { visualFind, visualFindable } from './find';
+import { visualPassages } from './passages';
 import { formatKeys } from './formatting';
 import { codeHighlights } from './highlight';
 import { propertiesChanged, propertyReferences } from './property-references';
@@ -504,6 +505,13 @@ function Surface({
     ),
   );
 
+  const [passages] = useState(() =>
+    visualPassages(() => {
+      const view = editor.current?.action((ctx) => ctx.get(editorViewCtx));
+      return view && !view.isDestroyed ? view : null;
+    }),
+  );
+
   useEditor((root) => {
     const generation = ++made.current;
     const given = text.current;
@@ -612,6 +620,7 @@ function Surface({
     ref,
     () => ({
       findable,
+      passages,
       read: surface.read,
       replace: surface.show,
       caret: surface.caret,
@@ -620,7 +629,7 @@ function Surface({
       selection: surface.selection,
       insert: surface.insert,
     }),
-    [surface, findable],
+    [surface, findable, passages],
   );
 
   // It fills the box the page editor gives it, the toolbar along its top

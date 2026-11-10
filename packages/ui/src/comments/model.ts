@@ -81,11 +81,31 @@ export const canDelete = (comment: Comment, viewer: Viewer) =>
 // The server's times have milliseconds or not, so they compare as instants.
 const time = (iso: string) => Date.parse(iso);
 
-/** Open threads oldest first, then the resolved ones (decision 6), by the server's times. */
-export function ordered(threads: readonly Thread[]) {
+/** The passage a thread's first comment is on, as it opened, if any (decision 5). */
+export const quoteOf = (thread: Thread) =>
+  thread.first.state.kind === 'opened' ? (thread.first.state.payload.quote ?? null) : null;
+
+/**
+ * Open threads in the order of their passages in the page (`at`, where
+ * each is found), then those on the whole page and those whose passage
+ * isn't found, oldest first; then the resolved ones (decision 6). Ages go
+ * by the server's times.
+ */
+export function ordered(
+  threads: readonly Thread[],
+  at: (thread: Thread) => number | null = () => null,
+) {
   const byAge = [...threads].sort((a, b) => time(a.first.createdAt) - time(b.first.createdAt));
+  const open = byAge.filter((t) => t.resolved === null);
+  const placed = open.flatMap((thread) => {
+    const offset = at(thread);
+    return offset === null ? [] : [{ thread, offset }];
+  });
+  // Stable, so threads on one passage stay oldest first.
+  placed.sort((a, b) => a.offset - b.offset);
+  const onPage = open.filter((t) => !placed.some((p) => p.thread === t));
   return {
-    open: byAge.filter((t) => t.resolved === null),
+    open: [...placed.map((p) => p.thread), ...onPage],
     resolved: byAge.filter((t) => t.resolved !== null),
   };
 }

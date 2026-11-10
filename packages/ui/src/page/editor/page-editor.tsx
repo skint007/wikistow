@@ -428,6 +428,8 @@ export function PageEditor({
     [],
   );
 
+  const visualPassages = () => (given.current === null ? surface.current?.passages : undefined);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -439,6 +441,14 @@ export function PageEditor({
       },
       focus: () => surface.current?.focus(),
       selection: () => atCursor()?.selection?.() ?? '',
+      // The visual editor's, in either mode it shows in; none in the source
+      // editor, nor while the visual editor holds text older than the page's.
+      passages: {
+        root: () => visualPassages()?.root() ?? null,
+        quote: () => visualPassages()?.quote() ?? null,
+        find: (quote) => visualPassages()?.find(quote),
+        show: (quote) => visualPassages()?.show(quote) ?? false,
+      },
       // A plugin's text, at the cursor as a paste goes, or at the body's end.
       insert(markdown) {
         const target = atCursor();

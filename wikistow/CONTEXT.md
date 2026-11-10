@@ -124,7 +124,7 @@ _Avoid_: Recycle bin, archive.
 A file referenced by a page version, such as an image or downloadable script. It has the same audience as the version that includes it, and its key travels inside that version.
 
 **Comment**
-A note on a page by someone who can read it, about the whole page or a passage it quotes, in a thread of replies that can be resolved. One **for readers** is read by everyone who reads the page; one **for editors** only by those who can read its draft. ADR 0014; quoting a passage is still to come.
+A note on a page by someone who can read it, about the whole page or a passage it quotes, in a thread of replies that can be resolved. One **for readers** is read by everyone who reads the page; one **for editors** only by those who can read its draft. ADR 0014.
 _Avoid_: Annotation, note, remark.
 
 **Conflict**
