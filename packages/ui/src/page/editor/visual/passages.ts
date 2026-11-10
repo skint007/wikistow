@@ -7,7 +7,7 @@ import {
 } from '@wikistow/client';
 import { claimedInline } from '@wikistow/plugin-sdk';
 import type { Node } from '@milkdown/kit/prose/model';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { fencedAsSource, type Passages } from '../../../comments/passages';
 import { alertIn } from './alerts';
@@ -99,6 +99,9 @@ export function ownTextOf(doc: Node): OwnText {
       // A soft line break (`isInline`) shows as the space the reader shows.
       else if (child.type.name === 'hardbreak')
         add(at, end, child.attrs['isInline'] ? ' ' : '\n', true);
+      // A `<br>` written as HTML, as in a table's cell, breaks the line as the reader shows it.
+      else if (child.type.name === 'html' && /^<br\s*\/?>$/i.test(String(child.attrs['value'])))
+        add(at, end, '\n', true);
       else if (child.type.name === 'math_inline')
         add(at, end, ownSource.math(String(child.attrs['value']), false), true);
       else if (typeof child.attrs['source'] === 'string')
@@ -148,8 +151,10 @@ export function visualPassages(view: () => EditorView | null): Passages {
     quote() {
       const editor = view();
       if (!editor) return null;
-      const { from, to, empty } = editor.state.selection;
-      if (empty) return null;
+      const { selection } = editor.state;
+      // A wikilink or math chosen as a whole, as by an arrow key onto it, isn't text selected.
+      if (selection.empty || selection instanceof NodeSelection) return null;
+      const { from, to } = selection;
       const own = ownTextOf(editor.state.doc);
       const offsets = offsetsOf(own, from, to);
       return offsets ? quoteAt(own.text, offsets.from, offsets.to) : null;
