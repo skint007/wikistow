@@ -9,12 +9,20 @@ import { useClient } from '../vault/store';
 import { quoteOf } from './model';
 import { clearUnderlines, pointAt, selectedIn, underline, type Passages } from './passages';
 import { pageCommentsQuery } from './queries';
-import { commentsStore, passagesStore, useCommentsStore, type CommentsPage } from './store';
+import {
+  commentsStore,
+  passagesStore,
+  useCommentsStore,
+  usePassagesStore,
+  type CommentsPage,
+} from './store';
 
 // Above the selection, clear of it; on a touch screen, above the browser's
 // own selection menu too, which the app can't add to (decision 13).
 const GAP = 8;
 const TOUCH_GAP = 56;
+
+const TOO_LONG = 'Select at most 500 characters to comment on them';
 
 type Shown = { left: number; top: number; quote: QuoteText | 'too-long' };
 
@@ -93,9 +101,13 @@ export function PassageButton({
         size="sm"
         className="shadow-card"
         aria-label="Comment on the selection"
-        disabled={busy || tooLong}
-        data-hint={tooLong ? 'Select at most 500 characters to comment on them' : undefined}
-        aria-description={tooLong ? 'Select at most 500 characters to comment on them' : undefined}
+        disabled={busy}
+        // Dimmed, it says why on hover, as `disabled` wouldn't let it.
+        {...(tooLong && {
+          'aria-disabled': true,
+          'data-hint': TOO_LONG,
+          'aria-description': TOO_LONG,
+        })}
         // The selection stays as it is while the button is pressed.
         onPointerDown={(event) => {
           event.preventDefault();
@@ -121,32 +133,23 @@ export function PassageButton({
 /**
  * Give the comments panel the page's text while it shows (`passages`), so
  * threads' passages are found, ordered and shown, and tell it when the
- * text in `watched` changes. In the published view (`underlined`), the
- * open threads' passages found there are underlined, and a click on one
- * opens its thread.
+ * text in `watched` changes: always where passages are underlined
+ * (`underlined`), else while the panel is open, as a draft changes as it's
+ * typed. Only what reads `passagesStore` hears of it, never the page,
+ * whose drawing again would change its text again.
  */
 export function usePassages(
-  page: CommentsPage,
   passages: Passages | null,
   watched: Element | null,
   { underlined }: { underlined: boolean },
 ) {
-  const ctx = useClient();
-  const needs = useNeedsConnection();
   const { open } = useCommentsStore();
-  const { data } = useQuery({
-    ...pageCommentsQuery(ctx, page, { offline: needs.offline }),
-    enabled: underlined,
-  });
   useEffect(() => {
     passagesStore.set(passages);
     return () => {
       if (passagesStore.get().passages === passages) passagesStore.set(null);
     };
   }, [passages]);
-  // The text is read again as it changes: for the underlines, and while the
-  // panel is open, for its threads. A draft changes as it's typed.
-  const [read, setRead] = useState(0);
   useEffect(() => {
     if (!watched || !(underlined || open)) return;
     let frame = 0;
@@ -155,7 +158,6 @@ export function usePassages(
       frame = requestAnimationFrame(() => {
         frame = 0;
         passagesStore.reread();
-        if (underlined) setRead((n) => n + 1);
       });
     });
     observer.observe(watched, { childList: true, subtree: true, characterData: true });
@@ -164,9 +166,22 @@ export function usePassages(
       cancelAnimationFrame(frame);
     };
   }, [watched, underlined, open]);
+}
+
+/**
+ * The passages of the page's open threads, underlined where the page as
+ * read in the published view has them (`passagesStore`); a click on one
+ * opens its thread.
+ */
+export function PassageUnderlines({ page }: { page: CommentsPage }) {
+  const ctx = useClient();
+  const needs = useNeedsConnection();
+  const { passages, read } = usePassagesStore();
+  const { data } = useQuery(pageCommentsQuery(ctx, page, { offline: needs.offline }));
   const threads = data?.threads;
   useEffect(() => {
-    const root = underlined ? passages?.root() : null;
+    void read;
+    const root = passages?.root();
     if (!root || !threads) return;
     const quotes = threads.flatMap((thread) => {
       const quote = thread.resolved === null ? quoteOf(thread) : null;
@@ -186,5 +201,6 @@ export function usePassages(
       root.removeEventListener('click', click);
       clearUnderlines();
     };
-  }, [underlined, passages, threads, read]);
+  }, [passages, threads, read]);
+  return null;
 }

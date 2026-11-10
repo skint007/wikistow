@@ -80,10 +80,10 @@ function OwnSource({
   children: ReactNode;
 }) {
   const marks = { [QUOTE_SOURCE]: source, ...(block && { [QUOTE_BLOCK]: '' }) };
+  // A block's wrapper is a block itself, which takes the gap the body puts
+  // between its blocks (`.page-body > * + *`).
   return block ? (
-    <div {...marks} className="contents">
-      {children}
-    </div>
+    <div {...marks}>{children}</div>
   ) : (
     <span {...marks} className="contents">
       {children}

@@ -56,7 +56,11 @@ import { usePluginPaletteEntries } from '../../../../../../commands/plugin-palet
 import { AgentName, agentPersonName } from '../../../../../../agents/agent-name';
 import { AssistantButton, useChatPage } from '../../../../../../ai/chat-column';
 import { CommentsButton, useCommentsPage } from '../../../../../../comments/button';
-import { PassageButton, usePassages } from '../../../../../../comments/passage-button';
+import {
+  PassageButton,
+  PassageUnderlines,
+  usePassages,
+} from '../../../../../../comments/passage-button';
 import { QUOTE_ROOT, readerPassages, type Passages } from '../../../../../../comments/passages';
 import { commentsStore, unsentKey } from '../../../../../../comments/store';
 import { ago } from '../../../../../../agents/model';
@@ -647,7 +651,7 @@ function PageBody({
     [model.view],
   );
   const passages = model.view === 'published' ? shownPassages : draftPassages;
-  usePassages(commentsPage, passages, model.view === 'published' ? shownBody : card, {
+  usePassages(passages, model.view === 'published' ? shownBody : card, {
     underlined: model.view === 'published',
   });
   // Readers comment while the page is published; in the draft view, its editors.
@@ -1329,6 +1333,7 @@ function PageBody({
         {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
       </PageColumns>
       {commentable && !needs.offline && <PassageButton passages={passages} onComment={commentOn} />}
+      {model.view === 'published' && <PassageUnderlines page={commentsPage} />}
       <Place
         name="page.panel"
         shown={pluginShown}
