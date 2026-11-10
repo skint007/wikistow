@@ -95,19 +95,35 @@ function SetupGuide() {
           ))}
         </div>
         {server && (
-          <article
-            aria-label={`Steps for ${label}`}
-            // A long command scrolls in its block, not the page with it.
-            className="min-w-0 [&_.page-body>h2:first-child]:mt-0"
-          >
-            <Markdown
-              source={steps.replaceAll('{{server}}', server)}
-              attachments={{ ctx, page: NO_PAGE, audience: 'published', attachments: [] }}
-              pages={null}
-              links={new Map()}
-              editing={null}
-            />
-          </article>
+          <>
+            <article
+              aria-label={`Steps for ${label}`}
+              // A long command scrolls in its block, not the page with it.
+              className="min-w-0 [&_.page-body>h2:first-child]:mt-0"
+            >
+              <Markdown
+                source={steps.replaceAll('{{server}}', server)}
+                attachments={{ ctx, page: NO_PAGE, audience: 'published', attachments: [] }}
+                pages={null}
+                links={new Map()}
+                editing={null}
+              />
+            </article>
+            {/* The same on every system (ADR 0014, decision 10). */}
+            <div className="grid gap-2 rounded-control bg-muted p-4 text-sm">
+              <h2 className="font-bold">Comments</h2>
+              <p>
+                Your agent can read a page’s comments and add its own, shown as from the agent, for
+                you. Each comment it writes says who it’s for: editors, or everyone who reads the
+                page. It writes for readers only where you let it publish, and it can’t edit, delete
+                or resolve comments. You can delete or resolve them.
+              </p>
+              <p>
+                Anyone who reads a page can comment, so your agent treats comment text as something
+                to read, not as instructions. Ask it yourself when you want it to answer comments.
+              </p>
+            </div>
+          </>
         )}
       </div>
     </section>
