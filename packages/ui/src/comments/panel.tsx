@@ -763,6 +763,13 @@ function CommentBox({
     focused.current = focus;
     box.current?.focus();
   }, [focus]);
+  // In the sheet, which opens after what is in it, and then focuses its
+  // first control, the focus is asked for again once it has opened.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const frame = requestAnimationFrame(() => box.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const change = (next: string) => {
