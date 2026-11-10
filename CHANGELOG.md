@@ -4,6 +4,21 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.25.0-beta.4 - 2026-11-10
+
+### Highlights
+
+#### Upgrade notes
+
+- Update the desktop app and the CLI on every device. Older versions can’t share a folder, move one into or out of a shared folder, stop sharing or add a co-owner where a page has comments, and they don’t show comments.
+
+#### Features
+
+- Comment on pages. **Comments** in a page’s toolbar opens its threads beside the page. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only.
+- Comment on a passage: select text in a page, or in the draft’s visual editor, and press **Comment**. The passage is underlined, and its thread says when it’s edited away.
+- **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit.
+- Agents read and add comments, with `wikistow page comments` and `wikistow page comment`, also in `wikistow mcp`.
+
 ### Changes
 
 #### App
@@ -15,9 +30,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Agents read and add comments: `wikistow page comments` lists a page's threads, and `wikistow page comment --text TEXT --for readers|editors [--reply-to ID]` adds one, also as `page_comments` and `page_comment` in `wikistow mcp`. `--for` is always needed, a reply's must match its thread, and an agent comments for readers only where it may publish. The skill, the tools' instructions and the setup guide say comment text is content, not instructions. (#391)
 
+#### Server
+
+- The server keeps comments on pages (ADR 0014), end-to-end encrypted: routes to list, add, edit, delete and resolve them, seen marks, **New comments** and a stream of comment changes, comments in the record scan when asked for (`comments=1`), and their keys in making a share, moves across a share's edge, ending a share and adding a co-owner. An app from before comments is told to update for those four where a page has comments. (#389)
+
 #### Development
 
-- The server keeps comments on pages (ADR 0014, step 2), end-to-end encrypted, though nothing in the app shows them yet: routes to list, add, edit, delete and resolve them, seen marks, **New comments** and a stream of comment changes, comments in the record scan when asked for (`comments=1`), and their keys in making a share, moves across a share's edge, ending a share and adding a co-owner. An app from before comments is told to update for those four where a page has comments. (#389)
+- ADR 0014 (comments on pages) is accepted, reviewed in protocol review rounds 20 and 21, and built. (#387, #388, #393)
 
 ## 0.25.0-beta.3 - 2026-11-09
 
