@@ -4,6 +4,111 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.25.0 - 2026-11-11
+
+### Highlights
+
+#### Upgrade notes
+
+- Update the desktop app and the CLI on every device. Older versions can’t share a folder, move one into or out of a shared folder, stop sharing or add a co-owner where a page has comments, and they don’t show comments.
+
+#### Features
+
+- Comment on pages. **Comments** in a page’s toolbar opens its threads beside the page. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only.
+- Comment on a passage: select text in a page, or in the draft’s visual editor, and press **Comment**. The passage is underlined, and its thread says when it’s edited away.
+- **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit.
+- When your edit and someone else’s clash, Merge… combines them: changes to different parts combine on their own, and where you both changed the same part you pick yours, theirs, both, or edit it. It works for edits made offline and in another window too.
+- Owners can stop sharing a folder or the space, from its Share dialog or Members and owners. It goes back to the owners alone, so the folder above it can be shared. Members keep what they already read.
+- Sign in with a passkey, with Use a passkey on the sign-in page, also when signing in the desktop app. It counts as both factors, so there’s no two-factor code. Add and remove passkeys in Settings → Security.
+- The search box is a command palette too: type `>` first, or press Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, then type what you want to do.
+- Moving and copying ask less. Move to… and Copy to… take one step, dragging moves at once and Ctrl+drag copies (Option on a Mac), with Undo for 10 seconds. Ask before moving is now off by default.
+- Drag a page or folder from the sidebar onto another space in the rail to move it there.
+- While offline you can rename folders and change their look, delete pages and folders, move them within their space, and publish pages. The changes wait on the device and go once you’re back online.
+- A page or folder moved to another space keeps its old address, which opens the new place, and its public link, at the same address. Links in folder tables and query blocks open it there too.
+- Owners can move or copy everything in a space into another space, with Move space into… and Copy space into… in the space menu.
+- Export… can write links between pages as relative Markdown links, for GitHub and editors that don’t read wikilinks.
+- The icon picker’s Image tab offers the images already used in the space, and Shared with me shows each folder’s and space’s own look.
+- Plugins can keep settings, the same on each of your devices, and Settings → Plugins draws the settings a plugin declares. A library plugin can be turned off in one browser or on one computer only.
+- App plugins can draw the search results their own way.
+- The plugin workshop keeps its conversation, versions and sample pages, so you can reload or switch devices and carry on. Drafts can hold fonts and images.
+- Share a plugin draft with people you name, or send a change to someone else’s plugin back to them with Propose to its owner.
+- Load development folder… works in a computer’s browser too.
+- Agent tools that speak MCP can use WikiStow through `wikistow mcp`, with the same commands and checks as the CLI.
+- Agents read and add comments, with `wikistow page comments` and `wikistow page comment`, also in `wikistow mcp`.
+- The CLI can move pages and folders and rename folders, and its page history says what a change made while reading did, such as “Ticked 3”.
+
+#### Fixes
+
+- Mermaid diagrams now draw in the browser after an offline reload. A diagram that can’t shows its source at once, instead of “Drawing diagram…” for two minutes.
+- A draft opened right after someone else saved it, as from Agent activity, opens on their draft, instead of an older one with a false conflict.
+- A folder renamed offline is renamed once you’re back online, even if someone moved it into or out of a shared folder meanwhile.
+
+#### Maintenance
+
+- The desktop app runs on Electron 44.11.1.
+
+### Changes
+
+#### App
+
+- Comment on pages. **Comments** in a page's toolbar opens its comments beside the page, or over it on smaller screens. A comment made while reading is for everyone who reads the page; one made in the draft is for editors only, and readers never see it. Reply, edit and delete your comments, and resolve threads you started, or any thread on a page you can edit. Owners can delete any comment. Comments are end-to-end encrypted like the page and follow it when it is shared or moved within its space. **Comments** in the rail lists new comments on your threads, and new threads on pages you can edit. Comments need the connection. (#390)
+- Comment on a passage: select text in a page, or in the draft's visual editor, and press **Comment** above it. The comment quotes the passage, which is underlined in the page; clicking it opens the thread. When the passage is edited away, its thread says so, with a link to the published version it was on. In the draft, **Show** selects the passage. (#392)
+- When someone else saved a draft while you were editing it, **Merge…** combines your changes with theirs. Changes to different parts of the page combine on their own; where you both changed the same part, you see both side by side and pick yours, theirs, both, or edit it. You review what saving changes before the merged draft saves. (#384)
+- **Merge…** also works for a page you edited offline that someone changed meanwhile, and for a change you saved in another window or tab on the same device. (#385)
+- Owners can stop sharing a folder or the space, from its Share dialog or Members and owners. It goes back to the owners alone, so the folder above it can be shared. Its members keep what they already read or downloaded, and nothing saved afterwards reaches them. (#381)
+- Sign in with a passkey, a fingerprint, face, screen lock or security key, with **Use a passkey** on the sign-in page, and in the browser when signing in the desktop app. It counts as both factors, so there's no two-factor code. Add, name and remove passkeys in Settings → Security; the desktop app lists and removes them. Passwords keep working, and your vault passphrase is still asked for. (#366)
+- The search box is a command palette too: type `>` first, or open it with Ctrl+Shift+P (Cmd+Shift+P on a Mac) or F1, to run what you could do where you are by typing its name. It lists the page's commands, such as Edit page, Publish, Move to… and Find on page, the space's (Export space…, and for owners Share space… and Delete space…), Lock vault, Change theme…, each plugin's settings, and the running plugins' commands under their plugin's name. Letters match in order, best matches first, then the commands you ran last, kept on this device. (#345)
+- Moving and copying ask less. **Move to…** and **Copy to…** take one step: pick the place, then **Move** or **Copy**. Dragging a page or folder in the sidebar moves it at once, within the space or onto a space in the rail, and Ctrl+drag (Option on a Mac) copies it. A notice says where it went, with **Undo** for 10 seconds. Nothing lists who gains or loses access any more: one line says when more people will be able to read it, and one what a move ends. **Ask before moving** is now off by default; turned on, a drop opens **Move to…** on that place. Moving everything in a space still asks first. (#380)
+- Drag a page or folder from the sidebar onto another space in the rail to move it there. (#357)
+- Rename a folder, change its emoji, colour or icon, and delete pages and folders while offline. They wait on the device and go once the app is back online. (#347)
+- Move pages and folders within their space, by Move to… or by dragging, and publish pages, while offline. They wait on the device and go once the app is back online; a waiting publish can be cancelled from the page. Moves into or out of a shared folder, and publishing a page with a public link, still need the connection. (#354)
+- A folder renamed offline is renamed once you're back online even if someone moved it into or out of a shared folder meanwhile. Before, its change was refused and could only be discarded. (#377)
+- A page or folder moved to another space keeps its old address: opening it opens the new place, saying it moved, and links to it from pages left behind still open it, for people who can open it there. (#351)
+- A link in a folder table or a query block to a page moved to another space opens it there, as the linking page's own link does. A query block's links also follow a renamed page now. (#369)
+- A page moved to another space keeps its public link, at the same address, where you can publish it there. Its public page says it's being updated until you open Share public link… there and update it. A link the move can't keep ends, as before, and the move says so. (#355)
+- Owners can move or copy everything in a space into a folder of another space, from the space menu (**Move space into…**, **Copy space into…**), which asks first. After a move, the space is empty and the app asks whether to delete it. (#356)
+- **Export…** has a **Markdown links** switch, off by default, that writes links between pages as relative links to their files, `[Plan](../Work/Plan.md#next-steps)`, for GitHub and editors that don’t read wikilinks. It says how many links stayed wikilinks, such as page embeds. (#350)
+- The icon picker's **Image** tab has an **In this space** row of the images already used in the space, its folders and its pages, each once. Picking one copies it, so the same picture can go on several folders or pages without uploading it again. (#360)
+- **Shared with me** shows each shared folder with its own emoji, colour, icon or image, as the sidebar does, and each shared space with its tile from the rail. (#362)
+- A draft opened right after someone else saved it, as from **Agent activity**, opens on their draft. Before, it could open an older draft and say someone else saved a newer version. (#382)
+- Mermaid diagrams now draw in the browser after an offline reload. The diagram frame's files are named by their hashes under `/assets/diagram/`, so the browser's cache keeps them, and the service worker fetches them once when it installs. A diagram that can't draw offline shows its source and says so at once, instead of "Drawing diagram…" for two minutes. (#342)
+
+#### Plugins
+
+- Plugins can keep settings for the person, the same on each of their devices: `host.settings` (`get`, `set`, `update`, `on('changed')`), one JSON object of at most 16 KB per plugin, kept encrypted beside the plugin's approval in the account's record, or on the computer for a desktop folder install. A manifest's `settings` declares text, number, on/off and choice fields, which Settings → Plugins draws under the plugin's **Settings**, so scripts get settings without a view. Settings sections get `{ settings }`, `host.app.navigate({ kind: 'settings' })` opens the plugin's own, and the page's Plugins menu has ***Plugin* settings…**. An update keeps them and Remove deletes them. `reading-room` declares its column's width and reading speed. The library lists versions with `settings` only to apps that send `manifest=3`. (#344)
+- A library plugin can be turned off in one browser or on one computer only, and stay on on your other devices: Settings → Plugins has a second switch beside **Your account**, labelled **This browser** or **This computer**. Off there, the plugin doesn't load on that device at all. It's kept on the device, and removing the plugin forgets it. (#349)
+- App plugins can draw the search results their own way: `search.results` is a replaceable region, whose view gets what was typed and the app's own results, and draws only where the plugin can read every result. The search box and `>`'s commands stay the app's, and `host.app.navigate` closes search. (#352)
+- **Load development folder…** in Settings → Plugins works in a computer's browser too: choose a plugin's built `dist/` folder, approve it, and press **Reload** after each build. Chrome and Edge read the folder again; Firefox and Safari ask for it again at each **Reload…**. The plugin runs in that tab only, labelled Development, until you close or reload the tab or remove it, and replaces a library plugin of the same ID there. Each build goes to the server as your own development build, served only to you and dropped a week after the last Reload (migration `0042_plugin_development`). (#364)
+- Plugin drafts hold fonts and images (`.woff2 .woff .ttf .otf .png .jpg .jpeg .webp .gif`, 1 MB each) under `public/`, so a theme with its own font or a plugin with an icon can be made in the workshop. **Add file…** in the workshop adds one; **Upload project folder…** and **Change with the assistant** bring them along; a build copies them as `wikistow-plugin build` does. The assistant can list and delete them, but not write them (migration `0044_draft_binary_files`). (#365, #378)
+- The plugin workshop keeps its conversation, versions and sample pages with the draft, so you can reload or switch devices and carry on. A page you copied into the preview isn't kept, only a note that you copied one. The newest version comes back to preview; older ones are listed as history. **Clear conversation** starts over on the draft's files (migration `0045_draft_workshop`). (#371)
+- In the workshop, a copy of someone else's plugin offers **Propose to *owner*…**, which sends your changes back to them. They see what changed by file on their workshop page, and can open it as a draft of their own and publish it as a new version, or decline it (migration `0046_plugin_proposals`). (#372)
+- Share a plugin draft with people you name, with **Share…** in the workshop. They find it under **Drafts shared with you**, can change its files and preview it, each with a conversation of their own, and only you publish it. When two people change one file, the last change wins (migration `0047_shared_drafts`). (#373)
+
+#### CLI
+
+- Agents read and add comments: `wikistow page comments` lists a page's threads, and `wikistow page comment --text TEXT --for readers|editors [--reply-to ID]` adds one, also as `page_comments` and `page_comment` in `wikistow mcp`. `--for` is always needed, a reply's must match its thread, and an agent comments for readers only where it may publish. The skill, the tools' instructions and the setup guide say comment text is content, not instructions. (#391)
+- `wikistow mcp` serves the agent's commands as the tools of an MCP server, over standard input and output, for agent tools that speak MCP. Each tool runs its command with `--json`, with the same checks, idempotency keys and exit statuses. `wikistow mcp --help` says how to add it to Claude Code, Codex and other clients. (#368)
+- `page move`, `folder move` and `folder rename` move a page or folder within its space and rename a folder, with `--json` and `--idempotency-key`. (#343)
+- `page history` says what a version made by changes while reading changed, such as "Ticked 3, unticked 1", and `--json` gives it as `change`. (#346)
+- `export --links markdown` writes links between pages as relative Markdown links instead of wikilinks, as the web's **Markdown links** does, and counts the wikilinks left (`wikilinks` in `--json`). (#350)
+
+#### Server
+
+- The server keeps comments on pages (ADR 0014), end-to-end encrypted: routes to list, add, edit, delete and resolve them, seen marks, **New comments** and a stream of comment changes, comments in the record scan when asked for (`comments=1`), and their keys in making a share, moves across a share's edge, ending a share and adding a co-owner. An app from before comments is told to update for those four where a page has comments. (#389)
+- The server can end a share (ADR 0012): `POST /api/shares/:shareId/end` takes every record wrapped under the share sealed again to the space's owners, then deletes the share with its members, groups' access, agents' picks and keys, and ends the public links of people who can no longer publish. `GET /api/shares/:shareId/ending` tells an owner which public links end and which publications stay, and the record scan gains a `share` scope. (#379)
+- Agents can rename folders where they may edit, and moves and renames take an `Idempotency-Key`, so a retry after a lost answer gets the first answer back. (#343)
+
+#### Releases and packaging
+
+- Signed apt and dnf repositories for the desktop app on GitHub Pages, published after each stable release, and an update notice that says to use apt or dnf for them. (#361)
+- Electron 44.11.1, from 44.10.2. (#395)
+
+#### Development
+
+- ADR 0012 (ending a share), ADR 0013 (merging conflicting edits) and ADR 0014 (comments on pages) are accepted and built. ADR 0014 was reviewed in protocol review rounds 20 and 21, and the merge module ADR 0013 builds on is in `packages/client/src/merge/`. (#367, #370, #383, #387, #388, #393)
+- Built ADRs are marked built, and each feature they leave for later links to its issue. (#341)
+- CI retries its downloads from GitHub Releases in the AUR, Homebrew and Mac app jobs. (#353)
+
 ## 0.25.0-beta.4 - 2026-11-10
 
 ### Highlights
