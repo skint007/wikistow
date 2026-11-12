@@ -270,7 +270,7 @@ New routes only. No existing route or response changes.
 | Route | Does |
 | --- | --- |
 | `GET /api/pages/:pageId/live` | The page's open session, or an ended one kept with unsaved changes, for people who can edit the page: its record, the caller's key material, the first snapshot, the latest snapshot, each join's latest kept message, and the changes after the latest snapshot; or `{session: null}`. |
-| `POST /api/pages/:pageId/live {sessionId, joinId, metadata, wrap \| envelopes, snapshot, permissionVersion}` | Starts a session, with its first snapshot, and makes the starter's join, present for 30 s until its stream opens. If a session is already open, it answers `duplicate`, and the app fetches that session. |
+| `POST /api/pages/:pageId/live {sessionId, joinId, metadata, wrap \| envelopes, snapshot, permissionVersion}` | Starts a session, with its first snapshot, and makes the starter's join, present for 30 s until its stream opens. It takes the snapshot route's body limit and pool. If a session is already open, it answers `duplicate`, and the app fetches that session. |
 | `GET /api/live/:sessionId/stream?after=&joinId=` | The stream, in NDJSON: the session's joins, past and present (each with identity, key version, join order, `joinId`, the join a save's own join belongs to, and whether it is still there), the messages after the given position, and `{ended: reason}`. Opening it joins the session. |
 | `POST /api/live/:sessionId/messages {joinId, messages, parent?, fold?}` | Sends messages. A snapshot and a Saved notice also name, unsigned, the position they cover. |
 | `POST /api/live/:sessionId/leave {joinId}` | The join leaves at once. |
