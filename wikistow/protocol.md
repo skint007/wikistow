@@ -65,6 +65,10 @@ Identity key rotation, and its statement format, are left to a later milestone (
 
 [ADR 0014](../docs/adr/0014-comments.md) adds comments on pages (#320, section 5.9), built. Nothing new is signed but the comments themselves, each a metadata record v2 with `subjectKind: "comment"` under its page's keys, with a payload format of their own. There are no new domain strings. A client from before them doesn't ask the scan route for comments, which then answers it `invalid-request` over a scope that holds one, so it can't make a share, move across a region boundary, end a share or add a co-owner over a page with comments until it updates.
 
+### What live sessions add (proposed)
+
+[ADR 0015](../docs/adr/0015-live-editing.md) proposes live sessions (#321, section 5.10), not built yet: the editors who have a page's draft open edit one shared document, whose changes the server relays sealed under a session key. The session record is a metadata record v2 with `subjectKind: "live"`, wrapped with the draft key or sealed to the owners, so it adds no record format. Its messages add three domains, `live-message/v1`, `live-message-payload/v1` and `live-client/v1`, and draft payloads gain the `wikistow.live` extension (section 5.5). What a session's saver writes is an ordinary draft revision. Older clients never see a session, and save as writers outside it.
+
 Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
 ### Versioning rules
@@ -122,7 +126,7 @@ These further risks are accepted too:
 - **A4. First sight.** Pins are made the first time an app sees a person's key (section 8.3). The key-change warning catches every later swap. A server that substitutes its own key before an app has ever seen the real one, the first time someone shares with a new person or a member first meets an owner, goes undetected. The server also chooses which people, names and emails the list of people shows (section 7.3), so it can offer its own key under a name and email the owner expects; that is the same first sight as a typed email, whose lookup it answers too. In the same way, a server can present a share it made up, sealed by an identity it controls. The member sees it in Shared with me as shared by that identity, and the server can read what they write in it. A substitution when a new co-owner's app first meets the space is worse: that app then accepts the server's identity as an owner (section 6.5, step 2), and seals its owner-region saves and its rotations to it, so the server reads the owner region as that co-owner writes it, and the shares that co-owner rotates. It doesn't stay in that app: the co-owner signs a statement naming its adder (section 6.5), so through that statement every other app in the space accepts the server's identity too (step 3). The co-owner dialog names the adder by label, which is the one place this can be noticed. On a device that keeps no contacts mark across sessions (section 8.5, Q2), a desktop app without a trusted secret store, or a browser whose site storage was cleared, a server that serves an older contacts record makes every pin and accepted owner recorded after it first-sight again, for that session; A9 already gives an active server the same. Comments (section 5.9) add a third first sight: a reader first verifying a comment by another member they have never pinned, so a server can show a real member's comment under a name and email the viewer has no label for, and, with any member who holds the share's published key, a comment of its own under a name the viewer never met.
 - **A5. A removed owner colluding with the server.** Owner statements (section 6.5) can't be revoked. The remover's app doesn't accept the removed owner again unless its person adds them back, but other apps learn of a removal only from the server, and write under a key version sealed by any owner they accepted and didn't remove themselves (section 6.5). So the server can serve those apps a key version the removed owner sealed, and they write under it. If the server hides the removal from them, or lists the removed owner again later, they also keep sealing to the removed owner. An owner who removes themself, or transfers the space, made the post-removal versions and so knows them, in every app, until a remaining owner rotates again; once the new owner's rotations after a transfer have all succeeded, its app puts the old owner on its removed-owners list (section 7.6). In apps that didn't remove the owner, their statements still count, so the removed owner and the server can introduce new owners, server identities included, to those apps. A co-owner the remover adds later doesn't inherit the remover's removed-owners list. On a device that keeps no contacts mark, an older contacts record (A4) also drops the person's removed-owners entries for that session.
 - **A6. A revoked agent's keys.** Revoking an agent ends its credential at once, but doesn't change the folder keys it held. Whoever holds the agent's key file, colluding with the server, can read what is saved under those key versions until an owner rotates the keys (section 9.7). On a device that keeps no contacts mark across sessions (section 8.5, Q2), a server that serves a contacts record from before the revocation makes the person's next unlock seal new key versions to the revoked agent again (section 9.4), which undoes that rotation for the agent's shares.
-- **A7. Visible metadata.** The server sees account emails, names and avatar images, identity IDs and public keys; space, folder, page, revision, attachment and share IDs; the tree; shares, members, roles, owners and agent grants; which key version each record is under; sizes, times and who did what; and the source-to-publication link. With comments (section 5.9, accepted), also who commented on which page, in which thread and for which audience, when, edits, deletions and resolved threads, and when each person last read a page's comments; never their text.
+- **A7. Visible metadata.** The server sees account emails, names and avatar images, identity IDs and public keys; space, folder, page, revision, attachment and share IDs; the tree; shares, members, roles, owners and agent grants; which key version each record is under; sizes, times and who did what; and the source-to-publication link. With comments (section 5.9, accepted), also who commented on which page, in which thread and for which audience, when, edits, deletions and resolved threads, and when each person last read a page's comments; never their text. With live sessions (section 5.10, proposed), also who has which page's draft open and when, and when and how much each of them sends, to the tenth of a second; never what they type or where their cursor is.
 - **A8. A compromised unlocked client.** Whoever controls a client while it is unlocked gets everything that client can decrypt, and can sign anything as that person.
 - **A9. Served JavaScript.** In the browser, the server delivers the client code. A malicious operator can ship code that steals keys at the next unlock (`wikistow.md` L135). The desktop app and the CLI bundle their code, which narrows this risk without removing it.
 - **A10. Moves once made.** Once an owner moves something across a region boundary, from a menu or by a drop, the client uploads wraps under the destination's keys (section 10). A gainer colluding with the server can open them even if the move then fails. The same holds for a copy, or a move between spaces, by anyone allowed to make one (section 10, **Copies, and moves between spaces**): once they press Copy or Move, or drop it, its records go up under the destination's keys and stay on the server, hidden, until it finishes or is deleted, at most a day after its last request.
@@ -316,8 +320,13 @@ Every domain string in the protocol. **Status** is *frozen* (v1, shipped), *kept
 | `agent-lookup-code/v1` | kept | hash input (server) | normalized lookup code | §9.2 |
 | `agent-poll-secret/v1` | kept | hash input (server) | pollSecret (bytes) | §9.2 |
 | `agent-credential/v1` | kept | hash input (server) | credentialId, secret (bytes) | §9.6 |
+| `live-message/v1` | proposed | signed by sender | installationId, spaceId, pageId, sessionId, kind, senderId, senderKeyVersion, joinId, seq, payloadHash | §5.10 |
+| `live-message-payload/v1` | proposed | AEAD AD | installationId, spaceId, pageId, sessionId, kind, senderId, senderKeyVersion, joinId, seq | §5.10 |
+| `live-client/v1` | proposed | hash input for a Yjs client ID | installationId, sessionId, senderId, senderKeyVersion, joinId | §5.10 |
 
 Comments (section 5.9) add no domain: a comment is a `metadata-record/v2` with `subjectKind: "comment"`, opened through a `content-key-wrap/v1` with `subjectKind: "comment"` and its audience as `audienceClass`, or through `metadata-envelope/v2`, and its payload uses `metadata-payload/v1` as its AD.
+
+A live session's record (section 5.10, proposed) adds none either: it is a `metadata-record/v2` with `subjectKind: "live"`, opened through a `content-key-wrap/v1` with `subjectKind: "live"` and `audienceClass: "draft"`, or through `metadata-envelope/v2`. Its messages use the three `live-` domains above.
 
 Every domain is distinct, and the `wikistow/` prefix sets them apart from any other protocol. `contacts/v1` is both signed and hashed; the hash only names the bytes the signature covers. No domain's bytes are ever accepted as the message of a different domain, because every verifier rebuilds the bytes from its own domain string. Section 15 lists the domains PR #29 added that this design retires.
 
@@ -581,6 +590,16 @@ Rules (`payload.ts`, `metadata.ts`):
 - History says what such a version changed ("Ticked 3, unticked 1", "Changed servings"). It opens the versions it lists to read it, the newest 20 and more as asked, each once. Readers open those in their own history (section 11). Each counts by its own record alone, so a reader's oldest version is labelled like any other. The CLI's `page history` lists and opens every version.
 - It tells nobody anything new: it is encrypted with the version, anyone who opens the version could compare it with the one before, and it was counted from a draft that equalled the publication before.
 
+**What a live session's draft holds** (`live.ts`, proposed in [ADR 0015](../docs/adr/0015-live-editing.md)), the extension `wikistow.live`:
+
+```
+{ format: 1, session: SessionId, state: base64url, with: IdentityId[] }
+```
+
+- Written into each draft a live session's saver saves (section 5.10): `session` is the session's ID, `state` the Yjs state vector of the document the draft was written from, and `with` the other people who sent changes in the session, by the saver's word. `format` is an integer (section 3.3, rule 6).
+- An app counts a draft as holding its own changes when `session` is its session and `state` covers every change it made. History shows `with` beside the draft's author for editors, who can open the draft a publication was made from; nothing signs it but the saver.
+- Drafts only. Publishing, restoring, detaching, copies (section 10) and publications into other spaces (section 13) leave it out. A client that doesn't know the namespace copies it into its next version, a publication included, which shows that publication's readers the session's ID, how many characters each Yjs client wrote, and who `with` names: nothing of the text. One that doesn't match the schema counts as none.
+
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
 
 ```
@@ -662,7 +681,7 @@ signed bytes = canonical('metadata-record/v2', [protocol, installationId, spaceI
 keyCommitment = base64url(BLAKE2b-256(canonical('content-key-commit/v1', [contentKey (bytes)])))
 ```
 
-- The fields before `keyCommitment` have the same names, types and meaning as in v1 (sections 5.1 and 5.4), but `subjectKind`: `"group"` is v2 only (section 7.8), and so is `"comment"` (section 5.9). `protocol` is the number `2`. The wire form is `{record, signature, payload}`, plus the key material of section 6.8.
+- The fields before `keyCommitment` have the same names, types and meaning as in v1 (sections 5.1 and 5.4), but `subjectKind`: `"group"` is v2 only (section 7.8), and so is `"comment"` (section 5.9), and, as proposed, `"live"` (section 5.10). `protocol` is the number `2`. The wire form is `{record, signature, payload}`, plus the key material of section 6.8.
 - `contentKey` is the 32-byte key that encrypts the payload. The canonical input is 72 bytes: the domain field (`01 0000001e` then the 30 bytes of `wikistow/content-key-commit/v1`) and the key field (`03 00000020` then the 32 key bytes).
 - **The payload ADs don't change.** v2 records still use `revision-payload/v1` and `metadata-payload/v1`.
 - **No key version in the record.** Which share and key version wrap the content key is in the key wrap (section 6.3), not in the signed record, so an owner can rewrap content after a move without its author (section 10).
@@ -757,6 +776,58 @@ The server can't open the wrap or read the payload, so it checks nothing of a co
 - An owner's app opens a comment it rewraps or seals in full, with its payload hash, decryption and the checks of **Opening**, never by unsealing its content key alone.
 - The v1 record schema keeps `subjectKind` `"space"` or `"folder"`; only v2 takes `"group"` and `"comment"`. The scan's `metadata` entries take only space and folder names (and group names in the owner region's scope), its `comment` entries only `subjectKind: "comment"`, and the opener's expected kind is fixed by the entry, never read from the record. The metadata route accepts only space and folder names, by a list of what it takes.
 
+### 5.10 Live sessions
+
+**Status: proposed** in [ADR 0015](../docs/adr/0015-live-editing.md) (#321), not built yet.
+
+A **live session** lets the editors who have a page's draft open edit one shared document, a Yjs `Y.Doc`. Changes to it are relayed through the server, sealed under a **session key** that only the draft's audience holds. One participant's app, the **saver**, writes the shared document as ordinary draft revisions (section 5.1), checked by the server as any draft save is. A session is short-lived: the server deletes it once everyone has left and everything in it is saved, and ends it at once when the page's permission version moves.
+
+**The session record** is a metadata record v2 (sections 5.4 and 5.7):
+- `subjectKind: "live"`, `subjectId` the session ID (an ID, section 3.2, made with `newId`; the server keeps session IDs unique across the installation), `basedOn: null`, and `metadataRevisionId` an ID of its own, in the same set as metadata and comment version IDs (section 5.9). There is no v1 session record, and a session record is never edited. It is signed by the editor who starts the session.
+- **The key material** is that of the page's draft region (section 6.8): in a share, one key wrap (section 6.3) with `audienceClass: "draft"`, `subjectKind: "live"`, `subjectId` the session ID and `versionId` the record's `metadataRevisionId`, wrapped with the draft key; in the owner region, v2 metadata envelopes to the sealing owners (sections 5.8 and 6.6). Wraps and envelopes of sessions are stored under a kind of their own, `"live"`, and no scan route lists them: a session is not a retained record (section 6.7).
+- **The payload**, session format 1.0, encrypted as metadata is (AD `metadata-payload/v1` with `subjectKind: "live"`):
+
+```
+{ format: {major: 1, minor}, pageId: PageId, revisionId: RevisionId, key: base64url (32 bytes),
+  extensions: { [namespace]: JSON } }
+```
+
+  `pageId` is the session's page, `revisionId` the draft it started from, and `key` the session key, 32 fresh random bytes. The payload is loose and follows section 5.5's format rules.
+
+**Writing the record.** The server checks, under the locks of a draft save: the caller is a person who can edit the page; the record is a v2 record with `subjectKind: "live"`, `subjectId` the session ID the request names and `basedOn: null`; the key material is what section 6.8 requires in the page's region, with the key version check; the permission version is current; and the page has no open session (`duplicate` otherwise, and the app fetches the open one).
+
+**Opening the record.** The client checks that the key material is in the region of the page's draft it opened (`region-mismatch` otherwise), runs the checks of a metadata record v2 for `subjectKind: "live"` and the session's ID, building a wrap's AD with `audienceClass: "draft"` whatever the server says, then parses the payload and refuses it (`binding-mismatch`) unless `pageId` is the page asked for. The session key is wiped when the app leaves the session or locks.
+
+**Messages.** Every message in a session has this wire form, a strict object (section 3.3, rule 8):
+
+```
+LiveMessage = { kind: "update" | "snapshot" | "presence" | "saved", senderId, senderKeyVersion,
+                joinId: ID, seq: integer ≥ 1, sealed: Sealed, signature }
+
+ad          = canonical('live-message-payload/v1', [installationId, spaceId, pageId, sessionId, kind,
+                                                   senderId, senderKeyVersion, joinId, seq])
+sealed      = XChaCha20-Poly1305(sessionKey, random 24-byte nonce, plaintext, ad)
+payloadHash = base64url(BLAKE2b-256(nonce ‖ ciphertext))
+signature   = Ed25519(sender, canonical('live-message/v1', [installationId, spaceId, pageId, sessionId,
+              kind, senderId, senderKeyVersion, joinId, seq, payloadHash]))
+```
+
+- `joinId` is made with `newId` each time an app joins, and `seq` counts that join's messages from 1. A receiver drops a message whose `(senderId, joinId, seq)` it has already taken.
+- A receiver refuses a message unless the server lists `(senderId, senderKeyVersion, joinId)` among the session's joins, past or present, the sender's key passes section 8.4, the signature verifies (`bad-signature`), and the plaintext decrypts under the AD (`decrypt-failed`).
+- **`update`**: the plaintext is a Yjs update (update format v1). Its Yjs client ID is the sender's for that join: `BLAKE2b(8 bytes, canonical('live-client/v1', [installationId, sessionId, senderId, senderKeyVersion, joinId]))`, read as a big-endian integer, keeping its low 53 bits. A receiver refuses an update that adds a struct under any other client ID (`binding-mismatch`). Its delete set may name any client.
+- **`snapshot`**: the plaintext is UTF-8 JSON `{format: {major: 1, minor}, revisionId, state: base64url}`, where `state` is the whole document as one Yjs update, made when its sender saved `revisionId`. A snapshot adds structs under every client, so the client ID rule doesn't apply to it. Before using one, a receiver opens `revisionId`, a draft of the session's page, and refuses the snapshot unless the document's title, front matter, body, attachments and extensions equal that revision's payload, `wikistow.links` and `wikistow.live` aside. The first snapshot comes with the session record, from the draft it names. The request carries, unsigned, the position of the last message it covers; the server uses it only to delete covered messages.
+- **`presence`**: UTF-8 JSON `{format: {major: 1, minor}, editor: "source" | "visual", visible: boolean, cursor: {anchor, head} | null}`, the cursor as Yjs relative positions in `body`, base64url. The server relays presence and stores none.
+- **`saved`**: UTF-8 JSON `{format: {major: 1, minor}, revisionId, state: base64url}`: the sender saved `revisionId`, which holds the document up to the Yjs state vector `state`. It is a hint; the revision's own `wikistow.live` (section 5.5) is what counts.
+- The JSON plaintexts are loose payloads (section 5.5): unknown fields are ignored, a newer major format is refused.
+
+**The document** is a `Y.Doc` with `title`, `frontmatter` and `body` (`Y.Text`), and `attachments` and `extensions` (`Y.Map`). A save writes the page payload of section 5.5 from them: `markdown` is the front matter followed by the body, as written. `wikistow.links` is worked out at each save as today and never kept in the document.
+
+**Saving.** The saver is the app the server has listed longest among the session's present joins whose latest presence says `visible`, or the one listed longest if none does. It saves as any writer does (sections 5.1, 6.1 and 6.8), signed by its own identity, with `wikistow.live` in the payload. Any participant may save too, but only a document that holds every change the draft head holds, when the head is a revision of the session; so an app never saves over a change it hasn't seen. A draft head that isn't a revision of the session was written from outside it; the saver merges it in on the client (ADR 0015, decision 8), and nothing in this protocol changes for that write.
+
+**Serving and relaying.** Only people take part; the server answers agents `not-found` on every session route. It serves a session to callers who can edit the page now, with their own key material. It relays each message to the session's present joins and stores `update`, `snapshot` and `saved` messages in an order it gives, numbered by position, for newcomers. It checks that the sender is the caller, at its current key version, with a `joinId` of the caller's present join, and that the message is within the limits: an `update` of at most 512 KiB of ciphertext, a `snapshot` of at most 2 MiB. Order, positions and the list of joins are the server's (A1, A2). Yjs changes commute, so a server that reorders them changes nothing; one that drops them can stop apps catching up, and it can end sessions. That is availability only.
+
+**Ending.** When the page's permission version moves, the server ends its open session and tells its joins. It deletes a session a minute after its last join leaves, if its last `update` comes before its last `saved`. Otherwise it keeps the session for the next editor, for at most the draft retention (30 days). After an end, it serves the session's stored messages for 10 minutes to its joins' callers who can still edit the page, and accepts no new ones. A new session gets a new session ID and key, wrapped under the share's current key version.
+
 ---
 
 ## 6. Shares and folder keys
@@ -776,7 +847,7 @@ Share = { shareId: ID, spaceId, rootId: FolderId | null, currentKeyVersion: inte
 - the space's name is in the space share if there is one;
 - anything else is in the space's **owner region** (section 6.6). A group's name (section 7.8) is always there, in a shared space too.
 
-So a share root's own name is in that share, and the names of the folders above it are not. A comment is in its page's region (section 5.9).
+So a share root's own name is in that share, and the names of the folders above it are not. A comment is in its page's region (section 5.9), and so, as proposed, is a live session (section 5.10).
 
 **A record's region, as a client sees it,** comes from the key material through which that client opened it, never from the tree:
 - opened through a key wrap, whether the record is v1 or v2: the share named by the wrap's `shareId`, in the record's space;
@@ -805,6 +876,7 @@ A folder key is named by `(spaceId, shareId, keyVersion, class)`, where `class` 
 | a metadata version (a folder's or the space's name) | `metadata` | published key |
 | a comment for editors (section 5.9) | `draft` | draft key |
 | a comment for readers (section 5.9) | `published` | published key |
+| a live session's record (section 5.10, proposed) | `draft` | draft key |
 
 Readers hold only published keys, so they read published versions and folder names, and comments for readers (section 5.9). Drafts, and every title inside a draft, need the draft key.
 
@@ -820,8 +892,8 @@ ad         = canonical('content-key-wrap/v1', [installationId, spaceId, shareId,
 wrappedKey = XChaCha20-Poly1305(folderKey, random 24-byte nonce, contentKey (32 bytes), ad)
 ```
 
-- `audienceClass` is the record's `audience` for a revision, and `"metadata"` for a metadata version (section 6.2), but for a comment (section 5.9) its audience, `"draft"` or `"published"`.
-- `subjectKind` is `"page"` for a revision, and the record's `subjectKind` (`"space"` or `"folder"`, or `"comment"`) for a metadata version.
+- `audienceClass` is the record's `audience` for a revision, and `"metadata"` for a metadata version (section 6.2), but for a comment (section 5.9) its audience, `"draft"` or `"published"`, and for a live session's record (section 5.10, proposed) always `"draft"`.
+- `subjectKind` is `"page"` for a revision, and the record's `subjectKind` (`"space"` or `"folder"`, or `"comment"`, or as proposed `"live"`) for a metadata version.
 - `subjectId` is the record's `pageId` or `subjectId`. `versionId` is its `revisionId` or `metadataRevisionId`.
 - `folderKey` is the key of that class at `(spaceId, shareId, keyVersion)`.
 - `wrappedKey.ciphertext` is exactly 48 bytes. Anything else is `malformed`.
