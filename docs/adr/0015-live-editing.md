@@ -113,12 +113,13 @@ LiveMessage = { kind: "update" | "snapshot" | "presence" | "saved", senderId, se
 
 ad        = canonical('live-message-payload/v1', [installationId, spaceId, pageId, sessionId, kind,
                                                  senderId, senderKeyVersion, joinId, seq, clock])
-sealed    = XChaCha20-Poly1305(sessionKey, random 24-byte nonce, plaintext, ad)
+sealed    = XChaCha20-Poly1305(sessionKey, random 24-byte nonce, pad(plaintext), ad)
 signature = Ed25519(sender, canonical('live-message/v1', [installationId, spaceId, pageId, sessionId,
             kind, senderId, senderKeyVersion, joinId, seq, clock, payloadHash]))
 ```
 
-- **`joinId`, `seq` and `clock`.** An app makes a fresh `joinId` (`newId`) each time it joins, and numbers its messages from 1 with `seq`. `clock` is its Yjs client's clock once the message's changes are in, signed in every message, a change that only deletes included, so others know how far its typing has gone. It has one request in flight at a time, and the server stores and relays its messages in `seq` order.
+- **`joinId`, `seq` and `clock`.** An app makes a fresh `joinId` (`newId`) each time it joins, and numbers the messages the server stores (changes, snapshots and Saved notices) from 1 with `seq`. A presence carries the `seq` of the last stored message before it and doesn't count, since the server keeps only the latest presence, in memory, and a newcomer may get it before the stored messages it follows.
+- **Padding.** A change's size says where in the page it is, since Yjs writes positions as numbers of varying length: one character typed near the top of a 60 KB page takes 33 bytes, near the end 37. So every plaintext is padded to a multiple of 128 bytes (`pad`: one `0x80` byte, then zeros) before sealing. `clock` is its Yjs client's clock once the message's changes are in, signed in every message, a change that only deletes included, so others know how far its typing has gone. It has one request in flight at a time, and the server stores and relays its messages in `seq` order.
 - **Checks on receipt.** The receiving app takes a join's messages in `seq` order: it drops a repeat, by `(senderId, joinId, seq)`, and refuses one whose `seq` is below the last it took from that join. It refuses a message whose signature fails, whose sender's key fails the pins (protocol section 8.4), or whose `(senderId, senderKeyVersion, joinId)` the server doesn't list among the session's joins, past and present.
 - **A change** is a Yjs update. Its Yjs client ID is derived from its sender: `BLAKE2b-64(canonical('live-client/v1', [installationId, sessionId, senderId, senderKeyVersion, joinId]))`, cut to 53 bits. Deleting other people's text is a change like any other. The receiving app refuses an update:
   - that adds anything under another client ID, so a member can't write as someone else's client;
@@ -170,7 +171,7 @@ Decide 7 covers WebSockets instead.
 
 ### 6. Catching up
 
-- **Snapshots.** The editor who starts a session sends its first snapshot with the session record, made from the draft it opened, with the text repaired as a save repairs it, under its own client alone. A newcomer compares snapshots with revisions repaired the same way. After that, the saver posts a snapshot once the changes since the last one pass 256 KB or 1,000 messages. Each is the document as of one of its saves, once every change the snapshot holds has been sent and placed by the server. The server then deletes the changes the snapshot holds, but keeps each join's latest change. While the session is kept, open or ended, draft retention keeps the draft it started from and the drafts its kept snapshots name, so a newcomer can always open them.
+- **Snapshots.** The editor who starts a session sends its first snapshot with the session record, made from the draft it opened, with the text repaired as a save repairs it, under its own client alone. A newcomer compares snapshots with revisions repaired the same way. After that, the saver posts a snapshot once the changes since the last one pass 256 KB or 1,000 messages. Each is the document as of one of its saves, once every change the snapshot holds has been sent and placed by the server. The server then deletes the changes the snapshot holds, but keeps each join's latest stored message. While the session is kept, open or ended, draft retention keeps the draft it started from and the drafts its kept snapshots name, so a newcomer can always open them.
 - **A newcomer** fetches the session with `GET /api/pages/:pageId/live`: the record and its key material, the latest snapshot, and the changes after it.
   - It opens the revision the snapshot names. The snapshot must hold the document's eight parts and nothing else, each holding only what its kind allows (decision 4), and its payload, put together as a save writes it, must equal that revision's title, Markdown, attachments as a set, extensions and other fields, `format`, `wikistow.links`, `wikistow.live` and `wikistow.change` aside.
   - The first snapshot is the one the record's signer sent with the record, naming the record's `revisionId`. It must hold changes of its sender's client alone. A later one must have the revision's `state` as its own. Every range of text it adds, and every range it deletes, must be under a client within the highest `clock` that client's join has signed in a kept message, the first snapshot counting for its sender's join, and once applied it must leave nothing waiting in Yjs. Yjs's own state and state vector don't show what it holds back, so the newcomer decodes the snapshot to check. The newcomer checks this from those signed messages, which the server keeps when later snapshots delete the rest.
@@ -241,7 +242,7 @@ Anything that saves a draft without being in the session keeps today's check: it
 | Seal and sign a change | 0.16 ms | nothing |
 | Check and open a change | 0.25 to 0.38 ms | nothing |
 | Apply it to the document | 0.03 ms | nothing |
-| On the wire | about 300 bytes per change, at most 10 a second per typist | typing |
+| On the wire | about 400 bytes per change, padded, at most 10 a second per typist | typing |
 | Source editor | a CodeMirror transaction per change | nothing |
 | Visual editor, its own edit | the blocks changed, as today, plus a diff of their text | the blocks changed |
 | Visual editor, others' changes | the blocks touched and those beside them: 6 to 38 ms to check, plus replacing those nodes, at most every 100 ms | the blocks touched |
@@ -273,10 +274,11 @@ New routes only. No existing route or response changes.
 | `GET /api/live/:sessionId/stream?after=&joinId=` | The stream, in NDJSON: the session's joins, past and present (each with identity, key version, join order, `joinId`, the join a save's own join belongs to, and whether it is still there), the messages after the given position, and `{ended: reason}`. Opening it joins the session. |
 | `POST /api/live/:sessionId/messages {joinId, messages, parent?, fold?}` | Sends messages. A snapshot and a Saved notice also name, unsigned, the position they cover. |
 | `POST /api/live/:sessionId/leave {joinId}` | The join leaves at once. |
+| `POST /api/live/:sessionId/snapshots {joinId, message, covers}` | Posts a snapshot. |
 | `POST /api/live/:sessionId/end` | A participant ends the session, as the saver does to start again. Changes the end refuses are put in by their apps as at an end for access (decision 12). |
 
 **Limits:**
-- a change is at most 512 KiB sealed, and a snapshot 2 MiB, on a route with a 4 MiB body limit;
+- a change is at most 512 KiB sealed, within the ordinary 1 MiB limit for a request. Snapshots go on a route of their own, `POST /api/live/:sessionId/snapshots`, at most 2 MiB, with a 4 MiB body limit and a pool of its own for large bodies, so typing never waits on the slots that making shares and moves use;
 - a request at most every 100 ms per tab, carrying the tab's changes, presence and notices together, and `LIVE_LIMIT` allows 3,000 requests a minute per person, enough for four tabs typing at once with room for snapshots and a save's own join;
 - the stream has no write limit.
 
