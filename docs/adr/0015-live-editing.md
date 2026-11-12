@@ -10,7 +10,7 @@ In short:
 - **Everyone with the draft open edits one copy.** An editor's app that opens a page's draft joins the page's **live session**. Each change goes out within about a tenth of a second and shows in the others' editors, in source mode and in the visual editor. Nobody in the session gets a conflict from anyone else in it.
 - **A CRDT over the page's text (Yjs).** The session's shared document holds the page's title, front matter and body as text, and its files and extensions by key. Yjs merges changes made at the same time character by character, with no server that reads them. The source editor edits that text directly. The visual editor writes, and takes in, only the blocks a change touches.
 - **Sealed like a comment for editors.** Starting a session makes a **session record**: a metadata record v2 with `subjectKind: "live"`, whose payload holds a fresh **session key**. In a share the record is wrapped with the share's draft key; outside shares it is sealed to the owners. Each change is encrypted with the session key and signed by its writer. The server relays ciphertext and keeps it only for a while. Readers never get the key.
-- **Drafts stay as they are.** One app in the session, the **saver**, autosaves the shared document as ordinary draft revisions, signed by the saver, on today's one-second cadence. A revision's payload names the session and how much of it the revision holds, so every app knows when its own typing is saved. Publishing, history, the link table and retention don't change.
+- **Drafts stay as they are.** One app in the session, the **saver**, autosaves the shared document as ordinary draft revisions, signed by the saver, on today's autosave cadence. A revision's payload names the session and how much of it the revision holds, so every app knows when its own typing is saved. Publishing, history, the link table and retention don't change.
 - **Writers outside the session keep the conflict.** The CLI and agents, offline changes, older apps, folder table cells and restores save as today, and `stale-head` still guards them. When one of their saves lands, the saver folds it into the session with ADR 0013's merge. Where it overlaps what the session changed, the session's text stays and everyone in it is offered **Review**.
 - **Presence** shows who else has the draft open, in the toolbar, and their cursors, sealed like the changes. The server sees who is in a session, when, and how much each person sends. It never sees what they send or where in the page.
 - **A newcomer** opens the latest **snapshot**, which is the shared document as of a saved revision whose text it must equal, and then the changes after it.
@@ -52,7 +52,7 @@ In short:
 
 ### 1. Who joins, and when
 
-- **Editors with the draft open.** Anyone who can edit the page (an editor, publisher or owner) joins its live session when their app opens the draft view online. They leave when they close it, lock or open another page. Offline, they keep their place (decision 10). Readers never join, and never see that a session exists. Agents, the CLI, the chat assistant and plugins don't join (decisions 8 and 9).
+- **Editors with the draft open.** Anyone who can edit the page (an editor, publisher or owner) joins its live session when their app opens the draft view online. They leave when they close it, lock, open another page or go offline (decision 10). Readers never join, and never see that a session exists. Agents, the CLI, the chat assistant and plugins don't join (decisions 8 and 9).
 - **Always, alone too.** The first editor to open the draft starts the session, and is alone in it until someone else comes. So there is one way to edit online, and a second person joins a session that is already running, with nothing to hand over. The cost is one snapshot upload when a draft is opened, and one small request about every tenth of a second while someone types (decision 11). Decide 2 covers the other way: start a session only when a second editor comes.
 - **Not while a change waits on the device.** An app with an offline change waiting for the page (ADR 0009) edits as today until that change is sent and resolved, and then joins.
 - **Each tab, window or device takes part on its own,** with its own Yjs client. Two tabs of one person show as one person.
@@ -68,8 +68,9 @@ A session's document is a `Y.Doc` holding:
 | `body` | `Y.Text` | the Markdown after the front matter |
 | `attachments` | `Y.Map` | each attachment's `AttachmentRef`, by ID |
 | `extensions` | `Y.Map` | each extension namespace's value, by namespace |
+| `links` | `Y.Map` | which page a link means, where someone chose between pages of one title (`chooseLink`), by link key |
 
-- **The payload a save writes is these five put back together,** as `joinPage` does today. So Markdown stays the page's canonical form, and the session changes no payload format. Each save works out `wikistow.links` as today, so the link table isn't in the document. Neither is `wikistow.live` (decision 5).
+- **The payload a save writes is the first five put back together,** as `joinPage` does today. So Markdown stays the page's canonical form, and the session changes no payload format. Each save works out `wikistow.links` as today, from the saver's tree and the choices in `links`, so a choice anyone makes reaches the table. The table itself isn't in the document, and neither is `wikistow.live` (decision 5). As for any writer, which pages a link may name follows what the writer sees (protocol section 5.5), and the writer is the saver.
 - **Yjs** (13.6) merges changes made at the same time. Text merges character by character. A map entry merges by key, and the later write wins. When two people type in one sentence, both keep their typing, in the order Yjs gives, which is the same for everyone. Two people changing the same characters at once can leave Markdown that reads oddly, such as a doubled `**`, and both see it and either can fix it. ADR 0013 turned down merging by character for drafts nobody saw being made. In a live session, people watch each other type.
 - **Undo** undoes only the person's own changes, in both editors.
 
@@ -88,7 +89,7 @@ A session's document is a `Y.Doc` holding:
 
 **Split mode** shows the shared document in both panes. Each pane takes the other's changes as it takes anyone's.
 
-**The rest of the page.** The properties box edits `frontmatter`. The cover edits `extensions` (`wikistow.cover`). A file goes into `attachments` once its upload has finished, so a save never names a file the server doesn't have.
+**The rest of the page.** The properties box edits `frontmatter`. The cover edits `extensions` (`wikistow.cover`). A file goes into the shared document, its link with its `AttachmentRef`, only from the app that uploaded it, and only once that app's own save of it has landed: the server lets only a file's uploader commit it to a revision until it is committed (`attachBlobs`), so the saver's save would otherwise fail as `missing-blob`. Until then the uploader's app holds that change and everything it sends after it, as it holds a fold (decision 8).
 
 ### 4. Sealing and relaying
 
@@ -97,9 +98,9 @@ A session's document is a `Y.Doc` holding:
 - **Its key material** is in the region of the page's draft (protocol section 6.1):
   - in a share, one key wrap with `audienceClass: "draft"` and `subjectKind: "live"`, under the draft key at the current key version;
   - in the owner region, v2 metadata envelopes to the sealing owners.
-- **The payload,** session format 1.0, is `{format, pageId, revisionId, key, extensions}`. `revisionId` is the draft the session started from, and `key` is the session key: 32 fresh random bytes.
+- **The payload,** session format 1.0, is `{format, pageId, revisionId, key, sealedTo, extensions}`. `revisionId` is the draft the session started from, and `key` is the session key: 32 fresh random bytes. In the owner region, `sealedTo` lists the owners it was sealed to; in a share it is `null`.
 
-The app that opens the record checks it as a metadata record v2 with `subjectKind: "live"` and the session's ID. It also checks that `pageId` is this page, and that the key material is in the region of the page's draft it opened (`region-mismatch` otherwise). Readers hold no draft key, so they can't open it. A member can't put a session wrapped under another share's key on a page. The record needs no new record format and no new domain strings.
+The app that opens the record checks it as a metadata record v2 with `subjectKind: "live"` and the session's ID. It also checks that `pageId` is this page, and that the key material is in the region of the page's draft it opened (`region-mismatch` otherwise). Then it checks that the session is no older than what the app knows of access to the page, as a writer does (protocol section 6.8). In a share, the wrap's key version must be the highest the app holds that counts for writing, and not below its **No going back** mark. In the owner region, every owner in `sealedTo` must be one of its sealing owners. Otherwise it refuses to join (`key-version`, or `unaccepted-owner`), reports it, and edits as an outsider. An app that rotates a share's keys, or removes an owner, leaves the sessions it is in there at once, and joins only a new one. So a server that keeps an old session open can't get its keystrokes sent under a key a removed person holds. Readers hold no draft key, so they can't open it. A member can't put a session wrapped under another share's key on a page. The record needs no new record format and no new domain strings.
 
 **A message** is a change, a snapshot, a presence or a save notice:
 
@@ -115,18 +116,21 @@ signature = Ed25519(sender, canonical('live-message/v1', [installationId, spaceI
 ```
 
 - **`joinId` and `seq`.** An app makes a fresh `joinId` (`newId`) each time it joins, and numbers its messages from 1 with `seq`.
-- **Checks on receipt.** The receiving app drops a repeat. It refuses a message whose signature fails, whose sender's key fails the pins (protocol section 8.4), or whose sender and `joinId` the server doesn't list among the session's joins, past and present.
-- **A change** is a Yjs update. Its Yjs client ID is derived from its sender: `BLAKE2b-64(canonical('live-client/v1', [installationId, sessionId, senderId, senderKeyVersion, joinId]))`, cut to 53 bits. The receiving app refuses an update that adds anything under another client ID. So a member can't write as someone else's client and split the document between apps. Deleting other people's text is a change like any other.
+- **Checks on receipt.** The receiving app drops a repeat, by `(senderId, joinId, seq)`. It refuses a message whose signature fails, whose sender's key fails the pins (protocol section 8.4), or whose sender and `joinId` the server doesn't list among the session's joins, past and present.
+- **A change** is a Yjs update. Its Yjs client ID is derived from its sender: `BLAKE2b-64(canonical('live-client/v1', [installationId, sessionId, senderId, senderKeyVersion, joinId]))`, cut to 53 bits. Deleting other people's text is a change like any other. The receiving app refuses an update:
+  - that adds anything under another client ID, so a member can't write as someone else's client;
+  - that adds anything at a place in its client's history the app already holds, which an honest sender never does, since a repeat is dropped by `seq` first. Yjs would skip it without a word, so a snapshot that claimed someone's later typing could make an app drop it. The app refuses the session instead (decision 6);
+  - that adds anything outside the document's six parts.
 - **Presence** is `{editor: "source" | "visual", visible, cursor}` (decision 7).
-- **Saved** is `{revisionId, state}`: the saver saved this revision, which holds the session up to that Yjs state vector.
+- **Saved** is `{revisionId, state}`: the saver saved this revision, which holds the session up to that Yjs state vector. The request also names, unsigned, the position of the last message the saved document held, so the server can tell what is saved (decision 12).
 - **A snapshot** is `{revisionId, state}`: the whole document as one Yjs update, as of the save of `revisionId` (decision 6).
 
 This adds three domain strings: `live-message/v1`, `live-message-payload/v1` and `live-client/v1`.
 
 **Relaying.**
-- The app sends its changes at most every 100 ms, merged into one update, with `POST /api/live/:sessionId/messages`.
+- The app sends its changes at most every 100 ms, merged into one update, with `POST /api/live/:sessionId/messages`, one request carrying its change and its presence together.
 - It reads everyone's messages from one stream, `GET /api/live/:sessionId/stream`. That answers NDJSON as the tree's stream does, with the participants, each message with a position the server gives it, and a line when the session ends.
-- Opening the stream is joining. Closing it, or 30 s without it, is leaving.
+- Opening the stream is joining. Closing it, or 30 s without it, is leaving. An app whose stream broke opens it again with the same `joinId` within those 30 s, and so keeps its client and sends what it hadn't.
 - The server checks that each message's sender is the caller, is in the session, and can edit the page. It stores changes, snapshots and save notices in order. It passes presence on and keeps none.
 - It fans messages out in memory, as the tree's stream does, in the one server process.
 
@@ -135,30 +139,35 @@ Decide 7 covers WebSockets instead.
 ### 5. Drafts: the saver
 
 - **One app saves.** The saver is the participant the server has listed longest whose page is visible, or, if no page is visible, the participant listed longest. Every app works the saver out from the same list. A hidden tab's timers slow down, so a hidden tab doesn't save for others while a visible one can.
-- **It autosaves the shared document** on today's cadence: one second after the last change from anyone, and at least every 10 s. It is an ordinary draft save, based on the draft head, with the permission version and the key material of the page's region, and signed by the saver. The server checks it as it checks any save, and nothing changes there.
-- **`wikistow.live`**, a new payload extension, says what the revision holds: `{format: 1, session, state, with}`.
-  - `session` is the session ID, `state` the Yjs state vector the revision holds, and `with` the IDs of the others who wrote in the session.
+- **It autosaves the shared document** on today's cadence: one second after the last change from anyone, and at least every 10 s while changes keep coming. It is an ordinary draft save, based on the draft head, with the permission version and the key material of the page's region, and signed by the saver. The server checks it as it checks any save, and nothing changes there.
+- **`wikistow.live`**, a new payload extension, says what the revision holds: `{format: 1, revision, session, state, with}`.
+  - `revision` is the revision's own ID, `session` the session ID, `state` the Yjs state vector the revision holds, and `with` the IDs of the others who wrote in the session.
+  - **A revision counts as the session's only when `revision` is its own ID** and `session` is the session, as `wikistow.change` counts (protocol section 5.5). A writer outside the session that keeps the extension, as every client keeps a namespace it doesn't know, copies one naming another revision, so its save counts as an outsider's and is folded in (decision 8).
   - It goes into drafts only. Publishing, copies and publications into other spaces leave it out.
-  - A client from before it copies it into what it publishes, as it does any namespace it doesn't know. That shows readers the session ID, how many characters each Yjs client wrote, and who else edited, but nothing of the text.
+  - A client from before it copies it into what it publishes. That shows readers the session ID, how many characters each Yjs client wrote, and who else edited, but nothing of the text.
+- **Saves don't rewrite the text.** Today a save may rename links (protocol section 5.5, **Renames**) and repair the text, and the editor takes the result back. In a session only the saver renames and repairs, and it does so as its own change to the shared document before it saves, so every save writes the document exactly as it is. Another app's save renames and repairs nothing. If the saver changes hands during a rename, both apps may make it, and its new text shows twice until someone deletes one.
 - **Each app knows when its own typing is saved:** when the draft head is a revision of its session whose `state` holds all of its own changes. It learns this from the saver's **Saved** message, or by opening the head. Until then the page shows "Saving…". Leaving, locking or hiding the page sends whatever is still unsent.
 - **Any app may save** at once when it needs to, to publish or to leave with changes the head doesn't hold, provided its document holds everything the head does. If that save meets `stale-head`, the app reads the new head:
   - a revision of the session that holds its changes means it is done;
   - a revision of the session that doesn't means it catches up and saves on top;
   - a revision from outside the session goes to decision 8.
+
+  A revision of the session whose `state` holds changes the app can't get within 10 s, because they were never relayed (a sender cut off, or a session ended mid-typing), is folded in as an outsider's is, so the app never saves over it.
 - **Who signs.** A draft revision is signed by the app that saved it, and in a session it holds other people's typing. So a draft's signed author says who saved it, not who wrote every word, and `with` names the others on the saver's word. Published history keeps the draft's author and the publisher. For editors, who can open the draft a publication was made from, it adds the people `with` names ("with Sam"). Decide 9.
-- **Publishing** saves first, as today, and then publishes the head. If the saver saves in between, the publish meets `stale-head`, and the app publishes the newer head instead, once. What goes out is the shared draft as everyone in the session sees it at that moment, half-typed sentences included. So while others are editing, **Publish** says so ("Sam is editing too").
-- **Nothing typed is lost when everyone leaves at once.** The server keeps a session whose last change came after its last Saved notice. The next editor to open the page joins it, and their app saves it.
+- **Publishing** saves first, as today, and then publishes the head. While it does, its presence says so, and the saver holds its saves for up to 10 s, so the head stays put. If it moves anyway, the publish meets `stale-head` and the app publishes the newer head. What goes out is the shared draft as everyone in the session sees it at that moment, half-typed sentences included. So while others are editing, **Publish** says so ("Sam is editing too").
+- **Nothing typed is lost when everyone leaves at once.** The server keeps a session whose last change came after the position its last Saved notice names. The next editor to open the page joins it, and their app saves it.
 
 ### 6. Catching up
 
 - **Snapshots.** The editor who starts a session sends its first snapshot with the session record, made from the draft it opened. After that, the saver posts a snapshot once the changes since the last one pass 256 KB or 1,000 messages. It does so right after a save that renamed no links and repaired nothing, so that the shared document equals the saved text. The server then deletes the changes the snapshot holds.
 - **A newcomer** fetches the session with `GET /api/pages/:pageId/live`: the record and its key material, the latest snapshot, and the changes after it.
-  - It opens the revision the snapshot names, and checks that the snapshot's title, front matter, body, attachments and extensions equal that revision's, `wikistow.links` and `wikistow.live` aside. Otherwise it refuses to join, says why, and edits as an outsider.
+  - It opens the revision the snapshot names, and checks that the snapshot's title, front matter, body, attachments and extensions equal that revision's, `wikistow.links` and `wikistow.live` aside, and that the snapshot's state vector is that revision's `state`. It also checks that the snapshot holds the document's six parts and nothing else. Otherwise it refuses to join, says why, and edits as an outsider.
+  - A snapshot's text is checked; its history isn't. A member who made one that claims someone's later typing gets the newcomer to refuse that typing when it comes (decision 4), so the newcomer says "This live session can't be trusted" and stops, rather than losing it.
   - Then it applies the later changes and joins the stream from that position.
-- **A brief drop**, such as a broken stream or a laptop that slept, resumes from the last position the app had. It fetches what it missed and sends its own unsent changes, which Yjs tells apart by state vector. There is no conflict.
-- **A long drop.** Offline, the app keeps its document and its place in the session (decision 10). If the session ended meanwhile, the app's changes the head doesn't hold are an outsider's. It saves them on top of the head when its document holds the head. Otherwise it merges them into the next session as decision 8 does, offering **Merge…** where they overlap.
+- **A brief drop**, such as a broken stream or a laptop that slept, resumes within 30 s from the last position the app had, with the same `joinId`. It fetches what it missed and sends its own unsent changes, which Yjs tells apart by state vector. There is no conflict.
+- **A longer drop.** Once the server has dropped its join, the app can't send what it typed under that client. It joins again as a newcomer and puts its unsent typing in as one change, merged by block from the text the session last had from it (decision 8), with **Merge…** where it overlaps. Going offline is decision 10.
 - **Measured** (spike below): a snapshot opens in 15 to 50 ms. Without snapshots, catching up on an hour of two people typing nonstop would mean replaying 11 MB of changes, which takes 9 s.
-- **A session that grows too big** starts again at the next quiet moment. That is a snapshot past 2 MiB, about four hours of two people typing nonstop. The saver saves and ends the session, and every app joins a new one from that revision.
+- **A session that grows too big** starts again at the next quiet moment, a few seconds with no change from anyone. That is a snapshot past 2 MiB, about four hours of two people typing nonstop. The saver saves and ends the session (`POST /api/live/:sessionId/end`), and every app joins a new one from that revision.
 
 ### 7. Presence
 
@@ -186,7 +195,7 @@ Draft view, source mode                         Visual editor
 Anything that saves a draft without being in the session keeps today's check: its save names its base, and `stale-head` refuses it when the head has moved on.
 
 - **Who.** The CLI and agents (MCP included), offline changes when they are sent, and older apps. Also folder table cells, changes made while reading (ADR 0008), and restoring a version.
-- **While people type,** the saver moves the head about once a second. So an agent that read the page a minute ago meets `stale-head`, reads it again and tries again, as it would today after any save. The agents guide says that a page being edited live changes every second.
+- **While people type,** the saver moves the head at least every 10 s, and a second after each pause. So an agent that read the page a minute ago meets `stale-head`, reads it again and tries again, as it would today after any save. The agents guide says that a page being edited live changes every few seconds.
 - **A save that lands** makes the head a revision from outside the session, and the saver folds it in.
   - It merges by block with ADR 0013's `pageMerge`. The base is the session's revision that the save was based on, theirs is the outsider's revision, and ours is the shared document now.
   - It applies the result to the shared document, and holds the change and everything it sends after it until it has saved the result on top of the outsider's revision.
@@ -202,9 +211,7 @@ Anything that saves a draft without being in the session keeps today's check: it
 
 ### 10. Offline, and older apps and servers
 
-- **Offline** (ADR 0009), the app stops sending and receiving, and keeps its document and its place in the session. What the person types also goes into the offline queue, as today. Back online:
-  - if the session is still open, the app sends its changes through the session and withdraws the queue entry for the page, which it hasn't sent;
-  - if the session has ended, the entry goes out as ADR 0009 says, as an outsider's save.
+- **Offline** (ADR 0009), the app leaves the session. What the person typed that the session didn't take, and what they type next, go into the offline queue, as today, based on the session's last revision the app knew. Back online, the entry goes out as ADR 0009 says, as an outsider's save, and the app joins again once it is resolved (decision 1). The entry holds other people's changes the app had taken but no revision held yet; the session holds them too, so the fold, which takes a change made the same way on both sides once, adds only what the person typed.
 - **Older apps** don't know sessions, so they are outsiders. An older app with the draft open beside a session meets the conflict prompt each time it saves. Since 0.25 that prompt offers **Merge…**. The session folds in what it saves.
 - **An older server** answers the session route `not-found`. The app then edits as today, and says nothing.
 - **A newer major format** of a session or of `wikistow.live`: the app says "Update the app to edit with others" and edits as an outsider.
@@ -222,17 +229,18 @@ Anything that saves a draft without being in the session keeps today's check: it
 | Visual editor, others' changes | the blocks touched and those beside them: 6 to 38 ms to check, plus replacing those nodes, at most every 100 ms | the blocks touched |
 | Saving | today's autosave, by one app for everyone | page size |
 | A newcomer | one snapshot, 15 to 50 ms to open, plus the changes since | the session's history |
-| The server | one row per change, deleted with the session | typing |
+| The server | per request, at most 10 a second per typist: a rate-limit count, an access check and one row per change, deleted with the session | typing |
 
 A key typed reaches the others in about the 100 ms of batching, plus the round trip, plus at most 100 ms more in the visual editor. That is well within the second the issue asks for. The visual editor's own costs while typing stay as the spec gives them: on a 100 KB page, about 7 ms a key, with tasks of 50 to 80 ms.
 
 ### 12. Ending
 
-- **Everyone left.** A minute after the last participant leaves, if the session's last change is in a saved revision, the server deletes the session: its record, key material, snapshots and changes. A session with changes after its last save is kept for the next editor, up to the draft retention (30 days), and then deleted.
-- **Access changed.** The server ends the page's session at once, and tells its participants, when the page's permission version moves. That covers a key rotation, a member or role change, a move, making or ending a share, an owner change, and the trash.
-  - Each app takes the new access. If it can still edit, it saves what the head doesn't hold. Those who can still edit then join a new session, under new keys.
+- **Everyone left.** A minute after the last participant leaves, if the position the last Saved notice names is the session's last change, the server deletes the session: its record, key material, snapshots and changes. A session with changes after that is kept for the next editor, up to the draft retention (30 days), and then deleted.
+- **Access changed.** The server ends the page's session at once, and tells its participants, when the page's permission version moves. That covers a key rotation, a member or role change, a move, making or ending a share, an owner change, unpublishing, and the trash. It takes no more messages for it but Saved notices.
+  - Each app takes the new access. If it can still edit, it saves what the head doesn't hold, when its document holds the head, and otherwise folds what it has into the next session as decision 8 does. Changes the server refused at the end, typed in the last tenth of a second, are among them, so two people who typed in one block just then get **Merge…**. Those who can still edit then join a new session, under new keys.
   - A removed person keeps the session key they held. It opens only that session's ciphertext (A3), so nothing typed after the end reaches them.
-  - For 10 minutes, an ended session's changes stay readable to its participants who can still edit the page, so an app that missed some can catch up before it saves.
+  - **An ended session's stored changes stay readable** to those who can still edit the page and hold its key, until an app saves what they hold and sends a Saved notice naming the last of them, or for at most the draft retention. So changes nobody saved before an owner added a member aren't lost: the next editor's app catches up from them and folds them in before it starts a new session.
+- **The saver ends it** to start again (decision 6), once the latest Saved notice names the last change.
 - **The page went.** Deleting the page or its space ends the session, with nothing to save.
 
 ### 13. Routes
@@ -244,11 +252,12 @@ New routes only. No existing route or response changes.
 | `GET /api/pages/:pageId/live` | The page's open session, for people who can edit the page: its record, the caller's key material, the latest snapshot and the changes after it, or `{session: null}`. |
 | `POST /api/pages/:pageId/live {sessionId, metadata, wrap \| envelopes, snapshot, permissionVersion}` | Starts a session, with its first snapshot. If a session is already open, it answers `duplicate`, and the app fetches that session. |
 | `GET /api/live/:sessionId/stream?after=&joinId=` | The stream, in NDJSON: the session's joins, past and present (each with identity, join order, `joinId` and whether it is still there), the messages after the given position, and `{ended: reason}`. Opening it joins the session. |
-| `POST /api/live/:sessionId/messages {messages}` | Sends messages. A snapshot also names the position it covers. |
+| `POST /api/live/:sessionId/messages {messages}` | Sends messages. A snapshot and a Saved notice also name, unsigned, the position they cover. |
+| `POST /api/live/:sessionId/end` | A participant ends the session, as the saver does to start again. Refused while a change after the latest Saved notice's position waits. |
 
 **Limits:**
 - a change is at most 512 KiB sealed, and a snapshot 2 MiB, on a route with a 4 MiB body limit;
-- 1,200 messages a minute per person (`LIVE_LIMIT`);
+- a request at most every 100 ms per tab, so `LIVE_LIMIT` allows 1,800 requests a minute per person, enough for three tabs typing at once;
 - the stream has no write limit.
 
 All of these are for people only, as the other streams are. They answer an agent's credential `not-found`.
@@ -282,10 +291,11 @@ Live sessions add a channel, not new content. What is typed ends up in draft rev
   - **Records from another share.** It can serve a session record a member made under another share's key, and the app refuses it (`region-mismatch`). With a member who wraps a version of the page under another share's key, it can show the page in that share, and new sessions there go under that share's keys, as a draft save would (A2).
 - **A malicious member** (an editor):
   - **Writing.** They can type anything, as they can save anything today. They can't write under another person's Yjs client, since client IDs come from the sender's identity and join, and they can't sign as anyone else.
-  - **Snapshots.** They can post a snapshot whose internal structure differs from the session's. Newcomers check its text against a signed revision, so it can't show them other text. At worst, later changes don't fit the newcomer's document and it can't catch up: availability only.
+  - **Snapshots.** They can post a snapshot whose history differs from the session's. Newcomers check its text and state vector against a signed revision, so it can't show them other text. It can claim typing that someone does later; the newcomer then refuses that typing when it comes, and says the session can't be trusted (decision 6), rather than dropping it. It can name an unsigned position that gets the server to delete changes it doesn't hold; newcomers then can't catch up. Availability only.
+  - **Saved notices.** They can name a position past what they saved, so the server deletes a session with unsaved changes after everyone leaves. That loses what the session typed since its last save, as deleting the text would.
   - **`with`.** They can name people falsely in `with`, which is the saver's word, not the named people's.
   - **Flooding** is for the rate limit, and for the owners to remove them.
-- **A removed member.** A removal ends the session, and the next session's key is under the new key version. The removed person can read only what the old session relayed before the end (A3).
+- **A removed member.** A removal ends the session, and the next session's key is under the new key version. The removed person can read only what the old session relayed before the end (A3). A server that keeps the old session open after a rotation, colluding with the removed person, reaches only apps that don't know of the rotation (A2): an app that holds the new key version, or that removed the owner, refuses the old session (decision 4).
 - **Attribution** (section 2.3, authenticated authorship). Each change is signed by its writer, but changes aren't kept after the session. A draft revision's signature now says who saved it, and the revision may hold other people's typing. History says so (decision 5).
 - **Agents** don't join, so a compromised agent host (A6) gains nothing here.
 - **Served JavaScript** (A9) is as before: the code that edits live is the code that saves.
@@ -373,5 +383,5 @@ Steps 2 and 4 can run in parallel. Step 5 needs step 3, and step 6 needs steps 4
 5. **Writers outside the session keep `stale-head`, and a save of theirs that lands is folded in, with the session's text winning where they overlap and Review offered?** Recommended: yes (decision 8). Refusing them while a session is open would block agents whenever anyone had the page open.
 6. **Presence: names in the toolbar, carets in source mode, a bar by the block in the visual editor?** Recommended: yes (decision 7). Exact carets in the visual editor can come later.
 7. **An NDJSON stream and requests, not WebSockets?** Recommended: yes (decision 4). They reuse the streams the server has, and the desktop app forwards them as it is.
-8. **A session ends at any change of access to the page?** Recommended: yes (decision 12). It is simple and safe. Only a removal needs a new key, but a member added or a role changed costs only a pause of a second or so.
+8. **A session ends at any change of access to the page?** Recommended: yes (decision 12). It is simple and safe. Only a removal needs a new key, but a member added or a role changed restarts the session too: a pause of a second or so, and **Merge…** for two people who typed in one block in its last tenth of a second.
 9. **History names who else wrote (`with`)?** Recommended: yes, for editors (decision 5). The signed author stays the saver.
