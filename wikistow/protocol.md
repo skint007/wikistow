@@ -603,10 +603,10 @@ Rules (`payload.ts`, `metadata.ts`):
 **Changes waiting for review** (`overlaps.ts`, proposed in ADR 0015), the extension `wikistow.overlaps`:
 
 ```
-{ format: 1, revisions: [{ revision: RevisionId, parts: integer[] }] }
+{ format: 1, revisions: [{ revision: RevisionId, parts: string[] }] }
 ```
 
-- Written by a live session's saver from the document's `overlaps` map, when it merges in a draft written from outside the session and parts of it overlap the session's own changes, which stay (section 5.10). Each entry names such a draft, and in `parts` each part that overlapped, by its number among the blocks of that draft as the merge cuts them (ADR 0013), counting from 0, so the extension holds no text or hash of text, until someone reviews or dismisses it, or the draft is no longer kept. Review offers those parts only. The draft view shows a note for each. `format` and each part number are integers (section 3.3, rule 6).
+- Written by a live session's saver from the document's `overlaps` map, when it merges in a draft written from outside the session and parts of it overlap the session's own changes, which stay (section 5.10). Each entry names such a draft, and in `parts` each part that overlapped, by its place in that draft as the merge cuts it (ADR 0013), never by text or a hash of text: `body:<s>-<e>` for its blocks `s` to `e`, counting from 0 with `e` excluded (`s = e` for a deletion, at the place it deleted), `title`, `frontmatter`, `property:<n>` for its `n`th front-matter key, `banner`, `icon`, or `data:<n>` for its `n`th extension namespace in code point order, until someone reviews or dismisses it, or the draft is no longer kept. Review offers those parts only. The draft view shows a note for each. `format` is an integer (section 3.3, rule 6).
 - Drafts only, carried from draft to draft like any namespace. Publishing, copies and publications into other spaces leave it out; a client from before it copies it into what it publishes, which shows readers only revision IDs and block numbers. One that doesn't match the schema counts as none.
 
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
