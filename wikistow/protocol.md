@@ -603,10 +603,10 @@ Rules (`payload.ts`, `metadata.ts`):
 **Changes waiting for review** (`overlaps.ts`, proposed in ADR 0015), the extension `wikistow.overlaps`:
 
 ```
-{ format: 1, revisions: RevisionId[] }
+{ format: 1, revisions: [{ revision: RevisionId, parts: Hash32[] }] }
 ```
 
-- Written by a live session's saver from the document's `overlaps` map, when it merges in a draft written from outside the session and parts of it overlap the session's own changes, which stay (section 5.10). Each entry names such a draft, until someone reviews it or dismisses it, or it is no longer kept. The draft view shows a note for each. `format` is an integer (section 3.3, rule 6).
+- Written by a live session's saver from the document's `overlaps` map, when it merges in a draft written from outside the session and parts of it overlap the session's own changes, which stay (section 5.10). Each entry names such a draft, and in `parts` each part that overlapped, by `BLAKE2b-256` of that part's text in the draft as base64url (an app-local hash, never signed), until someone reviews or dismisses it, or the draft is no longer kept. Review offers those parts only. The draft view shows a note for each. `format` is an integer (section 3.3, rule 6).
 - Drafts only, carried from draft to draft like any namespace. Publishing, copies and publications into other spaces leave it out; a client from before it copies it into what it publishes, which shows readers only revision IDs. One that doesn't match the schema counts as none.
 
 **Link table** (`wikistow.links`, format 1, `link-table.ts`; added after the freeze, see `protocol-review.md`). It maps each wikilink to the page it names, so the link follows that page through a rename (`wikistow.md`, Wikilinks):
