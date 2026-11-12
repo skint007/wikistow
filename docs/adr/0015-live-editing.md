@@ -121,7 +121,7 @@ signature = Ed25519(sender, canonical('live-message/v1', [installationId, spaceI
 - **Checks on receipt.** The receiving app drops a repeat, by `(senderId, joinId, seq)`. It refuses a message whose signature fails, whose sender's key fails the pins (protocol section 8.4), or whose `(senderId, senderKeyVersion, joinId)` the server doesn't list among the session's joins, past and present.
 - **A change** is a Yjs update. Its Yjs client ID is derived from its sender: `BLAKE2b-64(canonical('live-client/v1', [installationId, sessionId, senderId, senderKeyVersion, joinId]))`, cut to 53 bits. Deleting other people's text is a change like any other. The receiving app refuses an update:
   - that adds anything under another client ID, so a member can't write as someone else's client;
-  - that adds anything outside the document's seven parts, or anything but text in its text parts and plain JSON values in its maps.
+  - that adds anything outside the document's seven parts, or anything but text in its text parts and plain JSON values in its maps, deleted content aside.
 
   An update deleting something the app doesn't hold yet waits, as Yjs holds it, until that arrives.
 
