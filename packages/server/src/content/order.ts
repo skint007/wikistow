@@ -92,8 +92,26 @@ export async function placeBack(
     .where(eq(nodes.id, nodeId));
   const ordered = (await lastPosition(tx, spaceId, parentId, [nodeId])) !== null;
   if (!ordered) return null;
+  const old = node?.position;
   // No position, in an ordered folder: at the end, like anything new there.
-  return node?.position ?? placeAtEnd(tx, { spaceId, parentId, except: [nodeId] });
+  if (!old || !isPosition(old)) return placeAtEnd(tx, { spaceId, parentId, except: [nodeId] });
+  // Something given the same position meanwhile keeps it; this goes just after.
+  const keys = await tx
+    .select({ position: nodes.position })
+    .from(nodes)
+    .where(
+      and(
+        childrenOf(spaceId, parentId),
+        shown,
+        sql`${nodes.position} >= ${old}`,
+        sql`${nodes.id} <> ${nodeId}`,
+      ),
+    )
+    .orderBy(nodes.position)
+    .limit(2);
+  if (keys[0]?.position !== old) return old;
+  const next = keys[1]?.position ?? null;
+  return positionBetween(old, next !== null && isPosition(next) && next > old ? next : null);
 }
 
 /**

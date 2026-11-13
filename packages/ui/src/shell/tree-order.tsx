@@ -52,7 +52,7 @@ const ordered = (tree: Tree, parentId: FolderId | null, { waiting }: Waits) =>
  * Where `nodeId` lands in `parentId` just before `before`, or at the end for
  * null: its own position, and the others' to write first.
  */
-export const landing = (
+export function landing(
   tree: Tree,
   waits: Waits,
   {
@@ -60,7 +60,15 @@ export const landing = (
     parentId,
     before,
   }: { nodeId: string; parentId: FolderId | null; before: string | null },
-) => orderOperations.placing(ordered(tree, parentId, waits), nodeId, before);
+) {
+  const children = ordered(tree, parentId, waits);
+  // Before one made offline, which isn't ordered yet: before the next that is.
+  const shown: string[] = childrenOf(tree, parentId).map(({ node }) => node.id);
+  const ids = new Set<string>(children.map((child) => child.id));
+  const from = before === null ? -1 : shown.indexOf(before);
+  const next = from < 0 ? before : (shown.slice(from).find((id) => ids.has(id)) ?? null);
+  return orderOperations.placing(children, nodeId, next);
+}
 
 /**
  * Whether Move up (-1) or Move down (1) can move `nodeId` in its folder: it
@@ -113,8 +121,9 @@ export async function writePositions(
   } & Waits,
 ) {
   if (writes.length === 0) return;
+  // The folder's own changes, or for the top, the space's: an order waiting there.
   const waits =
-    waiting(parentId) !== 'none' ||
+    waiting(parentId ?? (spaceId as string as FolderId)) !== 'none' ||
     writes.some((write) => waiting(write.nodeId as PageId) !== 'none');
   if (!offline && !waits) {
     for (let i = 0; i < writes.length; i += BATCH) {

@@ -182,3 +182,17 @@ describe('treeInOrder', () => {
     expect(ids).toEqual(['f', 'p', 'lost']);
   });
 });
+
+describe('treeInOrder, with a folder left out', () => {
+  it('still lists each folder before what is in it', () => {
+    const tree = {
+      folders: [
+        { id: 'b', parentId: 'a', position: null },
+        { id: 'a', parentId: 'gone', position: null },
+      ],
+      pages: [{ id: 'p', parentId: 'b', position: null }],
+    };
+    const ids = treeInOrder(tree, { folder: (f) => f.id, page: (p) => p.id }).map((c) => c.node.id);
+    expect(ids).toEqual(['a', 'b', 'p']);
+  });
+});

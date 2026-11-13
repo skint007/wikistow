@@ -5,6 +5,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
+import { useAvailability } from '../shell/availability';
 import { PLAIN, useClient } from '../vault/store';
 import { spacesQuery, treeQuery } from '../data/queries';
 import { isStale } from '../sharing/messages';
@@ -18,7 +19,9 @@ import {
   noteMoved,
   parentIn,
   previewCopy,
+  landCopy,
   refreshCopied,
+  restoring,
   undoCopy,
 } from './quiet-moves';
 
@@ -52,6 +55,7 @@ export function ConfirmCopy({
   onBusy,
   onDone,
   onMoved,
+  before,
 }: {
   sourceSpaceId: SpaceId;
   /** Null for everything in the space. */
@@ -66,10 +70,13 @@ export function ConfirmCopy({
   onDone: () => void;
   /** Once a move finished, in place of closing and opening what it made. */
   onMoved?: () => void;
+  /** Dropped on a line between rows of the place chosen, in this space: the copy lands there (#400). */
+  before?: string | null | undefined;
 }) {
   const ctx = useClient();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const availability = useAvailability();
   const { busy, error, setError, run } = useAction((caught) => copyMessage(caught, copy));
   useEffect(() => onBusy?.(busy), [busy, onBusy]);
   const [progress, setProgress] = useState<copyOperations.CopyProgress | null>(null);
@@ -148,6 +155,15 @@ export function ConfirmCopy({
         setProgress(null);
       }
       const { spaceId, nodeId } = made;
+      // A copy dropped on a line in this space lands there.
+      const landed =
+        copy && chosen.spaceId === sourceSpaceId
+          ? await landCopy(ctx, queryClient, availability, {
+              made,
+              parentId: chosen.place.parentId,
+              before,
+            })
+          : undefined;
       // Both trees, before opening what it made there.
       await refreshCopied(queryClient, ctx, confirmed, made);
       if (!copy && onMoved) {
@@ -157,13 +173,16 @@ export function ConfirmCopy({
       // Closed first: a dialog left open would be shown again for the space it went to.
       onDone();
       if (node) {
-        const undo = undoCopy(ctx, queryClient, {
-          preview: confirmed,
-          made,
-          moving: node,
-          fromParentId,
-          ownsDestination: destTree?.space?.role === 'owner',
-        });
+        const undo = restoring(
+          undoCopy(ctx, queryClient, {
+            preview: confirmed,
+            made,
+            moving: node,
+            fromParentId,
+            ownsDestination: destTree?.space?.role === 'owner',
+          }),
+          landed,
+        );
         noteMoved(ctx, {
           moving: node,
           to: chosen,

@@ -611,6 +611,43 @@ export async function landWhereDropped(
   return { position: own.position, restore: () => write(back) };
 }
 
+/**
+ * A copy just made in this space, dropped on a line there: it goes there
+ * too, in the tree as it is now with the copy in it (`landWhereDropped`).
+ */
+export async function landCopy(
+  ctx: ClientContext,
+  queryClient: QueryClient,
+  availability: Pick<ReturnType<typeof useAvailability>, 'offline' | 'waiting'>,
+  {
+    made,
+    parentId,
+    before,
+  }: {
+    made: copyOperations.MadeCopy;
+    parentId: FolderId | null;
+    before: string | null | undefined;
+  },
+): Promise<Landed | undefined> {
+  if (before === undefined) return undefined;
+  const tree = await queryClient.fetchQuery(treeQuery(ctx, made.spaceId));
+  const where = { tree, spaceId: made.spaceId, parentId };
+  const landed = await landWhereDropped(ctx, availability, {
+    ...where,
+    nodeId: made.nodeId,
+    before,
+  });
+  if (landed) {
+    await writePositions(ctx, {
+      ...where,
+      writes: [{ nodeId: made.nodeId, position: landed.position }],
+      offline: availability.offline,
+      waiting: availability.waiting,
+    });
+  }
+  return landed;
+}
+
 /** `undo`, then the order of the folder it went into as it was (`Landed`). */
 export const restoring = <U extends Undo | null>(undo: U, landed: Landed | undefined): U =>
   undo && landed
@@ -728,28 +765,14 @@ export function useQuietMove() {
         to: { spaceId: to.spaceId, parentId: to.place.parentId },
       });
       const made = await copyNow(ctx, preview);
-      let landed: Landed | undefined;
       // Dropped on a line in this space: the copy lands there too.
-      if (sameSpace && drop.before !== undefined) {
-        const copied = await queryClient.fetchQuery(treeQuery(ctx, spaceId));
-        landed = await landWhereDropped(ctx, availability, {
-          tree: copied,
-          spaceId,
-          nodeId: made.nodeId,
-          parentId: to.place.parentId,
-          before: drop.before,
-        });
-        if (landed) {
-          await writePositions(ctx, {
-            tree: copied,
-            spaceId,
+      const landed = sameSpace
+        ? await landCopy(ctx, queryClient, availability, {
+            made,
             parentId: to.place.parentId,
-            writes: [{ nodeId: made.nodeId, position: landed.position }],
-            offline: availability.offline,
-            waiting: availability.waiting,
-          });
-        }
-      }
+            before: drop.before,
+          })
+        : undefined;
       await refreshCopied(queryClient, ctx, preview, made);
       done(
         copyNotes(tree, preview, to.spaceName, spaces),

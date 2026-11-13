@@ -313,6 +313,12 @@ function MoveSteps({
               chosen={chosen}
               onBusy={setBusy}
               onDone={onDone}
+              // Where it was dropped, if this is the place it was dropped on.
+              before={
+                chosen.spaceId === spaceId && moving.to?.parentId === chosen.place.parentId
+                  ? moving.before
+                  : undefined
+              }
             />
           )
         }
@@ -777,15 +783,15 @@ function MoveHere({
           moved = true;
           undo = restoring(undoOnDevice(ctx, back), landed);
         } else {
-          const confirmed =
-            shown && position === undefined
-              ? shown
-              : await moveOperations.previewMove(ctx, {
-                  spaceId,
-                  nodeId: moving.id,
-                  parentId,
-                  ...(position !== undefined && { position }),
-                });
+          // The preview shown, if any, is what moves, at the place dropped on.
+          const confirmed = shown
+            ? { ...shown, ...(position !== undefined && { position }) }
+            : await moveOperations.previewMove(ctx, {
+                spaceId,
+                nodeId: moving.id,
+                parentId,
+                ...(position !== undefined && { position }),
+              });
           // It crosses after all, which the tree didn't show: its notes come first.
           if (confirmed.crossing && !shown) {
             await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });

@@ -95,11 +95,16 @@ export function treeInOrder<F extends Listed, P extends Listed>(
     }
   };
   walk(null);
-  const parents = new Set(
-    [...tree.folders, ...tree.pages].flatMap((node) =>
-      seen.has(node.id) || node.parentId === null ? [] : [node.parentId],
+  // From each folder the tree leaves out, so a folder still comes before
+  // what is in it; then anything left, such as a loop a server made.
+  const listed = new Set<string>([...tree.folders, ...tree.pages].map((node) => node.id));
+  const nodes = [...tree.folders, ...tree.pages];
+  const missing = new Set(
+    nodes.flatMap((node) =>
+      node.parentId === null || listed.has(node.parentId) ? [] : [node.parentId],
     ),
   );
-  for (const parentId of parents) walk(parentId);
+  for (const parentId of missing) walk(parentId);
+  for (const node of nodes) if (!seen.has(node.id) && node.parentId !== null) walk(node.parentId);
   return out;
 }

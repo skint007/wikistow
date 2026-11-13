@@ -325,6 +325,20 @@ describe('a folder’s own order', () => {
     ]);
   });
 
+  it('puts a restore just after what took its position meanwhile', async () => {
+    const owner = await personWithVault(t);
+    const { spaceId, folder, ids } = await shelf(owner);
+    await drop(owner.ctx, spaceId, folder, ids.c, 'Apples');
+    // Cheese, Apples, Bread; Bread to the trash, then Cheese where it was.
+    await pages.deleteNode(owner.ctx, { spaceId, nodeId: ids.b });
+    await drop(owner.ctx, spaceId, folder, ids.c, null);
+    await trashOperations.restoreDeleted(owner.ctx, ids.b);
+    const tree = await spaceOperations.loadTree(owner.ctx, spaceId);
+    const positions = tree.pages.flatMap((p) => (p.parentId === folder ? [p.position] : []));
+    expect(new Set(positions).size).toBe(positions.length);
+    expect(await listed(owner.ctx, spaceId, folder)).toEqual(['Apples', 'Cheese', 'Bread']);
+  });
+
   it('says a node moved only to someone who can see it', async () => {
     const owner = await personWithVault(t);
     const editor = await personWithVault(t);
