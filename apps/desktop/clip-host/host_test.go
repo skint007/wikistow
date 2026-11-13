@@ -333,10 +333,11 @@ func TestOpenGivesUp(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 	b.send(map[string]any{"v": 1, "id": "b", "type": "hello"})
-	for _, id := range []string{"a", "b"} {
-		if got := b.receive(); got["type"] != "error" || got["id"] != id {
-			t.Fatalf("got %v", got)
-		}
+	if got := b.receive(); got["type"] != "error" || got["id"] != "a" {
+		t.Fatalf("got %v", got)
+	}
+	if got := b.receive(); got["app"] != "closed" || got["id"] != "b" {
+		t.Fatalf("got %v", got)
 	}
 	// Still answering, as a closed app.
 	b.send(map[string]any{"v": 1, "id": "c", "type": "hello"})

@@ -764,8 +764,12 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-app.on('window-all-closed', () => app.quit());
-// The helper then finds the app closed, rather than a socket nobody answers.
+// The helper then finds the app closed, rather than a socket nobody
+// answers: from the window's closing, as quitting may wait on writes after.
+app.on('window-all-closed', () => {
+  clipping.stopNow();
+  app.quit();
+});
 app.on('will-quit', () => clipping.stopNow());
 
 // Quitting (Ctrl+Q) closes the window first, as its close button

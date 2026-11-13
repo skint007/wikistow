@@ -110,8 +110,13 @@ func (h *host) start(open envelope, frame []byte, frames <-chan []byte) (appConn
 				return conn, queued, nil
 			}
 		case <-deadline.C:
-			for _, held := range queued {
-				if err := h.failed(envelopeOf(held).ID, "WikiStow didn’t open in time."); err != nil {
+			// The `open` failed; the rest get what a closed app's do.
+			if err := h.failed(open.ID, "WikiStow didn’t open in time."); err != nil {
+				return nil, nil, err
+			}
+			for _, held := range queued[1:] {
+				err := h.answer(envelopeOf(held).ID, "status", map[string]any{"app": "closed"})
+				if err != nil {
 					return nil, nil, err
 				}
 			}
