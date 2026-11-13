@@ -43,6 +43,8 @@ export const PAYLOAD_INTEGERS: readonly JsonPathPattern[] = [
   ['extensions', 'wikistow.change', 'format'],
   ['extensions', 'wikistow.change', 'ticked'],
   ['extensions', 'wikistow.change', 'unticked'],
+  ['extensions', 'wikistow.live', 'format'],
+  ['extensions', 'wikistow.overlaps', 'format'],
 ];
 
 /**

@@ -240,10 +240,10 @@ describe('removing a member', () => {
       );
     expect(await send((body) => ({ ...body, expectedKeyVersion: 7 }))).toBe('stale-head');
     expect(await send((body) => body)).toBe('no error');
-    // Planned before version 2 existed, it is refused before anything else.
-    expect(await rejection(sharing.applyShareRotation(alice.ctx, planned))).toBe(
-      'permission-version',
-    );
+    // Planned before version 2 existed, it is refused before anything is
+    // sent: this app's mark is at version 2 now (section 6.8), so it plans
+    // again.
+    expect(await rejection(sharing.applyShareRotation(alice.ctx, planned))).toBe('stale-head');
   });
 
   it('removes someone from every share in the space at once', async () => {

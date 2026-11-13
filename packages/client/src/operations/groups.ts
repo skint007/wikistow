@@ -14,6 +14,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
@@ -27,6 +28,8 @@ import {
   listShares,
   ownerKeys,
   planShareRotation,
+  rotationChange,
+  rotationRaise,
   sealPlanned,
   sealVersion,
   versionsToGive,
@@ -777,69 +780,75 @@ export async function applyGroupChange(ctx: ClientContext, change: GroupChange):
   const rotations = sealed.map(({ shareId, rotation }) => ({ shareId, ...rotation }));
   // A one-share request carries its rotation, if any, on its own.
   const rotation = sealed[0]?.rotation ?? null;
-  switch (action.kind) {
-    case 'delete-group':
-      await ctx.api.call(groupRoutes.deleteGroup, {
-        params: { groupId: action.groupId },
-        body: { rotations, permissionVersion },
-      });
-      break;
-    case 'add-member':
-      if (!subject) throw new CryptoError('malformed', 'Nobody to add');
-      await ctx.api.call(groupRoutes.addGroupMember, {
-        params: { groupId: action.groupId },
-        body: {
-          identityId: subject.id,
-          keyVersion: subject.keyVersion,
-          envelopes,
-          permissionVersion,
-        },
-      });
-      break;
-    case 'add-agent':
-      await ctx.api.call(groupRoutes.addGroupAgent, {
-        params: { groupId: action.groupId },
-        body: { agentId: action.agentId, permissionVersion },
-      });
-      break;
-    case 'remove-member':
-      await ctx.api.call(groupRoutes.removeGroupMember, {
-        params: { groupId: action.groupId, identityId: action.identityId },
-        body: { rotations, permissionVersion },
-      });
-      break;
-    case 'set-share-group':
-      await ctx.api.call(groupRoutes.setShareGroup, {
-        params: { shareId: action.shareId, groupId: action.groupId },
-        body: { access: action.access, envelopes, rotation, permissionVersion },
-      });
-      break;
-    case 'remove-share-group':
-      await ctx.api.call(groupRoutes.removeShareGroup, {
-        params: { shareId: action.shareId, groupId: action.groupId },
-        body: { rotation, permissionVersion },
-      });
-      break;
-    case 'remove-direct':
-      await ctx.api.call(groupRoutes.removeDirectGrant, {
-        params: { shareId: action.shareId, identityId: action.identityId },
-        body: { rotation, permissionVersion },
-      });
-      break;
-    case 'remove-everywhere':
-      await ctx.api.call(groupRoutes.removeFromSpace, {
-        params: { spaceId, identityId: action.identityId },
-        body: { rotations, permissionVersion },
-      });
-      break;
-    case 'give-access':
-      if (!subject) throw new CryptoError('malformed', 'Nobody to give access to');
-      await ctx.api.call(groupRoutes.giveAccess, {
-        params: { spaceId, identityId: subject.id },
-        body: { keyVersion: subject.keyVersion, envelopes, permissionVersion },
-      });
-      break;
-  }
+  const run = async () => {
+    switch (action.kind) {
+      case 'delete-group':
+        await ctx.api.call(groupRoutes.deleteGroup, {
+          params: { groupId: action.groupId },
+          body: { rotations, permissionVersion },
+        });
+        break;
+      case 'add-member':
+        if (!subject) throw new CryptoError('malformed', 'Nobody to add');
+        await ctx.api.call(groupRoutes.addGroupMember, {
+          params: { groupId: action.groupId },
+          body: {
+            identityId: subject.id,
+            keyVersion: subject.keyVersion,
+            envelopes,
+            permissionVersion,
+          },
+        });
+        break;
+      case 'add-agent':
+        await ctx.api.call(groupRoutes.addGroupAgent, {
+          params: { groupId: action.groupId },
+          body: { agentId: action.agentId, permissionVersion },
+        });
+        break;
+      case 'remove-member':
+        await ctx.api.call(groupRoutes.removeGroupMember, {
+          params: { groupId: action.groupId, identityId: action.identityId },
+          body: { rotations, permissionVersion },
+        });
+        break;
+      case 'set-share-group':
+        await ctx.api.call(groupRoutes.setShareGroup, {
+          params: { shareId: action.shareId, groupId: action.groupId },
+          body: { access: action.access, envelopes, rotation, permissionVersion },
+        });
+        break;
+      case 'remove-share-group':
+        await ctx.api.call(groupRoutes.removeShareGroup, {
+          params: { shareId: action.shareId, groupId: action.groupId },
+          body: { rotation, permissionVersion },
+        });
+        break;
+      case 'remove-direct':
+        await ctx.api.call(groupRoutes.removeDirectGrant, {
+          params: { shareId: action.shareId, identityId: action.identityId },
+          body: { rotation, permissionVersion },
+        });
+        break;
+      case 'remove-everywhere':
+        await ctx.api.call(groupRoutes.removeFromSpace, {
+          params: { spaceId, identityId: action.identityId },
+          body: { rotations, permissionVersion },
+        });
+        break;
+      case 'give-access':
+        if (!subject) throw new CryptoError('malformed', 'Nobody to give access to');
+        await ctx.api.call(groupRoutes.giveAccess, {
+          params: { spaceId, identityId: subject.id },
+          body: { keyVersion: subject.keyVersion, envelopes, permissionVersion },
+        });
+        break;
+    }
+  };
+  // A change that rotates is pending until answered (section 6.8).
+  const plans = change.rotations.map(({ plan }) => plan);
+  if (plans.length === 0) await run();
+  else await sendShareChange(ctx, plans.map(rotationChange), run, () => plans.map(rotationRaise));
   forgetSpaces(ctx);
 }
 

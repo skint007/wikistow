@@ -244,13 +244,18 @@ export async function withFreshKeys<T>(
   spaceId: SpaceId,
   write: (keys: SpaceKeys) => Promise<T>,
 ): Promise<T> {
+  // Other tabs may have raised a mark or begun a change since (section 6.8).
+  await ctx.marks.refresh?.();
   try {
     return await write(await spaceKeys(ctx, spaceId));
   } catch (error) {
+    // A mark another tab raised may be past the keys worked out before:
+    // work them out again once, and refuse only if it still holds.
     const stale =
       (error instanceof ApiError &&
         (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
-      (error instanceof CryptoError && error.code === 'missing-key');
+      (error instanceof CryptoError &&
+        (error.code === 'missing-key' || error.code === 'key-version'));
     if (!stale) throw error;
     return write(await spaceKeys(ctx, spaceId, { refresh: true }));
   }

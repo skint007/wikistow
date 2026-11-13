@@ -135,8 +135,13 @@ export function StopSharing({
           },
         );
       } catch (caught) {
-        // Access changed meanwhile: look at it again before stopping.
-        if (caught instanceof ApiError && caught.code === 'permission-version') {
+        // Access changed meanwhile, or the share was ended: look at it
+        // again, which says if it isn't shared any more, or reports a share
+        // this app ended that the server still lists.
+        if (
+          caught instanceof ApiError &&
+          (caught.code === 'permission-version' || caught.code === 'stale-head')
+        ) {
           await preview.refetch();
         }
         throw caught;

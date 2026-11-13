@@ -26,6 +26,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Each folder, and the top of a space, has one order, shared by everyone who sees it. A drop on the line between two rows puts a page or folder there: in its own folder it reorders, and in another it moves and lands there, with Ctrl to copy, Undo, and Ask before moving as before. A drop on a folder's row still moves it in, last. **Move up** and **Move down** are in each row's menu, and page rows have a ⋯ menu, so phones reach them. **Sort by name**, in a folder's menu or the space's for its top, lists it by name again. Folders and pages mix; something new, moved or copied in goes last, and a restore goes back to its place. The folder view, plugins' `pages.list` and `pages.tree`, `wikistow tree` and agents' `list_pages` list in the same order. Offline, a reorder waits on the device as one change to its folder. (#413)
 - The visual editor writes again only the blocks you edit. The rest of the page keeps its own Markdown, byte for byte, where an edit used to rewrite every block in the editor's style. Text typed in the source in **Split**, and changes the app makes such as a renamed link, go into the visual editor a block at a time, and a long page's first edit no longer waits for the whole page to be read back (ADR 0015, step 2). (#417)
 
+- The No going back marks (protocol section 6.8) as ADR 0015 needs them across a browser's tabs. An owner's app that rotates a share's keys, removes an owner or makes a group change that rotates raises its own mark to the version it made. Before it sends a rotation, an owner's removal, an ending or a move into or out of a share, it records the change as pending in its kept marks, waits for that to land, and tells its other tabs on a `BroadcastChannel` that carries nothing else; until the answer comes, no tab joins or sends in that share's live sessions. A change whose answer was lost stays pending until the app fetches the share again and sees which way it went. Tabs read the marks again before they write under, rotate from or move content into a share, and when another tab says it wrote them, and a cleared change never comes back. (#425)
+
 #### Server
 
 - A page's or folder's `position` among what is in its folder, a fractional index (migration `0049_node_positions`). `GET /api/spaces/:spaceId/tree?order=1` lists positions, which released apps never ask for. `POST /api/spaces/:spaceId/order` sets them and `POST /api/spaces/:spaceId/order/by-name` clears them, for editors there and their agents. A move may carry a `position`; without one, as from released apps, it goes last in a folder with an order of its own. (#413)
@@ -38,6 +40,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Releases and packaging
 
 - `@electron/asar` 4.3.2, from 4.3.1, which builds the desktop app's `app.asar`. It brings `glob` 14 and `minimatch` 11, past their security advisories. (#418)
+
+#### Development
+
+- The client's `live` module, step 5 of ADR 0015 (live editing, #321), in `@wikistow/client/live`: the session record, wrapped with the share's draft key or sealed to the owners; messages padded, sealed under the session key and signed, both bound to the record's hash; the Yjs client ID each join derives; the strict decoding of Yjs updates and states before anything reaches Yjs; each join's `seq` and `clock`; the snapshot check; and `wikistow.live`. Nothing calls it yet. Test vectors pin the three new domains. `yjs` 13.6.33 is a dependency of `packages/client`. (#419)
 
 ## 0.25.0 - 2026-11-11
 
