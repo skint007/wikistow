@@ -1,10 +1,4 @@
-import {
-  linkablePages,
-  patient,
-  queueOperations,
-  searchOperations,
-  trashOperations,
-} from '@wikistow/client';
+import { linkablePages, patient, searchOperations, trashOperations } from '@wikistow/client';
 import { PageId, pageRoutes, SpaceId } from '@wikistow/contracts';
 import { PluginError, type PageRef } from '@wikistow/plugin-sdk';
 import {
@@ -122,14 +116,14 @@ export function startAppPlugins(queryClient: QueryClient) {
     // A page only: a folder's ID would take everything in it, which the prompt wouldn't list.
     if (!pages.every(({ pageId }) => titles.has(pageId)))
       throw new PluginError('not-found', 'There is no such page');
-    // One made on this device and not sent yet would go for good, not to the trash.
+    // One with changes waiting on this device would go for good if made
+    // here, or after them: once they are sent, it goes as any other.
     const queue = queueOf(ctx);
     for (const { pageId } of pages) {
-      const entry = await queue?.entry(PageId.parse(pageId)).catch(() => null);
-      if (entry && queueOperations.droppedOnDelete(entry))
+      if (await queue?.entry(PageId.parse(pageId)).catch(() => null))
         throw new PluginError(
           'unsupported',
-          'A page made on this device isn’t sent yet. Try again once it is.',
+          'A page has changes saved on this device only. Try again once they are sent.',
         );
     }
     const named = pages.map((page) => ({
@@ -145,6 +139,8 @@ export function startAppPlugins(queryClient: QueryClient) {
     const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
     const writer = pageWriter(patient(ctx, unloaded, caller.signal));
     const trashed: PageId[] = [];
+    // Offline, a delete waits on this device, to go once back online.
+    let waiting = 0;
     try {
       for (const { spaceId, pageId, title } of named) {
         // Turned off meanwhile: the rest stay, as the batches stop.
@@ -160,6 +156,7 @@ export function startAppPlugins(queryClient: QueryClient) {
           });
         });
         if (done === 'trashed') trashed.push(nodeId);
+        else waiting += 1;
       }
     } catch (error) {
       // Those before it went: the plugin is told how many, and the notice offers Undo.
@@ -173,11 +170,14 @@ export function startAppPlugins(queryClient: QueryClient) {
     } finally {
       for (const spaceId of spaceIds) void contentChanged(queryClient, ctx, { spaceId });
       void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
+      const pagesOf = (n: number) => (n === 1 ? 'a page' : `${n} pages`);
+      const later = waiting === 0 ? '' : ` ${pagesOf(waiting)} go once you’re back online.`;
+      if (trashed.length === 0 && waiting > 0)
+        showNotice({ ctx, message: `${caller.name}: ${later.trim()}` });
       if (trashed.length > 0) {
-        const count = trashed.length === 1 ? 'a page' : `${trashed.length} pages`;
         showNotice({
           ctx,
-          message: `${caller.name} moved ${count} to the trash.`,
+          message: `${caller.name} moved ${pagesOf(trashed.length)} to the trash.${later}`,
           // Back at the batches' pace too, the trash listed once.
           undo: async () => {
             const waiting = patient(ctx, unloaded);

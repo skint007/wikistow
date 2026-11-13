@@ -59,11 +59,22 @@ defineScript((host) => {
         { title, markdown: `${markdown}\n` },
       );
       await editor.insert(`[[${made.title}]]`);
-      // The heading is the new page's title now: links to it go to the page.
-      if (heading && !UNWRITABLE.test(heading))
-        followed(
-          await host.pages.relink([{ from: { page: page.page, heading }, to: { page: made } }]),
-        );
+      // The heading is the new page's title now: links to it go to the page,
+      // and links to the headings under it go to them there.
+      const under = rest.flatMap((line) => {
+        const found = HEADING.exec(line)?.[1];
+        return found && !UNWRITABLE.test(found) ? [found] : [];
+      });
+      const moves = [
+        ...(heading && !UNWRITABLE.test(heading)
+          ? [{ from: { page: page.page, heading }, to: { page: made } }]
+          : []),
+        ...under.map((each) => ({
+          from: { page: page.page, heading: each },
+          to: { page: made, heading: each },
+        })),
+      ];
+      if (moves.length > 0) followed(await host.pages.relink(moves));
     },
   });
 
@@ -80,12 +91,26 @@ defineScript((host) => {
       const rows = await host.pages.index(page.page.spaceId);
       const merged: { page: PageRef; title: string }[] = [];
       const parts: string[] = [];
+      const seen = new Set<string>();
       for (const name of names) {
-        const title = (name.split('/').pop() ?? name).trim().toLowerCase();
-        const row = rows.find(
-          (each) => each.title.toLowerCase() === title && each.page.pageId !== page.page.pageId,
+        // `Folder/Title` names the page under those folders, innermost last.
+        const folders = name.split('/').map((part) => part.trim().toLowerCase());
+        const title = folders.pop() ?? '';
+        const found = rows.filter(
+          (each) =>
+            each.title.toLowerCase() === title &&
+            each.page.pageId !== page.page.pageId &&
+            folders.every(
+              (folder, i) =>
+                (each.path[each.path.length - folders.length + i] ?? '').toLowerCase() === folder,
+            ),
         );
+        const [row, ...more] = found;
         if (!row) throw new PluginError('not-found', `There’s no page “${name}” to merge.`);
+        if (more.length > 0)
+          throw new PluginError('invalid', `“${name}” names several pages: name its folder too.`);
+        if (seen.has(row.page.pageId)) continue;
+        seen.add(row.page.pageId);
         const read = await host.pages.read(row.page);
         parts.push(`## ${read.title}\n\n${body(read.markdown).trim()}\n`);
         merged.push({ page: row.page, title: read.title });

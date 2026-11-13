@@ -264,7 +264,15 @@ export const pluginShortcuts = {
   set(command: CommandKey, name: string | null) {
     // What another tab kept meanwhile stays.
     const { [commandKey(command)]: _was, ...rest } = readKept() ?? kept;
-    kept = name === null ? rest : { ...rest, [commandKey(command)]: normalShortcut(name) };
+    if (name === null) kept = rest;
+    else {
+      // Settings refused keys anything installed holds: whatever else keeps them is stale.
+      const keys = normalShortcut(name);
+      kept = {
+        ...Object.fromEntries(Object.entries(rest).filter(([, other]) => other !== keys)),
+        [commandKey(command)]: keys,
+      };
+    }
     try {
       localStorage.setItem(KEPT, JSON.stringify(kept));
     } catch {
