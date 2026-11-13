@@ -246,6 +246,21 @@ describe('an edit in the visual editor', () => {
     act(() => void undo(view.state, view.dispatch));
     expect(m.handle.read()).toBe(PAGE);
   });
+
+  it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
+    for (const [page, kept] of [
+      ['Para.\n\n  ```\n  code\n  ```\n', '  ```\n  code\n  ```\n'],
+      ['Para.\n\n  - a\n\n        b\n', '  - a\n\n        b\n'],
+    ] as const) {
+      const m = await mount(page);
+      const view = viewOf(m.dom);
+      const first = view.state.doc.firstChild?.nodeSize ?? 0;
+      act(() => view.dispatch(view.state.tr.delete(0, first)));
+      await expect.poll(() => m.changes.at(-1), { message: page }).toBe(kept);
+      expect(m.unfaithful, page).toEqual([]);
+      m.unmount();
+    }
+  });
 });
 
 describe('text taken in by block', () => {

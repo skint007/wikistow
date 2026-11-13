@@ -36,6 +36,16 @@ const read = new WeakMap<Node, readonly (Span | null)[]>();
  */
 export const spansOf = (doc: Node): readonly (Span | null)[] | null => read.get(doc) ?? null;
 
+// Where the line `at` is on starts, if only spaces and tabs are before it
+// there, else `at`: a block's place starts after the spaces it's indented
+// by, which are part of what it says, as a fence's indent is taken off
+// its lines.
+function lineStart(markdown: string, at: number): number {
+  let from = at;
+  while (from > 0 && (markdown[from - 1] === ' ' || markdown[from - 1] === '\t')) from--;
+  return from === 0 || markdown[from - 1] === '\n' ? from : at;
+}
+
 /**
  * Milkdown's reading of Markdown, as the editor's own parser does it, noting
  * where each top-level block came from: a node of the tree read makes most
@@ -57,7 +67,7 @@ function reading(schema: Schema, remark: RemarkParser) {
       const { start, end } = child.position ?? {};
       const span =
         made === 1 && start?.offset !== undefined && end?.offset !== undefined
-          ? { from: start.offset, to: end.offset }
+          ? { from: lineStart(markdown, start.offset), to: end.offset }
           : null;
       for (let i = 0; i < made; i++) spans.push(span);
     }

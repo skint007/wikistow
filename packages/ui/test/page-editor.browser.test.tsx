@@ -177,6 +177,34 @@ describe('the page editor', () => {
       .toBe('Title\n=====\n\n* one\n\nBody typed!\n');
   });
 
+  it('in split, shows the newest of the source’s texts, whichever way each goes in', async () => {
+    const m = mount('One\n\nTwo\n\nThree\n', 'split');
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    const editor = visual(m);
+    if (!code || !editor) throw new Error('No editors');
+    const at = (text: string) => code.state.doc.toString().indexOf(text);
+    // A fence left open, read whole; closed, a block at a time; then more.
+    act(() => code.dispatch({ changes: { from: at('Two'), insert: '```\n' } }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    act(() => code.dispatch({ changes: { from: at('Two') + 3, insert: '\n```' } }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    act(() => code.dispatch({ changes: { from: at('Three') + 5, insert: ' more' } }));
+    const view = viewOf(editor);
+    const blocks = () =>
+      view.state.doc.content.content.map((node) => [node.type.name, node.textContent]);
+    const last = [
+      ['paragraph', 'One'],
+      ['code_block', 'Two'],
+      ['paragraph', 'Three more'],
+    ];
+    await expect.poll(blocks).toEqual(last);
+    // No older text read whole goes in after it.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(blocks()).toEqual(last);
+    expect(m.handle.read()).toBe('One\n\n```\nTwo\n```\n\nThree more\n');
+  });
+
   it('holds the newest text the session gives while text pasted is checked', async () => {
     const m = mount('', 'visual');
     await expect.poll(() => shown(m)).toBe('visual');

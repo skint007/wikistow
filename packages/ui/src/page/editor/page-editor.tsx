@@ -154,8 +154,19 @@ export function PageEditor({
   const modeNow = useRef(mode);
   // In split, the source's text waiting for the visual editor (`syncVisual`),
   // and when it may next read a text whole.
-  const syncing = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null);
+  // Whether that waits to be read whole, then.
+  const syncing = useRef<{
+    timer: ReturnType<typeof setTimeout>;
+    run: () => void;
+    whole: boolean;
+  } | null>(null);
   const wholeAt = useRef(-Infinity);
+  // Whether a whole read is under way; each text going in is numbered in
+  // turn, and the last shown, so an older one read whole doesn't go in
+  // over it.
+  const reading = useRef(false);
+  const texts = useRef(0);
+  const lastShown = useRef(0);
   // In split, the side the person was in last, where Insert in page puts its code.
   const lastSide = useRef<'source' | 'visual'>('visual');
   // What Find on page searches: the editor the page's text is in, or in
@@ -274,9 +285,11 @@ export function PageEditor({
    */
   const syncVisual = (text: string, wait: number) => {
     given.current = text;
-    // Already on its way, it takes the newest text when it goes.
-    if (syncing.current && wait > 0) return;
-    if (syncing.current) clearTimeout(syncing.current.timer);
+    // Already on its way, it takes the newest text when it goes; but one
+    // waiting to be read whole tries a block at a time first, again.
+    const waiting = syncing.current;
+    if (waiting && wait > 0 && !waiting.whole) return;
+    if (waiting) clearTimeout(waiting.timer);
     const ask = asked.current;
     const settle = () => {
       const focus = focusAt.current;
@@ -289,39 +302,55 @@ export function PageEditor({
       const text = given.current;
       if (text === null || ask !== asked.current) return;
       if (surface.current?.take?.(text)) {
+        lastShown.current = ++texts.current;
         given.current = null;
         return settle();
       }
+      // One whole read at a time: the one under way goes on to the newest.
+      if (reading.current) return;
       const due = wholeAt.current - performance.now();
       if (!now && due > 0) {
-        syncing.current = { timer: setTimeout(() => run(false), due), run: () => run(true) };
+        syncing.current = {
+          timer: setTimeout(() => run(false), due),
+          run: () => run(true),
+          whole: true,
+        };
         return;
       }
       const started = performance.now();
+      const mine = ++texts.current;
+      reading.current = true;
       wholeAt.current = started + WHOLE_MS;
       void check(text).then((fidelity) => {
+        reading.current = false;
         if (ask !== asked.current) return;
-        // Text given since goes in after it, if it's still to; if it's in,
-        // this is older.
-        const newest = given.current === text;
-        if (!newest && given.current === null) return;
-        if (!fidelity.visual) {
-          if (!newest) return;
-          setNote(onHold(fidelity.reason));
-          const focus = focusAt.current;
-          focusAt.current = null;
-          if (focus) mirror.current?.focus(focus.at);
-          return;
-        }
-        if (newest) given.current = null;
-        // Not yet made, it takes the page's text when it is.
-        surface.current?.replace(text);
         const took = performance.now() - started;
         wholeAt.current = started + Math.max(WHOLE_MS, WHOLE_SHARE * took);
-        if (newest) settle();
+        const newest = given.current === text;
+        // Text given since goes in after it, if it's still to; one that went
+        // in meanwhile is newer.
+        if (lastShown.current < mine) {
+          if (fidelity.visual) {
+            if (newest) given.current = null;
+            lastShown.current = mine;
+            // Not yet made, it takes the page's text when it is.
+            surface.current?.replace(text);
+            if (newest) settle();
+          } else if (newest) {
+            setNote(onHold(fidelity.reason));
+            const focus = focusAt.current;
+            focusAt.current = null;
+            if (focus) mirror.current?.focus(focus.at);
+          }
+        }
+        if (given.current !== null && given.current !== text) syncVisual(given.current, 0);
       });
     };
-    syncing.current = { timer: setTimeout(() => run(false), wait), run: () => run(true) };
+    syncing.current = {
+      timer: setTimeout(() => run(false), wait),
+      run: () => run(true),
+      whole: false,
+    };
   };
 
   /**
