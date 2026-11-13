@@ -38,12 +38,13 @@ const FILES: readonly File[] = [
 ];
 
 /**
- * The bytes at `url`, or an error naming it. In a browser (`keeping`) it
- * skips the browser's HTTP cache, so forgetting the model leaves no copy
- * there.
+ * The bytes at `url`, or an error naming it. The browser's HTTP cache may
+ * answer, as for any of the app's files, so a worker that can't keep them
+ * itself doesn't ask the server each time it starts, which would tell it
+ * how often someone searches (ADR 0016, decision 7).
  */
-async function fetched(url: string, keeping: boolean): Promise<ArrayBuffer> {
-  const response = await fetch(url, keeping ? { cache: 'no-store' } : {});
+async function fetched(url: string): Promise<ArrayBuffer> {
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
   return response.arrayBuffer();
 }
@@ -84,8 +85,7 @@ async function opened(): Promise<Cache | null> {
 async function read(keep: boolean) {
   const cache = keep ? await opened() : null;
   if (!cache) {
-    // Kept nowhere, so nothing is left behind to forget, even in the HTTP cache.
-    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url, keep)));
+    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url)));
     return { bytes, from: keep ? ('network' as const) : ('files' as const) };
   }
   let fetchedAny = false;
@@ -94,7 +94,7 @@ async function read(keep: boolean) {
       const kept = await cache.match(url).catch(() => undefined);
       if (kept) return kept.arrayBuffer();
       fetchedAny = true;
-      const bytes = await fetched(url, true);
+      const bytes = await fetched(url);
       if (!(await check(bytes))) throw new Error(`${url} isn’t the file this build names`);
       // A response copies the bytes it is given. One the cache can't take
       // is fetched again next time.
