@@ -19,6 +19,8 @@ import {
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
+import type { MarkRaise, NewChange } from '../key-versions.ts';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { pinLabel } from '../contacts.ts';
 import { commentWrapSubject, openCommentKey } from '../comments.ts';
@@ -970,6 +972,7 @@ export async function planShareRotation(
     keys?: SpaceKeys;
   },
 ): Promise<PlannedRotation> {
+  await ctx.marks.refresh?.();
   const keys = given ?? (await ownerKeys(ctx, spaceId));
   const share = await requireShare(ctx, spaceId, shareId);
   const v = share.currentKeyVersion;
@@ -1045,13 +1048,39 @@ export async function applyShareRotation(
   { plan, permissionVersion }: PlannedRotation,
 ): Promise<number> {
   await saveContacts(ctx, [], { sealTo: plan.remaining.map(({ identity }) => identity) });
-  const { keyVersion } = await ctx.api.call(sharingRoutes.rotate, {
-    params: { shareId: plan.shareId },
-    body: { ...sealPlanned(ctx, plan), permissionVersion },
-  });
+  const { keyVersion } = await sendShareChange(
+    ctx,
+    [rotationChange(plan)],
+    () =>
+      ctx.api.call(sharingRoutes.rotate, {
+        params: { shareId: plan.shareId },
+        body: { ...sealPlanned(ctx, plan), permissionVersion },
+      }),
+    () => [rotationRaise(plan)],
+  );
   forgetSpaces(ctx);
   return keyVersion;
 }
+
+/** A planned rotation as a pending change (section 6.8), from the version it rotates. */
+export const rotationChange = (plan: RotationPlan): NewChange => ({
+  spaceId: plan.spaceId,
+  shareId: plan.shareId,
+  change: 'rotation',
+  fromKeyVersion: plan.keyVersion - 1,
+});
+
+/**
+ * The mark an accepted rotation raises: the version this app made, which the
+ * server takes only under a compare-and-swap on the one before, so a server
+ * that then hides it can't keep this app, or a live session of its, on the
+ * old one (section 6.8).
+ */
+export const rotationRaise = (plan: RotationPlan): MarkRaise => ({
+  spaceId: plan.spaceId,
+  shareId: plan.shareId,
+  keyVersion: plan.keyVersion,
+});
 
 /** Rotate a share's keys without removing anyone, as after an agent is revoked (section 9.7). */
 export const rotateKeys = async (

@@ -11,6 +11,7 @@ import {
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
+import { settleShareChanges } from './share-changes.ts';
 import { applyContactsChange, type ContactsChange, type SpaceOwners } from '../contacts.ts';
 import { CryptoError, type CryptoErrorCode } from '../errors.ts';
 import { openFolderKeys } from '../folder-keys.ts';
@@ -51,7 +52,12 @@ export function spaceKeys(
   if (cached && !refresh && !confirmedAdder) return cached;
   const loading = ctx.agent
     ? loadAgentSpaceKeys(ctx, spaceId, ctx.agent.person)
-    : loadSpaceKeys(ctx, spaceId, confirmedAdder);
+    : loadSpaceKeys(ctx, spaceId, confirmedAdder).then(async (keys) => {
+        // Changes left pending by a lost answer settle once the shares
+        // are fetched again with this app's envelopes opened (section 6.8).
+        await settleShareChanges(ctx, spaceId).catch(() => {});
+        return keys;
+      });
   ctx.spaces.set(spaceId, loading);
   loading.catch(() => {
     if (ctx.spaces.get(spaceId) === loading) ctx.spaces.delete(spaceId);

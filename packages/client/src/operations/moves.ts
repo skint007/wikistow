@@ -17,6 +17,8 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
+import type { NewChange } from '../key-versions.ts';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import {
@@ -371,12 +373,45 @@ export async function moveNode(
     return;
   }
   requireReviewable(preview);
+  await ctx.marks.refresh?.();
   const rewrap = await rewrapper(ctx, preview);
   await rewrap.scan(onProgress);
+  // A move into or out of a share is pending until answered (section 6.8):
+  // no tab joins or sends in the share's live sessions meanwhile.
+  const changes: NewChange[] = [preview.from, preview.to].flatMap((region) =>
+    region.kind === 'share'
+      ? [
+          {
+            spaceId: region.spaceId,
+            shareId: region.shareId,
+            change: 'move' as const,
+            fromKeyVersion: Math.max(1, ctx.marks.get(region.spaceId, region.shareId)),
+          },
+        ]
+      : [],
+  );
+  await sendShareChange(
+    ctx,
+    changes,
+    () => sendRewrapped(send, rewrap, preview, ctx, onProgress),
+    () => [],
+  );
+  forgetSpaces(ctx);
+}
+
+// Send a move across a region boundary with its rewrapped records, scanning
+// again for records saved meanwhile.
+async function sendRewrapped(
+  send: (material: Partial<KeyMaterial>) => Promise<unknown>,
+  rewrap: Awaited<ReturnType<typeof rewrapper>>,
+  preview: MovePreview,
+  ctx: ClientContext,
+  onProgress: Progress | undefined,
+): Promise<void> {
   for (let tries = 0; ; tries++) {
     try {
       await send(rewrap.material());
-      break;
+      return;
     } catch (error) {
       // The server refuses wraps for something deleted meanwhile.
       if (
@@ -400,7 +435,6 @@ export async function moveNode(
       if (!(await rewrap.scan(onProgress))) throw error;
     }
   }
-  forgetSpaces(ctx);
 }
 
 type KeyMaterial = {

@@ -236,6 +236,8 @@ export async function withFreshKeys<T>(
   spaceId: SpaceId,
   write: (keys: SpaceKeys) => Promise<T>,
 ): Promise<T> {
+  // Other tabs may have raised a mark or begun a change since (section 6.8).
+  await ctx.marks.refresh?.();
   try {
     return await write(await spaceKeys(ctx, spaceId));
   } catch (error) {
