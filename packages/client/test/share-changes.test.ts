@@ -200,6 +200,41 @@ describe('settling a change whose answer was lost', () => {
     expect(marks.get(spaceId, shareId)).toBe(0);
   });
 
+  it('raises nothing, ending or not, when the server refuses the listing', async () => {
+    const ending: NewChange = { ...rotation, change: 'ending' };
+    for (const [refusal, clears] of [
+      [new ApiError(403, 'forbidden', 'Not an owner'), true],
+      [new ApiError(401, 'unauthenticated', 'Signed out'), false],
+      [new ApiError(429, 'rate-limited', 'Slow down'), false],
+    ] as const) {
+      const { ctx, marks } = context();
+      (ctx as unknown as { api: unknown }).api = { call: () => Promise.reject(refusal) };
+      await lostOne(marks, ending);
+      await settleShareChanges(ctx, spaceId, later()).catch(() => {});
+      expect(marks.get(spaceId, shareId), refusal.code).toBe(0);
+      expect(changePending(marks, spaceId, shareId), refusal.code).toBe(!clears);
+    }
+  });
+
+  it('sends nothing from a version behind the mark another tab raised meanwhile', async () => {
+    const { ctx, marks } = context();
+    marks.raise(spaceId, shareId, 2);
+    let sent = false;
+    await expect(
+      sendShareChange(
+        ctx,
+        [rotation],
+        () => {
+          sent = true;
+          return Promise.resolve();
+        },
+        () => [],
+      ),
+    ).rejects.toMatchObject({ code: 'key-version' });
+    expect(sent).toBe(false);
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
+  });
+
   it('fetches again to settle at most once per grace period', async () => {
     const { ctx, marks } = context();
     await lostOne(marks);
@@ -227,6 +262,26 @@ describe('settling a change whose answer was lost', () => {
     await settleShareChanges(ctx, spaceId);
     expect(changePending(marks, spaceId, shareId)).toBe(true);
     await settleShareChanges(ctx, spaceId, (begun?.at ?? 0) + SEND_LIMIT_MS + 1);
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
+  });
+
+  it('never settles another tab’s change while that tab holds its lock, as when frozen', async () => {
+    const { ctx, marks } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
+    // Another tab began it and froze mid-send: its renewals stopped, its lock held.
+    const [begun] = await marks.begin([rotation]);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    void navigator.locks.request(`wikistow-share-change-${begun?.id ?? ''}`, () => held);
+    await expect
+      .poll(async () => (await navigator.locks.query()).held?.length ?? 0)
+      .toBeGreaterThan(0);
+    const silent = (begun?.at ?? 0) + SEND_LIMIT_MS + 1;
+    await settleShareChanges(ctx, spaceId, silent);
+    expect(changePending(marks, spaceId, shareId)).toBe(true);
+    // Closed, it lets go of the lock, and a fetch settles it.
+    release();
+    await expect.poll(async () => (await navigator.locks.query()).held?.length ?? 0).toBe(0);
+    await settleShareChanges(ctx, spaceId, silent);
     expect(changePending(marks, spaceId, shareId)).toBe(false);
   });
 

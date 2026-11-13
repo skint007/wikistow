@@ -5,9 +5,10 @@
 // session of the share stop sending at once; a definite answer clears it,
 // raising the No going back mark when the change was accepted.
 import { sharingRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
-import { outcomeUnknown } from '../api/client.ts';
+import { ApiError, outcomeUnknown } from '../api/client.ts';
 import {
   ENDED,
+  requireNotBehind,
   LOST_GRACE_MS,
   RENEW_MS,
   SEND_LIMIT_MS,
@@ -40,6 +41,12 @@ export async function sendShareChange<T>(
   } = {},
 ): Promise<T> {
   const { marks } = ctx;
+  // Another tab may have raised a mark, or ended the share, while the owner
+  // confirmed: never rotate from, end or move under a version behind it.
+  await marks.refresh?.();
+  for (const { spaceId, shareId, fromKeyVersion } of changes) {
+    requireNotBehind({ marks, spaceId, shareId, keyVersion: fromKeyVersion });
+  }
   const begun = (await marks.begin?.(changes)) ?? [];
   const ids = begun.map((change) => change.id);
   // This tab never settles by a fetch a change it is still sending, even
@@ -48,6 +55,11 @@ export async function sendShareChange<T>(
   for (const id of ids) mine.add(id);
   // Renewed while it is sent, so no fetch takes it for gone silent.
   const renewing = ids.length > 0 ? setInterval(() => void marks.renew?.(ids), RENEW_MS) : null;
+  // While it is sent, this tab holds a lock per change, which a frozen tab
+  // keeps and a closed one lets go, so other tabs can tell the two apart.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  for (const id of ids) void holdLock(id, held);
   let result: T;
   try {
     result = await send();
@@ -62,6 +74,7 @@ export async function sendShareChange<T>(
   } finally {
     if (renewing) clearInterval(renewing);
     for (const id of ids) mine.delete(id);
+    release();
   }
   const raises = accepted(result);
   if (marks.settle) await marks.settle(ids, raises);
@@ -167,19 +180,29 @@ export async function settleShareChanges(
   now = Date.now(),
 ): Promise<void> {
   if (settleable(ctx, spaceId, now).length === 0) return;
-  let shares: readonly { shareId: ShareId; currentKeyVersion: number }[];
+  let shares: readonly { shareId: ShareId; currentKeyVersion: number }[] | null;
   try {
     ({ shares } = await ctx.api.call(sharingRoutes.listShares, { params: { spaceId } }));
   } catch (error) {
-    if (outcomeUnknown(error)) throw error;
     // The server says this person can't list the space's shares: they are
-    // no owner now, so no change they sent can stand for them. Nothing to raise.
-    shares = [];
+    // no owner now, so no change they sent can stand for them, and nothing
+    // is raised. Any other failure tells nothing, and leaves them pending.
+    const notOwner =
+      error instanceof ApiError && (error.code === 'forbidden' || error.code === 'not-found');
+    if (!notOwner) throw error;
+    shares = null;
   }
   // A renewal or a clear from another tab may have come meanwhile.
   await ctx.marks.refresh?.();
-  const pending = settleable(ctx, spaceId, now);
+  const pending = await notHeld(settleable(ctx, spaceId, now));
   if (pending.length === 0) return;
+  if (shares === null) {
+    await ctx.marks.settle?.(
+      pending.map((change) => change.id),
+      [],
+    );
+    return;
+  }
   const self = ctx.identity.public.id;
   const sealedHere = (shareId: ShareId, keyVersion: number) =>
     ctx.keyring
@@ -189,6 +212,29 @@ export async function settleShareChanges(
     pending.map((change) => change.id),
     outcomes(pending, shares, sealedHere),
   );
+}
+
+// The Web Locks of this browser, which its tabs share, if any.
+const locks = (): LockManager | undefined =>
+  typeof navigator !== 'undefined' ? navigator.locks : undefined;
+const lockName = (id: string) => `wikistow-share-change-${id}`;
+
+// Hold the change's lock until `held` resolves.
+async function holdLock(id: string, held: Promise<void>): Promise<void> {
+  await locks()
+    ?.request(lockName(id), () => held)
+    .catch(() => {});
+}
+
+// Those of `changes` no tab holds the lock of: the answer was lost, or the
+// tab sending it closed. Where there are no Web Locks, the timestamps alone.
+async function notHeld(changes: PendingChange[]): Promise<PendingChange[]> {
+  const manager = locks();
+  if (!manager || changes.length === 0) return changes;
+  const state = await manager.query().catch(() => null);
+  if (!state) return changes;
+  const taken = new Set((state.held ?? []).map((lock) => lock.name));
+  return changes.filter((change) => !taken.has(lockName(change.id)));
 }
 
 // The IDs of changes this tab is sending, by its marks.
