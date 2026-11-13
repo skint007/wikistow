@@ -205,6 +205,33 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-semantic-search/spike/`, not commi
 - **Not measured:** a phone. Chromium's CPU throttling (`Emulation.setCPUThrottlingRate`, 4×) left the worker's times unchanged, so it can't stand in for one.
 - **Brute force** over 30,000 vectors of 384 signed bytes, in Node 26: 10 ms; over 3,000, 1 ms.
 
+## Measured in step 2 (2026-11-13)
+
+Step 2 put the model in the build (#430) and measured the built app: the worker as the build emits it, under the app's policy as the server and the desktop app send it, with the model's files as the build carries them. The figures are from its browser tests (`apps/web/e2e/meaning.spec.ts` and the packed app's in `apps/desktop/e2e/packed.spec.ts`), which record them beside their results, run five times each on the spike's laptop (Intel Core Ultra 9 185H) at a load average of 2.6 to 3.6, median of the five; each run's query and passage times are themselves the median of seven. Chromium is Playwright's 153 (headless), the desktop app the packed `app.asar` on Electron 44 (Chromium 152) under Xvfb. The passage is 248 tokens, near the 256 a passage may have (decision 4).
+
+| Where | Load | First embedding after | A query | A passage of 248 tokens |
+| --- | --- | --- | --- | --- |
+| Chromium, the files from the server | 0.74 s | 52 ms | 14 ms | 211 ms |
+| Chromium, the files from the worker's cache | 0.33 s | 45 ms | 14 ms | 215 ms |
+| The desktop app, the files from its package | 0.37 s | 46 ms | 14 ms | 289 ms |
+
+- **Load** is fetching or reading the three files and making the runtime's session; from the server, it includes checking the model's and tokenizer's hashes before they are kept. That was over loopback, so it leaves out the download itself: 25.8 MB with Brotli (the model 23.3 MB, the runtime's WebAssembly 2.4 MB, the tokenizer 0.15 MB), about 4 s at 50 Mbit/s.
+- **The desktop app** embeds a passage about 40% slower than Chromium on the same machine, from the same files; a query takes as long. Electron's Chromium is a version older, and its window is a real one under Xvfb, not a headless page. At 289 ms a passage, 1,000 pages at two passages each take about 10 minutes the first time, not the 7 decision 4 assumed.
+- **Offline**, in Chromium, a worker started after the page reloaded from the service worker read the files from its cache and gave the same vectors.
+- **The policy held.** In Chromium the worker's script came with the app's exact policy, from the server; the desktop app's `app://` handler sends the same one. Loading, compiling and embedding raised no error under it in either.
+- **Sizes.** The desktop package grows by 49.7 MB (the model 34.0 MB, the runtime's WebAssembly 14.8 MB, the tokenizer 0.7 MB, the worker's script 0.1 MB), and the server image by 75.4 MB, the Brotli copies included.
+- **Not measured: a phone.** No real phone could be reached from this machine, and an emulated one says nothing about a phone's processor, as the spike found. The phone row of decision 5 stays as it is, not offered, until a real phone's browser is measured; that waits on someone with one. Memory wasn't measured again either; the spike's figures (decision 1) stand.
+
+How the build turned out, where this ADR didn't say:
+
+- **The runtime's WebAssembly** is `/assets/ort-wasm-simd-threaded-<hash>.wasm`, the name the build gives the file the runtime itself names, which the worker imports too, so the build has one copy. The model and its tokenizer are under `/assets/meaning/`, named by their pinned hashes. The tokenizer's settings, 366 bytes, are in the worker's script.
+- **Brotli copies** are made only for those three files, at the highest quality, and kept between builds by hash, as making them takes about a minute (`apps/web/meaning.ts`). The rest of the build has none yet.
+- **The service worker** fails the build if it would keep a file over 4 MB, so no large file gets into the shell by mistake.
+- **Until the app embeds** (step 4), the embedder is an entry of the build of its own, so the build has its worker; the tests start the worker directly.
+- **The worker's cache** holds the three files under their paths, each kept only once it checks out: the model and its tokenizer by their pinned SHA-256, the runtime's WebAssembly by its magic number, so a wrong answer, such as a proxy's page, is never kept. Loading deletes other models' caches and any file of its own this build doesn't name, such as an older runtime's. The desktop app keeps no cache: it reads its files from its package. Where there is no Cache Storage, as on a page not served over HTTPS, or it refuses, as with site data blocked or no room left, the worker fetches the files each time it starts, and the browser's HTTP cache answers, as the files are cached for good, so the server still learns only that they were fetched, not how often anyone searches (decision 7). That HTTP cache may hold a copy beside the worker's cache in any browser, as it does any of the app's files. Forgetting the model can't delete it, but it holds nothing of the person's, and the browser lets it go when it needs the room. A load that fails stops the worker, as the runtime keeps a failed start for the worker's life, and the next load starts another.
+- **The server** says `Vary: Accept-Encoding` on every file with a Brotli copy, sent compressed or not, so a shared cache never keeps one form for every browser.
+- **The licences** are in `/third-party-notices.txt`: the model's MIT licence, from BAAI's FlagEmbedding, and the runtime's and the tokenizer library's, as the build drops their notices from the scripts. ONNX Runtime's own notices for what its WebAssembly includes (protobuf, Abseil, Eigen and more) are beside it, unchanged, in `/third-party-notices-onnxruntime.txt`, 330 KB, which the service worker doesn't keep.
+
 ## Considered options
 
 - **Embeddings from the administrator's AI provider.** No model on the device, and better models. But it sends every page's text, and every query, to the provider through the server, which #324 rules out. It could come later as an opt-in with a disclosure like the chat assistant's.
@@ -237,7 +264,7 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-semantic-search/spike/`, not commi
 ## Implementation, in pull requests
 
 1. **This ADR.**
-2. **The model in the build, and a measurement.** Fetch and check the model at its pinned hash, emit it and the runtime as hashed files with Brotli copies, serve `/assets/*` precompressed, leave the large files and the copies out of the service worker's shell and the copies out of the desktop package, add the licence. The worker and its model cache, with a browser test that embeds a text under the app's policy, offline too. Measure load, a query and a passage in Chromium and the desktop app, and in a real phone's browser, so the phone row of decision 5 rests on numbers.
+2. **The model in the build, and a measurement** (#430; see **Measured in step 2**, which measured no phone). Fetch and check the model at its pinned hash, emit it and the runtime as hashed files with Brotli copies, serve `/assets/*` precompressed, leave the large files and the copies out of the service worker's shell and the copies out of the desktop package, add the licence. The worker and its model cache, with a browser test that embeds a text under the app's policy, offline too. Measure load, a query and a passage in Chromium and the desktop app, and in a real phone's browser, so the phone row of decision 5 rests on numbers.
 3. **Passages and vectors** in `packages/client`: cutting a page's reduced text at its headings and paragraphs, 8-bit vectors, the scan, and sealing and opening the kept file, with tests.
 4. **Indexing in the background.** The queue, kept vectors on unlock, updates when pages change, the 30 s pause for drafts, lock and logout, the desktop bridge's file, and the setting with its rules per device.
 5. **By meaning in the search dialog**, with filters, the status line, the keyboard and screen reader, and an e2e: a page about a beach holiday is found by "trip to the coast".

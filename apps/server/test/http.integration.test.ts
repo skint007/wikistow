@@ -2,6 +2,7 @@ import { fileBlobStore } from '@wikistow/server';
 import { createTestDatabase } from '@wikistow/server/testing';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { brotliCompressSync } from 'node:zlib';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { createApp } from '../src/app.ts';
@@ -31,7 +32,11 @@ beforeAll(async () => {
   await mkdir(join(webDist, 'assets'), { recursive: true });
   await writeFile(join(webDist, 'index.html'), '<!doctype html><title>WikiStow</title>');
   await writeFile(join(webDist, 'assets', 'app-3f9a.js'), 'export {}');
+  await writeFile(join(webDist, 'assets', 'model-5d1c.onnx'), MODEL);
+  await writeFile(join(webDist, 'assets', 'model-5d1c.onnx.br'), brotliCompressSync(MODEL));
 });
+
+const MODEL = new Uint8Array(4096).fill(7);
 
 afterAll(async () => {
   await testDb.drop();
@@ -75,6 +80,35 @@ describe('the web app', () => {
       expect(res.headers.get('cache-control'), path).toBeNull();
     }
     expect((await newApp().request('/missing.js')).status).toBe(404);
+  });
+
+  // The search model and the runtime's WebAssembly (ADR 0016, decision 3).
+  it('sends an asset’s Brotli copy to a browser that accepts it, and the file to one that doesn’t', async () => {
+    const compressed = await newApp().request('/assets/model-5d1c.onnx', {
+      headers: { 'Accept-Encoding': 'gzip, deflate, br, zstd' },
+    });
+    expect(compressed.status).toBe(200);
+    expect(compressed.headers.get('content-encoding')).toBe('br');
+    expect(compressed.headers.get('content-type')).toBe('application/octet-stream');
+    expect(compressed.headers.get('vary')).toBe('Accept-Encoding');
+    expect(compressed.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(new Uint8Array(await compressed.arrayBuffer())).toEqual(
+      new Uint8Array(brotliCompressSync(MODEL)),
+    );
+
+    const plain = await newApp().request('/assets/model-5d1c.onnx', {
+      headers: { 'Accept-Encoding': 'gzip' },
+    });
+    expect(plain.headers.get('content-encoding')).toBeNull();
+    expect(plain.headers.get('vary')).toBe('Accept-Encoding');
+    expect(new Uint8Array(await plain.arrayBuffer())).toEqual(MODEL);
+    // A file with no copy goes as it is.
+    const script = await newApp().request('/assets/app-3f9a.js', {
+      headers: { 'Accept-Encoding': 'br' },
+    });
+    expect(script.headers.get('content-encoding')).toBeNull();
+    expect(script.headers.get('vary')).toBeNull();
+    expect(await script.text()).toBe('export {}');
   });
 
   it.each(['/..%2fsecret.txt', '/assets/%2e%2e/%2e%2e/secret.txt'])(
