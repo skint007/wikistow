@@ -468,10 +468,11 @@ function Surface({
       };
       if (plan.check.length < BLOCK_TIMED) return go(fidelityOf(plan.check, plan.transform).visual);
       if (atOnce) return false;
-      return checkFidelity(plan.check).then(
-        (fidelity) => go(fidelity.visual),
-        () => false,
-      );
+      // Anything that fails on the way, as a plugin putting it in, is as
+      // if it couldn't be taken in so.
+      return checkFidelity(plan.check)
+        .then((fidelity) => go(fidelity.visual))
+        .catch(() => false);
     },
     /**
      * Show `markdown`, checked already, at once: a block at a time if that

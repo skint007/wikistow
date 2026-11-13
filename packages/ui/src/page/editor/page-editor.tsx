@@ -337,18 +337,20 @@ export function PageEditor({
       if (taking !== false) {
         const mine = ++texts.current;
         reading.current = true;
-        void taking.then((took) => {
-          reading.current = false;
-          if (ask !== asked.current) return stale();
-          // The newest, read whole, as soon as its pace allows.
-          if (!took) {
-            const hurry = hurried.current || now;
-            hurried.current = false;
-            return given.current === null ? undefined : whole(given.current, hurry);
-          }
-          if (lastShown.current < mine) taken(mine);
-          onward(text);
-        });
+        void taking
+          .catch(() => false)
+          .then((took) => {
+            reading.current = false;
+            if (ask !== asked.current) return stale();
+            // The newest, read whole, as soon as its pace allows.
+            if (!took) {
+              const hurry = hurried.current || now;
+              hurried.current = false;
+              return given.current === null ? undefined : whole(given.current, hurry);
+            }
+            if (lastShown.current < mine) taken(mine);
+            onward(text);
+          });
         return;
       }
       tookTake.current = performance.now() - trying;
@@ -358,6 +360,7 @@ export function PageEditor({
     const whole = (text: string, now: boolean) => {
       const due = wholeAt.current - performance.now();
       if (!now && due > 0) {
+        if (syncing.current) clearTimeout(syncing.current.timer);
         syncing.current = {
           timer: setTimeout(() => run(false), due),
           run: () => run(true),
@@ -469,11 +472,13 @@ export function PageEditor({
     const taking = surface.current.take?.(text) ?? false;
     if (taking === true) return void (given.current = null);
     if (taking === false) return whole();
-    void taking.then((taken) => {
-      if (given.current !== text || ask !== asked.current) return;
-      if (taken) given.current = null;
-      else whole();
-    });
+    void taking
+      .catch(() => false)
+      .then((taken) => {
+        if (given.current !== text || ask !== asked.current) return;
+        if (taken) given.current = null;
+        else whole();
+      });
   };
 
   /**
