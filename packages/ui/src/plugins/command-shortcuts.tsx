@@ -19,8 +19,10 @@ const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'C
  * The shortcuts of a running plugin's commands, under its row in Settings
  * → Plugins (#404): each command with its keys, **Set** to press new ones
  * and **Clear**. Keys the app or another command already uses are refused,
- * saying whose they are. Kept on this device (`pluginShortcuts`). Nothing
- * shows while the plugin registers no command, as while it is off.
+ * saying whose they are. Kept on this device (`pluginShortcuts`). A kept
+ * shortcut of a command it hasn't registered now is listed to clear, as
+ * it still holds its keys. Nothing shows while the plugin registers no
+ * command and keeps none, as while it is off.
  */
 export function CommandShortcuts({ pluginId }: { pluginId: string }) {
   const { commands, plugins } = usePlugins();
@@ -28,23 +30,22 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
   const [recording, setRecording] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ commandId: string; message: string } | null>(null);
   const own = commands.filter((command) => command.pluginId === pluginId);
-  if (own.length === 0) return null;
-  const name = pluginName(plugins, pluginId);
-  // The shortcuts kept here that still run something: a running plugin's
-  // commands', and every one of an installed plugin that is off or not
-  // started yet, so none is given twice. A removed plugin's, or a command
-  // a running plugin no longer has, frees its keys.
+  // Every shortcut kept for an installed plugin's command, registered now
+  // or not (a plugin that is off, or one that registers it only at times),
+  // so none is given twice. A removed plugin's frees its keys.
   const installed = new Set(plugins.map(({ plugin }) => plugin.manifest.id));
-  const runningPlugins = new Set(commands.map((each) => each.pluginId));
-  const taken = Object.entries(shortcuts).flatMap(([at, keys]) => {
+  const kept = Object.entries(shortcuts).flatMap(([at, keys]) => {
     const slash = at.indexOf('/');
-    const [pluginId, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
-    const running = commands.find((each) => each.pluginId === pluginId && each.id === commandId);
-    if (slash < 0 || !installed.has(pluginId) || (runningPlugins.has(pluginId) && !running))
-      return [];
-    const title = `${pluginName(plugins, pluginId)}: ${running?.title ?? commandId}`;
-    return [{ pluginId, commandId, title, keys }];
+    const [of, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
+    if (slash < 0 || !installed.has(of)) return [];
+    const running = commands.find((each) => each.pluginId === of && each.id === commandId);
+    const title = `${pluginName(plugins, of)}: ${running?.title ?? commandId}`;
+    return [{ pluginId: of, commandId, title, keys, running: running !== undefined }];
   });
+  // This plugin's that no command of it has now, to clear here: one renamed by an update, say.
+  const unregistered = kept.filter((each) => each.pluginId === pluginId && !each.running);
+  if (own.length === 0 && unregistered.length === 0) return null;
+  const name = pluginName(plugins, pluginId);
 
   const pressed = (command: CommandKey, event: KeyboardEvent<HTMLButtonElement>) => {
     if (MODIFIER_KEYS.has(event.key)) return;
@@ -57,7 +58,7 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
     }
     const keys = shortcutOf(event.nativeEvent, isApple());
     const message = keys
-      ? shortcutProblem(keys, command, taken, shortcutLabel)
+      ? shortcutProblem(keys, command, kept, shortcutLabel)
       : 'That key can’t be a shortcut. Use a letter, a digit, punctuation or F1–F24.';
     if (message || !keys) {
       setProblem({ commandId: command.commandId, message: message ?? '' });
@@ -139,6 +140,27 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
             </li>
           );
         })}
+        {unregistered.map(({ commandId, keys }) => (
+          <li key={commandId} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 text-muted-foreground">
+              {commandId}, a command it hasn’t registered now
+            </span>
+            <kbd
+              aria-keyshortcuts={ariaShortcut(keys)}
+              className="rounded-control border border-border px-1.5 font-mono text-xs"
+            >
+              {shortcutLabel(keys)}
+            </kbd>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`Clear the shortcut for ${commandId}`}
+              onClick={() => pluginShortcuts.set({ pluginId, commandId }, null)}
+            >
+              Clear
+            </Button>
+          </li>
+        ))}
       </ul>
     </section>
   );
