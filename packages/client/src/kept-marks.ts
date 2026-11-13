@@ -216,7 +216,25 @@ export class KeptMarks implements KeyVersionMarks {
     }));
     const marks = { ...this.#contents.marks };
     for (const change of begun) marks[changeKey(change)] = at;
-    await this.#change({ ...this.#contents, marks }, { strict: true });
+    try {
+      await this.#change({ ...this.#contents, marks }, { strict: true });
+    } catch (error) {
+      // Never sent, so never pending: no later write may keep it.
+      const unsent = new Set(begun.map(changeKey));
+      const kept: Contents['marks'] = {};
+      for (const [key, value] of Object.entries(this.#contents.marks)) {
+        if (!unsent.has(key)) {
+          Object.defineProperty(kept, key, {
+            value,
+            enumerable: true,
+            writable: true,
+            configurable: true,
+          });
+        }
+      }
+      this.#contents = { ...this.#contents, marks: kept };
+      throw error;
+    }
     return begun;
   }
 

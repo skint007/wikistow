@@ -187,6 +187,8 @@ describe('pending changes across tabs', () => {
     };
     const marks = await KeptMarks.open(failing, who);
     await expect(marks.begin([change()])).rejects.toThrow('Quota exceeded');
+    // Never sent, so it holds nothing here either.
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
     marks.close();
     await expect(marks.begin([change()])).rejects.toThrow();
   });
