@@ -311,6 +311,7 @@ export function PageEditor({
     };
     const stale = () => {
       if (modeNow.current === 'split') onward(null);
+      else hurried.current = false;
     };
     const run = (now: boolean) => {
       syncing.current = null;
@@ -441,7 +442,8 @@ export function PageEditor({
     body.current = text;
     if (given.current !== null) given.current = text;
     mirror.current?.replace(text);
-    if (modeNow.current === 'split') return syncVisual(text, 0);
+    // At once, as text typed in the source isn't, which is paced.
+    if (modeNow.current === 'split') return syncVisual(text, 0, true);
     if (modeNow.current !== 'visual') {
       // In source mode, or while the check runs, which checks it next.
       if (surface.current) surface.current.replace(text);
