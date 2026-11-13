@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - Plugins can say which devices they work on: the desktop app, a computer’s browser and a phone. The library and the install dialog show it as tags, Works on this phone lists only the plugins that work there, and installing one where it says it doesn’t work warns first.
+- Plugins can list pages by their properties, and draw an imported vault’s dataview blocks. Settings → Plugins shows which plugin draws each kind of code block.
 
 #### Optimizations
 
@@ -20,6 +21,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A plugin's manifest can name the devices it works on, `platforms`: the desktop app, a browser on a computer and a phone (wherever the app shows its phone layout), each `full`, `partial` or `none`, with a short note. The library and the approval dialog show it as tags, such as **Desktop app only** or **Phone partial**, or **Devices not stated**. **Works on this phone** (or this browser, or this desktop app) in the library lists only the plugins that say they work there. Installing one on a device it says it doesn't work on warns, then installs. A plugin that registers a view in `app.titlebar`, which only the desktop app has, warns at upload, on each workshop build and in `wikistow-plugin build` when it says it works fully in a browser or on a phone, or not in the desktop app. The workshop's assistant sets the field. The library lists versions with `platforms` only to apps that send `manifest=4`. (#407)
 - **Import…** and `wikistow import` send about a third as many requests: 2 for a page whose note names no other note or file, 3 for one that links, and 2 for an attachment, down from about 8 and 3. Where to write is asked once a folder, a page is published from the draft just saved, and each attachment's copy for readers is sealed from the file read rather than downloaded again, two attachments at a time. Each change goes with an idempotency key and is sent again when its answer is lost, so nothing is made twice. 100 notes at a 300 ms round trip took 107 s instead of 280 s. (#410)
+- Plugins can list pages by their properties. `host.pages.index(spaceId)` gives each page of a space they can read with its title, folder, tags and properties, and `host.pages.query({ spaceId, from, where, sort, limit })` lists what a `wikistow-query` block of those lines would. Both read your search index, never the pages again, and cover only the pages you gave the plugin. `index.changed` tells a plugin when that index changes, or its page access does. Scripts get them too. An app plugin can claim a bare fence language in its manifest's `fences`, such as `dataview`, so an imported vault's blocks are drawn by it: the approval dialog says so, and **Code blocks plugins draw** in Settings → Plugins shows which plugin draws each, with **Show as code** and **Use _plugin_**. Without the plugin they stay code. The library lists versions with `fences` only to apps that send `manifest=4`. A new example, `vault-tables`, draws a part of Dataview's `TABLE` and `LIST` queries. (#411)
 
 ## 0.25.0 - 2026-11-11
 
