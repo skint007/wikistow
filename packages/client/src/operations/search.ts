@@ -79,8 +79,10 @@ export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   /**
    * When the server took the version indexed, as it says, not signed by its
    * author (`OpenedRevision.createdAt`); for a version this person saved on
-   * this device, this device's time once the server confirmed it. Null when
-   * unknown, as for a draft waiting offline.
+   * this device, this device's time once the server confirmed it, until the
+   * version is read from the server again. A change waiting on this device
+   * keeps its base's. Null when unknown, as for a version kept on the device
+   * before times were, until the server is asked (`updateIndex`).
    */
   readonly updated: string | null;
 };
@@ -180,7 +182,8 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * with its space and page ID, and in each of `spaces` (every one for
    * `'all'`) no page `pages` leaves out. A page's content can be left out
    * if this index holds that version of it. A page as this index holds it
-   * (the same version, in the same place) is kept as indexed: only the
+   * (the same version, in the same place, not now given the time it lacked)
+   * is kept as indexed: only the
    * text of pages that changed is read again (`SearchIndex`), and its
    * lookups are copied, in time linear in the pages it holds, then sorted
    * only where pages changed. If nothing did, this index is returned
@@ -205,7 +208,9 @@ export class PageIndex extends SearchIndex<SearchPage> {
     const added: Held[] = [];
     for (const [key, [doc, content]] of given) {
       const held = byPage.get(key);
-      if (held && sameDoc(held.entry, doc)) continue;
+      // As it was, unless it now comes with the time it lacked.
+      const timed = held?.entry.updated === null && content?.updated != null;
+      if (held && sameDoc(held.entry, doc) && !timed) continue;
       if (held) removed.set(key, held);
       const text = content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined);
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
@@ -473,8 +478,9 @@ export type SavedVersion = {
   payload: Pick<PagePayload, 'title' | 'markdown' | 'extensions'>;
   /**
    * When it was saved, by this device's clock once the server confirmed it
-   * (`IndexedEntry.updated`). Null or left out for one still waiting on the
-   * device, or unknown.
+   * (`IndexedEntry.updated`); null or left out if unknown. A save still
+   * waiting on this device names its base as the version (`revisionId` is
+   * `basedOn`), and keeps the time the index holds for that.
    */
   updated?: string | null;
 };
@@ -529,8 +535,11 @@ export async function updateIndex(
   const pages: [SearchPage, IndexedText?][] = [];
   if (ids.length > 0) {
     await readPages(ctx, await loadSpaces(ctx, ids, true), {
-      reuse: (spaceId, page, head) =>
-        index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
+      reuse: (spaceId, page, head) => {
+        const held = index.page(spaceId, page);
+        // One held without its time is opened again, to be asked for it (`timed`).
+        return held?.revisionId === head && held.updated !== null ? 'held' : undefined;
+      },
       timed: true,
       live,
       onProgress,
@@ -555,7 +564,11 @@ export async function updateIndex(
         draft: true,
         unpublished: false,
       },
-      { ...(await contentOfPayload(saved.payload, readLinks)), updated: saved.updated ?? null },
+      {
+        ...(await contentOfPayload(saved.payload, readLinks)),
+        // One waiting on this device names its base, and keeps the base's time.
+        updated: saved.revisionId === saved.basedOn ? held.updated : (saved.updated ?? null),
+      },
     ]);
   }
   live();

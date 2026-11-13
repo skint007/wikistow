@@ -54,9 +54,10 @@ export async function contentChanged(
   for (const each of [change].flat()) {
     if ('saved' in each) {
       // The server's answer to a save says no time, so this device's. A
-      // save into this device's queue, on its base, isn't taken yet.
-      const { updated = queued(each.saved) ? null : new Date().toISOString() } = each.saved;
-      searchIndexChanged(queryClient, { saved: { ...each.saved, updated } });
+      // save into this device's queue isn't taken yet, and keeps its base's.
+      const stamp = !queued(each.saved) && each.saved.updated === undefined;
+      const saved = stamp ? { ...each.saved, updated: new Date().toISOString() } : each.saved;
+      searchIndexChanged(queryClient, { saved });
       loads.push(patchTree(queryClient, ctx, each.saved, refetchType));
       pages.set(each.saved.pageId, each.saved);
     } else {

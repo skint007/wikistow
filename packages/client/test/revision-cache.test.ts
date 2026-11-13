@@ -127,6 +127,38 @@ describe('opened revisions in one session', () => {
     expect(served.asked).toBe(0);
   });
 
+  it('keeps one kept on the device without its time again with it, once asked for', async () => {
+    const { ctx, world } = fixture();
+    const wanted = {
+      spaceId: world.spaceId,
+      pageId: world.page,
+      audience: 'draft' as const,
+      revisionId: world.revisions.privateDraft,
+    };
+    const opened = await pages.openRevisionOf(ctx, wanted, wanted.audience, wanted.revisionId);
+    ctx.revisions.clear();
+    // The device's store, holding it as kept before times were.
+    const rewritten: pages.OpenedRevision[] = [];
+    const kept = {
+      hasVersion: (id: string) => id === wanted.revisionId,
+      version: async () => ({ ...opened, createdAt: null }),
+      refreshVersion: async (version: pages.OpenedRevision) => {
+        rewritten.push(version);
+      },
+    };
+    Object.assign(ctx, { keptContent: kept });
+    const fetched = await pages.fetchRevisions(
+      ctx,
+      world.spaceId,
+      new Map([[wanted.revisionId, wanted]]),
+      { timed: true },
+    );
+    expect(fetched.get(wanted.revisionId)?.().createdAt).toBe(TAKEN);
+    expect(rewritten.map(({ record, createdAt }) => [record.revisionId, createdAt])).toEqual([
+      [wanted.revisionId, TAKEN],
+    ]);
+  });
+
   it('checks space, page and audience even when the revision ID is cached', async () => {
     const { ctx, world } = fixture();
     const wanted = {

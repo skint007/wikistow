@@ -155,6 +155,51 @@ describe('a search index', () => {
     expect(again.page(lib.spaceId, lib.page.pageId)?.updated).toBe(edited?.updated);
   });
 
+  it('asks the server again for a time it doesn’t hold, building or updating, not when offline', async () => {
+    const { ed, lib } = await shared();
+    const index = await search.indexSpaces(ed.ctx);
+    const taken = index.page(lib.spaceId, lib.page.pageId)?.updated;
+    expect(taken).toEqual(expect.any(String));
+    // As an index and versions a build before times kept: none.
+    const timeless = new search.PageIndex();
+    for (const { doc, title, text, properties, links } of index.pages()) {
+      timeless.addText(doc, { title, text, properties, links });
+    }
+    const untimed = (ctx: ClientContext) => {
+      const cached = [...search.keptPages(index)].map(([revisionId, page]) =>
+        ctx.revisions.get({
+          spaceId: page.spaceId,
+          pageId: page.pageId,
+          revisionId,
+          audience: 'draft',
+        }),
+      );
+      ctx.revisions.clear();
+      for (const opened of cached) if (opened) ctx.revisions.put({ ...opened, createdAt: null });
+    };
+    untimed(ed.ctx);
+    const paths = calls(ed.ctx);
+    // A kept index entry without a time is opened again, and asked for.
+    const kept = new Map(
+      [...search.keptPages(index)].map(([id, page]) => [id, { ...page, updated: null }]),
+    );
+    const built = await search.indexSpaces(ed.ctx, { kept });
+    expect(built.page(lib.spaceId, lib.page.pageId)?.updated).toBe(taken);
+    expect(paths).toContain('/api/revisions/batch');
+    // An update asks again for what it holds without one.
+    untimed(ed.ctx);
+    paths.length = 0;
+    const updated = await search.updateIndex(ed.ctx, timeless, { spaces: [lib.spaceId] });
+    expect(updated.page(lib.spaceId, lib.page.pageId)?.updated).toBe(taken);
+    expect(paths).toContain('/api/revisions/batch');
+    // Offline, from what's kept, nothing is asked: the time stays unknown.
+    untimed(ed.ctx);
+    paths.length = 0;
+    const offline = await search.updateIndex(ed.ctx, timeless, { spaces: [] });
+    expect(offline).toBe(timeless);
+    expect(paths).toEqual([]);
+  });
+
   it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {
     const { bob, ed, lib } = await shared();
     // Kept text stands in for the version's, so what was opened again shows.
