@@ -83,7 +83,7 @@ type Progress = {
   slots: number[];
   units: (Unit | undefined)[];
   done: boolean;
-  written: Map<boolean, Composed>;
+  written: Map<string, Composed>;
 };
 
 const LISTS = new Set(['bullet_list', 'ordered_list']);
@@ -330,8 +330,8 @@ export class Writer {
    * exactly that reads back as it, doing now whatever `prepare` hasn't.
    * Its line breaks are LF; the page holds it as `page` gives it.
    */
-  write(doc: Node, final = true): Written {
-    const { markdown, faithful } = this.#composed(doc, final);
+  write(doc: Node, final = true, edges = true): Written {
+    const { markdown, faithful } = this.#composed(doc, final, edges);
     return { markdown, faithful };
   }
 
@@ -474,9 +474,12 @@ export class Writer {
     }
   }
 
-  #composed(doc: Node, final: boolean): Composed {
+  // With the page's own text before its first block and after its last, if
+  // `edges`, which a writing of only some of it, as a selection, leaves out.
+  #composed(doc: Node, final: boolean, edges = true): Composed {
+    const key = `${final}${edges}`;
     const progress = this.#progressOf(doc);
-    const known = progress.written.get(final);
+    const known = progress.written.get(key);
     if (known) return known;
     this.prepare(doc, () => true);
     const base = progress.base;
@@ -485,13 +488,13 @@ export class Writer {
     if (units.some((unit) => typeof unit?.markdown !== 'string')) {
       composed = this.#whole(doc, final, false);
     } else {
-      composed = this.#joined(doc, progress, base, final);
+      composed = this.#joined(doc, progress, base, final, edges);
       // With its blocks as their source, it may not read as it shows where
       // the editor's own writing of them all would.
       if (!composed.faithful && units.some((unit) => unit?.sourced))
         composed = this.#whole(doc, final, true) ?? composed;
     }
-    progress.written.set(final, composed);
+    progress.written.set(key, composed);
     return composed;
   }
 
@@ -513,7 +516,13 @@ export class Writer {
 
   // The units of `progress` one after another, those as their source with
   // the text that was between them there, if they were next to each other.
-  #joined(doc: Node, progress: Progress, base: Base | null, final: boolean): Composed {
+  #joined(
+    doc: Node,
+    progress: Progress,
+    base: Base | null,
+    final: boolean,
+    edges: boolean,
+  ): Composed {
     const { units } = progress;
     const lineBreak = this.#lineBreak;
     const anew = (markdown: string) =>
@@ -536,9 +545,11 @@ export class Writer {
         // where that's only blank lines.
         const first = spans[0];
         const lead = first ? text.slice(0, first.from) : '';
-        const kept = unit.sourced
-          ? unit.sourced.first === 0
-          : progress.slots[run] === 0 && LINES.test(withLf(lead));
+        const kept =
+          edges &&
+          (unit.sourced
+            ? unit.sourced.first === 0
+            : progress.slots[run] === 0 && LINES.test(withLf(lead)));
         between = kept ? lead : '';
       } else {
         // Where it was there, as two blocks next to each other there, or
@@ -571,8 +582,13 @@ export class Writer {
     const lastSpan = spans.at(-1);
     const after = lastSpan ? text.slice(lastSpan.to) : '';
     const ends =
-      !!base && !!last?.sourced && last.sourced.last === spans.length - 1 && final === base.final;
+      edges &&
+      !!base &&
+      !!last?.sourced &&
+      last.sourced.last === spans.length - 1 &&
+      final === base.final;
     const instead =
+      edges &&
       !!base &&
       !!last &&
       !last.sourced &&

@@ -341,6 +341,23 @@ describe('an edit in the visual editor', () => {
     expect(m.unfaithful).toEqual([]);
   });
 
+  it('gives what’s selected without the page’s blank lines around it', async () => {
+    const m = await mount('\nHello world\n\nSecond\n\n');
+    const view = viewOf(m.dom);
+    const at = find(view.state.doc, 'world');
+    act(() =>
+      view.dispatch(
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, at, at + 'world'.length)),
+      ),
+    );
+    expect(m.handle.selection?.()).toBe('world');
+    const end = view.state.doc.content.size;
+    act(() =>
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, end - 1))),
+    );
+    expect(m.handle.selection?.()).toBe('Hello world\n\nSecond');
+  });
+
   it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
     for (const [page, kept] of [
       ['Para.\n\n  ```\n  code\n  ```\n', '  ```\n  code\n  ```\n'],

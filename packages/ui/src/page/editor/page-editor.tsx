@@ -302,11 +302,15 @@ export function PageEditor({
       setNote(null);
       if (focus) surface.current?.focus(focus.at);
     };
-    // Whatever was given since, once what's under way is done.
-    const onward = (text: string) => {
+    // Whatever was given since, once what's under way is done; or what's
+    // waiting, if what was under way was for an earlier split.
+    const onward = (text: string | null) => {
       const hurry = hurried.current;
       hurried.current = false;
       if (given.current !== null && given.current !== text) syncVisual(given.current, 0, hurry);
+    };
+    const stale = () => {
+      if (modeNow.current === 'split') onward(null);
     };
     const run = (now: boolean) => {
       syncing.current = null;
@@ -334,7 +338,7 @@ export function PageEditor({
         reading.current = true;
         void taking.then((took) => {
           reading.current = false;
-          if (ask !== asked.current) return;
+          if (ask !== asked.current) return stale();
           // The newest, read whole, as soon as its pace allows.
           if (!took) {
             const hurry = hurried.current;
@@ -366,7 +370,7 @@ export function PageEditor({
       wholeAt.current = started + WHOLE_MS;
       void check(text).then((fidelity) => {
         reading.current = false;
-        if (ask !== asked.current) return;
+        if (ask !== asked.current) return stale();
         const took = performance.now() - started;
         wholeAt.current = started + Math.max(WHOLE_MS, WHOLE_SHARE * took);
         const newest = given.current === text;
