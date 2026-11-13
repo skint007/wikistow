@@ -15,6 +15,7 @@ import {
   type NewChange,
   type PendingChange,
 } from '../key-versions.ts';
+import { spaceKeys } from './keys.ts';
 import type { ClientContext } from './session.ts';
 
 /**
@@ -47,8 +48,12 @@ export async function sendShareChange<T>(
   try {
     result = await send();
   } catch (error) {
-    if (outcomeUnknown(error) || lostMeanwhile()) await marks.lose?.(ids);
-    else await marks.settle?.(ids, []);
+    if (outcomeUnknown(error) || lostMeanwhile()) {
+      await marks.lose?.(ids);
+      settleAfterGrace(ctx, changes);
+    } else {
+      await marks.settle?.(ids, []);
+    }
     throw error;
   } finally {
     if (renewing) clearInterval(renewing);
@@ -59,6 +64,18 @@ export async function sendShareChange<T>(
     for (const { spaceId, shareId, keyVersion } of raises)
       marks.raise(spaceId, shareId, keyVersion);
   return result;
+}
+
+// Once a lost answer's grace has passed, fetch the spaces again, which
+// settles what was lost (`spaceKeys`), so no later load has to come first.
+function settleAfterGrace(ctx: ClientContext, changes: readonly NewChange[]): void {
+  for (const spaceId of new Set(changes.map((change) => change.spaceId))) {
+    const timer = setTimeout(
+      () => void spaceKeys(ctx, spaceId, { refresh: true }).catch(() => {}),
+      LOST_GRACE_MS + 1_000,
+    );
+    (timer as { unref?: () => void }).unref?.();
+  }
 }
 
 /**

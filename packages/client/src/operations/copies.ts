@@ -838,6 +838,8 @@ function openedIn(versions: Opened, revisionId: RevisionId): OpenedRevision {
  * lists, which a move's finish compares.
  */
 async function sealingFor(ctx: ClientContext, preview: CopyPreview, live: () => void) {
+  // Other tabs may have raised a mark since (section 6.8).
+  await ctx.marks.refresh?.();
   const { source, destination } = preview;
   const sameSpace = source.spaceId === destination.spaceId;
   const tree = await loadTree(ctx, source.spaceId);

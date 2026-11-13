@@ -193,6 +193,65 @@ describe('pending changes across tabs', () => {
     await expect(marks.begin([change()])).rejects.toThrow();
   });
 
+  it('never lets a write queued before it carry a change it couldn’t record', async () => {
+    let kept: Uint8Array | null = null;
+    let writes = 0;
+    const file: KeptFile = {
+      read: () => Promise.resolve(kept),
+      // The first write lands; the second, the change's own, fails.
+      write: (sealed) => {
+        writes += 1;
+        if (writes === 2) return Promise.reject(new Error('Quota exceeded'));
+        kept = sealed;
+        return Promise.resolve();
+      },
+    };
+    const marks = await KeptMarks.open(file, who);
+    marks.raise(spaceId, other, 2);
+    await expect(marks.begin([change()])).rejects.toThrow('Quota exceeded');
+    const later = await KeptMarks.open(file, who);
+    expect(later.get(spaceId, other)).toBe(2);
+    expect(changePending(later, spaceId, shareId)).toBe(false);
+  });
+
+  it('keeps changes still being sent through a restore it hadn’t seen', async () => {
+    const b = browser();
+    const one = await KeptMarks.open(b.tab(), who);
+    const two = await KeptMarks.open(withoutChannel(b.tab()), who);
+    one.raise(spaceId, other, 4);
+    await one.begin([change()]);
+    await two.refresh();
+    two.startOver('2026-11-13T00:00:00.000Z');
+    await expect.poll(async () => (await KeptMarks.open(b.tab(), who)).restoredAt).not.toBeNull();
+    const later = await KeptMarks.open(b.tab(), who);
+    expect(later.get(spaceId, other)).toBe(0);
+    expect(changePending(later, spaceId, shareId)).toBe(true);
+    // And the tab that sent it, writing after, keeps it too.
+    one.raise(spaceId, other, 1);
+    await expect
+      .poll(async () => changePending(await KeptMarks.open(b.tab(), who), spaceId, shareId))
+      .toBe(true);
+  });
+
+  it('refuses a change once its marks close while it waits for the lock', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const file: KeptFile = {
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      exclusive: async (work) => {
+        await gate;
+        return work();
+      },
+    };
+    const marks = await KeptMarks.open(file, who);
+    const begun = marks.begin([change()]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    marks.close();
+    release();
+    await expect(begun).rejects.toThrow();
+  });
+
   it('stops listening once closed', async () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);

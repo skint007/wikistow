@@ -152,7 +152,8 @@ export class KeptMarks implements KeyVersionMarks {
    * mark and the No going back marks, which describe the server before it.
    */
   startOver(restoredAt: string): void {
-    void this.#change({ ...NONE, restoredAt });
+    // Changes still being sent stay pending: their answers are the server's now.
+    void this.#change({ ...NONE, marks: ownChanges(this.#contents.marks), restoredAt });
   }
 
   get contactsMark(): ContactsMark | null {
@@ -205,6 +206,10 @@ export class KeptMarks implements KeyVersionMarks {
    * file can't be written, this throws, and nothing is sent.
    */
   async begin(changes: readonly NewChange[]): Promise<readonly PendingChange[]> {
+    if (this.#closed) throw new Error('The session has ended; its marks are closed');
+    // Let writes queued before land first, so none of them carries this
+    // change to the file before its own write, which may fail.
+    await this.#writing;
     if (this.#closed) throw new Error('The session has ended; its marks are closed');
     const at = Date.now();
     const begun = changes.map((change): PendingChange => ({
@@ -319,7 +324,11 @@ export class KeptMarks implements KeyVersionMarks {
         await file.exclusive(async () => {
           const disk = this.#open(await file.read().catch(() => null));
           if (disk) this.#contents = merged(this.#contents, disk);
-          if (!this.#closed) await file.write(this.#seal(this.#contents));
+          if (this.#closed) {
+            if (strict) throw new Error('The session has ended; its marks are closed');
+            return;
+          }
+          await file.write(this.#seal(this.#contents));
         });
       }
       if (!this.#closed) this.#channel?.post();
@@ -355,6 +364,22 @@ function pendingIn(marks: Contents['marks']): PendingChange[] {
       lost: lostAt !== null,
       lostAt,
     });
+  }
+  return out;
+}
+
+// Only the pending changes, losses and clears `marks` holds.
+function ownChanges(marks: Contents['marks']): Contents['marks'] {
+  const out: Contents['marks'] = {};
+  for (const [key, value] of Object.entries(marks)) {
+    if (key.startsWith('~')) {
+      Object.defineProperty(out, key, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
   }
   return out;
 }
@@ -399,7 +424,15 @@ function raised(marks: Contents['marks'], raises: readonly MarkRaise[]): Content
  */
 function merged(mine: Contents, disk: Contents): Contents {
   const restored = (contents: Contents) => Date.parse(contents.restoredAt ?? '') || 0;
-  if (restored(disk) !== restored(mine)) return restored(disk) > restored(mine) ? disk : mine;
+  if (restored(disk) !== restored(mine)) {
+    // The later restore's marks win whole, but for pending changes, which
+    // are about the server now, and their clears.
+    const [winner, loser] = restored(disk) > restored(mine) ? [disk, mine] : [mine, disk];
+    return {
+      ...winner,
+      marks: tidied({ ...ownChanges(loser.marks), ...winner.marks }),
+    };
+  }
   const marks = { ...disk.marks };
   for (const [share, version] of Object.entries(mine.marks)) {
     marks[share] = Math.max(marks[share] ?? 0, version);
