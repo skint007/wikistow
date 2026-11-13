@@ -127,5 +127,12 @@ describe('contentChanged', () => {
         },
       ],
     });
+    // One saved into this device's queue, on its base, isn't taken yet: no time.
+    vi.mocked(searchIndexChanged).mockClear();
+    const queued = saved('r3', 'r3');
+    await contentChanged(queryClient, ctx, { saved: queued });
+    expect(vi.mocked(searchIndexChanged).mock.calls).toEqual([
+      [queryClient, { saved: { ...queued, updated: null } }],
+    ]);
   });
 });

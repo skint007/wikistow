@@ -25,6 +25,9 @@ export type ContentChange =
    */
   | { saved: SavedDraft };
 
+/** A save into this device's queue (ADR 0009) names its base as the version saved. */
+const queued = (saved: SavedDraft) => saved.revisionId === saved.basedOn;
+
 /** A draft this person saved: the version, what it holds as written, and the region it is in. */
 export type SavedDraft = searchOperations.SavedVersion & { payload: PagePayload; region: Region };
 
@@ -50,8 +53,9 @@ export async function contentChanged(
   const loads: Promise<void>[] = [];
   for (const each of [change].flat()) {
     if ('saved' in each) {
-      // Told once the server took it, which says no time: this device's.
-      const updated = each.saved.updated ?? new Date().toISOString();
+      // The server's answer to a save says no time, so this device's. A
+      // save into this device's queue, on its base, isn't taken yet.
+      const { updated = queued(each.saved) ? null : new Date().toISOString() } = each.saved;
       searchIndexChanged(queryClient, { saved: { ...each.saved, updated } });
       loads.push(patchTree(queryClient, ctx, each.saved, refetchType));
       pages.set(each.saved.pageId, each.saved);

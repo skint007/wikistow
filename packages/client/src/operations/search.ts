@@ -78,7 +78,7 @@ export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   readonly links: readonly Readonly<IndexedLink>[];
   /**
    * When the server took the version indexed, as it says, not signed by its
-   * author (`OpenedRevision.createdAt`); for a draft this person saved on
+   * author (`OpenedRevision.createdAt`); for a version this person saved on
    * this device, this device's time once the server confirmed it. Null when
    * unknown, as for a draft waiting offline.
    */
@@ -441,8 +441,12 @@ export async function indexSpaces(
   await readPages(ctx, spaces, {
     reuse: (spaceId, page, head) => {
       const found = kept?.get(head);
-      return found?.spaceId === spaceId && found.pageId === page ? found : undefined;
+      // One kept without its time is opened again, to be asked for it (`timed`).
+      return found?.spaceId === spaceId && found.pageId === page && found.updated !== null
+        ? found
+        : undefined;
     },
+    timed: from === 'server',
     live,
     onProgress,
     readLinks,
@@ -527,6 +531,7 @@ export async function updateIndex(
     await readPages(ctx, await loadSpaces(ctx, ids, true), {
       reuse: (spaceId, page, head) =>
         index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
+      timed: true,
       live,
       onProgress,
       readLinks,
@@ -636,12 +641,15 @@ async function readPages(
   spaces: Awaited<ReturnType<typeof loadSpaces>>,
   {
     reuse,
+    timed,
     live,
     onProgress,
     readLinks,
     each,
   }: {
     reuse: (spaceId: SpaceId, pageId: PageId, head: RevisionId) => IndexedText | 'held' | undefined;
+    /** Ask the server for when each version opened was taken, if held without (`RevisionOptions`). */
+    timed: boolean;
     live: () => void;
     onProgress: ((progress: IndexProgress) => void) | undefined;
     readLinks: ReadWikilinks | undefined;
@@ -668,7 +676,8 @@ async function readPages(
         }
       }
       const unkept = chunk.filter((page) => !reused.has(page.id));
-      const versions = unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept) : null;
+      const versions =
+        unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept, { timed }) : null;
       live();
       // One at a time, each read checked first: locking or giving up stops
       // the reads, rather than leave them queued with the pages' text.
