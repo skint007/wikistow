@@ -39,6 +39,33 @@ export const treeLabels = {
 export const childrenOf = (tree: Tree, parentId: FolderId | null) =>
   childrenInOrder(tree, parentId, treeLabels);
 
+type Child = ReturnType<typeof childrenOf>[number];
+
+/**
+ * Every folder's children, and the top's, in order (`childrenOf`), each
+ * folder sorted once: for what asks of many rows at a time, such as the
+ * sidebar's menus, which a large folder would otherwise sort for each row.
+ */
+export function orderOfTree(tree: Tree): (parentId: FolderId | null) => readonly Child[] {
+  const groups = new Map<FolderId | null, { folders: Tree['folders']; pages: Tree['pages'] }>();
+  const group = (parentId: FolderId | null) => {
+    let found = groups.get(parentId);
+    if (!found) groups.set(parentId, (found = { folders: [], pages: [] }));
+    return found;
+  };
+  for (const folder of tree.folders) group(folder.parentId).folders.push(folder);
+  for (const page of tree.pages) group(page.parentId).pages.push(page);
+  const sorted = new Map<FolderId | null, readonly Child[]>();
+  return (parentId) => {
+    let children = sorted.get(parentId);
+    if (!children) {
+      children = childrenInOrder(group(parentId), parentId, treeLabels);
+      sorted.set(parentId, children);
+    }
+    return children;
+  };
+}
+
 type Waits = { waiting: (id: PageId | FolderId | null) => Waiting };
 
 // The children whose order this app writes: not one made offline, which
@@ -71,18 +98,20 @@ export function landing(
 }
 
 /**
- * Whether Move up (-1) or Move down (1) can move `nodeId` in its folder: it
- * isn't first or last of what this app orders there.
+ * Whether Move up (-1) or Move down (1) can move `nodeId` among `children`,
+ * its folder's in order: it isn't first or last of what this app orders there.
  */
 export function canStep(
-  tree: Tree,
-  waits: Waits,
-  { nodeId, parentId }: { nodeId: string; parentId: FolderId | null },
+  children: readonly Child[],
+  { waiting }: Waits,
+  nodeId: string,
   step: -1 | 1,
 ) {
-  const children = ordered(tree, parentId, waits);
-  const at = children.findIndex((child) => child.id === nodeId);
-  return at >= 0 && at + step >= 0 && at + step < children.length;
+  const ids: string[] = children.flatMap(({ node }) =>
+    waiting(node.id) === 'made' ? [] : [node.id],
+  );
+  const at = ids.indexOf(nodeId);
+  return at >= 0 && at + step >= 0 && at + step < ids.length;
 }
 
 // The folder's name, or the space's for its top, for a change made offline to name.

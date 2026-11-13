@@ -1834,19 +1834,21 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   // In its new place, and where it goes there: where the person put it, or
   // where the server will, at the end of a folder with an order of its own.
   // Folders put in order here: their positions, by node, by folder (null: the top).
-  const orders = new Map<FolderId | null, Record<string, Position | null>>();
+  const orders = new Map<FolderId | null, QueuedOrder>();
   for (const entry of here) {
-    if (entry.kind === 'order' && entry.failure === null)
-      orders.set(entry.parentId, entry.positions);
+    if (entry.kind === 'order' && entry.failure === null) orders.set(entry.parentId, entry);
   }
   const placed = <N extends { id: string; parentId: FolderId | null; position: Position | null }>(
     node: N,
   ): N => {
     const move = moved.get(node.id);
     const parentId = move ? move.parentId : node.parentId;
-    const ordered = orders.get(parentId);
-    if (ordered && node.id in ordered)
-      return { ...node, parentId, position: ordered[node.id] ?? null };
+    const order = orders.get(parentId);
+    // A move with a place, made after, says where it is now.
+    const newer = move?.position !== undefined && move.at > (order?.at ?? -Infinity);
+    if (order && node.id in order.positions && !newer) {
+      return { ...node, parentId, position: order.positions[node.id] ?? null };
+    }
     if (!move) return node;
     const position =
       move.position !== undefined

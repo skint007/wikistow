@@ -91,7 +91,7 @@ import {
 } from './tree-menus';
 import { useAvailability } from './availability';
 import { copying, NODE_DRAG_TYPE, nodeDrag } from './node-drag';
-import { canStep, childrenOf, useReorder } from './tree-order';
+import { canStep, childrenOf, orderOfTree, useReorder } from './tree-order';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -325,6 +325,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     () => (tree ? visibleRows(tree, expanded, filter) : []),
     [tree, expanded, filter],
   );
+  // Each folder's children in order, sorted once for each tree, for every row's menu.
+  const orderIn = useMemo(() => (tree ? orderOfTree(tree) : () => []), [tree]);
   // While filtering, every folder shows open, and the kept state waits
   // unchanged for the filter to clear. Saving drops folders the tree no
   // longer has, deleted or out of reach.
@@ -373,14 +375,14 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const orderingOf = (row: Row): Ordering | null => {
     if (filtering || !canOrderAt(row.parentId)) return null;
     const step = (by: -1 | 1) =>
-      canStep(tree, availability, { nodeId: row.id, parentId: row.parentId }, by)
+      canStep(orderIn(row.parentId), availability, row.id, by)
         ? () => void reorder.step(tree, row.id, row.parentId, by)
         : undefined;
     return { onMoveUp: step(-1), onMoveDown: step(1) };
   };
   // Sort by name, for a folder, or the top, with an order of its own.
   const sortsAt = (parentId: FolderId | null) =>
-    canOrderAt(parentId) && hasOwnOrder(childrenOf(tree, parentId).map((child) => child.node));
+    canOrderAt(parentId) && hasOwnOrder(orderIn(parentId).map((child) => child.node));
   // Importing publishes what it makes, so it needs publish rights there too.
   const canImportAt = (parentId: FolderId | null) =>
     canEditAt(parentId) && ((shareCovering(tree, parentId) ?? tree.space)?.canPublish ?? false);
@@ -506,7 +508,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     );
   // The child after `id` in its folder's order, or null for the last.
   const nextOf = (id: string, parentId: FolderId | null) => {
-    const children = childrenOf(tree, parentId);
+    const children = orderIn(parentId);
     const at = children.findIndex((child) => child.node.id === id);
     return children[at + 1]?.node.id ?? null;
   };
