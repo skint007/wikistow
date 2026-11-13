@@ -85,6 +85,8 @@ Request flow and deployment:
 
 Every page and folder has a stable ID and one parent within one space. A move between spaces is a copy, so the moved pages and folders get new IDs. A page path is a human-friendly client view derived from decrypted names. Renaming a page does not change its identity or break internal links.
 
+Each folder, and the top of each space, has one order of what is in it, shared by everyone who sees it, which anyone who can edit there changes, as with a book's contents (#400). A folder nobody ordered lists by name, which only apps can do, as names are encrypted: folders first, then pages. Once someone puts an item in place there, by dragging it between two rows or with **Move up** and **Move down**, the folder has an order of its own, folders and pages mixed, and everything in it takes its place, as shown then. Something new, or moved or copied in, goes last; something restored from the trash goes back where it was while the folder keeps its order. **Sort by name** lists it by name again. The order is a position on each page and folder, a fractional index: moving one item changes its own position alone, so two people reordering at once don't clash, and a move sets the folder and the position together. The sidebar, the folder view, plugins, agents and the CLI's tree list in that order. Offline, a reorder waits on the device with the other moves. Protocol section 10 (**Order**) has the rules.
+
 Personal spaces start with one owner. Shared spaces have at least one owner and may have multiple owners. Space owners can access all content in their space, including drafts. Installation administrators have no implicit space ownership or decryption access.
 
 Proposed default: the common library is an ordinary shared space with owner-managed membership. Creating an account does not automatically grant access to it or any private space. If the common library later admits every verified account automatically, its owners must explicitly opt into that audience and clients must still distribute keys to new members.
@@ -140,7 +142,7 @@ Proposed deletion policy: account deletion removes the account's credentials, pe
 
 ### What the service can see
 
-Encrypt page titles, Markdown, attachment names and contents, and human-readable folder and space names. The server retains account emails, opaque resource IDs, parent relationships, memberships, permissions, revision identifiers, sizes, timestamps, and activity attribution. This version protects content, not all metadata or traffic patterns.
+Encrypt page titles, Markdown, attachment names and contents, and human-readable folder and space names. The server retains account emails, opaque resource IDs, parent relationships, the order of a folder's contents where someone gave it one (an order of those IDs, nothing of their names), memberships, permissions, revision identifiers, sizes, timestamps, and activity attribution. This version protects content, not all metadata or traffic patterns.
 
 The server stores ciphertext and wrapped keys, not content keys, vault passphrases, recovery secrets, plaintext search indexes, or decrypted page previews. Keep plaintext out of request logs, error reporting, analytics, server caches, and background jobs. Public links, below, are the exception to storing plaintext: the server stores, renders and serves their copies, and still keeps them out of logs and error reports. Source-to-publication relationships are additional visible metadata; human-readable source names remain encrypted.
 

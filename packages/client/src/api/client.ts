@@ -50,8 +50,11 @@ export const noAnswer = (error: unknown): boolean =>
   error instanceof ApiError &&
   (error.code === 'network' || (error.status >= 500 && error.code === 'unreadable-response'));
 
+// A part whose every field is optional, such as a query of flags, may be left out.
 type Part<S, K extends string> = S extends z.ZodType
-  ? { [P in K]: z.input<S> }
+  ? object extends z.input<S>
+    ? { [P in K]?: z.input<S> }
+    : { [P in K]: z.input<S> }
   : { [P in K]?: never };
 
 /** What a caller supplies for route `R`: exactly the parts its contract declares. */

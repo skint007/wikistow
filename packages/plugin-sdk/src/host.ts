@@ -109,14 +109,21 @@ export type PageChange = {
 export interface Pages {
   /** The draft where the person edits the page, else its published version. */
   read(page: PageRef): Promise<PageVersion>;
+  /**
+   * The folders and pages directly in a folder, or at the top of a space,
+   * in the order the sidebar lists them: the folder's own order, or by name,
+   * folders first.
+   */
   list(folder: FolderRef): Promise<FolderEntry[]>;
   /**
    * Every folder and page of a space the plugin can read, in one call, as
    * the app's own tree shows them: with what was made on this device and
-   * not sent yet, and offline, what this device keeps. Folders come
-   * first, each list in no set order. Empty where it can read nothing
-   * there. Missing (undefined) in an app older than it; in a script it is
-   * always there, and such an app stops the script that calls it.
+   * not sent yet, and offline, what this device keeps. They come in the
+   * order the sidebar lists them with every folder open: each folder
+   * followed by what is in it, each in its folder's order. Empty where it
+   * can read nothing there. Missing (undefined) in an app older than it; in
+   * a script it is always there, and such an app stops the script that
+   * calls it.
    */
   tree?(spaceId: string): Promise<TreeEntry[]>;
   /**

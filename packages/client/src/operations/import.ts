@@ -641,7 +641,7 @@ function targetsByFolder(ctx: ClientContext, spaceId: SpaceId) {
     if (route === structureRoutes.target) {
       const { params, query } = input as CallInput<typeof structureRoutes.target>;
       if (params.spaceId !== spaceId) return api.call(...args);
-      const nodeId = query.nodeId ?? null;
+      const nodeId = query?.nodeId ?? null;
       const madeWith = nodeId === null ? undefined : pinned.get(nodeId);
       if (madeWith === undefined) return ask(nodeId);
       return { ...(await madeWith), name: null } satisfies Target;

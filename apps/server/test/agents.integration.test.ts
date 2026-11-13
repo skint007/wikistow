@@ -259,6 +259,8 @@ describe('an agent’s token', () => {
         structureRoutes.target,
         structureRoutes.createFolder,
         structureRoutes.updateMetadata,
+        structureRoutes.arrange,
+        structureRoutes.sortByName,
         pageRoutes.createPage,
         pageRoutes.getPage,
         pageRoutes.saveDraft,

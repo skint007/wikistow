@@ -92,6 +92,10 @@ A container within a space with one parent and any number of child folders or pa
 **Page**
 A document with one location, an editable draft, and zero or more published versions. Its title and Markdown content belong to each version.
 
+**Order**
+How a folder, or the top of a space, lists what is in it, the same for everyone who sees it. By name, folders first, until an editor puts something in place; then the folder has an order of its own, folders and pages mixed, until someone chooses **Sort by name**. Each item's place in it is its position.
+_Avoid_: Sort order (a person's own choice, which this isn't), rank, index.
+
 **Draft**
 The current unpublished content of a page. Editors can see it; readers cannot.
 

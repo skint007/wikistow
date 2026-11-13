@@ -293,8 +293,18 @@ describe('making folders', () => {
     const tree = (await run(['tree', '--space', spaceId])).json();
     expect(tree.folders).toEqual(
       expect.arrayContaining([
-        { id: notebooks.folderId, parentId: lib.shared, name: 'Notebooks' },
-        { id: home.folderId, parentId: notebooks.folderId, name: 'Home' },
+        {
+          id: notebooks.folderId,
+          parentId: lib.shared,
+          name: 'Notebooks',
+          order: expect.any(Number),
+        },
+        {
+          id: home.folderId,
+          parentId: notebooks.folderId,
+          name: 'Home',
+          order: expect.any(Number),
+        },
       ]),
     );
     expect(tree.pages).toContainEqual(
@@ -318,7 +328,7 @@ describe('making folders', () => {
     expect(folder.code, folder.stdout).toBe(page.code);
     expect(folder.json().error.code).toBe(page.json().error.code);
     const tree = (await run(['tree', '--space', lib.spaceId])).json();
-    expect(tree.folders).toEqual([{ id: lib.shared, parentId: null, name: 'Shared' }]);
+    expect(tree.folders).toEqual([{ id: lib.shared, parentId: null, name: 'Shared', order: 0 }]);
   }, 60_000);
 });
 
@@ -874,7 +884,12 @@ describe('copying', () => {
       links: [{ kind: 'wikilink', page: 'plan', text: 'Plan', count: 1 }],
     });
     const tree = (await w.run(['tree', '--space', w.board])).json();
-    expect(tree.folders).toContainEqual({ id: trip.nodeId, parentId: w.drafts, name: 'Trip' });
+    expect(tree.folders).toContainEqual({
+      id: trip.nodeId,
+      parentId: w.drafts,
+      name: 'Trip',
+      order: expect.any(Number),
+    });
     const inTrip = (tree.pages as Record<string, unknown>[])
       .filter((p) => p.parentId === trip.nodeId)
       .map(({ id, title, publishedHead }) => ({ id, title, publishedHead }));

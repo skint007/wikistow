@@ -76,7 +76,12 @@ export function onSent(listener: (sent: SentVersion) => void): () => void {
 const CHANNEL = 'wikistow-kept-queue';
 const Told = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('saved') }),
-  z.object({ kind: z.literal('changed'), spaceId: SpaceId, id: z.union([PageId, FolderId]) }),
+  z.object({
+    kind: z.literal('changed'),
+    spaceId: SpaceId,
+    // The space, for the order of its top (#400).
+    id: z.union([PageId, FolderId, SpaceId]),
+  }),
   z.object({ kind: z.literal('sent'), spaceId: SpaceId }),
   z.object({
     kind: z.enum(['recorded', 'landed']),

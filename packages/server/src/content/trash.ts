@@ -38,6 +38,7 @@ import {
   subtreeOf,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { placeAtEnd, placeBack } from './order.ts';
 import { humanActor } from './identities.ts';
 import {
   deleteUnlistedFile,
@@ -206,7 +207,8 @@ async function holdTrash(tx: Database, accountId: string, trashId: string) {
  * went with it: its versions, attachments and shares, and its pages'
  * published state, all of which stayed. Its public links stay ended.
  *
- * It goes back under the folder it was in. If that folder is in the trash
+ * It goes back under the folder it was in, where it was in that folder's
+ * own order while the folder still has one. If that folder is in the trash
  * too, it goes to the top of the space, or, if it was in a shared folder,
  * to the top of that one: its keys are the share's. Its records' keys must
  * fit where it goes: the share there, or the owners outside one, as they
@@ -244,9 +246,13 @@ export async function restoreTrash(
     requireRoom(await pathUp(tx, spaceId, parentId), depthOf(held, nodeId) + 1);
     await requireRegion(tx, { held, rooted, to });
 
-    if (parentId !== root.parentId) {
-      await tx.update(nodes).set({ parentId }).where(eq(nodes.id, nodeId));
-    }
+    // Back where it was in its folder's order, while the folder has one;
+    // anywhere else, at the end like anything new (section 10, Order).
+    const position =
+      parentId === root.parentId
+        ? await placeBack(tx, { spaceId, parentId, nodeId })
+        : await placeAtEnd(tx, { spaceId, parentId, except: [nodeId] });
+    await tx.update(nodes).set({ parentId, position }).where(eq(nodes.id, nodeId));
     await tx.update(nodes).set({ trashId: null }).where(eq(nodes.trashId, row.id));
     await tx.delete(trash).where(eq(trash.id, row.id));
     await bumpPermissions(tx, spaceId, ids);
