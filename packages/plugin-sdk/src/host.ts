@@ -73,6 +73,15 @@ export type PageRow = {
   revision: string;
   /** The version indexed is a draft readers don't see, as in `SearchResult`. */
   draft: boolean;
+  /**
+   * When that version was saved, as an ISO 8601 time in UTC
+   * (`2026-11-13T09:30:00.000Z`): when the server took it, as the server
+   * says, which its author didn't sign; for a draft saved on this device,
+   * this device's clock once the server took it. Null when the app doesn't
+   * know, as for a change still waiting on the device to be sent. Missing in
+   * an app older than it.
+   */
+  updated?: string | null;
 };
 
 /**

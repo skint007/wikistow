@@ -121,12 +121,13 @@ export class SearchIndex<T> {
 
   /**
    * Index a page as another index read it (`pages`): its title, its text
-   * already reduced, its properties and its links, none if left out. Only while the
-   * index is built: not once it is derived (`with`), or derived from.
+   * already reduced, its properties and its links, none if left out, and
+   * when its version was saved, null if left out. Only while the index is
+   * built: not once it is derived (`with`), or derived from.
    */
-  addText(doc: T, { title, text, properties = [], links = [] }: IndexedText): void {
+  addText(doc: T, { title, text, properties = [], links = [], updated = null }: IndexedText): void {
     if (this.#frozen) throw new Error('An index derived, or derived from, doesn’t change');
-    this.#base.add({ doc, title, text, properties, links });
+    this.#base.add({ doc, title, text, properties, links, updated });
     this.#held = null;
   }
 
@@ -431,7 +432,7 @@ function after(sorted: readonly string[], term: string): number {
 
 /**
  * A page as an index holds it: what its hits return, its title, its reduced
- * text, its properties and its links.
+ * text, its properties and its links, and when its version was saved.
  */
 export type IndexedPage<T> = {
   doc: T;
@@ -439,6 +440,8 @@ export type IndexedPage<T> = {
   text: string;
   properties: readonly Readonly<PropertyData>[];
   links: readonly Readonly<IndexedLink>[];
+  /** When the server took the version indexed (`OpenedRevision.createdAt`), or null if unknown. */
+  updated: string | null;
 };
 
 /**
@@ -455,6 +458,7 @@ export type IndexedText = {
   text: string;
   properties?: readonly Readonly<PropertyData>[];
   links?: readonly Readonly<IndexedLink>[];
+  updated?: string | null;
 };
 
 /** What the index keeps of a page's Markdown: its text for search, and its properties. */

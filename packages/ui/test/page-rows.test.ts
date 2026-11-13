@@ -26,6 +26,8 @@ const diary = FolderId.parse('f-diary');
 
 type Page = [id: string, title: string, properties: PropertyData[], folderIds: FolderId[]];
 
+const SAVED = '2026-11-13T09:30:00.000Z';
+
 const docOf = ([id, , , folderIds]: Page, revision = 1): searchOperations.SearchPage => ({
   spaceId,
   pageId: PageId.parse(id),
@@ -40,7 +42,7 @@ const docOf = ([id, , , folderIds]: Page, revision = 1): searchOperations.Search
 function indexOf(pages: Page[]) {
   const index = new searchOperations.PageIndex();
   for (const page of pages)
-    index.addText(docOf(page), { title: page[1], text: '', properties: page[2] });
+    index.addText(docOf(page), { title: page[1], text: '', properties: page[2], updated: SAVED });
   return index;
 }
 
@@ -115,6 +117,7 @@ describe('a space’s rows', () => {
       properties: { Tags: ['#Bread', 'quick', 'bread', 2], servings: 4, tried: true },
       revision: 'r-p-bread-1',
       draft: false,
+      updated: SAVED,
     });
     // Obsidian's older `tag` too, as `from: #tag` finds it.
     expect(rows[2]?.tags).toEqual(['tomato', 'soup']);
@@ -146,6 +149,16 @@ describe('a space’s rows', () => {
     expect(pageRows(space)).toMatchObject([
       { title: 'Garlic bread', folderId: soups, path: ['Recipes', 'Soups'] },
     ]);
+  });
+
+  it('gives null for when a version was saved when the index doesn’t know', () => {
+    const index = new searchOperations.PageIndex();
+    index.addText(docOf(['p-bread', 'Garlic bread', [], [recipes]]), {
+      title: 'Garlic bread',
+      text: '',
+    });
+    const space = readableSpace(index.list({ spaceId }), TREE, grantedTo([recipes]));
+    expect(pageRows(space).map(({ updated }) => updated)).toEqual([null]);
   });
 
   it('gives a property’s list as a copy', () => {

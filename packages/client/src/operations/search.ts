@@ -76,6 +76,13 @@ export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   readonly title: string;
   readonly properties: readonly Readonly<PropertyData>[];
   readonly links: readonly Readonly<IndexedLink>[];
+  /**
+   * When the server took the version indexed, as it says, not signed by its
+   * author (`OpenedRevision.createdAt`); for a draft this person saved on
+   * this device, this device's time once the server confirmed it. Null when
+   * unknown, as for a draft waiting offline.
+   */
+  readonly updated: string | null;
 };
 
 /** Which pages of the index to list (`PageIndex.list`). */
@@ -208,9 +215,10 @@ export class PageIndex extends SearchIndex<SearchPage> {
         text: text.text,
         properties: text.properties ?? [],
         links: text.links ?? [],
+        updated: text.updated ?? null,
       };
-      const { title, properties, links } = page;
-      added.push({ page, entry: { ...doc, title, properties, links } });
+      const { title, properties, links, updated } = page;
+      added.push({ page, entry: { ...doc, title, properties, links, updated } });
     }
     const relisted = spaces === 'all' ? [...bySpace.keys()] : spaces;
     let relisting = false;
@@ -240,8 +248,8 @@ export class PageIndex extends SearchIndex<SearchPage> {
     if (this.#read === null) {
       const read: Lookup = { bySpace: new Map(), byPage: new Map(), linked: new Map() };
       for (const page of this.pages()) {
-        const { doc, title, properties, links } = page;
-        const entry: IndexedEntry = { ...doc, title, properties, links };
+        const { doc, title, properties, links, updated } = page;
+        const entry: IndexedEntry = { ...doc, title, properties, links, updated };
         let space = read.bySpace.get(doc.spaceId);
         if (!space) read.bySpace.set(doc.spaceId, (space = []));
         space.push(entry);
@@ -459,6 +467,12 @@ export type SavedVersion = {
   revisionId: RevisionId;
   /** The payload written, as the server holds it: its title, Markdown and link table. */
   payload: Pick<PagePayload, 'title' | 'markdown' | 'extensions'>;
+  /**
+   * When it was saved, by this device's clock once the server confirmed it
+   * (`IndexedEntry.updated`). Null or left out for one still waiting on the
+   * device, or unknown.
+   */
+  updated?: string | null;
 };
 
 /**
@@ -536,7 +550,7 @@ export async function updateIndex(
         draft: true,
         unpublished: false,
       },
-      await contentOfPayload(saved.payload, readLinks),
+      { ...(await contentOfPayload(saved.payload, readLinks)), updated: saved.updated ?? null },
     ]);
   }
   live();
@@ -711,6 +725,7 @@ export type KeptPages = ReadonlyMap<
     text: string;
     properties: readonly Readonly<PropertyData>[];
     links: readonly Readonly<IndexedLink>[];
+    updated: string | null;
   }
 >;
 
@@ -718,9 +733,9 @@ export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
     index
       .pages()
-      .map(({ doc, title, text, properties, links }) => [
+      .map(({ doc, title, text, properties, links, updated }) => [
         doc.revisionId,
-        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties, links },
+        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties, links, updated },
       ]),
   );
 
@@ -741,6 +756,7 @@ const KeptJson = z.array(
     z.string(),
     z.array(KeptProperty),
     z.array(KeptLink),
+    z.iso.datetime().nullable(),
   ]),
 );
 
@@ -749,7 +765,7 @@ const KeptJson = z.array(
 // another account or server's. They are bound to the app's `build` too:
 // another build may reduce pages differently (`searchText`), so its file
 // opens as nothing and every page is read again. So does one kept before
-// properties or links were (its rows have a field fewer), whatever its build.
+// properties, links or times were (its rows have a field fewer), whatever its build.
 const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
@@ -764,6 +780,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.text,
     page.properties,
     page.links.map(({ key, pageId }) => [key, pageId]),
+    page.updated,
   ]);
   return sealOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), utf8(JSON.stringify(json)));
 }
@@ -775,7 +792,7 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   try {
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
-      json.map(([id, spaceId, pageId, title, text, properties, links]) => [
+      json.map(([id, spaceId, pageId, title, text, properties, links, updated]) => [
         id,
         {
           spaceId,
@@ -784,6 +801,7 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
           text,
           properties,
           links: links.map(([key, target]) => ({ key, pageId: target })),
+          updated,
         },
       ]),
     );
@@ -799,7 +817,10 @@ async function contentOf(
 ): Promise<{ revisionId: RevisionId; content: IndexedText } | null> {
   if (version?.opened.kind !== 'current') return null;
   const content = await contentOfPayload(version.opened.payload, readLinks);
-  return { revisionId: version.record.revisionId, content };
+  return {
+    revisionId: version.record.revisionId,
+    content: { ...content, updated: version.createdAt },
+  };
 }
 
 /**

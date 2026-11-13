@@ -176,6 +176,8 @@ export function cacheWritten(
         ? { kind: 'share', spaceId: record.spaceId, shareId: commit.wrap.shareId }
         : OWNER_REGION,
       keyVersion: commit.wrap?.keyVersion ?? null,
+      // The server's answer carries no time: this device's, as it confirmed.
+      createdAt: new Date().toISOString(),
     },
     generation,
   );

@@ -104,6 +104,7 @@ export function pageRow(
     properties: blockProperties(entry.properties) ?? {},
     revision: entry.revisionId,
     draft: entry.draft,
+    updated: entry.updated,
   };
 }
 

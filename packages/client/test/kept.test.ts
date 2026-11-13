@@ -82,6 +82,7 @@ function fakeServer(identity: PrivateIdentity) {
       opened: { kind: 'current', payload },
       region: { kind: 'owner' },
       keyVersion: null,
+      createdAt: '2026-11-13T09:00:00.000Z',
     });
     return { revisionId, blobHash };
   }
@@ -213,6 +214,8 @@ describe('keeping pages for offline', () => {
     expect(opened.opened.kind === 'current' && opened.opened.payload.title).toBe(
       `Recipes draft ${SECRET}`,
     );
+    // With when the server took it, as it said when it was kept.
+    expect(opened.createdAt).toBe('2026-11-13T09:00:00.000Z');
     expect(await pageOperations.downloadBlob(later, recipes.draft.blobHash)).toEqual(
       utf8('image Recipes draft'),
     );

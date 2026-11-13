@@ -128,6 +128,33 @@ describe('a search index', () => {
     ).toEqual([lib.page.pageId]);
   });
 
+  it('gives each page when the server took the version it holds, a reader’s the publication’s', async () => {
+    const { bob, ed, lib } = await shared();
+    const takenAt = async (revisionId: string | undefined) => {
+      const [row] = await t.db
+        .select({ at: schema.revisions.createdAt })
+        .from(schema.revisions)
+        .where(eq(schema.revisions.id, revisionId ?? ''));
+      return row?.at.toISOString();
+    };
+    const read = (await search.indexSpaces(bob.ctx)).page(lib.spaceId, lib.page.pageId);
+    const edited = (await search.indexSpaces(ed.ctx)).page(lib.spaceId, lib.page.pageId);
+    expect(read).toMatchObject({ draft: false, updated: expect.any(String) });
+    expect(edited).toMatchObject({ draft: true, updated: expect.any(String) });
+    expect(read?.updated).toBe(await takenAt(read?.revisionId));
+    expect(edited?.updated).toBe(await takenAt(edited?.revisionId));
+    expect(read?.revisionId).not.toBe(edited?.revisionId);
+    // Kept with the index, so one built from it has them too, unopened.
+    const kept = search.keptPages(await search.indexSpaces(ed.ctx));
+    const opened = search.openKept(ed.ctx, search.sealKept(ed.ctx, kept, '1.0.0'), '1.0.0');
+    // Nothing in memory either: what isn't kept is opened again.
+    ed.ctx.revisions.clear();
+    const paths = calls(ed.ctx);
+    const again = await search.indexSpaces(ed.ctx, { kept: opened });
+    expect(paths).not.toContain('/api/revisions/batch');
+    expect(again.page(lib.spaceId, lib.page.pageId)?.updated).toBe(edited?.updated);
+  });
+
   it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {
     const { bob, ed, lib } = await shared();
     // Kept text stands in for the version's, so what was opened again shows.
@@ -267,11 +294,13 @@ describe('a search index', () => {
           basedOn,
           revisionId: written.revisionId,
           payload: written.payload,
+          updated: '2026-11-13T09:30:00.000Z',
         },
       ],
     });
     expect(paths).toEqual([]);
     expect(found(saved, 'saved')).toEqual([lib.page.pageId]);
+    expect(saved.page(lib.spaceId, lib.page.pageId)?.updated).toBe('2026-11-13T09:30:00.000Z');
     expect(saved.list({ spaceId: lib.spaceId, tag: 'mine' }).map((p) => p.pageId)).toEqual([
       lib.page.pageId,
     ]);

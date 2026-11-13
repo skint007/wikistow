@@ -1708,6 +1708,8 @@ export class OfflineQueue {
               basedOn: entry.basedOn,
               revisionId: entry.basedOn,
               payload: entry.payload,
+              // Not taken by the server yet.
+              updated: null,
             },
           ]
         : [],

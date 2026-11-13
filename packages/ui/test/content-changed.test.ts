@@ -99,7 +99,13 @@ describe('contentChanged', () => {
       'page soup',
       `tree ${home}`,
     ]);
-    expect(vi.mocked(searchIndexChanged).mock.calls).toEqual([[queryClient, { saved: first }]]);
+    // With the time it was saved, as this device tells it: the server's answer has none.
+    expect(vi.mocked(searchIndexChanged).mock.calls).toEqual([
+      [
+        queryClient,
+        { saved: { ...first, updated: expect.stringMatching(/^\d{4}-\d\d-\d\dT.*Z$/) } },
+      ],
+    ]);
     // The next is patched in alone, the tree as loaded holding its marker by now.
     queryClient.setQueryData([PLAIN, 'tree', home], { pages: [{ ...entry, draftChanges: true }] });
     const next = saved('r2', 'r3');

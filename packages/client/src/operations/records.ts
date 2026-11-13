@@ -47,15 +47,23 @@ export type LoadedMetadata = {
 };
 
 /**
- * A decrypted revision: its signed record, what it says, its region, and in
- * a share, the key version of the wrap it was opened through (null in the
- * owner region).
+ * A decrypted revision: its signed record, what it says, its region, in a
+ * share, the key version of the wrap it was opened through (null in the
+ * owner region), and when the server took it (`createdAt`).
  */
 export type OpenedRevision = {
   record: RevisionRecord | RevisionRecordV2;
   opened: OpenedPayload;
   region: Region;
   keyVersion: number | null;
+  /**
+   * When the server took this version, as it says (`meta.createdAt`): its
+   * word, not signed by the author, so a time to sort and show, never to
+   * trust. For a version this device wrote, its own clock once the server
+   * confirmed the write (`cacheWritten`). Null when unknown, as for a
+   * version kept on the device before times were.
+   */
+  createdAt: string | null;
 };
 
 /**
@@ -108,7 +116,7 @@ export function openServedMetadata(
 export function openServedRevision(
   ctx: ClientContext,
   keys: SpaceKeys,
-  served: Served & { revision: unknown },
+  served: Served & { revision: unknown; meta: { createdAt: string } },
   expect: ExpectedRevision,
 ): OpenedRevision {
   const material = servedKeyMaterial({ ...served, keyring: ctx.keyring });
@@ -124,7 +132,7 @@ export function openServedRevision(
     recordProtocol(served.revision, 'Revision') === 1 ? openRevision(args) : openRevisionV2(args);
   // It opened through this wrap, so the wrap parses.
   const keyVersion = material.keyring ? KeyWrap.parse(material.wrap).keyVersion : null;
-  return { ...opened, keyVersion };
+  return { ...opened, keyVersion, createdAt: served.meta.createdAt };
 }
 
 /**

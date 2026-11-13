@@ -67,7 +67,14 @@ export function sampleStore() {
       ? samples.find((sample) => sample.pageId === ref.pageId)
       : undefined;
 
+  /**
+   * When each sample last changed in this session, as the index's `updated`
+   * would have it; one restored with the draft has none until it changes.
+   */
+  const savedAt = new Map<string, string>();
+
   const set = (pageId: string, change: Partial<Sample>, outside: boolean) => {
+    savedAt.set(pageId, new Date().toISOString());
     samples = samples.map((sample) =>
       sample.pageId === pageId
         ? {
@@ -86,6 +93,7 @@ export function sampleStore() {
     if (page.copyOf !== null) copied = true;
     const sample: Sample = { ...page, pageId: `sample-${made}`, revision: 1, outside: 0 };
     samples = [...samples, sample];
+    savedAt.set(sample.pageId, new Date().toISOString());
     changed();
     return sample;
   };
@@ -150,7 +158,11 @@ export function sampleStore() {
           draft: true,
           unpublished: false,
         },
-        { title: sample.title, ...indexedContent(sample.markdown) },
+        {
+          title: sample.title,
+          ...indexedContent(sample.markdown),
+          updated: savedAt.get(sample.pageId) ?? null,
+        },
       );
     }
     return readableSpace(

@@ -50,7 +50,9 @@ export async function contentChanged(
   const loads: Promise<void>[] = [];
   for (const each of [change].flat()) {
     if ('saved' in each) {
-      searchIndexChanged(queryClient, { saved: each.saved });
+      // Told once the server took it, which says no time: this device's.
+      const updated = each.saved.updated ?? new Date().toISOString();
+      searchIndexChanged(queryClient, { saved: { ...each.saved, updated } });
       loads.push(patchTree(queryClient, ctx, each.saved, refetchType));
       pages.set(each.saved.pageId, each.saved);
     } else {
