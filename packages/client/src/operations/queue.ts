@@ -1860,10 +1860,12 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   };
   const endOf = (parentId: FolderId | null): Position | null => {
     let last: Position | null = null;
+    // As the folder's order waiting here puts them, where it does.
+    const waiting = orders.get(parentId)?.positions ?? {};
     for (const other of [...tree.folders, ...tree.pages]) {
-      if (other.parentId === parentId && other.position !== null && !moved.has(other.id)) {
-        if (last === null || other.position > last) last = other.position;
-      }
+      if (other.parentId !== parentId || moved.has(other.id)) continue;
+      const position = other.id in waiting ? (waiting[other.id] ?? null) : other.position;
+      if (position !== null && (last === null || position > last)) last = position;
     }
     try {
       return last && positionBetween(last, null);

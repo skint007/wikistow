@@ -152,4 +152,18 @@ test('a drop on a line in another folder moves it there, where it was dropped', 
     page.getByRole('status').filter({ hasText: 'Moved “Bread” to Shelf.' }),
   ).toBeVisible();
   await expect.poll(shelf).toEqual(['Apple pie', 'Bread', 'Cheese']);
+
+  // Below the rows, Cupboard goes last at the top, after Shelf, which is open.
+  const folderAt = async (name: string) =>
+    (await page.getByRole('treeitem').allInnerTexts()).findIndex((text) => text.includes(name));
+  expect(await folderAt('Cupboard')).toBeLessThan(await folderAt('Shelf'));
+  await dragOnto(
+    page,
+    page.getByRole('treeitem', { name: /Cupboard/ }),
+    page.getByRole('tree').locator('li[aria-hidden]').last(),
+    'middle',
+  );
+  await expect
+    .poll(async () => (await folderAt('Cupboard')) > (await folderAt('Shelf')))
+    .toBe(true);
 });

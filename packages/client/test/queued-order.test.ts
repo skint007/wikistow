@@ -71,4 +71,24 @@ describe('withQueued and a folder’s order', () => {
     const shown = queueOperations.withQueued(tree, spaceId, [move('a3', 1), order({ a: 'a2' }, 2)]);
     expect(positionOf(shown, 'a')).toBe('a2');
   });
+
+  it('puts a move in at the end as the order waiting there has it', () => {
+    const elsewhere = {
+      ...tree,
+      folders: [...tree.folders, { ...tree.folders[0]!, id: FolderId.parse('other') }],
+      pages: [...tree.pages, { ...page('x', null), parentId: FolderId.parse('other') }],
+    } as unknown as Tree;
+    const inbound = {
+      kind: 'move',
+      id: PageId.parse('x'),
+      node: 'page',
+      spaceId,
+      name: 'x',
+      parentId: folder,
+      failure: null,
+      at: 2,
+    } as queueOperations.QueueEntry;
+    const shown = queueOperations.withQueued(elsewhere, spaceId, [order({ a: 'a5' }, 1), inbound]);
+    expect(positionOf(shown, 'x')! > 'a5').toBe(true);
+  });
 });

@@ -588,6 +588,22 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       edge: 'bottom',
     };
   };
+  // Below the rows: the top of the space, or, for something already at the
+  // top and not copied, the end of it, with the line under the last row, so
+  // it can go after an open folder there.
+  const belowRows = (event: DragEvent): Target => {
+    const last = rows.at(-1);
+    return dragging?.parentId === null && last && !filtering && !copying(event)
+      ? {
+          kind: 'line',
+          parentId: null,
+          before: null,
+          rowId: last.id,
+          edge: 'bottom',
+          level: 1,
+        }
+      : { kind: 'into', parentId: null };
+  };
   const lineOn = (row: Row) =>
     dragging?.over?.kind === 'line' && dragging.over.rowId === row.id ? dragging.over : null;
   const into = (parentId: FolderId | null) =>
@@ -883,9 +899,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               <li
                 aria-hidden
                 className="min-h-10 flex-1"
-                onDragEnter={(event) => dragOver(event, { kind: 'into', parentId: null })}
-                onDragOver={(event) => dragOver(event, { kind: 'into', parentId: null })}
-                onDrop={(event) => drop(event, { kind: 'into', parentId: null })}
+                onDragEnter={(event) => dragOver(event, belowRows(event))}
+                onDragOver={(event) => dragOver(event, belowRows(event))}
+                onDrop={(event) => drop(event, belowRows(event))}
               />
             </ul>
           </div>
