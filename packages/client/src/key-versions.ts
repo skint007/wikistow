@@ -87,17 +87,16 @@ export type MarkRaise = { spaceId: SpaceId; shareId: ShareId; keyVersion: number
 /**
  * Refuse a change whose plan a raised mark has overtaken (section 6.8): a
  * rotation from a version below the share's mark, as when another tab or
- * owner rotated while the owner confirmed, is `stale-head`, to plan again;
- * any change of a share this app ended is `key-version`. Endings and moves
+ * owner rotated while the owner confirmed, or any change of a share this
+ * app ended meanwhile, is `stale-head`, to plan again. Endings and moves
  * rotate from no version, so only the ended mark refuses them.
  */
 export function requireCurrentPlan(marks: KeyVersionMarks, change: NewChange): void {
   const mark = marks.get(change.spaceId, change.shareId);
+  // Ended meanwhile, as by another tab: plan or preview again, which says
+  // whether the server still lists the share (`key-version` there).
   if (mark === ENDED) {
-    throw new CryptoError(
-      'key-version',
-      `This app ended share ${change.shareId}, but the server still lists it`,
-    );
+    throw new ApiError(409, 'stale-head', `Share ${change.shareId} was ended meanwhile`);
   }
   if (change.change === 'rotation' && change.fromKeyVersion < mark) {
     throw new ApiError(

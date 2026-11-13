@@ -256,6 +256,7 @@ export class KeptMarks implements KeyVersionMarks {
         }
       }
       this.#contents = { ...this.#contents, marks: kept };
+      this.#notify();
       throw error;
     }
     return begun;

@@ -241,10 +241,13 @@ export async function withFreshKeys<T>(
   try {
     return await write(await spaceKeys(ctx, spaceId));
   } catch (error) {
+    // A mark another tab raised may be past the keys worked out before:
+    // work them out again once, and refuse only if it still holds.
     const stale =
       (error instanceof ApiError &&
         (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
-      (error instanceof CryptoError && error.code === 'missing-key');
+      (error instanceof CryptoError &&
+        (error.code === 'missing-key' || error.code === 'key-version'));
     if (!stale) throw error;
     return write(await spaceKeys(ctx, spaceId, { refresh: true }));
   }

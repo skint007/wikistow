@@ -213,7 +213,11 @@ describe('pending changes across tabs', () => {
       write: () => Promise.reject(new Error('Quota exceeded')),
     };
     const marks = await KeptMarks.open(failing, who);
+    const heard: boolean[] = [];
+    marks.onChange(() => heard.push(changePending(marks, spaceId, shareId)));
     await expect(marks.begin([change()])).rejects.toThrow('Quota exceeded');
+    // Listeners last heard it isn't pending.
+    expect(heard.at(-1) ?? false).toBe(false);
     // Never sent, so it holds nothing here either.
     expect(changePending(marks, spaceId, shareId)).toBe(false);
     marks.close();

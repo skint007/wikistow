@@ -200,7 +200,7 @@ describe('settling a change whose answer was lost', () => {
     expect(marks.get(spaceId, shareId)).toBe(0);
   });
 
-  it('ends or moves whatever version the mark is at, but not in a share this app ended', async () => {
+  it('ends or moves whatever version the mark is at, but asks again once the share is ended', async () => {
     for (const change of ['ending', 'move'] as const) {
       const { ctx, marks } = context();
       marks.raise(spaceId, shareId, 3);
@@ -220,7 +220,7 @@ describe('settling a change whose answer was lost', () => {
           () => Promise.resolve(),
           () => [],
         ),
-      ).rejects.toMatchObject({ code: 'key-version' });
+      ).rejects.toMatchObject({ code: 'stale-head' });
     }
   });
 
