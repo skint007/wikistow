@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, pick, signIn, test } from './fixtures';
+import { expect, pick, test } from './fixtures';
 import { folderMenu, newFolder } from './sharing';
 import {
   adminTab,
@@ -8,6 +8,7 @@ import {
   memberWithVault,
   newPage,
   PASSPHRASE,
+  sameAccountElsewhere,
   saveStatus,
   waitForSave,
 } from './vault';
@@ -144,21 +145,6 @@ test('pages opened here read, search and unlock offline', async ({
   await page.getByRole('treeitem', { name: 'Bread' }).click();
   await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
 });
-
-/**
- * The same person in a second browser, on `url`, unlocked there with the
- * passphrase (a new tab keeps no unlock).
- */
-async function sameAccountElsewhere(freshPage: () => Promise<Page>, email: string, url: string) {
-  const other = await freshPage();
-  await signIn(other, email);
-  await other.getByRole('heading', { name: 'Unlock your vault' }).waitFor();
-  await other.goto(url);
-  await other.getByLabel('Vault passphrase').fill(PASSPHRASE);
-  await other.getByRole('button', { name: 'Unlock' }).click();
-  await other.waitForURL(url);
-  return other;
-}
 
 /**
  * A draft edited offline is saved on this device and sent when the server
