@@ -33,6 +33,8 @@ export interface KeyVersionMarks {
   settle?(ids: readonly string[], raises: readonly MarkRaise[]): Promise<void>;
   /** The answer to pending changes was lost: they wait for the app to fetch the shares again. */
   lose?(ids: readonly string[]): Promise<void>;
+  /** Pending changes are still being sent (`at` moves on). */
+  renew?(ids: readonly string[]): Promise<void>;
   /** Take in what other tabs kept since: their higher marks, pending changes and clears. */
   refresh?(): Promise<void>;
 }
@@ -53,11 +55,22 @@ export type NewChange = {
 };
 export type PendingChange = NewChange & {
   id: string;
-  /** When it was begun, in milliseconds since the epoch. */
+  /** When it was begun, or last renewed while it is sent, in milliseconds since the epoch. */
   at: number;
   /** Whether its answer was lost, so a fetch of the shares settles it. */
   lost: boolean;
+  /** When its answer was lost. */
+  lostAt: number | null;
 };
+
+/** How often a change being sent is renewed. */
+export const RENEW_MS = 30_000;
+
+/**
+ * How long after a lost answer a fetch may settle a change: the server may
+ * still be committing the request whose answer was lost.
+ */
+export const LOST_GRACE_MS = 30_000;
 
 /**
  * How long a change may be sent for before a fetch of its shares settles it
@@ -104,6 +117,7 @@ export class MemoryKeyVersionMarks implements KeyVersionMarks {
       id: `change-${++this.#next}`,
       at: Date.now(),
       lost: false,
+      lostAt: null,
     }));
     this.#pending = [...this.#pending, ...begun];
     return Promise.resolve(begun);
@@ -116,7 +130,16 @@ export class MemoryKeyVersionMarks implements KeyVersionMarks {
   }
 
   lose(ids: readonly string[]): Promise<void> {
-    this.#pending = this.#pending.map((c) => (ids.includes(c.id) ? { ...c, lost: true } : c));
+    const now = Date.now();
+    this.#pending = this.#pending.map((c) =>
+      ids.includes(c.id) ? { ...c, lost: true, lostAt: now } : c,
+    );
+    return Promise.resolve();
+  }
+
+  renew(ids: readonly string[]): Promise<void> {
+    const now = Date.now();
+    this.#pending = this.#pending.map((c) => (ids.includes(c.id) ? { ...c, at: now } : c));
     return Promise.resolve();
   }
 

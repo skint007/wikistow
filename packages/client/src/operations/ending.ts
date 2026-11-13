@@ -232,8 +232,8 @@ export async function endShare(
   await scan();
   // The ending is pending until answered (section 6.8): no tab joins or
   // sends in the share's live sessions meanwhile.
+  let lost = false;
   const sendUntilAnswered = async () => {
-    let lost = false;
     for (let tries = 0; ; tries++) {
       try {
         await send();
@@ -260,6 +260,7 @@ export async function endShare(
     [{ spaceId, shareId, change: 'ending', fromKeyVersion: preview.keyVersion }],
     sendUntilAnswered,
     () => [{ spaceId, shareId, keyVersion: ENDED }],
+    { lostMeanwhile: () => lost },
   );
   forgetSpaces(ctx);
   // The tree lists nothing in the trash, so what it doesn't list came from

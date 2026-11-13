@@ -33,15 +33,18 @@ export interface MarksChannel {
   listen(listener: () => void): () => void;
 }
 
-const Pending = z.strictObject({
-  id: z.string().min(1).max(64),
-  spaceId: z.string(),
-  shareId: z.string(),
-  change: z.enum(['rotation', 'ending', 'move']),
-  fromKeyVersion: z.number().int().positive(),
-  at: z.number().int().nonnegative(),
-  lost: z.boolean(),
-});
+// Pending changes of shares (section 6.8) are kept among the marks, under
+// keys no `spaceId shareId` pair can make (IDs never hold `~`), so an app
+// from before them, which reads the file strictly and keeps every mark it
+// finds, still opens it and carries them forward:
+//
+//   `~change <id> <spaceId> <shareId> <change> <fromKeyVersion>` → when begun or last renewed
+//   `~lost <id>` → when its answer was lost
+//   `~cleared <id>` → when it was cleared, for good
+const CHANGE = '~change';
+const LOST = '~lost';
+const CLEARED = '~cleared';
+const CHANGES = new Set(['rotation', 'ending', 'move']);
 
 // The newest clears kept, so a tab that hasn't read a clear yet can't put
 // its change back, and the file stays small.
@@ -57,13 +60,6 @@ const Contents = z.strictObject({
   contactsRecord: z.string().nullable().default(null),
   marks: z.record(z.string(), z.number().int().positive()),
   restoredAt: z.iso.datetime().nullable(),
-  /**
-   * Changes of shares this app sent and hasn't seen answered (section 6.8),
-   * and the IDs of those since cleared, newest last. None in files kept
-   * before them.
-   */
-  pending: z.array(Pending).default([]),
-  cleared: z.array(z.string()).default([]),
 });
 type Contents = z.infer<typeof Contents>;
 
@@ -71,14 +67,7 @@ const KEY = 'trust-marks-key/v1';
 const marksAd = (installationId: InstallationId, identity: PrivateIdentity) =>
   canonical('trust-marks/v1', [installationId, identity.public.id]);
 
-const NONE: Contents = {
-  contactsMark: null,
-  contactsRecord: null,
-  marks: {},
-  restoredAt: null,
-  pending: [],
-  cleared: [],
-};
+const NONE: Contents = { contactsMark: null, contactsRecord: null, marks: {}, restoredAt: null };
 
 /**
  * What a device keeps between sessions, as the CLI does in its local state:
@@ -141,8 +130,6 @@ export class KeptMarks implements KeyVersionMarks {
           integers: [
             ['contactsMark', 'version'],
             ['marks', '*'],
-            ['pending', '*', 'fromKeyVersion'],
-            ['pending', '*', 'at'],
           ],
         });
       } catch {
@@ -165,7 +152,7 @@ export class KeptMarks implements KeyVersionMarks {
    * mark and the No going back marks, which describe the server before it.
    */
   startOver(restoredAt: string): void {
-    this.#change({ ...NONE, restoredAt });
+    void this.#change({ ...NONE, restoredAt });
   }
 
   get contactsMark(): ContactsMark | null {
@@ -194,7 +181,7 @@ export class KeptMarks implements KeyVersionMarks {
       this.#contents.contactsRecord === record
     )
       return;
-    this.#change({ ...this.#contents, contactsMark: mark, contactsRecord: record });
+    void this.#change({ ...this.#contents, contactsMark: mark, contactsRecord: record });
   }
 
   get(spaceId: SpaceId, shareId: ShareId): number {
@@ -208,19 +195,38 @@ export class KeptMarks implements KeyVersionMarks {
   }
 
   pending(): readonly PendingChange[] {
-    return this.#contents.pending as PendingChange[];
+    return pendingIn(this.#contents.marks);
   }
 
   /**
    * Record `changes` as pending (section 6.8), and once the file holds
    * them, tell the other tabs, which read it again and stop sending in
-   * those shares' live sessions. Only then is a change sent.
+   * those shares' live sessions. Only then may a change be sent: if the
+   * file can't be written, this throws, and nothing is sent.
    */
   async begin(changes: readonly NewChange[]): Promise<readonly PendingChange[]> {
+    if (this.#closed) throw new Error('The session has ended; its marks are closed');
     const at = Date.now();
-    const begun = changes.map((change) => ({ ...change, id: newId(z.string()), at, lost: false }));
-    await this.#change({ ...this.#contents, pending: [...this.#contents.pending, ...begun] });
+    const begun = changes.map((change): PendingChange => ({
+      ...change,
+      id: newId(z.string()),
+      at,
+      lost: false,
+      lostAt: null,
+    }));
+    const marks = { ...this.#contents.marks };
+    for (const change of begun) marks[changeKey(change)] = at;
+    await this.#change({ ...this.#contents, marks }, { strict: true });
     return begun;
+  }
+
+  /** Renew pending changes still being sent, so no fetch settles them as gone silent. */
+  async renew(ids: readonly string[]): Promise<void> {
+    const now = Date.now();
+    const marks = { ...this.#contents.marks };
+    for (const change of pendingIn(marks))
+      if (ids.includes(change.id)) marks[changeKey(change)] = now;
+    await this.#change({ ...this.#contents, marks });
   }
 
   /**
@@ -228,22 +234,18 @@ export class KeptMarks implements KeyVersionMarks {
    * those the server accepted, then clear them all for good.
    */
   async settle(ids: readonly string[], raises: readonly MarkRaise[]): Promise<void> {
-    const gone = new Set(ids);
-    await this.#change({
-      ...this.#contents,
-      marks: raised(this.#contents.marks, raises),
-      pending: this.#contents.pending.filter((change) => !gone.has(change.id)),
-      cleared: [...this.#contents.cleared, ...ids].slice(-MAX_CLEARED),
-    });
+    const now = Date.now();
+    const marks = { ...raised(this.#contents.marks, raises) };
+    for (const id of ids) marks[`${CLEARED} ${id}`] = now;
+    await this.#change({ ...this.#contents, marks: tidied(marks) });
   }
 
   /** The answer to pending changes was lost: a fetch of their shares settles them. */
   async lose(ids: readonly string[]): Promise<void> {
-    const lost = new Set(ids);
-    await this.#change({
-      ...this.#contents,
-      pending: this.#contents.pending.map((c) => (lost.has(c.id) ? { ...c, lost: true } : c)),
-    });
+    const now = Date.now();
+    const marks = { ...this.#contents.marks };
+    for (const id of ids) marks[`${LOST} ${id}`] = now;
+    await this.#change({ ...this.#contents, marks });
   }
 
   /**
@@ -282,13 +284,17 @@ export class KeptMarks implements KeyVersionMarks {
   }
 
   // Write `contents`, merged with what other tabs kept, in turn with this
-  // tab's other writes, then tell the other tabs. Failing to keep a change
+  // tab's other writes, then tell the other tabs. Failing to keep a mark
   // only means the next launch doesn't know it, so the returned promise
-  // never rejects.
-  #change(contents: Contents): Promise<void> {
+  // rejects only when `strict`: a pending change must land before it is
+  // sent.
+  #change(contents: Contents, { strict = false }: { strict?: boolean } = {}): Promise<void> {
     this.#contents = contents;
     const write = async () => {
-      if (this.#closed) return;
+      if (this.#closed) {
+        if (strict) throw new Error('The session has ended; its marks are closed');
+        return;
+      }
       const file = this.#file;
       if (!file.exclusive) await file.write(this.#seal(this.#contents));
       else {
@@ -300,9 +306,61 @@ export class KeptMarks implements KeyVersionMarks {
       }
       if (!this.#closed) this.#channel?.post();
     };
-    this.#writing = this.#writing.then(write).catch(() => {});
-    return this.#writing;
+    const written = this.#writing.then(write);
+    this.#writing = written.catch(() => {});
+    return strict ? written : this.#writing;
   }
+}
+
+const changeKey = (c: NewChange & { id: string }) =>
+  `${CHANGE} ${c.id} ${c.spaceId} ${c.shareId} ${c.change} ${c.fromKeyVersion}`;
+
+// The pending changes `marks` holds, but those cleared.
+function pendingIn(marks: Contents['marks']): PendingChange[] {
+  const out: PendingChange[] = [];
+  for (const [key, at] of Object.entries(marks)) {
+    const [kind, id, spaceId, shareId, change, from, ...rest] = key.split(' ');
+    if (kind !== CHANGE || rest.length > 0 || !id || !spaceId || !shareId || !change || !from)
+      continue;
+    const fromKeyVersion = Number(from);
+    if (!CHANGES.has(change) || !Number.isSafeInteger(fromKeyVersion) || fromKeyVersion < 1)
+      continue;
+    if (marks[`${CLEARED} ${id}`] !== undefined) continue;
+    const lostAt = marks[`${LOST} ${id}`] ?? null;
+    out.push({
+      id,
+      spaceId: spaceId as SpaceId,
+      shareId: shareId as ShareId,
+      change: change as PendingChange['change'],
+      fromKeyVersion,
+      at,
+      lost: lostAt !== null,
+      lostAt,
+    });
+  }
+  return out;
+}
+
+// `marks` without what cleared changes left, keeping the newest clears.
+function tidied(marks: Contents['marks']): Contents['marks'] {
+  const clears = Object.entries(marks)
+    .filter(([key]) => key.startsWith(`${CLEARED} `))
+    .sort(([, a], [, b]) => b - a);
+  const kept = new Set(clears.slice(0, MAX_CLEARED).map(([key]) => key));
+  const gone = new Set(clears.map(([key]) => key.slice(CLEARED.length + 1)));
+  const out: Contents['marks'] = {};
+  for (const [key, value] of Object.entries(marks)) {
+    const [kind, id] = key.split(' ');
+    if (kind === CLEARED && !kept.has(key)) continue;
+    if ((kind === CHANGE || kind === LOST) && id !== undefined && gone.has(id)) continue;
+    Object.defineProperty(out, key, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
 }
 
 // `marks` with each of `raises` taken in, or `marks` itself if none raises one.
@@ -331,21 +389,12 @@ function merged(mine: Contents, disk: Contents): Contents {
   const theirs = disk.contactsMark;
   const later = !theirs || (mine.contactsMark && mine.contactsMark.version >= theirs.version);
   const contacts = later ? mine : disk;
-  // A change either cleared stays cleared; one either recorded stays until then.
-  const cleared = [...new Set([...disk.cleared, ...mine.cleared])].slice(-MAX_CLEARED);
-  const gone = new Set([...disk.cleared, ...mine.cleared]);
-  const pending = [...disk.pending];
-  for (const change of mine.pending) {
-    const at = pending.findIndex((other) => other.id === change.id);
-    if (at < 0) pending.push(change);
-    else if (change.lost) pending[at] = { ...change, lost: true };
-  }
+  // Pending changes, losses and clears are marks too: each kept from
+  // either side, and a change either cleared stays cleared.
   return {
     contactsMark: contacts.contactsMark,
     contactsRecord: contacts.contactsRecord,
-    marks,
+    marks: tidied(marks),
     restoredAt: disk.restoredAt,
-    pending: pending.filter((change) => !gone.has(change.id)),
-    cleared,
   };
 }

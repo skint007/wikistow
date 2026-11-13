@@ -13,6 +13,9 @@ import {
   type KeptFile,
   type MarksChannel,
 } from '../src/index.ts';
+import { z } from 'zod';
+import { openOnDevice } from '../src/device-seal.ts';
+import { canonical } from '../src/encoding.ts';
 import { changePending } from '../src/key-versions.ts';
 
 const identity = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human' });
@@ -60,6 +63,30 @@ function browser() {
   return { tab };
 }
 
+// The same file, without hearing the other tabs.
+const withoutChannel = (file: KeptFile): KeptFile => {
+  const copy = { ...file };
+  delete copy.channel;
+  return copy;
+};
+
+// The file as an app from before pending changes reads it: strictly.
+const OldContents = z.strictObject({
+  contactsMark: z.strictObject({ version: z.number().int(), contactsHash: z.string() }).nullable(),
+  contactsRecord: z.string().nullable().default(null),
+  marks: z.record(z.string(), z.number().int().positive()),
+  restoredAt: z.iso.datetime().nullable(),
+});
+const readAsBefore = async (file: KeptFile) => {
+  const plain = openOnDevice(
+    identity,
+    'trust-marks-key/v1',
+    canonical('trust-marks/v1', [installationId, identity.public.id]),
+    (await file.read()) ?? new Uint8Array(),
+  );
+  return plain && OldContents.parse(JSON.parse(new TextDecoder().decode(plain)));
+};
+
 const change = (shareId_ = shareId) => ({
   spaceId,
   shareId: shareId_,
@@ -101,7 +128,7 @@ describe('pending changes across tabs', () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);
     // A tab that never hears the others.
-    const deaf = await KeptMarks.open({ ...b.tab(), channel: undefined }, who);
+    const deaf = await KeptMarks.open(withoutChannel(b.tab()), who);
     const [begun] = await one.begin([change()]);
     await deaf.refresh();
     expect(changePending(deaf, spaceId, shareId)).toBe(true);
@@ -117,7 +144,7 @@ describe('pending changes across tabs', () => {
   it('never drops a change another tab began meanwhile', async () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);
-    const two = await KeptMarks.open({ ...b.tab(), channel: undefined }, who);
+    const two = await KeptMarks.open(withoutChannel(b.tab()), who);
     await Promise.all([one.begin([change()]), two.begin([change(other)])]);
     const later = await KeptMarks.open(b.tab(), who);
     expect(changePending(later, spaceId, shareId)).toBe(true);
@@ -139,6 +166,29 @@ describe('pending changes across tabs', () => {
     const two = await KeptMarks.open(b.tab(), who);
     one.raise(spaceId, shareId, 4);
     await expect.poll(() => two.get(spaceId, shareId)).toBe(4);
+  });
+
+  it('writes a file an app from before pending changes still opens, keeping them', async () => {
+    const b = browser();
+    const file = b.tab();
+    const one = await KeptMarks.open(file, who);
+    one.raise(spaceId, shareId, 3);
+    const [begun] = await one.begin([change()]);
+    const old = await readAsBefore(file);
+    expect(old?.marks[`${spaceId} ${shareId}`]).toBe(3);
+    // It keeps every mark it finds, so the change survives its writes.
+    expect(Object.keys(old?.marks ?? {}).some((key) => key.includes(begun?.id ?? '?'))).toBe(true);
+  });
+
+  it('refuses to begin a change it can’t record, so it is never sent', async () => {
+    const failing: KeptFile = {
+      read: () => Promise.resolve(null),
+      write: () => Promise.reject(new Error('Quota exceeded')),
+    };
+    const marks = await KeptMarks.open(failing, who);
+    await expect(marks.begin([change()])).rejects.toThrow('Quota exceeded');
+    marks.close();
+    await expect(marks.begin([change()])).rejects.toThrow();
   });
 
   it('stops listening once closed', async () => {

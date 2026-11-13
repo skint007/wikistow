@@ -13,13 +13,18 @@ import {
   SpaceId,
   type ClientContext,
 } from '../src/index.ts';
-import { changePending, SEND_LIMIT_MS } from '../src/key-versions.ts';
+import {
+  changePending,
+  LOST_GRACE_MS,
+  SEND_LIMIT_MS,
+  type NewChange,
+} from '../src/key-versions.ts';
 import { sendShareChange, settleShareChanges } from '../src/operations/share-changes.ts';
 
 const alice = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human' });
 const spaceId = SpaceId.parse('space');
 const shareId = ShareId.parse('share');
-const rotation = { spaceId, shareId, change: 'rotation' as const, fromKeyVersion: 1 };
+const rotation: NewChange = { spaceId, shareId, change: 'rotation', fromKeyVersion: 1 };
 
 // What `settleShareChanges` reads: the shares the server lists, and the
 // versions this app holds, with who sealed each.
@@ -38,6 +43,41 @@ function context({
 }
 
 describe('sending a change of a share', () => {
+  it('counts as lost when an earlier try got no answer, whatever the last one said', async () => {
+    const { ctx, marks } = context();
+    const refused = new ApiError(408, 'request-timeout', 'Too slow');
+    await expect(
+      sendShareChange(
+        ctx,
+        [rotation],
+        () => Promise.reject(refused),
+        () => [],
+        {
+          lostMeanwhile: () => true,
+        },
+      ),
+    ).rejects.toBe(refused);
+    expect(marks.pending()).toMatchObject([{ lost: true }]);
+  });
+
+  it('raises the mark on marks that keep no pending changes', async () => {
+    const raisedOnly = {
+      get: () => 0,
+      raised: [] as number[],
+      raise(_s: unknown, _h: unknown, v: number) {
+        this.raised.push(v);
+      },
+    };
+    const ctx = { marks: raisedOnly } as unknown as ClientContext;
+    await sendShareChange(
+      ctx,
+      [rotation],
+      () => Promise.resolve(1),
+      () => [{ spaceId, shareId, keyVersion: 2 }],
+    );
+    expect(raisedOnly.raised).toEqual([2]);
+  });
+
   it('is pending while it is sent, and raises the mark once accepted', async () => {
     const { ctx, marks } = context();
     let during = false;
@@ -86,6 +126,19 @@ describe('sending a change of a share', () => {
 });
 
 describe('settling a change whose answer was lost', () => {
+  // Past the grace a lost answer gets, as the server may still be committing it.
+  const later = () => Date.now() + LOST_GRACE_MS + 1;
+
+  it('waits out the grace after a lost answer', async () => {
+    const { ctx, marks } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
+    const [begun] = await marks.begin([rotation]);
+    await marks.lose([begun?.id ?? '']);
+    await settleShareChanges(ctx, spaceId);
+    expect(changePending(marks, spaceId, shareId)).toBe(true);
+    await settleShareChanges(ctx, spaceId, later());
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
+  });
+
   const lostOne = async (marks: MemoryKeyVersionMarks, change = rotation) => {
     const [begun] = await marks.begin([change]);
     await marks.lose([begun?.id ?? '']);
@@ -97,7 +150,7 @@ describe('settling a change whose answer was lost', () => {
       held: [{ keyVersion: 2, sealer: 'alice' }],
     });
     await lostOne(marks);
-    await settleShareChanges(ctx, spaceId);
+    await settleShareChanges(ctx, spaceId, later());
     expect(marks.get(spaceId, shareId)).toBe(2);
     expect(changePending(marks, spaceId, shareId)).toBe(false);
   });
@@ -106,21 +159,21 @@ describe('settling a change whose answer was lost', () => {
     for (const held of [[], [{ keyVersion: 2, sealer: 'bob' }]]) {
       const { ctx, marks } = context({ shares: [{ shareId, currentKeyVersion: 2 }], held });
       await lostOne(marks);
-      await settleShareChanges(ctx, spaceId);
+      await settleShareChanges(ctx, spaceId, later());
       expect(marks.get(spaceId, shareId)).toBe(0);
       expect(changePending(marks, spaceId, shareId)).toBe(false);
     }
   });
 
   it('marks an ending done only when the share is gone', async () => {
-    const ending = { ...rotation, change: 'ending' as const };
+    const ending: NewChange = { ...rotation, change: 'ending' };
     const gone = context();
     await lostOne(gone.marks, ending);
-    await settleShareChanges(gone.ctx, spaceId);
+    await settleShareChanges(gone.ctx, spaceId, later());
     expect(gone.marks.get(spaceId, shareId)).toBe(ENDED);
     const still = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
     await lostOne(still.marks, ending);
-    await settleShareChanges(still.ctx, spaceId);
+    await settleShareChanges(still.ctx, spaceId, later());
     expect(still.marks.get(spaceId, shareId)).toBe(0);
   });
 

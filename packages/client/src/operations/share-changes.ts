@@ -8,6 +8,8 @@ import { sharingRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
 import { outcomeUnknown } from '../api/client.ts';
 import {
   ENDED,
+  LOST_GRACE_MS,
+  RENEW_MS,
   SEND_LIMIT_MS,
   type MarkRaise,
   type NewChange,
@@ -29,18 +31,33 @@ export async function sendShareChange<T>(
   changes: readonly NewChange[],
   send: () => Promise<T>,
   accepted: (result: T) => readonly MarkRaise[],
+  {
+    lostMeanwhile = () => false,
+  }: {
+    /** Whether an earlier try of `send`, which retries itself, got no answer. */
+    lostMeanwhile?: () => boolean;
+  } = {},
 ): Promise<T> {
-  const begun = (await ctx.marks.begin?.(changes)) ?? [];
+  const { marks } = ctx;
+  const begun = (await marks.begin?.(changes)) ?? [];
   const ids = begun.map((change) => change.id);
+  // Renewed while it is sent, so no fetch takes it for gone silent.
+  const renewing = ids.length > 0 ? setInterval(() => void marks.renew?.(ids), RENEW_MS) : null;
   let result: T;
   try {
     result = await send();
   } catch (error) {
-    if (outcomeUnknown(error)) await ctx.marks.lose?.(ids);
-    else await ctx.marks.settle?.(ids, []);
+    if (outcomeUnknown(error) || lostMeanwhile()) await marks.lose?.(ids);
+    else await marks.settle?.(ids, []);
     throw error;
+  } finally {
+    if (renewing) clearInterval(renewing);
   }
-  await ctx.marks.settle?.(ids, accepted(result));
+  const raises = accepted(result);
+  if (marks.settle) await marks.settle(ids, raises);
+  else
+    for (const { spaceId, shareId, keyVersion } of raises)
+      marks.raise(spaceId, shareId, keyVersion);
   return result;
 }
 
@@ -90,9 +107,13 @@ export async function settleShareChanges(
   now = Date.now(),
 ): Promise<void> {
   // A change still being sent, here or in another tab, is never settled
-  // under it: only one whose answer was lost, or whose sender went silent.
+  // under it: only one whose answer was lost a while ago, or whose sender
+  // went silent.
   const pending = (ctx.marks.pending?.() ?? []).filter(
-    (change) => change.spaceId === spaceId && (change.lost || now - change.at > SEND_LIMIT_MS),
+    (change) =>
+      change.spaceId === spaceId &&
+      ((change.lostAt !== null && now - change.lostAt > LOST_GRACE_MS) ||
+        now - change.at > SEND_LIMIT_MS),
   );
   if (pending.length === 0) return;
   const { shares } = await ctx.api.call(sharingRoutes.listShares, { params: { spaceId } });
