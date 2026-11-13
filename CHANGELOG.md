@@ -41,7 +41,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- The client's `live` module, step 5 of ADR 0015 (live editing, #321), in `@wikistow/client/live`: the session record, wrapped with the share's draft key or sealed to the owners; messages padded, sealed under the session key and signed, both bound to the record's hash; the Yjs client ID each join derives; the strict decoding of Yjs updates and states before anything reaches Yjs; each join's `seq` and `clock`; the snapshot check; and `wikistow.live`. Nothing calls it yet. Test vectors pin the three new domains. `yjs` 13.6.33 is a dependency of `packages/client`. (#TBD)
+- The client's `live` module, step 5 of ADR 0015 (live editing, #321), in `@wikistow/client/live`: the session record, wrapped with the share's draft key or sealed to the owners; messages padded, sealed under the session key and signed, both bound to the record's hash; the Yjs client ID each join derives; the strict decoding of Yjs updates and states before anything reaches Yjs; each join's `seq` and `clock`; the snapshot check; and `wikistow.live`. Nothing calls it yet. Test vectors pin the three new domains. `yjs` 13.6.33 is a dependency of `packages/client`. (#419)
 
 ## 0.25.0 - 2026-11-11
 
