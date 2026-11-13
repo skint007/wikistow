@@ -168,15 +168,20 @@ export const Manifest = z.strictObject({
 });
 export type Manifest = z.infer<typeof Manifest>;
 
-/** `app.titlebar` as a string in the code, as `host.ui.register('app.titlebar', …)` writes it. */
-const TITLEBAR = /(["'`])app\.titlebar\1/;
+/**
+ * A call registering a view in the titlebar region, as built code writes
+ * it. Only the call counts: the SDK's own region table, which most bundles
+ * carry, names the region too.
+ */
+const TITLEBAR = /\bregister\(\s*(["'`])app\.titlebar\1/;
 
 /**
  * Where a built plugin's `platforms` says more than its code allows, as
  * sentences for its author: nothing when it makes no claim. The one thing
- * checked is `app.titlebar`, which only the desktop app has, found in the
- * `ui` file's text, so a plugin drawing there works fully only in the
- * desktop app. Shown at upload and on each workshop build; never refused.
+ * checked is a `ui` that registers a view in `app.titlebar`, which only
+ * the desktop app has, so it works fully only there. Found in the built
+ * file's text, so a region name held in a variable goes unseen. Shown at
+ * upload and on each workshop build; never refused.
  */
 export function platformWarnings(manifest: Manifest, files: ReadonlyMap<string, Uint8Array>) {
   const { platforms } = manifest;
