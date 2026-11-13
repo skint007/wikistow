@@ -225,8 +225,10 @@ export interface Pages {
    * `[[…]]` links change, their own text (`|text`) kept. It saves each
    * page it changes as `saveDrafts` does, as one write, and gives each
    * one's result; a page linking there outside its `write` access is left
-   * as it is, its result `not-granted`. A page that holds no such link
-   * isn't listed. Up to `RELINK_LIMIT` moves, all in one space. Missing
+   * as it is, its result `not-granted`, and one it can't open is listed
+   * with why. Pages it can't read aren't named, and their links stay as
+   * they are: give it access to every page that may link there. A page
+   * that holds no such link isn't listed. Up to `RELINK_LIMIT` moves, all in one space. Missing
    * (undefined) in an app older than it, as `saveDrafts` is.
    */
   relink?(moves: LinkMove[]): Promise<DraftResult[]>;

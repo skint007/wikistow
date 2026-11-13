@@ -30,18 +30,13 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
   const own = commands.filter((command) => command.pluginId === pluginId);
   if (own.length === 0) return null;
   const name = pluginName(plugins, pluginId);
-  const taken = commands.flatMap((command) => {
-    const keys = shortcuts[`${command.pluginId}/${command.id}`];
-    return keys === undefined
-      ? []
-      : [
-          {
-            pluginId: command.pluginId,
-            commandId: command.id,
-            title: `${pluginName(plugins, command.pluginId)}: ${command.title}`,
-            keys,
-          },
-        ];
+  // Every shortcut kept here, a plugin's that is off or not started yet too, so none is given twice.
+  const taken = Object.entries(shortcuts).flatMap(([at, keys]) => {
+    const slash = at.indexOf('/');
+    const [pluginId, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
+    const running = commands.find((each) => each.pluginId === pluginId && each.id === commandId);
+    const title = `${pluginName(plugins, pluginId)}: ${running?.title ?? commandId}`;
+    return slash < 0 ? [] : [{ pluginId, commandId, title, keys }];
   });
 
   const pressed = (command: CommandKey, event: KeyboardEvent<HTMLButtonElement>) => {

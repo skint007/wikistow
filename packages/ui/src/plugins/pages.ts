@@ -414,6 +414,25 @@ export function pagesFor(caller: EditingCaller): HostPages {
 
   const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
 
+  /** How long a batch trusts the folders it listed before checking a page's access again. */
+  const RELISTED_MS = 30_000;
+
+  /**
+   * Check the plugin may still write `page`, as a batch goes on: its access
+   * as the person set it now, and the folders as listed at most
+   * `RELISTED_MS` ago, so a page moved out of its access stops being written.
+   */
+  const rechecking = (ctx: ClientContext, trees: Map<SpaceId, ReturnType<typeof parentsIn>>) => {
+    let listed = Date.now();
+    return async (page: PageRef) => {
+      if (Date.now() - listed > RELISTED_MS) {
+        trees.clear();
+        listed = Date.now();
+      }
+      await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(page.pageId), 'write', trees);
+    };
+  };
+
   /**
    * Each of `saves` saved as `saveDraft` saves it, in turn, at the pace of
    * every batch (`batchTurn`), waiting out the server's own limits, each
@@ -427,15 +446,14 @@ export function pagesFor(caller: EditingCaller): HostPages {
     trees: Map<SpaceId, ReturnType<typeof parentsIn>>,
   ): Promise<DraftResult[]> => {
     const waiting = patient(ctx, unloaded, caller.signal);
+    const recheck = rechecking(ctx, trees);
     const results: DraftResult[] = [];
     for (const { page: ref, base, change } of saves) {
       if (!caller.live()) break;
       const page = { spaceId: ref.spaceId, pageId: ref.pageId };
       try {
         const version = await batchTurn(async () => {
-          await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(
-            page.pageId,
-          ), 'write', trees);
+          await recheck(page);
           return (
             (await caller.open(page, base, change)) ?? saveOn(caller, waiting, page, base, change)
           );
@@ -629,9 +647,7 @@ export function pagesFor(caller: EditingCaller): HostPages {
       for (const page of pages) await require(ctx, page.spaceId, page.pageId, 'write', trees);
       write();
       // Checked again as each goes: the person may take its access away while asked.
-      return caller.trash(ctx, pages, (page) =>
-        require(ctx, page.spaceId, page.pageId, 'write', trees),
-      );
+      return caller.trash(ctx, pages, rechecking(ctx, trees));
     }),
 
     relink: guarded(async (ctx, moves) => {
@@ -667,10 +683,18 @@ export function pagesFor(caller: EditingCaller): HostPages {
           throw error;
         });
         if (has === 'none') continue;
-        const read = await batchTurn(async () => {
-          await caller.flush(page);
-          return readPage(caller, waiting, page);
-        });
+        let read: Awaited<ReturnType<typeof readPage>>;
+        try {
+          read = await batchTurn(async () => {
+            await caller.flush(page);
+            return readPage(caller, waiting, page);
+          });
+        } catch (error) {
+          // Said, as it may link there: a page a newer app wrote, say.
+          const { code, message } = pluginError(error);
+          refused.push({ page, ok: false, code, message });
+          continue;
+        }
         if (read.opened.opened.kind !== 'current') continue;
         const { payload } = read.opened.opened;
         let markdown: string | null;

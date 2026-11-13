@@ -1,5 +1,5 @@
-import { patient, searchOperations, trashOperations } from '@wikistow/client';
-import { PageId, SpaceId } from '@wikistow/contracts';
+import { patient, queueOperations, searchOperations, trashOperations } from '@wikistow/client';
+import { PageId, pageRoutes, SpaceId } from '@wikistow/contracts';
 import { PluginError, type PageRef } from '@wikistow/plugin-sdk';
 import {
   QueryObserver,
@@ -10,7 +10,7 @@ import {
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
 import { pageWriter } from '../data/offline-changes';
-import { searchIndexQuery, spacesQuery, trashQuery, treeQuery } from '../data/queries';
+import { queueOf, searchIndexQuery, spacesQuery, trashQuery, treeQuery } from '../data/queries';
 import { showNotice } from '../page/undo-notice';
 import { pageTitle } from '../shell/sidebar';
 import { desktop } from '../desktop';
@@ -116,6 +116,16 @@ export function startAppPlugins(queryClient: QueryClient) {
     // A page only: a folder's ID would take everything in it, which the prompt wouldn't list.
     if (!pages.every(({ pageId }) => titles.has(pageId)))
       throw new PluginError('not-found', 'There is no such page');
+    // One made on this device and not sent yet would go for good, not to the trash.
+    const queue = queueOf(ctx);
+    for (const { pageId } of pages) {
+      const entry = await queue?.entry(PageId.parse(pageId)).catch(() => null);
+      if (entry && queueOperations.droppedOnDelete(entry))
+        throw new PluginError(
+          'unsupported',
+          'A page made on this device isn’t sent yet. Try again once it is.',
+        );
+    }
     const named = pages.map((page) => ({ ...page, title: titles.get(page.pageId) ?? null }));
     const agreed = await pluginTrashPrompts.ask(
       { plugin: caller.name, titles: named.map(({ title }) => title) },
@@ -147,8 +157,15 @@ export function startAppPlugins(queryClient: QueryClient) {
         showNotice({
           ctx,
           message: `${caller.name} moved ${count} to the trash.`,
+          // Back at the batches' pace too, the trash listed once.
           undo: async () => {
-            for (const nodeId of trashed) await trashOperations.restoreDeleted(ctx, nodeId);
+            const waiting = patient(ctx, unloaded);
+            const { items } = await waiting.api.call(pageRoutes.listTrash);
+            const back = new Set<string>(trashed);
+            for (const { trashId, nodeId } of items) {
+              if (back.has(nodeId))
+                await batchTurn(() => trashOperations.restoreTrash(waiting, trashId));
+            }
             for (const spaceId of spaceIds) await contentChanged(queryClient, ctx, { spaceId });
             await queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
           },
