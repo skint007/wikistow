@@ -201,7 +201,9 @@ describe('an edit in the visual editor', () => {
     expect(await typeAt(m, view.state.doc.content.size - 1, ' more')).toBe(`${PAGE} more`);
     // The paragraph in the middle, written in the editor's style.
     const written = await typeAt(m, find(view.state.doc, 'emphasis') + 2, '!');
-    expect(written).toBe(PAGE.replace('_emphasis_ and __strong__', '*em!phasis* and **strong**').concat(' more'));
+    expect(written).toBe(
+      PAGE.replace('_emphasis_ and __strong__', '*em!phasis* and **strong**').concat(' more'),
+    );
     // In a list, the list's.
     const listed = await typeAt(m, find(view.state.doc, 'one') + 3, '!');
     expect(listed).toBe(
@@ -220,7 +222,8 @@ describe('an edit in the visual editor', () => {
       // Typed at the end of its first block's text.
       let at = -1;
       view.state.doc.firstChild?.descendants((node, pos) => {
-        if (node.isTextblock && at < 0 && !node.type.spec.code) at = pos + 1 + node.content.size + 1;
+        if (node.isTextblock && at < 0 && !node.type.spec.code)
+          at = pos + 1 + node.content.size + 1;
       });
       if (at < 0) {
         m.unmount();
@@ -248,7 +251,21 @@ describe('an edit in the visual editor', () => {
 describe('text taken in by block', () => {
   const PAGES = ['One.\n\nTwo.\n\nThree.\n\nFour.\n', PAGE_OF('\r\n')];
   function PAGE_OF(lineBreak: string) {
-    return ['# Head', '', 'A *b* c.', '', '* x', '* y', '', 'More.', '', '| a | b |', '| - | - |', '| 1 | 2 |', ''].join(lineBreak);
+    return [
+      '# Head',
+      '',
+      'A *b* c.',
+      '',
+      '* x',
+      '* y',
+      '',
+      'More.',
+      '',
+      '| a | b |',
+      '| - | - |',
+      '| 1 | 2 |',
+      '',
+    ].join(lineBreak);
   }
 
   it('shows a change to a block as reading the page whole does, reading only what changed', async () => {
@@ -270,7 +287,24 @@ describe('text taken in by block', () => {
   it('takes in random changes as reading each corpus page whole does, LF and CRLF', async () => {
     const t = await transformer();
     const rng = random(20_261_112);
-    const tokens = [' word', 'x', '\n\n', '\n', '*', '**', '- ', '1. ', '# ', '`', '> ', '|', '[[Plan]]', '🌱', '\\', ''];
+    const tokens = [
+      ' word',
+      'x',
+      '\n\n',
+      '\n',
+      '*',
+      '**',
+      '- ',
+      '1. ',
+      '# ',
+      '`',
+      '> ',
+      '|',
+      '[[Plan]]',
+      '🌱',
+      '\\',
+      '',
+    ];
     let taken = 0;
     let edits = 0;
     for (const { name, body } of samples) {
@@ -338,7 +372,9 @@ describe('text taken in by block', () => {
     await typeAt(m, find(view.state.doc, 'Three') + 5, ' more');
     act(() =>
       view.dispatch(
-        view.state.tr.setSelection(TextSelection.create(view.state.doc, find(view.state.doc, 'hree'))),
+        view.state.tr.setSelection(
+          TextSelection.create(view.state.doc, find(view.state.doc, 'hree')),
+        ),
       ),
     );
     expect(m.handle.take?.('One, from outside.\n\nTwo.\n\nThree more.\n')).toBe(true);
@@ -354,6 +390,8 @@ describe('text taken in by block', () => {
     const next = 'One.\n\nTitle\n=====\n\n* a\n* b\n\nTwo.\n';
     expect(m.handle.take?.(next)).toBe(true);
     const view = viewOf(m.dom);
-    expect(await typeAt(m, find(view.state.doc, 'Two') + 3, '!')).toBe(next.replace('Two.', 'Two!.'));
+    expect(await typeAt(m, find(view.state.doc, 'Two') + 3, '!')).toBe(
+      next.replace('Two.', 'Two!.'),
+    );
   });
 });

@@ -172,7 +172,9 @@ describe('the page editor', () => {
     const view = viewOf(editor);
     act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
     await expect.poll(() => m.changes.at(-1)).toBe('Title\n=====\n\n* one\n\nBody typed!\n');
-    await expect.poll(() => code.state.doc.toString()).toBe('Title\n=====\n\n* one\n\nBody typed!\n');
+    await expect
+      .poll(() => code.state.doc.toString())
+      .toBe('Title\n=====\n\n* one\n\nBody typed!\n');
   });
 
   it('holds the newest text the session gives while text pasted is checked', async () => {

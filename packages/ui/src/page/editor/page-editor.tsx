@@ -301,8 +301,10 @@ export function PageEditor({
       wholeAt.current = started + WHOLE_MS;
       void check(text).then((fidelity) => {
         if (ask !== asked.current) return;
-        // Text given since is on its way, but this goes in meanwhile.
+        // Text given since goes in after it, if it's still to; if it's in,
+        // this is older.
         const newest = given.current === text;
+        if (!newest && given.current === null) return;
         if (!fidelity.visual) {
           if (!newest) return;
           setNote(onHold(fidelity.reason));

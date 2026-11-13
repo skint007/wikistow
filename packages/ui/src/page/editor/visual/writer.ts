@@ -495,10 +495,10 @@ export class Writer {
         // Where it was there, as two blocks next to each other there, or
         // one in place of a block next to the other: written anew, only
         // where that's blank lines, which read as the editor's would.
-        const ends = before.sourced?.last ?? progress.slots[place] ?? -1;
-        const starts = unit.sourced?.first ?? progress.slots[run] ?? -1;
-        const [a, b] = [spans[ends], spans[ends + 1]];
-        const gap = a && b && ends + 1 === starts ? text.slice(a.to, b.from) : null;
+        const was = before.sourced?.last ?? progress.slots[place] ?? -1;
+        const now = unit.sourced?.first ?? progress.slots[run] ?? -1;
+        const [a, b] = [spans[was], spans[was + 1]];
+        const gap = a && b && was + 1 === now ? text.slice(a.to, b.from) : null;
         if (gap !== null && ((before.sourced && unit.sourced) || BLANK_LINES.test(withLf(gap))))
           between = gap;
       }

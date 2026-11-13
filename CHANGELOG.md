@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- The visual editor writes again only the blocks you edit. The rest of the page keeps its own Markdown, byte for byte, where an edit used to rewrite every block in the editor's style. Text typed in the source in **Split**, and changes the app makes such as a renamed link, go into the visual editor a block at a time, and a long page's first edit no longer waits for the whole page to be read back (ADR 0015, step 2). (#PR)
+
 ## 0.25.0 - 2026-11-11
 
 ### Highlights
