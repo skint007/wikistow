@@ -157,8 +157,13 @@ export function startAppPlugins(queryClient: QueryClient) {
             name: pageTitle(title),
           });
         });
-        if (done === 'trashed') trashed.push(nodeId);
-        else waiting += 1;
+        if (done === 'trashed') {
+          trashed.push(nodeId);
+          // Off it at once if shown, as the app's own Delete goes to the space, so nothing is typed into it.
+          const shown = where.shown()?.page;
+          if (shown?.pageId === pageId)
+            void where.navigate({ kind: 'space', spaceId: shown.spaceId });
+        } else waiting += 1;
       }
     } catch (error) {
       // Those before it went: the plugin is told how many, and the notice offers Undo.
@@ -175,10 +180,6 @@ export function startAppPlugins(queryClient: QueryClient) {
         const spaceId = SpaceId.parse(named.find((page) => page.pageId === pageId)?.spaceId);
         void contentChanged(queryClient, ctx, { spaceId, pageId });
       }
-      // Off a page it trashed, as the app's own Delete goes to the space.
-      const shown = where.shown()?.page;
-      if (shown && trashed.some((pageId) => pageId === shown.pageId))
-        void where.navigate({ kind: 'space', spaceId: shown.spaceId });
       void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
       const pagesOf = (n: number) => (n === 1 ? 'a page' : `${n} pages`);
       const later = waiting === 0 ? '' : ` ${pagesOf(waiting)} go once you’re back online.`;
