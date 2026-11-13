@@ -17,7 +17,7 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
-import type { NewChange } from '../key-versions.ts';
+import { requireCurrentPlan, type NewChange } from '../key-versions.ts';
 import { sendShareChange } from './share-changes.ts';
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
@@ -414,7 +414,13 @@ export async function moveNode(
   await sendShareChange(
     ctx,
     changes,
-    () => sendRewrapped(send, rewrap, preview, ctx, onProgress),
+    () =>
+      sendRewrapped(send, rewrap, preview, ctx, onProgress, async () => {
+        // A try after the first one checks the mark again: a rotation may
+        // have overtaken the wraps while the server took its time.
+        await ctx.marks.refresh?.();
+        for (const change of changes) requireCurrentPlan(ctx.marks, change);
+      }),
     () => [],
   );
   forgetSpaces(ctx);
@@ -428,9 +434,11 @@ async function sendRewrapped(
   preview: MovePreview,
   ctx: ClientContext,
   onProgress: Progress | undefined,
+  again: () => Promise<void>,
 ): Promise<void> {
   for (let tries = 0; ; tries++) {
     try {
+      if (tries > 0) await again();
       await send(rewrap.material());
       return;
     } catch (error) {

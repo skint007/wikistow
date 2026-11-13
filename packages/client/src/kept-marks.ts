@@ -303,10 +303,10 @@ export class KeptMarks implements KeyVersionMarks {
     const answer: Contents['marks'] = raised({}, raises);
     for (const id of ids) answer[`${CLEARED} ${id}`] = now;
     if (this.#keepForLater(answer)) return;
-    await this.#change({
-      ...this.#contents,
-      marks: tidied(merge(this.#contents.marks, answer)),
-    });
+    await this.#change(
+      { ...this.#contents, marks: tidied(merge(this.#contents.marks, answer)) },
+      { answer },
+    );
   }
 
   /** The answer to pending changes was lost: a fetch of their shares settles them. */
@@ -317,7 +317,7 @@ export class KeptMarks implements KeyVersionMarks {
     const answer: Contents['marks'] = {};
     for (const id of ids) answer[`${LOST} ${id}`] = now;
     if (this.#keepForLater(answer)) return;
-    await this.#change({ ...this.#contents, marks });
+    await this.#change({ ...this.#contents, marks }, { answer });
   }
 
   // An answer to a change sent before the session closed, as when the app
@@ -327,6 +327,11 @@ export class KeptMarks implements KeyVersionMarks {
   // locked, the answer is the server's, so it holds either way.
   #keepForLater(answer: Contents['marks']): boolean {
     if (!this.#closed) return false;
+    this.#keep(answer);
+    return true;
+  }
+
+  #keep(answer: Contents['marks']): void {
     const before = late.get(this.#who);
     const restoredAt = this.#contents.restoredAt;
     late.set(this.#who, {
@@ -338,7 +343,6 @@ export class KeptMarks implements KeyVersionMarks {
         ),
       ),
     });
-    return true;
   }
 
   /**
@@ -397,11 +401,21 @@ export class KeptMarks implements KeyVersionMarks {
 
   #change(
     contents: Contents,
-    { strict = false, check }: { strict?: boolean; check?: () => void } = {},
+    {
+      strict = false,
+      check,
+      answer,
+    }: {
+      strict?: boolean;
+      check?: () => void;
+      /** A server's answer this write carries, kept for the next session if it closed first. */
+      answer?: Contents['marks'];
+    } = {},
   ): Promise<void> {
     this.#contents = contents;
     const write = async () => {
       const closed = () => {
+        if (answer) this.#keep(answer);
         if (strict) throw new Error('The session has ended; its marks are closed');
       };
       if (this.#closed) return closed();

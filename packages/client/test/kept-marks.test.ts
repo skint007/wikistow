@@ -342,6 +342,35 @@ describe('pending changes across tabs', () => {
     ).toBe(0);
   });
 
+  it('keeps an answer whose write was still queued when the session closed', async () => {
+    let bytes: Uint8Array | null = null;
+    let gate: Promise<void> | null = null;
+    let release: () => void = () => {};
+    const file: KeptFile = {
+      read: () => Promise.resolve(bytes),
+      write: (sealed) => {
+        bytes = sealed;
+        return Promise.resolve();
+      },
+      exclusive: async (work) => {
+        if (gate) await gate;
+        return work();
+      },
+    };
+    const marks = await KeptMarks.open(file, who);
+    const [begun] = await marks.begin([change()]);
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const settled = marks.settle([begun?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    marks.close();
+    release();
+    gate = null;
+    await settled;
+    const next = await KeptMarks.open(file, who);
+    expect(next.get(spaceId, shareId)).toBe(2);
+    expect(changePending(next, spaceId, shareId)).toBe(false);
+  });
+
   it('keeps a late answer until it lands, and drops its raises across a restore', async () => {
     const memory = (): KeptFile => {
       let bytes: Uint8Array | null = null;
