@@ -595,7 +595,11 @@ describe('live session test vectors (section 5.10)', () => {
       content: sodium.from_hex(update.content),
     });
     const opened = openLiveMessage({ binding, trust, listed: () => true, message });
-    expect(opened).toMatchObject({ kind: 'update', seq: 2, clock: 1 });
+    expect(opened).toMatchObject({ kind: 'update', seq: 2, clock: update.clock });
+    // It follows the first snapshot in its join's order.
+    const own = decodeUpdate(opened.content).structs[0];
+    expect(own?.start).toBe(decodeUpdate(sodium.from_hex(live.snapshot.state)).structs[0]?.end);
+    expect(own?.end).toBe(update.clock);
     // Bound to its record: another record hash opens nothing.
     const other = { ...binding, recordHash: hash(new Uint8Array([1])) };
     expect(() => openLiveMessage({ binding: other, trust, listed: () => true, message })).toThrow();
@@ -622,7 +626,15 @@ describe('live session test vectors (section 5.10)', () => {
     expect(read).toMatchObject({ kind: 'current', revisionId: live.saved.revisionId });
     if (read.kind !== 'current') throw new Error('Not current');
     expect(sodium.to_hex(read.state)).toBe(live.saved.state);
-    expect(decodeState(read.state)?.vector.get(live.client.clientId)).toBe(1);
+    expect(decodeState(read.state)?.vector.get(live.client.clientId)).toBe(live.update.clock);
+  });
+
+  it('refuse padding of any other form, and a clock past 2^53 − 1', () => {
+    for (const [name, { kind, code, padded }] of Object.entries(live.paddingRefuse)) {
+      expect(() => unpad(kind as 'update' | 'presence', sodium.from_hex(padded)), name).toThrow(
+        expect.objectContaining({ code }),
+      );
+    }
   });
 
   it('decode updates in the one form section 5.10 takes', () => {

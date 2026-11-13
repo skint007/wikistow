@@ -112,10 +112,24 @@ export function liveVectors(previous?: LivePrevious) {
     senderKeyVersion: starter.public.keyVersion,
     joinId: started.joinId,
   });
-  const doc = new Y.Doc();
-  doc.clientID = clientId;
-  doc.getText('body').insert(0, 'ü');
-  const content = Y.encodeStateAsUpdate(doc);
+  // The first snapshot, as the starter sends it with the record (seq 1),
+  // then one character typed after it (seq 2) and a Saved notice (seq 3):
+  // one join's messages, in order, each clock following the last.
+  const first = firstSnapshot({
+    sender: starter,
+    binding,
+    joinId: started.joinId,
+    clientId,
+    revisionId: RevisionId.parse('vector-live-draft'),
+    payload: newPayload({ title: 'Lasagne', markdown: 'Brown the mince.' }),
+  });
+  const doc = first.document.doc;
+  const snapshotState = Y.encodeStateAsUpdate(doc);
+  const typed: Uint8Array[] = [];
+  doc.on('update', (u: Uint8Array) => typed.push(u));
+  doc.getText('body').insert(doc.getText('body').length, 'ü');
+  const content = typed[0] ?? new Uint8Array();
+  const clock = Y.getState(doc.store, clientId);
   const header = {
     kind: 'update' as const,
     senderId: starter.public.id,
@@ -129,7 +143,7 @@ export function liveVectors(previous?: LivePrevious) {
     kind: 'update',
     joinId: started.joinId,
     seq: 2,
-    clock: 1,
+    clock,
     content,
   });
   const presence = sealLiveMessage({
@@ -138,7 +152,7 @@ export function liveVectors(previous?: LivePrevious) {
     kind: 'presence',
     joinId: started.joinId,
     seq: 2,
-    clock: 1,
+    clock,
     content: presenceContent({
       format: { major: 1, minor: 0 },
       editor: 'source',
@@ -156,7 +170,7 @@ export function liveVectors(previous?: LivePrevious) {
     kind: 'saved',
     joinId: started.joinId,
     seq: 3,
-    clock: 1,
+    clock,
     content: stateContent(RevisionId.parse('vector-live-draft-2'), state),
   });
   // Padding at the edge of a bucket, and a clock past 2^32.
@@ -171,6 +185,32 @@ export function liveVectors(previous?: LivePrevious) {
     content: hex(bytes),
     padded: hex(pad(kind, clock, bytes)),
   }));
+  // Padded plaintexts a receiver must refuse.
+  const good = pad('update', 1, filler(5));
+  const bump = (bytes: Uint8Array, at: number, value: number) => {
+    const out = bytes.slice();
+    out[at] = value;
+    return out;
+  };
+  const paddingRefuse = {
+    otherMark: { kind: 'update', code: 'malformed', padded: hex(bump(good, 13, 0x81)) },
+    extraBucket: {
+      kind: 'update',
+      code: 'malformed',
+      padded: hex(Uint8Array.from([...good, ...new Uint8Array(128)])),
+    },
+    noContent: {
+      kind: 'update',
+      code: 'malformed',
+      padded: hex(bump(new Uint8Array(128), 8, 0x80)),
+    },
+    shortPresence: { kind: 'presence', code: 'malformed', padded: hex(good) },
+    clockPastSafe: {
+      kind: 'update',
+      code: 'binding-mismatch',
+      padded: hex(Uint8Array.from([0, 0x20, 0, 0, 0, 0, 0, 0, ...good.slice(8)])),
+    },
+  };
   // Updates a receiver's decoder must accept, and must refuse.
   const bom = new Y.Doc();
   bom.clientID = 7;
@@ -268,17 +308,10 @@ export function liveVectors(previous?: LivePrevious) {
       clientWithoutRanges: hex(handState({ deletes: [{ client: 7, ranges: [] }] })),
       emptyRange: hex(handState({ deletes: [{ client: 7, ranges: [[0, 0]] }] })),
       trailingByte: hex(new Uint8Array([...handState({ vector: [[7, 1]] }), 0])),
+      // The client 7 as 0x87 0x00.
+      nonMinimalClient: hex(new Uint8Array([0, 1, 0x87, 0, 1])),
     },
   };
-  // The first snapshot, as the starter sends it with the record.
-  const first = firstSnapshot({
-    sender: starter,
-    binding,
-    joinId: started.joinId,
-    clientId,
-    revisionId: RevisionId.parse('vector-live-draft'),
-    payload: newPayload({ title: 'Lasagne', markdown: 'Brown the mince.' }),
-  });
   const snapshotHeader = { ...header, kind: 'snapshot' as const, seq: 1 };
   const snapshot = {
     message: first.message,
@@ -293,7 +326,7 @@ export function liveVectors(previous?: LivePrevious) {
         ad: liveMessageAd(binding, snapshotHeader),
       }),
     ),
-    state: hex(Y.encodeStateAsUpdate(first.document.doc)),
+    state: hex(snapshotState),
   };
   const clientInput = canonical('live-client/v1', [
     installationId,
@@ -343,9 +376,9 @@ export function liveVectors(previous?: LivePrevious) {
     },
     update: {
       header,
-      clock: 1,
+      clock,
       content: hex(content),
-      padded: hex(pad('update', 1, content)),
+      padded: hex(pad('update', clock, content)),
       ad: hex(liveMessageAd(binding, header)),
       payloadHash: hash(sealedBytes(update.sealed)),
       signedBytes: hex(liveMessageBytes(binding, header, hash(sealedBytes(update.sealed)))),
@@ -353,6 +386,7 @@ export function liveVectors(previous?: LivePrevious) {
     },
     saved: { message: saved, state: hex(state), revisionId: 'vector-live-draft-2' },
     padding,
+    paddingRefuse,
     decoder,
     states,
     snapshot,

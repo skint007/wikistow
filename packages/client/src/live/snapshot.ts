@@ -160,6 +160,9 @@ export function openSnapshot({
     if (!poster?.parent || joins.signed(own) !== 0) {
       refuse('a later snapshot isn’t from a save’s own join');
     }
+    if (message.clock !== joins.signed(own)) {
+      refuse('a later snapshot’s clock isn’t its join’s last');
+    }
     if (decoded.structs.some((section) => section.client === own)) {
       refuse('a later snapshot holds structs under its own join’s client');
     }

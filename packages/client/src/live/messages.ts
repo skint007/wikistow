@@ -30,6 +30,7 @@ import {
   utf8,
 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
+import { decodeState } from './decode.ts';
 import { isAgentId, sign, verifySignature, type PrivateIdentity } from '../identity.ts';
 import { sodium } from '../sodium.ts';
 import type { TrustStore } from '../trust.ts';
@@ -300,9 +301,18 @@ function readStateContent(
 export const readSnapshot = (content: Uint8Array): OpenedState =>
   readStateContent(LiveSnapshot, content, 'Live snapshot');
 
-/** A `saved`'s plaintext: the revision its sender saved, and the state it holds. */
-export const readSaved = (content: Uint8Array): OpenedState =>
-  readStateContent(LiveSaved, content, 'Saved notice');
+/**
+ * A `saved`'s plaintext: the revision its sender saved, and the state it
+ * holds, which must decode strictly (`decodeState`) or the notice is
+ * refused (`malformed`), as any stored message whose `state` doesn't decode.
+ */
+export function readSaved(content: Uint8Array): OpenedState {
+  const read = readStateContent(LiveSaved, content, 'Saved notice');
+  if (read.kind === 'current' && decodeState(read.state) === null) {
+    throw new CryptoError('malformed', 'A Saved notice’s state doesn’t decode');
+  }
+  return read;
+}
 
 /**
  * A presence as an app reads it (section 5.10, **`presence`**). `visible`

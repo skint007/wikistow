@@ -178,6 +178,19 @@ describe('a later snapshot', () => {
     };
   }
 
+  it('refuses one whose clock isn’t its join’s last', () => {
+    const { carols, poster, b, hello, revision } = later();
+    poster.seq = 1;
+    const lying = poster.seal(
+      'snapshot',
+      stateContent(revision.revisionId, Y.encodeStateAsUpdate(carols.document.doc)),
+      5000,
+    );
+    expect(() => newcomer([carols, poster], [b, hello]).check(lying, revision)).toThrow(
+      refused(/clock isn’t its join’s last/),
+    );
+  });
+
   it('opens, as provisional, when it holds no more than each join signed', () => {
     const { carols, poster, b, hello, snapshot, revision } = later();
     const { document, provisional } = newcomer([carols, poster], [b, hello]).check(

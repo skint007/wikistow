@@ -16,6 +16,7 @@ import {
   readSaved,
   readSnapshot,
   sealLiveMessage,
+  stateContent,
   unpad,
   type LiveBinding,
   type LiveMessage,
@@ -284,6 +285,10 @@ describe('what messages hold', () => {
     );
     expect(readSnapshot(content)).toEqual({ kind: 'current', revisionId: 'draft-2', state });
     expect(readSaved(content)).toEqual({ kind: 'current', revisionId: 'draft-2', state });
+    // A Saved notice whose state doesn't decode is refused.
+    expect(() => readSaved(stateContent('draft-2', new Uint8Array([0xff])))).toThrow(
+      code('malformed'),
+    );
     const newer = utf8(JSON.stringify({ format: { major: 2, minor: 0 } }));
     expect(readSnapshot(newer)).toEqual({ kind: 'newer-format', major: 2 });
     for (const bad of [
