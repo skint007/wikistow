@@ -208,11 +208,16 @@ export class PageIndex extends SearchIndex<SearchPage> {
     const added: Held[] = [];
     for (const [key, [doc, content]] of given) {
       const held = byPage.get(key);
-      // As it was, unless it now comes with the time it lacked.
-      const timed = held?.entry.updated === null && content?.updated != null;
-      if (held && sameDoc(held.entry, doc) && !timed) continue;
+      const same = held !== undefined && sameDoc(held.entry, doc);
+      // As it was, unless it now comes with the time it lacked: then only
+      // that is taken, as what it holds, such as a change typed on this
+      // device over the version (`withQueuedDrafts`), is the page's still.
+      const timed = same && held.entry.updated === null && content?.updated != null;
+      if (same && !timed) continue;
       if (held) removed.set(key, held);
-      const text = content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined);
+      const text = timed
+        ? { ...held.page, updated: content?.updated }
+        : (content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined));
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
       const page = {
         doc,
@@ -520,15 +525,19 @@ export async function updateIndex(
   const all = changes.spaces === 'all';
   const listing = new Set<SpaceId>(changes.spaces === 'all' ? [] : changes.spaces);
   // Each saved page's version as saved in turn; one not saved over the
-  // version before it has its space listed instead.
+  // version before it has its space listed instead. With each, its time:
+  // one waiting on this device, saved over its base, keeps the base's.
   const saves = new Map<string, SavedVersion>();
+  const times = new Map<string, string | null>();
   for (const saved of all ? [] : (changes.saved ?? [])) {
     if (listing.has(saved.spaceId)) continue;
     const key = pageKey(saved.spaceId, saved.pageId);
     const before =
       saves.get(key)?.revisionId ?? index.page(saved.spaceId, saved.pageId)?.revisionId;
-    if (before === saved.basedOn) saves.set(key, saved);
-    else listing.add(saved.spaceId);
+    if (before === saved.basedOn) {
+      saves.set(key, saved);
+      if (saved.revisionId !== saved.basedOn) times.set(key, saved.updated ?? null);
+    } else listing.add(saved.spaceId);
   }
   const ids = all ? await readableSpaces(ctx) : [...listing];
   live();
@@ -547,7 +556,7 @@ export async function updateIndex(
       each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
     });
   }
-  for (const saved of saves.values()) {
+  for (const [key, saved] of saves) {
     const held = index.page(saved.spaceId, saved.pageId);
     if (!held || listing.has(saved.spaceId)) continue;
     // As in `readPages`: locking stops the links' reads.
@@ -566,8 +575,7 @@ export async function updateIndex(
       },
       {
         ...(await contentOfPayload(saved.payload, readLinks)),
-        // One waiting on this device names its base, and keeps the base's time.
-        updated: saved.revisionId === saved.basedOn ? held.updated : (saved.updated ?? null),
+        updated: times.has(key) ? (times.get(key) ?? null) : held.updated,
       },
     ]);
   }

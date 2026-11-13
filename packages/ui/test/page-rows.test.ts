@@ -242,4 +242,21 @@ describe('what changed in the index', () => {
     // The first index: every page.
     expect(indexChanges(undefined, INDEX)).toHaveLength(PAGES.length);
   });
+
+  it('names a page given the time it lacked, which keeps what the index held of it', () => {
+    const [bread] = PAGES as [Page];
+    const doc = docOf(bread);
+    const untimed = new searchOperations.PageIndex();
+    // As a change typed on this device over the version, waiting to be sent.
+    untimed.addText(doc, { title: 'Garlic bread, typed here', text: 'typed', properties: [] });
+    const timed = untimed.with([[doc, { title: 'Garlic bread', text: '', updated: SAVED }]]);
+    expect(timed.page(spaceId, doc.pageId)).toMatchObject({
+      title: 'Garlic bread, typed here',
+      updated: SAVED,
+    });
+    expect(indexChanges(untimed, timed)).toEqual([{ spaceId, folderIds: doc.folderIds }]);
+    // Given again, with a time or without, it stays as it is.
+    expect(timed.with([[doc, { title: 'Garlic bread', text: '', updated: SAVED }]])).toBe(timed);
+    expect(timed.with([[doc, { title: 'Garlic bread', text: '' }]])).toBe(timed);
+  });
 });

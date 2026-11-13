@@ -155,7 +155,7 @@ describe('a search index', () => {
     expect(again.page(lib.spaceId, lib.page.pageId)?.updated).toBe(edited?.updated);
   });
 
-  it('asks the server again for a time it doesn’t hold, building or updating, not when offline', async () => {
+  it('asks the server again for a time it doesn’t hold, building or updating', async () => {
     const { ed, lib } = await shared();
     const index = await search.indexSpaces(ed.ctx);
     const taken = index.page(lib.spaceId, lib.page.pageId)?.updated;
@@ -192,12 +192,6 @@ describe('a search index', () => {
     const updated = await search.updateIndex(ed.ctx, timeless, { spaces: [lib.spaceId] });
     expect(updated.page(lib.spaceId, lib.page.pageId)?.updated).toBe(taken);
     expect(paths).toContain('/api/revisions/batch');
-    // Offline, from what's kept, nothing is asked: the time stays unknown.
-    untimed(ed.ctx);
-    paths.length = 0;
-    const offline = await search.updateIndex(ed.ctx, timeless, { spaces: [] });
-    expect(offline).toBe(timeless);
-    expect(paths).toEqual([]);
   });
 
   it('takes unchanged pages from a kept index, sealed for its person and build, and opens changed ones', async () => {

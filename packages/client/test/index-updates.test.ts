@@ -452,6 +452,30 @@ describe('an update with this person’s own saves', () => {
     expect(seen(index)).toEqual(seen(fresh(world)));
   });
 
+  it('gives each save its time, and one waiting on this device the time of what it’s on', async () => {
+    const { ctx, called } = session();
+    const at = '2026-11-13T09:30:00.000Z';
+    const taken = { ...save(first.doc.revisionId, 5, 'taken'), updated: at };
+    // Saved into this device's queue: on its base, as typed.
+    const waiting = { ...save(taken.revisionId, 6, 'waiting'), revisionId: taken.revisionId };
+    const next = await searchOperations.updateIndex(ctx, index, {
+      spaces: [],
+      saved: [taken, waiting],
+    });
+    expect(called).toEqual([]);
+    expect(next.page(first.doc.spaceId, first.doc.pageId)).toMatchObject({
+      revisionId: taken.revisionId,
+      title: 'Saved 6',
+      updated: at,
+    });
+    // A save the server took, its time not known, has none.
+    const unknown = await searchOperations.updateIndex(ctx, next, {
+      spaces: [],
+      saved: [save(taken.revisionId, 7, 'unknown')],
+    });
+    expect(unknown.page(first.doc.spaceId, first.doc.pageId)?.updated).toBeNull();
+  });
+
   it('lists the space instead when the save wasn’t over the version held', async () => {
     // Someone else's version came between.
     const { ctx, called } = session();
