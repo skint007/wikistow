@@ -796,10 +796,13 @@ async function sendNodes(
       try {
         await send();
       } catch (error) {
+        // A mark another tab raised may be past the keys worked out before,
+        // as the server's key-version is: work them out again once.
         const stale =
           (error instanceof ApiError &&
             (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
-          (error instanceof CryptoError && error.code === 'missing-key');
+          (error instanceof CryptoError &&
+            (error.code === 'missing-key' || error.code === 'key-version'));
         if (!stale) throw error;
         await sealing.refresh();
         await send();
@@ -838,6 +841,8 @@ function openedIn(versions: Opened, revisionId: RevisionId): OpenedRevision {
  * lists, which a move's finish compares.
  */
 async function sealingFor(ctx: ClientContext, preview: CopyPreview, live: () => void) {
+  // Other tabs may have raised a mark since (section 6.8).
+  await ctx.marks.refresh?.();
   const { source, destination } = preview;
   const sameSpace = source.spaceId === destination.spaceId;
   const tree = await loadTree(ctx, source.spaceId);
