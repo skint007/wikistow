@@ -151,7 +151,8 @@ export function agentTools({ ctx, propose, noticePage }: AgentToolsOptions, canE
         const tree = await spaces.loadTree(ctx, spaceId);
         // As the sidebar lists them, every folder open, each in its order (#400).
         const ordered = treeInOrder(tree, {
-          folder: (f) => nameOf(f.metadata) ?? '',
+          // The sidebar's label for one it can't read, so the order by name matches it.
+          folder: (f) => nameOf(f.metadata) ?? 'Unreadable folder',
           page: (p) => shownTitle(p.title),
         });
         return json({

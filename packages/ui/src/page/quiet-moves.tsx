@@ -6,7 +6,9 @@ import {
   type ClientContext,
   type FolderId,
   type PageId,
+  orderOperations,
   type Position,
+  type PositionWrite,
   type Region,
   type SpaceId,
 } from '@wikistow/client';
@@ -25,7 +27,7 @@ import { isStale, unreadableCommentMessage } from '../sharing/messages';
 import { pageTitle } from '../shell/sidebar';
 import { nameOf, shareName } from '../sharing/names';
 import { useAvailability } from '../shell/availability';
-import { landing, writePositions } from '../shell/tree-order';
+import { childrenOf, landing, writePositions } from '../shell/tree-order';
 import { PLAIN, useClient } from '../vault/store';
 import type { Chosen } from './confirm-copy';
 import { READ_BUDGET_MS } from './markdown-worker';
@@ -561,9 +563,16 @@ export type Drop = {
 };
 
 /**
+ * Where a move or copy into a folder lands, dropped on a line there: its
+ * own position, and `restore`, which puts back the others' (#400).
+ */
+export type Landed = { position: Position | null; restore: () => Promise<void> };
+
+/**
  * Where a move into `parentId` lands, dropped just before `before`: its own
  * position, once the others there that need one have theirs, which this
- * writes first. Nothing for a drop that wasn't on a line.
+ * writes first. Nothing for a drop that wasn't on a line. A move that then
+ * fails, or is taken back, calls `restore`, so the folder lists as before.
  */
 export async function landWhereDropped(
   ctx: ClientContext,
@@ -581,18 +590,47 @@ export async function landWhereDropped(
     parentId: FolderId | null;
     before: string | null | undefined;
   },
-): Promise<Position | null | undefined> {
+): Promise<Landed | undefined> {
   if (before === undefined) return undefined;
   const { own, others } = landing(tree, availability, { nodeId, parentId, before });
-  await writePositions(ctx, {
-    tree,
-    spaceId,
-    parentId,
-    writes: others,
-    offline: availability.offline,
-    waiting: availability.waiting,
-  });
-  return own.position;
+  const shown = childrenOf(tree, parentId).map(({ node }) => ({
+    id: node.id,
+    position: node.position,
+  }));
+  const write = (writes: readonly PositionWrite[]) =>
+    writePositions(ctx, {
+      tree,
+      spaceId,
+      parentId,
+      writes,
+      offline: availability.offline,
+      waiting: availability.waiting,
+    });
+  await write(others);
+  const back = orderOperations.undoing(shown, others);
+  return { position: own.position, restore: () => write(back) };
+}
+
+/** `undo`, then the order of the folder it went into as it was (`Landed`). */
+export const restoring = <U extends Undo | null>(undo: U, landed: Landed | undefined): U =>
+  undo && landed
+    ? ({
+        ...undo,
+        run: async () => {
+          await undo.run();
+          await landed.restore();
+        },
+      } as U)
+    : undo;
+
+/** Run `work`; if it fails, put the folder's order back first (`Landed`). */
+export async function orRestore<T>(landed: Landed | undefined, work: () => Promise<T>) {
+  try {
+    return await work();
+  } catch (caught) {
+    await landed?.restore().catch(() => {});
+    throw caught;
+  }
 }
 
 /**
@@ -637,16 +675,19 @@ export function useQuietMove() {
       const back = { spaceId, moving, parentId: node.parentId, position: node.position };
       const route = moveRoute(tree, moving, to.place.parentId, availability);
       if (route.route === null) throw new MoveRefused(route.hint ?? 'It can’t move there now.');
-      const position = await landWhereDropped(ctx, availability, {
+      const landed = await landWhereDropped(ctx, availability, {
         tree,
         spaceId,
         nodeId: moving.id,
         parentId: to.place.parentId,
         before: drop.before,
       });
+      const position = landed?.position;
       if (route.route === 'device') {
-        await moveOnDevice(ctx, spaceId, moving, to.place.parentId, position);
-        return done(null, undoOnDevice(ctx, back));
+        await orRestore(landed, () =>
+          moveOnDevice(ctx, spaceId, moving, to.place.parentId, position),
+        );
+        return done(null, restoring(undoOnDevice(ctx, back), landed));
       }
       const work = () =>
         moveOperations.previewMove(ctx, {
@@ -655,17 +696,23 @@ export function useQuietMove() {
           parentId: to.place.parentId,
           ...(position !== undefined && { position }),
         });
-      let preview = await work();
-      try {
-        await moveNow(ctx, preview);
-      } catch (caught) {
-        if (!isStale(caught)) throw caught;
-        // Worked out again, once: nothing was shown to go stale.
-        preview = await work();
-        await moveNow(ctx, preview);
-      }
+      const preview = await orRestore(landed, async () => {
+        let worked = await work();
+        try {
+          await moveNow(ctx, worked);
+        } catch (caught) {
+          if (!isStale(caught)) throw caught;
+          // Worked out again, once: nothing was shown to go stale.
+          worked = await work();
+          await moveNow(ctx, worked);
+        }
+        return worked;
+      });
       await refreshMoved(queryClient, ctx);
-      done(moveNotes(tree, preview, to.spaceName), undoMove(ctx, queryClient, back));
+      done(
+        moveNotes(tree, preview, to.spaceName),
+        restoring(undoMove(ctx, queryClient, back), landed),
+      );
     }
 
     async function copyThere() {
@@ -681,22 +728,23 @@ export function useQuietMove() {
         to: { spaceId: to.spaceId, parentId: to.place.parentId },
       });
       const made = await copyNow(ctx, preview);
+      let landed: Landed | undefined;
       // Dropped on a line in this space: the copy lands there too.
       if (sameSpace && drop.before !== undefined) {
         const copied = await queryClient.fetchQuery(treeQuery(ctx, spaceId));
-        const position = await landWhereDropped(ctx, availability, {
+        landed = await landWhereDropped(ctx, availability, {
           tree: copied,
           spaceId,
           nodeId: made.nodeId,
           parentId: to.place.parentId,
           before: drop.before,
         });
-        if (position !== undefined) {
+        if (landed) {
           await writePositions(ctx, {
             tree: copied,
             spaceId,
             parentId: to.place.parentId,
-            writes: [{ nodeId: made.nodeId, position }],
+            writes: [{ nodeId: made.nodeId, position: landed.position }],
             offline: availability.offline,
             waiting: availability.waiting,
           });
@@ -705,13 +753,16 @@ export function useQuietMove() {
       await refreshCopied(queryClient, ctx, preview, made);
       done(
         copyNotes(tree, preview, to.spaceName, spaces),
-        undoCopy(ctx, queryClient, {
-          preview,
-          made,
-          moving,
-          fromParentId: parentIn(source, moving),
-          ownsDestination: tree.space?.role === 'owner',
-        }),
+        restoring(
+          undoCopy(ctx, queryClient, {
+            preview,
+            made,
+            moving,
+            fromParentId: parentIn(source, moving),
+            ownsDestination: tree.space?.role === 'owner',
+          }),
+          landed,
+        ),
       );
     }
 

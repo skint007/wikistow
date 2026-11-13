@@ -206,6 +206,26 @@ const QueuedPublishJson = z.strictObject({
 });
 export type QueuedPublish = z.output<typeof QueuedPublishJson>;
 
+/**
+ * A folder's order, or the top of a space's, changed offline (#400): the
+ * positions of what is in it, by node, null to list one by name, sent in
+ * one request (`arrange`). Keyed by the folder, or for the top by the space,
+ * so a later reorder there adds to it. `name` names the folder, or the
+ * space, should the server refuse. Sent, it gives positions only to what is
+ * in that folder then: something moved out meanwhile keeps its place there.
+ */
+const QueuedOrderJson = z.strictObject({
+  kind: z.literal('order'),
+  id: z.union([FolderId, SpaceId]),
+  spaceId: SpaceId,
+  parentId: FolderId.nullable(),
+  name: z.string(),
+  positions: z.record(z.string(), Position.nullable()),
+  failure: Failure.nullable(),
+  at: z.number(),
+});
+export type QueuedOrder = z.output<typeof QueuedOrderJson>;
+
 const QueueEntryJson = z.discriminatedUnion('kind', [
   QueuedPageJson,
   QueuedFolderJson,
@@ -213,6 +233,7 @@ const QueueEntryJson = z.discriminatedUnion('kind', [
   QueuedDeleteJson,
   QueuedMoveJson,
   QueuedPublishJson,
+  QueuedOrderJson,
 ]);
 export type QueueEntry =
   | QueuedPage
@@ -220,7 +241,8 @@ export type QueueEntry =
   | QueuedRename
   | QueuedDelete
   | QueuedMove
-  | QueuedPublish;
+  | QueuedPublish
+  | QueuedOrder;
 
 /**
  * Which entry: a page or folder has at most one of each kind. Its own
@@ -235,6 +257,7 @@ const CHANGE_KINDS = [
   'delete',
   'move',
   'publish',
+  'order',
 ] as const satisfies readonly QueueEntry['kind'][];
 
 /** Whether `entry` is the item itself made offline, which the server doesn't have yet. */
@@ -263,7 +286,7 @@ export const droppedOnDelete = (entry: QueueEntry): boolean =>
  */
 export type QueueEvent =
   | { kind: 'saved'; entry: QueuedPage }
-  | { kind: 'changed'; spaceId: SpaceId; id: PageId | FolderId }
+  | { kind: 'changed'; spaceId: SpaceId; id: PageId | FolderId | SpaceId }
   | { kind: 'sent'; spaceId: SpaceId }
   | { kind: 'recorded'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId }
   | { kind: 'landed'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId };
@@ -750,6 +773,9 @@ export class OfflineQueue {
         return { outcome: 'dropped' as const, gone };
       }
       await toTrash({ id, node, spaceId, name, ...(tried && { tried: true }) });
+      // A folder deleted isn't put in order first.
+      const order = node === 'folder' ? await this.#keyed({ kind: 'order', id }) : null;
+      if (order) await this.#remove(order);
       // A page deleted isn't published first.
       const publish = node === 'page' ? await this.#keyed({ kind: 'publish', id }) : null;
       if (publish?.kind === 'publish') await this.#handOver(publish);
@@ -805,6 +831,43 @@ export class OfflineQueue {
         ...(position !== undefined && { position }),
         failure: null,
         // In the order made: after what it may need moved first.
+        at: this.#at(),
+      });
+    });
+    this.#emit({ kind: 'changed', spaceId, id });
+  }
+
+  /**
+   * Put what is in a folder, or at the top of a space for a null
+   * `parentId`, in order on this device (#400): `positions` are added to
+   * any waiting there, after the changes made before them.
+   */
+  async order({
+    spaceId,
+    parentId,
+    name,
+    positions,
+  }: {
+    spaceId: SpaceId;
+    parentId: FolderId | null;
+    name: string;
+    positions: readonly { nodeId: string; position: Position | null }[];
+  }): Promise<void> {
+    const id = parentId ?? spaceId;
+    await this.#store.queueExclusive(async () => {
+      const before = await this.#keyed({ kind: 'order', id });
+      const kept = before?.kind === 'order' ? before.positions : {};
+      await this.#write({
+        kind: 'order',
+        id,
+        spaceId,
+        parentId,
+        name,
+        positions: {
+          ...kept,
+          ...Object.fromEntries(positions.map((p) => [p.nodeId, p.position])),
+        },
+        failure: null,
         at: this.#at(),
       });
     });
@@ -1068,7 +1131,7 @@ export class OfflineQueue {
         // Where it goes, made offline: a folder that must be made first.
         const parentId = madeOffline(entry)
           ? parentOf(entry)
-          : entry.kind === 'move'
+          : entry.kind === 'move' || entry.kind === 'order'
             ? entry.parentId
             : null;
         const parent = parentId ? folders.get(parentId) : undefined;
@@ -1119,7 +1182,37 @@ export class OfflineQueue {
         return this.#sendMove(ctx, entry);
       case 'publish':
         return this.#sendPublish(ctx, entry, entries, read);
+      case 'order':
+        return this.#sendOrder(ctx, entry);
     }
+  }
+
+  async #sendOrder(ctx: ClientContext, entry: QueuedOrder): Promise<'offline' | void> {
+    const { spaceId, parentId } = entry;
+    try {
+      // Only what is there now: one moved out meanwhile keeps its place where it went.
+      const { folders, pages } = await loadStructure(ctx, spaceId);
+      const here = new Set<string>(
+        [...folders, ...pages].flatMap((node) => (node.parentId === parentId ? [node.id] : [])),
+      );
+      const positions = Object.entries(entry.positions).flatMap(([nodeId, position]) =>
+        here.has(nodeId) ? [{ nodeId, position }] : [],
+      );
+      for (let i = 0; i < positions.length; i += ORDER_BATCH) {
+        await arrange(ctx, { spaceId, parentId, positions: positions.slice(i, i + ORDER_BATCH) });
+      }
+    } catch (error) {
+      const failure = failureOf(error);
+      if (!failure) return 'offline';
+      return this.#stop(entry, failure.kind === 'conflict' ? refused(error) : failure);
+    }
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#keyed(entry);
+      // Put in order again while this went: the next round sends that.
+      if (current?.kind === 'order' && current.at === entry.at) await this.#remove(current);
+    });
+    this.#emit({ kind: 'changed', spaceId, id: entry.id });
+    this.#emit({ kind: 'sent', spaceId });
   }
 
   async #sendFolder(
@@ -1557,7 +1650,12 @@ export class OfflineQueue {
     await this.#store.queueExclusive(async () => {
       const current = await this.#keyed(entry);
       if (!current) return;
-      if (current.kind === 'folder' || current.kind === 'delete' || current.kind === 'move') {
+      if (
+        current.kind === 'folder' ||
+        current.kind === 'delete' ||
+        current.kind === 'move' ||
+        current.kind === 'order'
+      ) {
         return this.#write({ ...current, failure });
       }
       if (current.kind === 'rename' || current.kind === 'publish') {
@@ -1631,6 +1729,9 @@ export type QueueChoices = Pick<
  * Why the server refused a send, or null for no answer or no session,
  * which leaves the change to be sent when it answers, or after signing in.
  */
+/** The server takes this many positions at once. */
+const ORDER_BATCH = 1000;
+
 function failureOf(error: unknown): QueueFailure | null {
   // A session that ended waits for the next one, which sends it (decision 10).
   if (noAnswer(error) || (error instanceof ApiError && error.status === 401)) return null;
@@ -1732,10 +1833,20 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   }
   // In its new place, and where it goes there: where the person put it, or
   // where the server will, at the end of a folder with an order of its own.
+  // Folders put in order here: their positions, by node, by folder (null: the top).
+  const orders = new Map<FolderId | null, Record<string, Position | null>>();
+  for (const entry of here) {
+    if (entry.kind === 'order' && entry.failure === null)
+      orders.set(entry.parentId, entry.positions);
+  }
   const placed = <N extends { id: string; parentId: FolderId | null; position: Position | null }>(
     node: N,
   ): N => {
     const move = moved.get(node.id);
+    const parentId = move ? move.parentId : node.parentId;
+    const ordered = orders.get(parentId);
+    if (ordered && node.id in ordered)
+      return { ...node, parentId, position: ordered[node.id] ?? null };
     if (!move) return node;
     const position =
       move.position !== undefined

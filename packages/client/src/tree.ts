@@ -76,7 +76,9 @@ export function childrenInOrder<F extends Listed, P extends Listed>(
 /**
  * Every folder and page of `tree`, as the sidebar lists them with every
  * folder open: each folder followed by what is in it, each level in its
- * order (`childrenInOrder`). What can't be reached from the top isn't listed.
+ * order (`childrenInOrder`). What can't be reached from the top, such as a
+ * page in a folder the server left out, comes after, each group under its
+ * missing folder in that folder's order.
  */
 export function treeInOrder<F extends Listed, P extends Listed>(
   tree: { folders: readonly F[]; pages: readonly P[] },
@@ -93,5 +95,11 @@ export function treeInOrder<F extends Listed, P extends Listed>(
     }
   };
   walk(null);
+  const parents = new Set(
+    [...tree.folders, ...tree.pages].flatMap((node) =>
+      seen.has(node.id) || node.parentId === null ? [] : [node.parentId],
+    ),
+  );
+  for (const parentId of parents) walk(parentId);
   return out;
 }

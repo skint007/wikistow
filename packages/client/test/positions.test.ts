@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test';
 import { isPosition } from '@wikistow/contracts';
 import {
+  orderOperations,
   inTreeOrder,
+  treeInOrder,
   positionBetween,
   positionsBetween,
   positionsFor,
@@ -149,5 +151,34 @@ describe('positionsFor', () => {
       expect(inTreeOrder(nodes).map((n) => n.id)).toEqual(order.map((n) => n.id));
       expect(nodes.every((n) => n.position === null || n.position.length <= 80)).toBe(true);
     }
+  });
+});
+
+describe('placing', () => {
+  it('keeps the key of the item dropped when it stays the same', () => {
+    const { own } = orderOperations.placing(
+      [
+        { id: 'a', position: 'a0' },
+        { id: 'b', position: 'a0' },
+        { id: 'x', position: 'a1' },
+      ],
+      'x',
+      'b',
+    );
+    expect(own.position).not.toBeNull();
+  });
+});
+
+describe('treeInOrder', () => {
+  it('lists what the top doesn’t reach after the rest', () => {
+    const tree = {
+      folders: [{ id: 'f', parentId: null, position: null }],
+      pages: [
+        { id: 'p', parentId: 'f', position: null },
+        { id: 'lost', parentId: 'gone', position: null },
+      ],
+    };
+    const ids = treeInOrder(tree, { folder: (f) => f.id, page: (p) => p.id }).map((c) => c.node.id);
+    expect(ids).toEqual(['f', 'p', 'lost']);
   });
 });

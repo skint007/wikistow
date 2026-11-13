@@ -24,9 +24,11 @@ const childrenOf = (spaceId: string, parentId: string | null) =>
 const shown = and(isNull(nodes.trashId), isNull(nodes.copyId));
 
 /**
- * The highest position among what a folder shows, or null when it has no
- * order of its own: none of them has a position. `except` leaves out nodes
- * on their way in.
+ * Whether a folder has an order of its own, and the highest position there
+ * (null when it has none). Only what it shows decides whether it is
+ * ordered; what is in its trash counts for the highest too, so nothing new
+ * takes a position that something restored will come back to. `except`
+ * leaves out nodes on their way in.
  */
 async function lastPosition(
   tx: Database,
@@ -35,17 +37,20 @@ async function lastPosition(
   except: readonly string[] = [],
 ): Promise<string | null> {
   const [row] = await tx
-    .select({ last: sql<string | null>`max(${nodes.position})` })
+    .select({
+      ordered: sql<boolean>`bool_or(${nodes.trashId} is null)`,
+      last: sql<string | null>`max(${nodes.position})`,
+    })
     .from(nodes)
     .where(
       and(
         childrenOf(spaceId, parentId),
-        shown,
+        isNull(nodes.copyId),
         isNotNull(nodes.position),
         ...(except.length > 0 ? [sql`${nodes.id} <> all(${sql.param([...except])}::text[])`] : []),
       ),
     );
-  return row?.last ?? null;
+  return row?.ordered ? (row.last ?? null) : null;
 }
 
 /**
@@ -169,11 +174,13 @@ export async function arrangeNodes(
       }
     }
     for (const id of ids) {
-      if (byId.get(id)?.parentId !== parentId) {
-        throw new ContentError('stale-head', 'It moved since you loaded it', {
-          nodeIds: [id],
-        });
+      if (byId.get(id)?.parentId === parentId) continue;
+      // Somewhere else now: said only to someone who sees it there, as a
+      // move says where a node is only to someone who may move it.
+      if (!(await accessTo(tx, caller, { spaceId, nodeId: id }))) {
+        throw new ContentError('not-found');
       }
+      throw new ContentError('stale-head', 'It moved since you loaded it', { nodeIds: [id] });
     }
     for (const [id, position] of byNode) {
       await tx.update(nodes).set({ position }).where(eq(nodes.id, id));

@@ -53,9 +53,10 @@ export function placing(
   const order = [...rest];
   order.splice(at < 0 ? rest.length : at, 0, moving);
   const writes = positionsFor(order, nodeId);
+  // Its key, where it stays the same, isn't written: it keeps it.
   const own = writes.find((write) => write.nodeId === nodeId) ?? {
     nodeId,
-    position: null,
+    position: moving.position as Position | null,
   };
   return { own, others: writes.filter((write) => write.nodeId !== nodeId) };
 }

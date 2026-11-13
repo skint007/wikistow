@@ -77,19 +77,23 @@ export function canStep(
   return at >= 0 && at + step >= 0 && at + step < children.length;
 }
 
-const nodeIn = (tree: Tree, id: string) => {
-  const folder = tree.folders.find((f) => f.id === id);
-  if (folder) return { kind: 'folder' as const, name: treeLabels.folder(folder) };
-  const page = tree.pages.find((p) => p.id === id);
-  return page ? { kind: 'page' as const, name: treeLabels.page(page) } : null;
+// The folder's name, or the space's for its top, for a change made offline to name.
+const placeName = (tree: Tree, parentId: FolderId | null) => {
+  if (parentId === null) {
+    const opened = tree.space?.metadata?.opened;
+    return opened?.kind === 'current' ? opened.metadata.name : 'Space';
+  }
+  const folder = tree.folders.find((f) => f.id === parentId);
+  return folder ? treeLabels.folder(folder) : 'Folder';
 };
 
 /** The server takes this many positions at once. */
 const BATCH = 1000;
 
 /**
- * Write positions in `parentId`: on the server, or on this device offline
- * or while any of them has a change waiting, so each goes after it.
+ * Write positions in `parentId`: on the server, or on this device offline,
+ * or while any of them, or the folder, has a change waiting, so they go
+ * after it, all in one change to the folder (`OfflineQueue.order`).
  */
 export async function writePositions(
   ctx: ClientContext,
@@ -109,7 +113,10 @@ export async function writePositions(
   } & Waits,
 ) {
   if (writes.length === 0) return;
-  if (!offline && writes.every((write) => waiting(write.nodeId as PageId) === 'none')) {
+  const waits =
+    waiting(parentId) !== 'none' ||
+    writes.some((write) => waiting(write.nodeId as PageId) !== 'none');
+  if (!offline && !waits) {
     for (let i = 0; i < writes.length; i += BATCH) {
       await orderOperations.arrange(ctx, {
         spaceId,
@@ -119,18 +126,12 @@ export async function writePositions(
     }
     return;
   }
-  for (const { nodeId, position } of writes) {
-    const node = nodeIn(tree, nodeId);
-    if (!node) continue;
-    await pageWriter(ctx).moveNode({
-      spaceId,
-      nodeId: nodeId as PageId,
-      node: node.kind,
-      name: node.name,
-      parentId,
-      position,
-    });
-  }
+  await pageWriter(ctx).order({
+    spaceId,
+    parentId,
+    name: placeName(tree, parentId),
+    positions: writes,
+  });
 }
 
 const quoted = (name: string) => (

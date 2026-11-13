@@ -306,6 +306,45 @@ describe('a folder’s own order', () => {
     expect(tree.pages.every((p) => p.position === null)).toBe(true);
   });
 
+  it('gives nothing new the place of something in the trash, which a restore takes back', async () => {
+    const owner = await personWithVault(t);
+    const { spaceId, folder, ids } = await shelf(owner);
+    await drop(owner.ctx, spaceId, folder, ids.c, 'Apples');
+    expect(await listed(owner.ctx, spaceId, folder)).toEqual(['Cheese', 'Apples', 'Bread']);
+    await pages.deleteNode(owner.ctx, { spaceId, nodeId: ids.b });
+    await pages.createPage(owner.ctx, { spaceId, parentId: folder, title: 'Dates' });
+    await trashOperations.restoreDeleted(owner.ctx, ids.b);
+    const tree = await spaceOperations.loadTree(owner.ctx, spaceId);
+    const positions = tree.pages.flatMap((p) => (p.parentId === folder ? [p.position] : []));
+    expect(new Set(positions).size).toBe(positions.length);
+    expect(await listed(owner.ctx, spaceId, folder)).toEqual([
+      'Cheese',
+      'Apples',
+      'Bread',
+      'Dates',
+    ]);
+  });
+
+  it('says a node moved only to someone who can see it', async () => {
+    const owner = await personWithVault(t);
+    const editor = await personWithVault(t);
+    const lib = await library(owner);
+    await shareFolder(owner.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [await invite(owner, editor, 'editor')],
+    });
+    // `beside` is in the folder above the share, which the editor doesn't see.
+    const result = await rejection(
+      orderOperations.arrange(editor.ctx, {
+        spaceId: lib.spaceId,
+        parentId: lib.shared,
+        positions: [{ nodeId: lib.beside.pageId, position: positionBetween(null, null) }],
+      }),
+    );
+    expect(result).toBe('not-found');
+  });
+
   it('orders the top of a space too', async () => {
     const owner = await personWithVault(t);
     const { spaceId, folder } = await shelf(owner);

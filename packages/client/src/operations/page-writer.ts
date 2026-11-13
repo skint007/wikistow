@@ -176,6 +176,13 @@ export type PageWriter = {
   }): Promise<void>;
   /** Publish a page's draft as it stands now on this device (#331), as `OfflineQueue.publish`. */
   publish(input: { page: PageRef; title: string; draftHead: RevisionId }): Promise<void>;
+  /** Put what is in a folder, or at the top, in order on this device (#400), as `OfflineQueue.order`. */
+  order(input: {
+    spaceId: SpaceId;
+    parentId: FolderId | null;
+    name: string;
+    positions: readonly { nodeId: string; position: Position | null }[];
+  }): Promise<void>;
 };
 
 /**
@@ -367,6 +374,11 @@ export function createPageWriter({
     async publish(input) {
       if (!queue) throw new Error('This device keeps no changes');
       await queue.publish(input);
+    },
+
+    async order(input) {
+      if (!queue) throw new Error('This device keeps no changes');
+      await queue.order(input);
     },
   };
   return writer;

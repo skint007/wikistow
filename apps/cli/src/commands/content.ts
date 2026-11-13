@@ -145,7 +145,8 @@ export async function tree(
     spaceOperations.loadTree(ctx, args.spaceId),
   );
   const ordered = treeInOrder(loaded, {
-    folder: (f) => nameOf(f.metadata) ?? '',
+    // The sidebar's label for one it can't read, so the order by name matches it.
+    folder: (f) => nameOf(f.metadata) ?? 'Unreadable folder',
     page: (p) => shownTitle(p.title),
   });
   const result = {

@@ -9,6 +9,8 @@ import {
   newFolderMetadata,
   newPayload,
   openSession,
+  positionBetween,
+  positionsBetween,
   FolderId as FolderIdSchema,
   moveOperations as moves,
   PageId,
@@ -770,5 +772,44 @@ describe('moves and publishes made offline', () => {
       message: expect.stringContaining('public link'),
     });
     expect((await published(ctx, page))?.count).toBe(1);
+  });
+
+  it('send a folder put in order offline in one request, leaving out what moved away', async () => {
+    const { ctx, queue, spaceId, page } = await device();
+    const second = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Agenda' });
+    const third = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Zebra' });
+    const elsewhere = await spaces.createFolder(ctx, { spaceId, parentId: null, name: 'Away' });
+    const first = positionBetween(null, null);
+    const at = (i: number) => positionsBetween(first, null, 3)[i] ?? null;
+    await queue.order({
+      spaceId,
+      parentId: null,
+      name: 'Notes',
+      positions: [
+        { nodeId: third, position: first },
+        { nodeId: page.pageId, position: at(0) },
+      ],
+    });
+    // A later reorder there adds to the same change.
+    await queue.order({
+      spaceId,
+      parentId: null,
+      name: 'Notes',
+      positions: [{ nodeId: second, position: at(1) }],
+    });
+    expect((await queue.entries()).map((entry) => entry.kind)).toEqual(['order']);
+    // Moved away meanwhile, by someone else: it keeps its place where it went.
+    await moves.moveNode(ctx, {
+      preview: await moves.previewMove(ctx, { spaceId, nodeId: second, parentId: elsewhere }),
+    });
+
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    const tree = await spaces.loadTree(ctx, spaceId);
+    const position = (id: string) =>
+      [...tree.folders, ...tree.pages].find((n) => n.id === id)?.position;
+    expect(position(third)).toBe(first);
+    expect(position(page.pageId)).toBe(at(0));
+    expect(position(second)).toBeNull();
   });
 });
