@@ -953,6 +953,17 @@ export function reducedText(
   for (const whole of markdown.split(/\r\n?|\n/)) {
     lineAt++;
     if (length >= limit) break;
+    if (lineAt === frontLines && frontLines > 0) {
+      // The frontmatter is YAML: what reads as opened in it ends with it,
+      // as after a `...` fence, which reads as text.
+      if (html !== null) release(html.read);
+      html = null;
+      fence = null;
+      end();
+      table = false;
+      items.length = 0;
+      empty = false;
+    }
     const line = clip(whole, lineLimit);
     // Block syntax is looked for past every quote marker, indent and list
     // marker, so a block in a quote or list item ends a paragraph too.

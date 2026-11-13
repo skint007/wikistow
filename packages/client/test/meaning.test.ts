@@ -56,6 +56,15 @@ describe('the reduction’s headings', () => {
     expect(reducedText('---\n# a comment\ntitle: x\n---\nBody').headings).toEqual([]);
     expect(reducedText('---\ntitle: a\rb\n---\nBody').headings).toEqual([]);
     expect(reducedText('---\r\ntitle: a\r\n---\r\n# Body').headings).toEqual(['title: a\n'.length]);
+    // Closed by `...`, and holding what reads as a fence: neither runs on.
+    expect(reducedText('---\na: 1\n...\nFoo\n===\nbody')).toEqual({
+      text: 'a: 1 ...\nFoo\nbody',
+      headings: ['a: 1 ...\n'.length],
+    });
+    expect(reducedText('---\na: |\n  ```\n---\n# Head\n\nbody')).toEqual({
+      text: 'a:\n---\nHead\nbody',
+      headings: ['a:\n---\n'.length],
+    });
   });
 
   it('marks no heading without text', () => {
@@ -85,9 +94,12 @@ describe('a page’s passages', () => {
     ]);
   });
 
-  it('is the title alone for a page with no text, and nothing with no title either', () => {
+  it('is the title alone for a page with no text, as much as fits, and nothing with no title either', () => {
     expect(cut('Lasagne', '')).toEqual([{ passage: 'Lasagne', start: 0, heading: null }]);
     expect(cut('', '')).toEqual([]);
+    // A title too long for one: as much of it as fits.
+    const [long] = meaningPassages({ title: '日'.repeat(300), text: '', headings: [] });
+    expect(long?.text).toBe('日'.repeat(256));
   });
 
   it('cuts a longer page at its headings, each passage with its title and heading', () => {
@@ -187,11 +199,12 @@ describe('a page’s passages', () => {
 
   it('counts tokens the way the model’s tokenizer splits words, or more', () => {
     expect(estimateTokens('the')).toBe(1);
-    expect(estimateTokens('pasta,')).toBe(2);
-    expect(estimateTokens('Café')).toBe(1);
+    expect(estimateTokens('pasta,')).toBe(3);
+    expect(estimateTokens('Café')).toBe(2);
+    expect(estimateTokens('Niamh')).toBe(2);
     expect(estimateTokens('3.14')).toBe(4);
     expect(estimateTokens('日本語')).toBe(3);
-    expect(estimateTokens('lasagne')).toBeGreaterThanOrEqual(2);
+    expect(estimateTokens('lasagne')).toBe(3);
     expect(estimateTokens('')).toBe(0);
     // What doesn't read as a word, one a character: no token is shorter.
     // The model's tokenizer makes 6, 9, 27 and 54 of these.
@@ -200,7 +213,7 @@ describe('a page’s passages', () => {
     expect(estimateTokens('aGVsbG8gd29ybGQgdGhpcyBpcyBiYXNlNjQ=')).toBe(36);
     expect(estimateTokens(`sha256:${'0a'.repeat(32)}`)).toBe(71);
     expect(estimateTokens('iPhone')).toBe(6);
-    expect(estimateTokens('a'.repeat(10) + 'e'.repeat(10))).toBe(5);
+    expect(estimateTokens('a'.repeat(10) + 'e'.repeat(10))).toBe(7);
     expect(estimateTokens('a'.repeat(21))).toBe(21);
     expect(estimateTokens('Pneumonoultramicroscopicsilicovolcanoconiosis')).toBe(45);
   });

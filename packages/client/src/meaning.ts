@@ -143,6 +143,8 @@ export function meaningPassages(
     const headingEnd = lineEnd < 0 ? text.length : lineEnd;
     section(text.slice(at, headingEnd), at, headingEnd + 1, starts[i + 1] ?? text.length);
   }
+  // A page with a title too long for one passage, and no text: its start.
+  if (passages.length === 0 && title) passages.push(passage(first(title, maxTokens), 0, null));
   return passages;
 }
 
@@ -220,15 +222,19 @@ function* cutWord(
 
 /**
  * About as many tokens as the model's tokenizer (BERT's, uncased) makes of
- * `word`, a run without spaces, or more for prose, so a passage cut by it
- * holds no more than it should. Accents go, as the tokenizer drops them.
- * Each mark of punctuation or symbol is a token, and so is each character
- * of any script but Latin. A run of Latin letters that reads as a word
- * (cased as one, at most 20 letters, a quarter of them vowels) is one token
- * up to 6 letters long, and one each 4 letters past that; any other run of
- * Latin letters and digits, such as a number, an ID or a hash, one a
- * character, as no token is shorter than one. An estimate all the same:
- * where the tokenizer is at hand, its count is the one to pass.
+ * `word`, a run without spaces, or more, so a passage cut by it holds no
+ * more than it should. Accents go, as the tokenizer drops them. Each mark
+ * of punctuation or symbol is a token, and so is each character of any
+ * script but Latin. A run of Latin letters that reads as a word (cased as
+ * one, at most 20 letters, a quarter of them vowels) is one token up to 3
+ * letters long, and one each 3 letters; any other run of Latin letters and
+ * digits, such as a number, an ID or a hash, one a character, as no token
+ * is shorter than one. So it counts English high, where most words are a
+ * token, to count names and other languages, whose words are cut into
+ * more, about right: measured with the model's tokenizer, passages of 256
+ * cut by it held at most 213 tokens of the spec's English, and 245 of
+ * French, German, Spanish, Finnish, Welsh or a list of names. An estimate
+ * all the same: where the tokenizer is at hand, its count is the one to pass.
  */
 export function estimateTokens(word: string): number {
   let tokens = 0;
@@ -257,7 +263,7 @@ const SPACE = /^\s$/u;
 /** Letters cased as a word is: all small, all capitals, or a capital first. */
 const WORDLIKE = /^(?:\p{Ll}{1,20}|\p{Lu}\p{Ll}{1,19}|\p{Lu}{1,20})$/u;
 const vowels = (run: string) => run.match(/[aeiouy]/gi)?.length ?? 0;
-const wordTokens = (run: string) => (run.length <= 6 ? 1 : Math.ceil(run.length / 4));
+const wordTokens = (run: string) => Math.ceil(run.length / 3);
 
 /** A passage's text, hashed: 16 bytes of BLAKE2b, as base64url. */
 export const passageHash = (text: string): string =>
