@@ -128,7 +128,7 @@ Replacing and `host.app` are for app plugins, which already run with the app's t
 - Replacing the editors, or regions where trust or audience is decided.
 - Plugin Markdown syntax beyond claimed inline code (and, as changed by #401, claimed fence languages).
 - Storage for plugins.
-- A plugin's commands outside the page's Plugins menu (an app-wide command list, shortcuts). Worth an issue of its own.
+- A plugin's commands outside the page's Plugins menu (an app-wide command list, shortcuts). Worth an issue of its own. (Since built: the command palette lists them (#311), and the person can give each a shortcut in Settings → Plugins (#404).)
 - Replacing the whole shell (rail, sidebar and main in one view). Replacing the rail and the sidebar together gets close, and keeps the ways back.
 
 ## Considered options

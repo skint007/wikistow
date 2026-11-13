@@ -559,8 +559,11 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     const run = epoch;
     // One count of writes a minute, for the page operations and page edits alike.
     const write = writeLimit();
+    const controller = new AbortController();
     const caller: Caller = {
       id,
+      name: manifest.name,
+      signal: controller.signal,
       access: manifest.access,
       scopes: () => access[id] ?? [],
       live: () => live(),
@@ -603,7 +606,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       },
     };
     const active: Active = {
-      controller: new AbortController(),
+      controller,
       caller,
       pages: reach.pages(caller),
       registry: createRegistry(() => {

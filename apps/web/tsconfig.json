@@ -5,5 +5,13 @@
     "types": ["vite-plus/client", "node"],
     "paths": { "@/*": ["../../packages/ui/src/*"] }
   },
-  "include": ["src", "vite.config.ts", "e2e", "screenshots", "drill", "playwright.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "meaning.ts",
+    "e2e",
+    "screenshots",
+    "drill",
+    "playwright.config.ts"
+  ]
 }

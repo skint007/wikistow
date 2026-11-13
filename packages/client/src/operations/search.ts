@@ -225,6 +225,7 @@ export class PageIndex extends SearchIndex<SearchPage> {
         doc,
         title: text.title,
         text: text.text,
+        headings: text.headings ?? [],
         properties: text.properties ?? [],
         links: text.links ?? [],
         updated: text.updated ?? null,
@@ -768,6 +769,7 @@ export type KeptPages = ReadonlyMap<
     pageId: PageId;
     title: string;
     text: string;
+    headings: readonly number[];
     properties: readonly Readonly<PropertyData>[];
     links: readonly Readonly<IndexedLink>[];
     updated: string | null;
@@ -776,12 +778,19 @@ export type KeptPages = ReadonlyMap<
 
 export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
-    index
-      .pages()
-      .map(({ doc, title, text, properties, links, updated }) => [
-        doc.revisionId,
-        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, properties, links, updated },
-      ]),
+    index.pages().map(({ doc, title, text, headings, properties, links, updated }) => [
+      doc.revisionId,
+      {
+        spaceId: doc.spaceId,
+        pageId: doc.pageId,
+        title,
+        text,
+        headings,
+        properties,
+        links,
+        updated,
+      },
+    ]),
   );
 
 const KeptScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -799,6 +808,7 @@ const KeptJson = z.array(
     PageId,
     z.string(),
     z.string(),
+    z.array(z.number().int().nonnegative()),
     z.array(KeptProperty),
     z.array(KeptLink),
     z.iso.datetime().nullable(),
@@ -810,7 +820,8 @@ const KeptJson = z.array(
 // another account or server's. They are bound to the app's `build` too:
 // another build may reduce pages differently (`searchText`), so its file
 // opens as nothing and every page is read again. So does one kept before
-// properties, links or times were (its rows have a field fewer), whatever its build.
+// headings, properties, links or times were (its rows have a field fewer),
+// whatever its build.
 const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
@@ -823,6 +834,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.pageId,
     page.title,
     page.text,
+    page.headings,
     page.properties,
     page.links.map(({ key, pageId }) => [key, pageId]),
     page.updated,
@@ -837,13 +849,14 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   try {
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
-      json.map(([id, spaceId, pageId, title, text, properties, links, updated]) => [
+      json.map(([id, spaceId, pageId, title, text, headings, properties, links, updated]) => [
         id,
         {
           spaceId,
           pageId,
           title,
           text,
+          headings,
           properties,
           links: links.map(([key, target]) => ({ key, pageId: target })),
           updated,

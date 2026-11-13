@@ -92,6 +92,23 @@ export function editorDrafts() {
     through,
 
     /**
+     * Save what is typed in `page`, if the draft view has it open here, so
+     * a read of its draft gets it, as the page handle's read does. A save
+     * `caller` isn't told of.
+     */
+    async flush(caller: Caller, page: PageRef) {
+      const draft = openDrafts.get(page.pageId);
+      if (!draft?.ready()) return;
+      const { pageId } = page;
+      if (!savingFor.has(pageId)) savingFor.set(pageId, caller.id);
+      try {
+        await draft.flush();
+      } finally {
+        if (savingFor.get(pageId) === caller.id) savingFor.delete(pageId);
+      }
+    },
+
+    /**
      * The page handle a plugin gets for `shown`. In the draft view it reads
      * the draft as it is now, what is typed saved first, and an edit must be
      * on top of the version it last read. Its `editor` works at the cursor,

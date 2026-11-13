@@ -35,6 +35,7 @@ import {
 } from '../src/index.ts';
 import { sodium } from '../src/sodium.ts';
 import { liveVectors } from './live-vectors.ts';
+import { meaningVectors } from './meaning-vectors.ts';
 import { m2Vectors } from './m2-vectors.ts';
 
 const FILE = new URL('../test/vectors.json', import.meta.url);
@@ -68,6 +69,7 @@ const Previous = z.object({
       .optional(),
   }),
   live: z.object({ starter: ExportedIdentity }).optional(),
+  meaning: z.object({ keeper: ExportedIdentity }).optional(),
 });
 const previousFile: unknown = existsSync(FILE) ? JSON.parse(readFileSync(FILE, 'utf8')) : undefined;
 const previous = previousFile === undefined ? undefined : Previous.parse(previousFile);
@@ -159,6 +161,7 @@ const vectors = {
   metadata: { sealed: folderMetadata.metadata, envelope: folderMetadata.envelopes[0] },
   m2: m2Vectors(previous?.m2),
   live: liveVectors(previous?.live),
+  meaning: meaningVectors(previous?.meaning),
 };
 
 function isSection(value: unknown): value is Record<string, unknown> {

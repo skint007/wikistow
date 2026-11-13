@@ -1,0 +1,10 @@
+{
+  "id": "note-refactor",
+  "name": "Note refactor",
+  "version": "0.1.0",
+  "api": 1,
+  "description": "Splits the selection into a page of its own, and merges the pages the selection links to into this one, as Obsidian's Note Refactor does. Links follow what moved, and merged pages go to the trash once you agree.",
+  "script": "script.js",
+  "access": "write",
+  "platforms": { "desktop": "full", "browser": "full", "phone": "full" }
+}

@@ -171,6 +171,10 @@ _Avoid_: Field, attribute, metadata (folder metadata is something else).
 Inline code such as `` `=servings` `` or `` `=[[Page]].servings` `` that shows a property's value in a page's body.
 _Avoid_: Variable (template variables are filled once, when a page is made), placeholder.
 
+**Search by meaning**
+Finding pages by what they mean as well as by their words, with a small embedding model the person's own app runs over the pages it can read. Each page's passages become vectors, sealed on the device and never sent anywhere. Word matches come first; **By meaning** lists other pages close in meaning below them. Accepted in ADR 0016, not built yet.
+_Avoid_: Semantic search, AI search, vector search.
+
 **Query table**
 A `wikistow-query` code block, shown as a table of the pages that match it, as each viewer can see them.
 _Avoid_: Dataview, database view.

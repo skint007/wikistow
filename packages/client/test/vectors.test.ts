@@ -59,6 +59,14 @@ import { z } from 'zod';
 import { sodium } from '../src/sodium.ts';
 import vectors from './vectors.json';
 import { opensFor } from '../src/owner-predicates.ts';
+import {
+  meaningBytes,
+  MEANING_PASSAGES_VERSION,
+  openMeaningIndex,
+  passageHash,
+  quantizeVector,
+  readMeaningBytes,
+} from '../src/meaning.ts';
 import { opensAnyone } from './support/anyone.ts';
 import {
   JoinId,
@@ -763,3 +771,71 @@ function canonicalLiveClient(client: (typeof vectors)['live']['client']) {
     client.joinId,
   ]);
 }
+
+describe('kept vector test vectors (ADR 0016, decision 4)', () => {
+  const { meaning } = vectors;
+  const keeper = {
+    identity: identity(meaning.keeper),
+    installationId: InstallationId.parse(meaning.installationId),
+  };
+  const kept = new Map(
+    meaning.versions.map(({ revisionId, passages }) => [
+      RevisionId.parse(revisionId),
+      passages.map(({ hash: passage, start, scale, values }) => ({
+        hash: passage,
+        start,
+        vector: { scale, values: Int8Array.from(values) },
+      })),
+    ]),
+  );
+
+  it('derive the key under meaning-index-key/v1 and bind it by meaning-index/v1', () => {
+    const key = sodium.crypto_generichash(
+      32,
+      canonical(meaning.keyDomain, []),
+      keeper.identity.boxSecretKey,
+    );
+    expect(meaning.keyDomain).toBe('meaning-index-key/v1');
+    expect(sodium.to_hex(key)).toBe(meaning.key);
+    expect(meaning.passagesVersion).toBe(MEANING_PASSAGES_VERSION);
+    const ad = canonical('meaning-index/v1', [
+      keeper.installationId,
+      keeper.identity.public.id,
+      meaning.modelHash,
+      meaning.passagesVersion,
+    ]);
+    expect(sodium.to_hex(ad)).toBe(meaning.ad);
+  });
+
+  it('hash each passage and keep its vector in 8 bits', () => {
+    for (const { passages } of meaning.versions) {
+      for (const { text, hash: passage, vector, scale, values } of passages) {
+        expect(passageHash(text)).toBe(passage);
+        expect(quantizeVector(vector)).toEqual({ scale, values: Int8Array.from(values) });
+      }
+    }
+  });
+
+  it('lay the vectors out as bytes, and read them back', () => {
+    expect(sodium.to_hex(meaningBytes(kept))).toBe(meaning.plaintext);
+    expect(readMeaningBytes(sodium.from_hex(meaning.plaintext))).toEqual(kept);
+  });
+
+  it('seal the bytes with XChaCha20-Poly1305 after a 24-byte nonce', () => {
+    const sealed = fromBase64(meaning.sealed);
+    const nonce = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+      null,
+      sealed.subarray(nonce),
+      sodium.from_hex(meaning.ad),
+      sealed.subarray(0, nonce),
+      sodium.from_hex(meaning.key),
+    );
+    expect(sodium.to_hex(plaintext)).toBe(meaning.plaintext);
+    expect(openMeaningIndex(keeper, sealed, meaning.modelHash)).toEqual(kept);
+    expect(openMeaningIndex(keeper, sealed, `${meaning.modelHash}0`)).toBeNull();
+    expect(
+      openMeaningIndex(keeper, fromBase64(flip(meaning.sealed, 30)), meaning.modelHash),
+    ).toBeNull();
+  });
+});
