@@ -194,6 +194,17 @@ describe.runIf(unix)('the clip listener', () => {
     expect(await again.next()).toBeNull();
   });
 
+  it('lets the person’s helper in past connections that never prove themselves', async () => {
+    const { socket, token } = await listening();
+    // As other accounts on Windows can open the pipe to read, and wait.
+    const idle = await Promise.all(Array.from({ length: 20 }, () => helper(socket)));
+    const client = await helper(socket);
+    await prove(client, token);
+    client.send({ v: 1, id: 'a', type: 'hello' });
+    expect(await client.next()).toMatchObject({ id: 'a', type: 'status' });
+    expect(idle.filter((other) => other.closed).length).toBeGreaterThanOrEqual(5);
+  });
+
   it('drops a helper naming an extension it doesn’t answer', async () => {
     const { socket, token } = await listening();
     const client = await helper(socket);
@@ -508,9 +519,15 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
     expect(existsSync(hostFile) && existsSync(manifest)).toBe(true);
   });
 
-  it('in development writes no manifests unless asked', async () => {
+  it('in development writes no manifests unless asked, and leaves the installed app’s alone', async () => {
     const { clipping, manifest } = await app([]);
     expect(await clipping.state()).toEqual({ on: true, problem: 'development', browsers: [] });
     expect(existsSync(manifest)).toBe(false);
+    // As the installed app wrote it.
+    await mkdir(join(manifest, '..'), { recursive: true });
+    await writeFile(manifest, '{}');
+    await clipping.set(false);
+    await clipping.set(true);
+    expect(await readFile(manifest, 'utf8')).toBe('{}');
   });
 });

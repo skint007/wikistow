@@ -136,8 +136,15 @@ export function desktopClipping(options: ClippingOptions) {
   const state = (): ClippingState => ({ on, problem: problem(), browsers: on ? browsers : [] });
 
   /** The manifests as the setting says, for the helper this copy ships. */
+  /**
+   * The manifests as the setting says, for the helper this copy ships. A
+   * development build or a translocated Mac app leaves them alone, on or
+   * off: they are the installed app's, and deleting them would leave the
+   * extension unable to start it.
+   */
   async function manifests() {
-    const named = on && !translocated && !development ? (helper?.path ?? null) : null;
+    if (translocated || development) return void (browsers = []);
+    const named = on ? (helper?.path ?? null) : null;
     browsers = await syncManifests(targets, named, allowed, registry, hostName).catch(() => []);
   }
 

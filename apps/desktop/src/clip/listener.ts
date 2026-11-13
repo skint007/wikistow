@@ -24,8 +24,15 @@ import {
   type ErrorCode,
 } from './protocol.ts';
 
-/** At most this many helpers at once; each popup or clip is one. */
+/** At most this many helpers at once once proven; each popup or clip is one. */
 const MAX_CONNECTIONS = 16;
+/**
+ * At most this many connections still to prove themselves. On Windows any
+ * account, or another computer through file sharing, can open the pipe to
+ * read, which proves nothing; the oldest such goes to make room, so they
+ * can't keep the person's helper out, which proves itself in milliseconds.
+ */
+const MAX_UNPROVEN = 16;
 /** A socket's path must fit `sockaddr_un`, 104 bytes on a Mac with its ending. */
 const MAX_SOCKET_PATH = 103;
 
@@ -72,6 +79,8 @@ export function clipListener(options: ClipListenerOptions) {
   let server: Server | null = null;
   let address: string | null = null;
   const connections = new Set<Socket>();
+  /** Connections not yet past the token's challenge, oldest first. */
+  const unproven = new Set<Socket>();
   /** This run wrote clip-host.json, so it is this run's to delete. */
   let wrote = false;
 
@@ -89,10 +98,18 @@ export function clipListener(options: ClipListenerOptions) {
     address = await listenAddress(options.endpoint);
     const token = randomBytes(32);
     const listening = createServer({ allowHalfOpen: false }, (socket) => {
-      if (connections.size >= MAX_CONNECTIONS) return void socket.destroy();
-      connections.add(socket);
-      socket.once('close', () => connections.delete(socket));
-      serve(socket, token, options);
+      if (unproven.size >= MAX_UNPROVEN) unproven.values().next().value?.destroy();
+      unproven.add(socket);
+      socket.once('close', () => {
+        unproven.delete(socket);
+        connections.delete(socket);
+      });
+      serve(socket, token, options, () => {
+        unproven.delete(socket);
+        if (connections.size >= MAX_CONNECTIONS) return false;
+        connections.add(socket);
+        return true;
+      });
     });
     await new Promise<void>((resolve, reject) => {
       listening.once('error', reject);
@@ -102,6 +119,8 @@ export function clipListener(options: ClipListenerOptions) {
       });
     });
     server = listening;
+    // A failed accept, as when out of file descriptors, drops only that connection.
+    listening.on('error', () => {});
     // The folder keeps others out; the socket is the person's too.
     if (options.endpoint.kind === 'unix') await chmod(address, 0o600);
     await mkdir(dirname(options.hostFile), { recursive: true, mode: 0o700 });
@@ -120,7 +139,7 @@ export function clipListener(options: ClipListenerOptions) {
     const closing = server;
     server = null;
     removeFiles();
-    for (const socket of connections) socket.destroy();
+    for (const socket of [...connections, ...unproven]) socket.destroy();
     if (closing) await new Promise<void>((resolve) => closing.close(() => resolve()));
   }
 
@@ -153,7 +172,13 @@ async function listenAddress(endpoint: ClipEndpoint): Promise<string> {
  * then its messages, each checked for its version and against its schema.
  * Anything else drops it.
  */
-function serve(socket: Socket, token: Uint8Array, options: ClipListenerOptions) {
+function serve(
+  socket: Socket,
+  token: Uint8Array,
+  options: ClipListenerOptions,
+  /** Count the connection as proven, if there's room. */
+  admit: () => boolean,
+) {
   const challenge = appChallenge(token);
   let step: 'challenge' | 'proof' | 'open' = 'challenge';
   let caller = '';
@@ -198,7 +223,7 @@ function serve(socket: Socket, token: Uint8Array, options: ClipListenerOptions) 
     }
     if (step === 'proof') {
       const proven = challenge.proven(body);
-      if (!proven || !options.allowed(proven.caller)) return drop();
+      if (!proven || !options.allowed(proven.caller) || !admit()) return drop();
       clearTimeout(timer);
       caller = proven.caller;
       step = 'open';

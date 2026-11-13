@@ -235,7 +235,7 @@ pnpm exec vp -C apps/desktop pack
 pnpm -C apps/desktop start
 ```
 
-The browser clipper's helper is Go, in `apps/desktop/clip-host`. With Go installed, `scripts/clip-host.sh`, from `apps/desktop`, builds it for every system a package ships on into `out/clip-host`, and `go test ./...` in `clip-host` runs its tests against a fake app. A development build listens on its socket, but writes no browser manifests unless started with `--clip-manifests`, so it doesn't take the installed app's. Then they name the helper `scripts/clip-host.sh` built. `--clip-extension=chrome-extension://<id>/`, or a Firefox add-on ID, adds an extension to that launch's manifests, as the desktop tests do for theirs (`e2e/clip.spec.ts`); the next launch without it takes it out.
+The browser clipper's helper is Go, in `apps/desktop/clip-host`. With Go installed, `scripts/clip-host.sh`, from `apps/desktop`, builds it for every system a package ships on into `out/clip-host`, and `go test ./...` in `clip-host` runs its tests against a fake app. A development build listens on its socket, but writes no browser manifests unless started with `--clip-manifests`, so it doesn't take the installed app's, and never deletes them, even with Browser clipping off. With the switch, they name the helper `scripts/clip-host.sh` built. `--clip-extension=chrome-extension://<id>/`, or a Firefox add-on ID, adds an extension to that launch's manifests, as the desktop tests do for theirs (`e2e/clip.spec.ts`); the next launch without it takes it out.
 
 The desktop tests run the real app under a virtual display, with the browser half of each sign-in in Chromium beside it:
 
