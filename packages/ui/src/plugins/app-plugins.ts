@@ -157,13 +157,13 @@ export function startAppPlugins(queryClient: QueryClient) {
             name: pageTitle(title),
           });
         });
-        if (done === 'trashed') {
-          trashed.push(nodeId);
-          // Off it at once if shown, as the app's own Delete goes to the space, so nothing is typed into it.
-          const shown = where.shown()?.page;
-          if (shown?.pageId === pageId)
-            void where.navigate({ kind: 'space', spaceId: shown.spaceId });
-        } else waiting += 1;
+        if (done === 'trashed') trashed.push(nodeId);
+        else waiting += 1;
+        // Off it at once if shown, trashed or waiting to be, as the app's own
+        // Delete goes to the space, so nothing is typed into it.
+        const shown = where.shown()?.page;
+        if (shown?.pageId === pageId)
+          void where.navigate({ kind: 'space', spaceId: shown.spaceId });
       }
     } catch (error) {
       // Those before it went: the plugin is told how many, and the notice offers Undo.
