@@ -181,9 +181,10 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * An index like this one, but holding `pages`, each in place of the page
    * with its space and page ID, and in each of `spaces` (every one for
    * `'all'`) no page `pages` leaves out. A page's content can be left out
-   * if this index holds that version of it. A page as this index holds it
-   * (the same version, in the same place, not now given the time it lacked)
-   * is kept as indexed: only the
+   * if this index holds that version of it, and a version it holds without
+   * a time, given now with one, keeps what it held of it. A page as this
+   * index holds it (the same version, in the same place, with its time) is
+   * kept as indexed: only the
    * text of pages that changed is read again (`SearchIndex`), and its
    * lookups are copied, in time linear in the pages it holds, then sorted
    * only where pages changed. If nothing did, this index is returned
@@ -208,16 +209,20 @@ export class PageIndex extends SearchIndex<SearchPage> {
     const added: Held[] = [];
     for (const [key, [doc, content]] of given) {
       const held = byPage.get(key);
-      const same = held !== undefined && sameDoc(held.entry, doc);
-      // As it was, unless it now comes with the time it lacked: then only
-      // that is taken, as what it holds, such as a change typed on this
-      // device over the version (`withQueuedDrafts`), is the page's still.
-      const timed = same && held.entry.updated === null && content?.updated != null;
-      if (same && !timed) continue;
+      // The version it holds, given now with the time it lacked: only the
+      // time and where it is are taken, as what it holds, such as a change
+      // typed on this device over that version (`withQueuedDrafts`), is the
+      // page's still.
+      const timed =
+        held?.entry.revisionId === doc.revisionId &&
+        held.entry.updated === null &&
+        content?.updated != null;
+      if (held && sameDoc(held.entry, doc) && !timed) continue;
       if (held) removed.set(key, held);
-      const text = timed
-        ? { ...held.page, updated: content?.updated }
-        : (content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined));
+      const text =
+        held && timed
+          ? { ...held.page, updated: content?.updated }
+          : (content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined));
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
       const page = {
         doc,

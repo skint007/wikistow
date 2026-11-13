@@ -255,6 +255,18 @@ describe('what changed in the index', () => {
       updated: SAVED,
     });
     expect(indexChanges(untimed, timed)).toEqual([{ spaceId, folderIds: doc.folderIds }]);
+    // Listed otherwise now, as readers see it while the change waits: the same.
+    const listed = untimed.with([
+      [
+        { ...doc, draft: !doc.draft },
+        { title: 'Garlic bread', text: '', updated: SAVED },
+      ],
+    ]);
+    expect(listed.page(spaceId, doc.pageId)).toMatchObject({
+      title: 'Garlic bread, typed here',
+      draft: !doc.draft,
+      updated: SAVED,
+    });
     // Given again, with a time or without, it stays as it is.
     expect(timed.with([[doc, { title: 'Garlic bread', text: '', updated: SAVED }]])).toBe(timed);
     expect(timed.with([[doc, { title: 'Garlic bread', text: '' }]])).toBe(timed);
