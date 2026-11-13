@@ -162,8 +162,8 @@ export function PageEditor({
     whole: boolean;
   } | null>(null);
   const wholeAt = useRef(-Infinity);
-  // Whether a whole read is under way, and the person turned to the visual
-  // side meanwhile; each text going in is numbered in
+  // Whether a whole read, or a take-in checked in the worker, is under way,
+  // and the person turned to the visual side meanwhile; each text going in is numbered in
   // turn, and the last shown, so an older one read whole doesn't go in
   // over it.
   const reading = useRef(false);
@@ -302,24 +302,55 @@ export function PageEditor({
       setNote(null);
       if (focus) surface.current?.focus(focus.at);
     };
+    // Whatever was given since, once what's under way is done.
+    const onward = (text: string) => {
+      const hurry = hurried.current;
+      hurried.current = false;
+      if (given.current !== null && given.current !== text) syncVisual(given.current, 0, hurry);
+    };
     const run = (now: boolean) => {
       syncing.current = null;
       const text = given.current;
       if (text === null || ask !== asked.current) return;
-      const trying = performance.now();
-      const taken = surface.current?.take?.(text);
-      tookTake.current = performance.now() - trying;
-      if (taken) {
-        lastShown.current = ++texts.current;
-        given.current = null;
-        return settle();
-      }
-      // One whole read at a time: the one under way goes on to the newest,
-      // at once if the person turned to it meanwhile.
+      // One text at a time, a whole read or one checked in the worker: the
+      // one under way goes on to the newest, at once if the person turned to
+      // it meanwhile.
       if (reading.current) {
         hurried.current ||= now;
         return;
       }
+      const trying = performance.now();
+      const taking = surface.current?.take?.(text) ?? false;
+      const taken = (mine: number) => {
+        tookTake.current = performance.now() - trying;
+        lastShown.current = mine;
+        if (given.current !== text) return;
+        given.current = null;
+        settle();
+      };
+      if (taking === true) return taken(++texts.current);
+      if (taking !== false) {
+        const mine = ++texts.current;
+        reading.current = true;
+        void taking.then((took) => {
+          reading.current = false;
+          if (ask !== asked.current) return;
+          // The newest, read whole, as soon as its pace allows.
+          if (!took) {
+            const hurry = hurried.current;
+            hurried.current = false;
+            return given.current === null ? undefined : whole(given.current, hurry);
+          }
+          if (lastShown.current < mine) taken(mine);
+          onward(text);
+        });
+        return;
+      }
+      tookTake.current = performance.now() - trying;
+      whole(text, now);
+    };
+    // `text`, read whole, checked first, paced.
+    const whole = (text: string, now: boolean) => {
       const due = wholeAt.current - performance.now();
       if (!now && due > 0) {
         syncing.current = {
@@ -355,9 +386,7 @@ export function PageEditor({
             if (focus) mirror.current?.focus(focus.at);
           }
         }
-        const hurry = hurried.current;
-        hurried.current = false;
-        if (given.current !== null && given.current !== text) syncVisual(given.current, 0, hurry);
+        onward(text);
       });
     };
     syncing.current = {
@@ -417,19 +446,27 @@ export function PageEditor({
     }
     given.current = text;
     if (atOnce || !surface.current) return void show('visual', false);
-    // A block at a time if it can be; else checked whole first.
-    if (surface.current.take?.(text)) return void (given.current = null);
     const ask = asked.current;
-    void check(text).then((fidelity) => {
+    const whole = () =>
+      void check(text).then((fidelity) => {
+        if (given.current !== text || ask !== asked.current) return;
+        if (fidelity.visual) {
+          given.current = null;
+          surface.current?.replace(text);
+          return;
+        }
+        asked.current++;
+        setMode('source');
+        setNote(fidelity.reason);
+      });
+    // A block at a time if it can be; else checked whole first.
+    const taking = surface.current.take?.(text) ?? false;
+    if (taking === true) return void (given.current = null);
+    if (taking === false) return whole();
+    void taking.then((taken) => {
       if (given.current !== text || ask !== asked.current) return;
-      if (fidelity.visual) {
-        given.current = null;
-        surface.current?.replace(text);
-        return;
-      }
-      asked.current++;
-      setMode('source');
-      setNote(fidelity.reason);
+      if (taken) given.current = null;
+      else whole();
     });
   };
 

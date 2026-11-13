@@ -8,6 +8,7 @@ import {
 } from '@milkdown/kit/core';
 import type { Node, ResolvedPos } from '@milkdown/kit/prose/model';
 import { Plugin, Selection, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import {
@@ -27,8 +28,8 @@ import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
 import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
-import { byBlock, replacement, same } from './blocks';
-import { endsInLine, fidelityOf, withLf } from './fidelity';
+import { planBlocks, replacement, same, type Taken } from './blocks';
+import { BLOCK_TIMED, checkFidelity, endsInLine, fidelityOf, withLf } from './fidelity';
 import { lineBreakFor } from '../surface';
 import { inText, spansOf, type Span } from './sources';
 import { visualFind, visualFindable } from './find';
@@ -122,6 +123,38 @@ function shownAsRead(
     const there = read(i);
     return span && node && (kept.has(node) || (!!there && same(node, there))) ? span : null;
   });
+}
+
+/**
+ * `taken`, read from `markdown`, put in `view` in place of the blocks of
+ * `doc` it replaces, changing only what reads differently; and what `write`
+ * keeps as each block's source then.
+ */
+function putIn(view: EditorView, write: Writer, markdown: string, doc: Node, taken: Taken) {
+  const { schema } = doc.type;
+  const was = schema.topNodeType.create(
+    null,
+    doc.content.content.slice(taken.first, taken.first + taken.count),
+  );
+  const change = replacement(was, schema.topNodeType.create(null, taken.nodes));
+  if (change) {
+    let at = 0;
+    for (let i = 0; i < taken.first; i++) at += doc.child(i).nodeSize;
+    view.dispatch(
+      view.state.tr
+        .replace(at + change.from, at + change.to, change.slice)
+        .setMeta(EXTERNAL, true)
+        .setMeta('addToHistory', false),
+    );
+  }
+  const now = view.state.doc;
+  const { first, nodes } = taken;
+  const read = (i: number) =>
+    i >= first && i < first + nodes.length ? nodes[i - first] : undefined;
+  if (taken.spans.length === now.childCount)
+    write.source({ doc: now, text: markdown, spans: shownAsRead(now, doc, read, taken.spans) });
+  else write.source(null);
+  return now;
 }
 
 // Whether `tr` is the session's change (`EXTERNAL`), or one plugins added to it.
@@ -277,6 +310,10 @@ function Surface({
   const focusing = useRef<{ at: number | undefined } | null>(null);
   // Strict Mode makes the editor twice; the last made is the one kept.
   const made = useRef(0);
+  // Each text shown, a block at a time or whole, and given to `replace`,
+  // counted, so one checked meanwhile doesn't go in over a later one.
+  const changes = useRef(0);
+  const replacing = useRef(0);
 
   const docOf = (live: Editor) => live.action((ctx) => ctx.get(editorViewCtx).state.doc);
   // `doc` as the page holds it, ending as the text it was given does, and
@@ -368,6 +405,7 @@ function Surface({
      * stays where it was.
      */
     show: (markdown: string) => {
+      changes.current++;
       text.current = markdown;
       // A cursor asked for before it was made was in other text.
       focusing.current = null;
@@ -390,69 +428,60 @@ function Surface({
     },
     /**
      * Show `markdown` by reading again only the top-level blocks it changes,
-     * with those beside them (`byBlock`), checked as a paste is; false, and
-     * nothing shown, if it must be read whole (`show`), checked first as a
-     * page is. The cursor stays where it was, and the change is no edit to
-     * undo.
+     * with those beside them (`planBlocks`), checked as a paste is: at once
+     * if that's under 1 KB (`BLOCK_TIMED`), else in the check's worker,
+     * going in once it's checked, if nothing has gone in meanwhile. False,
+     * and nothing shown, if it must be read whole (`show`), checked first
+     * as a page is. The cursor stays where it was, and the change is no
+     * edit to undo.
      */
-    take: (markdown: string): boolean => {
+    take: (markdown: string): boolean | Promise<boolean> => {
       const live = editor.current;
       const write = writer.current;
       const given = origin.current;
       if (!live || !write || !given) return false;
       const holds = surface.read();
-      return live.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        const { doc } = view.state;
-        const final = endsInLine(given.markdown);
-        const { page, runs, spans } = write.layout(doc, final);
+      const mine = ++changes.current;
+      const plan = live.action((ctx) => {
+        const { doc } = ctx.get(editorViewCtx).state;
+        const { page, runs, spans } = write.layout(doc, endsInLine(given.markdown));
         // Only text it holds as the page does can be compared with it.
-        if (page !== holds) return false;
+        if (page !== holds) return null;
         const parse = ctx.get(parserCtx);
+        const made = planBlocks({ doc, page, runs, spans, text: markdown, parse });
         const transform = { parse, serialize: ctx.get(serializerCtx) };
-        const taken = byBlock({
-          doc,
-          page,
-          runs,
-          spans,
-          text: markdown,
-          parse,
-          kept: (lf) => fidelityOf(lf, transform).visual,
-        });
+        return made && { ...made, doc, transform };
+      });
+      if (!plan) return false;
+      const go = (kept: boolean) => {
+        const now = editor.current;
+        if (!kept || !now || mine !== changes.current || docOf(now) !== plan.doc) return false;
+        const taken = plan.finish();
         if (!taken) return false;
-        const { schema } = doc.type;
-        const was = schema.topNodeType.create(
-          null,
-          doc.content.content.slice(taken.first, taken.first + taken.count),
+        const doc = now.action((ctx) =>
+          putIn(ctx.get(editorViewCtx), write, markdown, plan.doc, taken),
         );
-        const change = replacement(was, schema.topNodeType.create(null, taken.nodes));
-        if (change) {
-          let at = 0;
-          for (let i = 0; i < taken.first; i++) at += doc.child(i).nodeSize;
-          view.dispatch(
-            view.state.tr
-              .replace(at + change.from, at + change.to, change.slice)
-              .setMeta(EXTERNAL, true)
-              .setMeta('addToHistory', false),
-          );
-        }
-        const now = view.state.doc;
         text.current = markdown;
         focusing.current = null;
-        origin.current = { markdown, doc: now };
-        const { first, nodes } = taken;
-        const read = (i: number) =>
-          i >= first && i < first + nodes.length ? nodes[i - first] : undefined;
-        if (taken.spans.length === now.childCount)
-          write.source({
-            doc: now,
-            text: markdown,
-            spans: shownAsRead(now, doc, read, taken.spans),
-          });
-        else write.source(null);
+        origin.current = { markdown, doc };
         surface.later();
         return true;
-      });
+      };
+      if (plan.check.length < BLOCK_TIMED) return go(fidelityOf(plan.check, plan.transform).visual);
+      return checkFidelity(plan.check).then(
+        (fidelity) => go(fidelity.visual),
+        () => false,
+      );
+    },
+    /** Show `markdown` instead, a block at a time if it can be, else read whole. */
+    replace: (markdown: string) => {
+      const mine = ++replacing.current;
+      const taking = surface.take(markdown);
+      if (taking === false) return surface.show(markdown);
+      if (taking !== true)
+        void taking.then((taken) => {
+          if (!taken && mine === replacing.current) surface.show(markdown);
+        });
     },
     edit: () => {
       edited.current = true;
@@ -639,7 +668,7 @@ function Surface({
         // Text the session showed while it was being made, which reading it
         // as it is would replace.
         const shown = text.current;
-        if (shown !== given && !surface.take(shown)) surface.show(shown);
+        if (shown !== given) surface.replace(shown);
         // Ready for the first edit, written meanwhile.
         else surface.later();
         // Focus asked for meanwhile, unless the person went elsewhere.
@@ -690,7 +719,7 @@ function Surface({
       findable,
       passages,
       read: surface.read,
-      replace: (markdown: string) => void (surface.take(markdown) || surface.show(markdown)),
+      replace: surface.replace,
       take: surface.take,
       caret: surface.caret,
       focus: surface.focus,

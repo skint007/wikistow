@@ -125,30 +125,31 @@ function definedIn(nodes: readonly Node[]): Map<string, string> {
 const sameKeys = (a: ReadonlyMap<string, unknown>, b: ReadonlyMap<string, unknown>) =>
   a.size === b.size && [...a.keys()].every((key) => b.has(key));
 
+/** What's to be read again, checked as `check`, and then read (`finish`): null if it must be read whole. */
+export type Plan = { readonly check: string; finish(): Taken | null };
+
 /**
  * How `doc`, written as `page`, its blocks in `runs` and each one's place
  * there in `spans`, takes in `text` a block at a time: the blocks the
  * characters that differ fall in, read again from `text` with the block
  * beside them each side, by `parse`, which notes where each block came
  * from (`spansOf`). Footnotes the rest of the page defines have stubs, as
- * the writer reads blocks with (`Writer`). The text read must be one the
- * editor keeps whole (`kept`, as a paste is checked); and what's read must
- * end where the page did: the blocks beside the change read as they were,
- * and the footnotes defined there the same. Null if it must be read whole:
- * as a fence or HTML left open takes in the block after it, a footnote is
- * defined or no longer is, or 1 KB or more of text is new (`BLOCK_TIMED`),
- * or the blocks it touches are, with those beside them, 16 KB or more
- * (`REGION_MAX`), which may be slow to read and are checked off the page's
- * thread then.
+ * the writer reads blocks with (`Writer`). What's read again must be one
+ * the editor keeps whole (`check`, checked as a paste is); and once read
+ * (`finish`), it must end where the page did: the blocks beside the change
+ * read as they were, where they were, and the footnotes defined there the
+ * same. Null if it must be read whole: as a fence or HTML left open takes
+ * in the block after it, a footnote is defined or no longer is, 1 KB or
+ * more of text is new (`BLOCK_TIMED`), or the blocks it touches are, with
+ * those beside them, 16 KB or more (`REGION_MAX`).
  */
-export function byBlock({
+export function planBlocks({
   doc,
   page,
   runs,
   spans,
   text,
   parse,
-  kept,
 }: {
   doc: Node;
   page: string;
@@ -156,8 +157,7 @@ export function byBlock({
   spans: readonly (Span | null)[];
   text: string;
   parse: (markdown: string) => Node;
-  kept: (markdown: string) => boolean;
-}): Taken | null {
+}): Plan | null {
   const last = runs.length - 1;
   if (last < 0) return null;
   // The characters that differ: from `start` to `end` in `page`, and to as
@@ -190,7 +190,9 @@ export function byBlock({
   const first = a === 0 ? 0 : before.first;
   const past = b === last ? doc.childCount : after.first + after.count;
   if (from > start || end > to) return null;
-  const region = text.slice(from, to + text.length - page.length);
+  const shift = text.length - page.length;
+  const region = text.slice(from, to + shift);
+  if (region.length >= REGION_MAX) return null;
   const replaced = doc.content.content.slice(first, past);
   // Footnotes, if any are in it: the rest of the page's, as stubs, and those
   // it defines must stay the same.
@@ -200,56 +202,59 @@ export function byBlock({
     : new Map<string, string>();
   const stubs = [...outside.values()].map((label) => `[^${label}]: x`);
   const lf = [withLf(region), ...stubs].join('\n\n');
-  // Checked as a paste is, with the blocks beside it, as the editor would
-  // write them together.
-  if (region.length >= REGION_MAX || !kept(lf)) return null;
-  let read: Node;
-  try {
-    read = parse(lf);
-  } catch {
-    return null;
-  }
-  const found = spansOf(read);
-  let nodes = [...read.content.content];
-  let at: readonly (Span | null)[] = found ?? [];
-  // Nothing but space, read as an empty paragraph.
-  if (!found) {
-    if (withLf(region).trim() !== '' || stubs.length > 0) return null;
-    nodes = [];
-  }
-  // Without the stubs, each where it was put.
-  const ends = nodes.slice(nodes.length - stubs.length);
-  const stubbed = ends.every(
-    (node, i) =>
-      node.type.name === DEFINITION &&
-      normalizeIdentifier(String(node.attrs['label'])) === [...outside.keys()][i],
-  );
-  if (!stubbed || ends.length !== stubs.length) return null;
-  nodes = nodes.slice(0, nodes.length - stubs.length);
-  at = at.slice(0, nodes.length);
-  if (notes && !sameKeys(definedIn(nodes), definedIn(replaced))) return null;
-  // The blocks beside it as they were, each side the page goes on.
-  const shownIn = (run: Run) =>
-    doc.content.content.slice(run.first, run.first + run.count).filter((node) => !blank(node));
-  if (a < lo) {
-    const was = shownIn(before);
-    if (!was.every((node, i) => nodes[i] && same(node, nodes[i] as Node))) return null;
-  }
-  if (b > hi) {
-    const was = shownIn(after);
-    const offset = nodes.length - was.length;
-    if (offset < 0 || !was.every((node, i) => same(node, nodes[offset + i] as Node))) return null;
-  }
-  if (first === 0 && past === doc.childCount && nodes.length === 0) return null;
-  const shift = text.length - page.length;
-  const moved = (span: Span | null) => span && { from: span.from + shift, to: span.to + shift };
-  const placed = inText(region, at).map(
-    (span) => span && { from: span.from + from, to: span.to + from },
-  );
-  return {
-    first,
-    count: past - first,
-    nodes,
-    spans: [...spans.slice(0, first), ...placed, ...spans.slice(past).map(moved)],
+  const finish = (): Taken | null => {
+    let read: Node;
+    try {
+      read = parse(lf);
+    } catch {
+      return null;
+    }
+    const found = spansOf(read);
+    let nodes = [...read.content.content];
+    let at: readonly (Span | null)[] = found ?? [];
+    // Nothing but space, read as an empty paragraph.
+    if (!found) {
+      if (withLf(region).trim() !== '' || stubs.length > 0) return null;
+      nodes = [];
+    }
+    // Without the stubs, each where it was put.
+    const ends = nodes.slice(nodes.length - stubs.length);
+    const stubbed = ends.every(
+      (node, i) =>
+        node.type.name === DEFINITION &&
+        normalizeIdentifier(String(node.attrs['label'])) === [...outside.keys()][i],
+    );
+    if (!stubbed || ends.length !== stubs.length) return null;
+    nodes = nodes.slice(0, nodes.length - stubs.length);
+    at = at.slice(0, nodes.length);
+    if (notes && !sameKeys(definedIn(nodes), definedIn(replaced))) return null;
+    const placed = inText(region, at).map(
+      (span) => span && { from: span.from + from, to: span.to + from },
+    );
+    // The blocks beside it as they were, where they were, each side the
+    // page goes on: read from the same place, the same text reads, and
+    // ends, the same.
+    const shownIn = (run: Run) =>
+      doc.content.content.slice(run.first, run.first + run.count).filter((node) => !blank(node));
+    if (a < lo) {
+      const was = shownIn(before);
+      if (!was.every((node, i) => nodes[i] && same(node, nodes[i] as Node))) return null;
+      if (placed[was.length - 1]?.to !== before.to) return null;
+    }
+    if (b > hi) {
+      const was = shownIn(after);
+      const offset = nodes.length - was.length;
+      if (offset < 0 || !was.every((node, i) => same(node, nodes[offset + i] as Node))) return null;
+      if (placed[offset]?.from !== after.from + shift) return null;
+    }
+    if (first === 0 && past === doc.childCount && nodes.length === 0) return null;
+    const moved = (span: Span | null) => span && { from: span.from + shift, to: span.to + shift };
+    return {
+      first,
+      count: past - first,
+      nodes,
+      spans: [...spans.slice(0, first), ...placed, ...spans.slice(past).map(moved)],
+    };
   };
+  return { check: lf, finish };
 }

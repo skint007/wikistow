@@ -8,7 +8,12 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import { unnumbered } from '../src/page/editor/visual/blocks.ts';
 import { transformer } from '../src/page/editor/visual/config.ts';
-import { fidelityOf, withLf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
+import {
+  checkFidelity,
+  fidelityOf,
+  withLf,
+  writesAsShown,
+} from '../src/page/editor/visual/fidelity.ts';
 import { inText, spansOf } from '../src/page/editor/visual/sources.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
@@ -147,6 +152,22 @@ async function typeAt(m: Mounted, at: number, text: string) {
   act(() => view.dispatch(view.state.tr.insertText(text, at)));
   await expect.poll(() => m.changes.length).toBeGreaterThan(count);
   return m.changes.at(-1);
+}
+
+// Take `next` in a block at a time, as split or the session does, once
+// it's checked.
+async function takeIn(m: Mounted, next: string): Promise<boolean> {
+  let taking: boolean | Promise<boolean> = false;
+  act(() => void (taking = m.handle.take?.(next) ?? false));
+  let taken = false;
+  await act(async () => void (taken = await taking));
+  return taken;
+}
+
+// Show `next` instead, however it goes in.
+async function replaceWith(m: Mounted, next: string) {
+  act(() => m.handle.replace(next));
+  await act(() => expect.poll(() => m.handle.read()).toBe(next));
 }
 
 // Whether `m` shows what reading `markdown` whole shows. Its schema isn't
@@ -362,7 +383,7 @@ describe('text taken in by block', () => {
       const view = viewOf(m.dom);
       const before = view.state.doc;
       const next = page.replace('Two.', 'Two, changed.').replace('A *b* c.', 'A *b* changed.');
-      expect(m.handle.take?.(next), page).toBe(true);
+      expect(await takeIn(m, next), page).toBe(true);
       expect(m.handle.read()).toBe(next);
       expect(await showsAsRead(m, next)).toBe(true);
       // The blocks it didn't change are the very ones it had.
@@ -408,10 +429,9 @@ describe('text taken in by block', () => {
         const kept = fidelityOf(next, t).visual;
         if (!kept) continue;
         edits++;
-        let by = false;
-        act(() => void (by = m.handle.take?.(next) ?? false));
+        const by = await takeIn(m, next);
         if (by) taken++;
-        else act(() => m.handle.replace(next));
+        else await replaceWith(m, next);
         expect(m.handle.read(), where).toBe(next);
         expect(await showsAsRead(m, next), where).toBe(true);
         text = next;
@@ -451,7 +471,7 @@ describe('text taken in by block', () => {
         page.replace('Intro.', lines('Before', '', 'Intro.')),
       ]) {
         const m = await mount(page);
-        expect(m.handle.take?.(next), JSON.stringify(next)).toBe(true);
+        expect(await takeIn(m, next), JSON.stringify(next)).toBe(true);
         expect(m.handle.read()).toBe(next);
         expect(await showsAsRead(m, next), JSON.stringify(next)).toBe(true);
         m.unmount();
@@ -477,9 +497,9 @@ describe('text taken in by block', () => {
       page.replace('- a', Array.from({ length: 1_500 }, (_, i) => `- item ${i}`).join('\n')),
     ]) {
       const m = await mount(page);
-      expect(m.handle.take?.(next), next).toBe(false);
+      expect(await takeIn(m, next), next).toBe(false);
       expect(m.handle.read(), next).toBe(page);
-      act(() => m.handle.replace(next));
+      await replaceWith(m, next);
       expect(m.handle.read(), next).toBe(next);
       expect(await showsAsRead(m, next), next).toBe(true);
       m.unmount();
@@ -491,17 +511,45 @@ describe('text taken in by block', () => {
     const page = `One.\n\n${list}\n\nTwo.\n\nThree.\n`;
     const m = await mount(page);
     const next = page.replace('Two.', 'Two, changed.');
-    expect(m.handle.take?.(next)).toBe(false);
-    act(() => m.handle.replace(next));
+    expect(await takeIn(m, next)).toBe(false);
+    await replaceWith(m, next);
     expect(m.handle.read()).toBe(next);
     expect(await showsAsRead(m, next)).toBe(true);
     // Away from it, a block at a time.
-    expect(m.handle.take?.(next.replace('Three.', 'Three, changed.'))).toBe(true);
+    expect(await takeIn(m, next.replace('Three.', 'Three, changed.'))).toBe(true);
+  });
+
+  it('reads the page whole where a fence opened is closed by a block beside it', async () => {
+    // The empty code block's first line closes the fence; its last opens one
+    // that takes in the rest of the page, though the block reads the same.
+    for (const fence of ['```', '~~~']) {
+      const page = `One.\n\nTwo.\n\n${fence}\n${fence}\n\nThree.\n\nFour.\n`;
+      const next = page.replace('Two.', `Twoz.\n\n${fence}`);
+      const m = await mount(page);
+      expect(await takeIn(m, next), fence).toBe(false);
+      await replaceWith(m, next);
+      expect(await showsAsRead(m, next), fence).toBe(true);
+      m.unmount();
+    }
+  });
+
+  it('checks what may be slow to read in the check’s worker, refusing what the whole check would', async () => {
+    const slow = '*a'.repeat(6_500);
+    const page = `One.\n\n${slow}\n\nThree.\n`;
+    const next = page.replace(slow, `${slow}${'*a'.repeat(200)}`);
+    const m = await mount(page);
+    let taking: boolean | Promise<boolean> = false;
+    act(() => void (taking = m.handle.take?.(next) ?? false));
+    expect(taking).toBeInstanceOf(Promise);
+    let taken = false;
+    await act(async () => void (taken = await taking));
+    expect(m.handle.read()).toBe(taken ? next : page);
+    if (!(await checkFidelity(next)).visual) expect(taken).toBe(false);
   });
 
   it('takes nothing it wouldn’t keep whole, such as a reference link', async () => {
     const m = await mount('One.\n\nTwo.\n\nThree.\n');
-    expect(m.handle.take?.('One.\n\n[a][r]\n\n[r]: https://example.test/\n\nThree.\n')).toBe(false);
+    expect(await takeIn(m, 'One.\n\n[a][r]\n\n[r]: https://example.test/\n\nThree.\n')).toBe(false);
     expect(m.handle.read()).toBe('One.\n\nTwo.\n\nThree.\n');
   });
 
@@ -516,7 +564,7 @@ describe('text taken in by block', () => {
         ),
       ),
     );
-    expect(m.handle.take?.('One, from outside.\n\nTwo.\n\nThree more.\n')).toBe(true);
+    expect(await takeIn(m, 'One, from outside.\n\nTwo.\n\nThree more.\n')).toBe(true);
     const { selection, doc } = view.state;
     expect(doc.textBetween(selection.head, selection.head + 4)).toBe('hree');
     // Undo takes back the person's edit, not the change.
@@ -528,7 +576,7 @@ describe('text taken in by block', () => {
     const t = await transformer();
     const page = 'Intro\n\nMid\n\n| A | B |\n| --- | --- |\n| a | b |\n';
     const m = await mount(page);
-    act(() => void m.handle.take?.(page.replace('| a | b |', '\t| a | b |')));
+    await takeIn(m, page.replace('| a | b |', '\t| a | b |'));
     const view = viewOf(m.dom);
     const written = (await typeAt(m, find(view.state.doc, 'Intro') + 5, '!')) ?? '';
     // What it writes reads as it shows, or it says it doesn't.
@@ -539,7 +587,7 @@ describe('text taken in by block', () => {
   it('keeps blocks taken in as written there, as they were given', async () => {
     const m = await mount('One.\n\nTwo.\n');
     const next = 'One.\n\nTitle\n=====\n\n* a\n* b\n\nTwo.\n';
-    expect(m.handle.take?.(next)).toBe(true);
+    expect(await takeIn(m, next)).toBe(true);
     const view = viewOf(m.dom);
     expect(await typeAt(m, find(view.state.doc, 'Two') + 3, '!')).toBe(
       next.replace('Two.', 'Two!.'),
