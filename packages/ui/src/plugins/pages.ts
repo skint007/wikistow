@@ -418,17 +418,28 @@ export function pagesFor(caller: EditingCaller): HostPages {
   const RELISTED_MS = 30_000;
 
   /**
+   * What lets `trees` be listed again, called before each use: once they are
+   * `RELISTED_MS` old, counted from now, the next check lists the folders
+   * afresh, so a page moved out of the plugin's access meanwhile is seen.
+   */
+  const relisting = (trees: Map<SpaceId, ReturnType<typeof parentsIn>>) => {
+    let listed = Date.now();
+    return () => {
+      if (Date.now() - listed <= RELISTED_MS) return;
+      trees.clear();
+      listed = Date.now();
+    };
+  };
+
+  /**
    * Check the plugin may still write `page`, as a batch goes on: its access
-   * as the person set it now, and the folders as listed at most
-   * `RELISTED_MS` ago, so a page moved out of its access stops being written.
+   * as the person set it now, by folders listed at most `RELISTED_MS` ago.
+   * Make it as `trees` are listed, or clear them first.
    */
   const rechecking = (ctx: ClientContext, trees: Map<SpaceId, ReturnType<typeof parentsIn>>) => {
-    let listed = Date.now();
+    const relist = relisting(trees);
     return async (page: PageRef) => {
-      if (Date.now() - listed > RELISTED_MS) {
-        trees.clear();
-        listed = Date.now();
-      }
+      relist();
       await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(page.pageId), 'write', trees);
     };
   };
@@ -674,8 +685,10 @@ export function pagesFor(caller: EditingCaller): HostPages {
       const refused: DraftResult[] = [];
       // Read at the batches' pace too, as each read is two of the person's requests.
       const waiting = patient(ctx, unloaded, caller.signal);
+      const relist = relisting(trees);
       for (const pageId of candidates) {
         if (!caller.live()) break;
+        relist();
         const page = { spaceId, pageId };
         // One it can't read isn't named, nor whether it links there.
         const has = await accessAt(ctx, spaceId, pageId, trees).catch((error: unknown) => {
@@ -731,6 +744,8 @@ export function pagesFor(caller: EditingCaller): HostPages {
       }
       if (saves.length === 0) return refused;
       write();
+      // Its reads took a while: the saves check against folders listed afresh.
+      trees.clear();
       return [...refused, ...(await saveEach(ctx, saves, trees))];
     }),
 

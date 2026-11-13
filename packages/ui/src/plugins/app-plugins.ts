@@ -149,6 +149,15 @@ export function startAppPlugins(queryClient: QueryClient) {
         });
         if (done === 'trashed') trashed.push(nodeId);
       }
+    } catch (error) {
+      // Those before it went: the plugin is told how many, and the notice offers Undo.
+      const { code, message } = pluginError(error);
+      throw new PluginError(
+        code,
+        trashed.length === 0
+          ? message
+          : `${message} ${trashed.length} of ${named.length} pages went to the trash first.`,
+      );
     } finally {
       for (const spaceId of spaceIds) void contentChanged(queryClient, ctx, { spaceId });
       void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });

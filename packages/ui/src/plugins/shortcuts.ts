@@ -259,7 +259,8 @@ export const pluginShortcuts = {
   of: (command: CommandKey): string | null => kept[commandKey(command)] ?? null,
   /** Give `command` the shortcut `name`, or none for null. */
   set(command: CommandKey, name: string | null) {
-    const { [commandKey(command)]: _was, ...rest } = kept;
+    // What another tab kept meanwhile stays.
+    const { [commandKey(command)]: _was, ...rest } = readKept();
     kept = name === null ? rest : { ...rest, [commandKey(command)]: normalShortcut(name) };
     try {
       localStorage.setItem(KEPT, JSON.stringify(kept));
@@ -272,7 +273,19 @@ export const pluginShortcuts = {
     listeners.add(listener);
     return () => void listeners.delete(listener);
   },
+  /** Read them again, as another tab changed them. */
+  reread() {
+    kept = readKept();
+    for (const listener of listeners) listener();
+  },
 };
+
+// Another tab's changes, so every tab runs and refuses the same keys.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === KEPT || event.key === null) pluginShortcuts.reread();
+  });
+}
 
 export const usePluginShortcuts = () =>
   useSyncExternalStore(pluginShortcuts.subscribe, pluginShortcuts.get);
