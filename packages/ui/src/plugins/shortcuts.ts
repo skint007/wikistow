@@ -260,19 +260,18 @@ export const pluginShortcuts = {
   get: () => kept,
   /** The shortcut given to `command`, if any. */
   of: (command: CommandKey): string | null => kept[commandKey(command)] ?? null,
-  /** Give `command` the shortcut `name`, or none for null. */
-  set(command: CommandKey, name: string | null) {
+  /**
+   * Give `command` the shortcut `name`, or none for null; with `from`, a
+   * command that kept it before, which loses it.
+   */
+  set(command: CommandKey, name: string | null, from?: CommandKey) {
     // What another tab kept meanwhile stays.
-    const { [commandKey(command)]: _was, ...rest } = readKept() ?? kept;
-    if (name === null) kept = rest;
-    else {
-      // Settings refused keys anything installed holds: whatever else keeps them is stale.
-      const keys = normalShortcut(name);
-      kept = {
-        ...Object.fromEntries(Object.entries(rest).filter(([, other]) => other !== keys)),
-        [commandKey(command)]: keys,
-      };
-    }
+    const {
+      [commandKey(command)]: _was,
+      [from ? commandKey(from) : '']: _taken,
+      ...rest
+    } = readKept() ?? kept;
+    kept = name === null ? rest : { ...rest, [commandKey(command)]: normalShortcut(name) };
     try {
       localStorage.setItem(KEPT, JSON.stringify(kept));
     } catch {

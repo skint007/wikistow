@@ -7,6 +7,7 @@ import { pluginName } from './places';
 import { usePlugins } from './runtime';
 import {
   pluginShortcuts,
+  normalShortcut,
   shortcutOf,
   shortcutProblem,
   usePluginShortcuts,
@@ -25,23 +26,24 @@ const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'C
  * command and keeps none, as while it is off.
  */
 export function CommandShortcuts({ pluginId }: { pluginId: string }) {
-  const { commands, plugins, unavailable } = usePlugins();
+  const { commands, plugins } = usePlugins();
   const shortcuts = usePluginShortcuts();
   const [recording, setRecording] = useState<string | null>(null);
-  const [problem, setProblem] = useState<{ commandId: string; message: string } | null>(null);
+  const [problem, setProblem] = useState<{
+    commandId: string;
+    message: string;
+    /** Keys kept for a command not running here, which pressing again takes. */
+    keys?: string;
+  } | null>(null);
   const own = commands.filter((command) => command.pluginId === pluginId);
-  // Every shortcut kept for an installed plugin's command, registered now
-  // or not (a plugin that is off or couldn't load, or one that registers it only at times),
-  // so none is given twice. A removed plugin's frees its keys.
-  // Those it knows of but couldn't load are installed too, as offline at the start.
-  const installed = new Set([
-    ...plugins.map(({ plugin }) => plugin.manifest.id),
-    ...Object.keys(unavailable),
-  ]);
+  // Every shortcut kept on this device, so none is given twice: a running
+  // command's is refused; one kept for a command not running here (its
+  // plugin off, removed, loaded in another tab, or one it registers only
+  // at times) is said, and pressing it again takes it.
   const kept = Object.entries(shortcuts).flatMap(([at, keys]) => {
     const slash = at.indexOf('/');
     const [of, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
-    if (slash < 0 || !installed.has(of)) return [];
+    if (slash < 0) return [];
     const running = commands.find((each) => each.pluginId === of && each.id === commandId);
     const title = `${pluginName(plugins, of)}: ${running?.title ?? commandId}`;
     return [{ pluginId: of, commandId, title, keys, running: running !== undefined }];
@@ -61,14 +63,30 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
       return;
     }
     const keys = shortcutOf(event.nativeEvent, isApple());
+    const running = kept.filter((each) => each.running);
     const message = keys
-      ? shortcutProblem(keys, command, kept, shortcutLabel)
+      ? shortcutProblem(keys, command, running, shortcutLabel)
       : 'That key can’t be a shortcut. Use a letter, a digit, punctuation or F1–F24.';
     if (message || !keys) {
       setProblem({ commandId: command.commandId, message: message ?? '' });
       return;
     }
-    pluginShortcuts.set(command, keys);
+    const normal = normalShortcut(keys);
+    const holder = kept.find(
+      (each) =>
+        normalShortcut(each.keys) === normal &&
+        (each.pluginId !== command.pluginId || each.commandId !== command.commandId),
+    );
+    const again = problem?.commandId === command.commandId && problem.keys === normal;
+    if (holder && !again) {
+      setProblem({
+        commandId: command.commandId,
+        keys: normal,
+        message: `${shortcutLabel(normal)} is kept for ${holder.title}, which isn’t running here. Press it again to take it.`,
+      });
+      return;
+    }
+    pluginShortcuts.set(command, keys, holder);
     setProblem(null);
     setRecording(null);
   };
