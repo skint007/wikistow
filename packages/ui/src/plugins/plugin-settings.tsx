@@ -612,7 +612,10 @@ function ClaimedFences() {
     .filter((plugin) => plugin.enabled && plugin.level === 'app');
   const draws = (plugin: InstalledPlugin, language: string) => {
     const type = plugin.manifest.fences?.[language];
-    return type !== undefined && blocks.has(blockLanguage(plugin.manifest.id, type));
+    // As the runtime takes it: app code's view, not a script's form registered over it.
+    return (
+      type !== undefined && blocks.get(blockLanguage(plugin.manifest.id, type))?.part === 'app'
+    );
   };
   const languages = [...new Set(drawers.flatMap((plugin) => fencesOf(plugin.manifest)))]
     .filter((language) => drawers.some((plugin) => draws(plugin, language)))

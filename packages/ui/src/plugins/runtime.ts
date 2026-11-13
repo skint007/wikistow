@@ -97,7 +97,11 @@ export type PluginThemeOption = {
   /** Its stylesheet, served from the app's own origin. */
   href: string;
 };
-export type PluginBlock = { pluginId: string; type: string; view: View<BlockProps> };
+/**
+ * A block a running plugin draws, with which of its code registered it
+ * (`snapshot.blocks`); inline code, always app code's, says none.
+ */
+export type PluginBlock = { pluginId: string; type: string; view: View<BlockProps>; part?: Part };
 
 /**
  * A claimed span's view as a block's, so it's drawn as blocks are
@@ -222,8 +226,8 @@ function blocksOf(
 ): Map<string, PluginBlock> {
   const blocks = new Map<string, PluginBlock>();
   for (const { pluginId, registry } of running) {
-    for (const { type, view } of registry.blocks())
-      blocks.set(blockLanguage(pluginId, type), { pluginId, type, view });
+    for (const { type, view, part } of registry.blocks())
+      blocks.set(blockLanguage(pluginId, type), { pluginId, type, view, part });
   }
   for (const { plugin, pluginId, registry } of running) {
     for (const [language, type] of Object.entries(plugin.manifest.fences ?? {})) {
@@ -231,7 +235,7 @@ function blocksOf(
       for (const block of registry.blocks()) {
         // App code's view only: a script, sandboxed, isn't handed what others wrote.
         if (block.type === type && block.part === 'app')
-          blocks.set(language, { pluginId, type, view: block.view });
+          blocks.set(language, { pluginId, type, view: block.view, part: 'app' });
       }
     }
   }

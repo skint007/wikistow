@@ -217,14 +217,24 @@ const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
   const own = <OwnCodeBlock node={node} {...props} />;
   if (code?.type !== 'element') return own;
   const language = languageOf(code.properties);
-  // A bare language a running plugin claims (`fences`) is its view too.
-  return fencedAsSource(language) || (language !== undefined && blocks.has(language)) ? (
-    <OwnSource source={ownSource.fence(language!, textOf(code))} block>
-      {own}
-    </OwnSource>
-  ) : (
-    own
-  );
+  if (fencedAsSource(language)) {
+    return (
+      <OwnSource source={ownSource.fence(language!, textOf(code))} block>
+        {own}
+      </OwnSource>
+    );
+  }
+  // A bare language a running plugin draws (`fences`) reads as the code it
+  // is without the plugin, as the visual editor and other viewers read it,
+  // so a passage quoted over it is found by each of them.
+  if (language !== undefined && blocks.has(language)) {
+    return (
+      <OwnSource source={textOf(code)} block>
+        {own}
+      </OwnSource>
+    );
+  }
+  return own;
 };
 
 function languageOf({ className }: { className?: unknown }) {
