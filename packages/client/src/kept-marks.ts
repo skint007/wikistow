@@ -5,7 +5,13 @@ import { openOnDevice, sealOnDevice } from './device-seal.ts';
 import { canonical, parseJson, utf8 } from './encoding.ts';
 import type { PrivateIdentity } from './identity.ts';
 import { newId } from './ids.ts';
-import type { KeyVersionMarks, MarkRaise, NewChange, PendingChange } from './key-versions.ts';
+import {
+  requireNotBehind,
+  type KeyVersionMarks,
+  type MarkRaise,
+  type NewChange,
+  type PendingChange,
+} from './key-versions.ts';
 
 /**
  * Where a device keeps sealed bytes between sessions: the desktop app's
@@ -209,6 +215,7 @@ export class KeptMarks implements KeyVersionMarks {
    * file can't be written, this throws, and nothing is sent.
    */
   async begin(changes: readonly NewChange[]): Promise<readonly PendingChange[]> {
+    if (changes.length === 0) return [];
     if (this.#closed) throw new Error('The session has ended; its marks are closed');
     // Let writes queued before land first, so none of them carries this
     // change to the file before its own write, which may fail.
@@ -225,7 +232,12 @@ export class KeptMarks implements KeyVersionMarks {
     const marks = { ...this.#contents.marks };
     for (const change of begun) marks[changeKey(change)] = at;
     try {
-      await this.#change({ ...this.#contents, marks }, { strict: true });
+      // Checked again against what other tabs kept, under the file's lock:
+      // never record a change from a version behind a mark.
+      await this.#change(
+        { ...this.#contents, marks },
+        { strict: true, check: () => this.#notBehind(changes) },
+      );
     } catch (error) {
       // Never sent, so never pending: no later write may keep it.
       const unsent = new Set(begun.map(changeKey));
@@ -314,7 +326,18 @@ export class KeptMarks implements KeyVersionMarks {
   // only means the next launch doesn't know it, so the returned promise
   // rejects only when `strict`: a pending change must land before it is
   // sent.
-  #change(contents: Contents, { strict = false }: { strict?: boolean } = {}): Promise<void> {
+  // Refuse changes from a version behind this share's mark, or of a share
+  // this app ended (`key-version`).
+  #notBehind(changes: readonly NewChange[]): void {
+    for (const { spaceId, shareId, fromKeyVersion } of changes) {
+      requireNotBehind({ marks: this, spaceId, shareId, keyVersion: fromKeyVersion });
+    }
+  }
+
+  #change(
+    contents: Contents,
+    { strict = false, check }: { strict?: boolean; check?: () => void } = {},
+  ): Promise<void> {
     this.#contents = contents;
     const write = async () => {
       if (this.#closed) {
@@ -322,11 +345,14 @@ export class KeptMarks implements KeyVersionMarks {
         return;
       }
       const file = this.#file;
-      if (!file.exclusive) await file.write(this.#seal(this.#contents));
-      else {
+      if (!file.exclusive) {
+        check?.();
+        await file.write(this.#seal(this.#contents));
+      } else {
         await file.exclusive(async () => {
           const disk = this.#open(await file.read().catch(() => null));
           if (disk) this.#contents = merged(this.#contents, disk);
+          check?.();
           if (this.#closed) {
             if (strict) throw new Error('The session has ended; its marks are closed');
             return;

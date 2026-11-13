@@ -200,7 +200,7 @@ describe('pending changes across tabs', () => {
     const file = b.tab();
     const one = await KeptMarks.open(file, who);
     one.raise(spaceId, shareId, 3);
-    const [begun] = await one.begin([change()]);
+    const [begun] = await one.begin([{ ...change(), fromKeyVersion: 3 }]);
     const old = await readAsBefore(file);
     expect(old?.marks[`${spaceId} ${shareId}`]).toBe(3);
     // It keeps every mark it finds, so the change survives its writes.
@@ -277,6 +277,30 @@ describe('pending changes across tabs', () => {
     marks.close();
     release();
     await expect(begun).rejects.toThrow();
+  });
+
+  it('refuses, under the lock, a change from a version behind a mark another tab raised', async () => {
+    const b = browser();
+    const one = await KeptMarks.open(withoutChannel(b.tab()), who);
+    const two = await KeptMarks.open(b.tab(), who);
+    two.raise(spaceId, shareId, 5);
+    await expect
+      .poll(async () => (await KeptMarks.open(b.tab(), who)).get(spaceId, shareId))
+      .toBe(5);
+    // Tab one hasn't heard; its change from version 1 is refused as it records it.
+    expect(one.get(spaceId, shareId)).toBe(0);
+    await expect(one.begin([change()])).rejects.toMatchObject({ code: 'key-version' });
+    expect(changePending(one, spaceId, shareId)).toBe(false);
+    const later = await KeptMarks.open(b.tab(), who);
+    expect(changePending(later, spaceId, shareId)).toBe(false);
+  });
+
+  it('writes nothing for no changes', async () => {
+    const marks = await KeptMarks.open(
+      { read: () => Promise.resolve(null), write: () => Promise.reject(new Error('No storage')) },
+      who,
+    );
+    await expect(marks.begin([])).resolves.toEqual([]);
   });
 
   it('stops listening once closed', async () => {
