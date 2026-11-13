@@ -90,7 +90,9 @@ async function dbNow(tx: Database): Promise<Date> {
 function presentAlone(join: JoinRow, now: Date) {
   const at = now.getTime();
   if (join.leftAt !== null) return false;
-  if (join.lastMessageAt.getTime() + GRACE_MS <= at) return false;
+  // A catch-up join opens no stream, and lasts as long as its grant may.
+  const grace = join.catchUp ? CATCH_UP_GRANT_MS : GRACE_MS;
+  if (join.lastMessageAt.getTime() + grace <= at) return false;
   return join.streamBrokeAt === null || join.streamBrokeAt.getTime() + GRACE_MS > at;
 }
 
@@ -115,7 +117,7 @@ function presentSet(joins: readonly JoinRow[], now: Date) {
 
 /** When a join went, or will go if nothing else comes from it. */
 function goneAt(join: JoinRow) {
-  const times = [join.lastMessageAt.getTime() + GRACE_MS];
+  const times = [join.lastMessageAt.getTime() + (join.catchUp ? CATCH_UP_GRANT_MS : GRACE_MS)];
   if (join.leftAt) times.push(join.leftAt.getTime());
   if (join.streamBrokeAt) times.push(join.streamBrokeAt.getTime() + GRACE_MS);
   return Math.min(...times);
@@ -432,8 +434,20 @@ async function takeGrant(
   const at = { present, now, heads, sessionId: session.id };
   for (const grant of grants) {
     if (grant.lapsedAt === null && lapsed(grant, at)) {
-      await tx.update(liveGrants).set({ lapsedAt: now }).where(eq(liveGrants.id, grant.id));
-      grant.lapsedAt = now;
+      // When it lapsed, not when that was seen, so the 30 s wait after counts from then.
+      const holder = joins.find(
+        (j) => j.identityId === grant.identityId && j.joinId === grant.joinId,
+      );
+      const limit = subject === session.id ? CATCH_UP_GRANT_MS : GRACE_MS;
+      const when = new Date(
+        Math.min(
+          now.getTime(),
+          grant.grantedAt.getTime() + limit,
+          holder ? goneAt(holder) : now.getTime(),
+        ),
+      );
+      await tx.update(liveGrants).set({ lapsedAt: when }).where(eq(liveGrants.id, grant.id));
+      grant.lapsedAt = when;
     }
   }
   const held = grants.find((g) => g.lapsedAt === null);
@@ -746,9 +760,10 @@ export async function getLive(
     // The open one first, so the budget goes to it.
     const open = openRow ? await servedSession(tx, openRow, at) : null;
     let ended: liveRoutes.ServedSession | null = null;
+    // The latest kept with unsaved changes under keys that count, once its joins have left.
     for (const session of endedRows) {
-      if (!(await catchable(tx, session, now))) continue;
-      ended = await servedSession(tx, session, at);
+      if (!(await keysCount(tx, session))) continue;
+      if (await catchable(tx, session, now)) ended = await servedSession(tx, session, at);
       break;
     }
     return {
@@ -792,6 +807,8 @@ export async function startLive(db: Database, input: StartLive) {
     if (!canEdit(access)) throw new ContentError('not-found');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
+    // Again under the locks, so a change of access that landed meanwhile counts.
+    if (!canEdit(await requirePageAccess(tx, caller, page))) throw new ContentError('not-found');
     const [heads] = await tx
       .select()
       .from(pageHeads)
@@ -1747,14 +1764,20 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     );
     const position = stored.row.position;
     // What it covers goes, but the first snapshot and each join's latest kept change.
+    // Ranked in one pass, so it costs no more than a sort however many there are.
     await tx.execute(sql`
       delete from ${liveMessages} m
-      where m.session_id = ${session.id} and m.position <= ${input.covers} and m.position <> 1
-        and m.kind in ('update', 'saved')
-        and exists (select 1 from ${liveMessages} n
-          where n.session_id = m.session_id and n.identity_id = m.identity_id
-            and n.join_id = m.join_id and n.kind in ('update', 'saved')
-            and n.position > m.position and n.position <= ${input.covers})`);
+      using (
+        select position from (
+          select position, row_number() over (
+            partition by identity_id, join_id order by position desc) as rank
+          from ${liveMessages}
+          where session_id = ${session.id} and position <= ${input.covers}
+            and kind in ('update', 'saved')
+        ) ranked
+        where rank > 1
+      ) covered
+      where m.session_id = ${session.id} and m.position = covered.position and m.position <> 1`);
     await tx.execute(sql`
       delete from ${liveMessages}
       where session_id = ${session.id} and kind = 'snapshot' and position <> 1
@@ -1994,7 +2017,7 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
       ),
     )
     .limit(10);
-  for (const next of later) if (await keysCount(tx, next)) return 'superseded';
+  for (const next of later) if (await catchable(tx, next, now)) return 'superseded';
   return null;
 }
 

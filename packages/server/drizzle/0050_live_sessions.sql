@@ -182,51 +182,118 @@ CREATE TRIGGER "page_heads_live_head" AFTER UPDATE OF "draft_head" ON "page_head
 -- base64url, and each row what it takes besides (LIVE_ID_BYTES,
 -- LIVE_MESSAGE_BYTES and LIVE_JOIN_BYTES in schema/live.ts). One row per
 -- account and session, so two sessions' writes never wait on each other's.
--- Rows whose account went count for nobody; a row that comes to nothing goes.
-CREATE FUNCTION "wikistow_live_usage"() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-  account uuid;
-  session text;
-  delta bigint;
+-- Kept once a statement, its rows summed, so a delete of many rows, as a
+-- snapshot or a session's going makes, updates each row once. Rows whose
+-- account went count for nobody; a row that comes to nothing goes.
+--> statement-breakpoint
+CREATE FUNCTION "wikistow_live_usage_live_messages"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_TABLE_NAME = 'live_messages' THEN
-    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
-    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."session_id" ELSE NEW."session_id" END;
-    delta := (CASE WHEN TG_OP = 'DELETE' THEN OLD."size" ELSE NEW."size" END * 4 + 2) / 3 + 1024;
-  ELSIF TG_TABLE_NAME = 'live_joins' THEN
-    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
-    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."session_id" ELSE NEW."session_id" END;
-    delta := 512;
-  ELSIF TG_TABLE_NAME = 'live_sessions' THEN
-    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
-    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."id" ELSE NEW."id" END;
-    delta := CASE WHEN TG_OP = 'DELETE' THEN OLD."payload_size" ELSE NEW."payload_size" END;
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO "live_usage" ("account_id", "session_id", "bytes")
+      SELECT "account_id", "session_id", sum(("size" * 4 + 2) / 3 + 1024) FROM "new_rows"
+      WHERE "account_id" IS NOT NULL GROUP BY 1, 2
+      ON CONFLICT ("account_id", "session_id")
+        DO UPDATE SET "bytes" = "live_usage"."bytes" + excluded."bytes";
   ELSE
-    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
-    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."id" ELSE NEW."id" END;
-    delta := 256;
-  END IF;
-  IF account IS NULL THEN RETURN NULL; END IF;
-  IF TG_OP = 'DELETE' THEN
-    UPDATE "live_usage" SET "bytes" = "bytes" - delta
-      WHERE "account_id" = account AND "session_id" = session;
-    DELETE FROM "live_usage"
-      WHERE "account_id" = account AND "session_id" = session AND "bytes" <= 0;
-  ELSE
-    INSERT INTO "live_usage" ("account_id", "session_id", "bytes") VALUES (account, session, delta)
-      ON CONFLICT ("account_id", "session_id") DO UPDATE SET "bytes" = "live_usage"."bytes" + delta;
+    -- A cascade fires this once a parent row, often with nothing deleted.
+    IF NOT EXISTS (SELECT 1 FROM "old_rows") THEN RETURN NULL; END IF;
+    UPDATE "live_usage" u SET "bytes" = u."bytes" - d."bytes"
+      FROM (SELECT "account_id" AS "account_id", "session_id" AS "session_id", sum(("size" * 4 + 2) / 3 + 1024) AS "bytes"
+        FROM "old_rows" WHERE "account_id" IS NOT NULL GROUP BY 1, 2) d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id";
+    DELETE FROM "live_usage" u
+      USING (SELECT DISTINCT "account_id" AS "account_id", "session_id" AS "session_id" FROM "old_rows") d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id" AND u."bytes" <= 0;
   END IF;
   RETURN NULL;
 END $$;
 --> statement-breakpoint
-CREATE TRIGGER "live_messages_usage" AFTER INSERT OR DELETE ON "live_messages"
-  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+CREATE TRIGGER "live_messages_usage_insert" AFTER INSERT ON "live_messages"
+  REFERENCING NEW TABLE AS "new_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_messages"();
 --> statement-breakpoint
-CREATE TRIGGER "live_joins_usage" AFTER INSERT OR DELETE ON "live_joins"
-  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+CREATE TRIGGER "live_messages_usage_delete" AFTER DELETE ON "live_messages"
+  REFERENCING OLD TABLE AS "old_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_messages"();
 --> statement-breakpoint
-CREATE TRIGGER "live_sessions_usage" AFTER INSERT OR DELETE ON "live_sessions"
-  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+CREATE FUNCTION "wikistow_live_usage_live_joins"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO "live_usage" ("account_id", "session_id", "bytes")
+      SELECT "account_id", "session_id", sum(512) FROM "new_rows"
+      WHERE "account_id" IS NOT NULL GROUP BY 1, 2
+      ON CONFLICT ("account_id", "session_id")
+        DO UPDATE SET "bytes" = "live_usage"."bytes" + excluded."bytes";
+  ELSE
+    -- A cascade fires this once a parent row, often with nothing deleted.
+    IF NOT EXISTS (SELECT 1 FROM "old_rows") THEN RETURN NULL; END IF;
+    UPDATE "live_usage" u SET "bytes" = u."bytes" - d."bytes"
+      FROM (SELECT "account_id" AS "account_id", "session_id" AS "session_id", sum(512) AS "bytes"
+        FROM "old_rows" WHERE "account_id" IS NOT NULL GROUP BY 1, 2) d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id";
+    DELETE FROM "live_usage" u
+      USING (SELECT DISTINCT "account_id" AS "account_id", "session_id" AS "session_id" FROM "old_rows") d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id" AND u."bytes" <= 0;
+  END IF;
+  RETURN NULL;
+END $$;
 --> statement-breakpoint
-CREATE TRIGGER "live_session_ids_usage" AFTER INSERT OR DELETE ON "live_session_ids"
-  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+CREATE TRIGGER "live_joins_usage_insert" AFTER INSERT ON "live_joins"
+  REFERENCING NEW TABLE AS "new_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_joins"();
+--> statement-breakpoint
+CREATE TRIGGER "live_joins_usage_delete" AFTER DELETE ON "live_joins"
+  REFERENCING OLD TABLE AS "old_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_joins"();
+--> statement-breakpoint
+CREATE FUNCTION "wikistow_live_usage_live_sessions"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO "live_usage" ("account_id", "session_id", "bytes")
+      SELECT "starter_account_id", "id", sum("payload_size") FROM "new_rows"
+      WHERE "starter_account_id" IS NOT NULL GROUP BY 1, 2
+      ON CONFLICT ("account_id", "session_id")
+        DO UPDATE SET "bytes" = "live_usage"."bytes" + excluded."bytes";
+  ELSE
+    -- A cascade fires this once a parent row, often with nothing deleted.
+    IF NOT EXISTS (SELECT 1 FROM "old_rows") THEN RETURN NULL; END IF;
+    UPDATE "live_usage" u SET "bytes" = u."bytes" - d."bytes"
+      FROM (SELECT "starter_account_id" AS "account_id", "id" AS "session_id", sum("payload_size") AS "bytes"
+        FROM "old_rows" WHERE "starter_account_id" IS NOT NULL GROUP BY 1, 2) d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id";
+    DELETE FROM "live_usage" u
+      USING (SELECT DISTINCT "starter_account_id" AS "account_id", "id" AS "session_id" FROM "old_rows") d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id" AND u."bytes" <= 0;
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER "live_sessions_usage_insert" AFTER INSERT ON "live_sessions"
+  REFERENCING NEW TABLE AS "new_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_sessions"();
+--> statement-breakpoint
+CREATE TRIGGER "live_sessions_usage_delete" AFTER DELETE ON "live_sessions"
+  REFERENCING OLD TABLE AS "old_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_sessions"();
+--> statement-breakpoint
+CREATE FUNCTION "wikistow_live_usage_live_session_ids"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO "live_usage" ("account_id", "session_id", "bytes")
+      SELECT "starter_account_id", "id", sum(256) FROM "new_rows"
+      WHERE "starter_account_id" IS NOT NULL GROUP BY 1, 2
+      ON CONFLICT ("account_id", "session_id")
+        DO UPDATE SET "bytes" = "live_usage"."bytes" + excluded."bytes";
+  ELSE
+    -- A cascade fires this once a parent row, often with nothing deleted.
+    IF NOT EXISTS (SELECT 1 FROM "old_rows") THEN RETURN NULL; END IF;
+    UPDATE "live_usage" u SET "bytes" = u."bytes" - d."bytes"
+      FROM (SELECT "starter_account_id" AS "account_id", "id" AS "session_id", sum(256) AS "bytes"
+        FROM "old_rows" WHERE "starter_account_id" IS NOT NULL GROUP BY 1, 2) d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id";
+    DELETE FROM "live_usage" u
+      USING (SELECT DISTINCT "starter_account_id" AS "account_id", "id" AS "session_id" FROM "old_rows") d
+      WHERE u."account_id" = d."account_id" AND u."session_id" = d."session_id" AND u."bytes" <= 0;
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER "live_session_ids_usage_insert" AFTER INSERT ON "live_session_ids"
+  REFERENCING NEW TABLE AS "new_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_session_ids"();
+--> statement-breakpoint
+CREATE TRIGGER "live_session_ids_usage_delete" AFTER DELETE ON "live_session_ids"
+  REFERENCING OLD TABLE AS "old_rows" FOR EACH STATEMENT EXECUTE FUNCTION "wikistow_live_usage_live_session_ids"();

@@ -279,8 +279,14 @@ export function mountLiveRoutes(
     // Only what a newcomer is served is kept in mind.
     const listed = new Set(state.grants.map(grantKey));
     for (const key of session.grants.keys()) if (!listed.has(key)) session.grants.delete(key);
+    // Only what is past both what it sent and what waits in its queue is
+    // read from the database: what is queued goes out from memory.
     for (const stream of session.streams) {
-      if (state.lastPosition > stream.known) {
+      const queued = stream.queue.reduce(
+        (last, item) => ('stored' in item ? Math.max(last, item.stored.position) : last),
+        stream.sent,
+      );
+      if (state.lastPosition > Math.max(stream.known, queued)) {
         stream.known = state.lastPosition;
         stream.wake?.();
       }
@@ -696,7 +702,8 @@ export function mountLiveRoutes(
             yield { grant, draftHead: head() } satisfies Line;
           }
           for (;;) {
-            yield* catchUp(stream.known);
+            // The backlog from the database, once what is queued has gone out first.
+            if (!stream.queue.some((queued) => 'stored' in queued)) yield* catchUp(stream.known);
             const item = stream.queue.shift();
             if (item) {
               stream.queuedBytes -= sizeOf(item);

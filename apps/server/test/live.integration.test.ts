@@ -1347,6 +1347,36 @@ describe('limits', () => {
     ).toMatchObject({ position: 4 });
   });
 
+  it('counts storage once a statement, so deleting many messages stays quick and exact', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const before = await usedBytes(t.db, editor.id);
+    const [first] = await t.db
+      .select()
+      .from(schema.liveMessages)
+      .where(eq(schema.liveMessages.sessionId, session.sessionId));
+    if (!first) throw new Error('the first snapshot');
+    await t.db.execute(sql`
+      insert into live_messages (session_id, position, kind, identity_id, join_id, seq,
+        account_id, message, size)
+      select ${session.sessionId}, 1 + g, 'update', ${first.identityId}, ${first.joinId}, 1 + g,
+        ${editor.id}::uuid, ${JSON.stringify(first.message)}::jsonb, 144
+      from generate_series(1, 20000) g`);
+    expect(await usedBytes(t.db, editor.id)).toBe(
+      before + 20000 * (Math.ceil((144 * 4) / 3) + 1024),
+    );
+    const row = await sessionRow(session.sessionId);
+    if (!row) throw new Error('the session');
+    const started = Date.now();
+    await t.db.delete(schema.liveSessions).where(eq(schema.liveSessions.id, session.sessionId));
+    expect(Date.now() - started).toBeLessThan(10_000);
+    // Its record, first snapshot and join go with it; its used ID is kept for good.
+    const snapshot = Math.ceil((first.size * 4) / 3) + schema.LIVE_MESSAGE_BYTES;
+    expect(await usedBytes(t.db, editor.id)).toBe(
+      before - row.payloadSize - snapshot - schema.LIVE_JOIN_BYTES,
+    );
+  });
+
   it('takes at most 16 MiB of stored messages a minute from a person', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);

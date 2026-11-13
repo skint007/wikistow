@@ -304,7 +304,8 @@ export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.
  * ID and asks to catch up from it: `joinId` becomes the caller's join for
  * that, whose `saved` then lets the server delete the session; a `saved`
  * from a catch-up join that doesn't hold the grant is `forbidden`. A
- * catch-up's grant lasts 10 minutes unplaced.
+ * catch-up's grant lasts 10 minutes unplaced, and a catch-up join stays
+ * present 10 minutes after its last request.
  * `grant` is that revision's grant as it stands, someone else's included.
  */
 export const sendMessages = {
