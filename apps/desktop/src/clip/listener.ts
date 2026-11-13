@@ -144,7 +144,7 @@ export function clipListener(options: ClipListenerOptions) {
       JSON.stringify({ v: 1, socket: address, token: token.toString('base64') }),
       { mode: 0o600 },
     );
-    await rename(next, options.hostFile);
+    await renameSoon(next, options.hostFile);
     wrote = true;
   }
 
@@ -157,15 +157,40 @@ export function clipListener(options: ClipListenerOptions) {
     if (closing) await new Promise<void>((resolve) => closing.close(() => resolve()));
   }
 
-  /** As the app quits: only the files, at once. */
+  /**
+   * As the app quits: only the files, at once. It never throws, so quitting
+   * never waits on it: on Windows a helper reading clip-host.json that
+   * moment keeps it from being deleted, and then it stays, naming a pipe
+   * that's gone, until the next launch replaces it.
+   */
   function removeFiles() {
-    if (wrote) rmSync(options.hostFile, { force: true });
+    const remove = (path: string) => {
+      try {
+        rmSync(path, { force: true });
+      } catch {}
+    };
+    if (wrote) remove(options.hostFile);
     wrote = false;
-    if (address && options.endpoint.kind === 'unix') rmSync(address, { force: true });
+    if (address && options.endpoint.kind === 'unix') remove(address);
     address = null;
   }
 
   return { start, stop, removeFiles, listening: () => server !== null };
+}
+
+/**
+ * Move `from` into place, trying again for a moment: on Windows a helper
+ * reading the old file holds it open for a few milliseconds.
+ */
+async function renameSoon(from: string, to: string) {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      if (tries >= 10) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
 }
 
 async function listenAddress(endpoint: ClipEndpoint): Promise<string> {
