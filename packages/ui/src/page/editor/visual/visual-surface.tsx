@@ -310,10 +310,9 @@ function Surface({
   const focusing = useRef<{ at: number | undefined } | null>(null);
   // Strict Mode makes the editor twice; the last made is the one kept.
   const made = useRef(0);
-  // Each text shown, a block at a time or whole, and given to `replace`,
-  // counted, so one checked meanwhile doesn't go in over a later one.
+  // Each text shown, a block at a time or whole, counted, so one checked
+  // meanwhile doesn't go in over a later one.
   const changes = useRef(0);
-  const replacing = useRef(0);
 
   const docOf = (live: Editor) => live.action((ctx) => ctx.get(editorViewCtx).state.doc);
   // `doc` as the page holds it, ending as the text it was given does, and
@@ -430,12 +429,12 @@ function Surface({
      * Show `markdown` by reading again only the top-level blocks it changes,
      * with those beside them (`planBlocks`), checked as a paste is: at once
      * if that's under 1 KB (`BLOCK_TIMED`), else in the check's worker,
-     * going in once it's checked, if nothing has gone in meanwhile. False,
-     * and nothing shown, if it must be read whole (`show`), checked first
-     * as a page is. The cursor stays where it was, and the change is no
+     * going in once it's checked, if nothing has gone in meanwhile, or
+     * with `atOnce`, not at all. False, and nothing shown, if it must be
+     * read whole (`show`), checked first as a page is. The cursor stays where it was, and the change is no
      * edit to undo.
      */
-    take: (markdown: string): boolean | Promise<boolean> => {
+    take: (markdown: string, atOnce = false): boolean | Promise<boolean> => {
       const live = editor.current;
       const write = writer.current;
       const given = origin.current;
@@ -468,20 +467,18 @@ function Surface({
         return true;
       };
       if (plan.check.length < BLOCK_TIMED) return go(fidelityOf(plan.check, plan.transform).visual);
+      if (atOnce) return false;
       return checkFidelity(plan.check).then(
         (fidelity) => go(fidelity.visual),
         () => false,
       );
     },
-    /** Show `markdown` instead, a block at a time if it can be, else read whole. */
+    /**
+     * Show `markdown`, checked already, at once: a block at a time if that
+     * can be checked at once, else read whole.
+     */
     replace: (markdown: string) => {
-      const mine = ++replacing.current;
-      const taking = surface.take(markdown);
-      if (taking === false) return surface.show(markdown);
-      if (taking !== true)
-        void taking.then((taken) => {
-          if (!taken && mine === replacing.current) surface.show(markdown);
-        });
+      if (surface.take(markdown, true) !== true) surface.show(markdown);
     },
     edit: () => {
       edited.current = true;
@@ -720,7 +717,7 @@ function Surface({
       passages,
       read: surface.read,
       replace: surface.replace,
-      take: surface.take,
+      take: (markdown: string) => surface.take(markdown),
       caret: surface.caret,
       focus: surface.focus,
       insertCode: surface.insertCode,

@@ -547,6 +547,18 @@ describe('text taken in by block', () => {
     if (!(await checkFidelity(next)).visual) expect(taken).toBe(false);
   });
 
+  it('shows text given to replace at once, checked already, however it goes in', async () => {
+    const long = `Long ${'words and more '.repeat(100)}end.`;
+    const page = `One.\n\n${long}\n\nThree.\n`;
+    for (const next of [page.replace(long, `${long} more`), page.replace('One.', '```\nOne.')]) {
+      const m = await mount(page);
+      act(() => m.handle.replace(next));
+      expect(m.handle.read()).toBe(next);
+      expect(await showsAsRead(m, next)).toBe(true);
+      m.unmount();
+    }
+  });
+
   it('takes nothing it wouldn’t keep whole, such as a reference link', async () => {
     const m = await mount('One.\n\nTwo.\n\nThree.\n');
     expect(await takeIn(m, 'One.\n\n[a][r]\n\n[r]: https://example.test/\n\nThree.\n')).toBe(false);
