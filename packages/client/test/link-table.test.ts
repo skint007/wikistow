@@ -13,6 +13,8 @@ import {
   linksInUse,
   placedWikilinks,
   readProperties,
+  relinkMarkdown,
+  RelinkUnwritable,
   resolveLinked,
   splitFrontmatter,
   tableWikilinks,
@@ -622,4 +624,74 @@ describe('rename byte safety', () => {
     expect(inProperties).toBeGreaterThan(50);
     expect(inReferences).toBeGreaterThan(50);
   }, 60_000);
+});
+
+describe('relinkMarkdown (#404)', () => {
+  const toNotes = (link: { target: string }) => link.target.toLowerCase() === 'notes';
+
+  it('points links to a moved heading at its new page, keeping their own text', () => {
+    const markdown = [
+      'See [[Notes#Soup recipes]] and [[notes#soup Recipes|the soups]].',
+      'Other: [[Notes#Bread]], [[Notes]], ![[Notes#Soup recipes]].',
+      '',
+      '| a | b |',
+      '| - | - |',
+      '| [[Notes#Soup recipes\\|soups]] | x |',
+    ].join('\n');
+    const moved = relinkMarkdown(markdown, [
+      { names: toNotes, heading: 'Soup recipes', to: { target: 'Soups', heading: null } },
+    ]);
+    expect(moved).toBe(
+      [
+        'See [[Soups]] and [[Soups|the soups]].',
+        'Other: [[Notes#Bread]], [[Notes]], ![[Notes#Soup recipes]].',
+        '',
+        '| a | b |',
+        '| - | - |',
+        '| [[Soups\\|soups]] | x |',
+      ].join('\n'),
+    );
+  });
+
+  it('moves every link to a merged page, each keeping its heading', () => {
+    const moved = relinkMarkdown('[[Notes]], [[Notes#Bread]] and [[Other]].', [
+      { names: toNotes, heading: null, to: { target: 'Kitchen', heading: 'Notes' } },
+    ]);
+    expect(moved).toBe('[[Kitchen#Notes]], [[Kitchen#Bread]] and [[Other]].');
+  });
+
+  it('writes a link to the page changed as its own heading, and leaves the rest alone', () => {
+    const self = (link: { target: string }) => link.target === '';
+    expect(
+      relinkMarkdown('Up to [[#Soup]].', [
+        { names: self, heading: 'Soup', to: { target: 'Soups', heading: null } },
+      ]),
+    ).toBe('Up to [[Soups]].');
+    expect(
+      relinkMarkdown('[[Notes#Soup]]', [
+        { names: toNotes, heading: 'Soup', to: { target: '', heading: 'Soup' } },
+      ]),
+    ).toBe('[[#Soup]]');
+    expect(
+      relinkMarkdown('Nothing [[Here]].', [
+        { names: toNotes, heading: null, to: { target: 'X', heading: null } },
+      ]),
+    ).toBeNull();
+  });
+
+  it('writes back a link’s own heading as it was written', () => {
+    expect(
+      relinkMarkdown('[[Notes#x < 10]]', [
+        { names: toNotes, heading: null, to: { target: 'Kitchen', heading: null } },
+      ]),
+    ).toBe('[[Kitchen#x < 10]]');
+  });
+
+  it('refuses a title a link can’t hold rather than writing a broken link', () => {
+    expect(() =>
+      relinkMarkdown('[[Notes]]', [
+        { names: toNotes, heading: null, to: { target: 'C# tips', heading: null } },
+      ]),
+    ).toThrow(RelinkUnwritable);
+  });
 });

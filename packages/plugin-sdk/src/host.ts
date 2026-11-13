@@ -115,6 +115,36 @@ export type PageChange = {
   data?: Json | null | undefined;
 };
 
+/** One page's change in a batch (`saveDrafts`): the page, the revision read, and what changes. */
+export type DraftChange = PageChange & { page: PageRef; base: string };
+
+/**
+ * How one page of a batch went: saved, with its new version, or not, with
+ * the code and message `saveDraft` would have failed with.
+ */
+export type DraftResult =
+  | { page: PageRef; ok: true; version: PageVersion }
+  | { page: PageRef; ok: false; code: PluginErrorCode; message: string };
+
+/** The most pages one batch saves (`saveDrafts`) or trashes (`trash`): a query's most rows. */
+export const BATCH_LIMIT = 500;
+
+/** The most moves one `relink` call makes. */
+export const RELINK_LIMIT = 100;
+
+/**
+ * Links pointing at a page, or at one of its headings, pointed elsewhere
+ * (`relink`). With `from.heading`, the links to that heading go to
+ * `to.page`, at `to.heading` if given, else at the page itself. Without
+ * it, every link to `from.page` goes to `to.page`: a link to one of its
+ * headings keeps that heading, and a link to the page itself goes to
+ * `to.heading` if given. Both pages are in one space.
+ */
+export type LinkMove = {
+  from: { page: PageRef; heading?: string | undefined };
+  to: { page: PageRef; heading?: string | undefined };
+};
+
 /** The page operations, each checked against the plugin's page access. */
 export interface Pages {
   /** The draft where the person edits the page, else its published version. */
@@ -172,8 +202,46 @@ export interface Pages {
    * `conflict` if someone saved since; nothing is merged or retried.
    */
   saveDraft(page: PageRef, change: PageChange & { base: string }): Promise<PageVersion>;
+  /**
+   * Save many drafts as one write against the plugin's writes a minute, up
+   * to `BATCH_LIMIT`, each as `saveDraft` saves it. Every page must be
+   * within its `write` access, or nothing is saved (`not-granted`). They
+   * are saved one at a time, about one a second, under the server's own
+   * limits, so a long batch takes a while. One that fails, such as with
+   * `conflict`, doesn't stop the rest: each page's result says how it
+   * went, in the order given. Missing (undefined) in an app older than it;
+   * in a script it is always there, and such an app stops the script that
+   * calls it.
+   */
+  saveDrafts?(changes: DraftChange[]): Promise<DraftResult[]>;
   /** Move a page or folder where nobody's access changes. */
   move(node: NodeRef, parent: FolderRef): Promise<void>;
+  /**
+   * Move pages to the trash, once the person agrees, asked once for them
+   * all in a prompt listing each page: true once they are in it, false if
+   * the person said no. Only pages within its `write` access, up to
+   * `BATCH_LIMIT`, in spaces the person owns (only owners delete), else
+   * nothing is asked or trashed (`not-granted`, `forbidden`). Their owners
+   * restore them from Trash for 30 days, as for pages deleted in the app.
+   * Counts as one write. Missing (undefined) in an app older than it, as
+   * `saveDrafts` is.
+   */
+  trash?(pages: PageRef[]): Promise<boolean>;
+  /**
+   * Point the links to a page, or to one of its headings, elsewhere
+   * (`LinkMove`), such as after moving a heading's section into a page of
+   * its own: in the pages of that space linking there, as the person's
+   * search index finds them, `from.page` itself included. Only a body's
+   * `[[…]]` links change, their own text (`|text`) kept. It saves each
+   * page it changes as `saveDrafts` does, as one write, and gives each
+   * one's result; a page linking there outside its `write` access is left
+   * as it is, its result `not-granted`, and one it can't open is listed
+   * with why. Pages it can't read aren't named, and their links stay as
+   * they are: give it access to every page that may link there. A page
+   * that holds no such link isn't listed. Up to `RELINK_LIMIT` moves, all in one space. Missing
+   * (undefined) in an app older than it, as `saveDrafts` is.
+   */
+  relink?(moves: LinkMove[]): Promise<DraftResult[]>;
 }
 
 /**
@@ -222,7 +290,11 @@ export type Command = {
   /** Unique within the plugin. */
   id: string;
   title: string;
-  /** Runs from the page toolbar's plugin menu, on the page shown. */
+  /**
+   * Runs on the page shown: from the page toolbar's Plugins menu, the
+   * command palette, or the keyboard shortcut the person gave it in
+   * Settings → Plugins (a plugin can't choose one).
+   */
   run(context: { page: PageHandle }): void | Promise<void>;
 };
 
