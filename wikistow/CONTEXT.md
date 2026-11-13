@@ -135,6 +135,10 @@ _Avoid_: Collision, sync error.
 Combining two drafts made from the same version into one: changes to different parts of the page are kept from both, and the person chooses where both changed the same part, then reviews the result before it saves. Built as ADR 0013 decided: for a draft someone else saved, an offline change that came back as a conflict, and another window's change.
 _Avoid_: Auto-merge, rebase, sync.
 
+**Live session**
+The editors who have a page's draft open, editing one shared copy of it and seeing each other's changes as they type, sealed so that only the draft's audience can read them. One of their apps saves the shared copy as the page's draft. Writers outside it, such as agents and offline changes, still meet a conflict. Accepted in ADR 0015.
+_Avoid_: Collaboration mode, co-editing room, multiplayer.
+
 **Kept for offline**
 What a device holds, sealed for one person, so pages open with no connection: the published version and, for editors, the draft of each kept page, the images they show, and the trees, with titles only for kept pages. The desktop keeps every page; the browser the pages opened on it, or every page if asked. Accepted in ADR 0009: kept and kept current while online (step 2), read when the server doesn't answer (step 3), and the version an offline change is based on kept until it is resolved (step 6).
 _Avoid_: Cached, synced.

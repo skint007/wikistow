@@ -111,6 +111,7 @@ Rules:
 - Publish appears only on the draft view, so the person publishing has the draft in front of them. Editors without publish permission see no Publish button.
 - A page with no published version opens on the draft view for editors, with a **Not published yet** pill instead of Published vN. Readers don't see it in the tree at all.
 - The view is part of the URL (for example `?view=draft`) so links to a draft work and the browser's Back button returns to the published view.
+- **Live editing** (accepted in [ADR 0015](../docs/adr/0015-live-editing.md), not built yet) would show, in the draft view's toolbar where the layout keeps a place for viewers, the others who have the draft open, by initials in their colour; their carets show in source mode, and a bar by the block they are in shows in the visual editor. Its section here comes with the build.
 - **Comments** sits in the toolbar of both views, beside **History**, with how many open threads the person sees, opening the page's comments in the chat's place. See [Comments](#comments).
 - Access lives in the **Share** dialog, which shows and changes who can read, edit, and publish. **History** opens a side sheet with published versions and restore.
 - **Share** is for owners. On a page it opens the share the page is in, or offers its folder (the space, for a top-level page). See [Sharing](#sharing).

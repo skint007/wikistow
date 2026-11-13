@@ -24,7 +24,7 @@ Related documents: [domain glossary](wikistow/CONTEXT.md), [interface design](wi
 - Account login and vault unlocking are separate. A distinct vault passphrase protects encryption keys, and a recovery key provides a backup way to unlock them.
 - Bulk import from Joplin and from an Obsidian vault (see **Import**). A person can also move one Obsidian note by pasting its Markdown into a page, or have an agent push it through the CLI. A selected Obsidian note is the test case for both routes.
 
-Comments are built as decided in [ADR 0014](docs/adr/0014-comments.md) (#320; see [Comments](#comments)). Simultaneous live editing (#321) and semantic search (#324) are later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
+Comments are built as decided in [ADR 0014](docs/adr/0014-comments.md) (#320; see [Comments](#comments)). Live editing is accepted in [ADR 0015](docs/adr/0015-live-editing.md) (#321), not built yet: editors with a page's draft open edit one shared copy, end-to-end encrypted, and see each other's changes as they type, while writers outside it, such as the CLI and offline changes, keep the conflict. Semantic search (#324) is later work. A stale edit produces a conflict instead of overwriting another writer. Reading and editing offline is built as decided in [ADR 0009](docs/adr/0009-offline.md) (see [Offline](#offline)).
 
 ## Architecture
 
