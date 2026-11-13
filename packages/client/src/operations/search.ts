@@ -183,8 +183,9 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * `'all'`) no page `pages` leaves out. A page's content can be left out
    * if this index holds that version of it, or given as its time alone
    * (`VersionTime`): what the index holds of it stays, with that time. A
-   * page as this index holds it (the same version, in the same place, with
-   * the same time) is kept as indexed: only the
+   * page given in the version and place this index holds it is kept as
+   * indexed, its content and time too, unless given a time alone that
+   * differs: only the
    * text of pages that changed is read again (`SearchIndex`), and its
    * lookups are copied, in time linear in the pages it holds, then sorted
    * only where pages changed. If nothing did, this index is returned
