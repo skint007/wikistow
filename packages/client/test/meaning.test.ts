@@ -204,6 +204,10 @@ describe('a page’s passages', () => {
     expect(estimateTokens('Niamh')).toBe(2);
     expect(estimateTokens('3.14')).toBe(4);
     expect(estimateTokens('日本語')).toBe(3);
+    // A vowel sign that takes space is a token, unlike an accent: কোনো is
+    // four signs and two consonants once its vowels are decomposed.
+    expect(estimateTokens('কোনো')).toBe(6);
+    expect(estimateTokens('भारत')).toBe(4);
     expect(estimateTokens('lasagne')).toBe(3);
     expect(estimateTokens('')).toBe(0);
     // What doesn't read as a word, one a character: no token is shorter.

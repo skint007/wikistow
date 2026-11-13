@@ -223,9 +223,10 @@ function* cutWord(
 /**
  * About as many tokens as the model's tokenizer (BERT's, uncased) makes of
  * `word`, a run without spaces, or more, so a passage cut by it holds no
- * more than it should. Accents go, as the tokenizer drops them. Each mark
- * of punctuation or symbol is a token, and so is each character of any
- * script but Latin. A run of Latin letters that reads as a word (cased as
+ * more than it should. Accents go, as the tokenizer drops them: the marks
+ * that take no space of their own (a vowel sign that does, as in Hindi, is
+ * a token). Each mark of punctuation or symbol is a token, and so is each
+ * character of any script but Latin. A run of Latin letters that reads as a word (cased as
  * one, at most 20 letters, a quarter of them vowels) is one token up to 3
  * letters long, and one each 3 letters; any other run of Latin letters and
  * digits, such as a number, an ID or a hash, one a character, as no token
@@ -233,8 +234,11 @@ function* cutWord(
  * token, to count names and other languages, whose words are cut into
  * more, about right: measured with the model's tokenizer, passages of 256
  * cut by it held at most 213 tokens of the spec's English, and 245 of
- * French, German, Spanish, Finnish, Welsh or a list of names. An estimate
- * all the same: where the tokenizer is at hand, its count is the one to pass.
+ * French, German, Spanish, Finnish, Welsh, Hindi, Bengali or a list of
+ * place names. An estimate all the same: some names count a token short,
+ * so a page that lists only such names can pass 256 by a tenth, though
+ * well within the model's 512. Where the tokenizer is at hand, its count
+ * is the one to pass.
  */
 export function estimateTokens(word: string): number {
   let tokens = 0;
@@ -257,7 +261,7 @@ export function estimateTokens(word: string): number {
   return tokens;
 }
 
-const MARK = /^\p{M}$/u;
+const MARK = /^\p{Mn}$/u;
 const LATIN = /^[\p{Script=Latin}\p{Nd}]$/u;
 const SPACE = /^\s$/u;
 /** Letters cased as a word is: all small, all capitals, or a capital first. */
