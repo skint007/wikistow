@@ -82,8 +82,8 @@ export function desktopClipping(options: ClippingOptions) {
   const settingFile = join(userData, 'clipping.json');
   const helper = clipHelper(options);
   // A development build writes none unless asked, so it doesn't take the
-  // installed app's host name.
-  const development = !helper?.installed && !options.argv.includes('--clip-manifests');
+  // installed app's host name; nor does one with no helper to name.
+  const development = !helper || (!helper.installed && !options.argv.includes('--clip-manifests'));
   // A Mac app opened where it was unzipped runs from a random path macOS removes later.
   const translocated = platform === 'darwin' && options.appPath.includes('/AppTranslocation/');
   const allowed = withExtension(PUBLISHED_EXTENSIONS, switchValue(options.argv, 'clip-extension'));

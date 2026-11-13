@@ -148,7 +148,8 @@ export type ClippingState = {
   /**
    * Why browsers can't reach the app although it's on, or null: a Mac app
    * run from where it was unzipped (`translocated`), a development build
-   * started without `--clip-manifests` (`development`), or the socket
+   * started without `--clip-manifests` or a copy with no helper
+   * (`development`), or the socket
    * couldn't be opened (`unavailable`).
    */
   problem: 'translocated' | 'development' | 'unavailable' | null;

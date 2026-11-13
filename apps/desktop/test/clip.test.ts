@@ -457,15 +457,18 @@ describe('the helper this copy ships', () => {
 });
 
 describe.runIf(process.platform === 'linux')('browser clipping', () => {
-  async function app(argv: string[] = ['--clip-manifests', `--clip-extension=${CALLER}`]) {
+  async function app(
+    argv: string[] = ['--clip-manifests', `--clip-extension=${CALLER}`],
+    built = true,
+  ) {
     const root = await newFolder();
     const home = join(root, 'home');
     const userData = join(root, 'data');
     const appPath = join(root, 'app');
-    const built = join(appPath, 'out', 'clip-host', 'linux-amd64', 'wikistow-clip-host');
+    const helperPath = join(appPath, 'out', 'clip-host', 'linux-amd64', 'wikistow-clip-host');
     await mkdir(join(home, '.config', 'chromium'), { recursive: true });
     await mkdir(join(appPath, 'out', 'clip-host', 'linux-amd64'), { recursive: true });
-    await writeFile(built, '');
+    if (built) await writeFile(helperPath, '');
     const clipping = desktopClipping({
       which: 'stable',
       platform: 'linux',
@@ -537,6 +540,15 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
     await writeFile(manifest, '{}');
     await clipping.set(false);
     await clipping.set(true);
+    expect(await readFile(manifest, 'utf8')).toBe('{}');
+  });
+
+  it('with no helper built, leaves the installed app’s manifests alone even when asked', async () => {
+    const { clipping, manifest } = await app(undefined, false);
+    expect(await clipping.state()).toMatchObject({ problem: 'development' });
+    await mkdir(join(manifest, '..'), { recursive: true });
+    await writeFile(manifest, '{}');
+    await clipping.set(false);
     expect(await readFile(manifest, 'utf8')).toBe('{}');
   });
 });

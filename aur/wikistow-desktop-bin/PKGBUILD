@@ -43,8 +43,11 @@ package() {
     cd "wikistow-desktop-$_version"
     # The app knows it is the beta from its folder (apps/desktop/src/install.ts).
     install -Dm644 app.asar "$pkgdir/usr/lib/$_app/app.asar"
-    # The browser starts it beside the app, which tells the beta by its folder too.
-    install -Dm755 wikistow-clip-host "$pkgdir/usr/lib/$_app/wikistow-clip-host"
+    # The browser starts it beside the app, which tells the beta by its folder
+    # too. Archives from before the web clipper have none.
+    if [[ -f wikistow-clip-host ]]; then
+        install -Dm755 wikistow-clip-host "$pkgdir/usr/lib/$_app/wikistow-clip-host"
+    fi
     # How the app was installed, for the app to read (docs/desktop.md).
     echo aur > "$pkgdir/usr/lib/$_app/install-source"
     echo "$_channel" > "$pkgdir/usr/lib/$_app/channel"

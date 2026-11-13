@@ -30,8 +30,9 @@ const MAX_CONNECTIONS = 16;
  * At most this many connections still to prove themselves. On Windows any
  * account, or another computer through file sharing, can open the pipe to
  * read, and can never send a byte; the oldest that sent none goes to make
- * room, so they can't keep out the person's helper, which sends its
- * challenge at once.
+ * room. The person's helper sends its challenge as soon as it has checked
+ * who serves the pipe, so only a flood of new opens within those few
+ * milliseconds can push it out, and that leaks nothing.
  */
 const MAX_UNPROVEN = 16;
 /** A socket's path must fit `sockaddr_un`, 104 bytes on a Mac with its ending. */

@@ -30,7 +30,7 @@ function clippingState(state: ClippingState | undefined) {
     case 'translocated':
       return 'Move WikiStow into Applications, then open it again, to clip from your browser.';
     case 'development':
-      return 'This development build sets up no browser. Start it with --clip-manifests to try clipping.';
+      return 'This copy sets up no browser. To try clipping in a development build, build the helper with scripts/clip-host.sh and start it with --clip-manifests.';
     case 'unavailable':
       return 'WikiStow couldn’t start listening for your browser. Quit and open it again to try again.';
   }
