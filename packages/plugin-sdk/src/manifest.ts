@@ -73,6 +73,34 @@ export const SettingField = z.discriminatedUnion('type', [
 ]);
 export type SettingField = z.infer<typeof SettingField>;
 
+/**
+ * The devices WikiStow runs on, as a plugin's `platforms` names them (#405):
+ * the desktop app, a browser on a computer, and a phone, which is wherever
+ * the app shows its phone layout, in a browser or installed.
+ */
+export const DEVICES = ['desktop', 'browser', 'phone'] as const;
+export type Device = (typeof DEVICES)[number];
+
+/** Where each device is, in a sentence: "It works fully in the desktop app". */
+export const ON_DEVICE: Record<Device, string> = {
+  desktop: 'in the desktop app',
+  browser: 'in a computer’s browser',
+  phone: 'on a phone',
+};
+
+/** How well a plugin works on a device: all of it, some of it, or not at all. */
+export const PlatformLevel = z.enum(['full', 'partial', 'none']);
+export type PlatformLevel = z.infer<typeof PlatformLevel>;
+
+/** Which devices a plugin works on, as its author says, with a short note on what "partial" leaves out. */
+export const Platforms = z.strictObject({
+  desktop: PlatformLevel,
+  browser: PlatformLevel,
+  phone: PlatformLevel,
+  note: z.string().min(1).max(200).optional(),
+});
+export type Platforms = z.infer<typeof Platforms>;
+
 /** `wikistow-plugin.json`: what a plugin is and what it contains. */
 export const Manifest = z.strictObject({
   id: PluginId,
@@ -131,8 +159,41 @@ export const Manifest = z.strictObject({
       'A setting’s default must be a value it takes',
     )
     .optional(),
+  /**
+   * Which devices it works on (#405), shown as tags in the library and the
+   * approval dialog. Left out, it makes no claim ("Not stated"); left out,
+   * not defaulted, as `inline` is.
+   */
+  platforms: Platforms.optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
+
+/** `app.titlebar` as a string in the code, as `host.ui.register('app.titlebar', …)` writes it. */
+const TITLEBAR = /(["'`])app\.titlebar\1/;
+
+/**
+ * Where a built plugin's `platforms` says more than its code allows, as
+ * sentences for its author: nothing when it makes no claim. The one thing
+ * checked is `app.titlebar`, which only the desktop app has, found in the
+ * `ui` file's text, so a plugin drawing there works fully only in the
+ * desktop app. Shown at upload and on each workshop build; never refused.
+ */
+export function platformWarnings(manifest: Manifest, files: ReadonlyMap<string, Uint8Array>) {
+  const { platforms } = manifest;
+  const ui = manifest.ui && files.get(manifest.ui);
+  if (!platforms || !ui || !TITLEBAR.test(new TextDecoder().decode(ui))) return [];
+  const warnings: string[] = [];
+  if (platforms.desktop === 'none')
+    warnings.push(
+      'It draws in app.titlebar, which only the desktop app has, but its platforms say it doesn’t work in the desktop app.',
+    );
+  const full = (['browser', 'phone'] as const).filter((device) => platforms[device] === 'full');
+  if (full.length > 0)
+    warnings.push(
+      `It draws in app.titlebar, which only the desktop app has, so it can’t work fully ${full.map((device) => ON_DEVICE[device]).join(' or ')}. Say "partial" or "none" there.`,
+    );
+  return warnings;
+}
 
 /** A plugin's settings as stored: any JSON object. */
 export const SettingsValue = z.record(z.string().max(100), z.json());
