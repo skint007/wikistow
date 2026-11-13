@@ -1,0 +1,19 @@
+/* Drawn as the app's own query tables are, with its colours. */
+.vault-tables {
+  margin: 0 0 1rem;
+}
+.vault-tables table {
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.vault-tables th,
+.vault-tables td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+.vault-tables figcaption,
+.vault-tables-note {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
