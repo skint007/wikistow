@@ -195,6 +195,21 @@ describe('a kept index', () => {
     indexOf(page(home, 'bean-soup', [recipes], '---\ntags: [soup, [hot]]\nservings: 4\n---\nB')),
   );
 
+  it('keeps each page’s headings', () => {
+    const [entry] = keptPages(
+      indexOf(page(home, 'soup', [], 'Intro\n\n# Method\n\nBoil.')),
+    ).values();
+    expect(entry?.headings).toEqual([6]);
+    const sealed = sealKept(ctx, keptPages(indexOf(page(home, 'soup', [], '# A\n\nb'))), '1.0.0');
+    expect([...(openKept(ctx, sealed, '1.0.0')?.values() ?? [])][0]?.headings).toEqual([0]);
+    // And as an index derived from another takes a page, or keeps one.
+    const [doc] = page(home, 'stew', [], '');
+    const next = indexOf(page(home, 'soup', [], '# A\n\nb')).with([
+      [doc, { title: 'Stew', text: 'Intro\nMethod', headings: [6] }],
+    ]);
+    expect(next.pages().map(({ headings }) => headings)).toEqual([[0], [6]]);
+  });
+
   it('keeps each page’s properties, for its person and build', () => {
     expect([...kept.values()][0]?.properties).toEqual([
       { key: 'tags', type: 'list', value: ['soup', ['hot']] },
@@ -224,7 +239,7 @@ describe('a kept index', () => {
     expect(openKept(ctx, sealKept(ctx, times, '1.0.0'), '1.0.0')).toEqual(times);
   });
 
-  it('opens as nothing when kept before properties, links or times were, even by the same build', () => {
+  it('opens as nothing when kept before headings, properties, links or times were, even by the same build', () => {
     // As `sealKept` seals, with the rows an earlier build wrote.
     const seal = (rows: unknown[][]) =>
       sealOnDevice(
@@ -234,12 +249,14 @@ describe('a kept index', () => {
         utf8(JSON.stringify(rows)),
       );
     const row = ['bean-soup-r1', home, 'bean-soup', 'Bean soup', 'text'];
-    expect(openKept(ctx, seal([[...row, [], [], null]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, [0], [], [], null]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, [0], [], []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([[...row, [], []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([[...row, []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([row]), '1.0.0')).toBeNull();
+    expect(openKept(ctx, seal([[...row, [-1], [], [], null]]), '1.0.0')).toBeNull();
     expect(
-      openKept(ctx, seal([[...row, [{ key: 'a', type: 'map', value: 1 }], [], null]]), '1.0.0'),
+      openKept(ctx, seal([[...row, [], [{ key: 'a', type: 'map', value: 1 }], [], null]]), '1.0.0'),
     ).toBeNull();
   });
 });
