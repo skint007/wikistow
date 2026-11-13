@@ -16,6 +16,7 @@ import {
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
@@ -37,6 +38,8 @@ export type EndingPreview = {
   rootId: FolderId | null;
   /** The permission version of the root, or of the space, which the ending carries. */
   permissionVersion: number;
+  /** The share's current key version, which the ending is pending from (section 6.8). */
+  keyVersion: number;
   /**
    * The people who lose access, but the owners: those holding the share's
    * current keys by envelopes this app verified, and the members the server
@@ -61,6 +64,7 @@ export async function previewEnding(
   ctx: ClientContext,
   { spaceId, shareId }: { spaceId: SpaceId; shareId: ShareId },
 ): Promise<EndingPreview> {
+  await ctx.marks.refresh?.();
   const keys = await ownerKeys(ctx, spaceId);
   const share = (await listShares(ctx, spaceId)).find((s) => s.shareId === shareId);
   if (!share) throw new ApiError(404, 'not-found', 'That folder isn’t shared any more');
@@ -88,6 +92,7 @@ export async function previewEnding(
     shareId,
     rootId,
     permissionVersion,
+    keyVersion: share.currentKeyVersion,
     people,
     groups: groups.filter((g) => g.shares.some((s) => s.shareId === shareId)).map((g) => g.groupId),
     agents: [...new Map(share.agents.map((a) => [a.agentId, a])).values()].map(
@@ -225,28 +230,38 @@ export async function endShare(
   };
 
   await scan();
+  // The ending is pending until answered (section 6.8): no tab joins or
+  // sends in the share's live sessions meanwhile.
   let lost = false;
-  for (let tries = 0; ; tries++) {
-    try {
-      await send();
-      break;
-    } catch (error) {
-      if (!(error instanceof ApiError) || tries >= 4) throw error;
-      // Sent again after a lost answer: the first one may have ended it.
-      if (error.code === 'not-found' && lost) {
-        const listed = await listShares(ctx, spaceId);
-        if (listed.some((s) => s.shareId === shareId)) throw error;
-        break;
+  const sendUntilAnswered = async () => {
+    for (let tries = 0; ; tries++) {
+      try {
+        await send();
+        return;
+      } catch (error) {
+        if (!(error instanceof ApiError) || tries >= 4) throw error;
+        // Sent again after a lost answer: the first one may have ended it.
+        if (error.code === 'not-found' && lost) {
+          const listed = await listShares(ctx, spaceId);
+          if (listed.some((s) => s.shareId === shareId)) throw error;
+          return;
+        }
+        if (outcomeUnknown(error) || error.code === 'request-timeout') {
+          lost = true;
+          continue;
+        }
+        // Saved or gone since the scan; with nothing new, something else changed.
+        if (error.code !== 'stale-head' || !(await scan())) throw error;
       }
-      if (outcomeUnknown(error) || error.code === 'request-timeout') {
-        lost = true;
-        continue;
-      }
-      // Saved or gone since the scan; with nothing new, something else changed.
-      if (error.code !== 'stale-head' || !(await scan())) throw error;
     }
-  }
-  ctx.marks.raise(spaceId, shareId, ENDED);
+  };
+  await sendShareChange(
+    ctx,
+    [{ spaceId, shareId, change: 'ending', fromKeyVersion: preview.keyVersion }],
+    sendUntilAnswered,
+    () => [{ spaceId, shareId, keyVersion: ENDED }],
+    { lostMeanwhile: () => lost },
+  );
   forgetSpaces(ctx);
   // The tree lists nothing in the trash, so what it doesn't list came from
   // there. It is only a hint: the share has ended whether or not it loads.

@@ -10,6 +10,7 @@ import {
   type KeptItem,
   type KeptItems,
   type KeptStore,
+  type MarksChannel,
   type MeAnswer,
 } from '@wikistow/client';
 import type { DesktopBridge, KeptFolder } from '@wikistow/contracts';
@@ -230,6 +231,24 @@ export const browserSearchIndex = {
 const TRUST_MARKS = 'trust-marks';
 
 /**
+ * How tabs say they wrote the trust marks (section 6.8): a
+ * `BroadcastChannel` whose messages carry nothing but that, never text,
+ * opened when a session first uses it.
+ */
+function marksChannel(): MarksChannel {
+  let channel: BroadcastChannel | null = null;
+  const open = () => (channel ??= new BroadcastChannel(`${DATABASE}-${TRUST_MARKS}`));
+  return {
+    post: () => open().postMessage(null),
+    listen: (listener) => {
+      const heard = () => listener();
+      open().addEventListener('message', heard);
+      return () => open().removeEventListener('message', heard);
+    },
+  };
+}
+
+/**
  * The browser's trust marks and contacts record (`KeptMarks`), kept in the
  * same database (ADR 0009, decision 2), sealed by the pages. Tabs write
  * them in turn under a Web Lock, each taking in what the others kept.
@@ -247,6 +266,7 @@ export const browserTrustMarks: KeptFile = {
     typeof navigator !== 'undefined' && navigator.locks
       ? navigator.locks.request(`${DATABASE}-${TRUST_MARKS}`, work)
       : work(),
+  ...(typeof BroadcastChannel !== 'undefined' && { channel: marksChannel() }),
 };
 
 let kept: Promise<{ store: KeptStore; onDisk: boolean }> | null = null;
