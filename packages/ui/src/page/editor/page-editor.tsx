@@ -341,7 +341,7 @@ export function PageEditor({
           if (ask !== asked.current) return stale();
           // The newest, read whole, as soon as its pace allows.
           if (!took) {
-            const hurry = hurried.current;
+            const hurry = hurried.current || now;
             hurried.current = false;
             return given.current === null ? undefined : whole(given.current, hurry);
           }
