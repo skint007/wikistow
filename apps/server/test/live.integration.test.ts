@@ -713,6 +713,11 @@ describe('ending', () => {
     // A saved still lands, for what the session placed.
     const saved = stays.message('saved');
     expect(await stays.send([{ message: saved, covers: 2 }])).toMatchObject({ positions: [3] });
+    // Stored, but relayed to nobody, the removed person least of all.
+    await t.live.refreshAll();
+    for (const s of [staying, removed]) {
+      expect(s.lines.some((l) => 'message' in l && l.message.position === 3)).toBe(false);
+    }
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
     // A stream opened now sends what the session keeps, then the end, and makes no join.
@@ -868,6 +873,10 @@ describe('deleting a session', () => {
     expect((await rival.send([], { fold: session.sessionId })).grant?.holder.joinId).toBe(
       catcher.joinId,
     );
+    // Nor from its catch-up join without naming the grant.
+    expect(await rejection(rival.send([{ message: rival.message('saved'), covers: 2 }]))).toBe(
+      'forbidden',
+    );
     await t.db.execute(sql`
       update live_grants set granted_at = now() - interval '11 minutes'
       where session_id = ${session.sessionId}`);
@@ -896,6 +905,9 @@ describe('deleting a session', () => {
     const saved = await startSession(editor, lib.page);
     await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: saved.sessionId } });
     await everyoneLeft(saved.sessionId, '1 second');
+    // Nobody catches up from it, which would only keep it.
+    const catcher = typist(owner, saved);
+    expect(await rejection(catcher.send([], { fold: saved.sessionId }))).toBe('not-found');
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(saved.sessionId)).toBeUndefined();
 
@@ -1044,7 +1056,7 @@ describe('snapshots', () => {
     const join = newId(JoinId);
     expect(await streamRefusal(owner, session, join, open.position)).toBe('stale-head');
     const response = await owner.browser.request(
-      `/api/live/${session.sessionId}/stream?after=${open.position}&joinId=${join}&kept=1`,
+      `/api/live/${session.sessionId}/stream?after=${open.position}&joinId=${join}&kept=${open.snapshot?.covers}`,
     );
     expect(response.ok).toBe(true);
     // The rest of what it kept, then the snapshot itself, at 22.
@@ -1052,6 +1064,22 @@ describe('snapshots', () => {
     const text = await readLines(response, left);
     const positions = text.flatMap((line) => ('message' in line ? [line.message.position] : []));
     expect(positions).toEqual(Array.from({ length: left }, (_, i) => served.length + 2 + i));
+    // Once a newer snapshot comes, a fetch built on the older one starts afresh.
+    const later = typist(editor, session);
+    await editor.ctx.api.call(liveRoutes.postSnapshot, {
+      params: { sessionId: session.sessionId },
+      body: {
+        joinId: later.joinId,
+        parent: session.joinId,
+        message: later.message('snapshot'),
+        covers: 22,
+        revisionId: session.revisionId,
+      },
+    });
+    const stale = await owner.browser.request(
+      `/api/live/${session.sessionId}/stream?after=${open.position}&joinId=${newId(JoinId)}&kept=${open.snapshot?.covers}`,
+    );
+    expect(stale.status).toBe(409);
   });
 
   it('keeps the drafts a kept session names past draft retention, and lets them go after', async () => {
@@ -1145,6 +1173,11 @@ describe('fold grants', () => {
     });
     const { open } = await liveOf(owner, lib.page.pageId);
     expect(open?.grants).toEqual([expect.objectContaining({ subject: outsider })]);
+    // A stream opened now hears of it among its first lines.
+    const late = await stream(owner, session, newId(JoinId), open?.position ?? 0);
+    expect(await late.next((l) => 'grant' in l)).toMatchObject({
+      grant: { subject: outsider, position: placed.positions[0] },
+    });
   });
 
   it('gives a lapsed grant back to its holder 30 s on, when nobody else asked', async () => {
@@ -1227,7 +1260,8 @@ describe('limits', () => {
     expect(size + 16).toBeLessThan(room);
     expect(2 * (size + 16)).toBeGreaterThan(room);
     await me.send([me.message('update', { size })]);
-    expect(await usedBytes(app.db, editor.id)).toBe(before + size + 16);
+    // Its ciphertext, and what its row takes besides.
+    expect(await usedBytes(app.db, editor.id)).toBe(before + size + 16 + schema.LIVE_MESSAGE_BYTES);
     expect(await rejection(me.send([me.message('update', { size })]))).toBe('storage-full');
     // And it stops counting once the session goes.
     await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
@@ -1258,6 +1292,18 @@ describe('limits', () => {
     expect(refused).toBe('rate-limited');
     expect((sent - 1) * (size + 16)).toBeLessThanOrEqual(liveRoutes.STORED_BYTES_PER_MINUTE);
     expect(sent * (size + 16)).toBeGreaterThan(liveRoutes.STORED_BYTES_PER_MINUTE - size);
+  });
+
+  it('takes so many live writes of one person’s at once, and refuses the rest', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const answers = await Promise.all(
+      Array.from({ length: 40 }, () => rejection(me.send([me.message('presence')]))),
+    );
+    expect(answers).toContain('rate-limited');
+    expect(answers).toContain('no error');
   });
 
   it('counts every live route, the stream’s opening included, against one allowance', async () => {

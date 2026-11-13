@@ -22,7 +22,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { LIVE_ID_BYTES } from '../db/schema/live.ts';
+import { LIVE_ID_BYTES, LIVE_JOIN_BYTES, LIVE_MESSAGE_BYTES } from '../db/schema/live.ts';
 import {
   appRateLimits,
   commentVersions,
@@ -599,22 +599,7 @@ async function servedSession(
   }
   if (complete) position = session.lastPosition;
   const joins = await joinsOf(tx, session.id);
-  const present = presentSet(joins, now);
-  const grants = await tx
-    .select()
-    .from(liveGrants)
-    .where(
-      and(
-        eq(liveGrants.sessionId, session.id),
-        or(
-          sql`${liveGrants.givenAfter} >= ${base}`,
-          heads.draftHead === null ? sql`false` : eq(liveGrants.subject, heads.draftHead),
-        ),
-      ),
-    )
-    .orderBy(desc(liveGrants.id))
-    .limit(GRANTS_SERVED);
-  grants.reverse();
+  const grants = await grantsOf(tx, session, { heads, now, joins });
   return {
     sessionId: session.id as liveRoutes.ServedSession['sessionId'],
     record,
@@ -633,10 +618,40 @@ async function servedSession(
     position,
     complete,
     joins: servedJoins(joins, now),
-    grants: grants.map((g) =>
-      servedGrant(g, lapsed(g, { present, now, heads, sessionId: session.id })),
-    ),
+    grants,
   };
+}
+
+/**
+ * The grants a newcomer is served: the latest given since the latest
+ * snapshot or placed after what it covers, and the one for the current
+ * draft head, at most `GRANTS_SERVED`.
+ */
+async function grantsOf(
+  tx: Database,
+  session: SessionRow,
+  { heads, now, joins }: { heads: Heads; now: Date; joins?: JoinRow[] },
+) {
+  const base = session.snapshotCovers ?? 0;
+  const rows = await tx
+    .select()
+    .from(liveGrants)
+    .where(
+      and(
+        eq(liveGrants.sessionId, session.id),
+        or(
+          sql`${liveGrants.givenAfter} >= ${base}`,
+          sql`${liveGrants.position} > ${base}`,
+          heads.draftHead === null ? sql`false` : eq(liveGrants.subject, heads.draftHead),
+        ),
+      ),
+    )
+    .orderBy(desc(liveGrants.id))
+    .limit(GRANTS_SERVED);
+  const present = presentSet(joins ?? (await joinsOf(tx, session.id)), now);
+  return rows
+    .reverse()
+    .map((g) => servedGrant(g, lapsed(g, { present, now, heads, sessionId: session.id })));
 }
 
 /** Whether an ended session holds an `update` after the position its latest `saved` covers. */
@@ -813,7 +828,8 @@ export async function startLive(db: Database, input: StartLive) {
       .from(liveSessions)
       .where(and(eq(liveSessions.pageId, page.id), isNull(liveSessions.endedAt)));
     if (open) throw new ContentError('duplicate', 'The page has an open session');
-    await chargeStored(tx, caller, size + payload.ciphertext.length + LIVE_ID_BYTES, input, {
+    const overhead = LIVE_ID_BYTES + LIVE_MESSAGE_BYTES + LIVE_JOIN_BYTES;
+    await chargeStored(tx, caller, size + payload.ciphertext.length + overhead, input, {
       stored: false,
     });
     await tx.insert(liveSessionIds).values({
@@ -931,6 +947,8 @@ export type Joined =
       lastPosition: number;
       snapshotCovers: number;
       token: string;
+      /** The grants a newcomer is served, for the stream's first lines. */
+      grants: liveRoutes.Grant[];
     };
 
 /**
@@ -939,15 +957,23 @@ export type Joined =
  * caller's that has gone is `not-found`, and so is a further join, which
  * has no stream. `after` past the last position is `invalid-request`, and
  * below what the latest later snapshot covers, whose messages are gone,
- * `stale-head`, but with `kept`, for a newcomer still fetching what that
- * snapshot kept. An ended session makes no join: its stream serves what
+ * `stale-head`, but with `kept`, what the snapshot its fetch was built on
+ * covers, for a newcomer still fetching what that snapshot kept, while it
+ * is still the latest. An ended session makes no join: its stream serves what
  * it keeps after `after`, then the end. Each stream gets a token
  * of its own, so a stream that broke marks its join only while it is the
  * join's latest.
  */
 export async function joinLive(
   db: Database,
-  input: { actor: Actor; sessionId: string; joinId: string; after: number; kept?: boolean },
+  input: {
+    actor: Actor;
+    sessionId: string;
+    joinId: string;
+    after: number;
+    /** What the snapshot covers that the caller's fetch, cut short, was built on. */
+    kept?: number | undefined;
+  },
 ): Promise<Joined> {
   return db.transaction(async (tx) => {
     const { caller, page, session } = await sessionFor(tx, input.actor, input.sessionId, {
@@ -957,7 +983,10 @@ export async function joinLive(
     if (input.after > session.lastPosition) {
       throw new ContentError('invalid-request', 'That position is past the session’s last');
     }
-    if (session.snapshotCovers !== null && input.after < session.snapshotCovers && !input.kept) {
+    const covers = session.snapshotCovers ?? 0;
+    // Below what the snapshot covers only to finish a fetch built on that very snapshot.
+    const short = input.kept === undefined ? input.after < covers : input.kept !== covers;
+    if (short) {
       throw new ContentError('stale-head', 'A snapshot has covered what you missed; join afresh', {
         draftHead: heads.draftHead,
         publishedHead: heads.publishedHead,
@@ -1028,6 +1057,7 @@ export async function joinLive(
       lastPosition: session.lastPosition,
       snapshotCovers: session.snapshotCovers ?? 0,
       token,
+      grants: await grantsOf(tx, session, { heads, now }),
     };
   });
 }
@@ -1077,7 +1107,7 @@ export async function streamClosed(
 
 /**
  * The join a request comes from: the caller's join `joinId` if it is
- * present (or, in an ended session, if it exists at all), or a further
+ * present, or a further
  * join of the caller's present join `parent`, made now: at most two of
  * those present at once, and at most eight joins of the person's.
  */
@@ -1097,7 +1127,7 @@ async function joinFor(
     if (mine.keyVersion !== caller.identity.keyVersion) {
       throw new ContentError('not-found', 'Your key changed; join afresh');
     }
-    if (session.endedReason === null && !present.has(joinKey(mine.identityId, mine.joinId))) {
+    if (!present.has(joinKey(mine.identityId, mine.joinId))) {
       throw new ContentError('not-found', 'That join has gone; join afresh');
     }
     return { join: mine, joins, made: false };
@@ -1167,9 +1197,12 @@ async function catchUpJoin(
     return { join: mine, joins, made: false };
   }
   // Served, and so caught up from, only once every join has left (section 5.10,
-  // **Ending**); other catch-up joins wait on the grant instead.
+  // **Ending**), with unsaved changes under keys that still count; other
+  // catch-up joins wait on the grant instead.
   const others = joins.filter((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId)));
-  if (others.length > 0) throw new ContentError('not-found');
+  if (others.length > 0 || !unsaved(session) || !(await keysCount(tx, session))) {
+    throw new ContentError('not-found');
+  }
   requireRoomForJoin(joins, present, caller.identity.id);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
@@ -1345,7 +1378,11 @@ export async function sendLive(db: Database, input: SendLive) {
     const { join, joins, made } = catchingUp
       ? await catchUpJoin(tx, ctx, input.joinId, now)
       : await joinFor(tx, ctx, input, now);
-    // Only the catch-up grant's holder sends the `saved` that lets the session go.
+    // Only the catch-up grant's holder sends the `saved` that lets the session go,
+    // naming the session as `fold`.
+    if (join.catchUp && !catchingUp && input.messages.length > 0) {
+      throw new ContentError('forbidden', 'A catch-up join sends its saved with its grant');
+    }
     if (catchingUp && input.messages.length > 0) {
       const heads = await headsOf(tx, page.id);
       const taken = await takeGrant(tx, session, session.id, join, { joins, now, heads });
@@ -1726,21 +1763,6 @@ export async function liveState(db: Database, sessionId: string) {
     const now = await dbNow(tx);
     const heads = await headsOf(tx, session.pageId).catch(() => null);
     const joins = await joinsOf(tx, session.id);
-    const present = presentSet(joins, now);
-    const grants = heads
-      ? await tx
-          .select()
-          .from(liveGrants)
-          .where(
-            and(
-              eq(liveGrants.sessionId, session.id),
-              sql`${liveGrants.givenAfter} >= ${session.snapshotCovers ?? 0}`,
-            ),
-          )
-          .orderBy(desc(liveGrants.id))
-          .limit(GRANTS_SERVED)
-      : [];
-    grants.reverse();
     return {
       ended: session.endedReason,
       pageId: session.pageId,
@@ -1749,11 +1771,7 @@ export async function liveState(db: Database, sessionId: string) {
       draftHead: heads?.draftHead ?? null,
       draftCount: heads?.draftCount ?? 0,
       joins: servedJoins(joins, now),
-      grants: heads
-        ? grants.map((g) =>
-            servedGrant(g, lapsed(g, { present, now, heads, sessionId: session.id })),
-          )
-        : [],
+      grants: heads ? await grantsOf(tx, session, { heads, now, joins }) : [],
     };
   });
 }
@@ -1870,7 +1888,17 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
   const at = now.getTime();
   if (session.endedAt && session.endedAt.getTime() + retentionMs <= at) return 'retention';
   const joins = await joinsOf(tx, session.id);
-  if (presentSet(joins, now).size > 0) return null;
+  const present = presentSet(joins, now);
+  const there = joins.filter((j) => present.has(joinKey(j.identityId, j.joinId)));
+  // A catch-up join keeps only a session there is something to catch up from.
+  if (
+    session.endedReason !== null &&
+    there.every((j) => j.catchUp) &&
+    (!unsaved(session) || !(await keysCount(tx, session)))
+  ) {
+    return unsaved(session) ? 'keys' : 'saved';
+  }
+  if (there.length > 0) return null;
   if (session.endedReason === null) {
     const lastGone = Math.max(0, ...joins.map(goneAt));
     if (lastGone + retentionMs <= at) return 'retention';

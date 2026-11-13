@@ -139,8 +139,9 @@ export type EndReason = z.infer<typeof EndReason>;
  * and the stored messages after it, up to `position`, oldest first. One
  * fetch serves about 8 MiB of messages, its sessions together. When
  * `complete` is false there are more, which the stream serves from
- * `position`, with `kept=1` while `position` is below what the snapshot
- * covers (the rest of `latest`). `grants` are those given since the
+ * `position`, with `kept` set to what the snapshot covers while
+ * `position` is below it (the rest of `latest`). Snapshots come whole,
+ * beyond the 8 MiB. `grants` are those given since the
  * latest snapshot, and the one for the current draft head.
  */
 export const ServedSession = z.strictObject({
@@ -246,8 +247,11 @@ export type StreamLine = z.infer<typeof StreamLine>;
  * person's stream past the server's limit of open streams. `after` is
  * the position the app holds; if messages after it have since gone with
  * a snapshot, it is `stale-head`, and the app joins again as a newcomer.
- * `kept=1` lets a newcomer start below what the latest snapshot covers,
- * to fetch the rest of what it kept (`ServedSession.complete`). A stream
+ * `kept`, what the snapshot its fetch was built on covers, lets a
+ * newcomer start below it, to fetch the rest of what that snapshot kept
+ * (`ServedSession.complete`), while that snapshot is the latest
+ * (`stale-head` otherwise). The first lines are the joins, each present
+ * join's latest presence and the grants a newcomer is served. A stream
  * that a newer snapshot leaves short of messages closes, as one too slow
  * to read does; the app opens it again from where it got. A stream opened
  * from another site, or as a navigation (`Accept` naming `text/html`), is
@@ -262,7 +266,7 @@ export const stream = {
   query: z.object({
     after: z.coerce.number().pipe(Position),
     joinId: JoinId,
-    kept: z.literal('1').optional(),
+    kept: z.coerce.number().pipe(Position).optional(),
   }),
   event: StreamLine,
 } as const satisfies StreamRouteDef;

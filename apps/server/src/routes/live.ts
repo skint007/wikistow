@@ -57,6 +57,11 @@ const MAX_QUEUED_BYTES = 8 * 1024 * 1024;
  */
 const MAX_STREAMS_PER_ACCOUNT = 16;
 const MAX_FETCHES_PER_ACCOUNT = 2;
+/**
+ * Live writes one person may have in hand at once, so a burst waits on
+ * their own requests, never on every connection the server has.
+ */
+const MAX_WRITES_PER_ACCOUNT = 8;
 /** How long a closed stream has to send what it had queued before it is cut off. */
 const DRAIN_MS = 5000;
 
@@ -268,7 +273,7 @@ export function mountLiveRoutes(
   }
 
   // People whose sign-in ended, or who can no longer edit the page, stop
-  // hearing at once, with nothing queued sent.
+  // hearing within `ACCESS_MS`, with nothing queued sent.
   async function checkAccess() {
     const checks = [...followed].flatMap(([sessionId, session]) =>
       [...session.streams].map(async (stream) => {
@@ -356,6 +361,21 @@ export function mountLiveRoutes(
     if (change.joinsChanged) refresh(change.sessionId).catch(failed);
   }
 
+  const writes = new Map<string, number>();
+  // A write of `actor`'s, one of at most `MAX_WRITES_PER_ACCOUNT` at once.
+  async function writing<T>(actor: Actor, run: () => Promise<T>): Promise<T> {
+    if (actor.agentId !== null) throw new ApiError('not-found', 'Not found');
+    if ((writes.get(actor.accountId) ?? 0) >= MAX_WRITES_PER_ACCOUNT) {
+      throw new ApiError('rate-limited', 'Too many live requests at once; try again shortly');
+    }
+    count(writes, actor.accountId, 1);
+    try {
+      return await run();
+    } finally {
+      count(writes, actor.accountId, -1);
+    }
+  }
+
   const asActor = (caller: EarlyCaller): Actor => ({
     accountId: caller.accountId,
     agentId: caller.agentId ?? null,
@@ -382,13 +402,15 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.startLive,
     async ({ params, body }, { actor }) =>
-      startLive(db, {
-        actor,
-        pageId: params.pageId,
-        storageBytes,
-        storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
-        ...body,
-      }).catch(toApiError),
+      writing(actor, () =>
+        startLive(db, {
+          actor,
+          pageId: params.pageId,
+          storageBytes,
+          storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
+          ...body,
+        }).catch(toApiError),
+      ),
     {
       ...SHARED,
       bodyLimit: liveRoutes.SNAPSHOT_BODY_BYTES,
@@ -408,13 +430,15 @@ export function mountLiveRoutes(
         positions,
         grant,
         relay: change,
-      } = await sendLive(db, {
-        actor,
-        sessionId: params.sessionId,
-        storageBytes,
-        storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
-        ...body,
-      }).catch(toApiError);
+      } = await writing(actor, () =>
+        sendLive(db, {
+          actor,
+          sessionId: params.sessionId,
+          storageBytes,
+          storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
+          ...body,
+        }).catch(toApiError),
+      );
       relay(change);
       return { positions, grant };
     },
@@ -424,13 +448,15 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.postSnapshot,
     async ({ params, body }, { actor }) => {
-      const { position, relay: change } = await postSnapshot(db, {
-        actor,
-        sessionId: params.sessionId,
-        storageBytes,
-        storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
-        ...body,
-      }).catch(toApiError);
+      const { position, relay: change } = await writing(actor, () =>
+        postSnapshot(db, {
+          actor,
+          sessionId: params.sessionId,
+          storageBytes,
+          storedBytesPerMinute: liveRoutes.STORED_BYTES_PER_MINUTE,
+          ...body,
+        }).catch(toApiError),
+      );
       if (change) relay(change);
       return { position };
     },
@@ -449,11 +475,11 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.leave,
     async ({ params, body }, { actor }) => {
-      const { left } = await leaveLive(db, {
-        actor,
-        sessionId: params.sessionId,
-        joinId: body.joinId,
-      }).catch(toApiError);
+      const { left } = await writing(actor, () =>
+        leaveLive(db, { actor, sessionId: params.sessionId, joinId: body.joinId }).catch(
+          toApiError,
+        ),
+      );
       if (left) refresh(params.sessionId).catch(failed);
       return { ok: true as const };
     },
@@ -463,7 +489,9 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.end,
     async ({ params }, { actor }) => {
-      const { ended } = await endLive(db, { actor, sessionId: params.sessionId }).catch(toApiError);
+      const { ended } = await writing(actor, () =>
+        endLive(db, { actor, sessionId: params.sessionId }).catch(toApiError),
+      );
       if (ended) refresh(params.sessionId).catch(failed);
       return { ok: true as const };
     },
@@ -507,7 +535,7 @@ export function mountLiveRoutes(
           sessionId,
           joinId,
           after,
-          kept: kept === '1',
+          kept,
         });
       } catch (error) {
         release();
@@ -571,7 +599,7 @@ export function mountLiveRoutes(
         replaced: false,
         wake: null,
         openedAt: Date.now(),
-        openCovers: joined.snapshotCovers,
+        openCovers: kept ?? joined.snapshotCovers,
         stop,
       };
       const ended = AbortSignal.any([signal, closing.signal]);
@@ -627,6 +655,10 @@ export function mountLiveRoutes(
           for (const presence of here.presence.values()) {
             yield { presence, draftHead: head() } satisfies Line;
           }
+          for (const grant of joined.grants) {
+            heardGrant(here, grant);
+            yield { grant, draftHead: head() } satisfies Line;
+          }
           for (;;) {
             yield* catchUp(stream.known);
             const item = stream.queue.shift();
@@ -649,7 +681,8 @@ export function mountLiveRoutes(
               continue;
             }
             if (stream.closed) {
-              if (stream.final) yield stream.final;
+              // A stream left short of what was stored gets no end, so its app opens it again.
+              if (stream.final && stream.sent >= stream.known) yield stream.final;
               return;
             }
             await new Promise<void>((resolve) => (stream.wake = resolve));

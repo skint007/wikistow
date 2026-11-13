@@ -1,5 +1,5 @@
 {
-  "id": "6870b335-d543-4e44-bf05-6042dd55c44b",
+  "id": "a252031f-c893-4bb1-9b33-71d63f28f87c",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5461,6 +5461,46 @@
           "value": "(\"live_sessions\".\"share_id\" is null) = (\"live_sessions\".\"key_version\" is null)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.live_usage": {
+      "name": "live_usage",
+      "schema": "",
+      "columns": {
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "live_usage_account_id_users_id_fk": {
+          "name": "live_usage_account_id_users_id_fk",
+          "tableFrom": "live_usage",
+          "tableTo": "users",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.live_wraps": {

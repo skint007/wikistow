@@ -6,10 +6,7 @@ import {
   commentVersions,
   contactsRecords,
   identities,
-  LIVE_ID_BYTES,
-  liveMessages,
-  liveSessionIds,
-  liveSessions,
+  liveUsage,
   metadataRevisions,
   publicCopies,
   publicFiles,
@@ -26,9 +23,9 @@ const total = async (query: Promise<{ bytes: string }[]>) => Number((await query
 
 /**
  * Everything stored on an account's behalf: attachments it uploaded, page
- * and metadata versions and comments it wrote, live sessions it started and
- * the messages it sent, while the session is kept, and each session ID it
- * took, which is kept for good (protocol section 5.10),
+ * and metadata versions and comments it wrote, its live sessions' records,
+ * messages and joins while kept, and each session ID it took (protocol
+ * section 5.10, summed in `live_usage`),
  * what is kept of its contacts record, and the files of public copies it
  * uploaded.
  * The sums run one after another: in a transaction they share a connection.
@@ -70,21 +67,9 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
     ),
     await total(
       db
-        .select({ bytes: sum(liveSessions.payloadSize) })
-        .from(liveSessions)
-        .where(eq(liveSessions.starterAccountId, accountId)),
-    ),
-    await total(
-      db
-        .select({ bytes: sql<string>`count(*) * ${LIVE_ID_BYTES}` })
-        .from(liveSessionIds)
-        .where(eq(liveSessionIds.starterAccountId, accountId)),
-    ),
-    await total(
-      db
-        .select({ bytes: sum(liveMessages.size) })
-        .from(liveMessages)
-        .where(eq(liveMessages.accountId, accountId)),
+        .select({ bytes: sum(liveUsage.bytes) })
+        .from(liveUsage)
+        .where(eq(liveUsage.accountId, accountId)),
     ),
     await total(
       db

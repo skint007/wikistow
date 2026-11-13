@@ -91,6 +91,11 @@ CREATE TABLE "live_sessions" (
 	CONSTRAINT "live_sessions_region" CHECK (("live_sessions"."share_id" is null) = ("live_sessions"."key_version" is null))
 );
 --> statement-breakpoint
+CREATE TABLE "live_usage" (
+	"account_id" uuid PRIMARY KEY NOT NULL,
+	"bytes" bigint DEFAULT 0 NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "live_wraps" (
 	"session_id" text PRIMARY KEY NOT NULL,
 	"share_id" text NOT NULL,
@@ -109,6 +114,7 @@ ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_space_id_spaces_
 ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_page_id_nodes_id_fk" FOREIGN KEY ("page_id") REFERENCES "public"."nodes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "live_usage" ADD CONSTRAINT "live_usage_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_wraps" ADD CONSTRAINT "live_wraps_session_id_live_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."live_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_wraps" ADD CONSTRAINT "live_wraps_share_id_shares_id_fk" FOREIGN KEY ("share_id") REFERENCES "public"."shares"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "live_grants_session_idx" ON "live_grants" USING btree ("session_id","subject");--> statement-breakpoint
@@ -169,3 +175,48 @@ END $$;
 CREATE TRIGGER "page_heads_live_head" AFTER UPDATE OF "draft_head" ON "page_heads"
   FOR EACH ROW WHEN (OLD."draft_head" IS DISTINCT FROM NEW."draft_head")
   EXECUTE FUNCTION "wikistow_live_head"();
+--> statement-breakpoint
+-- Each account's live storage (protocol section 5.10), kept as rows come and
+-- go, so a quota check reads one row: a session's record and its used ID
+-- count for its starter, a stored message and a join for their sender, each
+-- with what its row takes besides (LIVE_ID_BYTES, LIVE_MESSAGE_BYTES and
+-- LIVE_JOIN_BYTES in schema/live.ts). Rows whose account went count for nobody.
+CREATE FUNCTION "wikistow_live_usage"() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  account uuid;
+  delta bigint;
+BEGIN
+  IF TG_TABLE_NAME = 'live_messages' THEN
+    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
+    delta := CASE WHEN TG_OP = 'DELETE' THEN OLD."size" ELSE NEW."size" END + 1024;
+  ELSIF TG_TABLE_NAME = 'live_joins' THEN
+    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
+    delta := 512;
+  ELSIF TG_TABLE_NAME = 'live_sessions' THEN
+    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
+    delta := CASE WHEN TG_OP = 'DELETE' THEN OLD."payload_size" ELSE NEW."payload_size" END;
+  ELSE
+    account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
+    delta := 256;
+  END IF;
+  IF account IS NULL THEN RETURN NULL; END IF;
+  IF TG_OP = 'DELETE' THEN
+    UPDATE "live_usage" SET "bytes" = "bytes" - delta WHERE "account_id" = account;
+  ELSE
+    INSERT INTO "live_usage" ("account_id", "bytes") VALUES (account, delta)
+      ON CONFLICT ("account_id") DO UPDATE SET "bytes" = "live_usage"."bytes" + delta;
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER "live_messages_usage" AFTER INSERT OR DELETE ON "live_messages"
+  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+--> statement-breakpoint
+CREATE TRIGGER "live_joins_usage" AFTER INSERT OR DELETE ON "live_joins"
+  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+--> statement-breakpoint
+CREATE TRIGGER "live_sessions_usage" AFTER INSERT OR DELETE ON "live_sessions"
+  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();
+--> statement-breakpoint
+CREATE TRIGGER "live_session_ids_usage" AFTER INSERT OR DELETE ON "live_session_ids"
+  FOR EACH ROW EXECUTE FUNCTION "wikistow_live_usage"();

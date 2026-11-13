@@ -111,8 +111,28 @@ export const liveSessionIds = pgTable(
   ],
 );
 
-/** What one used session ID counts toward its starter's storage, about what its row takes. */
+/**
+ * What live rows count toward their account's storage besides their
+ * ciphertext, about what each takes on disk with its indexes: a used
+ * session ID, a stored message and a join. The `live_usage` triggers
+ * keep the sums (migration 0050).
+ */
 export const LIVE_ID_BYTES = 256;
+export const LIVE_MESSAGE_BYTES = 1024;
+export const LIVE_JOIN_BYTES = 512;
+
+/**
+ * Each account's live sessions' storage, kept by triggers as rows come and
+ * go: records it signed and used session IDs it took, as starter; stored
+ * messages and joins, as sender. So a quota check reads one row rather than
+ * summing every message.
+ */
+export const liveUsage = pgTable('live_usage', {
+  accountId: uuid()
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  bytes: bigint({ mode: 'number' }).notNull().default(0),
+});
 
 /**
  * A session's key wrap in a share (section 5.10, **The session record**),
