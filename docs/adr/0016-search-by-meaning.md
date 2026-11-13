@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Searching pages by meaning, on the device
 
-Search finds a page only by its words: "trip to the coast" doesn't find a page about a beach holiday in Cornwall (#324). This ADR proposes how search also finds pages by meaning, with a small embedding model that runs in the person's own app. It covers the model, where and how it runs and how it gets there, phones, the vectors and how they are kept, how results show in the search dialog, what the server learns, and who else uses it. Nothing here is decided yet: **Decide** lists the questions.
+Search finds a page only by its words: "trip to the coast" doesn't find a page about a beach holiday in Cornwall (#324). This ADR decides how search also finds pages by meaning, with a small embedding model that runs in the person's own app. It covers the model, where and how it runs and how it gets there, phones, the vectors and how they are kept, how results show in the search dialog, what the server learns, and who else uses it. Scott accepted every recommendation on 2026-11-13 (**Decided**, below).
 
 In short:
 - **A small English model, `bge-small-en-v1.5`** (MIT, 384 dimensions), in its 8-bit ONNX form: 34 MB, 23 MB with Brotli. In the spike it found the page meant first for 28 of 36 queries that today's word search can't match, and among the first three for 32. One query takes 13 ms and a short note about 40 ms, on one thread.
@@ -245,7 +245,9 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-semantic-search/spike/`, not commi
 
 Steps 2 and 3 can run in parallel. Step 4 needs both, and step 5 needs step 4.
 
-## Decide
+## Decided (2026-11-13)
+
+Scott accepted every recommendation below on 2026-11-13.
 
 1. **The model: `bge-small-en-v1.5`, English only, for now?** Recommended: yes (decision 1). It has the best published retrieval score of the small models, a licence with no conditions, and a 23 MB download with Brotli. `all-MiniLM-L6-v2` did as well on short notes at half the time, and is the choice if indexing time matters more. `multilingual-e5-small` is the choice if the family writes in other languages, at more than three times the download and the memory.
 2. **ONNX Runtime Web on WebAssembly, one thread, in a worker of the app's own, without transformers.js?** Recommended: yes (decision 2). It runs under today's policy unchanged. WebGPU and threads are faster but need a larger model or cross-origin isolation, and can come later.
