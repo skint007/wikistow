@@ -1,6 +1,15 @@
-import { pageRoutes, type FolderId, type PageId, type SpaceId } from '@wikistow/contracts';
-import { ApiError } from '../api/client.ts';
+import {
+  pageRoutes,
+  structureRoutes,
+  type FolderId,
+  type PageId,
+  type RouteDef,
+  type SpaceId,
+} from '@wikistow/contracts';
+import { ApiError, outcomeUnknown, type ApiClient, type CallInput } from '../api/client.ts';
 import { utf8 } from '../encoding.ts';
+import type { ImportFile } from '../import-archive.ts';
+import { newId, PageId as PageIdSchema } from '../ids.ts';
 import {
   importFrom,
   importKeyOf,
@@ -14,19 +23,24 @@ import {
   type NoteLink,
   type SourceNote,
 } from '../import.ts';
+import { repairText } from '../json.ts';
 import { foldTitle, linkablePages, pageIndex, pagesTitled } from '../links.ts';
 import { pace } from '../pace.ts';
 import { newPayload, PageTooLarge, revisePayload, type AttachmentRef } from '../payload.ts';
+import { resealAttachment, sealAttachment } from '../revision.ts';
 import {
+  attachmentTarget,
   createPage,
   loadPage,
   publishPage,
   saveDraft,
   shownVersions,
-  uploadAttachment,
+  uploadBlob,
   type OpenedRevision,
+  type PageRef,
 } from './pages.ts';
-import { patient } from './patience.ts';
+import { patient, pause } from './patience.ts';
+import type { treeTarget } from './records.ts';
 import type { ClientContext } from './session.ts';
 import { createFolder, loadStructure, loadTree } from './spaces.ts';
 
@@ -75,6 +89,11 @@ export class ImportStopped extends Error {
 
 /** Pages opened at a time when looking for an earlier run's. */
 const CHUNK = 100;
+/**
+ * A page's attachments uploaded at once, each as its two copies. Many more
+ * would soon reach the server's 400 uploads a minute, which `patient` waits out.
+ */
+const ATTACHMENTS_AT_ONCE = 2;
 /** The longest name a folder takes. */
 const FOLDER_NAME_LENGTH = 200;
 
@@ -88,11 +107,13 @@ const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\
  * Import a Joplin export (`readJoplinExport`) or an Obsidian vault
  * (`readObsidianVault`) into `scope`: a folder for each notebook or vault
  * folder, mirroring them, and a published page for each note, titled as
- * there. First every folder, then every page, empty, so each link has a
- * page to resolve to; then each page's attachments are uploaded and its
- * body saved with its link table, as `page draft` does, and it is
- * published. A Markdown link to another note becomes a wikilink, with as
- * many of the folders above its page as it takes to name it alone
+ * there. First every folder, then every page, so each link has a page to
+ * resolve to: empty, unless its note names no other note and no file,
+ * when it is made with its body. Then each empty page's attachments are
+ * uploaded, a few at once, and its body saved with its link table, as
+ * `page draft` does, and each page is published. A Markdown link to
+ * another note becomes a wikilink, with as many of the folders above its
+ * page as it takes to name it alone
  * (`wikilinkTarget`); a vault's wikilink changes so only when it wouldn't
  * name its page as written. A file's URL becomes `attachment:ID` on the
  * page that names it, and so does a vault's embed of it. A vault's files
@@ -103,6 +124,12 @@ const placedAt = (parentId: FolderId | null, key: string) => `${parentId ?? ''}\
  * of that key where it would go is used, one ever published left as it
  * is, even if someone unpublished it since, and one never published
  * finished. An import cut short is finished so.
+ *
+ * It sends as few requests as it can, one after another but for uploads:
+ * it asks where to write once a folder (`targetsByFolder`), and publishes
+ * from the draft it just saved, each attachment's copy for readers sealed
+ * from the file it read. Each change goes with an `Idempotency-Key`, and
+ * one whose answer was lost is sent again (`onceEach`).
  *
  * It waits out the server's rate limits (`patient`). Stops with
  * `ImportStopped`, at the next step, if `signal` aborts or the revision
@@ -126,12 +153,26 @@ export async function importNotes(
     signal?: AbortSignal;
   },
 ): Promise<ImportSummary> {
-  // Pages made, or left by an earlier run, to save and publish, and how many of them are done.
-  const placed: { note: SourceNote; pageId: PageId; draft: OpenedRevision | null }[] = [];
+  // Pages made, or left by an earlier run, to publish, and how many of them are done.
+  const placed: Placed[] = [];
   let finished = 0;
-  const stopped = () => new ImportStopped(placed.length - finished);
+  const stopped = () => new ImportStopped(placed.filter((p) => p.empty).length);
   // Hundreds of notes take longer than the server's write limits allow at once.
-  ctx = patient(ctx, stopped, signal);
+  ctx = onceEach(patient(ctx, stopped, signal), stopped, signal);
+  // The folder each page this import fills is in.
+  const folderOfPage = new Map<PageId, FolderId | null>();
+  const targets = targetsByFolder(ctx, scope.spaceId, folderOfPage);
+  ctx = targets.ctx;
+  // Once more if who may read there changed, asking the server where to write afresh.
+  const again = async <T>(pageId: PageId | null, step: () => Promise<T>): Promise<T> => {
+    try {
+      return await step();
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === 'permission-version')) throw error;
+      if (pageId !== null) targets.askAbout(pageId);
+      return step();
+    }
+  };
   const generation = ctx.revisions.generation;
   const live = () => {
     if (signal?.aborted || ctx.revisions.generation !== generation) throw stopped();
@@ -164,12 +205,14 @@ export async function importNotes(
     const parentId = parentOf(folder.parent);
     let folderId = earlierFolders.get(placedAt(parentId, folder.key));
     if (folderId === undefined) {
-      folderId = await createFolder(ctx, {
-        spaceId,
-        parentId,
-        name: folderName(folder.name),
-        extensions: importMark(from, folder.key),
-      });
+      folderId = await again(null, () =>
+        createFolder(ctx, {
+          spaceId,
+          parentId,
+          name: folderName(folder.name),
+          extensions: importMark(from, folder.key),
+        }),
+      );
       folders++;
       live();
     }
@@ -203,6 +246,7 @@ export async function importNotes(
   }));
   const { notes } = source;
   const pageOf = new Map<string, PageId>();
+  const linksOf = new Map<string, NoteLink[]>();
   // The draft an earlier run saved, by note: what it holds says what that run left.
   const savedBefore = new Map<string, { markdown: string; attachments: AttachmentRef[] }>();
   let existing = 0;
@@ -212,27 +256,57 @@ export async function importNotes(
     if (utf8(note.markdown).length > pageRoutes.MAX_MARKDOWN_BYTES) {
       skipped.push({ path: note.path, reason: 'too-large' });
     } else {
+      const links = noteLinks(note, source);
+      linksOf.set(note.key, links);
       const earlier = earlierPages.get(placedAt(parentId, note.key));
       let pageId: PageId;
       if (earlier) {
         pageId = earlier.pageId;
+        folderOfPage.set(pageId, parentId);
         const { opened } = earlier.draft;
         if (opened.kind === 'current') savedBefore.set(note.key, opened.payload);
+        // An earlier run cut short after saving the body has only to publish it.
+        const empty =
+          opened.kind !== 'current' ||
+          (opened.payload.markdown === '' && opened.payload.attachments.length === 0);
         if (earlier.done) existing++;
-        else placed.push({ note, pageId, draft: earlier.draft });
+        else placed.push({ note, pageId, draft: earlier.draft, empty });
       } else {
-        pageId = await createPage(ctx, {
-          spaceId,
-          parentId,
-          title: titleOf(note),
-          extensions: importMark(from, note.key),
-        });
+        pageId = newId(PageIdSchema);
+        folderOfPage.set(pageId, parentId);
+        // A note that names no other note or file reads the same whatever
+        // the other pages are, so its page is made with its body at once.
+        const whole =
+          links.length === 0 &&
+          !note.markdown.includes('[[') &&
+          !repairText(note.markdown).repaired;
+        const make = (markdown: string) =>
+          again(pageId, () =>
+            createPage(ctx, {
+              spaceId,
+              parentId,
+              title: titleOf(note),
+              markdown,
+              extensions: importMark(from, note.key),
+              pageId,
+            }),
+          );
+        let empty = !whole || note.markdown === '';
+        try {
+          await make(empty ? '' : note.markdown);
+        } catch (error) {
+          // Too large with the rest of its payload: made empty, and left out when saved.
+          if (empty || !(error instanceof PageTooLarge)) throw error;
+          await make('');
+          empty = true;
+        }
         live();
-        placed.push({ note, pageId, draft: null });
+        placed.push({ note, pageId, draft: null, empty });
       }
       pageOf.set(note.key, pageId);
     }
     onProgress?.({ phase: 'pages', done: i + 1, total: notes.length });
+    await pace();
   }
 
   // Every page there now, with its title, for links to resolve against.
@@ -264,18 +338,14 @@ export async function importNotes(
     skipped,
     encrypted: source.encrypted,
   };
-  // Each note's links, and those left as written: by this run as it saves
-  // the note, or by an earlier one, as its saved draft still holds them.
-  const linksOf = new Map<string, NoteLink[]>();
+  // Links left as written, by note: by this run as it saves the note, or
+  // by an earlier one, as its saved draft still holds them.
   const unresolvedOf = new Map<string, string[]>();
   for (const note of notes) {
-    if (!pageOf.has(note.key)) continue;
-    const links = noteLinks(note, source);
-    linksOf.set(note.key, links);
     const saved = savedBefore.get(note.key);
-    if (saved !== undefined) {
-      unresolvedOf.set(note.key, leftAsWritten(note, links, saved, { resolves }));
-    }
+    if (saved === undefined) continue;
+    const links = linksOf.get(note.key) ?? [];
+    unresolvedOf.set(note.key, leftAsWritten(note, links, saved, { resolves }));
     await pace();
   }
   // A vault's files belong to the pages that name them: the rest are left out.
@@ -288,36 +358,23 @@ export async function importNotes(
     }
   }
   onProgress?.({ phase: 'saving', done: 0, total: placed.length });
-  for (const [i, { note, pageId, draft }] of placed.entries()) {
+  for (const [i, entry] of placed.entries()) {
+    live();
+    const { note, pageId, draft } = entry;
     const page = { spaceId, pageId };
     const heads = listed.get(pageId);
     if (!heads?.draftHead) throw new ApiError(404, 'not-found', 'An imported page is gone');
-    const opened = draft?.opened.kind === 'current' ? draft.opened.payload : null;
-    // An earlier run cut short after saving the body has only to publish it.
-    const saved = opened !== null && (opened.markdown !== '' || opened.attachments.length > 0);
+    let draftHead = heads.draftHead;
+    let copies: ReadonlyMap<AttachmentRef['id'], AttachmentRef> | undefined;
     let tooLarge = false;
-    if (!saved) {
+    if (entry.empty) {
+      const opened = draft?.opened.kind === 'current' ? draft.opened.payload : null;
       const links = linksOf.get(note.key) ?? [];
-      const attached = new Map<string, AttachmentRef>();
-      for (const key of filesOf(links, source)) {
-        const resource = source.files.get(key);
-        if (!resource?.file) continue;
-        const bytes = await resource.file.read();
-        try {
-          const ref = await uploadAttachment(ctx, page, {
-            name: resource.name,
-            mediaType: resource.mediaType,
-            bytes,
-          });
-          attached.set(key, ref);
-          summary.attachments++;
-        } catch (error) {
-          // A file larger than the server takes: its links stay as written.
-          if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
-        }
-        live();
-      }
-      const attachments = [...attached.values()];
+      const uploaded = await uploadFiles(ctx, page, filesOf(links, source), live);
+      summary.attachments += uploaded.length;
+      const attached = new Map(uploaded.map((file) => [file.key, file.draft]));
+      copies = new Map(uploaded.map((file) => [file.draft.id, file.readers]));
+      const attachments = uploaded.map((file) => file.draft);
       // The page's attachments once saved: an embed names one by its name.
       const onPage = [...(opened?.attachments ?? []), ...attachments];
       const { markdown, unresolved } = rewriteNote(note, links, {
@@ -346,13 +403,16 @@ export async function importNotes(
             extensions: importMark(from, note.key),
           });
       try {
-        await saveDraft(ctx, {
-          page,
-          basedOn: heads.draftHead,
-          ...(heads.region ? { basedOnRegion: heads.region } : {}),
-          payload,
-          tree,
-        });
+        const written = await again(pageId, () =>
+          saveDraft(ctx, {
+            page,
+            basedOn: draftHead,
+            ...(heads.region ? { basedOnRegion: heads.region } : {}),
+            payload,
+            tree,
+          }),
+        );
+        draftHead = written.revisionId;
         unresolvedOf.set(note.key, unresolved);
       } catch (error) {
         // Its links written out, longer than a page holds: left as an empty draft.
@@ -360,10 +420,26 @@ export async function importNotes(
         skipped.push({ path: note.path, reason: 'too-large' });
         tooLarge = true;
       }
+      entry.empty = false;
       live();
     }
     if (!tooLarge) {
-      heads.publishedHead = (await publishPage(ctx, page, { tree })).revisionId;
+      // The draft just made or saved is in memory, so it isn't fetched
+      // again; one an earlier run saved was opened above.
+      const shown =
+        ctx.revisions.get({ ...page, audience: 'draft', revisionId: draftHead }) ??
+        draft ??
+        undefined;
+      const { publishedHead } = heads;
+      const published = await again(pageId, () =>
+        publishPage(ctx, page, {
+          tree,
+          expected: { draftHead, publishedHead },
+          ...(shown ? { draft: shown } : {}),
+          ...(copies ? { copies } : {}),
+        }),
+      );
+      heads.publishedHead = published.revisionId;
       summary.pages.push({ path: note.path, pageId, title: titleOf(note) });
     }
     finished++;
@@ -378,19 +454,185 @@ export async function importNotes(
 }
 
 /**
+ * A page to publish: made by this run, or left by an earlier one with
+ * `draft`. `empty` while its body is still to save.
+ */
+type Placed = { note: SourceNote; pageId: PageId; draft: OpenedRevision | null; empty: boolean };
+
+/** A file of the export to attach, by the key its links name it by. */
+type Attaching = { key: string; name: string; mediaType: string; file: ImportFile };
+
+/**
  * The files `links` name that the export has, each once, in order: at
  * most as many as a version lists (`MAX_ATTACHMENTS`). Links to the rest
  * stay as written.
  */
-function filesOf(links: readonly NoteLink[], source: ImportSource): Set<string> {
-  const files = new Set<string>();
+function filesOf(links: readonly NoteLink[], source: ImportSource): Attaching[] {
+  const files = new Map<string, Attaching>();
   for (const link of links) {
     if (files.size === pageRoutes.MAX_ATTACHMENTS) break;
-    if ((link.kind === 'resource' || link.kind === 'file') && source.files.get(link.key)?.file) {
-      files.add(link.key);
+    if (link.kind !== 'resource' && link.kind !== 'file') continue;
+    const found = source.files.get(link.key);
+    if (found?.file && !files.has(link.key)) {
+      const { name, mediaType, file } = found;
+      files.set(link.key, { key: link.key, name, mediaType, file });
     }
   }
-  return files;
+  return [...files.values()];
+}
+
+/** A file attached to a page: its copy for the draft, and its copy for readers. */
+type Attached = { key: string; draft: AttachmentRef; readers: AttachmentRef };
+
+/**
+ * Upload `files` as attachments of `page`, a few at once
+ * (`ATTACHMENTS_AT_ONCE`), listed in their order. Each is sealed for the
+ * draft and sealed again for readers from the same bytes, and both copies
+ * go together, so publishing needn't download it (`publishPage`'s
+ * `copies`). A file larger than the server takes is left out, so its
+ * links stay as written. On a failure, or `live` throwing, the uploads
+ * already sent finish first.
+ */
+async function uploadFiles(
+  ctx: ClientContext,
+  page: PageRef,
+  files: readonly Attaching[],
+  live: () => void,
+): Promise<Attached[]> {
+  const done: (Attached | undefined)[] = [];
+  const queue = files.entries();
+  let failed = false;
+  const upload = async () => {
+    for (const [at, { key, name, mediaType, file }] of queue) {
+      if (failed) return;
+      const bytes = await file.read();
+      const forDraft = attachmentTarget(ctx, page, 'draft');
+      const draft = sealAttachment({ target: forDraft, name, mediaType, bytes });
+      const readers = resealAttachment({
+        from: forDraft,
+        to: attachmentTarget(ctx, page, 'published'),
+        ...draft,
+      });
+      try {
+        await Promise.all([
+          uploadBlob(ctx, page, 'draft', draft.blob),
+          uploadBlob(ctx, page, 'published', readers.blob),
+        ]);
+        done[at] = { key, draft: draft.ref, readers: readers.ref };
+      } catch (error) {
+        if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
+      }
+      live();
+    }
+  };
+  const workers = Array.from({ length: Math.min(ATTACHMENTS_AT_ONCE, files.length) }, () =>
+    upload().catch((error: unknown) => {
+      failed = true;
+      throw error;
+    }),
+  );
+  for (const result of await Promise.allSettled(workers)) {
+    if (result.status === 'rejected') throw result.reason;
+  }
+  // In the order given, without the files left out.
+  return done.filter((file) => file !== undefined);
+}
+
+/** The changes an import sends that take an `Idempotency-Key`. */
+const KEYED: ReadonlySet<RouteDef> = new Set([
+  structureRoutes.createFolder,
+  pageRoutes.createPage,
+  pageRoutes.saveDraft,
+  pageRoutes.publish,
+]);
+/** How long a change whose answer was lost waits before it is sent again, each time. */
+const RESEND_AFTER_MS = [1000, 3000];
+
+/**
+ * `ctx` sending each change that takes one (`KEYED`) with an
+ * `Idempotency-Key` of its own. When no answer comes back, or the server
+ * failed (`outcomeUnknown`), it sends the same bytes again under the same
+ * key, after each of `RESEND_AFTER_MS`: if the first was made, the server
+ * answers as it did then, so no folder, page or version is made twice. A
+ * wait ends early, throwing `stopped()`, if `signal` aborts.
+ */
+function onceEach(ctx: ClientContext, stopped: () => Error, signal?: AbortSignal): ClientContext {
+  const { api } = ctx;
+  const call = (async (...args: Parameters<ApiClient['call']>) => {
+    const [route, input, options] = args;
+    if (!KEYED.has(route) || options?.idempotencyKey !== undefined) return api.call(...args);
+    const keyed = { ...options, idempotencyKey: `import:${crypto.randomUUID()}` };
+    for (const wait of RESEND_AFTER_MS) {
+      try {
+        return await api.call(route, input, keyed);
+      } catch (error) {
+        if (!outcomeUnknown(error)) throw error;
+        await pause(wait, stopped, signal);
+      }
+    }
+    return api.call(route, input, keyed);
+  }) as ApiClient['call'];
+  return { ...ctx, api: { ...api, call } };
+}
+
+type Target = Awaited<ReturnType<typeof treeTarget>>;
+
+/**
+ * `ctx` asking the server where to write (`treeTarget`) once for each
+ * folder an import fills, rather than for every change. A page made in a
+ * folder takes its folder's permission version and is in its share, so a
+ * page in `folderOf` gets its folder's answer, without the folder's name.
+ * The server still checks each change against its own word. A refused
+ * change forgets every answer, so the next change, or the same one sealed
+ * again with fresh keys, asks again. `askAbout` has a page asked about
+ * itself from then on, as for one whose permission version moved on from
+ * its folder's.
+ */
+function targetsByFolder(
+  ctx: ClientContext,
+  spaceId: SpaceId,
+  folderOf: ReadonlyMap<string, FolderId | null>,
+) {
+  const { api } = ctx;
+  const answers = new Map<string | null, Promise<Target>>();
+  const own = new Set<string>();
+  const ask = (nodeId: string | null) => {
+    const known = answers.get(nodeId);
+    if (known) return known;
+    const asked = api.call(structureRoutes.target, {
+      params: { spaceId },
+      query: nodeId === null ? {} : { nodeId },
+    });
+    answers.set(nodeId, asked);
+    asked.catch(() => {
+      if (answers.get(nodeId) === asked) answers.delete(nodeId);
+    });
+    return asked;
+  };
+  const call = (async (...args: Parameters<ApiClient['call']>) => {
+    const [route, input] = args;
+    if (route === structureRoutes.target) {
+      const { params, query } = input as CallInput<typeof structureRoutes.target>;
+      if (params.spaceId !== spaceId) return api.call(...args);
+      const nodeId = query.nodeId ?? null;
+      const folder = nodeId === null || own.has(nodeId) ? undefined : folderOf.get(nodeId);
+      if (folder === undefined) return ask(nodeId);
+      return { ...(await ask(folder)), name: null } satisfies Target;
+    }
+    try {
+      return await api.call(...args);
+    } catch (error) {
+      if (KEYED.has(route) && error instanceof ApiError) answers.clear();
+      throw error;
+    }
+  }) as ApiClient['call'];
+  return {
+    ctx: { ...ctx, api: { ...api, call } },
+    askAbout: (pageId: PageId) => {
+      own.add(pageId);
+      answers.delete(pageId);
+    },
+  };
 }
 
 /**
