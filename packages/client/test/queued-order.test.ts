@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { FolderId, PageId, queueOperations, SpaceId } from '../src/index.ts';
+import { FolderId, inTreeOrder, PageId, queueOperations, SpaceId } from '../src/index.ts';
 
 // A space's tree, with what the queue shows of a folder's order changed offline (#400).
 type Tree = Parameters<typeof queueOperations.withQueued>[0];
@@ -72,11 +72,11 @@ describe('withQueued and a folder’s order', () => {
     expect(positionOf(shown, 'a')).toBe('a2');
   });
 
-  it('puts a move in at the end as the order waiting there has it', () => {
+  it('shows a move in with no place given last, with no key a reorder would keep', () => {
     const elsewhere = {
       ...tree,
       folders: [...tree.folders, { ...tree.folders[0]!, id: FolderId.parse('other') }],
-      pages: [...tree.pages, { ...page('x', null), parentId: FolderId.parse('other') }],
+      pages: [...tree.pages, { ...page('x', 'a9'), parentId: FolderId.parse('other') }],
     } as unknown as Tree;
     const inbound = {
       kind: 'move',
@@ -89,6 +89,12 @@ describe('withQueued and a folder’s order', () => {
       at: 2,
     } as queueOperations.QueueEntry;
     const shown = queueOperations.withQueued(elsewhere, spaceId, [order({ a: 'a5' }, 1), inbound]);
-    expect(positionOf(shown, 'x')! > 'a5').toBe(true);
+    expect(positionOf(shown, 'x')).toBeNull();
+    const listed = inTreeOrder(
+      shown.pages
+        .filter((p) => p.parentId === folder)
+        .map((p) => ({ id: p.id, kind: 'page' as const, position: p.position, label: p.id })),
+    ).map((p) => p.id);
+    expect(listed.at(-1)).toBe('x');
   });
 });

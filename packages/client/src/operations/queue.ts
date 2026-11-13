@@ -25,7 +25,7 @@ import { resealAttachment, sealAttachment } from '../revision.ts';
 import type { ReadWikilinks } from '../link-table.ts';
 import { moveNode, previewMove } from './moves.ts';
 import { arrange } from './order.ts';
-import { positionBetween, positionsBetween } from '../positions.ts';
+import { positionsBetween } from '../positions.ts';
 import {
   attachmentTarget,
   createPage,
@@ -1870,29 +1870,16 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
       return { ...node, parentId, position: order.positions[node.id] ?? null };
     }
     if (!move) return node;
+    // Moved in with no place given: the server puts it last there as it
+    // moves it, a key only it can tell, its trash's counting. Shown with
+    // none, it lists after what has one, and a reorder there writes its key.
     const position =
       move.position !== undefined
         ? move.position
         : move.parentId === node.parentId
           ? node.position
-          : endOf(move.parentId);
+          : null;
     return { ...node, parentId: move.parentId, position };
-  };
-  const endOf = (parentId: FolderId | null): Position | null => {
-    let last: Position | null = null;
-    // As the folder's order waiting here puts them, where it does.
-    const waiting = orders.get(parentId)?.positions ?? {};
-    for (const other of [...tree.folders, ...tree.pages]) {
-      if (other.parentId !== parentId || moved.has(other.id)) continue;
-      const position = other.id in waiting ? (waiting[other.id] ?? null) : other.position;
-      if (position !== null && (last === null || position > last)) last = position;
-    }
-    try {
-      return last && positionBetween(last, null);
-    } catch {
-      // Keys there grew too long: the server makes room as it places it.
-      return null;
-    }
   };
   const regionUnder = (parentId: string | null): Region | null => {
     try {
