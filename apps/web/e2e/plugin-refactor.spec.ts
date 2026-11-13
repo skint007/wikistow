@@ -142,6 +142,8 @@ test('a plugin splits a note by a shortcut, and merges notes into the trash afte
     await expect(prompt.getByRole('list', { name: 'Pages to move to the trash' })).toHaveText(
       ['Rye', 'Cake'].join(''),
     );
+    // Its buttons wait a moment, so a click meant for something else can't answer it.
+    await expect(prompt.getByRole('button', { name: 'Move to trash' })).toBeEnabled();
     await shot(page, 'trash-prompt');
     await prompt.getByRole('button', { name: 'Move to trash' }).click();
     await expect(page.getByText('Note refactor moved 2 pages to the trash.')).toBeVisible();

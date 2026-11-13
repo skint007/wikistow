@@ -1,7 +1,7 @@
 /** What a plugin asks to move to the trash (`host.pages.trash`): its name, and each page's title. */
 export type TrashRequest = { plugin: string; titles: readonly (string | null)[] };
 
-type Asked = TrashRequest & { answer: (agreed: boolean) => void };
+type Asked = TrashRequest & { id: number; answer: (agreed: boolean) => void };
 
 /**
  * The plugins' requests to move pages to the trash (#404), asked one at a
@@ -10,6 +10,7 @@ type Asked = TrashRequest & { answer: (agreed: boolean) => void };
  */
 function trashPrompts() {
   let waiting: Asked[] = [];
+  let asks = 0;
   const listeners = new Set<() => void>();
   const changed = (next: Asked[]) => {
     waiting = next;
@@ -25,6 +26,7 @@ function trashPrompts() {
       return new Promise((resolve) => {
         const asked: Asked = {
           ...request,
+          id: ++asks,
           answer: (agreed) => {
             signal.removeEventListener('abort', gone);
             changed(waiting.filter((each) => each !== asked));

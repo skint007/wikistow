@@ -241,15 +241,16 @@ export function shortcutProblem(
 const KEPT = 'wikistow.pluginShortcuts';
 const Kept = z.record(z.string(), z.string().max(60)).catch({});
 
-function readKept(): Readonly<Record<string, string>> {
+/** What this device keeps, or null where its storage can't be read. */
+function readKept(): Readonly<Record<string, string>> | null {
   try {
     return Kept.parse(JSON.parse(localStorage.getItem(KEPT) ?? '{}'));
   } catch {
-    return {};
+    return null;
   }
 }
 
-let kept = readKept();
+let kept = readKept() ?? {};
 const listeners = new Set<() => void>();
 
 /** The shortcuts given to plugins' commands on this device, by `<pluginId>/<commandId>`. */
@@ -260,7 +261,7 @@ export const pluginShortcuts = {
   /** Give `command` the shortcut `name`, or none for null. */
   set(command: CommandKey, name: string | null) {
     // What another tab kept meanwhile stays.
-    const { [commandKey(command)]: _was, ...rest } = readKept();
+    const { [commandKey(command)]: _was, ...rest } = readKept() ?? kept;
     kept = name === null ? rest : { ...rest, [commandKey(command)]: normalShortcut(name) };
     try {
       localStorage.setItem(KEPT, JSON.stringify(kept));
@@ -275,7 +276,7 @@ export const pluginShortcuts = {
   },
   /** Read them again, as another tab changed them. */
   reread() {
-    kept = readKept();
+    kept = readKept() ?? kept;
     for (const listener of listeners) listener();
   },
 };

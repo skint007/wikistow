@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -43,16 +43,31 @@ export function PluginTrashPrompt() {
               </li>
             ))}
           </ul>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => asked.answer(false)}>
-              Keep {count === 1 ? 'it' : 'them'}
-            </Button>
-            <Button variant="destructive" onClick={() => asked.answer(true)}>
-              Move to trash
-            </Button>
-          </DialogFooter>
+          <Answers key={asked.id} count={count} answer={asked.answer} />
         </DialogContent>
       )}
     </Dialog>
+  );
+}
+
+/** How long a new request's buttons wait, so a click meant for the one before can't answer it. */
+const SETTLE_MS = 600;
+
+/** Keep or Move to trash, for one request: drawn afresh for each, waiting `SETTLE_MS` first. */
+function Answers({ count, answer }: { count: number; answer: (agreed: boolean) => void }) {
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <DialogFooter>
+      <Button variant="outline" disabled={!settled} onClick={() => answer(false)}>
+        Keep {count === 1 ? 'it' : 'them'}
+      </Button>
+      <Button variant="destructive" disabled={!settled} onClick={() => answer(true)}>
+        Move to trash
+      </Button>
+    </DialogFooter>
   );
 }

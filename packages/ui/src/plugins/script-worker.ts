@@ -141,6 +141,9 @@ export class ScriptWorker {
   #stopped = false;
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
+  /** When its activation's time is up, and what it has left while a waiting call pauses it. */
+  #startEnds = 0;
+  #startLeft = SCRIPT_BUDGET_MS;
 
   constructor(
     launch: LaunchScript,
@@ -220,10 +223,18 @@ export class ScriptWorker {
     this.#waits = 0;
     this.#ready = false;
     this.#started = Promise.withResolvers<void>();
+    this.#startLeft = SCRIPT_BUDGET_MS;
+    this.#startClock();
+  }
+
+  /** Run its activation's clock, from the time it has left. */
+  #startClock() {
+    const worker = this.#worker;
+    this.#startEnds = Date.now() + this.#startLeft;
     this.#starting = setTimeout(() => {
       if (this.#worker !== worker) return;
       this.#fail(`Its script took longer than ${SCRIPT_BUDGET_MS / 1000} seconds to start.`);
-    }, SCRIPT_BUDGET_MS);
+    }, this.#startLeft);
   }
 
   /** Settled once its activation finished, or the worker ended. */
@@ -320,6 +331,11 @@ export class ScriptWorker {
   /** A waiting call was made: the commands' and events' clocks stop until every one is answered. */
   #pause() {
     if (this.#waits++ > 0) return;
+    // Its activation's clock too, as one may call them as it starts.
+    if (!this.#ready) {
+      clearTimeout(this.#starting);
+      this.#startLeft = Math.max(0, this.#startEnds - Date.now());
+    }
     for (const invocation of this.#invocations.values()) {
       if (!invocation.pauses || invocation.ends === null) continue;
       clearTimeout(invocation.timer);
@@ -330,6 +346,7 @@ export class ScriptWorker {
 
   #resume() {
     if (--this.#waits > 0) return;
+    if (!this.#ready) this.#startClock();
     for (const invocation of this.#invocations.values())
       if (invocation.ends === null) this.#run(invocation);
   }
