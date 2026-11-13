@@ -145,6 +145,14 @@ export type EditorSurfaceHandle = {
   read(): string;
   /** Show `markdown` instead, keeping the cursor where it can. `onChange` isn't called. */
   replace(markdown: string): void;
+  /**
+   * Show `markdown` instead, as `replace` does, if it can read it a block at
+   * a time, checked as it goes, as the visual editor can; false, showing
+   * nothing, if it must be read whole, checked first as a page is. What's
+   * slow to check is checked off the page's thread, and goes in once it is,
+   * as the promise says, unless other text went in meanwhile.
+   */
+  take?(markdown: string): boolean | Promise<boolean>;
   /** Focus it. The source surface puts its cursor `at` that offset in `read()`'s text. */
   focus(at?: number): void;
   /** Where the cursor is, as an offset in `read()`'s text; null if it can't tell. */

@@ -17,7 +17,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@hono/node-server": "2.1.3",
+    "@hono/node-server": "2.1.6",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^26.0.0",
     "@wikistow/server": "workspace:*",

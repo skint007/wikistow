@@ -76,11 +76,15 @@ const NOT_LOADED: Fidelity = {
 const onHold = (reason: string) =>
   `The visual side is on hold. ${reason.replace('This page stays in source mode, because', 'It can’t show the source as written, because')}`;
 
-// In split, how long typing in the source pauses before the visual editor
-// is given its text: at least this, and four times as long as it took last,
-// as checking and reading a long page holds up the next key that long.
-const SYNC_MS = 250;
-const SYNC_SHARE = 4;
+// In split, the source's text goes to the visual editor a block at a time
+// (`take`), changes this close together going in together, or as close as
+// twice as long as the last try took. Text it must
+// read whole goes in at most this often, or every twice as long as the
+// last whole read took, as checking and reading a long page holds up the
+// next key that long (ADR 0015 decision 3).
+const TAKE_MS = 100;
+const WHOLE_MS = 1_000;
+const WHOLE_SHARE = 2;
 
 // Plugins' buttons in the visual editor's toolbar (`editor.toolbar`).
 const PLUGIN_BUTTONS = '[data-region="editor.toolbar"]';
@@ -150,11 +154,26 @@ export function PageEditor({
   // The mode as last set, for text the session gives before it's shown.
   const modeNow = useRef(mode);
   // In split, the source's text waiting for the visual editor (`syncVisual`),
-  // and how long giving it the last took.
-  const syncing = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null);
+  // and when it may next read a text whole.
+  // Whether that waits to be read whole, then.
+  const syncing = useRef<{
+    timer: ReturnType<typeof setTimeout>;
+    run: () => void;
+    whole: boolean;
+  } | null>(null);
+  const wholeAt = useRef(-Infinity);
+  // Whether a whole read, or a take-in checked in the worker, is under way,
+  // and the person turned to the visual side meanwhile; each text going in is numbered in
+  // turn, and the last shown, so an older one read whole doesn't go in
+  // over it.
+  const reading = useRef(false);
+  const hurried = useRef(false);
+  // How long the last try to take text in a block at a time took.
+  const tookTake = useRef(0);
+  const texts = useRef(0);
+  const lastShown = useRef(0);
   // In split, the side the person was in last, where Insert in page puts its code.
   const lastSide = useRef<'source' | 'visual'>('visual');
-  const synced = useRef(0);
   // What Find on page searches: the editor the page's text is in, or in
   // split, the side the person was in last.
   const [findIn, setFindIn] = useState<Findable | null>(null);
@@ -261,37 +280,128 @@ export function PageEditor({
 
   /**
    * In split, give the visual editor `text`, the source's, after `wait`
-   * ms, or at once as the person turns to it (`syncNow`), checked first as
-   * `give` does; meanwhile it takes no edit. If it wouldn't keep `text`
-   * whole, it goes on taking none, saying why, until the source's text is
-   * one it would, and typing goes on in the source.
+   * ms, with any text after it given meanwhile, or at once as the person
+   * turns to it (`syncNow`): a block at a time if it can (`take`), else
+   * read whole, checked first as `give` does, at most every `WHOLE_MS` or
+   * twice as long as the last took, but at once as the person turns to it.
+   * Meanwhile it takes no edit. If it wouldn't keep `text` whole, it goes
+   * on taking none, saying why, until the source's text is one it would,
+   * and typing goes on in the source.
    */
-  const syncVisual = (text: string, wait: number) => {
+  const syncVisual = (text: string, wait: number, now = false) => {
     given.current = text;
-    if (syncing.current) clearTimeout(syncing.current.timer);
+    // Already on its way, it takes the newest text when it goes; but one
+    // waiting to be read whole tries a block at a time first, again.
+    const waiting = syncing.current;
+    if (waiting && wait > 0 && !waiting.whole) return;
+    if (waiting) clearTimeout(waiting.timer);
     const ask = asked.current;
-    const run = () => {
+    const settle = () => {
+      const focus = focusAt.current;
+      focusAt.current = null;
+      setNote(null);
+      if (focus) surface.current?.focus(focus.at);
+    };
+    // Whatever was given since, once what's under way is done; or what's
+    // waiting, if what was under way was for an earlier split.
+    const onward = (text: string | null) => {
+      const hurry = hurried.current;
+      hurried.current = false;
+      if (given.current !== null && given.current !== text) syncVisual(given.current, 0, hurry);
+    };
+    const stale = () => {
+      if (modeNow.current === 'split') onward(null);
+      else hurried.current = false;
+    };
+    const run = (now: boolean) => {
       syncing.current = null;
-      const started = performance.now();
-      void check(text).then((fidelity) => {
-        if (given.current !== text || ask !== asked.current) return;
-        const focus = focusAt.current;
-        focusAt.current = null;
-        if (!fidelity.visual) {
-          setNote(onHold(fidelity.reason));
-          if (focus) mirror.current?.focus(focus.at);
-          return;
-        }
+      const text = given.current;
+      if (text === null || ask !== asked.current) return;
+      // One text at a time, a whole read or one checked in the worker: the
+      // one under way goes on to the newest, at once if the person turned to
+      // it meanwhile.
+      if (reading.current) {
+        hurried.current ||= now;
+        return;
+      }
+      const trying = performance.now();
+      const taking = surface.current?.take?.(text) ?? false;
+      const taken = (mine: number) => {
+        tookTake.current = performance.now() - trying;
+        lastShown.current = mine;
+        if (given.current !== text) return;
         given.current = null;
-        setNote(null);
-        // Not yet made, it takes the page's text when it is.
-        if (!surface.current) return;
-        surface.current.replace(text);
-        synced.current = performance.now() - started;
-        if (focus) surface.current.focus(focus.at);
+        settle();
+      };
+      if (taking === true) return taken(++texts.current);
+      if (taking !== false) {
+        const mine = ++texts.current;
+        reading.current = true;
+        void taking
+          .catch(() => false)
+          .then((took) => {
+            reading.current = false;
+            if (ask !== asked.current) return stale();
+            // The newest, read whole, as soon as its pace allows.
+            if (!took) {
+              const hurry = hurried.current || now;
+              hurried.current = false;
+              return given.current === null ? undefined : whole(given.current, hurry);
+            }
+            if (lastShown.current < mine) taken(mine);
+            onward(text);
+          });
+        return;
+      }
+      tookTake.current = performance.now() - trying;
+      whole(text, now);
+    };
+    // `text`, read whole, checked first, paced.
+    const whole = (text: string, now: boolean) => {
+      const due = wholeAt.current - performance.now();
+      if (!now && due > 0) {
+        if (syncing.current) clearTimeout(syncing.current.timer);
+        syncing.current = {
+          timer: setTimeout(() => run(false), due),
+          run: () => run(true),
+          whole: true,
+        };
+        return;
+      }
+      const started = performance.now();
+      const mine = ++texts.current;
+      reading.current = true;
+      wholeAt.current = started + WHOLE_MS;
+      void check(text).then((fidelity) => {
+        reading.current = false;
+        if (ask !== asked.current) return stale();
+        const took = performance.now() - started;
+        wholeAt.current = started + Math.max(WHOLE_MS, WHOLE_SHARE * took);
+        const newest = given.current === text;
+        // Text given since goes in after it, if it's still to; one that went
+        // in meanwhile is newer.
+        if (lastShown.current < mine) {
+          if (fidelity.visual) {
+            if (newest) given.current = null;
+            lastShown.current = mine;
+            // Not yet made, it takes the page's text when it is.
+            surface.current?.replace(text);
+            if (newest) settle();
+          } else if (newest) {
+            setNote(onHold(fidelity.reason));
+            const focus = focusAt.current;
+            focusAt.current = null;
+            if (focus) mirror.current?.focus(focus.at);
+          }
+        }
+        onward(text);
       });
     };
-    syncing.current = { timer: setTimeout(run, wait), run };
+    syncing.current = {
+      timer: setTimeout(() => run(now), wait),
+      run: () => run(true),
+      whole: false,
+    };
   };
 
   /**
@@ -300,7 +410,7 @@ export function PageEditor({
    */
   const syncNow = () => {
     const waiting = syncing.current;
-    if (!waiting) return;
+    if (!waiting) return void (hurried.current ||= reading.current);
     clearTimeout(waiting.timer);
     waiting.run();
   };
@@ -335,7 +445,8 @@ export function PageEditor({
     body.current = text;
     if (given.current !== null) given.current = text;
     mirror.current?.replace(text);
-    if (modeNow.current === 'split') return syncVisual(text, 0);
+    // At once, as text typed in the source isn't, which is paced.
+    if (modeNow.current === 'split') return syncVisual(text, 0, true);
     if (modeNow.current !== 'visual') {
       // In source mode, or while the check runs, which checks it next.
       if (surface.current) surface.current.replace(text);
@@ -345,17 +456,29 @@ export function PageEditor({
     given.current = text;
     if (atOnce || !surface.current) return void show('visual', false);
     const ask = asked.current;
-    void check(text).then((fidelity) => {
-      if (given.current !== text || ask !== asked.current) return;
-      if (fidelity.visual) {
-        given.current = null;
-        surface.current?.replace(text);
-        return;
-      }
-      asked.current++;
-      setMode('source');
-      setNote(fidelity.reason);
-    });
+    const whole = () =>
+      void check(text).then((fidelity) => {
+        if (given.current !== text || ask !== asked.current) return;
+        if (fidelity.visual) {
+          given.current = null;
+          surface.current?.replace(text);
+          return;
+        }
+        asked.current++;
+        setMode('source');
+        setNote(fidelity.reason);
+      });
+    // A block at a time if it can be; else checked whole first.
+    const taking = surface.current.take?.(text) ?? false;
+    if (taking === true) return void (given.current = null);
+    if (taking === false) return whole();
+    void taking
+      .catch(() => false)
+      .then((taken) => {
+        if (given.current !== text || ask !== asked.current) return;
+        if (taken) given.current = null;
+        else whole();
+      });
   };
 
   /**
@@ -517,7 +640,7 @@ export function PageEditor({
     onChange: (text) => {
       changed(text);
       if (modeNow.current === 'split')
-        syncVisual(text, Math.max(SYNC_MS, SYNC_SHARE * synced.current));
+        syncVisual(text, Math.max(TAKE_MS, WHOLE_SHARE * tookTake.current));
     },
     lineBreak,
     properties: propertyData,

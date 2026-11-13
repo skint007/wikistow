@@ -33,5 +33,6 @@ export function selectedMarkdown(state: EditorState, write: Writer): string {
       : content;
   }
   const selected = schema.topNodeType.createAndFill(undefined, blocks);
-  return selected ? write.write(selected, false).markdown : text();
+  // Without the page's own text before its first block or after its last.
+  return selected ? write.write(selected, false, false).markdown : text();
 }
