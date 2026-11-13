@@ -6,7 +6,7 @@ import { canonical, parseJson, utf8 } from './encoding.ts';
 import type { PrivateIdentity } from './identity.ts';
 import { newId } from './ids.ts';
 import {
-  requireNotBehind,
+  requireCurrentPlan,
   type KeyVersionMarks,
   type MarkRaise,
   type NewChange,
@@ -95,6 +95,8 @@ export class KeptMarks implements KeyVersionMarks {
   readonly #listeners = new Set<() => void>();
   readonly #unlisten: () => void;
   #contents: Contents;
+  // The marks as this tab's listeners last heard of them.
+  #announced = '';
   #writing: Promise<void> = Promise.resolve();
   #closed = false;
 
@@ -114,6 +116,7 @@ export class KeptMarks implements KeyVersionMarks {
     this.#seal = seal;
     this.#open = open;
     this.#contents = contents;
+    this.#announced = JSON.stringify(contents.marks);
     this.#channel = channel;
     this.#unlisten = channel?.listen(() => void this.refresh()) ?? (() => {});
   }
@@ -297,10 +300,8 @@ export class KeptMarks implements KeyVersionMarks {
     const read = async () => {
       const disk = this.#open(await file.read().catch(() => null));
       if (!disk) return;
-      const before = JSON.stringify(this.#contents);
       this.#contents = merged(this.#contents, disk);
-      if (JSON.stringify(this.#contents) !== before)
-        for (const listener of this.#listeners) listener();
+      this.#notify();
     };
     await (file.exclusive ? file.exclusive(read) : read()).catch(() => {});
   }
@@ -329,9 +330,17 @@ export class KeptMarks implements KeyVersionMarks {
   // Refuse changes from a version behind this share's mark, or of a share
   // this app ended (`key-version`).
   #notBehind(changes: readonly NewChange[]): void {
-    for (const { spaceId, shareId, fromKeyVersion } of changes) {
-      requireNotBehind({ marks: this, spaceId, shareId, keyVersion: fromKeyVersion });
-    }
+    for (const change of changes) requireCurrentPlan(this, change);
+  }
+
+  // Tell this tab's listeners when what it holds changed since they last
+  // heard, whether a tab of its own changed it or another's write was
+  // taken in, a refused or failed write of its own included.
+  #notify(): void {
+    const now = JSON.stringify(this.#contents.marks);
+    if (now === this.#announced) return;
+    this.#announced = now;
+    for (const listener of this.#listeners) listener();
   }
 
   #change(
@@ -352,6 +361,8 @@ export class KeptMarks implements KeyVersionMarks {
         await file.exclusive(async () => {
           const disk = this.#open(await file.read().catch(() => null));
           if (disk) this.#contents = merged(this.#contents, disk);
+          // What it took in counts, even if this write is refused or fails.
+          this.#notify();
           check?.();
           if (this.#closed) {
             if (strict) throw new Error('The session has ended; its marks are closed');
@@ -363,7 +374,7 @@ export class KeptMarks implements KeyVersionMarks {
       if (!this.#closed) {
         this.#channel?.post();
         // This tab's own sessions hear of its changes as other tabs' do.
-        for (const listener of this.#listeners) listener();
+        this.#notify();
       }
     };
     const written = this.#writing.then(write);

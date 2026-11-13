@@ -8,7 +8,7 @@ import { sharingRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import {
   ENDED,
-  requireNotBehind,
+  requireCurrentPlan,
   LOST_GRACE_MS,
   RENEW_MS,
   SEND_LIMIT_MS,
@@ -44,9 +44,7 @@ export async function sendShareChange<T>(
   // Another tab may have raised a mark, or ended the share, while the owner
   // confirmed: never rotate from, end or move under a version behind it.
   await marks.refresh?.();
-  for (const { spaceId, shareId, fromKeyVersion } of changes) {
-    requireNotBehind({ marks, spaceId, shareId, keyVersion: fromKeyVersion });
-  }
+  for (const change of changes) requireCurrentPlan(marks, change);
   const begun = (await marks.begin?.(changes)) ?? [];
   const ids = begun.map((change) => change.id);
   // This tab never settles by a fetch a change it is still sending, even

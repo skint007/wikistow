@@ -1,5 +1,6 @@
 import type { ShareId, SpaceId } from '@wikistow/contracts';
 import type { WritesOwner } from './owner-predicates.ts';
+import { ApiError } from './api/client.ts';
 import { CryptoError } from './errors.ts';
 import type { FolderKeyring, HeldKeyVersion } from './folder-keys.ts';
 
@@ -82,6 +83,30 @@ export const SEND_LIMIT_MS = 120_000;
 
 /** A mark to raise when a change is accepted: the new key version, or `ENDED`. */
 export type MarkRaise = { spaceId: SpaceId; shareId: ShareId; keyVersion: number };
+
+/**
+ * Refuse a change whose plan a raised mark has overtaken (section 6.8): a
+ * rotation from a version below the share's mark, as when another tab or
+ * owner rotated while the owner confirmed, is `stale-head`, to plan again;
+ * any change of a share this app ended is `key-version`. Endings and moves
+ * rotate from no version, so only the ended mark refuses them.
+ */
+export function requireCurrentPlan(marks: KeyVersionMarks, change: NewChange): void {
+  const mark = marks.get(change.spaceId, change.shareId);
+  if (mark === ENDED) {
+    throw new CryptoError(
+      'key-version',
+      `This app ended share ${change.shareId}, but the server still lists it`,
+    );
+  }
+  if (change.change === 'rotation' && change.fromKeyVersion < mark) {
+    throw new ApiError(
+      409,
+      'stale-head',
+      `Share ${change.shareId} was rotated past version ${change.fromKeyVersion} meanwhile; plan again`,
+    );
+  }
+}
 
 /** Whether a change of this share is pending, so its live sessions take nothing in or out. */
 export const changePending = (marks: KeyVersionMarks, spaceId: SpaceId, shareId: ShareId) =>

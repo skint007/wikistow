@@ -289,8 +289,13 @@ describe('pending changes across tabs', () => {
       .toBe(5);
     // Tab one hasn't heard; its change from version 1 is refused as it records it.
     expect(one.get(spaceId, shareId)).toBe(0);
-    await expect(one.begin([change()])).rejects.toMatchObject({ code: 'key-version' });
+    let told = 0;
+    one.onChange(() => (told += 1));
+    await expect(one.begin([change()])).rejects.toMatchObject({ code: 'stale-head' });
     expect(changePending(one, spaceId, shareId)).toBe(false);
+    // What it took in reached its own listeners, though its write was refused.
+    expect(one.get(spaceId, shareId)).toBe(5);
+    expect(told).toBeGreaterThan(0);
     const later = await KeptMarks.open(b.tab(), who);
     expect(changePending(later, spaceId, shareId)).toBe(false);
   });

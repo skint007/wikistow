@@ -200,6 +200,30 @@ describe('settling a change whose answer was lost', () => {
     expect(marks.get(spaceId, shareId)).toBe(0);
   });
 
+  it('ends or moves whatever version the mark is at, but not in a share this app ended', async () => {
+    for (const change of ['ending', 'move'] as const) {
+      const { ctx, marks } = context();
+      marks.raise(spaceId, shareId, 3);
+      await expect(
+        sendShareChange(
+          ctx,
+          [{ ...rotation, change }],
+          () => Promise.resolve(),
+          () => [],
+        ),
+      ).resolves.toBeUndefined();
+      marks.raise(spaceId, shareId, ENDED);
+      await expect(
+        sendShareChange(
+          ctx,
+          [{ ...rotation, change }],
+          () => Promise.resolve(),
+          () => [],
+        ),
+      ).rejects.toMatchObject({ code: 'key-version' });
+    }
+  });
+
   it('raises nothing, ending or not, when the server refuses the listing', async () => {
     const ending: NewChange = { ...rotation, change: 'ending' };
     for (const [refusal, clears] of [
@@ -216,7 +240,7 @@ describe('settling a change whose answer was lost', () => {
     }
   });
 
-  it('sends nothing from a version behind the mark another tab raised meanwhile', async () => {
+  it('asks to plan again, sending nothing, for a rotation the mark has overtaken', async () => {
     const { ctx, marks } = context();
     marks.raise(spaceId, shareId, 2);
     let sent = false;
@@ -230,7 +254,7 @@ describe('settling a change whose answer was lost', () => {
         },
         () => [],
       ),
-    ).rejects.toMatchObject({ code: 'key-version' });
+    ).rejects.toMatchObject({ code: 'stale-head' });
     expect(sent).toBe(false);
     expect(changePending(marks, spaceId, shareId)).toBe(false);
   });
