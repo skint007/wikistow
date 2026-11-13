@@ -38,6 +38,7 @@ export * from './restore.ts';
 export * from './revision.ts';
 export * from './revision-cache.ts';
 export * from './rotation.ts';
+export * from './meaning.ts';
 export * from './search.ts';
 export * from './trust.ts';
 export * from './templates.ts';

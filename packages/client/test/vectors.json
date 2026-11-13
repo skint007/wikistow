@@ -749,5 +749,89 @@
       },
       "padded": "00000000000000187b22666f726d6174223a7b226d616a6f72223a312c226d696e6f72223a307d2c22656469746f72223a22736f75726365222c2276697369626c65223a747275652c227075626c697368696e67223a66616c73652c22736176654661696c696e67223a6e756c6c2c22637572736f72223a6e756c6c7d800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
     }
+  },
+  "meaning": {
+    "keeper": {
+      "public": {
+        "id": "vector-meaning-keeper",
+        "kind": "human",
+        "keyVersion": 1,
+        "boxPublicKey": "3_KlrV1iWgpM22wYOhehmHe0G3Id1BU_Qru2to084XM",
+        "signPublicKey": "bgXomEYtWkfrdiJOlUedFHrj1dwgYspiLuyS_0tjSa8"
+      },
+      "boxSecretKey": "6EowFSkFZng3pQVpIMNvVwEjOTpyZQIEBdhbugsIkiw",
+      "signSecretKey": "JQ-r8xiTWj0GU5NXuo8Pp-HGmFYgw9sL93Aj7HNZ20duBeiYRi1aR-t2Ik6VR50UeuPV3CBiymIu7JL_S2NJrw"
+    },
+    "installationId": "vector-installation",
+    "modelHash": "834a93e5c137d978626bae7356498c62b5223492d0c851b40a794eaf75c04c80",
+    "passagesVersion": 1,
+    "keyDomain": "meaning-index-key/v1",
+    "key": "a459499189db1db7100bbedf1ec15384568fdcdafe445ee92fad2e9529d730c6",
+    "ad": "010000001977696b6973746f772f6d65616e696e672d696e6465782f76310100000013766563746f722d696e7374616c6c6174696f6e0100000015766563746f722d6d65616e696e672d6b6565706572010000004038333461393365356331333764393738363236626165373335363439386336326235323233343932643063383531623430613739346561663735633034633830020000000131",
+    "versions": [
+      {
+        "revisionId": "vector-meaning-soup",
+        "passages": [
+          {
+            "text": "Bean soup\nSoak the beans overnight.",
+            "hash": "S1JxydccFyiJESke13-4zw",
+            "start": 0,
+            "vector": [
+              0.5,
+              -0.25,
+              0.125,
+              0,
+              -1,
+              0.75,
+              0.0625,
+              -0.5
+            ],
+            "scale": 0.007874015718698502,
+            "values": [
+              64,
+              -32,
+              16,
+              0,
+              -127,
+              95,
+              8,
+              -63
+            ]
+          },
+          {
+            "text": "Bean soup\nMethod\nSimmer for an hour, then season. Ünïcødé ✓",
+            "hash": "2-pwOAKgQosk7UrDPuHT_g",
+            "start": 34,
+            "vector": [
+              0,
+              0.1,
+              -0.2,
+              0.3,
+              -0.4,
+              0.5,
+              -0.6,
+              0.7
+            ],
+            "scale": 0.005511811003088951,
+            "values": [
+              0,
+              18,
+              -36,
+              54,
+              -73,
+              91,
+              -109,
+              127
+            ]
+          }
+        ]
+      },
+      {
+        "revisionId": "vector-meaning-empty",
+        "passages": []
+      }
+    ],
+    "plaintext": "0008000000020013766563746f722d6d65616e696e672d736f7570000000024b5271c9d71c17288911291ed77fb8cf000000003c01020440e01000815f08c1dbea703802a0428b24ed4ac33ee1d3fe000000223bb49c6c0012dc36b75b937f0014766563746f722d6d65616e696e672d656d70747900000000",
+    "sealed": "HLRVzzOSxZSXf5otR64BWfFTexNUAtHeVT-zXqr8LxiG7hDPdUihs_VBginQM0ghzXcZd5yHjv2PrUaSZray61hlBK0FI-zSf8Pmq19NeEHMsC_TPoFOT0-6CvT3V_3bdJQNTumVh-AeuBKgNor3AQSm6gu3dxDcpvoJLIbQgk2lLOzRkzZSRJdJJf8LDahofQSD4JZC_2xitnRpX5AITss"
   }
 }
