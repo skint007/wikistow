@@ -889,11 +889,12 @@ export function reducedText(
   markdown: string,
   { limit = TEXT_LIMIT, lineLimit = LINE_LIMIT }: { limit?: number; lineLimit?: number } = {},
 ): { text: string; headings: number[] } {
-  // The lines of the page's frontmatter, its fences included: its closing
-  // fence is no setext underline.
+  // The lines of the page's frontmatter, its fences included, as the loop
+  // splits them: a comment in it is no heading, nor its closing fence an
+  // underline.
   const front = splitFrontmatter(markdown).frontmatter;
   const frontLines =
-    front === null ? 0 : (front.match(/\n/g)?.length ?? 0) + (front.endsWith('\n') ? 0 : 1);
+    front === null ? 0 : front.split(/\r\n?|\n/).length - (front.endsWith('\n') ? 1 : 0);
   let lineAt = -1;
   const headings: number[] = [];
   // The footnotes the page defines: a reference to any other is text.
@@ -1021,6 +1022,12 @@ export function reducedText(
     const text = withoutClosingHashes(
       (listed ? content.replace(/^\[[ xX]\]\s+/, '') : content).replace(/^#{1,6}\s+/, ''),
     );
+    // Whether a heading here is the page's own: out of the frontmatter,
+    // quotes and list items. And whether the line is a setext underline,
+    // making the paragraph above it, out of those too, a heading.
+    const own = lineAt >= frontLines && quoted === 0 && matched === 0;
+    const underlines =
+      own && !table && depth === 0 && nested === 0 && paragraph.length > 0 && SETEXT.test(line);
     // Whether the line carried on the paragraph, so stays in the list items
     // it's lazily left of.
     let carried = false;
@@ -1029,16 +1036,7 @@ export function reducedText(
     let opened: HtmlBlock | null = null;
     read: {
       if (breaks) {
-        // A setext underline makes the paragraph above it a heading, out of
-        // quotes and list items.
-        end(
-          !table &&
-            depth === 0 &&
-            nested === 0 &&
-            quoted === 0 &&
-            lineAt >= frontLines &&
-            SETEXT.test(line),
-        );
+        end(underlines);
         table = false;
         break read;
       }
@@ -1066,7 +1064,7 @@ export function reducedText(
         run !== undefined ||
         (!deep && /^(?:(?:-\s*)+|=+\s*|([*_])\s*(?:\1\s*){2,})$/.test(content))
       ) {
-        end();
+        end(!code && run === undefined && underlines);
         table = false;
         if (code) keep(content.trim());
         break read;
@@ -1101,7 +1099,8 @@ export function reducedText(
         paragraph.push(text);
         size += text.length + 1;
         if (waiting === 'label' || waiting === 'title') defined = paragraph.length;
-        if (heading) end(quoted === 0 && matched === 0 && opens === null);
+        // `#` alone is a heading with no text, which is none.
+        if (heading) end(own && opens === null && /^#{1,6}\s/.test(content));
       }
     }
     if (!carried) {

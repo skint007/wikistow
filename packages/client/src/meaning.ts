@@ -218,23 +218,28 @@ function* cutWord(
 
 /**
  * About as many tokens as the model's tokenizer (BERT's, uncased) makes of
- * `word`, a run without spaces, or more, so a passage cut by it holds no
- * more than it should. Accents go, as the tokenizer drops them. Each mark
- * of punctuation or symbol is a token, and so is each character of any
- * script but Latin; a run of Latin letters and digits is one token up to 6
- * characters long, and one each 4 characters past that.
+ * `word`, a run without spaces, or more for prose, so a passage cut by it
+ * holds no more than it should. Accents go, as the tokenizer drops them.
+ * Each mark of punctuation or symbol is a token, and so is each character
+ * of any script but Latin. A run of Latin letters that reads as a word
+ * (cased as one, at most 20 letters, a quarter of them vowels) is one token
+ * up to 6 letters long, and one each 4 letters past that; any other run of
+ * Latin letters and digits, such as a number, an ID or a hash, one a
+ * character, as no token is shorter than one. An estimate all the same:
+ * where the tokenizer is at hand, its count is the one to pass.
  */
 export function estimateTokens(word: string): number {
   let tokens = 0;
-  let run = 0;
+  let run = '';
   const flush = () => {
-    if (run > 0) tokens += run <= 6 ? 1 : Math.ceil(run / 4);
-    run = 0;
+    if (run)
+      tokens += WORDLIKE.test(run) && vowels(run) * 4 >= run.length ? wordTokens(run) : run.length;
+    run = '';
   };
   for (const char of word.normalize('NFKD')) {
     if (MARK.test(char)) continue;
     if (LATIN.test(char)) {
-      run++;
+      run += char;
       continue;
     }
     flush();
@@ -247,6 +252,10 @@ export function estimateTokens(word: string): number {
 const MARK = /^\p{M}$/u;
 const LATIN = /^[\p{Script=Latin}\p{Nd}]$/u;
 const SPACE = /^\s$/u;
+/** Letters cased as a word is: all small, all capitals, or a capital first. */
+const WORDLIKE = /^(?:\p{Lu}?\p{Ll}{1,19}|\p{Lu}{1,20})$/u;
+const vowels = (run: string) => run.match(/[aeiouy]/gi)?.length ?? 0;
+const wordTokens = (run: string) => (run.length <= 6 ? 1 : Math.ceil(run.length / 4));
 
 /** A passage's text, hashed: 16 bytes of BLAKE2b, as base64url. */
 export const passageHash = (text: string): string =>
@@ -258,9 +267,10 @@ const HASH_BYTES = 16;
 export type Vector8 = { scale: number; values: Int8Array };
 
 /**
- * `vector` in 8 bits: each value as a signed byte, -127 to 127, with one
- * scale, the largest value's size over 127 (a 32-bit float, as it's kept).
- * A vector of zeros keeps a scale of 0.
+ * `vector` in 8 bits: each value times 127 over the largest value's size,
+ * rounded to the nearest integer, halves away from zero, so -127 to 127;
+ * with one scale, that size over 127 (a 32-bit float, as it's kept). A
+ * vector of zeros keeps a scale of 0.
  */
 export function quantizeVector(vector: ArrayLike<number>): Vector8 {
   let largest = 0;
@@ -271,7 +281,10 @@ export function quantizeVector(vector: ArrayLike<number>): Vector8 {
   }
   const values = new Int8Array(vector.length);
   if (largest === 0) return { scale: 0, values };
-  for (let i = 0; i < vector.length; i++) values[i] = Math.round((vector[i]! * 127) / largest);
+  for (let i = 0; i < vector.length; i++) {
+    const value = (vector[i]! * 127) / largest;
+    values[i] = Math.sign(value) * Math.round(Math.abs(value));
+  }
   return { scale: Math.fround(largest / 127), values };
 }
 

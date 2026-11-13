@@ -49,6 +49,18 @@ describe('the reduction’s headings', () => {
       'Title\n=====\n\nOne\nlong\n---\n\n> # Quoted\n\n- # Listed\n\nA rule\n\n***\n\n- - -\n\nEnd';
     const { text, headings } = reducedText(markdown);
     expect(headings.map((at) => text.slice(at).split('\n')[0])).toEqual(['Title', 'One long']);
+    expect(reducedText('Foo\n-\n\ntext').headings).toEqual([0]);
+  });
+
+  it('marks nothing in the frontmatter, whatever its line breaks', () => {
+    expect(reducedText('---\n# a comment\ntitle: x\n---\nBody').headings).toEqual([]);
+    expect(reducedText('---\ntitle: a\rb\n---\nBody').headings).toEqual([]);
+    expect(reducedText('---\r\ntitle: a\r\n---\r\n# Body').headings).toEqual(['title: a\n'.length]);
+  });
+
+  it('marks no heading without text', () => {
+    expect(reducedText('#\ntext').headings).toEqual([]);
+    expect(reducedText('#\n\n# Real').headings).toEqual(['#\n'.length]);
   });
 
   it('marks a heading cut short, but nothing past the text it keeps, nor an empty heading', () => {
@@ -167,10 +179,18 @@ describe('a page’s passages', () => {
     expect(estimateTokens('the')).toBe(1);
     expect(estimateTokens('pasta,')).toBe(2);
     expect(estimateTokens('Café')).toBe(1);
-    expect(estimateTokens('3.14')).toBe(3);
+    expect(estimateTokens('3.14')).toBe(4);
     expect(estimateTokens('日本語')).toBe(3);
     expect(estimateTokens('lasagne')).toBeGreaterThanOrEqual(2);
     expect(estimateTokens('')).toBe(0);
+    // What doesn't read as a word, one a character: no token is shorter.
+    // The model's tokenizer makes 6, 9, 27 and 54 of these.
+    expect(estimateTokens('1234567890')).toBe(10);
+    expect(estimateTokens('qxjzvkwpmb')).toBe(10);
+    expect(estimateTokens('aGVsbG8gd29ybGQgdGhpcyBpcyBiYXNlNjQ=')).toBe(36);
+    expect(estimateTokens(`sha256:${'0a'.repeat(32)}`)).toBe(71);
+    expect(estimateTokens('iPhone')).toBe(6);
+    expect(estimateTokens('Pneumonoultramicroscopicsilicovolcanoconiosis')).toBe(45);
   });
 
   it('cuts at 256 tokens by default', () => {
@@ -202,6 +222,10 @@ describe('vectors of 8 bits', () => {
     const { scale, values } = quantizeVector([0.5, -1, 0.25, 0]);
     expect([...values]).toEqual([64, -127, 32, 0]);
     expect(scale).toBe(Math.fround(1 / 127));
+  });
+
+  it('rounds halves away from zero', () => {
+    expect([...quantizeVector([-0.5, 1, 0.5]).values]).toEqual([-64, 127, 64]);
   });
 
   it('keeps a vector of zeros as zeros', () => {
