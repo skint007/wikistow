@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Editing a page together, live
@@ -374,9 +374,9 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-live-editing/spike/`, not committe
 ## Consequences
 
 - **Now, with this ADR:**
-  - `wikistow/protocol.md` gains section 5.10, **Live sessions**, and the `wikistow.live` and `wikistow.overlaps` extensions in section 5.5, with notes in sections 1, 2.4 (A7), 3.5 (three new domains), 5.7, 6.1, 6.2 and 6.3, all marked proposed.
+  - `wikistow/protocol.md` gains section 5.10, **Live sessions**, and the `wikistow.live` and `wikistow.overlaps` extensions in section 5.5, with notes in sections 1, 2.4 (A7), 3.5 (three new domains), 5.7, 6.1, 6.2 and 6.3, all marked accepted.
   - `protocol-review.md` logs it.
-  - `wikistow.md`'s line on later work points here, `ui-design.md`'s page views say where presence goes, and `CONTEXT.md` gains **Live session**, all marked proposed.
+  - `wikistow.md`'s line on later work points here, `ui-design.md`'s page views say where presence goes, and `CONTEXT.md` gains **Live session**, all marked accepted.
 - **Once accepted:** a protocol review round (section 18) runs on section 5.10 before any client code that seals or opens messages.
 - **Once built:**
   - `wikistow.md` gains a Live editing section, and its Drafts section says that a draft's author is who saved it.
@@ -404,7 +404,9 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-live-editing/spike/`, not committe
 
 Steps 2 and 4 can run in parallel. Step 5 needs step 3, and step 6 needs steps 4 and 5. Step 7 needs steps 2 and 6.
 
-## Decide
+## Decided (2026-11-12)
+
+Scott accepted every recommendation below on 2026-11-12.
 
 1. **A CRDT (Yjs) over the page's text, with both editors?** Recommended: yes (decisions 2 and 3). Operational transforms need a server that reads the changes, and a CRDT over the visual editor leaves source mode out.
 2. **Every editor joins when they open the draft, alone too?** Recommended: yes (decision 1). One way to edit online, at the cost of a snapshot upload per draft opened. The other way, starting when a second editor comes, adds a hand-over while the first person types.

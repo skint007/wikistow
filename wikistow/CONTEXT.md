@@ -136,7 +136,7 @@ Combining two drafts made from the same version into one: changes to different p
 _Avoid_: Auto-merge, rebase, sync.
 
 **Live session**
-The editors who have a page's draft open, editing one shared copy of it and seeing each other's changes as they type, sealed so that only the draft's audience can read them. One of their apps saves the shared copy as the page's draft. Writers outside it, such as agents and offline changes, still meet a conflict. Proposed in ADR 0015.
+The editors who have a page's draft open, editing one shared copy of it and seeing each other's changes as they type, sealed so that only the draft's audience can read them. One of their apps saves the shared copy as the page's draft. Writers outside it, such as agents and offline changes, still meet a conflict. Accepted in ADR 0015.
 _Avoid_: Collaboration mode, co-editing room, multiplayer.
 
 **Kept for offline**
