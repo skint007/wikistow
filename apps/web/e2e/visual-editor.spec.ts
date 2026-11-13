@@ -69,7 +69,7 @@ test('switching editors changes no byte, and visual edits save as Markdown', asy
     await expect(saveStatus(page)).toHaveText('All changes saved');
   });
 
-  await test.step('an edit in the visual editor saves as Markdown', async () => {
+  await test.step('an edit in the visual editor saves as Markdown, rewriting only the blocks it touched', async () => {
     await showIn(page, 'Visual');
     await visual(page).getByRole('checkbox', { name: 'Done' }).check();
     await caretAtEndOf(visual(page).getByText('Beans', { exact: true }));
@@ -81,13 +81,15 @@ test('switching editors changes no byte, and visual edits save as Markdown', asy
     await expectSource(
       page,
       [
-        '# Beds',
+        // The heading and the table weren't edited, so they keep their source.
+        'Beds',
+        '====',
         '',
         '- Tomatoes',
         '- Beans and peas',
         '',
         '| Bed | Rows |',
-        '| :-- | ---: |',
+        '|:----|-----:|',
         '| A   |    3 |',
         '',
         '- [x] Water the beans',
