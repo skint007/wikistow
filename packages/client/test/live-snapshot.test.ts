@@ -226,6 +226,17 @@ describe('a later snapshot', () => {
     );
   });
 
+  it('says to update the app when its revision’s wikistow.live is of a newer format', () => {
+    const { carols, poster, b, hello, snapshot, revision } = later();
+    const newer = {
+      ...revision,
+      payload: { ...revision.payload, extensions: { 'wikistow.live': { format: 2 } } },
+    };
+    expect(() => newcomer([carols, poster], [b, hello]).check(snapshot, newer)).toThrow(
+      code('unsupported-format'),
+    );
+  });
+
   it('refuses one whose revision isn’t a draft of the session', () => {
     const { carols, poster, b, hello, snapshot, revision } = later();
     const live = revision.payload.extensions['wikistow.live'] as Record<string, unknown>;

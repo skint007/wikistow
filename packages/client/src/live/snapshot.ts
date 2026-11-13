@@ -174,6 +174,9 @@ export function openSnapshot({
   if (document.pending) refuse('Yjs holds part of it back');
   if (!first) {
     const live = draftLive(revision.payload, revision.revisionId);
+    if (live.kind === 'newer-format') {
+      throw new CryptoError('unsupported-format', 'Update the app to edit with others');
+    }
     if (live.kind !== 'live' || live.extension.session !== session.record.subjectId) {
       refuse('its revision isn’t a draft of the session');
     }
