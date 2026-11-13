@@ -1,5 +1,5 @@
 // The order of the pages and folders in a folder, or at the top of a space
-// (protocol section 5.4, #400). A folder whose children have no position
+// (protocol section 10, Order, #400). A folder whose children have no position
 // lists them by name, which only apps can do; one with an order of its own
 // lists them by `nodes.position`, a fractional index compared byte by byte.
 // The server sees an order of IDs it already sees, never a name.
@@ -7,7 +7,7 @@ import { isPosition } from '@wikistow/contracts';
 import { positionBetween } from '@wikistow/client';
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { nodes } from '../db/schema/index.ts';
+import { nodes, shares } from '../db/schema/index.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import { accessTo, canEdit, lockSpace } from './access.ts';
 import { ContentError } from './errors.ts';
@@ -152,13 +152,24 @@ export async function arrangeNodes(
       .from(nodes)
       .where(and(eq(nodes.spaceId, spaceId), inArray(nodes.id, ids), shown))
       .for('no key update');
+    const byId = new Map(found.map((row) => [row.id, row]));
     for (const id of ids) {
-      const node = found.find((row) => row.id === id);
-      // One the caller can't see doesn't exist for them.
-      if (!node || !(await accessTo(tx, caller, { spaceId, nodeId: id }))) {
+      if (!byId.has(id)) throw new ContentError('not-found');
+    }
+    // A child is in its folder's region, which the caller edits, unless it
+    // is the root of a share of its own, which they may not see: one they
+    // can't see doesn't exist for them.
+    const roots = await tx
+      .select({ rootId: shares.rootId })
+      .from(shares)
+      .where(and(eq(shares.spaceId, spaceId), inArray(shares.rootId, ids)));
+    for (const { rootId } of roots) {
+      if (rootId !== null && !(await accessTo(tx, caller, { spaceId, nodeId: rootId }))) {
         throw new ContentError('not-found');
       }
-      if (node.parentId !== parentId) {
+    }
+    for (const id of ids) {
+      if (byId.get(id)?.parentId !== parentId) {
         throw new ContentError('stale-head', 'It moved since you loaded it', {
           nodeIds: [id],
         });
@@ -172,7 +183,7 @@ export async function arrangeNodes(
 
 /**
  * Sort by name: clear every position in one folder, or at the top of a
- * space, so it lists by name again (section 5.4). What is in the trash
+ * space, so it lists by name again (section 10, Order). What is in the trash
  * from there loses its position too, so restoring it doesn't make the
  * folder ordered again.
  */

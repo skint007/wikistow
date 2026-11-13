@@ -127,7 +127,7 @@ export const createSpace = {
   status: 201,
 } as const satisfies RouteDef;
 
-/** A page's or folder's place in its folder's own order (section 5.4). */
+/** A page's or folder's place in its folder's own order (section 10, Order). */
 export const Placed = z.strictObject({ id: NodeId, position: Position });
 
 /**
@@ -161,7 +161,7 @@ export const tree = {
 
 /**
  * Put pages and folders in order in one folder, or at the top of the space
- * for a null `parentId` (section 5.4): each named node gets its position,
+ * for a null `parentId` (section 10, Order): each named node gets its position,
  * or none for null, which lists it by name after those with one. Needs edit
  * rights there, as a move does. Each node must be in that folder now, or
  * the answer is `stale-head`. Keys and permission versions don't change.

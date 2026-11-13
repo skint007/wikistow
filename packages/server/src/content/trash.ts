@@ -247,7 +247,7 @@ export async function restoreTrash(
     await requireRegion(tx, { held, rooted, to });
 
     // Back where it was in its folder's order, while the folder has one;
-    // anywhere else, at the end like anything new (section 5.4).
+    // anywhere else, at the end like anything new (section 10, Order).
     const position =
       parentId === root.parentId
         ? await placeBack(tx, { spaceId, parentId, nodeId })

@@ -210,7 +210,7 @@ export const move = {
     /** The destination folder's permission version, or the space's. */
     parentPermissionVersion: z.number().int(),
     /**
-     * Where it goes among what is there (section 5.4): a position, or null
+     * Where it goes among what is there (section 10, Order): a position, or null
      * to list it by name. Left out, it goes at the end of a folder with an
      * order of its own, and by name in one without (#400).
      */

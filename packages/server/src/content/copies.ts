@@ -90,7 +90,7 @@ type Listed = {
   metadataHead: string | null;
   draftHead: string | null;
   publishedHead: string | null;
-  /** Its place in its folder's own order, which its copy keeps there (section 5.4). */
+  /** Its place in its folder's own order, which its copy keeps there (section 10, Order). */
   position: string | null;
 };
 
@@ -797,7 +797,7 @@ export async function finishCopy(
 
 /**
  * Where a copy's top nodes land among what is in the destination as it
- * finishes (section 5.4): placed like something new, at the end of a
+ * finishes (section 10, Order): placed like something new, at the end of a
  * folder with an order of its own, else by name. Of a whole space's top,
  * those with a position in the source go at the end in that order, and the
  * rest list by name after them.

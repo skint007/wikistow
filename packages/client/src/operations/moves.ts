@@ -83,7 +83,7 @@ export type MovePreview = {
   folders: SharePreview['folders'];
   pages: SharePreview['pages'];
   /**
-   * Where it lands among what is there (section 5.4): a position, or null
+   * Where it lands among what is there (section 10, Order): a position, or null
    * to list it by name. Left out, at the end of a folder with an order of
    * its own (#400).
    */

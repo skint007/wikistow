@@ -398,7 +398,7 @@ export async function createPage(
         kind: 'page',
         createdBy: caller.accountId,
         permissionVersion: parent.permissionVersion,
-        // At the end of a folder with an order of its own (section 5.4).
+        // At the end of a folder with an order of its own (section 10, Order).
         position: await placeAtEnd(tx, input),
       })
       .onConflictDoNothing()

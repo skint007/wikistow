@@ -294,7 +294,7 @@ export async function openPublication(
         kind: 'page',
         createdBy: caller.accountId,
         permissionVersion: parent.permissionVersion,
-        // At the end of a folder with an order of its own (section 5.4).
+        // At the end of a folder with an order of its own (section 10, Order).
         position: await placeAtEnd(tx, {
           spaceId: input.destinationSpaceId,
           parentId: input.parentId,

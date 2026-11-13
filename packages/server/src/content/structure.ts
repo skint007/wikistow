@@ -315,7 +315,7 @@ export async function createFolder(
         kind: 'folder',
         createdBy: caller.accountId,
         permissionVersion: parent.permissionVersion,
-        // At the end of a folder with an order of its own (section 5.4).
+        // At the end of a folder with an order of its own (section 10, Order).
         position: await placeAtEnd(tx, input),
       })
       .onConflictDoNothing()
@@ -579,7 +579,7 @@ export async function saveSpaceOrder(db: Database, accountId: string, spaceIds: 
  * withheld, so nothing above it is named, not even by ID. An agent sees the
  * same of what it was granted, from a granted folder down, which its share
  * lists as its root. With `order`, it lists each listed node's position too
- * (section 5.4). It is all read in one snapshot, so a move or a share
+ * (section 10, Order). It is all read in one snapshot, so a move or a share
  * change can't land between two of its reads and mix the old tree and the new.
  */
 export function loadTree(

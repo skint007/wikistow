@@ -193,7 +193,7 @@ export async function moveNode(
       throw new ContentError('region-mismatch', 'A move within one region changes no keys');
     }
 
-    // Where it lands among what is there (section 5.4): where the app put it,
+    // Where it lands among what is there (section 10, Order): where the app put it,
     // or at the end of a folder with an order of its own.
     const position =
       input.position !== undefined

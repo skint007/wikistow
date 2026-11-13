@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // Where a page or folder sits among the others in its folder, or at the top
 // of its space, when the folder has an order of its own (protocol section
-// 5.4, #400): a fractional index, compared byte by byte, so one item moves by
+// 10, Order, #400): a fractional index, compared byte by byte, so one item moves by
 // changing its own key alone. The server sees the order of IDs it already
 // sees, never a name.
 

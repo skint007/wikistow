@@ -373,7 +373,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const orderingOf = (row: Row): Ordering | null => {
     if (filtering || !canOrderAt(row.parentId)) return null;
     const step = (by: -1 | 1) =>
-      canStep(tree, row.id, row.parentId, by)
+      canStep(tree, availability, { nodeId: row.id, parentId: row.parentId }, by)
         ? () => void reorder.step(tree, row.id, row.parentId, by)
         : undefined;
     return { onMoveUp: step(-1), onMoveDown: step(1) };

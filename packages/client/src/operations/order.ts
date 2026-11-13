@@ -1,5 +1,5 @@
 // Putting pages and folders in an order of their own, in a folder or at the
-// top of a space (protocol section 5.4, #400). The order is shared: everyone
+// top of a space (protocol section 10, Order, #400). The order is shared: everyone
 // who sees the folder sees it, and anyone who can edit there changes it.
 import { structureRoutes, type FolderId, type Position, type SpaceId } from '@wikistow/contracts';
 import { positionsFor, type PositionWrite } from '../positions.ts';

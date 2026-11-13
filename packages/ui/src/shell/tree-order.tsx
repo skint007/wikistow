@@ -20,7 +20,7 @@ import { useAvailability, type Waiting } from './availability';
 
 // A folder's own order in the sidebar (#400): reordering by drag, Move up
 // and Move down, and Sort by name. The order is the folder's, shared by
-// everyone who sees it (protocol section 5.4). Online, positions go to the
+// everyone who sees it (protocol section 10, Order). Online, positions go to the
 // server at once; offline, or while one of them has a change waiting, each
 // waits on this device as a move to where it is already (ADR 0009).
 
@@ -62,10 +62,18 @@ export const landing = (
   }: { nodeId: string; parentId: FolderId | null; before: string | null },
 ) => orderOperations.placing(ordered(tree, parentId, waits), nodeId, before);
 
-/** Whether Move up (-1) or Move down (1) can move `nodeId` in its folder: it isn't first or last. */
-export function canStep(tree: Tree, nodeId: string, parentId: FolderId | null, step: -1 | 1) {
-  const children = childrenOf(tree, parentId);
-  const at = children.findIndex((child) => child.node.id === nodeId);
+/**
+ * Whether Move up (-1) or Move down (1) can move `nodeId` in its folder: it
+ * isn't first or last of what this app orders there.
+ */
+export function canStep(
+  tree: Tree,
+  waits: Waits,
+  { nodeId, parentId }: { nodeId: string; parentId: FolderId | null },
+  step: -1 | 1,
+) {
+  const children = ordered(tree, parentId, waits);
+  const at = children.findIndex((child) => child.id === nodeId);
   return at >= 0 && at + step >= 0 && at + step < children.length;
 }
 
