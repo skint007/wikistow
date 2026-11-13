@@ -88,8 +88,12 @@ function parseValue(text: string, depth: number, integers: readonly JsonPathPatt
     problem === 'number-token' ? integers.some((pattern) => matchesPath(own(path), pattern)) : true,
   );
   if (bad) return undefined;
+  // Each wrapping array holds exactly one value, so `1,2` isn't one.
   let value: unknown = parsed.value;
-  for (let i = 0; i < depth; i++) value = (value as unknown[])[0];
+  for (let i = 0; i < depth; i++) {
+    if (!Array.isArray(value) || value.length !== 1) return undefined;
+    value = value[0];
+  }
   return value;
 }
 

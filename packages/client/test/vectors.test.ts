@@ -604,9 +604,14 @@ describe('live session test vectors (section 5.10)', () => {
       message: live.presence.message,
     });
     expect(opened.kind).toBe('presence');
-    expect(fromBase64(live.presence.message.sealed.ciphertext)).toHaveLength(
-      live.presence.paddedLength + 16,
-    );
+    const padded = aeadDecrypt({
+      key: sessionKey,
+      sealed: live.presence.message.sealed,
+      ad: liveMessageAd(binding, { ...opened, kind: 'presence' }),
+    });
+    expect(sodium.to_hex(padded)).toBe(live.presence.padded);
+    expect(padded).toHaveLength(512);
+    expect(unpad('presence', padded).content).toEqual(opened.content);
   });
 });
 

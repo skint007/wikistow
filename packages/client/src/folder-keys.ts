@@ -78,7 +78,8 @@ export const metadataWrapSubject = (
   versionId: r.metadataRevisionId,
 });
 
-const wrapAd = (
+/** A key wrap's AEAD associated data (`content-key-wrap/v1`, section 6.3). */
+export const wrapAd = (
   installationId: InstallationId,
   subject: WrapSubject,
   wrap: Pick<KeyWrap, 'shareId' | 'keyVersion'>,

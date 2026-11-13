@@ -35,7 +35,7 @@ import { checkEnvelopeV2, keyCommitment, openAnyEnvelope, unsealCommitted } from
 import { CryptoError } from '../errors.ts';
 import {
   KeyWrap,
-  unwrapContentKey,
+  wrapAd,
   wrapContentKey,
   type FolderKeyring,
   type HeldKeyVersion,
@@ -98,7 +98,19 @@ export type LiveKeyTarget =
   | { share: Pick<HeldKeyVersion, 'shareId' | 'keyVersion' | 'draftKey'>; owners?: undefined }
   | { owners: readonly PublicIdentity[]; share?: undefined };
 
-/** A session as its starter made it: what the start request carries, and the key it keeps. */
+/**
+ * A session payload as this module hands it out: without the session key,
+ * which lives only in `OpenedLiveSession.key`, a buffer the app wipes when
+ * it leaves or locks, never in a string it can't (section 3.4).
+ */
+export type LiveSessionInfo = Pick<
+  LiveSessionPayload,
+  'format' | 'pageId' | 'revisionId' | 'joinId' | 'sealedTo' | 'extensions'
+>;
+
+const withoutKey = ({ key: _key, ...info }: LiveSessionPayload): LiveSessionInfo => info;
+
+/** A session as its starter made it: what the start request carries. */
 export type StartedLiveSession = {
   sessionId: LiveSessionId;
   /** The starter's join, which the payload names and which sends the first snapshot. */
@@ -108,7 +120,7 @@ export type StartedLiveSession = {
   wrap: KeyWrap | null;
   /** In the owner region: one envelope per sealing owner. */
   envelopes: MetadataEnvelopeV2[];
-  payload: LiveSessionPayload;
+  payload: LiveSessionInfo;
 };
 
 /**
@@ -164,12 +176,9 @@ export function startLiveSession({
     authorKeyVersion: author.public.keyVersion,
   };
   const contentKey = sodium.crypto_aead_xchacha20poly1305_ietf_keygen();
+  const plaintext = utf8(JSON.stringify(payload));
   try {
-    const sealedPayload = aeadEncrypt({
-      key: contentKey,
-      plaintext: utf8(JSON.stringify(payload)),
-      ad: metadataAd(record),
-    });
+    const sealedPayload = aeadEncrypt({ key: contentKey, plaintext, ad: metadataAd(record) });
     const full: LiveRecord = {
       ...record,
       payloadHash: hash(sealedBytes(sealedPayload)),
@@ -192,7 +201,7 @@ export function startLiveSession({
         folderKey: to.share.draftKey,
         contentKey,
       });
-      return { sessionId, joinId, sealed, wrap, envelopes: [], payload };
+      return { sessionId, joinId, sealed, wrap, envelopes: [], payload: withoutKey(payload) };
     }
     if (to.owners.length === 0) {
       throw new CryptoError('unaccepted-owner', 'A session in the owner region needs its owners');
@@ -200,16 +209,17 @@ export function startLiveSession({
     const envelopes = to.owners.map((recipient) =>
       grantMetadataKeyV2({ granter: author, record: full, contentKey, recipient }),
     );
-    return { sessionId, joinId, sealed, wrap: null, envelopes, payload };
+    return { sessionId, joinId, sealed, wrap: null, envelopes, payload: withoutKey(payload) };
   } finally {
     sodium.memzero(contentKey);
+    plaintext.fill(0);
   }
 }
 
 /** A session record, opened and checked. The caller wipes `key` when it leaves or locks. */
 export type OpenedLiveSession = {
   record: LiveRecord;
-  payload: LiveSessionPayload;
+  payload: LiveSessionInfo;
   /** The session key, 32 bytes. */
   key: Uint8Array;
   recordHash: string;
@@ -217,6 +227,12 @@ export type OpenedLiveSession = {
   region: Region;
   /** In a share, the wrap's key version; null in the owner region. */
   keyVersion: number | null;
+  /**
+   * In a share, the owners who sealed to this app a draft key the wrap
+   * opens under, one of whom must count for writing for as long as the app
+   * is in the session. Empty in the owner region.
+   */
+  wrapSealers: PublicIdentity[];
   /** The record's signer, at the key that verified it. */
   author: PublicIdentity;
   /** In the owner region, the granters of the envelopes this app was served. */
@@ -309,19 +325,22 @@ export function openLiveSession({
     throw new CryptoError('hash-mismatch', 'Session ciphertext does not match its signed hash');
   }
   const granters: PublicIdentity[] = [];
-  const contentKey = wrap
-    ? unwrapContentKey({
-        installationId,
-        subject: liveWrapSubject({
-          spaceId: record.spaceId,
-          sessionId: record.subjectId,
-          versionId: record.metadataRevisionId,
-        }),
-        wrap,
-        keyring,
-        commitment: record.keyCommitment,
-      })
-    : openGrantedKey({ reader, trust, owners, record, envelopes: sealed.envelopes, granters });
+  let wrapSealers: PublicIdentity[] = [];
+  let contentKey: Uint8Array;
+  if (wrap) {
+    const opened = openWrap({ installationId, record, wrap, keyring, owners });
+    contentKey = opened.contentKey;
+    wrapSealers = opened.sealers;
+  } else {
+    contentKey = openGrantedKey({
+      reader,
+      trust,
+      owners,
+      record,
+      envelopes: sealed.envelopes,
+      granters,
+    });
+  }
   let plaintext: Uint8Array;
   try {
     plaintext = aeadDecrypt({ key: contentKey, sealed: sealedPayload, ad: metadataAd(record) });
@@ -347,11 +366,12 @@ export function openLiveSession({
   }
   const opened: OpenedLiveSession = {
     record,
-    payload,
+    payload: withoutKey(payload),
     key: fromBase64(payload.key),
     recordHash: liveRecordHash(record),
     region,
     keyVersion: wrap?.keyVersion ?? null,
+    wrapSealers,
     author,
     granters,
     starter: {
@@ -367,6 +387,75 @@ export function openLiveSession({
     throw error;
   }
   return opened;
+}
+
+/**
+ * The content key through the session's wrap, opened only with a draft key
+ * of the wrap's version that an owner who counts for writing sealed to this
+ * app (section 6.5, **Writing**). A key a removed owner sealed for the same
+ * version opens nothing here: otherwise they could wrap a session under a
+ * key of their own choosing, and read everything typed in it.
+ */
+function openWrap({
+  installationId,
+  record,
+  wrap,
+  keyring,
+  owners,
+}: {
+  installationId: InstallationId;
+  record: LiveRecord;
+  wrap: KeyWrap;
+  keyring: FolderKeyring;
+  owners: AcceptedOwners;
+}): { contentKey: Uint8Array; sealers: PublicIdentity[] } {
+  const subject = liveWrapSubject({
+    spaceId: record.spaceId,
+    sessionId: record.subjectId,
+    versionId: record.metadataRevisionId,
+  });
+  const held = keyring
+    .versions(record.spaceId, wrap.shareId)
+    .filter((version) => version.keyVersion === wrap.keyVersion && version.draftKey);
+  const counting = held.filter((version) => owners.writes(version.sealer));
+  if (counting.length === 0) {
+    throw held.length > 0
+      ? new CryptoError(
+          'key-version',
+          `No owner who counts for writing sealed version ${wrap.keyVersion} of share ${wrap.shareId} to this app`,
+        )
+      : new CryptoError(
+          'missing-key',
+          `No draft key for version ${wrap.keyVersion} of share ${wrap.shareId}`,
+        );
+  }
+  const ad = wrapAd(installationId, subject, wrap);
+  let failure: CryptoError = new CryptoError('decrypt-failed', 'The key wrap does not open');
+  let found: Uint8Array | null = null;
+  const sealers: PublicIdentity[] = [];
+  for (const version of counting) {
+    let contentKey: Uint8Array;
+    try {
+      contentKey = aeadDecrypt({
+        key: version.draftKey as Uint8Array,
+        sealed: wrap.wrappedKey,
+        ad,
+      });
+    } catch (error) {
+      if (!(error instanceof CryptoError)) throw error;
+      continue;
+    }
+    if (keyCommitment(contentKey) !== record.keyCommitment) {
+      sodium.memzero(contentKey);
+      failure = new CryptoError('key-commitment', 'The wrap opens to another content key');
+      continue;
+    }
+    sealers.push(version.sealer);
+    if (found) sodium.memzero(contentKey);
+    else found = contentKey;
+  }
+  if (!found) throw failure;
+  return { contentKey: found, sealers };
 }
 
 // The content key through this reader's own envelopes, each checked as a v2
@@ -427,8 +516,10 @@ function readSessionPayload(plaintext: Uint8Array): LiveSessionPayload {
  *   the record's key material, as after a move or the ending of a share,
  *   which rotate nothing (`region-mismatch`).
  * - In a share, the record's key version is the highest this app holds
- *   that counts for writing, and not below its No going back mark, nor the
- *   mark of a share this app ended (`key-version`).
+ *   that counts for writing, an owner who sealed this app a draft key its
+ *   wrap opens under still counts for writing, and the version is not below
+ *   its No going back mark, nor the mark of a share this app ended
+ *   (`key-version`).
  * - In the owner region, every owner `sealedTo` names, the record's signer
  *   and every envelope's granter is one of its sealing owners now
  *   (`unaccepted-owner`), since anyone can seal to owners' public keys.
@@ -443,6 +534,12 @@ export function requireLiveAccess(session: OpenedLiveSession, access: LiveAccess
     const keyVersion = session.keyVersion ?? 0;
     requireNotBehind({ marks, spaceId, shareId, keyVersion });
     const highest = highestWritable({ keyring, spaceId, shareId, writes: owners.writes });
+    if (!session.wrapSealers.some((sealer) => owners.writes(sealer))) {
+      throw new CryptoError(
+        'key-version',
+        'The owner who sealed the session’s key version doesn’t count for writing now',
+      );
+    }
     if (!highest || highest.keyVersion !== keyVersion) {
       throw new CryptoError(
         'key-version',

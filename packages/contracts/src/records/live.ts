@@ -119,7 +119,7 @@ export const LivePresence = z.looseObject({
   visible: z.boolean(),
   publishing: z.boolean(),
   saveFailing: SaveFailing.nullable(),
-  cursor: z.strictObject({ anchor: Base64, head: Base64 }).nullable(),
+  cursor: z.looseObject({ anchor: Base64, head: Base64 }).nullable(),
 });
 export type LivePresence = z.infer<typeof LivePresence>;
 

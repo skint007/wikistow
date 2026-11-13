@@ -5,7 +5,10 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
   ENDED,
+  FolderKeyring,
   generateIdentity,
+  newFolderKeys,
+  openFolderKeys,
   hash,
   metadataRecordV2Bytes,
   OWNER_REGION,
@@ -19,6 +22,7 @@ import {
   carol,
   dave,
   draftId,
+  folderEnvelope,
   forge,
   inShare,
   installationId,
@@ -32,6 +36,7 @@ import {
   toOwners,
   v1,
 } from './support/live.ts';
+import { opensAnyone } from './support/anyone.ts';
 
 const code = (expected: string) => expect.objectContaining({ code: expected });
 
@@ -58,7 +63,11 @@ describe('a live session in a share', () => {
     const [first, second] = [start(), start()];
     expect(second.sessionId).not.toBe(first.sessionId);
     expect(second.joinId).not.toBe(first.joinId);
-    expect(second.payload.key).not.toBe(first.payload.key);
+    const bobs = app(bob);
+    expect(open(second, bobs).key).not.toEqual(open(first, bobs).key);
+    // The key is never in a string the app can't wipe.
+    expect(Object.hasOwn(first.payload, 'key')).toBe(false);
+    expect(Object.hasOwn(open(first, bobs).payload, 'key')).toBe(false);
     expect(second.sealed.record.metadataRevisionId).not.toBe(
       first.sealed.record.metadataRevisionId,
     );
@@ -132,6 +141,55 @@ describe('a live session in a share', () => {
     expect(() =>
       open({ ...started, sealed: { ...started.sealed, record: comment } }, app(bob)),
     ).toThrow(code('malformed'));
+  });
+
+  it('opens a wrap only with a draft key from an owner who counts for writing', () => {
+    // Bob is removed, but the server serves Carol an envelope of version 1
+    // he sealed with keys of his own, and a session wrapped under them.
+    const fake = newFolderKeys();
+    const carols = app(carol, { removedOwners: [bob] });
+    carols.hold(bob, fake);
+    const forged = forge({ author: bob, payload: sessionPayload(), folderKey: fake.draftKey });
+    expect(() => open(forged, carols)).toThrow(code('decrypt-failed'));
+    // Holding only his, the version counts for nothing.
+    const alone = app(carol, { removedOwners: [bob] });
+    alone.access.keyring = new FolderKeyring();
+    expect(() => open(forged, alone)).toThrow(code('missing-key'));
+    const his = app(carol, { removedOwners: [bob] });
+    his.access.keyring = new FolderKeyring();
+    his.access.keyring.add(
+      openFolderKeys({
+        reader: carol,
+        trust: his.trust,
+        installationId,
+        envelope: folderEnvelope(carol.public, { keys: fake, sealer: bob }),
+        expect: { spaceId, shareId },
+        sealers: opensAnyone,
+      }),
+    );
+    expect(() => open(forged, his)).toThrow(code('key-version'));
+  });
+
+  it('leaves once no owner who sealed its key counts for writing', () => {
+    // Bob, an owner then, sealed Carol keys of his own for version 1.
+    const fake = newFolderKeys();
+    const before = app(carol);
+    before.hold(bob, fake);
+    const forged = forge({ author: bob, payload: sessionPayload(), folderKey: fake.draftKey });
+    const opened = open(forged, before);
+    expect(opened.wrapSealers.map((s) => s.id)).toEqual([bob.public.id]);
+    // Alice's envelope still makes version 1 count, but Bob is removed now.
+    const after = app(carol, { removedOwners: [bob] });
+    after.hold(bob, fake);
+    expect(() => requireLiveAccess(opened, after.access)).toThrow(code('key-version'));
+    // Two owners who sealed the same keys: one is enough.
+    const both = app(carol);
+    both.hold(bob, v1);
+    const shared = open(start(), both);
+    expect(shared.wrapSealers.map((s) => s.id).sort()).toEqual([alice.public.id, bob.public.id]);
+    const sameAfter = app(carol, { removedOwners: [bob] });
+    sameAfter.hold(bob, v1);
+    expect(() => requireLiveAccess(shared, sameAfter.access)).not.toThrow();
   });
 
   it('refuses a session whose key version isn’t the newest that counts for writing', () => {

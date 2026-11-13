@@ -330,11 +330,18 @@ describe('the list of joins', () => {
   });
 
   it('refuses a join’s messages for good once its changes were folded in as gone', () => {
-    const { bobs, joins } = setup();
+    const { carols, bobs, joins } = setup();
+    joins.list([carols.listed, bobs.listed]);
+    const typed = bobs.type((d) => d.text('title').insert(0, 'Bob')).send();
+    expect(receive(joins, typed)).toEqual({ kind: 'take' });
     joins.refuse(bobs.listed, 'folded in as gone');
     expect(joins.listed(bobs.listed)).toBe(false);
     expect(joins.clientOf(bobs.listed)).toBeUndefined();
-    expect(joins.signed(bobs.clientId)).toBe(0);
+    // What it signed still counts, so others may still delete or type next to it.
+    expect(joins.signed(bobs.clientId)).toBe(3);
+    expect(receive(joins, bobs.type((d) => d.text('title').insert(0, 'x')).send())).toMatchObject({
+      kind: 'refuse',
+    });
   });
 
   it('starts a newcomer’s order from each join’s latest kept message', () => {

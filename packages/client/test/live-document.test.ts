@@ -81,6 +81,15 @@ describe('placing structs', () => {
       entry('format', '{}', 'fields'),
     ];
     for (const problem of problems) expect(placed(one([problem]))).toHaveLength(1);
+    // Text that is more than one value, though wrapped it would parse.
+    for (const [root, key, text] of [
+      ['fields', 'foo', '1,2'],
+      ['extensions', 'x.y', '{}],[{}'],
+      ['links', 'wiki', '"page",9'],
+      ['attachments', 'a', `${JSON.stringify(ref('a'))},1`],
+    ] as const) {
+      expect(placed(one([entry(key, text, root)]))).toHaveLength(1);
+    }
     // A namespace whose integers the payload doesn't type takes any number.
     expect(placed(one([entry('ns', '{"format":1.0}')]))).toEqual([]);
   });

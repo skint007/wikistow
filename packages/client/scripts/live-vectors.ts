@@ -5,6 +5,7 @@
 // clear so another implementation can check each layer on its own.
 import * as Y from 'yjs';
 import {
+  aeadDecrypt,
   canonical,
   fromBase64,
   generateIdentity,
@@ -20,6 +21,7 @@ import {
   sealedBytes,
   SpaceId,
   toBase64,
+  wrapAd,
   type PrivateIdentity,
 } from '../src/index.ts';
 import {
@@ -72,7 +74,19 @@ export function liveVectors(previous?: LivePrevious) {
   });
   const recordBytes = metadataRecordV2Bytes(record);
   const recordHash = hash(recordBytes);
-  const sessionKey = fromBase64(started.payload.key);
+  // The session key, as anyone holding the draft key opens it.
+  if (!started.wrap) throw new Error('A session in a share has a wrap');
+  const contentKey = aeadDecrypt({
+    key: folderKeys.draftKey,
+    sealed: started.wrap.wrappedKey,
+    ad: wrapAd(installationId, subject, { shareId, keyVersion: 1 }),
+  });
+  const payload = JSON.parse(
+    new TextDecoder().decode(
+      aeadDecrypt({ key: contentKey, sealed: started.sealed.payload, ad: metadataAd(record) }),
+    ),
+  ) as { key: string };
+  const sessionKey = fromBase64(payload.key);
   const binding: LiveBinding = {
     installationId,
     spaceId,
@@ -161,7 +175,7 @@ export function liveVectors(previous?: LivePrevious) {
       payloadAd: hex(metadataAd(record)),
       signedBytes: hex(recordBytes),
       recordHash,
-      payload: started.payload,
+      payload,
     },
     client: {
       sessionId: record.subjectId,
@@ -182,6 +196,15 @@ export function liveVectors(previous?: LivePrevious) {
       signedBytes: hex(liveMessageBytes(binding, header, hash(sealedBytes(update.sealed)))),
       message: update,
     },
-    presence: { message: presence, paddedLength: 512 },
+    presence: {
+      message: presence,
+      padded: hex(
+        aeadDecrypt({
+          key: sessionKey,
+          sealed: presence.sealed,
+          ad: liveMessageAd(binding, { ...header, kind: 'presence' }),
+        }),
+      ),
+    },
   };
 }

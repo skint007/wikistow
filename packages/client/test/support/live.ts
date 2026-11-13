@@ -86,10 +86,11 @@ export const folderEnvelope = (
     keyVersion = 1,
     keys = v1,
     editor = true,
-  }: { keyVersion?: number; keys?: FolderKeys; editor?: boolean } = {},
+    sealer = alice,
+  }: { keyVersion?: number; keys?: FolderKeys; editor?: boolean; sealer?: PrivateIdentity } = {},
 ) =>
   sealFolderKeys({
-    sealer: alice,
+    sealer,
     installationId,
     spaceId,
     shareId,
@@ -105,7 +106,13 @@ export function app(
     listedOwners = [alice, bob],
     editor = self !== dave,
     region = share,
-  }: { listedOwners?: PrivateIdentity[]; editor?: boolean; region?: Region } = {},
+    removedOwners = [],
+  }: {
+    listedOwners?: PrivateIdentity[];
+    editor?: boolean;
+    region?: Region;
+    removedOwners?: PrivateIdentity[];
+  } = {},
 ) {
   const trust = new TrustStore(installationId);
   trust.pinSelf(self);
@@ -126,7 +133,11 @@ export function app(
     spaceId,
     self: self.public,
     trust,
-    entry: { spaceId, owners: [ref(alice), ref(bob)], removedOwners: [] },
+    entry: {
+      spaceId,
+      owners: [ref(alice), ref(bob)],
+      removedOwners: removedOwners.map((p) => p.public.id),
+    },
     nameRecords: [],
     statements: [],
     envelopes: [],
@@ -147,7 +158,19 @@ export function app(
         sealers: opensAnyone,
       }),
     );
-  return { self, trust, keyring, owners, marks, access, rotate };
+  /** Hold a version from another sealer, with keys of its choosing. */
+  const hold = (sealer: PrivateIdentity, keys: FolderKeys, keyVersion = 1) =>
+    keyring.add(
+      openFolderKeys({
+        reader: self,
+        trust,
+        installationId,
+        envelope: folderEnvelope(self.public, { keyVersion, keys, sealer }),
+        expect: { spaceId, shareId },
+        sealers: opensAnyone,
+      }),
+    );
+  return { self, trust, keyring, owners, marks, access, rotate, hold };
 }
 export type App = ReturnType<typeof app>;
 

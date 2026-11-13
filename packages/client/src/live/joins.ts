@@ -133,7 +133,7 @@ export class LiveJoins {
     );
   }
 
-  /** The Yjs client a listed join writes under. */
+  /** The Yjs client a listed join writes under, unless it is refused. */
   clientOf(join: JoinRef): number | undefined {
     const known = this.#joins.get(key(join));
     return known && !known.refused ? known.clientId : undefined;
@@ -171,9 +171,9 @@ export class LiveJoins {
    */
   refuse(join: JoinRef, why: string): void {
     const known = this.#joins.get(key(join));
-    if (!known) return;
-    known.refused ??= why;
-    if (this.#byClient.get(known.clientId) === known) this.#byClient.delete(known.clientId);
+    if (known) known.refused ??= why;
+    // Its client stays known, with the clock it signed, so others' changes
+    // next to its typing, or deleting it, still check against what it signed.
   }
 
   /**

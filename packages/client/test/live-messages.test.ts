@@ -264,6 +264,9 @@ describe('what messages hold', () => {
     for (const content of broken) {
       expect(readPresence(content)).toEqual({ visible: false, saveFailing: null, shown: null });
     }
+    // A newer minor's member in the cursor is kept, as in any loose payload.
+    const later = { ...presence, cursor: { anchor: 'AA', head: 'AA', assoc: 1 } };
+    expect(readPresence(utf8(JSON.stringify(later))).shown).toEqual(later);
     // A cursor that breaks its type only stops it being shown.
     const cursor = readPresence(utf8(JSON.stringify({ ...presence, cursor: 'here' })));
     expect(cursor).toEqual({ visible: true, saveFailing: null, shown: null });
