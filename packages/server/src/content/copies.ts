@@ -1002,9 +1002,15 @@ async function liftTrash(tx: Database, copy: CopyRow, held: readonly string[]) {
   });
   if (kept.length === 0) return [];
   const source = rows.find((node) => node.id === copy.sourceNodeId);
+  const parentId = source?.parentId ?? null;
   return tx
     .update(nodes)
-    .set({ parentId: source?.parentId ?? null })
+    .set({
+      parentId,
+      // Its place was in the folder it leaves: restored where it goes, it
+      // goes last there (section 10, Order). One that stays keeps it.
+      position: sql`case when ${nodes.parentId} is not distinct from ${parentId} then ${nodes.position} end`,
+    })
     .where(
       anyId(
         nodes.id,
