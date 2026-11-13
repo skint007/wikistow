@@ -156,14 +156,22 @@ export class KeptMarks implements KeyVersionMarks {
     const contents = open(await file.read().catch(() => null)) ?? NONE;
     const who = `${installationId} ${identity.public.id}`;
     const marks = new KeptMarks(file, { seal, open }, contents, file.channel ?? null, who);
-    // Answers a closed session of this person heard after it closed.
-    const answers = late.get(who);
-    if (answers) {
-      late.delete(who);
-      void marks.#change({
-        ...marks.#contents,
-        marks: tidied(merge(marks.#contents.marks, answers)),
-      });
+    // Answers a closed session of this person heard after it closed. A
+    // restore that session didn't know of drops its raises, as it drops
+    // every mark (`startOver`); its clears and losses still hold. The
+    // answer stays kept until it has landed in the file.
+    const kept = late.get(who);
+    if (kept) {
+      const answers = kept.restoredAt === contents.restoredAt ? kept.marks : ownChanges(kept.marks);
+      void marks.#change(
+        { ...marks.#contents, marks: tidied(merge(marks.#contents.marks, answers)) },
+        { strict: true },
+      ).then(
+        () => {
+          if (late.get(who) === kept) late.delete(who);
+        },
+        () => {},
+      );
     }
     return marks;
   }
@@ -319,7 +327,17 @@ export class KeptMarks implements KeyVersionMarks {
   // locked, the answer is the server's, so it holds either way.
   #keepForLater(answer: Contents['marks']): boolean {
     if (!this.#closed) return false;
-    late.set(this.#who, tidied(merge(late.get(this.#who) ?? {}, answer)));
+    const before = late.get(this.#who);
+    const restoredAt = this.#contents.restoredAt;
+    late.set(this.#who, {
+      restoredAt,
+      marks: tidied(
+        merge(
+          before?.restoredAt === restoredAt ? before.marks : ownChanges(before?.marks ?? {}),
+          answer,
+        ),
+      ),
+    });
     return true;
   }
 
@@ -482,7 +500,7 @@ function tidied(marks: Contents['marks']): Contents['marks'] {
 }
 
 // Answers closed sessions heard, by person and server, for their next session.
-const late = new Map<string, Contents['marks']>();
+const late = new Map<string, { restoredAt: string | null; marks: Contents['marks'] }>();
 
 // Two sets of marks taken together, the higher of each, as tabs merge them.
 function merge(a: Contents['marks'], b: Contents['marks']): Contents['marks'] {

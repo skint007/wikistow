@@ -336,9 +336,50 @@ describe('pending changes across tabs', () => {
     expect(changePending(next, spaceId, shareId)).toBe(false);
     await expect.poll(async () => (await KeptMarks.open(file, who)).get(spaceId, shareId)).toBe(2);
     // Another person's session never does.
-    const stranger = generateIdentity({ id: IdentityId.parse('bob'), kind: 'human' });
-    const theirs = await KeptMarks.open(file, { identity: stranger, installationId });
-    expect(theirs.get(spaceId, shareId)).toBe(0);
+    const stranger0 = generateIdentity({ id: IdentityId.parse('carol'), kind: 'human' });
+    expect(
+      (await KeptMarks.open(file, { identity: stranger0, installationId })).get(spaceId, shareId),
+    ).toBe(0);
+  });
+
+  it('keeps a late answer until it lands, and drops its raises across a restore', async () => {
+    const memory = (): KeptFile => {
+      let bytes: Uint8Array | null = null;
+      return {
+        read: () => Promise.resolve(bytes),
+        write: (sealed) => {
+          bytes = sealed;
+          return Promise.resolve();
+        },
+      };
+    };
+    // A session that closes before the answer's write lands leaves it for the next.
+    const quick = memory();
+    const first = await KeptMarks.open(quick, who);
+    const [one] = await first.begin([change()]);
+    first.close();
+    await first.settle([one?.id ?? ''], [{ spaceId, shareId, keyVersion: 3 }]);
+    const brief = await KeptMarks.open(quick, who);
+    brief.close();
+    const lasting = await KeptMarks.open(quick, who);
+    expect(lasting.get(spaceId, shareId)).toBe(3);
+    expect(changePending(lasting, spaceId, shareId)).toBe(false);
+    lasting.close();
+    // A restore the closed session didn't know of drops its raises, not its clears.
+    const restored = memory();
+    const sender = await KeptMarks.open(restored, who);
+    const [two] = await sender.begin([change()]);
+    const elsewhere = await KeptMarks.open(restored, who);
+    sender.close();
+    await sender.settle([two?.id ?? ''], [{ spaceId, shareId, keyVersion: 4 }]);
+    elsewhere.startOver('2026-11-13T00:00:00.000Z');
+    await expect.poll(async () => (await restored.read()) !== null).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    elsewhere.close();
+    const after = await KeptMarks.open(restored, who);
+    expect(after.restoredAt).toBe('2026-11-13T00:00:00.000Z');
+    expect(after.get(spaceId, shareId)).toBe(0);
+    expect(changePending(after, spaceId, shareId)).toBe(false);
   });
 
   it('stops listening once closed', async () => {
