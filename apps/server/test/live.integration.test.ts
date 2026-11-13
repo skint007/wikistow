@@ -611,10 +611,10 @@ describe('messages', () => {
     const size = liveRoutes.MAX_UPDATE_BYTES - 128;
     for (let i = 0; i < 6; i++) await me.send([me.message('update', { size })]);
     const { messages: batch } = await storedAfter(t.db, session.sessionId, 1);
-    // Four past the first make 2 MiB, so a fifth starts the next read.
-    expect(batch.map((m) => m.position)).toEqual([2, 3, 4, 5, 6]);
-    const { messages: rest } = await storedAfter(t.db, session.sessionId, 6);
-    expect(rest.map((m) => m.position)).toEqual([7]);
+    // Four make just under 2 MiB, so a fifth starts the next read.
+    expect(batch.map((m) => m.position)).toEqual([2, 3, 4, 5]);
+    const { messages: rest } = await storedAfter(t.db, session.sessionId, 5);
+    expect(rest.map((m) => m.position)).toEqual([6, 7]);
   });
 
   it('takes a request with a presence before its stored messages sent again unchanged', async () => {
@@ -1008,6 +1008,11 @@ describe('snapshots', () => {
       .from(schema.liveMessages)
       .where(eq(schema.liveMessages.sessionId, session.sessionId));
     expect(kept.map((r) => r.position).sort((a, b) => a - b)).toEqual([1, 3, 4, 5]);
+    // A read of what it deleted finds nothing, and says what the snapshot covers.
+    expect(await storedAfter(t.db, session.sessionId, 1, { upTo: 2 })).toEqual({
+      messages: [],
+      snapshotCovers: 4,
+    });
     // None covers less than the latest, and what it covered can't be fetched again.
     expect(await rejection(post(3, 2))).toBe('stale-head');
     expect(await streamRefusal(owner, session, newId(JoinId), 2)).toBe('stale-head');
@@ -1292,6 +1297,42 @@ describe('limits', () => {
     expect(refused).toBe('rate-limited');
     expect((sent - 1) * (size + 16)).toBeLessThanOrEqual(liveRoutes.STORED_BYTES_PER_MINUTE);
     expect(sent * (size + 16)).toBeGreaterThan(liveRoutes.STORED_BYTES_PER_MINUTE - size);
+  });
+
+  it('starts sessions while the same person types elsewhere, without waiting in a ring', async () => {
+    const { owner, lib } = await sharedLibrary();
+    const session = await startSession(owner, lib.page);
+    const me = typist(owner, session, session.joinId);
+    me.started();
+    await stream(owner, session, me.joinId, 1);
+    const pagesToStart = await Promise.all(
+      // Two at once, as many as the snapshot pool takes from one person.
+      ['A', 'B'].map((title) =>
+        pages.createPage(owner.ctx, { spaceId: lib.spaceId, parentId: null, title }),
+      ),
+    );
+    const heads: RevisionId[] = [];
+    for (const pageId of pagesToStart)
+      heads.push(await headOf(owner, { spaceId: lib.spaceId, pageId }));
+    const starts = await Promise.all(
+      pagesToStart.map((pageId, i) =>
+        sealStart(
+          owner.ctx,
+          { spaceId: lib.spaceId, pageId },
+          { revisionId: heads[i] as RevisionId },
+        ),
+      ),
+    );
+    const typing = async () => {
+      for (let i = 0; i < 6; i++) await me.send([me.message('update')]);
+    };
+    const answers = await Promise.all([
+      typing().then(() => 'no error'),
+      ...starts.map(({ body }, i) =>
+        rejection(sendStart(owner.ctx, pagesToStart[i] as typeof lib.page.pageId, body)),
+      ),
+    ]);
+    expect(answers).toEqual(['no error', 'no error', 'no error']);
   });
 
   it('takes so many live writes of one person’s at once, and refuses the rest', async () => {

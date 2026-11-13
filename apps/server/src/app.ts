@@ -198,7 +198,12 @@ export function createApp({
   // And each change to a comment, on the same listener.
   const commentChanges = mountCommentChangeRoutes(routes, { db, log });
   // Live sessions relay in memory, and hear of ends and moved heads on the same listener.
-  const live = mountLiveRoutes(routes, { db, log, storageBytes: config.limits.storageBytes });
+  const live = mountLiveRoutes(routes, {
+    db,
+    log,
+    storageBytes: config.limits.storageBytes,
+    rateLimit: config.rateLimit,
+  });
   mountAgentRoutes(routes, { db });
   mountDesktopRoutes(routes, { db, auth });
   mountAdminAiRoutes(routes, { db, config, log });

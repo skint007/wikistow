@@ -14,9 +14,12 @@ import {
 } from '../db/schema/index.ts';
 import { ContentError } from './errors.ts';
 
-// Serializes one account's writes that count toward its storage, so two at
-// once can't both fit under the quota.
-const lockQuota = (tx: Database, accountId: string) =>
+/**
+ * Serializes one account's writes that count toward its storage, so two at
+ * once can't both fit under the quota. Taken again in one transaction, it
+ * holds as before.
+ */
+export const lockQuota = (tx: Database, accountId: string) =>
   tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`wikistow:quota:${accountId}`}))`);
 
 const total = async (query: Promise<{ bytes: string }[]>) => Number((await query)[0]?.bytes ?? 0);

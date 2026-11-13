@@ -8,6 +8,7 @@
 import { liveRoutes } from '@wikistow/contracts';
 import {
   canStillEdit,
+  consumeRateLimit,
   checkLiveEditor,
   endLive,
   getLive,
@@ -57,6 +58,13 @@ const MAX_QUEUED_BYTES = 8 * 1024 * 1024;
  */
 const MAX_STREAMS_PER_ACCOUNT = 16;
 const MAX_FETCHES_PER_ACCOUNT = 2;
+/**
+ * Fetches of a session and stream openings one person may make a minute,
+ * together: each can read megabytes, which the requests limit alone, made
+ * for typing, would let through thousands of times.
+ */
+const READ_LIMIT = { windowMs: 60_000, max: 120 };
+
 /**
  * Live writes one person may have in hand at once, so a burst waits on
  * their own requests, never on every connection the server has.
@@ -122,7 +130,12 @@ function sizeOf(item: Queued) {
 
 export function mountLiveRoutes(
   routes: Routes,
-  { db, log, storageBytes }: { db: Database; log: Log; storageBytes: number },
+  {
+    db,
+    log,
+    storageBytes,
+    rateLimit,
+  }: { db: Database; log: Log; storageBytes: number; rateLimit: boolean },
 ) {
   const report: ReportUnreadable = ({ table, id }) =>
     log({ level: 'warn', event: 'unreadable-row', table, rowId: id });
@@ -262,6 +275,9 @@ export function mountLiveRoutes(
       }
     }
     for (const grant of state.grants) heardGrant(session, grant);
+    // Only what a newcomer is served is kept in mind.
+    const listed = new Set(state.grants.map(grantKey));
+    for (const key of session.grants.keys()) if (!listed.has(key)) session.grants.delete(key);
     for (const stream of session.streams) {
       if (state.lastPosition > stream.known) {
         stream.known = state.lastPosition;
@@ -361,6 +377,14 @@ export function mountLiveRoutes(
     if (change.joinsChanged) refresh(change.sessionId).catch(failed);
   }
 
+  // A fetch or a stream's opening, counted against the person's `READ_LIMIT`.
+  async function countRead(accountId: string) {
+    if (!rateLimit) return;
+    const { allowed } = await consumeRateLimit(db, `live-read account:${accountId}`, READ_LIMIT);
+    if (!allowed)
+      throw new ApiError('rate-limited', 'Too many fetches of sessions; try again shortly');
+  }
+
   const writes = new Map<string, number>();
   // A write of `actor`'s, one of at most `MAX_WRITES_PER_ACCOUNT` at once.
   async function writing<T>(actor: Actor, run: () => Promise<T>): Promise<T> {
@@ -389,6 +413,7 @@ export function mountLiveRoutes(
       if ((fetching.get(actor.accountId) ?? 0) >= MAX_FETCHES_PER_ACCOUNT) {
         throw new ApiError('rate-limited', 'Fetching sessions already; try again shortly');
       }
+      await countRead(actor.accountId);
       count(fetching, actor.accountId, 1);
       try {
         return await getLive(db, actor, params.pageId, report).catch(toApiError);
@@ -515,10 +540,12 @@ export function mountLiveRoutes(
         throw new ApiError('forbidden', 'Cross-origin request refused');
       }
       const account = principal.accountId;
+      await countRead(account);
       const replacing = [...(followed.get(sessionId)?.streams ?? [])].some(
         (s) => s.accountId === account && s.joinId === joinId,
       );
-      if ((streaming.get(account) ?? 0) >= MAX_STREAMS_PER_ACCOUNT && !replacing) {
+      // A stream replacing one of the same join still counts until that one finishes.
+      if ((streaming.get(account) ?? 0) - (replacing ? 1 : 0) >= MAX_STREAMS_PER_ACCOUNT) {
         throw new ApiError('rate-limited', 'Too many sessions open at once');
       }
       // Counted from now until the stream has finished, its join included.
