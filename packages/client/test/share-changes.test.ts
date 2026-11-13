@@ -224,6 +224,38 @@ describe('settling a change whose answer was lost', () => {
     }
   });
 
+  it('asks again for a move into a share whose wraps a rotation has overtaken', async () => {
+    const { ctx, marks } = context();
+    marks.raise(spaceId, shareId, 4);
+    const into: NewChange = { ...rotation, change: 'move', fromKeyVersion: 3, into: true };
+    await expect(
+      sendShareChange(
+        ctx,
+        [into],
+        () => Promise.resolve(),
+        () => [],
+      ),
+    ).rejects.toMatchObject({ code: 'stale-head' });
+    await expect(
+      sendShareChange(
+        ctx,
+        [{ ...into, fromKeyVersion: 4 }],
+        () => Promise.resolve(),
+        () => [],
+      ),
+    ).resolves.toBeUndefined();
+    // Out of a share, the version is the share's own business.
+    const out: NewChange = { ...rotation, change: 'move', fromKeyVersion: 1 };
+    await expect(
+      sendShareChange(
+        ctx,
+        [out],
+        () => Promise.resolve(),
+        () => [],
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('raises nothing, ending or not, when the server refuses the listing', async () => {
     const ending: NewChange = { ...rotation, change: 'ending' };
     for (const [refusal, clears] of [

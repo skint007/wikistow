@@ -389,18 +389,28 @@ export async function moveNode(
   await rewrap.scan(onProgress);
   // A move into or out of a share is pending until answered (section 6.8):
   // no tab joins or sends in the share's live sessions meanwhile.
-  const changes: NewChange[] = [preview.from, preview.to].flatMap((region) =>
-    region.kind === 'share'
-      ? [
-          {
-            spaceId: region.spaceId,
-            shareId: region.shareId,
-            change: 'move' as const,
-            fromKeyVersion: Math.max(1, ctx.marks.get(region.spaceId, region.shareId)),
-          },
-        ]
-      : [],
-  );
+  // The destination side is under the version its wraps were made at,
+  // which must still be at the mark when the move goes, however long the
+  // scan took; the source side moves out of whatever version it is at.
+  const changes: NewChange[] = [];
+  if (preview.from.kind === 'share') {
+    const { spaceId: s, shareId: h } = preview.from;
+    changes.push({
+      spaceId: s,
+      shareId: h,
+      change: 'move',
+      fromKeyVersion: Math.max(1, ctx.marks.get(s, h)),
+    });
+  }
+  if (preview.to.kind === 'share' && rewrap.keyVersion !== null) {
+    changes.push({
+      spaceId: preview.to.spaceId,
+      shareId: preview.to.shareId,
+      change: 'move',
+      fromKeyVersion: rewrap.keyVersion,
+      into: true,
+    });
+  }
   await sendShareChange(
     ctx,
     changes,
@@ -544,6 +554,8 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
     );
   };
   return {
+    /** The destination share's key version the wraps are under, or null for the owner region. */
+    keyVersion: target.kind === 'share' ? target.held.keyVersion : null,
     material: (): KeyMaterial => {
       const all = [...done.values()];
       return {

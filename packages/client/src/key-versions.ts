@@ -53,6 +53,11 @@ export type NewChange = {
   shareId: ShareId;
   change: ShareChange;
   fromKeyVersion: number;
+  /**
+   * A move into the share, whose content is wrapped under `fromKeyVersion`,
+   * which must be at the mark when it goes. Not kept in the marks file.
+   */
+  into?: boolean;
 };
 export type PendingChange = Omit<NewChange, 'change'> & {
   /** A kind this app knows, or one a newer app recorded, which holds sessions all the same. */
@@ -88,8 +93,10 @@ export type MarkRaise = { spaceId: SpaceId; shareId: ShareId; keyVersion: number
  * Refuse a change whose plan a raised mark has overtaken (section 6.8): a
  * rotation from a version below the share's mark, as when another tab or
  * owner rotated while the owner confirmed, or any change of a share this
- * app ended meanwhile, is `stale-head`, to plan again. Endings and moves
- * rotate from no version, so only the ended mark refuses them.
+ * app ended meanwhile, is `stale-head`, to plan again; so is a move into
+ * a share whose wraps are under a version below its mark. Endings, and
+ * moves out of a share, rotate from no version, so only the ended mark
+ * refuses them.
  */
 export function requireCurrentPlan(marks: KeyVersionMarks, change: NewChange): void {
   const mark = marks.get(change.spaceId, change.shareId);
@@ -98,7 +105,7 @@ export function requireCurrentPlan(marks: KeyVersionMarks, change: NewChange): v
   if (mark === ENDED) {
     throw new ApiError(409, 'stale-head', `Share ${change.shareId} was ended meanwhile`);
   }
-  if (change.change === 'rotation' && change.fromKeyVersion < mark) {
+  if ((change.change === 'rotation' || change.into) && change.fromKeyVersion < mark) {
     throw new ApiError(
       409,
       'stale-head',
