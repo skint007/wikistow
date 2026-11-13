@@ -348,7 +348,11 @@ export const postSnapshot = {
     covers: Position,
     revisionId: RevisionId,
   }),
-  response: z.strictObject({ position: Position }),
+  /**
+   * Its position; sent again after a lost answer, as before, or null once
+   * a later snapshot has covered it since.
+   */
+  response: z.strictObject({ position: Position.nullable() }),
   status: 201,
 } as const satisfies RouteDef;
 

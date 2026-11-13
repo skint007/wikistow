@@ -1260,6 +1260,27 @@ describe('snapshots', () => {
     expect(stale.status).toBe(409);
   });
 
+  it('answers a snapshot sent again as before, null once a later one covered it', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    const post = (joinId: JoinId, message: liveRoutes.LiveMessage, covers: number) =>
+      editor.ctx.api.call(liveRoutes.postSnapshot, {
+        params: { sessionId: session.sessionId },
+        body: { joinId, parent: me.joinId, message, covers, revisionId: session.revisionId },
+      });
+    const first = typist(editor, session);
+    const firstSnapshot = first.message('snapshot');
+    expect(await post(first.joinId, firstSnapshot, 2)).toEqual({ position: 3 });
+    expect(await post(first.joinId, firstSnapshot, 2)).toEqual({ position: 3 });
+    const second = typist(editor, session);
+    expect(await post(second.joinId, second.message('snapshot'), 3)).toEqual({ position: 4 });
+    // The first is gone with the second; sent again, it is answered, not refused.
+    expect(await post(first.joinId, firstSnapshot, 2)).toEqual({ position: null });
+  });
+
   it('keeps the drafts a kept session names past draft retention, and lets them go after', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);

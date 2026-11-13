@@ -398,6 +398,28 @@ export function mountLiveRoutes(
   }
 
   const writes = new Map<string, number>();
+  // A stream's reads of what is stored wait their turn among a person's
+  // requests in hand, so many streams never take more connections than that.
+  const waiting = new Map<string, (() => void)[]>();
+  async function inTurn<T>(accountId: string, run: () => Promise<T>): Promise<T> {
+    while ((writes.get(accountId) ?? 0) >= MAX_WRITES_PER_ACCOUNT) {
+      await new Promise<void>((resolve) => {
+        const queue = waiting.get(accountId) ?? [];
+        queue.push(resolve);
+        waiting.set(accountId, queue);
+      });
+    }
+    count(writes, accountId, 1);
+    try {
+      return await run();
+    } finally {
+      count(writes, accountId, -1);
+      const queue = waiting.get(accountId);
+      const next = queue?.shift();
+      if (queue && queue.length === 0) waiting.delete(accountId);
+      next?.();
+    }
+  }
   // A request of `actor`'s against the database, one of at most `MAX_WRITES_PER_ACCOUNT` at once.
   async function writing<T>(actor: Actor, run: () => Promise<T>): Promise<T> {
     if (actor.agentId !== null) throw new ApiError('not-found', 'Not found');
@@ -409,6 +431,10 @@ export function mountLiveRoutes(
       return await run();
     } finally {
       count(writes, actor.accountId, -1);
+      const queue = waiting.get(actor.accountId);
+      const next = queue?.shift();
+      if (queue && queue.length === 0) waiting.delete(actor.accountId);
+      next?.();
     }
   }
 
@@ -589,7 +615,9 @@ export function mountLiveRoutes(
           try {
             let sent = after;
             while (sent < upTo && !signal.aborted) {
-              const { messages } = await storedAfter(db, sessionId, sent, { upTo });
+              const { messages } = await inTurn(account, () =>
+                storedAfter(db, sessionId, sent, { upTo }),
+              );
               if (messages.length === 0) break;
               for (const message of messages) {
                 sent = message.position;
@@ -673,9 +701,9 @@ export function mountLiveRoutes(
       // leaves it short: it closes, and its app opens it again from `sent`.
       async function* catchUp(upTo: number) {
         while (stream.sent < upTo && !stream.closed) {
-          const { messages, snapshotCovers } = await storedAfter(db, sessionId, stream.sent, {
-            upTo,
-          });
+          const { messages, snapshotCovers } = await inTurn(account, () =>
+            storedAfter(db, sessionId, stream.sent, { upTo }),
+          );
           here.snapshotCovers = Math.max(here.snapshotCovers, snapshotCovers);
           if (snapshotCovers > Math.max(stream.sent, stream.openCovers)) {
             close(stream, null, { drop: true });

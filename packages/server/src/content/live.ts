@@ -1814,6 +1814,17 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     if (input.message.kind !== 'snapshot') {
       throw new ContentError('invalid-request', 'Post a snapshot here');
     }
+    // Sent again after a lost answer: answered as before, whatever was posted since,
+    // its position null once a later snapshot has covered it.
+    if (input.message.seq <= join.lastSeq) {
+      const stored = await storeMessage(tx, session, join, caller, {
+        message: input.message,
+        covers: input.covers,
+        revisionId: input.revisionId,
+        size,
+      });
+      return { position: stored.position, relay: null };
+    }
     const [draft] = await tx
       .select({ id: revisions.id })
       .from(revisions)
@@ -1842,10 +1853,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       revisionId: input.revisionId,
       size,
     });
-    if (!stored.row) {
-      if (stored.position === null) throw new ContentError('duplicate', 'That snapshot is gone');
-      return { position: stored.position, relay: null };
-    }
+    if (!stored.row) return { position: stored.position, relay: null };
     await spendStoredBytes(
       tx,
       caller.accountId,
