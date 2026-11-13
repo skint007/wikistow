@@ -149,8 +149,8 @@ export const Manifest = z
     /** The fenced block types it claims, written `plugin:<id>/<block>`. */
     blocks: z.array(BlockType).max(20).default([]),
     /**
-     * Bare fence languages it draws as one of its `blocks`, each with that
-     * block's type: `{ "dataview": "query" }` draws a ```` ```dataview ````
+     * Bare fence languages its app code draws as one of its `blocks`, each
+     * with that block's type, so it needs `ui`: `{ "dataview": "query" }` draws a ```` ```dataview ````
      * fence as its `query` block (#401). Where two running plugins claim a
      * language, the first in Settings' order draws it, unless the person
      * chose otherwise there (`fencePart`). Left out, not defaulted, as
@@ -210,7 +210,13 @@ export const Manifest = z
   .refine(
     ({ blocks, fences }) => Object.values(fences ?? {}).every((type) => blocks.includes(type)),
     { message: 'Each fence language draws one of its blocks', path: ['fences'] },
-  );
+  )
+  // A fence of a bare language holds whatever its author wrote, on any page
+  // opened: only app code, which reads the page as the app does, draws one.
+  .refine(({ ui, fences }) => fences === undefined || ui !== undefined, {
+    message: 'Only an app plugin (ui) claims fence languages',
+    path: ['fences'],
+  });
 export type Manifest = z.infer<typeof Manifest>;
 
 /**

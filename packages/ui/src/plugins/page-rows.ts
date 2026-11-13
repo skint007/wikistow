@@ -191,11 +191,14 @@ export function indexChanges(
     was.delete(k);
     if (old === page) continue;
     const { doc } = page;
+    // A copy unpublished where it is is in no row (`readableSpace`), before or after.
+    if (doc.unpublished && (!old || old.doc.unpublished)) continue;
     if (
       old &&
       old.doc.revisionId === doc.revisionId &&
       old.doc.parentId === doc.parentId &&
       old.doc.draft === doc.draft &&
+      old.doc.unpublished === doc.unpublished &&
       sameList(old.doc.folderIds, doc.folderIds) &&
       sameList(old.doc.path, doc.path)
     )
@@ -205,6 +208,6 @@ export function indexChanges(
       changes.push({ spaceId: old.doc.spaceId, folderIds: old.doc.folderIds });
   }
   for (const { doc } of was.values())
-    changes.push({ spaceId: doc.spaceId, folderIds: doc.folderIds });
+    if (!doc.unpublished) changes.push({ spaceId: doc.spaceId, folderIds: doc.folderIds });
   return changes;
 }

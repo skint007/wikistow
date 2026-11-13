@@ -212,9 +212,10 @@ const replacedBy = (entries: Loaded[]) =>
 /**
  * Each block a running plugin draws, by its fence's info string: its own
  * `plugin:<id>/<type>`, and each bare language its manifest's `fences`
- * gives the type (#401). A bare language is the first plugin's of
- * `running`, in Settings' order, that draws that block, but for one the
- * person gave the language back from (`fencePart` in its `ownParts`).
+ * gives the type (#401), with app code's view of it. A bare language is
+ * the first plugin's of `running`, in Settings' order, whose app code
+ * draws that block, but for one the person gave the language back from
+ * (`fencePart` in its `ownParts`).
  */
 function blocksOf(
   running: readonly { plugin: InstalledPlugin; pluginId: string; registry: Registry }[],
@@ -228,7 +229,9 @@ function blocksOf(
     for (const [language, type] of Object.entries(plugin.manifest.fences ?? {})) {
       if (blocks.has(language) || plugin.ownParts.includes(fencePart(language))) continue;
       for (const block of registry.blocks()) {
-        if (block.type === type) blocks.set(language, { pluginId, type, view: block.view });
+        // App code's view only: a script, sandboxed, isn't handed what others wrote.
+        if (block.type === type && block.part === 'app')
+          blocks.set(language, { pluginId, type, view: block.view });
       }
     }
   }

@@ -50,7 +50,7 @@ describe('bare fence languages', () => {
     expect(neither.runtime.get().blocks.has('plugin:alpha/query')).toBe(true);
   });
 
-  it('fills in a script’s form for a bare language it claims', async () => {
+  it('draws a bare language with app code’s view only, never a script’s form', async () => {
     const script = fakeScript([
       {
         type: 'block',
@@ -62,13 +62,19 @@ describe('bare fence languages', () => {
       },
     ]);
     const { runtime } = await testRuntime([
-      { id: 'cook', script: script.launch, blocks: ['recipe'], fences: { recipe: 'recipe' } },
+      {
+        id: 'cook',
+        activate: () => {},
+        script: script.launch,
+        blocks: ['recipe'],
+        fences: { recipe: 'recipe' },
+      },
     ]);
     const page = { spaceId: 's', pageId: 'p' };
-    const results = await runtime.blockResults('recipe', page, 'servings: 6');
+    const results = await runtime.blockResults('plugin:cook/recipe', page, 'servings: 6');
     expect(results?.fields['servings']).toMatchObject({ value: 6 });
-    expect(await runtime.blockResults('plugin:cook/recipe', page, '')).not.toBeNull();
-    expect(await runtime.blockResults('dataview', page, '')).toBeNull();
+    expect(runtime.get().blocks.has('recipe')).toBe(false);
+    expect(await runtime.blockResults('recipe', page, 'servings: 6')).toBeNull();
   });
 });
 

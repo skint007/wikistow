@@ -1,6 +1,7 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
 import type { InstalledPlugin, PluginCandidate, PluginScope } from '@wikistow/contracts';
 import {
+  blockLanguage,
   isReplaceable,
   REGIONS,
   type Manifest,
@@ -75,6 +76,9 @@ const replacedParts = (manifest: Manifest) =>
   (manifest.replaces ?? []).filter(isReplaceable).map((region) => REPLACED[region].part);
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** The most parts of the app one plugin's approval gives back (`ownParts`), regions and languages. */
+const MAX_OWN_PARTS = 20;
 
 /** The bare fence languages a manifest claims (`fences`), in its order. */
 const fencesOf = (manifest: Manifest) => Object.keys(manifest.fences ?? {});
@@ -466,8 +470,9 @@ export function Approval<T extends ApprovalRequest>({
             )}
             {fencesOf(candidate.manifest).length > 0 && (
               <p>
-                It draws {listed.format(fencesOf(candidate.manifest))} code blocks as its own. You
-                can show them as code again in Settings → Plugins.
+                It draws {listed.format(fencesOf(candidate.manifest))} code blocks as its own, on
+                every page you open, whoever wrote them. You can show them as code again in Settings
+                → Plugins.
               </p>
             )}
             {candidate.replaces && <Replaces candidate={candidate} />}
@@ -601,14 +606,20 @@ function ClaimedFences() {
   const { plugins, safeMode, blocks } = usePlugins();
   const [error, setError] = useState<string | null>(null);
   if (safeMode) return null;
-  // Themes run no code, so draw no blocks.
+  // Only plugins that draw the block here, running with it registered, can draw the language.
   const drawers = plugins
     .map(({ plugin }) => plugin)
-    .filter((plugin) => plugin.enabled && plugin.level !== 'theme');
-  const languages = [...new Set(drawers.flatMap((plugin) => fencesOf(plugin.manifest)))].sort();
+    .filter((plugin) => plugin.enabled && plugin.level === 'app');
+  const draws = (plugin: InstalledPlugin, language: string) => {
+    const type = plugin.manifest.fences?.[language];
+    return type !== undefined && blocks.has(blockLanguage(plugin.manifest.id, type));
+  };
+  const languages = [...new Set(drawers.flatMap((plugin) => fencesOf(plugin.manifest)))]
+    .filter((language) => drawers.some((plugin) => draws(plugin, language)))
+    .sort();
   if (languages.length === 0) return null;
   const rows = languages.map((language) => {
-    const claiming = drawers.filter((plugin) => fencesOf(plugin.manifest).includes(language));
+    const claiming = drawers.filter((plugin) => draws(plugin, language));
     // The plugin the runtime draws it with, so a claim whose block never registered isn't named.
     const drawer = blocks.get(language)?.pluginId;
     return {
@@ -633,8 +644,14 @@ function ClaimedFences() {
       setError(null);
       try {
         for (const plugin of own) {
-          if (!plugin.ownParts.includes(part))
-            await pluginStore.setOwnParts(refOf(plugin), [...current(plugin), part]);
+          if (plugin.ownParts.includes(part)) continue;
+          const next = [...current(plugin), part];
+          // What an approval keeps: more would make it unreadable.
+          if (next.length > MAX_OWN_PARTS)
+            throw new Error(
+              `${plugin.manifest.name} already has ${MAX_OWN_PARTS} parts of the app given back.`,
+            );
+          await pluginStore.setOwnParts(refOf(plugin), next);
         }
         if (chosen)
           await pluginStore.setOwnParts(

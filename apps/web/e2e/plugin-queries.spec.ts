@@ -42,7 +42,9 @@ test('a plugin draws a dataview block from the pages it can read', async ({
     await page.goto('/settings/plugins?tab=library');
     await page.getByLabel('Plugin folder').setInputFiles(`${VAULT_TABLES}/dist`);
     const approval = page.getByRole('dialog');
-    await expect(approval).toContainText('It draws dataview code blocks as its own.');
+    await expect(approval).toContainText(
+      'It draws dataview code blocks as its own, on every page you open, whoever wrote them.',
+    );
     // Only me: the library is the server's, and other tests list it.
     await pick(approval.getByRole('button', { name: /^Who sees it/ }), 'Only me');
     await approval.getByRole('button', { name: 'Upload' }).click();
