@@ -3,13 +3,14 @@ import {
   structureRoutes,
   type FolderId,
   type PageId,
+  type RevisionId,
   type RouteDef,
   type SpaceId,
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown, type ApiClient, type CallInput } from '../api/client.ts';
 import { utf8 } from '../encoding.ts';
 import type { ImportFile } from '../import-archive.ts';
-import { newId, PageId as PageIdSchema } from '../ids.ts';
+import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '../ids.ts';
 import {
   importFrom,
   importKeyOf,
@@ -163,16 +164,23 @@ export async function importNotes(
   const folderOfPage = new Map<PageId, FolderId | null>();
   const targets = targetsByFolder(ctx, scope.spaceId, folderOfPage);
   ctx = targets.ctx;
-  // Once more if who may read there changed, asking the server where to write afresh.
-  const again = async <T>(pageId: PageId | null, step: () => Promise<T>): Promise<T> => {
+  // Once more if who may read there changed, asking the server where to
+  // write afresh: `step` is told it is a retry, to trust nothing it kept.
+  const again = async <T>(
+    pageId: PageId | null,
+    step: (retry: boolean) => Promise<T>,
+  ): Promise<T> => {
     try {
-      return await step();
+      return await step(false);
     } catch (error) {
       if (!(error instanceof ApiError && error.code === 'permission-version')) throw error;
       if (pageId !== null) targets.askAbout(pageId);
-      return step();
+      return step(true);
     }
   };
+  // A draft this run just wrote, as it wrote it, from memory.
+  const writtenDraft = (pageId: PageId, revisionId: RevisionId) =>
+    ctx.revisions.get({ spaceId: scope.spaceId, pageId, audience: 'draft', revisionId });
   const generation = ctx.revisions.generation;
   const live = () => {
     if (signal?.aborted || ctx.revisions.generation !== generation) throw stopped();
@@ -270,9 +278,10 @@ export async function importNotes(
           opened.kind !== 'current' ||
           (opened.payload.markdown === '' && opened.payload.attachments.length === 0);
         if (earlier.done) existing++;
-        else placed.push({ note, pageId, draft: earlier.draft, empty });
+        else placed.push({ note, pageId, draft: earlier.draft, empty, written: undefined });
       } else {
         pageId = newId(PageIdSchema);
+        const revisionId = newId(RevisionIdSchema);
         folderOfPage.set(pageId, parentId);
         // A note that names no other note or file reads the same whatever
         // the other pages are, so its page is made with its body at once.
@@ -289,6 +298,7 @@ export async function importNotes(
               markdown,
               extensions: importMark(from, note.key),
               pageId,
+              revisionId,
             }),
           );
         let empty = !whole || note.markdown === '';
@@ -301,7 +311,13 @@ export async function importNotes(
           empty = true;
         }
         live();
-        placed.push({ note, pageId, draft: null, empty });
+        placed.push({
+          note,
+          pageId,
+          draft: null,
+          empty,
+          written: writtenDraft(pageId, revisionId),
+        });
       }
       pageOf.set(note.key, pageId);
     }
@@ -365,8 +381,6 @@ export async function importNotes(
     const heads = listed.get(pageId);
     if (!heads?.draftHead) throw new ApiError(404, 'not-found', 'An imported page is gone');
     let draftHead = heads.draftHead;
-    // Whether this run wrote the draft it publishes: made the page, or saved it.
-    let wrote = draft === null;
     let copies: ReadonlyMap<AttachmentRef['id'], AttachmentRef> | undefined;
     let tooLarge = false;
     if (entry.empty) {
@@ -415,7 +429,7 @@ export async function importNotes(
           }),
         );
         draftHead = written.revisionId;
-        wrote = true;
+        entry.written = writtenDraft(pageId, draftHead);
         unresolvedOf.set(note.key, unresolved);
       } catch (error) {
         // Its links written out, longer than a page holds: left as an empty draft.
@@ -427,22 +441,21 @@ export async function importNotes(
       live();
     }
     if (!tooLarge) {
-      // The draft this run just made or saved is in memory, as it wrote it,
-      // so it isn't fetched again. One an earlier run saved is: its region
-      // as kept may be older than a share made since.
-      const shown = wrote
-        ? ctx.revisions.get({ ...page, audience: 'draft', revisionId: draftHead })
-        : undefined;
+      // The draft this run made or saved is published as it wrote it,
+      // without fetching it. One an earlier run saved is fetched: its region
+      // as kept may be older than a share made since, as on a retry.
+      const { written } = entry;
       const { publishedHead } = heads;
-      const published = await again(pageId, () =>
+      const published = await again(pageId, (retry) =>
         publishPage(ctx, page, {
           tree,
           expected: { draftHead, publishedHead },
-          ...(shown ? { draft: shown } : {}),
+          ...(written && !retry ? { draft: written } : {}),
           ...(copies ? { copies } : {}),
         }),
       );
       heads.publishedHead = published.revisionId;
+      entry.written = undefined;
       summary.pages.push({ path: note.path, pageId, title: titleOf(note) });
     }
     finished++;
@@ -458,9 +471,17 @@ export async function importNotes(
 
 /**
  * A page to publish: made by this run, or left by an earlier one with
- * `draft`. `empty` while its body is still to save.
+ * `draft`. `empty` while its body is still to save. `written` is the draft
+ * this run made or saved, as it wrote it, kept here as the revision cache
+ * may drop it before its turn to publish.
  */
-type Placed = { note: SourceNote; pageId: PageId; draft: OpenedRevision | null; empty: boolean };
+type Placed = {
+  note: SourceNote;
+  pageId: PageId;
+  draft: OpenedRevision | null;
+  empty: boolean;
+  written: OpenedRevision | undefined;
+};
 
 /** A file of the export to attach, by the key its links name it by. */
 type Attaching = { key: string; name: string; mediaType: string; file: ImportFile };
