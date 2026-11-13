@@ -36,7 +36,9 @@ const shortcut = join(
 const LINKS = 'HKCU\\Software\\Classes\\wikistow\\shell\\open\\command';
 const UNINSTALL = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WikiStow';
 const helper = join(folder, 'wikistow-clip-host.exe');
-// The one host manifest a release writes before the Chrome Web Store has an ID.
+// No extension is published yet, so the app's launch adds one, which only
+// Firefox's manifest names.
+const EXTENSION = 'clip-check@wikistow.invalid';
 const FIREFOX_HOST = 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\io.github.skint007.wikistow';
 const manifests = join(env('APPDATA'), 'WikiStow Desktop', 'native-messaging');
 const PORT = 9333;
@@ -56,7 +58,7 @@ function registry(key: string) {
  * path and the extension's ID. Answers its first reply.
  */
 async function askHelper(message: object): Promise<Record<string, unknown>> {
-  const child = spawn(helper, ['manifest.json', 'web-clipper@wikistow.skint007.github.io'], {
+  const child = spawn(helper, ['manifest.json', EXTENSION], {
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const body = Buffer.from(JSON.stringify(message));
@@ -96,7 +98,7 @@ check(registry(LINKS)?.includes(`"${exe}" "%1"`) === true, 'wikistow:// links op
 check(registry(UNINSTALL) !== null, 'Settings > Apps lists the uninstaller');
 check(existsSync(helper), 'the web clipper’s helper is installed beside the app');
 
-const app = spawn(exe, [`--remote-debugging-port=${PORT}`], {
+const app = spawn(exe, [`--remote-debugging-port=${PORT}`, `--clip-extension=${EXTENSION}`], {
   stdio: 'inherit',
 });
 const exited = new Promise<number | null>((resolve) => app.once('exit', resolve));

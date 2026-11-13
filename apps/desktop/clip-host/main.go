@@ -34,9 +34,10 @@ func main() {
 		connect: func(caller string) (appConn, error) {
 			return connectApp(place.hostFile, caller)
 		},
-		launch: place.launch,
-		wait:   appWait,
-		poll:   250 * time.Millisecond,
+		launch:   place.launch,
+		wait:     appWait,
+		poll:     250 * time.Millisecond,
+		relaunch: relaunchAfter,
 	}
 	if err := h.run(); err != nil {
 		fail(err)

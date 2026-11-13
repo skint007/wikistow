@@ -18,15 +18,15 @@ export const HOST_NAMES = {
 } as const;
 
 /**
- * The published extensions. The Chrome Web Store fixes the Chrome ID at the
- * first upload (ADR 0017, step 7), so until then no Chromium browser gets a
- * manifest unless a launch adds an extension (`--clip-extension`). Edge
+ * The published extensions, none yet. The Chrome Web Store fixes the
+ * Chrome ID at the first upload, and a Firefox ID belongs to whoever first
+ * uploads it to Mozilla Add-ons, so naming `web-clipper@wikistow.skint007.github.io`
+ * (ADR 0017) before the project holds it would trust whoever claims it.
+ * Each goes in once its store holds it (step 7). Until then no browser gets
+ * a manifest unless a launch adds an extension (`--clip-extension`). Edge
  * and Brave install from the Chrome Web Store too.
  */
-export const PUBLISHED_EXTENSIONS: Allowed = {
-  chromium: [],
-  firefox: ['web-clipper@wikistow.skint007.github.io'],
-};
+export const PUBLISHED_EXTENSIONS: Allowed = { chromium: [], firefox: [] };
 
 /** The extensions a manifest names: Chrome's exact origins, and Firefox's IDs. */
 export type Allowed = { chromium: string[]; firefox: string[] };

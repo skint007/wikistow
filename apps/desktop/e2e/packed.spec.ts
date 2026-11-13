@@ -66,9 +66,14 @@ test('the Mac app starts', async () => {
 test('the Mac app answers its clipper’s helper', async () => {
   test.skip(!MAC_APP || !process.env['CI'], 'on CI’s macOS job, which has no data to keep');
   const helper = `${MAC_APP}/Contents/MacOS/wikistow-clip-host`;
-  // As Firefox starts it: the manifest's path, then the extension's ID.
-  const firefox = ['manifest.json', 'web-clipper@wikistow.skint007.github.io'];
-  const app = await _electron.launch({ executablePath: `${MAC_APP}/Contents/MacOS/WikiStow` });
+  // As Firefox starts it: the manifest's path, then the extension's ID,
+  // which this launch adds, as no extension is published yet.
+  const id = 'clip-check@wikistow.invalid';
+  const firefox = ['manifest.json', id];
+  const app = await _electron.launch({
+    executablePath: `${MAC_APP}/Contents/MacOS/WikiStow`,
+    args: [`--clip-extension=${id}`],
+  });
   try {
     const page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();

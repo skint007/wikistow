@@ -10,6 +10,11 @@ import (
 // How long `open` waits for the app it started to listen (ADR 0017, decision 1).
 const appWait = 60 * time.Second
 
+// When `open` starts the app again, once, if it isn't listening yet: an app
+// still quitting holds the single-instance lock for a few seconds, and the
+// launch that met it handed over and quit.
+const relaunchAfter = 10 * time.Second
+
 // host is one run of the helper, from the browser's connection to its end.
 type host struct {
 	// The browser's side.
@@ -22,8 +27,9 @@ type host struct {
 	// Start the app outside the browser's reach; nil when this copy can't,
 	// as a development build, which has no launcher, can't.
 	launch func() error
-	// How long to wait for a started app, and how often to look.
-	wait, poll time.Duration
+	// How long to wait for a started app, how often to look, and when to
+	// start it again.
+	wait, poll, relaunch time.Duration
 }
 
 // run relays until either side goes. The browser closing its end is the
@@ -98,8 +104,12 @@ func (h *host) start(open envelope, frame []byte, frames <-chan []byte) (appConn
 	defer deadline.Stop()
 	tick := time.NewTicker(h.poll)
 	defer tick.Stop()
+	again := time.NewTimer(h.relaunch)
+	defer again.Stop()
 	for {
 		select {
+		case <-again.C:
+			_ = h.launch()
 		case next, ok := <-frames:
 			if !ok {
 				return nil, nil, nil

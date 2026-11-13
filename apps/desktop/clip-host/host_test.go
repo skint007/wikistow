@@ -128,13 +128,14 @@ func runHost(t *testing.T, app *fakeApp, launch func() error, wait time.Duration
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	h := &host{
-		in:      inR,
-		out:     outW,
-		caller:  "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
-		connect: func(caller string) (appConn, error) { return connectApp(app.hostFile, caller) },
-		launch:  launch,
-		wait:    wait,
-		poll:    20 * time.Millisecond,
+		in:       inR,
+		out:      outW,
+		caller:   "chrome-extension://abcdefghijklmnopabcdefghijklmnop/",
+		connect:  func(caller string) (appConn, error) { return connectApp(app.hostFile, caller) },
+		launch:   launch,
+		wait:     wait,
+		poll:     20 * time.Millisecond,
+		relaunch: wait / 2,
 	}
 	b := &browser{t: t, in: inW, out: outR, done: make(chan error, 1)}
 	go func() {
@@ -314,6 +315,29 @@ func TestOpenStartsTheApp(t *testing.T) {
 		t.Fatalf("got %v then %v", first, second)
 	}
 	if started != 1 {
+		t.Fatalf("started %d times", started)
+	}
+}
+
+// An app still quitting swallows the first launch, which hands over to it.
+func TestOpenStartsTheAppAgainOnce(t *testing.T) {
+	app := newFakeApp(t, echo)
+	started := 0
+	b := runHost(t, app, func() error {
+		started++
+		if started == 2 {
+			app.listen()
+		}
+		return nil
+	}, 400*time.Millisecond)
+	b.send(map[string]any{"v": 1, "id": "a", "type": "open"})
+	if got := b.receive(); got["app"] != "starting" {
+		t.Fatalf("got %v", got)
+	}
+	if got := b.receive(); got["type"] != "echo" {
+		t.Fatalf("got %v", got)
+	}
+	if started != 2 {
 		t.Fatalf("started %d times", started)
 	}
 }
