@@ -1,5 +1,5 @@
 {
-  "id": "e0e472bb-9ac7-44e4-b19e-bd2d1a1adb33",
+  "id": "6870b335-d543-4e44-bf05-6042dd55c44b",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5114,6 +5114,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starter_account_id": {
+          "name": "starter_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5122,8 +5134,66 @@
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "live_session_ids_space_idx": {
+          "name": "live_session_ids_space_idx",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "live_session_ids_starter_account_idx": {
+          "name": "live_session_ids_starter_account_idx",
+          "columns": [
+            {
+              "expression": "starter_account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "live_session_ids_space_id_spaces_id_fk": {
+          "name": "live_session_ids_space_id_spaces_id_fk",
+          "tableFrom": "live_session_ids",
+          "tableTo": "spaces",
+          "columnsFrom": [
+            "space_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "live_session_ids_starter_account_id_users_id_fk": {
+          "name": "live_session_ids_starter_account_id_users_id_fk",
+          "tableFrom": "live_session_ids",
+          "tableTo": "users",
+          "columnsFrom": [
+            "starter_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "live_session_ids_versionId_unique": {

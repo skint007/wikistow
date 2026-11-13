@@ -57,6 +57,8 @@ CREATE TABLE "live_messages" (
 CREATE TABLE "live_session_ids" (
 	"id" text PRIMARY KEY NOT NULL,
 	"version_id" text NOT NULL,
+	"space_id" text NOT NULL,
+	"starter_account_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "live_session_ids_versionId_unique" UNIQUE("version_id")
 );
@@ -103,6 +105,8 @@ ALTER TABLE "live_joins" ADD CONSTRAINT "live_joins_session_id_live_sessions_id_
 ALTER TABLE "live_joins" ADD CONSTRAINT "live_joins_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_messages" ADD CONSTRAINT "live_messages_session_id_live_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."live_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_messages" ADD CONSTRAINT "live_messages_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_space_id_spaces_id_fk" FOREIGN KEY ("space_id") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_page_id_nodes_id_fk" FOREIGN KEY ("page_id") REFERENCES "public"."nodes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_wraps" ADD CONSTRAINT "live_wraps_session_id_live_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."live_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -112,6 +116,8 @@ CREATE INDEX "live_joins_account_idx" ON "live_joins" USING btree ("account_id")
 CREATE UNIQUE INDEX "live_messages_seq_idx" ON "live_messages" USING btree ("session_id","identity_id","join_id","seq");--> statement-breakpoint
 CREATE INDEX "live_messages_account_idx" ON "live_messages" USING btree ("account_id");--> statement-breakpoint
 CREATE INDEX "live_messages_revision_idx" ON "live_messages" USING btree ("revision_id") WHERE "live_messages"."revision_id" is not null;--> statement-breakpoint
+CREATE INDEX "live_session_ids_space_idx" ON "live_session_ids" USING btree ("space_id");--> statement-breakpoint
+CREATE INDEX "live_session_ids_starter_account_idx" ON "live_session_ids" USING btree ("starter_account_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "live_sessions_open_page_idx" ON "live_sessions" USING btree ("page_id") WHERE "live_sessions"."ended_at" is null;--> statement-breakpoint
 CREATE INDEX "live_sessions_page_idx" ON "live_sessions" USING btree ("page_id");--> statement-breakpoint
 CREATE INDEX "live_sessions_revision_idx" ON "live_sessions" USING btree ("revision_id");--> statement-breakpoint

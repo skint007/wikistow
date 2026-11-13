@@ -22,6 +22,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
+import { LIVE_ID_BYTES } from '../db/schema/live.ts';
 import {
   appRateLimits,
   commentVersions,
@@ -445,6 +446,12 @@ async function takeGrant(
  */
 const SERVED_MESSAGE_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Grants a fetch or a stream's read lists at most, the latest: one is
+ * given only for the draft head, so older ones are of drafts long folded.
+ */
+const GRANTS_SERVED = 64;
+
 async function servedSession(
   tx: Database,
   session: SessionRow,
@@ -554,14 +561,16 @@ async function servedSession(
   let position = taken.at(-1) ?? base;
   let complete = taken.length === sizes.length;
   if (complete) position = base;
+  // Sizes first, then only the bodies that fit, so a fetch holds what it serves.
   for (let after = base; complete;) {
     const batch = await tx
-      .select()
+      .select({ position: liveMessages.position, size: liveMessages.size })
       .from(liveMessages)
       .where(and(eq(liveMessages.sessionId, session.id), gt(liveMessages.position, after)))
       .orderBy(asc(liveMessages.position))
       .limit(200);
     if (batch.length === 0) break;
+    const wanted: number[] = [];
     for (const message of batch) {
       after = message.position;
       if (pinned.includes(message.position)) {
@@ -574,9 +583,18 @@ async function servedSession(
       }
       budget.left -= message.size;
       served++;
-      const one = servedMessage(message, report);
-      if (one) messages.push(one);
+      wanted.push(message.position);
       position = message.position;
+    }
+    if (wanted.length === 0) continue;
+    const bodies = await tx
+      .select()
+      .from(liveMessages)
+      .where(and(eq(liveMessages.sessionId, session.id), inArray(liveMessages.position, wanted)))
+      .orderBy(asc(liveMessages.position));
+    for (const body of bodies) {
+      const one = servedMessage(body, report);
+      if (one) messages.push(one);
     }
   }
   if (complete) position = session.lastPosition;
@@ -594,7 +612,9 @@ async function servedSession(
         ),
       ),
     )
-    .orderBy(asc(liveGrants.id));
+    .orderBy(desc(liveGrants.id))
+    .limit(GRANTS_SERVED);
+  grants.reverse();
   return {
     sessionId: session.id as liveRoutes.ServedSession['sessionId'],
     record,
@@ -665,7 +685,10 @@ export async function getLive(
     const open = openRow ? await servedSession(tx, openRow, at) : null;
     let ended: liveRoutes.ServedSession | null = null;
     for (const session of endedRows) {
-      if (presentSet(await joinsOf(tx, session.id), now).size > 0) continue;
+      // Its joins have left; a catch-up join of someone fetching it again doesn't count.
+      const joins = await joinsOf(tx, session.id);
+      const present = presentSet(joins, now);
+      if (joins.some((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId)))) continue;
       // Once nobody's keys count for it, it is about to go, and nobody can catch up from it.
       if (!(await keysCount(tx, session))) continue;
       ended = await servedSession(tx, session, at);
@@ -790,10 +813,15 @@ export async function startLive(db: Database, input: StartLive) {
       .from(liveSessions)
       .where(and(eq(liveSessions.pageId, page.id), isNull(liveSessions.endedAt)));
     if (open) throw new ContentError('duplicate', 'The page has an open session');
-    await chargeStored(tx, caller, size + payload.ciphertext.length, input, { stored: false });
-    await tx
-      .insert(liveSessionIds)
-      .values({ id: input.sessionId, versionId: record.metadataRevisionId });
+    await chargeStored(tx, caller, size + payload.ciphertext.length + LIVE_ID_BYTES, input, {
+      stored: false,
+    });
+    await tx.insert(liveSessionIds).values({
+      id: input.sessionId,
+      versionId: record.metadataRevisionId,
+      spaceId: page.spaceId,
+      starterAccountId: caller.accountId,
+    });
     await tx.insert(liveSessions).values({
       id: input.sessionId,
       spaceId: page.spaceId,
@@ -886,7 +914,12 @@ async function sameStart(tx: Database, taken: SessionRow, input: StartLive, call
 
 /** What opening the stream answers: the session ended, or the join made or resumed. */
 export type Joined =
-  | { ended: liveRoutes.EndReason; draftHead: string | null }
+  | {
+      ended: liveRoutes.EndReason;
+      draftHead: string | null;
+      /** What an ended session keeps after `after`, to read and then close. */
+      lastPosition: number;
+    }
   | {
       ended: null;
       pageId: string;
@@ -907,7 +940,8 @@ export type Joined =
  * has no stream. `after` past the last position is `invalid-request`, and
  * below what the latest later snapshot covers, whose messages are gone,
  * `stale-head`, but with `kept`, for a newcomer still fetching what that
- * snapshot kept. An ended session makes no join. Each stream gets a token
+ * snapshot kept. An ended session makes no join: its stream serves what
+ * it keeps after `after`, then the end. Each stream gets a token
  * of its own, so a stream that broke marks its join only while it is the
  * join's latest.
  */
@@ -920,9 +954,6 @@ export async function joinLive(
       lock: true,
     });
     const heads = await headsOf(tx, page.id);
-    if (session.endedReason !== null) {
-      return { ended: session.endedReason, draftHead: heads.draftHead };
-    }
     if (input.after > session.lastPosition) {
       throw new ContentError('invalid-request', 'That position is past the session’s last');
     }
@@ -931,6 +962,14 @@ export async function joinLive(
         draftHead: heads.draftHead,
         publishedHead: heads.publishedHead,
       });
+    }
+    // An ended one is read, not joined: what it keeps, then its end.
+    if (session.endedReason !== null) {
+      return {
+        ended: session.endedReason,
+        draftHead: heads.draftHead,
+        lastPosition: session.lastPosition,
+      };
     }
     const now = await dbNow(tx);
     const token = randomUUID();
@@ -1306,6 +1345,18 @@ export async function sendLive(db: Database, input: SendLive) {
     const { join, joins, made } = catchingUp
       ? await catchUpJoin(tx, ctx, input.joinId, now)
       : await joinFor(tx, ctx, input, now);
+    // Only the catch-up grant's holder sends the `saved` that lets the session go.
+    if (catchingUp && input.messages.length > 0) {
+      const heads = await headsOf(tx, page.id);
+      const taken = await takeGrant(tx, session, session.id, join, { joins, now, heads });
+      if (
+        taken.lapsed ||
+        taken.grant.identityId !== join.identityId ||
+        taken.grant.joinId !== join.joinId
+      ) {
+        throw new ContentError('forbidden', 'Another join is catching up from this session');
+      }
+    }
     const relay: Relay = {
       sessionId: session.id,
       pageId: page.id,
@@ -1320,6 +1371,11 @@ export async function sendLive(db: Database, input: SendLive) {
     const positions: (number | null)[] = [];
     const updates: number[] = [];
     const resent: number[] = [];
+    // The seq a presence in this request carries: the last stored before
+    // it, which for a request sent again is below what the join has stored.
+    const firstStored = input.messages.find((m) => m.message.kind !== 'presence')?.message.seq;
+    let reached =
+      firstStored !== undefined && firstStored <= join.lastSeq ? firstStored - 1 : join.lastSeq;
     let savedAt: number | null = null;
     let bytes = 0;
     for (const { message, covers } of input.messages) {
@@ -1343,7 +1399,7 @@ export async function sendLive(db: Database, input: SendLive) {
         if (join.parentJoinId !== null) {
           throw new ContentError('invalid-request', 'A further join keeps no presence');
         }
-        if (message.seq !== join.lastSeq) {
+        if (message.seq !== reached) {
           throw new ContentError('invalid-request', 'A presence carries its join’s last seq');
         }
         if (relay.sent.some((item) => 'presence' in item)) {
@@ -1362,6 +1418,7 @@ export async function sendLive(db: Database, input: SendLive) {
         revisionId: null,
         size,
       });
+      reached = message.seq;
       positions.push(stored.position);
       if (!stored.row) {
         if (message.kind === 'update' && stored.position !== null) resent.push(stored.position);
@@ -1680,8 +1737,10 @@ export async function liveState(db: Database, sessionId: string) {
               sql`${liveGrants.givenAfter} >= ${session.snapshotCovers ?? 0}`,
             ),
           )
-          .orderBy(asc(liveGrants.id))
+          .orderBy(desc(liveGrants.id))
+          .limit(GRANTS_SERVED)
       : [];
+    grants.reverse();
     return {
       ended: session.endedReason,
       pageId: session.pageId,

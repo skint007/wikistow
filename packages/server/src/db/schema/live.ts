@@ -16,7 +16,7 @@ import {
 import { timestamptz } from './helpers.ts';
 import { identities } from './identities.ts';
 import { shares } from './shares.ts';
-import { nodes } from './spaces.ts';
+import { nodes, spaces } from './spaces.ts';
 import { users } from './users.ts';
 
 const position = () => bigint({ mode: 'number' });
@@ -88,16 +88,31 @@ export const liveSessions = pgTable(
 );
 
 /**
- * Every session ID and record version ID ever taken, kept when the session
- * goes, so the server keeps session IDs unique across the installation and
- * no later metadata, comment or session version takes a session's version
- * ID (protocol section 5.10). A few bytes a session.
+ * Every session ID and record version ID taken, kept when the session goes,
+ * so the server keeps session IDs unique across the installation and no
+ * later metadata, comment or session version takes a session's version ID
+ * (protocol section 5.10). It goes with its space or its starter's account,
+ * and counts toward the starter's storage (`LIVE_ID_BYTES` a row).
  */
-export const liveSessionIds = pgTable('live_session_ids', {
-  id: text().primaryKey(),
-  versionId: text().notNull().unique(),
-  createdAt: timestamptz().notNull().defaultNow(),
-});
+export const liveSessionIds = pgTable(
+  'live_session_ids',
+  {
+    id: text().primaryKey(),
+    versionId: text().notNull().unique(),
+    spaceId: text()
+      .notNull()
+      .references(() => spaces.id, { onDelete: 'cascade' }),
+    starterAccountId: uuid().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [
+    index('live_session_ids_space_idx').on(table.spaceId),
+    index('live_session_ids_starter_account_idx').on(table.starterAccountId),
+  ],
+);
+
+/** What one used session ID counts toward its starter's storage, about what its row takes. */
+export const LIVE_ID_BYTES = 256;
 
 /**
  * A session's key wrap in a share (section 5.10, **The session record**),

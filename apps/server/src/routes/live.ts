@@ -215,7 +215,9 @@ export function mountLiveRoutes(
 
   // A session read again, after any read of it already going.
   function refresh(sessionId: string): Promise<void> {
+    // A read that failed doesn't stop the one queued behind it.
     const next = (reading.get(sessionId) ?? Promise.resolve())
+      .catch(() => {})
       .then(() => readAgain(sessionId))
       .finally(() => {
         if (reading.get(sessionId) === next) reading.delete(sessionId);
@@ -268,14 +270,15 @@ export function mountLiveRoutes(
   // People whose sign-in ended, or who can no longer edit the page, stop
   // hearing at once, with nothing queued sent.
   async function checkAccess() {
-    for (const [sessionId, session] of followed) {
-      for (const stream of session.streams) {
+    const checks = [...followed].flatMap(([sessionId, session]) =>
+      [...session.streams].map(async (stream) => {
         const signedIn = await stillSignedIn(stream.authSessionId);
         if (!signedIn || !(await canStillEdit(db, humanActor(stream.accountId), sessionId))) {
           close(stream, null, { drop: true });
         }
-      }
-    }
+      }),
+    );
+    await Promise.all(checks);
   }
 
   async function stillSignedIn(authSessionId: string) {
@@ -311,7 +314,8 @@ export function mountLiveRoutes(
   };
   const timers = [
     every(TICK_MS, async () => {
-      for (const sessionId of [...followed.keys()]) await refresh(sessionId);
+      // One session failing to read doesn't stop the others.
+      for (const sessionId of [...followed.keys()]) await refresh(sessionId).catch(failed);
     }),
     every(ACCESS_MS, checkAccess),
   ];
@@ -360,6 +364,8 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.getLive,
     async ({ params }, { actor }) => {
+      // Agents are refused before they take any of their person's fetches.
+      if (actor.agentId !== null) throw new ApiError('not-found', 'Not found');
       if ((fetching.get(actor.accountId) ?? 0) >= MAX_FETCHES_PER_ACCOUNT) {
         throw new ApiError('rate-limited', 'Fetching sessions already; try again shortly');
       }
@@ -469,9 +475,15 @@ export function mountLiveRoutes(
     async (_body, { c, principal, signal, input, stop }) => {
       const { sessionId } = input.params;
       const { joinId, after, kept } = input.query;
-      // A GET that joins: never from another site, as a navigation would be.
+      // A GET that joins: never from another site, nor a navigation, which
+      // asks for a page and can't ask for this stream's lines.
       const site = c.req.header('sec-fetch-site');
-      if (site !== undefined && site !== 'same-origin' && site !== 'none') {
+      const accept = c.req.header('accept') ?? '';
+      if (
+        (site !== undefined && site !== 'same-origin' && site !== 'none') ||
+        c.req.header('sec-fetch-mode') === 'navigate' ||
+        accept.includes('text/html')
+      ) {
         throw new ApiError('forbidden', 'Cross-origin request refused');
       }
       const account = principal.accountId;
@@ -503,10 +515,23 @@ export function mountLiveRoutes(
       }
       const draftHead = joined.draftHead as Line['draftHead'];
       if (joined.ended !== null) {
-        release();
+        // Read, not joined: what it keeps after `after`, then the end.
         const reason = joined.ended;
+        const upTo = joined.lastPosition;
         return (async function* () {
-          yield { ended: reason, draftHead } satisfies Line;
+          try {
+            for (let sent = after; sent < upTo && !signal.aborted;) {
+              const { messages } = await storedAfter(db, sessionId, sent, { upTo });
+              if (messages.length === 0) break;
+              for (const message of messages) {
+                sent = message.position;
+                yield { message, draftHead } satisfies Line;
+              }
+            }
+            yield { ended: reason, draftHead } satisfies Line;
+          } finally {
+            release();
+          }
         })();
       }
       let session = followed.get(sessionId);

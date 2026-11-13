@@ -617,6 +617,17 @@ describe('messages', () => {
     expect(rest.map((m) => m.position)).toEqual([7]);
   });
 
+  it('takes a request with a presence before its stored messages sent again unchanged', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const request = [me.message('presence'), me.message('update')];
+    const first = await me.send(request);
+    expect(first.positions).toEqual([null, 2]);
+    expect(await me.send(request)).toEqual(first);
+  });
+
   it('takes one presence a request, and opens no stream from another site', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
@@ -630,6 +641,12 @@ describe('messages', () => {
       { headers: { 'sec-fetch-site': 'cross-site' } },
     );
     expect(response.status).toBe(403);
+    // Nor by a navigation, which asks for a page.
+    const navigated = await editor.browser.request(
+      `/api/live/${session.sessionId}/stream?after=1&joinId=${newId(JoinId)}`,
+      { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } },
+    );
+    expect(navigated.status).toBe(403);
     expect((await liveOf(editor, lib.page.pageId)).open?.joins).toHaveLength(1);
   });
 
@@ -653,7 +670,7 @@ describe('messages', () => {
     expect(await streamRefusal(owner, c, newId(JoinId), 1)).toBe('rate-limited');
   });
 
-  it('opens no stream past the last position, nor from below what a snapshot covered', async () => {
+  it('opens no stream past the last position', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
     expect(await streamRefusal(editor, session, newId(JoinId), 5)).toBe('invalid-request');
@@ -698,9 +715,16 @@ describe('ending', () => {
     expect(await stays.send([{ message: saved, covers: 2 }])).toMatchObject({ positions: [3] });
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
-    // A stream opened now sends the end and makes no join.
+    // A stream opened now sends what the session keeps, then the end, and makes no join.
+    const joinsBefore = (await liveOf(other, lib.page.pageId)).ended?.joins.length;
     const late = await stream(other, session, newId(JoinId), 0);
-    expect(await late.next()).toMatchObject({ ended: 'access' });
+    const kept = [];
+    for (let line = await late.next(); !('ended' in line); line = await late.next()) {
+      if ('message' in line) kept.push(line.message.position);
+    }
+    expect(kept).toEqual([1, 2, 3]);
+    await late.closed();
+    expect((await liveOf(other, lib.page.pageId)).ended?.joins.length).toBe(joinsBefore);
   });
 
   it('ends at any change of access to the page, a member added included', async () => {
@@ -832,8 +856,15 @@ describe('deleting a session', () => {
       lapsed: false,
       position: null,
     });
-    // Nobody else takes it while it holds, but once it lapses, another may.
+    // Nobody else takes it while it holds, nor sends the saved that lets the session go,
+    // but once it lapses, another may.
     const rival = typist(editor, session);
+    expect(
+      await rejection(
+        rival.send([{ message: rival.message('saved'), covers: 2 }], { fold: session.sessionId }),
+      ),
+    ).toBe('forbidden');
+    expect(await sessionRow(session.sessionId)).toBeDefined();
     expect((await rival.send([], { fold: session.sessionId })).grant?.holder.joinId).toBe(
       catcher.joinId,
     );

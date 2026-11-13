@@ -250,8 +250,10 @@ export type StreamLine = z.infer<typeof StreamLine>;
  * to fetch the rest of what it kept (`ServedSession.complete`). A stream
  * that a newer snapshot leaves short of messages closes, as one too slow
  * to read does; the app opens it again from where it got. A stream opened
- * from another site is `forbidden`. An ended session's stream sends
- * `ended` and closes, making no join.
+ * from another site, or as a navigation (`Accept` naming `text/html`), is
+ * `forbidden`. An ended session's stream makes no join: it sends what the
+ * session keeps after `after`, as a fetch cut short leaves to it, then
+ * `ended`, and closes.
  */
 export const stream = {
   method: 'GET',
@@ -289,13 +291,15 @@ export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.
  * `rate-limited` (16 MiB of stored messages a minute per person) or
  * `storage-full`. An ended session takes only `saved` (`forbidden`).
  *
- * `fold` asks for the fold grant of the outsider's revision `fold`, which
- * must be the draft head; the grant goes to the main join (`joinId`, or
- * its `parent`). A request naming `fold` from a further join of the
- * grant's holder places the grant: its one `update` is the grant's. In an
+ * `fold`, from a main join, asks for the fold grant of the outsider's
+ * revision `fold`, which must be the draft head (`stale-head`), for that
+ * join. From a further join of the grant's holder it places the grant:
+ * the request's one `update` is the grant's; from any other further join
+ * it is `forbidden`. In an
  * ended session every join of which has left, `fold` is the session's own
  * ID and asks to catch up from it: `joinId` becomes the caller's join for
- * that, whose `saved` then lets the server delete the session. A
+ * that, whose `saved` then lets the server delete the session; a `saved`
+ * from a catch-up join that doesn't hold the grant is `forbidden`. A
  * catch-up's grant lasts 10 minutes unplaced.
  * `grant` is that revision's grant as it stands, someone else's included.
  */
