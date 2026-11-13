@@ -164,12 +164,15 @@ export function byBlock({
     tail++;
   const end = page.length - tail;
   if (text.length - tail - start >= BLOCK_TIMED) return null;
-  // The runs it touches, and one each side: or the two around it, if it's
-  // only in the text between them.
+  // The runs it touches, and one each side. A change starting in the text
+  // between two runs may go on the one before, as a line added to it does,
+  // and one ending there may start the one after: each counts as touched.
   const touched = runs.findIndex((run) => run.to >= start);
-  const lo = touched < 0 ? runs.length : touched;
-  const hi = runs.findLastIndex((run) => run.from <= end);
-  const [a, b] = [Math.max(0, lo - 1), Math.min(last, hi + 1)];
+  const between = (at: number) => !runs.some((run) => run.from <= at && at <= run.to);
+  const lo = (touched < 0 ? runs.length : touched) - (between(start) ? 1 : 0);
+  const reached = runs.findLastIndex((run) => run.from <= end);
+  const hi = reached + (between(end) && reached < last ? 1 : 0);
+  const [a, b] = [Math.max(0, lo - 1), Math.min(last, Math.max(hi, lo) + 1)];
   const [before, after] = [runs[a], runs[b]];
   if (!before || !after) return null;
   // From the page's start, or its end, if no run is beside it there.

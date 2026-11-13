@@ -350,6 +350,42 @@ describe('text taken in by block', () => {
     expect(taken).toBeGreaterThan(edits * 0.5);
   });
 
+  it('takes a line added at a block’s end in by block, as a new item, row or line', async () => {
+    for (const lineBreak of ['\n', '\r\n']) {
+      const lines = (...all: string[]) => all.join(lineBreak);
+      const page = lines(
+        'Intro.',
+        '',
+        '* one',
+        '* two',
+        '',
+        'Para line',
+        '',
+        '| a | b |',
+        '| - | - |',
+        '| 1 | 2 |',
+        '',
+        '> quote',
+        '',
+        'End.',
+        '',
+      );
+      for (const next of [
+        page.replace(`* two`, lines('* two', '* t')),
+        page.replace('Para line', lines('Para line', 'more')),
+        page.replace('| 1 | 2 |', lines('| 1 | 2 |', '| 3 | 4 |')),
+        page.replace('> quote', lines('> quote', '> more')),
+        page.replace('Intro.', lines('Before', '', 'Intro.')),
+      ]) {
+        const m = await mount(page);
+        expect(m.handle.take?.(next), JSON.stringify(next)).toBe(true);
+        expect(m.handle.read()).toBe(next);
+        expect(await showsAsRead(m, next), JSON.stringify(next)).toBe(true);
+        m.unmount();
+      }
+    }
+  });
+
   it('reads the page whole where a change reaches past its block', async () => {
     const page = 'One[^a].\n\n- a\n\nTwo.\n\nThree.\n\n[^a]: Note.\n\nFour.\n';
     for (const next of [

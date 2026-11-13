@@ -161,10 +161,12 @@ export function PageEditor({
     whole: boolean;
   } | null>(null);
   const wholeAt = useRef(-Infinity);
-  // Whether a whole read is under way; each text going in is numbered in
+  // Whether a whole read is under way, and the person turned to the visual
+  // side meanwhile; each text going in is numbered in
   // turn, and the last shown, so an older one read whole doesn't go in
   // over it.
   const reading = useRef(false);
+  const hurried = useRef(false);
   const texts = useRef(0);
   const lastShown = useRef(0);
   // In split, the side the person was in last, where Insert in page puts its code.
@@ -283,7 +285,7 @@ export function PageEditor({
    * on taking none, saying why, until the source's text is one it would,
    * and typing goes on in the source.
    */
-  const syncVisual = (text: string, wait: number) => {
+  const syncVisual = (text: string, wait: number, now = false) => {
     given.current = text;
     // Already on its way, it takes the newest text when it goes; but one
     // waiting to be read whole tries a block at a time first, again.
@@ -306,8 +308,12 @@ export function PageEditor({
         given.current = null;
         return settle();
       }
-      // One whole read at a time: the one under way goes on to the newest.
-      if (reading.current) return;
+      // One whole read at a time: the one under way goes on to the newest,
+      // at once if the person turned to it meanwhile.
+      if (reading.current) {
+        hurried.current ||= now;
+        return;
+      }
       const due = wholeAt.current - performance.now();
       if (!now && due > 0) {
         syncing.current = {
@@ -343,11 +349,13 @@ export function PageEditor({
             if (focus) mirror.current?.focus(focus.at);
           }
         }
-        if (given.current !== null && given.current !== text) syncVisual(given.current, 0);
+        const hurry = hurried.current;
+        hurried.current = false;
+        if (given.current !== null && given.current !== text) syncVisual(given.current, 0, hurry);
       });
     };
     syncing.current = {
-      timer: setTimeout(() => run(false), wait),
+      timer: setTimeout(() => run(now), wait),
       run: () => run(true),
       whole: false,
     };
@@ -359,7 +367,7 @@ export function PageEditor({
    */
   const syncNow = () => {
     const waiting = syncing.current;
-    if (!waiting) return;
+    if (!waiting) return void (hurried.current ||= reading.current);
     clearTimeout(waiting.timer);
     waiting.run();
   };
