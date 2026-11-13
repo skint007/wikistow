@@ -1,5 +1,5 @@
 {
-  "id": "06dee3ed-5998-47e7-a72b-52ded666a049",
+  "id": "199429cd-aa13-40b4-a567-3094e1efe585",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5305,6 +5305,19 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "kept_at": {
+          "name": "kept_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "keys_lost": {
+          "name": "keys_lost",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

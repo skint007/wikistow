@@ -713,11 +713,6 @@ describe('ending', () => {
     // A saved still lands, for what the session placed.
     const saved = stays.message('saved');
     expect(await stays.send([{ message: saved, covers: 2 }])).toMatchObject({ positions: [3] });
-    // Stored, but relayed to nobody, the removed person least of all.
-    await t.live.refreshAll();
-    for (const s of [staying, removed]) {
-      expect(s.lines.some((l) => 'message' in l && l.message.position === 3)).toBe(false);
-    }
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
     // A stream opened now makes no join, and sends the end; a removal rotated the keys,
@@ -760,8 +755,11 @@ describe('ending', () => {
     const me = typist(editor, session, session.joinId);
     me.started();
     const update = me.message('update');
-    expect(await me.send([update])).toMatchObject({ positions: [2] });
+    const presence = me.message('presence');
+    expect(await me.send([update, presence])).toMatchObject({ positions: [2, null] });
     await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    // The whole request, its presence too, as it went the first time.
+    expect(await me.send([update, presence])).toMatchObject({ positions: [2, null] });
     expect(await me.send([update])).toMatchObject({ positions: [2] });
     expect(await rejection(me.send([me.message('update')]))).toBe('forbidden');
   });

@@ -34,7 +34,22 @@ const total = async (query: Promise<{ bytes: string }[]>) => Number((await query
  * The sums run one after another: in a transaction they share a connection.
  */
 export async function usedBytes(db: Database, accountId: string): Promise<number> {
-  const sum = (column: unknown) => sql<string>`coalesce(sum(${column}), 0)`;
+  return (await usedBesidesLive(db, accountId)) + (await liveBytes(db, accountId));
+}
+
+const sum = (column: unknown) => sql<string>`coalesce(sum(${column}), 0)`;
+
+/** An account's live sessions' storage, from `live_usage`: one index range. */
+const liveBytes = (db: Database, accountId: string) =>
+  total(
+    db
+      .select({ bytes: sum(liveUsage.bytes) })
+      .from(liveUsage)
+      .where(eq(liveUsage.accountId, accountId)),
+  );
+
+/** Everything `usedBytes` counts but live sessions. */
+async function usedBesidesLive(db: Database, accountId: string): Promise<number> {
   const parts = [
     await total(
       db
@@ -70,12 +85,6 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
     ),
     await total(
       db
-        .select({ bytes: sum(liveUsage.bytes) })
-        .from(liveUsage)
-        .where(eq(liveUsage.accountId, accountId)),
-    ),
-    await total(
-      db
         .select({ bytes: sum(contactsRecords.size) })
         .from(contactsRecords)
         .where(eq(contactsRecords.accountId, accountId)),
@@ -89,6 +98,39 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
     ),
   ];
   return parts.reduce((a, b) => a + b, 0);
+}
+
+/** How long a live write takes the rest of an account's storage as last summed. */
+const BESIDES_LIVE_MS = 60_000;
+const besidesLive = new Map<string, { bytes: number; at: number }>();
+
+/**
+ * `charge` for live sessions' writes, which come many a second from one
+ * person under a lock the whole session shares: their own storage exactly,
+ * from `live_usage`, and the rest of the account's as summed at most a
+ * minute ago. Other writes are charged exactly, so the rest can only have
+ * grown by what those let in meanwhile.
+ */
+export async function chargeLive(
+  tx: Database,
+  accountId: string,
+  bytes: number,
+  storageBytes: number,
+) {
+  await lockQuota(tx, accountId);
+  const now = Date.now();
+  let rest = besidesLive.get(accountId);
+  if (!rest || rest.at + BESIDES_LIVE_MS <= now) {
+    rest = { bytes: await usedBesidesLive(tx, accountId), at: now };
+    besidesLive.set(accountId, rest);
+    // Kept small: only accounts that wrote within the last minute stay.
+    for (const [id, entry] of besidesLive) {
+      if (entry.at + BESIDES_LIVE_MS <= now) besidesLive.delete(id);
+    }
+  }
+  if (rest.bytes + (await liveBytes(tx, accountId)) + bytes > storageBytes) {
+    throw new ContentError('storage-full', 'Your storage is full');
+  }
 }
 
 /** Refuse a write of `bytes` that would take the account over its storage. */

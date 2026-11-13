@@ -71,6 +71,17 @@ export const liveSessions = pgTable(
     createdAt: timestamptz().notNull().defaultNow(),
     endedAt: timestamptz(),
     endedReason: text({ enum: ['access', 'ended'] }),
+    /**
+     * When the sweep last chose to keep it, ended, so it reads it again
+     * only now and then; cleared when a `saved` lands in it.
+     */
+    keptAt: timestamptz(),
+    /**
+     * Its keys stopped counting once (a rotation, a move to another region,
+     * its share's ending): it is served to nobody again, even if the page
+     * comes back, and goes once its joins have left.
+     */
+    keysLost: boolean().notNull().default(false),
   },
   (table) => [
     check('live_sessions_id_shape', sql`${table.id} ~ '^[A-Za-z0-9_-]{1,64}$'`),

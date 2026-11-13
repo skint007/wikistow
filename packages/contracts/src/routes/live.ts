@@ -242,7 +242,8 @@ export type StreamLine = z.infer<typeof StreamLine>;
  * The session's stream, in NDJSON. Opening it joins the session as
  * `joinId`: a new join, or one of the caller's still present, which it
  * resumes; a join of the caller's that has gone, or a further join, is
- * `not-found`, and a person's ninth present join `rate-limited`, as is a
+ * `not-found`, a new join past the person's storage `storage-full`, and a
+ * person's ninth present join `rate-limited`, as is a
  * join past `MAX_JOINS_MADE_PER_PERSON` or `MAX_JOINS_PER_SESSION`, or a
  * person's stream past the server's limit of open streams. `after` is
  * the position the app holds; if messages after it have since gone with

@@ -83,6 +83,8 @@ CREATE TABLE "live_sessions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ended_at" timestamp with time zone,
 	"ended_reason" text,
+	"kept_at" timestamp with time zone,
+	"keys_lost" boolean DEFAULT false NOT NULL,
 	CONSTRAINT "live_sessions_versionId_unique" UNIQUE("version_id"),
 	CONSTRAINT "live_sessions_id_shape" CHECK ("live_sessions"."id" ~ '^[A-Za-z0-9_-]{1,64}$'),
 	CONSTRAINT "live_sessions_version_id_shape" CHECK ("live_sessions"."version_id" ~ '^[A-Za-z0-9_-]{1,64}$'),
