@@ -249,26 +249,25 @@ describe('what changed in the index', () => {
     const untimed = new searchOperations.PageIndex();
     // As a change typed on this device over the version, waiting to be sent.
     untimed.addText(doc, { title: 'Garlic bread, typed here', text: 'typed', properties: [] });
-    const timed = untimed.with([[doc, { title: 'Garlic bread', text: '', updated: SAVED }]]);
+    const timed = untimed.with([[doc, { updated: SAVED }]]);
     expect(timed.page(spaceId, doc.pageId)).toMatchObject({
       title: 'Garlic bread, typed here',
       updated: SAVED,
     });
     expect(indexChanges(untimed, timed)).toEqual([{ spaceId, folderIds: doc.folderIds }]);
-    // Listed otherwise now, as readers see it while the change waits: the same.
-    const listed = untimed.with([
-      [
-        { ...doc, draft: !doc.draft },
-        { title: 'Garlic bread', text: '', updated: SAVED },
-      ],
-    ]);
-    expect(listed.page(spaceId, doc.pageId)).toMatchObject({
-      title: 'Garlic bread, typed here',
-      draft: !doc.draft,
-      updated: SAVED,
-    });
-    // Given again, with a time or without, it stays as it is.
-    expect(timed.with([[doc, { title: 'Garlic bread', text: '', updated: SAVED }]])).toBe(timed);
+    // Listed otherwise now, as readers see it while the change waits, with
+    // the time or still without it: what was typed stays.
+    for (const updated of [SAVED, null]) {
+      const listed = untimed.with([[{ ...doc, draft: !doc.draft }, { updated }]]);
+      expect(listed.page(spaceId, doc.pageId)).toMatchObject({
+        title: 'Garlic bread, typed here',
+        draft: !doc.draft,
+        updated,
+      });
+    }
+    // Given again, its time alone or with nothing new, it stays as it is.
+    expect(untimed.with([[doc, { updated: null }]])).toBe(untimed);
+    expect(timed.with([[doc, { updated: SAVED }]])).toBe(timed);
     expect(timed.with([[doc, { title: 'Garlic bread', text: '' }]])).toBe(timed);
   });
 });
