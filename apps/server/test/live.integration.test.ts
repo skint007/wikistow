@@ -811,9 +811,16 @@ describe('ending', () => {
     expect(await stays.send([{ message: saved, covers: 2 }])).toMatchObject({ positions: [3] });
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
-    // A stream opened now makes no join, and sends the end; the saved covers what the
-    // session kept, so there is nothing to catch up from, and it sends none of it.
-    const joinsBefore = (await liveOf(other, lib.page.pageId)).ended?.joins.length;
+    // A stream opened now makes no join, and sends the end; the removal rotated the
+    // keys, so nobody's count for what the session kept, and it sends none of it.
+    const joinCount = async () =>
+      (
+        await t.db
+          .select()
+          .from(schema.liveJoins)
+          .where(eq(schema.liveJoins.sessionId, session.sessionId))
+      ).length;
+    const joinsBefore = await joinCount();
     const late = await stream(other, session, newId(JoinId), 0);
     const kept = [];
     for (let line = await late.next(); !('ended' in line); line = await late.next()) {
@@ -821,7 +828,7 @@ describe('ending', () => {
     }
     expect(kept).toEqual([]);
     await late.closed();
-    expect((await liveOf(other, lib.page.pageId)).ended?.joins.length).toBe(joinsBefore);
+    expect(await joinCount()).toBe(joinsBefore);
   });
 
   it('ends at any change of access to the page, a member added included', async () => {
@@ -858,6 +865,13 @@ describe('ending', () => {
     expect(await me.send([update, presence])).toMatchObject({ positions: [2, null] });
     expect(await me.send([update])).toMatchObject({ positions: [2] });
     expect(await rejection(me.send([me.message('update')]))).toBe('forbidden');
+    // Its keys still count, so someone who took part reads what it kept, then its end.
+    const reading = await stream(editor, session, newId(JoinId), 0);
+    const read = [];
+    for (let line = await reading.next(); !('ended' in line); line = await reading.next()) {
+      if ('message' in line) read.push(line.message.position);
+    }
+    expect(read).toEqual([1, 2]);
   });
 
   it('lets a participant end it, after which another starts', async () => {
@@ -1437,6 +1451,34 @@ describe('fold grants', () => {
       holder: { joinId: saver.joinId },
       lapsed: false,
     });
+  });
+
+  it('keeps a grant whose draft head moved on within 30 s, to be placed later', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const saver = typist(editor, session, session.joinId);
+    saver.started();
+    await stream(editor, session, saver.joinId, 1);
+    await pages.editDraft(owner.ctx, lib.page, { markdown: 'from outside' });
+    const outsider = await headOf(owner, lib.page);
+    await saver.send([], { fold: outsider });
+    // The saver's merge lands 10 s in; its fold's update comes 40 s in.
+    await pages.editDraft(editor.ctx, lib.page, { markdown: 'merged' });
+    await t.db.execute(sql`
+      update live_grants set granted_at = now() - interval '40 seconds'
+      where session_id = ${session.sessionId}`);
+    await t.db.execute(sql`
+      update revisions set created_at = now() - interval '30 seconds'
+      where page_id = ${lib.page.pageId} and based_on = ${outsider}`);
+    const copy = typist(editor, session);
+    const placed = await copy.send([copy.message('update')], {
+      parent: saver.joinId,
+      fold: outsider,
+    });
+    expect(placed.grant).toMatchObject({ position: placed.positions[0], lapsed: false });
+    expect((await liveOf(owner, lib.page.pageId)).open?.grants).toEqual([
+      expect.objectContaining({ subject: outsider, lapsed: false, position: placed.positions[0] }),
+    ]);
   });
 
   it('passes a lapsed grant to another person before the one whose grant lapsed', async () => {

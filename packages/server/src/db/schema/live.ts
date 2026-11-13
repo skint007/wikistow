@@ -71,6 +71,8 @@ export const liveSessions = pgTable(
     createdAt: timestamptz().notNull().defaultNow(),
     endedAt: timestamptz(),
     endedReason: text({ enum: ['access', 'ended'] }),
+    /** Its last position as it ended: streams send everything up to it before the end. */
+    endedPosition: position(),
     /**
      * When the sweep last chose to keep it, ended, so it reads it again
      * only now and then; cleared when a `saved` lands in it.

@@ -324,23 +324,6 @@ async function lockCharges(tx: Database, accountId: string, limit: number | null
   await lockQuota(tx, accountId);
 }
 
-/**
- * Charge stored messages to their sender's minute (`rate-limited`) and
- * storage (`storage-full`). With `stored`, the rows are in already, so
- * the storage they take counts once, as `usedBytes` sums it.
- */
-async function chargeStored(
-  tx: Database,
-  caller: Caller,
-  bytes: number,
-  limits: { storageBytes: number; storedBytesPerMinute: number | null },
-  { stored }: { stored: boolean },
-) {
-  if (bytes === 0) return;
-  await spendStoredBytes(tx, caller.accountId, bytes, limits.storedBytesPerMinute);
-  await chargeLive(tx, caller.accountId, stored ? 0 : bytes, limits.storageBytes);
-}
-
 function servedMessage(row: MessageRow, report: ReportUnreadable) {
   return readStored(
     liveRoutes.StoredMessage,
@@ -367,7 +350,7 @@ const ignore: ReportUnreadable = () => {};
  */
 function lapsed(
   grant: GrantRow,
-  { present, now, heads }: { present: Set<string>; now: Date; heads: Heads },
+  { present, now, moved }: { present: Set<string>; now: Date; moved: Map<string, number> },
 ) {
   if (grant.lapsedAt !== null) return true;
   if (grant.position !== null) return false;
@@ -375,7 +358,27 @@ function lapsed(
   if (grant.catchUp) {
     return grant.grantedAt.getTime() + CATCH_UP_GRANT_MS <= now.getTime();
   }
-  return heads.draftHead === grant.subject && grant.grantedAt.getTime() + GRACE_MS <= now.getTime();
+  // Dated by when the head moved on, not by what it is now, so every read agrees.
+  const deadline = grant.grantedAt.getTime() + GRACE_MS;
+  const movedAt = moved.get(grant.subject);
+  if (movedAt !== undefined && movedAt < deadline) return false;
+  return deadline <= now.getTime();
+}
+
+/**
+ * When the page's draft head first moved on from each of `subjects`: when
+ * the first draft saved on top of it was made.
+ */
+async function headMoves(tx: Database, pageId: string, subjects: readonly string[]) {
+  const moved = new Map<string, number>();
+  if (subjects.length === 0) return moved;
+  const rows = await tx.execute<{ based_on: string; at: Date | string }>(sql`
+    select based_on, min(created_at) as at from ${revisions}
+    where page_id = ${pageId} and audience = 'draft'
+      and based_on = any(${sql.param([...new Set(subjects)])}::text[])
+    group by based_on`);
+  for (const row of rows) moved.set(row.based_on, new Date(row.at).getTime());
+  return moved;
 }
 
 function servedGrant(grant: GrantRow, isLapsed: boolean): liveRoutes.Grant {
@@ -402,12 +405,7 @@ async function takeGrant(
   session: SessionRow,
   subject: string,
   holder: JoinRow,
-  {
-    joins,
-    now,
-    heads,
-    catchUp = false,
-  }: { joins: JoinRow[]; now: Date; heads: Heads; catchUp?: boolean },
+  { joins, now, catchUp = false }: { joins: JoinRow[]; now: Date; catchUp?: boolean },
 ) {
   const present = presentSet(joins, now);
   // A catch-up's grants and a fold's are kept apart, whatever their subjects.
@@ -436,7 +434,7 @@ async function takeGrant(
       ),
     )
     .orderBy(desc(liveGrants.id));
-  const at = { present, now, heads };
+  const at = { present, now, moved: await headMoves(tx, session.pageId, [subject]) };
   for (const grant of grants) {
     if (grant.lapsedAt === null && lapsed(grant, at)) {
       // When it lapsed, not when that was seen, so the 30 s wait after counts from then.
@@ -703,7 +701,12 @@ async function grantsOf(
     .orderBy(desc(liveGrants.id))
     .limit(GRANTS_SERVED);
   const present = presentSet(joins ?? (await joinsOf(tx, session.id)), now);
-  return rows.reverse().map((g) => servedGrant(g, lapsed(g, { present, now, heads })));
+  const moved = await headMoves(
+    tx,
+    session.pageId,
+    rows.map((g) => g.subject),
+  );
+  return rows.reverse().map((g) => servedGrant(g, lapsed(g, { present, now, moved })));
 }
 
 /** Whether an ended session holds an `update` after the position its latest `saved` covers. */
@@ -925,11 +928,18 @@ export async function startLive(db: Database, input: StartLive) {
       input.storedBytesPerMinute,
     );
     await charge(tx, caller.accountId, stored, input.storageBytes);
-    await tx.insert(liveSessionIds).values({
-      id: input.sessionId,
-      versionId: record.metadataRevisionId,
-      starterAccountId: caller.accountId,
-    });
+    // Two starts at once with one ID: the second finds it taken.
+    const taken2 = await tx
+      .insert(liveSessionIds)
+      .values({
+        id: input.sessionId,
+        versionId: record.metadataRevisionId,
+        starterAccountId: caller.accountId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: liveSessionIds.id });
+    if (taken2.length === 0)
+      throw new ContentError('duplicate', 'That session or version ID is taken');
     await tx.insert(liveSessions).values({
       id: input.sessionId,
       spaceId: page.spaceId,
@@ -1499,13 +1509,7 @@ export async function sendLive(db: Database, input: SendLive) {
       throw new ContentError('forbidden', 'A catch-up join sends its saved with its grant');
     }
     if (catchingUp && input.messages.length > 0) {
-      const heads = await headsOf(tx, page.id);
-      const taken = await takeGrant(tx, session, session.id, join, {
-        joins,
-        now,
-        heads,
-        catchUp: true,
-      });
+      const taken = await takeGrant(tx, session, session.id, join, { joins, now, catchUp: true });
       if (
         taken.lapsed ||
         taken.grant.identityId !== join.identityId ||
@@ -1525,6 +1529,24 @@ export async function sendLive(db: Database, input: SendLive) {
       draftHead: null,
       draftCount: 0,
     };
+    // What is new in it is charged before anything is written, so a request
+    // refused for its size writes nothing.
+    const fresh = input.messages.filter(
+      ({ message }) => message.kind !== 'presence' && message.seq > join.lastSeq,
+    );
+    const sizes = fresh.map(({ message }) => decodedLength(message.sealed.ciphertext));
+    await spendStoredBytes(
+      tx,
+      caller.accountId,
+      sizes.reduce((total, size) => total + size + LIVE_MESSAGE_BYTES, 0),
+      input.storedBytesPerMinute,
+    );
+    await chargeLive(
+      tx,
+      caller.accountId,
+      sizes.reduce((total, size) => total + storedSize(size), 0),
+      input.storageBytes,
+    );
     const positions: (number | null)[] = [];
     const updates: number[] = [];
     const resent: number[] = [];
@@ -1537,7 +1559,6 @@ export async function sendLive(db: Database, input: SendLive) {
     let reached =
       firstStored !== undefined && firstStored <= join.lastSeq ? firstStored - 1 : join.lastSeq;
     let savedAt: number | null = null;
-    let bytes = 0;
     for (const { message, covers } of input.messages) {
       const size = checkMessage(message, caller, join.joinId);
       // A request stored before the end, sent again after a lost answer, is taken as
@@ -1587,14 +1608,11 @@ export async function sendLive(db: Database, input: SendLive) {
         if (message.kind === 'update' && stored.position !== null) resent.push(stored.position);
         continue;
       }
-      // Its row counts toward the minute as it does toward storage.
-      bytes += size + LIVE_MESSAGE_BYTES;
       const served = servedMessage(stored.row, ignore);
       if (served) relay.sent.push({ stored: served });
       if (message.kind === 'update') updates.push(stored.row.position);
       if (message.kind === 'saved') savedAt = stored.row.position;
     }
-    await chargeStored(tx, caller, bytes, input, { stored: true });
     await saveCounters(tx, session, join, now, { touch: !ended || join.catchUp });
     if (ended && savedAt !== null) {
       // What it covers moved: the sweep reads it again at its next pass.
@@ -1684,14 +1702,9 @@ async function foldFor(
   },
 ): Promise<liveRoutes.Grant> {
   const present = presentSet(joins, now);
-  const at = { present, now, heads };
+  const at = { present, now, moved: await headMoves(tx, session.pageId, [fold]) };
   if (catchingUp) {
-    const taken = await takeGrant(tx, session, session.id, join, {
-      joins,
-      now,
-      heads,
-      catchUp: true,
-    });
+    const taken = await takeGrant(tx, session, session.id, join, { joins, now, catchUp: true });
     let grant = taken.grant;
     const mine = grant.identityId === join.identityId && grant.joinId === join.joinId;
     if (mine && !taken.lapsed && savedAt !== null) {
@@ -1722,7 +1735,7 @@ async function foldFor(
         publishedHead: heads.publishedHead,
       });
     }
-    const taken = await takeGrant(tx, session, fold, join, { joins, now, heads });
+    const taken = await takeGrant(tx, session, fold, join, { joins, now });
     const grant = servedGrant(taken.grant, taken.lapsed);
     if (taken.changed) relay.grants.push(grant);
     return grant;
@@ -1847,22 +1860,10 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     if (input.covers > session.lastPosition) {
       throw new ContentError('invalid-request', 'A snapshot covers only what was stored before it');
     }
-    const stored = await storeMessage(tx, session, join, caller, {
-      message: input.message,
-      covers: input.covers,
-      revisionId: input.revisionId,
-      size,
-    });
-    if (!stored.row) return { position: stored.position, relay: null };
-    await spendStoredBytes(
-      tx,
-      caller.accountId,
-      size + LIVE_MESSAGE_BYTES,
-      input.storedBytesPerMinute,
-    );
-    const position = stored.row.position;
-    // What it covers goes, but the first snapshot and each join's latest kept change.
-    // Ranked in one pass, so it costs no more than a sort however many there are.
+    // What it covers goes, but the first snapshot and each join's latest kept
+    // change, and so do older later snapshots; then it is charged, so it can
+    // free room for itself; then stored. Ranked in one pass, so the delete
+    // costs no more than a sort however many there are.
     await tx.execute(sql`
       delete from ${liveMessages} m
       using (
@@ -1878,10 +1879,22 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       where m.session_id = ${session.id} and m.position = covered.position and m.position <> 1`);
     await tx.execute(sql`
       delete from ${liveMessages}
-      where session_id = ${session.id} and kind = 'snapshot' and position <> 1
-        and position < ${position}`);
-    // Charged once what it covers has gone, so a snapshot can free room for itself.
-    await chargeLive(tx, caller.accountId, 0, input.storageBytes);
+      where session_id = ${session.id} and kind = 'snapshot' and position <> 1`);
+    await spendStoredBytes(
+      tx,
+      caller.accountId,
+      size + LIVE_MESSAGE_BYTES,
+      input.storedBytesPerMinute,
+    );
+    await chargeLive(tx, caller.accountId, storedSize(size), input.storageBytes);
+    const stored = await storeMessage(tx, session, join, caller, {
+      message: input.message,
+      covers: input.covers,
+      revisionId: input.revisionId,
+      size,
+    });
+    if (!stored.row) throw new Error('a new snapshot was not stored');
+    const position = stored.row.position;
     session.snapshotPosition = position;
     session.snapshotCovers = input.covers;
     await saveCounters(tx, session, join, now, { touch: true });
@@ -1933,7 +1946,7 @@ export async function endLive(db: Database, input: { actor: Actor; sessionId: st
     if (session.endedReason !== null) return { ended: false };
     await tx
       .update(liveSessions)
-      .set({ endedAt: sql`now()`, endedReason: 'ended' })
+      .set({ endedAt: sql`now()`, endedReason: 'ended', endedPosition: session.lastPosition })
       .where(eq(liveSessions.id, session.id));
     return { ended: true };
   });
@@ -1954,6 +1967,7 @@ export async function liveState(db: Database, sessionId: string) {
     const joins = await joinsOf(tx, session.id);
     return {
       ended: session.endedReason,
+      endedPosition: session.endedPosition,
       pageId: session.pageId,
       lastPosition: session.lastPosition,
       snapshotCovers: session.snapshotCovers ?? 0,

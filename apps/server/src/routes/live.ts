@@ -262,6 +262,16 @@ export function mountLiveRoutes(
       forget(sessionId, session);
       return;
     }
+    // Ended: nothing read now goes out, but what was stored before the end,
+    // which every stream sends, then the end, as of then.
+    if (state.ended) {
+      for (const stream of session.streams) {
+        stream.known = Math.max(stream.known, state.endedPosition ?? stream.known);
+      }
+      endAll(session, state.ended);
+      forget(sessionId, session);
+      return;
+    }
     setHead(session, state.draftHead, state.draftCount);
     session.snapshotCovers = Math.max(session.snapshotCovers, state.snapshotCovers);
     const joins = JSON.stringify(state.joins);
@@ -287,12 +297,6 @@ export function mountLiveRoutes(
     for (const key of session.grants.keys()) if (!listed.has(key)) session.grants.delete(key);
     // Only what is past both what it sent and what waits in its queue is
     // read from the database: what is queued goes out from memory.
-    // Ended: what was stored after is never relayed, so nobody is sent to wait for it.
-    if (state.ended) {
-      endAll(session, state.ended);
-      forget(sessionId, session);
-      return;
-    }
     for (const stream of session.streams) {
       const queued = stream.queue.reduce(
         (last, item) => ('stored' in item ? Math.max(last, item.stored.position) : last),
@@ -710,8 +714,10 @@ export function mountLiveRoutes(
       // Stored messages after `sent` up to `upTo`, from the database, in
       // order. A snapshot that deleted some of them since the stream opened
       // leaves it short: it closes, and its app opens it again from `sent`.
+      // Open, or closed with its end still to send after what came before it.
+      const sending = () => !stream.closed || stream.final !== null;
       async function* catchUp(upTo: number) {
-        while (stream.sent < upTo && !stream.closed) {
+        while (stream.sent < upTo && sending()) {
           const { messages, snapshotCovers } = await inTurn(account, () =>
             storedAfter(db, sessionId, stream.sent, { upTo }),
           );
@@ -722,7 +728,7 @@ export function mountLiveRoutes(
           }
           if (messages.length === 0) return;
           for (const stored of messages) {
-            if (stream.closed) return;
+            if (!sending()) return;
             stream.sent = stored.position;
             yield { message: stored, draftHead: head() } satisfies Line;
           }
@@ -749,14 +755,14 @@ export function mountLiveRoutes(
             if (item) {
               stream.queuedBytes -= sizeOf(item);
               if ('stored' in item) {
-                // Once closed it fetches nothing, so it stops at a gap rather than skip one.
-                if (stream.closed && item.stored.position > stream.sent + 1) {
+                // Once cut off it fetches nothing, so it stops at a gap rather than skip one.
+                if (!sending() && item.stored.position > stream.sent + 1) {
                   stream.queue = [];
                   continue;
                 }
                 yield* catchUp(item.stored.position - 1);
-                // Closed while filling the gap before it: it stops there too.
-                if (stream.closed && item.stored.position > stream.sent + 1) {
+                // Cut off while filling the gap before it: it stops there too.
+                if (!sending() && item.stored.position > stream.sent + 1) {
                   stream.queue = [];
                   continue;
                 }

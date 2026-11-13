@@ -1,5 +1,5 @@
 {
-  "id": "05155dd0-3871-406d-938d-dd80806b4938",
+  "id": "990826ce-bef1-466e-bab1-3ee1fd8fff39",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5310,6 +5310,12 @@
         "ended_reason": {
           "name": "ended_reason",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_position": {
+          "name": "ended_position",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
