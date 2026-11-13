@@ -148,6 +148,8 @@ export function startAppPlugins(queryClient: QueryClient) {
         const nodeId = PageId.parse(pageId);
         const done = await batchTurn(async () => {
           await mayStill({ spaceId: SpaceId.parse(spaceId), pageId: nodeId });
+          // What is typed in it here goes with it, as its draft.
+          await drafts.flush(caller, { spaceId, pageId });
           return writer.deleteNode({
             spaceId: SpaceId.parse(spaceId),
             nodeId,
@@ -169,6 +171,14 @@ export function startAppPlugins(queryClient: QueryClient) {
       );
     } finally {
       for (const spaceId of spaceIds) void contentChanged(queryClient, ctx, { spaceId });
+      for (const pageId of trashed) {
+        const spaceId = SpaceId.parse(named.find((page) => page.pageId === pageId)?.spaceId);
+        void contentChanged(queryClient, ctx, { spaceId, pageId });
+      }
+      // Off a page it trashed, as the app's own Delete goes to the space.
+      const shown = where.shown()?.page;
+      if (shown && trashed.some((pageId) => pageId === shown.pageId))
+        void where.navigate({ kind: 'space', spaceId: shown.spaceId });
       void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
       const pagesOf = (n: number) => (n === 1 ? 'a page' : `${n} pages`);
       const later = waiting === 0 ? '' : ` ${pagesOf(waiting)} go once you’re back online.`;
