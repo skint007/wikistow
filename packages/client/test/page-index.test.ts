@@ -205,7 +205,26 @@ describe('a kept index', () => {
     expect(openKept(ctx, sealed, '1.0.1')).toBeNull();
   });
 
-  it('opens as nothing when kept before properties or links were, even by the same build', () => {
+  it('keeps when each version was saved, or that it isn’t known', () => {
+    const [doc, content] = page(home, 'bread', [], 'B');
+    const index = new PageIndex();
+    index.addText(doc, { title: content.title, text: 'B', updated: '2026-11-13T09:30:00.000Z' });
+    index.addText(
+      { ...doc, pageId: PageId.parse('pie'), revisionId: RevisionId.parse('pie-r1') },
+      {
+        title: 'pie',
+        text: 'P',
+      },
+    );
+    const times = keptPages(index);
+    expect([...times.values()].map(({ updated }) => updated)).toEqual([
+      '2026-11-13T09:30:00.000Z',
+      null,
+    ]);
+    expect(openKept(ctx, sealKept(ctx, times, '1.0.0'), '1.0.0')).toEqual(times);
+  });
+
+  it('opens as nothing when kept before properties, links or times were, even by the same build', () => {
     // As `sealKept` seals, with the rows an earlier build wrote.
     const seal = (rows: unknown[][]) =>
       sealOnDevice(
@@ -215,11 +234,12 @@ describe('a kept index', () => {
         utf8(JSON.stringify(rows)),
       );
     const row = ['bean-soup-r1', home, 'bean-soup', 'Bean soup', 'text'];
-    expect(openKept(ctx, seal([[...row, [], []]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, [], [], null]]), '1.0.0')?.size).toBe(1);
+    expect(openKept(ctx, seal([[...row, [], []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([[...row, []]]), '1.0.0')).toBeNull();
     expect(openKept(ctx, seal([row]), '1.0.0')).toBeNull();
     expect(
-      openKept(ctx, seal([[...row, [{ key: 'a', type: 'map', value: 1 }], []]]), '1.0.0'),
+      openKept(ctx, seal([[...row, [{ key: 'a', type: 'map', value: 1 }], [], null]]), '1.0.0'),
     ).toBeNull();
   });
 });

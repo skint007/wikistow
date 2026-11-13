@@ -176,6 +176,8 @@ export function cacheWritten(
         ? { kind: 'share', spaceId: record.spaceId, shareId: commit.wrap.shareId }
         : OWNER_REGION,
       keyVersion: commit.wrap?.keyVersion ?? null,
+      // The server's answer carries no time: this device's, as it confirmed.
+      createdAt: new Date().toISOString(),
     },
     generation,
   );
@@ -417,8 +419,13 @@ export type Wanted = { pageId: PageId; audience: Audience };
 /**
  * `fresh` opens them again rather than from memory; `trash` fetches
  * versions of pages in the trash, which only a space's owners can.
+ * `timed` asks the server again for one held without when it was taken
+ * (`OpenedRevision.createdAt`), as one this device kept before times were,
+ * and keeps it with its time; if the server doesn't give it, the one held
+ * stands in. Only for a caller that would ask the server anyway: offline,
+ * it waits for an answer that doesn't come.
  */
-export type RevisionOptions = { fresh?: boolean; trash?: boolean };
+export type RevisionOptions = { fresh?: boolean; trash?: boolean; timed?: boolean };
 
 /** Open now, but throw only to whoever asks for this one. */
 function openedNow(open: () => OpenedRevision): () => OpenedRevision {
@@ -444,29 +451,38 @@ export async function fetchRevisions(
   ctx: ClientContext,
   spaceId: SpaceId,
   wanted: ReadonlyMap<RevisionId, Wanted>,
-  { fresh = false, trash = false }: RevisionOptions = {},
+  { fresh = false, trash = false, timed = false }: RevisionOptions = {},
 ): Promise<Map<RevisionId, () => OpenedRevision>> {
   const fetched = new Map<RevisionId, () => OpenedRevision>();
+  // Held here without their time, to ask for again (`timed`).
+  const untimed = new Map<RevisionId, OpenedRevision>();
+  const held = (opened: OpenedRevision) => {
+    if (timed && opened.createdAt === null) untimed.set(opened.record.revisionId, opened);
+    else fetched.set(opened.record.revisionId, () => opened);
+  };
   const generation = ctx.revisions.generation;
   for (const [revisionId, expected] of wanted) {
     const cached = fresh ? undefined : ctx.revisions.get({ spaceId, revisionId, ...expected });
-    if (cached) fetched.set(revisionId, () => cached);
+    if (cached) held(cached);
   }
   // Then from the device, where it keeps them (ADR 0009), into memory too.
   const kept = fresh ? undefined : ctx.keptContent;
   if (kept) {
     const found = await Promise.all(
       [...wanted]
-        .filter(([revisionId]) => !fetched.has(revisionId) && kept.hasVersion(revisionId))
+        .filter(
+          ([revisionId]) =>
+            !fetched.has(revisionId) && !untimed.has(revisionId) && kept.hasVersion(revisionId),
+        )
         .map(([revisionId, expected]) => kept.version({ spaceId, revisionId, ...expected })),
     );
     for (const opened of found) {
       if (!opened) continue;
       ctx.revisions.put(opened, generation);
-      fetched.set(opened.record.revisionId, () => opened);
+      held(opened);
     }
   }
-  const queue = [...wanted.keys()].filter((id) => !fetched.has(id));
+  const queue = [...wanted.keys()].filter((id) => !fetched.has(id) && !untimed.has(id));
   const requests: {
     asked: ReadonlySet<RevisionId>;
     answer: Promise<z.output<typeof pageRoutes.fetchRevisions.response>>;
@@ -520,6 +536,26 @@ export async function fetchRevisions(
       queue.unshift(...new Set(deferred.filter((id) => asked.has(id) && !fetched.has(id))));
     }
     send();
+  }
+  if (untimed.size > 0) {
+    // Opened afresh, each is kept again with its time (`refreshVersion`).
+    const again = await fetchRevisions(
+      ctx,
+      spaceId,
+      new Map([...wanted].filter(([revisionId]) => untimed.has(revisionId))),
+      { fresh: true, trash },
+    ).catch(() => null);
+    for (const [revisionId, opened] of untimed) {
+      const open = again?.get(revisionId);
+      fetched.set(revisionId, () => {
+        try {
+          if (open) return open();
+        } catch {
+          // As held: it opened before, from here.
+        }
+        return opened;
+      });
+    }
   }
   return fetched;
 }

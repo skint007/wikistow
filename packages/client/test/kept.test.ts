@@ -82,6 +82,7 @@ function fakeServer(identity: PrivateIdentity) {
       opened: { kind: 'current', payload },
       region: { kind: 'owner' },
       keyVersion: null,
+      createdAt: '2026-11-13T09:00:00.000Z',
     });
     return { revisionId, blobHash };
   }
@@ -213,6 +214,8 @@ describe('keeping pages for offline', () => {
     expect(opened.opened.kind === 'current' && opened.opened.payload.title).toBe(
       `Recipes draft ${SECRET}`,
     );
+    // With when the server took it, as it said when it was kept.
+    expect(opened.createdAt).toBe('2026-11-13T09:00:00.000Z');
     expect(await pageOperations.downloadBlob(later, recipes.draft.blobHash)).toEqual(
       utf8('image Recipes draft'),
     );
@@ -363,6 +366,14 @@ describe('keeping pages for offline', () => {
           }
         );
       },
+      // As a build before times kept them: none, which offline doesn't ask for.
+      versions: async (id: SpaceId, wanted: ReadonlyMap<RevisionId, unknown>) =>
+        new Map(
+          [...(await server.source.versions(id, wanted))].map(([revisionId, open]) => [
+            revisionId,
+            () => ({ ...open(), createdAt: null }),
+          ]),
+        ),
     };
     await keptOperations.keep(ctx, {
       scope: 'opened',
@@ -372,6 +383,12 @@ describe('keeping pages for offline', () => {
 
     // A later session, whose API throws if asked.
     const later = await session(identity, store);
+    const asked: string[] = [];
+    const call = later.api.call.bind(later.api);
+    later.api.call = ((route, ...rest) => {
+      asked.push(route.path);
+      return call(route, ...rest);
+    }) as typeof later.api.call;
     const tree = await keptOperations.keptTree(later, spaceId);
     expect(tree.pages.map((page) => [page.id, page.title])).toEqual([
       [recipes.pageId, `Recipes draft ${SECRET}`],
@@ -389,5 +406,7 @@ describe('keeping pages for offline', () => {
     const index = await searchOperations.indexSpaces(later, { from: 'kept' });
     expect(index.search('Recipes').map(({ doc }) => doc.pageId)).toEqual([recipes.pageId]);
     expect(index.search('Notes')).toEqual([]);
+    expect(index.page(spaceId, recipes.pageId)?.updated).toBeNull();
+    expect(asked).toEqual([]);
   });
 });

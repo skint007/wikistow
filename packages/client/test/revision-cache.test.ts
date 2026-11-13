@@ -20,9 +20,13 @@ import { buildWorld } from './fixture/world.ts';
 function fixture() {
   const world = buildWorld();
   const { owner, server, installationId, spaceId } = world;
+  // How often it was asked, and whether it answers.
+  const served = { asked: 0, down: false };
   const ctx: ClientContext = {
     api: createApiClient({
       fetch: async (_url, init) => {
+        served.asked += 1;
+        if (served.down) throw new TypeError('Failed to fetch');
         if (typeof init.body !== 'string') throw new Error('expected a JSON request');
         const { ids } = pageRoutes.fetchRevisions.body.parse(JSON.parse(init.body));
         const revisions = ids.flatMap((revisionId) => {
@@ -33,7 +37,7 @@ function fixture() {
               ...served,
               wrap: null,
               meta: {
-                createdAt: new Date().toISOString(),
+                createdAt: TAKEN,
                 draftSeq: 1,
                 publishedSeq: null,
                 restoredFrom: null,
@@ -84,10 +88,77 @@ function fixture() {
       refused: [],
     }),
   );
-  return { world, ctx };
+  return { world, ctx, served };
 }
 
+const TAKEN = '2026-11-13T09:30:00.000Z';
+
 describe('opened revisions in one session', () => {
+  it('come with when the server took them, and one held without is asked for again when wanted', async () => {
+    const { ctx, world, served } = fixture();
+    const wanted = {
+      spaceId: world.spaceId,
+      pageId: world.page,
+      audience: 'draft' as const,
+      revisionId: world.revisions.privateDraft,
+    };
+    const revision = await pages.openRevisionOf(ctx, wanted, wanted.audience, wanted.revisionId);
+    expect(revision.createdAt).toBe(TAKEN);
+    // As one kept on the device before times were.
+    ctx.revisions.clear();
+    const untimed = { ...revision, createdAt: null };
+    ctx.revisions.put(untimed);
+    const fetch = (options: pages.RevisionOptions) =>
+      pages
+        .fetchRevisions(ctx, world.spaceId, new Map([[wanted.revisionId, wanted]]), options)
+        .then((fetched) => fetched.get(wanted.revisionId)?.());
+    served.asked = 0;
+    expect((await fetch({}))?.createdAt).toBeNull();
+    expect(served.asked).toBe(0);
+    // With no answer, the one held stands in.
+    served.down = true;
+    expect(await fetch({ timed: true })).toEqual(untimed);
+    expect(served.asked).toBe(1);
+    served.down = false;
+    expect((await fetch({ timed: true }))?.createdAt).toBe(TAKEN);
+    // Held with its time from then on.
+    served.asked = 0;
+    expect((await fetch({ timed: true }))?.createdAt).toBe(TAKEN);
+    expect(served.asked).toBe(0);
+  });
+
+  it('keeps one kept on the device without its time again with it, once asked for', async () => {
+    const { ctx, world } = fixture();
+    const wanted = {
+      spaceId: world.spaceId,
+      pageId: world.page,
+      audience: 'draft' as const,
+      revisionId: world.revisions.privateDraft,
+    };
+    const opened = await pages.openRevisionOf(ctx, wanted, wanted.audience, wanted.revisionId);
+    ctx.revisions.clear();
+    // The device's store, holding it as kept before times were.
+    const rewritten: pages.OpenedRevision[] = [];
+    const kept = {
+      hasVersion: (id: string) => id === wanted.revisionId,
+      version: async () => ({ ...opened, createdAt: null }),
+      refreshVersion: async (version: pages.OpenedRevision) => {
+        rewritten.push(version);
+      },
+    };
+    Object.assign(ctx, { keptContent: kept });
+    const fetched = await pages.fetchRevisions(
+      ctx,
+      world.spaceId,
+      new Map([[wanted.revisionId, wanted]]),
+      { timed: true },
+    );
+    expect(fetched.get(wanted.revisionId)?.().createdAt).toBe(TAKEN);
+    expect(rewritten.map(({ record, createdAt }) => [record.revisionId, createdAt])).toEqual([
+      [wanted.revisionId, TAKEN],
+    ]);
+  });
+
   it('checks space, page and audience even when the revision ID is cached', async () => {
     const { ctx, world } = fixture();
     const wanted = {

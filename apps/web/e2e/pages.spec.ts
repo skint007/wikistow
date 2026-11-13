@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, secretsOnServer, serverSnapshot, signIn, test } from './fixtures';
+import { expect, secretsOnServer, serverSnapshot, test } from './fixtures';
 import {
   adminTab,
   choosePassphrase,
@@ -9,28 +9,13 @@ import {
   memberWithVault,
   newPage,
   PASSPHRASE,
+  sameAccountElsewhere,
   PNG,
   saveStatus,
   waitForSave,
 } from './vault';
 
 const editor = (page: Page) => page.locator('#page-source');
-
-/**
- * The same person in a second browser, on `url`. Loading a page's address
- * asks for the passphrase first (a new tab keeps no unlock), then returns
- * there.
- */
-async function sameAccountElsewhere(freshPage: () => Promise<Page>, email: string, url: string) {
-  const other = await freshPage();
-  await signIn(other, email);
-  await other.getByRole('heading', { name: 'Unlock your vault' }).waitFor();
-  await other.goto(url);
-  await other.getByLabel('Vault passphrase').fill(PASSPHRASE);
-  await other.getByRole('button', { name: 'Unlock' }).click();
-  await other.waitForURL(url);
-  return other;
-}
 
 async function lockVault(page: Page) {
   await page.getByRole('button', { name: 'Account' }).click();
