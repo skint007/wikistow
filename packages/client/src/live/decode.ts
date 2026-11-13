@@ -171,6 +171,9 @@ const contentLength = (content: ItemContent): number =>
 
 function readItem(reader: Reader, client: number, clock: number): DecodedItem {
   const info = reader.byte();
+  // Yjs reads a GC or skip struct's length straight after its info byte.
+  if ((info & CONTENT) === 0) refuse('a GC struct');
+  if ((info & CONTENT) === 10) refuse('a skip struct');
   const origin = info & HAS_ORIGIN ? id(reader) : null;
   const rightOrigin = info & HAS_RIGHT_ORIGIN ? id(reader) : null;
   let parent: RootName | null = null;

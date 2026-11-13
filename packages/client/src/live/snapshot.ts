@@ -155,6 +155,11 @@ export function openSnapshot({
     if (end !== message.clock) refuse('the first snapshot’s structs don’t end at its clock');
     withinSigned(decoded, (client) => (client === own ? message.clock : 0));
   } else {
+    // From a save's own join that has sent no structs (section 5.10).
+    const poster = joins.joinOf(own);
+    if (!poster?.parent || joins.signed(own) !== 0) {
+      refuse('a later snapshot isn’t from a save’s own join');
+    }
     if (decoded.structs.some((section) => section.client === own)) {
       refuse('a later snapshot holds structs under its own join’s client');
     }

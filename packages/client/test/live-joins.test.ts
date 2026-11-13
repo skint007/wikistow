@@ -13,6 +13,7 @@ import {
   LiveJoins,
   openLiveMessage,
   readSnapshot,
+  stateContent,
   type LiveMessage,
   type OpenedLiveMessage,
 } from '../src/live/index.ts';
@@ -293,6 +294,28 @@ describe('the first snapshot', () => {
   });
 });
 
+describe('a later snapshot', () => {
+  it('comes only from a save’s own join that has sent no structs', () => {
+    const { carols, joins, first } = setup();
+    receive(joins, first);
+    const later = (t: Typist, clock: number) =>
+      t.seal('snapshot', stateContent(draftId, Y.encodeStateAsUpdate(carols.document.doc)), clock);
+    // From Carol's main join.
+    expect(receive(joins, later(carols, opened(first).clock))).toEqual({
+      kind: 'refuse',
+      why: 'a later snapshot isn’t from a save’s own join',
+    });
+    // From a save's own join of hers that has sent nothing.
+    const poster = new Typist(carol, binding, JoinId.parse('carol-poster'));
+    poster.parent = { senderId: carol.public.id, joinId: carols.joinId };
+    joins.list([carols.listed, poster.listed]);
+    expect(receive(joins, poster.seal('update', new Uint8Array([0, 0]), 0))).toEqual({
+      kind: 'take',
+    });
+    expect(receive(joins, later(poster, 0))).toEqual({ kind: 'take' });
+  });
+});
+
 describe('the list of joins', () => {
   it('refuses a save’s own join listed under another person’s join', () => {
     const { carols, bobs, joins } = setup();
@@ -312,10 +335,15 @@ describe('the list of joins', () => {
       parent: { senderId: bob.public.id, joinId: bobs.joinId },
     };
     joins.list([carols.listed, bobs.listed, saveJoin, orphan, own]);
-    expect(joins.listed(saveJoin)).toBe(false);
+    const from = (join: typeof own) => {
+      const t = new Typist(bob, binding, join.joinId);
+      return t.seal('update', new Uint8Array([0, 0]), 0);
+    };
+    expect(receive(joins, from(saveJoin))).toMatchObject({ kind: 'refuse' });
+    expect(joins.clientOf(saveJoin)).toBeUndefined();
     // The join a save's own join belongs to is the server's to list.
-    expect(joins.listed(orphan)).toBe(true);
-    expect(joins.listed(own)).toBe(true);
+    expect(receive(joins, from(orphan))).toEqual({ kind: 'take' });
+    expect(receive(joins, from(own))).toEqual({ kind: 'take' });
   });
 
   it('keeps a join as first listed, whatever the server lists later', () => {
@@ -335,13 +363,16 @@ describe('the list of joins', () => {
     const typed = bobs.type((d) => d.text('title').insert(0, 'Bob')).send();
     expect(receive(joins, typed)).toEqual({ kind: 'take' });
     joins.refuse(bobs.listed, 'folded in as gone');
-    expect(joins.listed(bobs.listed)).toBe(false);
     expect(joins.clientOf(bobs.listed)).toBeUndefined();
     // What it signed still counts, so others may still delete or type next to it.
     expect(joins.signed(bobs.clientId)).toBe(3);
     expect(receive(joins, bobs.type((d) => d.text('title').insert(0, 'x')).send())).toMatchObject({
       kind: 'refuse',
     });
+    // A second message it signed at a seq taken already is still equivocation.
+    bobs.seq = 0;
+    const twin = bobs.type((d) => d.text('title').insert(0, 'y')).send();
+    expect(receive(joins, twin)).toMatchObject({ kind: 'equivocation' });
   });
 
   it('starts a newcomer’s order from each join’s latest kept message', () => {

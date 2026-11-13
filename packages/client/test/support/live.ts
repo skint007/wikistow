@@ -47,6 +47,7 @@ import {
   readSnapshot,
   sealLiveMessage,
   startLiveSession,
+  type JoinRef,
   type ListedJoin,
   type LiveAccess,
   type LiveBinding,
@@ -303,6 +304,8 @@ export class Typist {
   readonly clientId: number;
   readonly document: LiveDocument;
   readonly binding: LiveBinding;
+  /** The join a save's own join belongs to, or null for a main join. */
+  parent: JoinRef | null = null;
   seq = 0;
   #unsent: Uint8Array[] = [];
 
@@ -336,7 +339,7 @@ export class Typist {
       senderId: this.sender.public.id,
       senderKeyVersion: this.sender.public.keyVersion,
       joinId: this.joinId,
-      parent: null,
+      parent: this.parent,
       present: true,
     };
   }

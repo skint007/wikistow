@@ -123,14 +123,14 @@ export class LiveJoins {
     }
   }
 
-  /** Whether the server has listed this join, at this key version, and it isn't refused. */
+  /**
+   * Whether the server has listed this join, at this key version. A refused
+   * join stays listed, so a second message it signed at a `seq` taken
+   * already still shows as equivocation (`check`); `check` refuses the rest.
+   */
   listed(header: Pick<LiveHeader, 'senderId' | 'senderKeyVersion' | 'joinId'>): boolean {
     const join = this.#joins.get(key(header));
-    return (
-      join !== undefined &&
-      join.refused === null &&
-      join.senderKeyVersion === header.senderKeyVersion
-    );
+    return join !== undefined && join.senderKeyVersion === header.senderKeyVersion;
   }
 
   /** The Yjs client a listed join writes under, unless it is refused. */
@@ -199,13 +199,14 @@ export class LiveJoins {
   check(message: OpenedLiveMessage, update?: DecodedUpdate): LiveVerdict {
     if (message.kind === 'presence') return { kind: 'take' };
     const join = this.#joins.get(key(message));
-    if (!join || join.refused) return { kind: 'refuse', why: 'the join isn’t one this app takes' };
+    if (!join) return { kind: 'refuse', why: 'the join isn’t one this app takes' };
     const seen = join.taken.get(message.seq);
     if (seen) {
       return seen.payloadHash === message.payloadHash && seen.kind === message.kind
         ? { kind: 'repeat' }
         : { kind: 'equivocation', sender: { senderId: join.senderId, joinId: join.joinId } };
     }
+    if (join.refused) return { kind: 'refuse', why: `the join is refused: ${join.refused}` };
     if (message.seq <= join.seq) return { kind: 'refuse', why: 'its seq is below the last taken' };
     if (message.seq !== join.seq + 1) return { kind: 'hold', reason: 'gap' };
     if ((message.kind === 'saved') !== (update === undefined)) {
@@ -215,6 +216,10 @@ export class LiveJoins {
       message.kind === 'snapshot' && message.seq === 1 && key(join) === key(this.#starter);
     if (key(join) === key(this.#starter) && message.seq === 1 && !first) {
       return { kind: 'refuse', why: 'the starter’s first message isn’t the first snapshot' };
+    }
+    // A later snapshot comes from a save's own join that has sent no structs.
+    if (message.kind === 'snapshot' && !first && (!join.parent || join.clock !== 0)) {
+      return { kind: 'refuse', why: 'a later snapshot isn’t from a save’s own join' };
     }
     const own = update?.structs.find((section) => section.client === join.clientId);
     const length = own ? own.end - own.start : 0;
@@ -230,7 +235,7 @@ export class LiveJoins {
           ? checkDeletes(update.deletes, (client) => (client === join.clientId ? message.clock : 0))
           : { kind: 'refuse', why: 'the first snapshot holds structs of another client' };
       }
-      // A later snapshot's own ranges are checked as the newcomer opens it
+      // A later snapshot's ranges are checked as a newcomer opens it
       // (`openSnapshot`); a join already in the session never applies one.
       return own
         ? { kind: 'refuse', why: 'a later snapshot holds structs under its own join’s client' }

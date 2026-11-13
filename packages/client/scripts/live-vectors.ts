@@ -32,10 +32,12 @@ import {
   pad,
   presenceContent,
   sealLiveMessage,
+  stateContent,
   startLiveSession,
   type LiveBinding,
 } from '../src/live/index.ts';
 import { sodium } from '../src/sodium.ts';
+import { update as handWritten } from '../test/support/yjs-bytes.ts';
 
 const exportIdentity = (identity: PrivateIdentity) => ({
   public: identity.public,
@@ -140,6 +142,83 @@ export function liveVectors(previous?: LivePrevious) {
       cursor: null,
     }),
   });
+  // A Saved notice naming the document's state, as `Y.encodeSnapshot` writes it.
+  const state = Y.encodeSnapshot(Y.snapshot(doc));
+  const saved = sealLiveMessage({
+    sender: starter,
+    binding,
+    kind: 'saved',
+    joinId: started.joinId,
+    seq: 3,
+    clock: 1,
+    content: stateContent(RevisionId.parse('vector-live-draft-2'), state),
+  });
+  // Padding at the edge of a bucket, and a clock past 2^32.
+  const filler = (length: number) => Uint8Array.from({ length }, (_, i) => i % 251);
+  const padding = [
+    { kind: 'update' as const, clock: 2 ** 40 + 5, content: filler(119) },
+    { kind: 'update' as const, clock: 0, content: filler(120) },
+    { kind: 'presence' as const, clock: 7, content: filler(503) },
+  ].map(({ kind, clock, content: bytes }) => ({
+    kind,
+    clock,
+    content: hex(bytes),
+    padded: hex(pad(kind, clock, bytes)),
+  }));
+  // Updates a receiver's decoder must accept, and must refuse.
+  const bom = new Y.Doc();
+  bom.clientID = 7;
+  bom.getText('body').insert(0, '\uFEFFx');
+  const twice = new Y.Doc();
+  twice.clientID = 7;
+  const sets: Uint8Array[] = [];
+  twice.on('update', (u: Uint8Array) => sets.push(u));
+  twice.getMap('extensions').set('a', '"x"');
+  twice.getMap('extensions').set('a', '"y"');
+  const text = { content: { string: 'x' } } as const;
+  const decoder = {
+    accept: {
+      emptyUpdate: hex(new Uint8Array([0, 0])),
+      leadingBom: hex(Y.encodeStateAsUpdate(bom)),
+      secondMapSet: hex(Y.mergeUpdates(sets)),
+    },
+    refuse: {
+      trailingByte: hex(new Uint8Array([0, 0, 0])),
+      nonMinimalClient: hex(
+        new Uint8Array([1, 1, 0x87, 0, 0, 4, 1, 4, 98, 111, 100, 121, 1, 0x78, 0]),
+      ),
+      gcStruct: hex(handWritten({ sections: [{ client: 7, clock: 0, structs: [{ gc: 3 }] }] })),
+      skipStruct: hex(handWritten({ sections: [{ client: 7, clock: 0, structs: [{ skip: 3 }] }] })),
+      parentById: hex(
+        handWritten({
+          sections: [
+            {
+              client: 7,
+              clock: 0,
+              structs: [{ ...text, parent: { id: { client: 1, clock: 0 } } }],
+            },
+          ],
+        }),
+      ),
+      unknownRoot: hex(
+        handWritten({
+          sections: [{ client: 7, clock: 0, structs: [{ ...text, parent: 'comments' }] }],
+        }),
+      ),
+      numberValue: hex(
+        handWritten({
+          sections: [
+            {
+              client: 7,
+              clock: 0,
+              structs: [{ parent: 'fields', parentSub: 'n', content: { any: [1] } }],
+            },
+          ],
+        }),
+      ),
+      emptyDeleteRange: hex(handWritten({ deletes: [{ client: 7, ranges: [[0, 0]] }] })),
+    },
+  };
   const clientInput = canonical('live-client/v1', [
     installationId,
     record.subjectId,
@@ -196,6 +275,9 @@ export function liveVectors(previous?: LivePrevious) {
       signedBytes: hex(liveMessageBytes(binding, header, hash(sealedBytes(update.sealed)))),
       message: update,
     },
+    saved: { message: saved, state: hex(state), revisionId: 'vector-live-draft-2' },
+    padding,
+    decoder,
     presence: {
       message: presence,
       padded: hex(

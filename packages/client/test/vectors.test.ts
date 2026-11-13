@@ -67,7 +67,11 @@ import {
   liveMessageBytes,
   LiveSessionId,
   liveWrapSubject,
+  decodeState,
+  decodeUpdate,
   openLiveMessage,
+  pad,
+  readSaved,
   SealedLiveRecord,
   unpad,
   type LiveBinding,
@@ -594,6 +598,39 @@ describe('live session test vectors (section 5.10)', () => {
     // Bound to its record: another record hash opens nothing.
     const other = { ...binding, recordHash: hash(new Uint8Array([1])) };
     expect(() => openLiveMessage({ binding: other, trust, listed: () => true, message })).toThrow();
+  });
+
+  it('pad to the edge of each bucket, after a clock of 8 bytes', () => {
+    for (const { kind, clock, content, padded } of live.padding) {
+      const bytes = sodium.from_hex(content);
+      const kindOf = kind as 'update' | 'presence';
+      expect(sodium.to_hex(pad(kindOf, clock, bytes))).toBe(padded);
+      expect(unpad(kindOf, sodium.from_hex(padded))).toEqual({ clock, content: bytes });
+    }
+    expect(live.padding.map((p) => p.padded.length / 2)).toEqual([128, 256, 512]);
+  });
+
+  it('seal a Saved notice holding a state as Y.encodeSnapshot writes it', () => {
+    const opened = openLiveMessage({
+      binding,
+      trust,
+      listed: () => true,
+      message: live.saved.message,
+    });
+    const read = readSaved(opened.content);
+    expect(read).toMatchObject({ kind: 'current', revisionId: live.saved.revisionId });
+    if (read.kind !== 'current') throw new Error('Not current');
+    expect(sodium.to_hex(read.state)).toBe(live.saved.state);
+    expect(decodeState(read.state)?.vector.get(live.client.clientId)).toBe(1);
+  });
+
+  it('decode updates in the one form section 5.10 takes', () => {
+    for (const bytes of Object.values(live.decoder.accept)) {
+      expect(() => decodeUpdate(sodium.from_hex(bytes))).not.toThrow();
+    }
+    for (const bytes of Object.values(live.decoder.refuse)) {
+      expect(() => decodeUpdate(sodium.from_hex(bytes))).toThrow();
+    }
   });
 
   it('pad a presence to exactly 512 bytes', () => {

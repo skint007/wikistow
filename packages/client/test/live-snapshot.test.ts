@@ -159,6 +159,7 @@ describe('a later snapshot', () => {
       with: [carol.public.id],
     });
     const poster = new Typist(carol, binding, JoinId.parse('carol-snapshots'));
+    poster.parent = { senderId: carol.public.id, joinId: started.joinId };
     const hello = poster.seal('update', new Uint8Array([0, 0]), 0);
     const snapshot = poster.seal(
       'snapshot',
@@ -235,6 +236,18 @@ describe('a later snapshot', () => {
     expect(() => newcomer([carols, poster], [b, hello]).check(snapshot, copied)).toThrow(
       refused(/isn’t a draft of the session/),
     );
+  });
+
+  it('refuses one from a join that isn’t a save’s own, or that has typed', () => {
+    const { carols, poster, b, hello, revision } = later();
+    // Carol posts it from her main join, which typed.
+    const main = carols.seal(
+      'snapshot',
+      stateContent(revision.revisionId, Y.encodeStateAsUpdate(carols.document.doc)),
+      opened(b).clock,
+    );
+    const kept = newcomer([carols, poster], [b, hello]);
+    expect(() => kept.check(main, revision)).toThrow(refused(/isn’t from a save’s own join/));
   });
 
   it('refuses one holding structs under its own join’s client', () => {
