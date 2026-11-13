@@ -342,6 +342,26 @@ describe('pending changes across tabs', () => {
     ).toBe(0);
   });
 
+  it('tells the other tabs of a change that landed as its session closed', async () => {
+    const b = browser();
+    const base = b.tab();
+    let closing: KeptMarks | null = null;
+    const one = await KeptMarks.open(
+      {
+        ...base,
+        write: async (sealed) => {
+          await base.write(sealed);
+          closing?.close();
+        },
+      },
+      who,
+    );
+    const two = await KeptMarks.open(b.tab(), who);
+    closing = one;
+    await one.begin([change()]);
+    await expect.poll(() => changePending(two, spaceId, shareId)).toBe(true);
+  });
+
   it('keeps an answer whose write was still queued when the session closed', async () => {
     let bytes: Uint8Array | null = null;
     let gate: Promise<void> | null = null;

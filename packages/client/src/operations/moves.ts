@@ -437,8 +437,9 @@ async function sendRewrapped(
   again: () => Promise<void>,
 ): Promise<void> {
   for (let tries = 0; ; tries++) {
+    // Its own refusal goes straight out: rescanning can't change it.
+    if (tries > 0) await again();
     try {
-      if (tries > 0) await again();
       await send(rewrap.material());
       return;
     } catch (error) {

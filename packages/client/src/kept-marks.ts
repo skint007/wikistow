@@ -434,11 +434,11 @@ export class KeptMarks implements KeyVersionMarks {
           await file.write(this.#seal(this.#contents));
         });
       }
-      if (!this.#closed) {
-        this.#channel?.post();
-        // This tab's own sessions hear of its changes as other tabs' do.
-        this.#notify();
-      }
+      // A pending change that landed is told to the other tabs before it
+      // goes, even if this session closed meanwhile.
+      if (!this.#closed || strict) this.#channel?.post();
+      // This tab's own sessions hear of its changes as other tabs' do.
+      if (!this.#closed) this.#notify();
     };
     const written = this.#writing.then(write);
     this.#writing = written.catch(() => {});
