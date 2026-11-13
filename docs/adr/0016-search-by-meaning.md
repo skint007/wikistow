@@ -207,15 +207,15 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-semantic-search/spike/`, not commi
 
 ## Measured in step 2 (2026-11-13)
 
-Step 2 put the model in the build (#PR) and measured the built app: the worker as the build emits it, under the app's policy as the server and the desktop app send it, with the model's files as the build carries them. The figures are from its browser tests (`apps/web/e2e/meaning.spec.ts` and the packed app's in `apps/desktop/e2e/packed.spec.ts`), which record them beside their results, run five times each on the spike's laptop (Intel Core Ultra 9 185H) at a load average of 3.4 to 4.2, median of the five; each run's query and passage times are themselves the median of seven. Chromium is Playwright's 153 (headless), the desktop app the packed `app.asar` on Electron 44 (Chromium 152) under Xvfb. The passage is 248 tokens, near the 256 a passage may have (decision 4).
+Step 2 put the model in the build (#PR) and measured the built app: the worker as the build emits it, under the app's policy as the server and the desktop app send it, with the model's files as the build carries them. The figures are from its browser tests (`apps/web/e2e/meaning.spec.ts` and the packed app's in `apps/desktop/e2e/packed.spec.ts`), which record them beside their results, run five times each on the spike's laptop (Intel Core Ultra 9 185H) at a load average of 2.6 to 3.6, median of the five; each run's query and passage times are themselves the median of seven. Chromium is Playwright's 153 (headless), the desktop app the packed `app.asar` on Electron 44 (Chromium 152) under Xvfb. The passage is 248 tokens, near the 256 a passage may have (decision 4).
 
 | Where | Load | First embedding after | A query | A passage of 248 tokens |
 | --- | --- | --- | --- | --- |
-| Chromium, the files from the server | 0.65 s | 44 ms | 13 ms | 205 ms |
-| Chromium, the files from the worker's cache | 0.32 s | 44 ms | 14 ms | 209 ms |
+| Chromium, the files from the server | 0.74 s | 52 ms | 14 ms | 211 ms |
+| Chromium, the files from the worker's cache | 0.33 s | 45 ms | 14 ms | 215 ms |
 | The desktop app, the files from its package | 0.37 s | 46 ms | 14 ms | 289 ms |
 
-- **Load** is fetching or reading the three files and making the runtime's session. From the server it was over loopback, so it leaves out the download itself: 25.8 MB with Brotli (the model 23.3 MB, the runtime's WebAssembly 2.4 MB, the tokenizer 0.15 MB), about 4 s at 50 Mbit/s.
+- **Load** is fetching or reading the three files and making the runtime's session; from the server, it includes checking the model's and tokenizer's hashes before they are kept. That was over loopback, so it leaves out the download itself: 25.8 MB with Brotli (the model 23.3 MB, the runtime's WebAssembly 2.4 MB, the tokenizer 0.15 MB), about 4 s at 50 Mbit/s.
 - **The desktop app** embeds a passage about 40% slower than Chromium on the same machine, from the same files; a query takes as long. Electron's Chromium is a version older, and its window is a real one under Xvfb, not a headless page. At 289 ms a passage, 1,000 pages at two passages each take about 10 minutes the first time, not the 7 decision 4 assumed.
 - **Offline**, in Chromium, a worker started after the page reloaded from the service worker read the files from its cache and gave the same vectors.
 - **The policy held.** In Chromium the worker's script came with the app's exact policy, from the server; the desktop app's `app://` handler sends the same one. Loading, compiling and embedding raised no error under it in either.
@@ -228,8 +228,9 @@ How the build turned out, where this ADR didn't say:
 - **Brotli copies** are made only for those three files, at the highest quality, and kept between builds by hash, as making them takes about a minute (`apps/web/meaning.ts`). The rest of the build has none yet.
 - **The service worker** fails the build if it would keep a file over 4 MB, so no large file gets into the shell by mistake.
 - **Until the app embeds** (step 4), the embedder is an entry of the build of its own, so the build has its worker; the tests start the worker directly.
-- **The worker's cache** holds the three files under their paths. Loading deletes other models' caches and any file of its own this build doesn't name, such as an older runtime's. The desktop app keeps no cache: it reads its files from its package.
-- **The licences** are in `/third-party-notices.txt`: the model's MIT licence, from BAAI's FlagEmbedding, and the runtime's and the tokenizer library's, as the build drops their notices from the scripts.
+- **The worker's cache** holds the three files under their paths, each kept only once it checks out: the model and its tokenizer by their pinned SHA-256, the runtime's WebAssembly by its magic number, so a wrong answer, such as a proxy's page, is never kept. Loading deletes other models' caches and any file of its own this build doesn't name, such as an older runtime's. The desktop app keeps no cache: it reads its files from its package. Where there is no Cache Storage, as on a page not served over HTTPS, the worker fetches the files each time it starts. A load that fails stops the worker, as the runtime keeps a failed start for the worker's life, and the next load starts another.
+- **The server** says `Vary: Accept-Encoding` on every file with a Brotli copy, sent compressed or not, so a shared cache never keeps one form for every browser.
+- **The licences** are in `/third-party-notices.txt`: the model's MIT licence, from BAAI's FlagEmbedding, and the runtime's and the tokenizer library's, as the build drops their notices from the scripts. ONNX Runtime's own notices for what its WebAssembly includes (protobuf, Abseil, Eigen and more) are beside it, unchanged, in `/third-party-notices-onnxruntime.txt`, 330 KB, which the service worker doesn't keep.
 
 ## Considered options
 

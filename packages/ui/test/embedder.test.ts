@@ -106,13 +106,15 @@ describe('Embedder', () => {
     expect(FakeWorker.started).toHaveLength(2);
   });
 
-  it('loads again after a load that failed', async () => {
+  it('loads again in a new worker after a load that failed', async () => {
     const embedder = new Embedder({ keep: true });
     FakeWorker.reply = (request) => ({ id: request.id, op: 'error', message: 'No model' });
     await expect(embedder.load()).rejects.toThrow('No model');
+    expect(FakeWorker.started[0]?.terminated).toBe(true);
     FakeWorker.reply = defaultReply;
     await expect(embedder.load()).resolves.toEqual({ from: 'network' });
-    expect(FakeWorker.started[0]?.asked.map(({ op }) => op)).toEqual(['load', 'load']);
+    expect(FakeWorker.started).toHaveLength(2);
+    expect(FakeWorker.started[1]?.asked.map(({ op }) => op)).toEqual(['load']);
   });
 
   it('fails what waits when stopped', async () => {

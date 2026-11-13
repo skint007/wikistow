@@ -18,49 +18,72 @@ type Model = { session: ort.InferenceSession; tokenizer: Tokenizer };
 
 let model: Promise<Model> | null = null;
 
+/** One of the three files, and how to tell its bytes are the ones this build means. */
+type File = { url: string; check: (bytes: ArrayBuffer) => Promise<boolean> };
+
+const hex = (bytes: ArrayBuffer) =>
+  Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+const hashed =
+  (sha256: string) =>
+  async (bytes: ArrayBuffer): Promise<boolean> =>
+    hex(await crypto.subtle.digest('SHA-256', bytes)) === sha256;
+/** WebAssembly's magic number, `\0asm`; the build names the runtime's by a hash of its own. */
+const webAssembly = async (bytes: ArrayBuffer) =>
+  bytes.byteLength > 4 && new Uint32Array(bytes, 0, 1)[0] === 0x6d736100;
+
+const FILES: readonly File[] = [
+  { url: files.model, check: hashed(MEANING_MODEL.files.model.sha256) },
+  { url: files.tokenizer, check: hashed(MEANING_MODEL.files.tokenizer.sha256) },
+  { url: wasmURL, check: webAssembly },
+];
+
 /** The bytes at `url`, or an error naming it. */
-async function fetched(url: string): Promise<Response> {
+async function fetched(url: string): Promise<ArrayBuffer> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-  return response;
+  return response.arrayBuffer();
 }
 
 /**
  * The three files, from the worker's cache when `keep`, which a file
- * missing from it is fetched into. Other models' caches, and files of this
- * model's cache that this build doesn't name (an older runtime's, say),
- * are deleted. Without `keep` (the desktop app, whose files are on its
- * disk already) every file is fetched.
+ * missing from it is fetched into, once its bytes check out, so a wrong
+ * answer (a proxy's page, say) is never kept. Other models' caches, and
+ * files of this model's cache that this build doesn't name (an older
+ * runtime's, say), are deleted. Without `keep` (the desktop app, whose
+ * files are on its disk already), or where there is no Cache Storage (a
+ * page not served over HTTPS), every file is fetched.
  */
-async function read(urls: readonly string[], keep: boolean) {
-  if (!keep) {
-    const bytes = await Promise.all(urls.map(async (url) => (await fetched(url)).arrayBuffer()));
-    return { bytes, from: 'files' as const };
+async function read(keep: boolean) {
+  if (!keep || typeof caches === 'undefined') {
+    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url)));
+    return { bytes, from: keep ? ('network' as const) : ('files' as const) };
   }
   for (const name of await caches.keys()) {
     if (name.startsWith(MEANING_CACHE_PREFIX) && name !== MEANING_CACHE) await caches.delete(name);
   }
   const cache = await caches.open(MEANING_CACHE);
-  const wanted = new Set(urls.map((url) => new URL(url, self.location.href).href));
+  const wanted = new Set(FILES.map(({ url }) => new URL(url, self.location.href).href));
   for (const request of await cache.keys()) {
     if (!wanted.has(request.url)) await cache.delete(request);
   }
   let fetchedAny = false;
   const bytes = await Promise.all(
-    urls.map(async (url) => {
+    FILES.map(async ({ url, check }) => {
       const kept = await cache.match(url);
       if (kept) return kept.arrayBuffer();
       fetchedAny = true;
-      const response = await fetched(url);
-      await cache.put(url, response.clone());
-      return response.arrayBuffer();
+      const bytes = await fetched(url);
+      if (!(await check(bytes))) throw new Error(`${url} isn’t the file this build names`);
+      // A response copies the bytes it is given.
+      await cache.put(url, new Response(bytes));
+      return bytes;
     }),
   );
   return { bytes, from: fetchedAny ? ('network' as const) : ('cache' as const) };
 }
 
 async function loaded(keep: boolean): Promise<{ model: Model; from: Loaded['from'] }> {
-  const { bytes, from } = await read([files.model, files.tokenizer, wasmURL], keep);
+  const { bytes, from } = await read(keep);
   const [modelBytes, tokenizerBytes, wasm] = bytes as [ArrayBuffer, ArrayBuffer, ArrayBuffer];
   // Threads need cross-origin isolation, which the app hasn't (decision 2).
   ort.env.wasm.numThreads = 1;

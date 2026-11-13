@@ -100,12 +100,14 @@ describe('the web app', () => {
       headers: { 'Accept-Encoding': 'gzip' },
     });
     expect(plain.headers.get('content-encoding')).toBeNull();
+    expect(plain.headers.get('vary')).toBe('Accept-Encoding');
     expect(new Uint8Array(await plain.arrayBuffer())).toEqual(MODEL);
     // A file with no copy goes as it is.
     const script = await newApp().request('/assets/app-3f9a.js', {
       headers: { 'Accept-Encoding': 'br' },
     });
     expect(script.headers.get('content-encoding')).toBeNull();
+    expect(script.headers.get('vary')).toBeNull();
     expect(await script.text()).toBe('export {}');
   });
 

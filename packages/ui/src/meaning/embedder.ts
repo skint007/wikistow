@@ -98,11 +98,16 @@ export class Embedder {
   /** Load the model, if this worker hasn't yet. */
   load(): Promise<Loaded> {
     this.#loaded ??= this.#ask({ op: 'load', keep: this.#keep }).then((answer) => {
-      if (answer.op === 'error') throw new Error(answer.message);
+      // The runtime keeps a failed start for the worker's life, so the next
+      // load starts a new one.
+      if (answer.op === 'error') {
+        this.#fail(answer.message);
+        throw new Error(answer.message);
+      }
       if (answer.op !== 'load') throw new Error('The embedding worker answered out of turn.');
       return { from: answer.from };
     });
-    // A load that fails lets the next try again.
+    // A load that fails lets the next try again, in a new worker.
     const loading = this.#loaded;
     loading.catch(() => {
       if (this.#loaded === loading) this.#loaded = null;

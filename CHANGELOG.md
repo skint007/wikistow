@@ -39,7 +39,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Releases and packaging
 
-- The web build carries the model search by meaning will run, step 2 of ADR 0016 (#324): `bge-small-en-v1.5` at 8 bits, fetched from Hugging Face at a pinned revision and checked against its SHA-256, with its tokenizer and ONNX Runtime Web's WebAssembly, each with a Brotli copy. The server sends `/assets/*` as their Brotli copies to browsers that accept them. The service worker keeps none of them, so nobody downloads them who doesn't use them, and the desktop app ships them without the copies, about 50 MB more. `/third-party-notices.txt` gives the model's, the runtime's and the tokenizer's licences. A build fails if the service worker would keep a file over 4 MB. Nothing embeds yet. (#PR)
+- The web build carries the model search by meaning will run, step 2 of ADR 0016 (#324): `bge-small-en-v1.5` at 8 bits, fetched from Hugging Face at a pinned revision and checked against its SHA-256, with its tokenizer and ONNX Runtime Web's WebAssembly, each with a Brotli copy. The server sends `/assets/*` as their Brotli copies to browsers that accept them. The service worker keeps none of them, so nobody downloads them who doesn't use them, and the desktop app ships them without the copies, about 50 MB more. `/third-party-notices.txt` gives the model's, the runtime's and the tokenizer's licences, and `/third-party-notices-onnxruntime.txt` the runtime's own notices. A build fails if the service worker would keep a file over 4 MB. Nothing embeds yet. (#PR)
 - `@electron/asar` 4.3.2, from 4.3.1, which builds the desktop app's `app.asar`. It brings `glob` 14 and `minimatch` 11, past their security advisories. (#418)
 
 #### Development

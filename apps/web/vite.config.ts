@@ -177,7 +177,8 @@ const diagramFrame = {
 /**
  * The service worker, `/sw.js` (ADR 0009, decision 6), written once the
  * build is on disk: `sw/sw.ts` with the files it keeps named before it.
- * It keeps the files at the top of the build but the plugin frame's own,
+ * It keeps the files at the top of the build but the plugin frame's own
+ * and ONNX Runtime's notices,
  * and everything under `/assets/` but source maps, Brotli copies,
  * Workshop's esbuild, which only an online Workshop loads, the model's
  * files, which only someone who turns on search by meaning loads and the
@@ -188,7 +189,12 @@ const diagramFrame = {
  * (`warm`). Its cache is named by a hash of the files it keeps, so each
  * build that changes one installs again.
  */
-const LEFT_TO_SERVER = new Set([PLUGIN_HOST_PAGE, PLUGIN_HOST_SCRIPT]);
+// ONNX Runtime's notices, 330 KB, which only someone reading them needs.
+const LEFT_TO_SERVER = new Set([
+  PLUGIN_HOST_PAGE,
+  PLUGIN_HOST_SCRIPT,
+  '/third-party-notices-onnxruntime.txt',
+]);
 /** The largest file the service worker keeps; the largest bundle is about 1 MB. */
 const SHELL_FILE_LIMIT = 4 * 1024 * 1024;
 const appShell = () => {
