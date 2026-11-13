@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Clipping from the browser, through the desktop app
 
-A browser extension should save what's in the browser to WikiStow: a link with a note, the selected text, a simplified article, the whole page, or a screenshot (#406). The issue's decisions bind this ADR: the extension holds no keys, tokens or agent identity; it hands each clip, as plain text, to the person's WikiStow desktop app through the browser's **native messaging**; the app makes the page as a **draft**, as the signed-in person, sealed like any page; the app runs no local server; the extension is published to the Chrome Web Store and Mozilla Add-ons; clipping needs the desktop app, and when the app is closed or locked the extension says so and can open it. The server doesn't change. This ADR proposes the native messaging host, how it reaches the running app and starts a closed one, the host manifests for each browser and system, trust, the message format and its limits, the clip modes and where HTML becomes Markdown, choosing a folder, the closed, locked and browser-only cases, and store review.
+A browser extension should save what's in the browser to WikiStow: a link with a note, the selected text, a simplified article, the whole page, or a screenshot (#406). The issue's decisions bind this ADR: the extension holds no keys, tokens or agent identity; it hands each clip, as plain text, to the person's WikiStow desktop app through the browser's **native messaging**; the app makes the page as a **draft**, as the signed-in person, sealed like any page; the app opens no network port (Decide 2); the extension is published to the Chrome Web Store and Mozilla Add-ons; clipping needs the desktop app, and when the app is closed or locked the extension says so and can open it. The server doesn't change. This ADR decides the native messaging host, how it reaches the running app and starts a closed one, the host manifests for each browser and system, trust, the message format and its limits, the clip modes and where HTML becomes Markdown, choosing a folder, the closed, locked and browser-only cases, and store review.
 
 In short:
 - **A small helper, `wikistow-clip-host`, is what the browser starts.** It is a separate executable of a few megabytes, written in Go, shipped inside every desktop package. It only relays: it copies framed messages between the browser and the running app, and it starts the app when it's closed. It holds no keys and keeps nothing.
@@ -261,7 +261,7 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-web-clipper/spike/`, not committed
 
 - **Now, with this ADR:** `wikistow.md` line 27 says it's proposed.
 - **Once accepted:**
-  - `wikistow.md` gains a **Web clipper** section: the modes, drafts, the properties, the folder search, the closed and locked cases, and that the desktop app listens on a socket only the person can open, beside line 57's "runs no local server".
+  - `wikistow.md` gains a **Web clipper** section: the modes, drafts, the properties, the folder search, the closed and locked cases, and that the desktop app listens on a socket only the person can open, as line 57 now says.
   - `docs/desktop.md` gains the helper, the manifests the app writes and where, the socket, **Settings → Browser clipping**, and how removal leaves them on Linux.
   - `ui-design.md` gains the popup, and the app's **Saved** notice, its unlock screen's waiting clip and the setting.
   - `CONTEXT.md` gains **Clip** and **Clip host**.
@@ -287,7 +287,9 @@ A throwaway spike (`~/.cache/wikistow-tmp/adr-web-clipper/spike/`, not committed
 
 Step 3 can run beside step 2. Step 4 needs both, step 5 needs step 4, and step 6 needs step 5.
 
-## Decide
+## Decided (2026-11-13)
+
+Scott accepted every recommendation below on 2026-11-13: the helper in Go; the socket or named pipe behind a token, with `wikistow.md` line 57 reworded from "runs no local server" to "opens no network port" and naming this listener; and the Firefox ID `web-clipper@wikistow.skint007.github.io`. He opens the Chrome Web Store and Mozilla Add-ons accounts, so publishing waits on them, not the build.
 
 1. **A small separate helper, in Go?** Recommended: yes (decision 1). It answers in milliseconds with a few megabytes, where Electron takes 60 to 130 ms and 80 to 120 MB for every popup, and it can't be the app anyway. Go builds every target from Linux, so the Windows helpers join the installers where they're built, with `go-winio` for the pipe. Rust is the choice if the second compiled language should be the one the spike used: its Mac helpers build on the Mac runners, as the app does, and Windows needs a cross linker or Windows runners.
 2. **The running app listens on a Unix socket in a folder only the person can open, or a Windows named pipe, behind a token in a file only they can read?** Recommended: yes (decision 1). The app opens no network port of its own, and no page can reach it. On Windows another account, or another computer through file sharing, can open the pipe to read, but can't send, and can't answer the token's challenge. It is still a listener the app didn't have, which is why it's here for you to confirm against "runs no local server".
