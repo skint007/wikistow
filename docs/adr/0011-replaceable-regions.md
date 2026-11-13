@@ -117,6 +117,8 @@ The page's text never changes for being claimed. The visual editor keeps the spa
 
 New Markdown syntax of a plugin's own, such as `==highlight==`, stays out. It would need the plugin's code in the reader's worker and in the visual editor's schema and serializer. Every device without the plugin would show it as stray characters. A serializer that lost a character would rewrite the page for everyone who edits it.
 
+**As changed by #401 (2026-11-12):** a plugin can also claim a bare fence language, such as `dataview`, so the blocks an imported vault already has are drawn without editing them. This is not syntax of its own: a fence is Markdown every device reads, the page's text never changes for being claimed, and without the plugin the block is code, as before. The manifest's `fences` gives each language one of the plugin's `blocks` (`{ "dataview": "query" }`), drawn by that block's view or form, so the approval dialog names the languages before any code runs, and the library lists such a version only to apps that read `manifest=4`. A language is a lowercase letter, then lowercase letters, digits, `_`, `+` and `-`, and not one the app draws itself (`wikistow-query`, `mermaid`, `math`). Two running plugins claiming one language are settled as two replacing one region are (decision 6): the first in Settings' order that draws the block draws it, and Settings → Plugins lists each claimed language with the plugin drawing it, **Show as code**, and **Use _plugin_** for each other plugin claiming it. The choice is kept in `ownParts` as `fence:<language>`, beside the regions, so it needs no new field, and an app older than it ignores it. Unlike `plugin:<id>/<type>`, a claimed language names no plugin, so without one the block has no note naming a missing plugin: it is just code.
+
 ### 8. Trust
 
 Replacing and `host.app` are for app plugins, which already run with the app's trust. No trust level changes. A theme plugin still replaces nothing, and its CSS can still hide anything.
@@ -124,7 +126,7 @@ Replacing and `host.app` are for app plugins, which already run with the app's t
 ## Out of scope
 
 - Replacing the editors, or regions where trust or audience is decided.
-- Plugin Markdown syntax beyond claimed inline code.
+- Plugin Markdown syntax beyond claimed inline code (and, as changed by #401, claimed fence languages).
 - Storage for plugins.
 - A plugin's commands outside the page's Plugins menu (an app-wide command list, shortcuts). Worth an issue of its own.
 - Replacing the whole shell (rail, sidebar and main in one view). Replacing the rail and the sidebar together gets close, and keeps the ways back.
