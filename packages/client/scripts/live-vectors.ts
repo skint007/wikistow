@@ -293,6 +293,64 @@ export function liveVectors(previous?: LivePrevious) {
     },
   };
   // States a receiver's decoder must refuse: each counts as none.
+  // What each accepted update holds, by Yjs's own count: each client's
+  // first and next clock.
+  const acceptEnds = {
+    emptyUpdate: [],
+    leadingBom: [[7, 0, Y.getState(bom.store, 7)]],
+    secondMapSet: [[7, 0, Y.getState(twice.store, 7)]],
+  };
+  // Updates that decode but that a receiver must find misplaced as Yjs
+  // places them in a fresh document, so the session is out of step.
+  const entry = (parent: string, parentSub: string, value: string): Struct => ({
+    parent,
+    parentSub,
+    content: { any: [value] },
+  });
+  const placement = {
+    textUnderMapKey: hex(one({ parent: 'title', parentSub: 'k', content: { string: 'x' } })),
+    stringInMap: hex(one({ parent: 'fields', parentSub: 'k', content: { string: '"x"' } })),
+    valueInText: hex(one({ parent: 'body', content: { any: ['"x"'] } })),
+    valueNotJson: hex(one(entry('extensions', 'ns', '{'))),
+    twoJsonValues: hex(one(entry('fields', 'foo', '1,2'))),
+    extensionNeverHeld: hex(one(entry('extensions', 'wikistow.live', '{}'))),
+    fieldHeldElsewhere: hex(one(entry('fields', 'title', '"x"'))),
+    attachmentUnderOtherId: hex(
+      one(
+        entry(
+          'attachments',
+          'a',
+          JSON.stringify({
+            id: 'b',
+            name: 'b',
+            mediaType: 'x',
+            size: 1,
+            key: 'a2V5',
+            blobHash: `${'B'.repeat(42)}A`,
+          }),
+        ),
+      ),
+    ),
+    originsUnderTwoParents: hex(
+      handWritten({
+        sections: [
+          {
+            client: 7,
+            clock: 0,
+            structs: [
+              { parent: 'title', content: { string: 'a' } },
+              { parent: 'body', content: { string: 'b' } },
+              {
+                origin: { client: 7, clock: 0 },
+                rightOrigin: { client: 7, clock: 1 },
+                content: { string: 'c' },
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  };
   const states = {
     accept: { saved: hex(Y.encodeSnapshot(Y.snapshot(doc))) },
     refuse: {
@@ -388,6 +446,8 @@ export function liveVectors(previous?: LivePrevious) {
     padding,
     paddingRefuse,
     decoder,
+    acceptEnds,
+    placement,
     states,
     snapshot,
     presence: {

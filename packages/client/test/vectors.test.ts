@@ -69,6 +69,8 @@ import {
   liveWrapSubject,
   decodeState,
   decodeUpdate,
+  LiveDocument,
+  LiveJoins,
   openLiveMessage,
   pad,
   readSaved,
@@ -635,6 +637,54 @@ describe('live session test vectors (section 5.10)', () => {
         expect.objectContaining({ code }),
       );
     }
+  });
+
+  it('read what each accepted update holds as Yjs counts it', () => {
+    for (const [name, ends] of Object.entries(live.acceptEnds)) {
+      const bytes = live.decoder.accept[name as keyof typeof live.decoder.accept];
+      const decoded = decodeUpdate(sodium.from_hex(bytes));
+      expect(
+        decoded.structs.map((s) => [s.client, s.start, s.end]),
+        name,
+      ).toEqual(ends);
+    }
+  });
+
+  it('find what doesn’t fit the document as Yjs places it', () => {
+    for (const [name, bytes] of Object.entries(live.placement)) {
+      const update = sodium.from_hex(bytes);
+      expect(() => decodeUpdate(update), name).not.toThrow();
+      expect(new LiveDocument(99).apply(update).length, name).toBeGreaterThan(0);
+    }
+  });
+
+  it('take the starter’s first snapshot, update and Saved notice in order', () => {
+    const joins = new LiveJoins({
+      installationId,
+      sessionId: record.subjectId,
+      starter: { senderId: starter.public.id, joinId: JoinId.parse(live.client.joinId) },
+    });
+    joins.list([
+      {
+        senderId: starter.public.id,
+        senderKeyVersion: starter.public.keyVersion,
+        joinId: JoinId.parse(live.client.joinId),
+        parent: null,
+        present: true,
+      },
+    ]);
+    for (const message of [live.snapshot.message, live.update.message, live.saved.message]) {
+      const opened = openLiveMessage({ binding, trust, listed: () => true, message });
+      const content =
+        opened.kind === 'update'
+          ? decodeUpdate(opened.content)
+          : opened.kind === 'snapshot'
+            ? decodeUpdate(sodium.from_hex(live.snapshot.state))
+            : undefined;
+      expect(joins.check(opened, content), opened.kind).toEqual({ kind: 'take' });
+      joins.take(opened);
+    }
+    expect(joins.signed(live.client.clientId)).toBe(live.update.clock);
   });
 
   it('decode updates in the one form section 5.10 takes', () => {
