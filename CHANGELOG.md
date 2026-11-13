@@ -34,6 +34,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - `wikistow tree` lists each folder's pages and folders in its order, and its JSON gives each an `order`. (#413)
 
+#### Development
+
+- The browser tests check that a query table, and a plugin's block listing pages, follow a listed page's change without a reload, made here or in another session. Their helper for typing in the source editor refuses frontmatter on a page that has Properties, where it would go into the body as text, and a new one sets a property instead. (#420)
+
 ## 0.25.0 - 2026-11-11
 
 ### Highlights
