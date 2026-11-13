@@ -203,6 +203,30 @@ The app keeps its key in the keyring under its own name. In KWallet that is **Wi
 
 The first launch after that change, on any desktop, signs in through the browser again and asks for your passphrase. The name doesn't lock other programs out: anything running as you can still ask the keyring for the key.
 
+## Clipping from your browser
+
+The WikiStow browser extension will save pages from Chrome, Edge, Brave and Firefox to the app, as drafts ([ADR 0017](adr/0017-web-clipper.md)). The extension isn't published yet, and the app doesn't save clips yet: what this section describes is the part built so far, which lets an extension reach the app. **Settings → Browser clipping** turns it on or off on this computer; it starts on.
+
+**The helper.** Every package installs a small program beside the app, `wikistow-clip-host` (`wikistow-clip-host.exe` on Windows), which the browser starts when the extension asks. It passes messages between the browser and the running app, and starts the app when it's closed, outside the browser, so closing the browser doesn't close WikiStow. It holds no keys and keeps nothing. It's in `/usr/lib/wikistow-desktop` (`/usr/lib/wikistow-desktop-beta` for the beta), beside `WikiStow.exe` in the Windows install folder, and in `WikiStow.app/Contents/MacOS`. The Windows installer waits for it to close too, as it does for the app: close the extension's popup, or the browser, if it says a browser is clipping.
+
+**The browsers' manifests.** A browser starts only a program a manifest names, and lets only the extensions it names use it. At each launch, with Browser clipping on, the app writes one for each browser it finds, for you alone, naming the helper and only the published extensions, and fixes any that changed:
+
+| Browser | Linux | macOS (in `~/Library/Application Support`) | Windows |
+| --- | --- | --- | --- |
+| Chrome | `~/.config/google-chrome/NativeMessagingHosts/` | `Google/Chrome/NativeMessagingHosts/` | the `HKCU\Software\Google\Chrome\NativeMessagingHosts` key |
+| Chromium | `~/.config/chromium/NativeMessagingHosts/` | `Chromium/NativeMessagingHosts/` | `HKCU\Software\Chromium\…` |
+| Edge | `~/.config/microsoft-edge/NativeMessagingHosts/` | `Microsoft Edge/NativeMessagingHosts/` | `HKCU\Software\Microsoft\Edge\…` |
+| Brave | `~/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/` | `BraveSoftware/Brave-Browser/NativeMessagingHosts/` | `HKCU\Software\BraveSoftware\Brave-Browser\…` |
+| Firefox | `~/.mozilla/native-messaging-hosts/` | `Mozilla/NativeMessagingHosts/` | `HKCU\Software\Mozilla\…` |
+
+Each is a file named `io.github.skint007.wikistow.json` (`io.github.skint007.wikistow_beta.json` for the beta, which never touches the stable app's). On Linux and macOS the app writes it only where the browser keeps its profiles (for Firefox, `~/.mozilla` or `~/.config/mozilla`, or on a Mac `Firefox`), so a browser installed later gets one at the app's next launch. On Windows it writes every key, which costs nothing where a browser is missing, each naming a file in `%APPDATA%\WikiStow Desktop\native-messaging`. Until the Chrome Web Store gives the extension its ID, only Firefox's is written. A Mac app opened where it was unzipped, rather than from Applications, writes none: macOS runs it from a temporary place it later removes, and Settings says to move it into Applications. Chromium browsers installed as a Flatpak or a snap can't start the helper, and nor can Chrome where a policy turns off per-user hosts.
+
+**The socket.** While Browser clipping is on, the app listens for the helper on a Unix socket, in `$XDG_RUNTIME_DIR/wikistow` (`wikistow-beta`) on Linux, or in a `clip` folder in its data folder on a Mac or without `$XDG_RUNTIME_DIR`, a folder only you can open; on Windows on a named pipe, `\\.\pipe\wikistow-clip-<random>`. It writes the socket's name and a new random token to `clip-host.json`, which only you can read, in its data folder, or on Windows in `%LOCALAPPDATA%\WikiStow Desktop`, and deletes it when it quits. The helper and the app each prove they hold the token before anything else crosses. Other people's accounts can't read the token, and the app sends them nothing; no web page can reach a socket or a pipe; the app opens no network port. A program you run can still read the token and use the socket as the extension would, as it can ask the keyring for the key ([the keyring](#the-keyring)): the [protocol](../wikistow/protocol.md) (A14) says what that allows.
+
+**Turning it off** closes the socket, deletes `clip-host.json`, and deletes the manifests and keys the app wrote. Turning it on writes them again.
+
+**What removing the app leaves.** The Windows uninstaller deletes the keys, the manifests and `clip-host.json`. Uninstalling the Homebrew cask deletes the Mac manifests; `brew upgrade` does too, and the app writes them again when it next opens. On Linux, and for a Mac app dragged to the Trash, the manifests stay in your home folder. They name a helper that's gone, so the browser can't start it, and the extension says the app isn't installed. To remove them, delete the files the table names; Settings → Browser clipping, turned off before removing the app, deletes them too.
+
 ## While you work on it
 
 ```sh
@@ -211,10 +235,12 @@ pnpm exec vp -C apps/desktop pack
 pnpm -C apps/desktop start
 ```
 
+The browser clipper's helper is Go, in `apps/desktop/clip-host`. With Go installed, `scripts/clip-host.sh`, from `apps/desktop`, builds it for every system a package ships on into `out/clip-host`, and `go test ./...` in `clip-host` runs its tests against a fake app. A development build listens on its socket, but writes no browser manifests unless started with `--clip-manifests`, so it doesn't take the installed app's. Then they name the helper `scripts/clip-host.sh` built. `--clip-extension=chrome-extension://<id>/`, or a Firefox add-on ID, adds an extension to that launch's manifests, as the desktop tests do for theirs (`e2e/clip.spec.ts`); the next launch without it takes it out.
+
 The desktop tests run the real app under a virtual display, with the browser half of each sign-in in Chromium beside it:
 
 ```sh
-cd apps/desktop && xvfb-run -a -s '-screen 0 1600x1000x24' pnpm exec playwright test
+cd apps/desktop && scripts/clip-host.sh && xvfb-run -a -s '-screen 0 1600x1000x24' pnpm exec playwright test
 ```
 
 The keyring test runs only with `KEYRING=1`, inside a session that has GNOME Keyring. `e2e/with-keyring.sh` sets one up in a CI container; don't run it on your own machine, since it replaces `~/.local/share/keyrings`.

@@ -151,6 +151,14 @@ _Avoid_: Cached, synced.
 A draft, new page or new folder made, a folder renamed, a page or folder deleted or moved within its share, or a page published, while the app couldn't reach the server (#330 added renames and deletes, #331 moves and publishing). It waits on the device, sealed, naming what it was based on, and is sent in order once the server answers, so a page changed meanwhile is the usual conflict. Built as accepted in ADR 0009 (step 6).
 _Avoid_: Outbox, pending sync.
 
+**Clip**
+What the WikiStow browser extension hands the person's desktop app to save: a link with a note, the selected text, a simplified article, the whole page, or a screenshot, with the folder, title and tags chosen in its popup. The app makes it a new page as a **draft**, as the signed-in person, sealed like any page, with the address as its `source` property; a clip never publishes. Accepted in ADR 0017; the app answers the extension but saves no clip yet.
+_Avoid_: Bookmark, capture, snippet.
+
+**Clip host**
+The small program, `wikistow-clip-host`, that the browser starts for the extension through native messaging, shipped beside the desktop app. It only relays messages between the browser and the running app, over a socket or named pipe only the person can open once both sides prove they hold the app's token, and starts the app when it's closed. It holds no keys and keeps nothing. Built as accepted in ADR 0017 (step 2).
+_Avoid_: Native app, bridge, proxy, local server.
+
 **Template**
 A page in a folder named Templates that new pages can start from. Its `{{variables}}` are filled in by the person making the page; the copy is an ordinary page with no tie to its template.
 _Avoid_: Blueprint, page type.
