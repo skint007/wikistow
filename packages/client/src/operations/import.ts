@@ -365,6 +365,8 @@ export async function importNotes(
     const heads = listed.get(pageId);
     if (!heads?.draftHead) throw new ApiError(404, 'not-found', 'An imported page is gone');
     let draftHead = heads.draftHead;
+    // Whether this run wrote the draft it publishes: made the page, or saved it.
+    let wrote = draft === null;
     let copies: ReadonlyMap<AttachmentRef['id'], AttachmentRef> | undefined;
     let tooLarge = false;
     if (entry.empty) {
@@ -413,6 +415,7 @@ export async function importNotes(
           }),
         );
         draftHead = written.revisionId;
+        wrote = true;
         unresolvedOf.set(note.key, unresolved);
       } catch (error) {
         // Its links written out, longer than a page holds: left as an empty draft.
@@ -424,12 +427,12 @@ export async function importNotes(
       live();
     }
     if (!tooLarge) {
-      // The draft just made or saved is in memory, so it isn't fetched
-      // again; one an earlier run saved was opened above.
-      const shown =
-        ctx.revisions.get({ ...page, audience: 'draft', revisionId: draftHead }) ??
-        draft ??
-        undefined;
+      // The draft this run just made or saved is in memory, as it wrote it,
+      // so it isn't fetched again. One an earlier run saved is: its region
+      // as kept may be older than a share made since.
+      const shown = wrote
+        ? ctx.revisions.get({ ...page, audience: 'draft', revisionId: draftHead })
+        : undefined;
       const { publishedHead } = heads;
       const published = await again(pageId, () =>
         publishPage(ctx, page, {
@@ -501,10 +504,11 @@ async function uploadFiles(
 ): Promise<Attached[]> {
   const done: (Attached | undefined)[] = [];
   const queue = files.entries();
-  let failed = false;
+  // Failures in the order they came: the others stop at the first.
+  const failures: unknown[] = [];
   const upload = async () => {
     for (const [at, { key, name, mediaType, file }] of queue) {
-      if (failed) return;
+      if (failures.length > 0) return;
       const bytes = await file.read();
       const forDraft = attachmentTarget(ctx, page, 'draft');
       const draft = sealAttachment({ target: forDraft, name, mediaType, bytes });
@@ -513,27 +517,29 @@ async function uploadFiles(
         to: attachmentTarget(ctx, page, 'published'),
         ...draft,
       });
-      try {
-        await Promise.all([
-          uploadBlob(ctx, page, 'draft', draft.blob),
-          uploadBlob(ctx, page, 'published', readers.blob),
-        ]);
-        done[at] = { key, draft: draft.ref, readers: readers.ref };
-      } catch (error) {
-        if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
-      }
+      const sent = await Promise.allSettled([
+        uploadBlob(ctx, page, 'draft', draft.blob),
+        uploadBlob(ctx, page, 'published', readers.blob),
+      ]);
+      const errors = sent.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason as unknown] : [],
+      );
+      // A file larger than the server takes is left out; any other failure stops the import.
+      const failure = errors.find(
+        (error) => !(error instanceof ApiError && error.code === 'payload-too-large'),
+      );
+      if (failure !== undefined) throw failure;
+      if (errors.length === 0) done[at] = { key, draft: draft.ref, readers: readers.ref };
       live();
     }
   };
   const workers = Array.from({ length: Math.min(ATTACHMENTS_AT_ONCE, files.length) }, () =>
     upload().catch((error: unknown) => {
-      failed = true;
-      throw error;
+      failures.push(error);
     }),
   );
-  for (const result of await Promise.allSettled(workers)) {
-    if (result.status === 'rejected') throw result.reason;
-  }
+  await Promise.all(workers);
+  if (failures.length > 0) throw failures[0];
   // In the order given, without the files left out.
   return done.filter((file) => file !== undefined);
 }
