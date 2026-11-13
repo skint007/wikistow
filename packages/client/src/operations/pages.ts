@@ -202,7 +202,8 @@ const writePage = <T>(
  * it, or loaded if its links need one. The page's ID and its first
  * draft's are new, or `pageId` and `revisionId`, as for a page made
  * offline (ADR 0009, decision 7): sent again under the same IDs, it is
- * refused as `duplicate` once it was made.
+ * refused as `duplicate` once it was made. Once made, its first draft is
+ * in the revision cache, as a saved one is.
  */
 export async function createPage(
   ctx: ClientContext,
@@ -229,6 +230,7 @@ export async function createPage(
     linkChoices?: ReadonlyMap<string, PageId>;
   },
 ): Promise<PageId> {
+  const generation = ctx.revisions.generation;
   const linkTree = linkTreeFor(ctx, spaceId, tree);
   // Before reading its links, which takes longest on a page too large to save.
   const content = newPayload({ title, markdown, extensions });
@@ -260,6 +262,7 @@ export async function createPage(
       params: { spaceId },
       body: { pageId, parentId, ...commit },
     });
+    cacheWritten(ctx, commit, payload, generation);
   });
   return pageId;
 }
@@ -1089,6 +1092,9 @@ const mayReuse = (
  * listed with that copy instead when `mayReuse` allows it and the copy
  * checks out here: downloaded, its hash and plaintext hash recomputed
  * (section 12.2). A copy that doesn't check out is resealed like any other.
+ * One in `sealed`, a copy for `to` that this app sealed from the file
+ * itself and uploaded, is listed when its plaintext hash is the
+ * attachment's, with nothing downloaded.
  */
 async function resealAll(
   ctx: ClientContext,
@@ -1099,7 +1105,14 @@ async function resealAll(
     to,
     earlier,
     writing,
-  }: { from: Audience; to: Audience; earlier: OpenedRevision | null; writing: Writing },
+    sealed,
+  }: {
+    from: Audience;
+    to: Audience;
+    earlier: OpenedRevision | null;
+    writing: Writing;
+    sealed?: ReadonlyMap<AttachmentRef['id'], AttachmentRef> | undefined;
+  },
 ): Promise<PagePayload> {
   const copies = new Map(
     earlier?.opened.kind === 'current'
@@ -1108,6 +1121,12 @@ async function resealAll(
   );
   const attachments = [];
   for (const ref of payload.attachments) {
+    const own = sealed?.get(ref.id);
+    if (own?.plainHash !== undefined && own.plainHash === ref.plainHash) {
+      const { size, key, blobHash, plainHash } = own;
+      attachments.push({ ...ref, size, key, blobHash, plainHash });
+      continue;
+    }
     const copy = copies.get(ref.id);
     if (
       earlier &&
@@ -1176,6 +1195,12 @@ async function checksOut(
  * or one loaded if they need it. A publication is new, or `revisionId`, as
  * for one made offline (#331): sent again under the same ID once it was
  * made, the server answers as it did then.
+ *
+ * A caller that just wrote the draft, as an import does, can pass it
+ * opened as `draft`, so it isn't fetched again: it counts only if it is
+ * this page's draft `expected.draftHead`. `copies` are copies of its
+ * attachments the caller sealed for readers from the files themselves and
+ * uploaded, by attachment ID (`resealAll`).
  */
 export async function publishPage(
   ctx: ClientContext,
@@ -1186,6 +1211,8 @@ export async function publishPage(
     change,
     tree,
     revisionId: sent,
+    draft: given,
+    copies,
   }: {
     expected?: {
       draftHead: RevisionId;
@@ -1196,13 +1223,22 @@ export async function publishPage(
     change?: ChangeSummary;
     tree?: LinkTree;
     revisionId?: RevisionId;
+    draft?: OpenedRevision;
+    copies?: ReadonlyMap<AttachmentRef['id'], AttachmentRef>;
   } = {},
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
-  const loaded = (await loadPage(ctx, page.pageId)).heads;
-  const heads = expected ?? loaded;
+  const heads = expected ?? (await loadPage(ctx, page.pageId)).heads;
   if (!heads.draftHead) throw new ApiError(404, 'not-found', 'There is no draft to publish');
-  const opened = await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
+  const { record } = given ?? {};
+  const opened =
+    given &&
+    record?.revisionId === heads.draftHead &&
+    record.pageId === page.pageId &&
+    record.spaceId === page.spaceId &&
+    record.audience === 'draft'
+      ? given
+      : await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
   const { value: draft, repaired } = repairText(withoutChange(current(opened)));
   // Before its links are read and its attachments sealed again.
   checkPayloadSize({ markdown: draft.markdown });
@@ -1237,6 +1273,7 @@ export async function publishPage(
       to: 'published',
       earlier: previous,
       writing: writingFor(ctx, keys, region, target),
+      sealed: copies,
     });
     // What it changed names the version it is in, so no copy of it counts.
     const revisionId = sent ?? newId(RevisionIdSchema);
