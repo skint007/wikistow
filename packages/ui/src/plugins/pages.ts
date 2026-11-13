@@ -473,7 +473,8 @@ export function pagesFor(caller: EditingCaller): HostPages {
 
     query: guarded(async (ctx, query) => {
       const read = readPluginQuery(query);
-      return queryRows(read, (await readableOf(ctx, query.spaceId)) ?? { pages: [], folders: [] });
+      const space = await readableOf(ctx, query.spaceId);
+      return queryRows(read, space ?? { pages: [], folders: [], parents: new Map() });
     }),
 
     create: guarded(async (ctx, ref, { title, markdown = '', data }) => {

@@ -102,6 +102,11 @@ describe('index.changed', () => {
       { spaceId: 'elsewhere', folderId: null, access: 'read' },
     ]);
     expect(following).toBe(2);
+    // Its access changed: what it reads there may have.
+    await expect.poll(() => heard['tables']).toEqual([['s', 'u']]);
+    expect(heard['blind']).toEqual([['elsewhere']]);
+    heard['tables'] = [];
+    heard['blind'] = [];
 
     runtime.indexChanged([
       { spaceId: 's', folderIds: ['top', 'f'] },

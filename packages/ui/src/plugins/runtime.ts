@@ -937,9 +937,15 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     /** Replace a plugin's page access for the open account, in its store. */
     async setAccess(plugin: PluginRef, scopes: readonly PluginScope[]) {
       if (!session.get()) return;
+      const before = access[plugin.id] ?? [];
       await store.setAccess(plugin, scopes);
       access = { ...access, [plugin.id]: scopes };
       emit();
+      // What `index` and `query` give it there changed with its access.
+      const entry = loaded.get(plugin.id);
+      const spaceIds = [...new Set([...before, ...scopes].map(({ spaceId }) => spaceId))];
+      if (entry?.active && entry.active.caller.access !== 'none' && spaceIds.length > 0)
+        tell(entry, { event: 'index.changed', payload: { spaceIds } });
     },
     /** Tell every running plugin but `from` of `event`. */
     deliver: (event: AppEvent, from: string | null = null) => deliver(event, from),

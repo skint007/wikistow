@@ -217,8 +217,10 @@ export type PluginEvents = {
    * The search index changed, for pages the plugin can read in `spaceIds`:
    * what `index` and `query` give there may have changed. Told as the
    * index takes in a change, made on this device or told by the server,
-   * as query tables redraw. While a plugin listens, the index is kept up to
-   * date.
+   * as query tables redraw, and as the person changes the plugin's page
+   * access there. While a plugin listens, the index is kept up to date. An
+   * app older than it refuses it: app code gets `unsupported`, and a script
+   * that listens is stopped.
    */
   'index.changed': { spaceIds: string[] };
 };

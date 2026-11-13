@@ -155,7 +155,7 @@ export function sampleStore() {
     }
     return readableSpace(
       index.list({ spaceId }),
-      { folders: [], pages: samples.map((sample) => ({ id: sample.pageId })) },
+      { folders: [], pages: samples.map((sample) => ({ id: sample.pageId, parentId: null })) },
       () => true,
     );
   };

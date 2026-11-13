@@ -77,7 +77,10 @@ const TREE = {
     { id: diary, parentId: null, name: 'Diary' },
   ],
   // `p-gone` is in the index, but no longer in the tree.
-  pages: PAGES.filter(([id]) => id !== 'p-gone').map(([id]) => ({ id })),
+  pages: PAGES.filter(([id]) => id !== 'p-gone').map(([id, , , folderIds]) => ({
+    id,
+    parentId: folderIds.at(-1) ?? null,
+  })),
 };
 
 const INDEX = indexOf(PAGES);
@@ -121,6 +124,27 @@ describe('a space’s rows', () => {
     const [soup] = pageRows(soupsOnly);
     expect(soup).toMatchObject({ title: 'Tomato soup', folderId: soups, path: ['Soups'] });
     expect(pageRows(soupsOnly)).toHaveLength(1);
+  });
+
+  it('leaves out a copy unpublished where it is, and puts each page where the tree has it', () => {
+    const index = indexOf([PAGES[0] as Page]);
+    const copy = docOf(['p-copy', 'Copy', [], [recipes]]);
+    index.addText({ ...copy, unpublished: true }, { title: 'Copy', text: '' });
+    const space = readableSpace(
+      index.list({ spaceId }),
+      {
+        folders: TREE.folders,
+        // The tree has the bread in Soups now, before the index does.
+        pages: [
+          { id: 'p-bread', parentId: soups },
+          { id: 'p-copy', parentId: recipes },
+        ],
+      },
+      grantedTo([recipes]),
+    );
+    expect(pageRows(space)).toMatchObject([
+      { title: 'Garlic bread', folderId: soups, path: ['Recipes', 'Soups'] },
+    ]);
   });
 
   it('gives a property’s list as a copy', () => {

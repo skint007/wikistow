@@ -26,29 +26,38 @@ type Entry = searchOperations.IndexedEntry;
 
 /**
  * What a plugin can read of one space: its pages, as the index holds them,
- * by title, and its folders, by the app's tree, each with its name.
+ * by title, its folders, by the app's tree, each with its name, and the
+ * folder each page is in, by the tree too.
  */
-export type ReadableSpace = { pages: readonly Entry[]; folders: readonly QueryFolder[] };
+export type ReadableSpace = {
+  pages: readonly Entry[];
+  folders: readonly QueryFolder[];
+  parents: ReadonlyMap<string, string | null>;
+};
 
 /**
  * The pages and folders of a space the plugin can read (`readable`, by a
  * node's ID): `entries`, the space's pages in the index, among `tree`'s, so
  * a page the tree no longer holds there is left out, and `tree`'s folders.
+ * A copy unpublished where it is, which `read` can't open, is left out too.
  */
 export function readableSpace(
   entries: readonly Entry[],
   tree: {
     folders: readonly { id: string; parentId: string | null; name: string | null }[];
-    pages: readonly { id: string }[];
+    pages: readonly { id: string; parentId: string | null }[];
   },
   readable: (nodeId: string) => boolean,
 ): ReadableSpace {
-  const inTree = new Set(tree.pages.map(({ id }) => id));
+  const parents = new Map(tree.pages.map(({ id, parentId }) => [id, parentId]));
   return {
-    pages: entries.filter((entry) => inTree.has(entry.pageId) && readable(entry.pageId)),
+    pages: entries.filter(
+      (entry) => parents.has(entry.pageId) && !entry.unpublished && readable(entry.pageId),
+    ),
     folders: tree.folders
       .filter((folder) => readable(folder.id))
       .map(({ id, parentId, name }) => ({ id, parentId, name })),
+    parents,
   };
 }
 
@@ -68,11 +77,18 @@ function tagsOf(properties: readonly Readonly<PropertyData>[]): string[] {
   return [...tags.values()];
 }
 
-/** `entry` as a plugin gets it, its path through `folders`, those it can read. */
-export function pageRow(entry: Entry, folders: ReadonlyMap<string, QueryFolder>): PageRow {
+/**
+ * `entry` as a plugin gets it, in the folder `parentId` the tree has it
+ * in, its path through `folders`, those it can read.
+ */
+export function pageRow(
+  entry: Entry,
+  folders: ReadonlyMap<string, QueryFolder>,
+  parentId: string | null,
+): PageRow {
   const path: (string | null)[] = [];
   const seen = new Set<string>();
-  for (let id = entry.parentId as string | null; id !== null && !seen.has(id);) {
+  for (let id = parentId; id !== null && !seen.has(id);) {
     seen.add(id);
     const folder = folders.get(id);
     if (!folder) break;
@@ -82,7 +98,7 @@ export function pageRow(entry: Entry, folders: ReadonlyMap<string, QueryFolder>)
   return {
     page: { spaceId: entry.spaceId, pageId: entry.pageId },
     title: entry.title,
-    folderId: entry.parentId,
+    folderId: parentId,
     path,
     tags: tagsOf(entry.properties),
     properties: blockProperties(entry.properties) ?? {},
@@ -94,7 +110,9 @@ export function pageRow(entry: Entry, folders: ReadonlyMap<string, QueryFolder>)
 /** Every page of `space` as a row, by title, as `host.pages.index` gives them. */
 export function pageRows(space: ReadableSpace): PageRow[] {
   const folders = new Map(space.folders.map((folder) => [folder.id, folder]));
-  return space.pages.map((entry) => pageRow(entry, folders));
+  return space.pages.map((entry) =>
+    pageRow(entry, folders, space.parents.get(entry.pageId) ?? null),
+  );
 }
 
 const PARTS = ['from', 'where', 'sort'] as const;
@@ -138,7 +156,12 @@ export function queryRows(query: ReadQuery, space: ReadableSpace): PageQueryResu
   const result = runPageQuery(query, space);
   if (!result.ok) throw new PluginError('invalid', result.error);
   const folders = new Map(space.folders.map((folder) => [folder.id, folder]));
-  return { rows: result.rows.map(({ page }) => pageRow(page, folders)), total: result.total };
+  return {
+    rows: result.rows.map(({ page }) =>
+      pageRow(page, folders, space.parents.get(page.pageId) ?? null),
+    ),
+    total: result.total,
+  };
 }
 
 /** A page whose row changed, or was added or removed: where it is, or was. */

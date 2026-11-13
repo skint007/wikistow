@@ -598,7 +598,7 @@ function ReplacedParts() {
  */
 function ClaimedFences() {
   const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
-  const { plugins, safeMode } = usePlugins();
+  const { plugins, safeMode, blocks } = usePlugins();
   const [error, setError] = useState<string | null>(null);
   if (safeMode) return null;
   // Themes run no code, so draw no blocks.
@@ -609,14 +609,23 @@ function ClaimedFences() {
   if (languages.length === 0) return null;
   const rows = languages.map((language) => {
     const claiming = drawers.filter((plugin) => fencesOf(plugin.manifest).includes(language));
-    const part = fencePart(language);
+    // The plugin the runtime draws it with, so a claim whose block never registered isn't named.
+    const drawer = blocks.get(language)?.pluginId;
     return {
       language,
-      part,
+      part: fencePart(language),
       claiming,
-      drawing: claiming.find((plugin) => !plugin.ownParts.includes(part)) ?? null,
+      drawing: claiming.find((plugin) => plugin.manifest.id === drawer) ?? null,
     };
   });
+
+  /** `plugin`'s `ownParts` without the languages its manifest no longer claims, so they don't pile up. */
+  const current = (plugin: InstalledPlugin) =>
+    plugin.ownParts.filter(
+      (own) =>
+        !own.startsWith(fencePart('')) ||
+        fencesOf(plugin.manifest).some((language) => fencePart(language) === own),
+    );
 
   /** Show `part`'s blocks as code for each of `own`, and drawn by `chosen` if given. */
   const choose = (part: string, own: InstalledPlugin[], chosen?: InstalledPlugin) =>
@@ -625,12 +634,12 @@ function ClaimedFences() {
       try {
         for (const plugin of own) {
           if (!plugin.ownParts.includes(part))
-            await pluginStore.setOwnParts(refOf(plugin), [...plugin.ownParts, part]);
+            await pluginStore.setOwnParts(refOf(plugin), [...current(plugin), part]);
         }
         if (chosen)
           await pluginStore.setOwnParts(
             refOf(chosen),
-            chosen.ownParts.filter((own) => own !== part),
+            current(chosen).filter((own) => own !== part),
           );
       } catch (failure) {
         setError(message(failure));
