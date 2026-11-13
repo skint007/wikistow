@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { desktop } from '../../desktop';
+import { usePhoneLayout } from '../../shell/phone-layout';
 import { isApple } from '../../shell/search-model';
 import type { Findable, FindSession } from './findable';
 import { foundText, isFindKey, NOTHING_FOUND, type FindQuery, type Found } from './match';
@@ -76,19 +77,6 @@ export function useFindTarget(target: Findable | null | undefined) {
   }, [find, target]);
 }
 
-// Where the window scrolls, not the page's card (app-shell.tsx).
-const NARROW = '(max-width: 899px)';
-
-const useNarrow = () =>
-  useSyncExternalStore(
-    (listener) => {
-      const query = window.matchMedia(NARROW);
-      query.addEventListener('change', listener);
-      return () => query.removeEventListener('change', listener);
-    },
-    () => window.matchMedia(NARROW).matches,
-  );
-
 /** Whether a key pressed in `target` belongs to a dialog over the page, which keeps its own keys. */
 const inDialog = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest('[role="dialog"], [role="alertdialog"]');
@@ -119,7 +107,8 @@ export function FindBar({ find }: { find: PageFind }) {
     query.current = { text, matchCase };
   });
   const [focusing, focus] = useReducer((n: number) => n + 1, 0);
-  const narrow = useNarrow();
+  // The phone layout scrolls the window, not the page's card.
+  const narrow = usePhoneLayout();
 
   useEffect(
     () =>
