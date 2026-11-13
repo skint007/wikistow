@@ -15,14 +15,17 @@ const cacheFor =
   };
 
 /**
- * Serve the built web app. Hashed files under /assets are cached forever;
- * everything else is revalidated. Any other extensionless path outside /api
- * and /assets gets index.html, so client-side routes load directly.
+ * Serve the built web app. Hashed files under /assets are cached forever,
+ * and sent as their Brotli copy beside them (`.br`), where the build wrote
+ * one and the browser accepts it: the search model and the runtime's
+ * WebAssembly (ADR 0016, decision 3). Everything else is revalidated. Any
+ * other extensionless path outside /api and /assets gets index.html, so
+ * client-side routes load directly.
  */
 export function serveWebApp(app: Hono<AppEnv>, webDist: string): void {
   const indexHtml = readFileSync(join(webDist, 'index.html'), 'utf8');
 
-  app.use('/assets/*', cacheFor(IMMUTABLE), serveStatic({ root: webDist }));
+  app.use('/assets/*', cacheFor(IMMUTABLE), serveStatic({ root: webDist, precompressed: true }));
   app.get('*', cacheFor('no-cache'), serveStatic({ root: webDist }), (c) => {
     const path = c.req.path;
     const reserved = path.startsWith('/api/') || path === '/assets' || path.startsWith('/assets/');

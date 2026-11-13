@@ -115,6 +115,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # The search model the web build fetches from Hugging Face and checks
+      # against its pinned hashes, and its Brotli copies, which take a minute
+      # to make (apps/web/meaning.ts). Kept by hash, so a stale entry is
+      # never used.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/wikistow-meaning
+          key: meaning-${{ hashFiles('packages/ui/src/meaning/model.ts', 'pnpm-lock.yaml') }}
+          restore-keys: meaning-
       - run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
           cp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"

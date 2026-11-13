@@ -15,11 +15,16 @@ const stage = await mkdtemp(join(tmpdir(), 'wikistow-desktop-'));
 try {
   const { productName, version } = JSON.parse(await readFile(join(here, 'package.json'), 'utf8'));
   // Only what the app loads: its bundles, the web build (with the
-  // workshop's bundler and its WebAssembly) and the window icons, the
-  // beta's included (src/install.ts).
-  const noMaps = { recursive: true, filter: (source: string) => !source.endsWith('.map') };
-  await cp(join(here, 'dist'), join(stage, 'dist'), noMaps);
-  await cp(join(here, '../web/dist'), join(stage, 'web'), noMaps);
+  // workshop's bundler, the search model and their WebAssembly) and the
+  // window icons, the beta's included (src/install.ts). Not source maps,
+  // nor the Brotli copies the server sends browsers, as the app reads its
+  // files from disk (ADR 0016, decision 3).
+  const loaded = {
+    recursive: true,
+    filter: (source: string) => !source.endsWith('.map') && !source.endsWith('.br'),
+  };
+  await cp(join(here, 'dist'), join(stage, 'dist'), loaded);
+  await cp(join(here, '../web/dist'), join(stage, 'web'), loaded);
   for (const icon of ['wikistow-desktop.png', 'wikistow-desktop-beta.png']) {
     await cp(join(here, 'packaging', icon), join(stage, 'packaging', icon));
   }

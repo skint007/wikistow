@@ -80,6 +80,8 @@ pnpm exec vp -C apps/desktop pack
 node apps/desktop/scripts/asar.ts
 ```
 
+The web build fetches the search model (ADR 0016) from Hugging Face the first time, about 35 MB at the revision `packages/ui/src/meaning/model.ts` pins, checks its SHA-256, and makes its Brotli copies, which takes about a minute. It keeps both in `node_modules/.cache/wikistow-meaning`, or in `WIKISTOW_MODEL_CACHE`, so later builds need no connection.
+
 Integration tests use the local Postgres service. The backup and restore tests also need Postgres 17's `pg_dump`, `pg_restore`, and `psql`. Browser tests need Playwright's Chromium, installed with `pnpm --filter @wikistow/web exec playwright install chromium`.
 
 Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).

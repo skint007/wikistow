@@ -39,10 +39,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Releases and packaging
 
+- The web build carries the model search by meaning will run, step 2 of ADR 0016 (#324): `bge-small-en-v1.5` at 8 bits, fetched from Hugging Face at a pinned revision and checked against its SHA-256, with its tokenizer and ONNX Runtime Web's WebAssembly, each with a Brotli copy. The server sends `/assets/*` as their Brotli copies to browsers that accept them. The service worker keeps none of them, so nobody downloads them who doesn't use them, and the desktop app ships them without the copies, about 50 MB more. `/third-party-notices.txt` gives the model's, the runtime's and the tokenizer's licences. A build fails if the service worker would keep a file over 4 MB. Nothing embeds yet. (#PR)
 - `@electron/asar` 4.3.2, from 4.3.1, which builds the desktop app's `app.asar`. It brings `glob` 14 and `minimatch` 11, past their security advisories. (#418)
 
 #### Development
 
+- The embedding worker for search by meaning, step 2 of ADR 0016: ONNX Runtime Web 1.31.1 on WebAssembly, one thread, with `@huggingface/tokenizers` 0.2.0, both dependencies of `packages/ui`, in a module worker of the app's own, which keeps the model's files in a cache of its own (`wikistow-meaning-`) in a browser, and reads the desktop app's from disk. Browser tests embed a text under the app's policy, from the server, from the cache and offline, and in the packed desktop app. Nothing in the app starts it yet. (#PR)
 - The client's `live` module, step 5 of ADR 0015 (live editing, #321), in `@wikistow/client/live`: the session record, wrapped with the share's draft key or sealed to the owners; messages padded, sealed under the session key and signed, both bound to the record's hash; the Yjs client ID each join derives; the strict decoding of Yjs updates and states before anything reaches Yjs; each join's `seq` and `clock`; the snapshot check; and `wikistow.live`. Nothing calls it yet. Test vectors pin the three new domains. `yjs` 13.6.33 is a dependency of `packages/client`. (#419)
 
 ## 0.25.0 - 2026-11-11
