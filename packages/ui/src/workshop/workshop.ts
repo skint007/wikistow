@@ -82,8 +82,11 @@ export type WorkshopState = {
 /** A plugin block's fence in a sample's text: its info string and its text. */
 type Fence = { language: string; source: string };
 
-/** The `plugin:<id>/<block>` fences in `markdown`, in order. */
-export function pluginFences(markdown: string): Fence[] {
+/**
+ * The `plugin:<id>/<block>` fences in `markdown`, and those of the bare
+ * languages in `bare` (a manifest's `fences`), in order.
+ */
+export function pluginFences(markdown: string, bare: ReadonlySet<string> = new Set()): Fence[] {
   const fences: Fence[] = [];
   let open: { marker: string; language: string; lines: string[] } | null = null;
   for (const line of markdown.split('\n')) {
@@ -97,8 +100,10 @@ export function pluginFences(markdown: string): Fence[] {
       } else open.lines.push(line);
       continue;
     }
-    const match = /^ {0,3}(`{3,}|~{3,})\s*(plugin:\S+)\s*$/.exec(line);
-    if (match?.[1] && match[2]) open = { marker: match[1], language: match[2], lines: [] };
+    const match = /^ {0,3}(`{3,}|~{3,})\s*(\S+)\s*$/.exec(line);
+    const language = match?.[2];
+    if (match?.[1] && language && (language.startsWith('plugin:') || bare.has(language)))
+      open = { marker: match[1], language, lines: [] };
   }
   return fences;
 }
@@ -241,6 +246,7 @@ export class Workshop {
   /** The stylesheet of the theme this workshop shows across the app, while it does. */
   #theming: string | null = null;
   readonly #unwatchTheme: () => void;
+  readonly #unwatchSamples: () => void;
 
   /** What the draft keeps is read after this, a closed workshop's last save. */
   readonly #after: Promise<void>;
@@ -309,6 +315,10 @@ export class Workshop {
           : [{ spaceId: SAMPLE_SPACE, name: 'Sample pages', icon: null }],
     });
     this.preview.start();
+    // A sample changed: what `index` and `query` give the plugin may have.
+    this.#unwatchSamples = this.samples.subscribe(() =>
+      this.preview.indexChanged([{ spaceId: SAMPLE_SPACE, folderIds: [] }]),
+    );
     // Settings' picker shares the preview: one it shows, or stops, ends this one.
     this.#unwatchTheme = pluginTheme.subscribe(() => {
       if (this.#theming && pluginTheme.get().preview?.href !== this.#theming) {
@@ -811,6 +821,7 @@ export class Workshop {
     this.preview.stop();
     this.#bundler.stop();
     this.#unwatchTheme();
+    this.#unwatchSamples();
     window.removeEventListener('error', this.#caught);
     window.removeEventListener('unhandledrejection', this.#rejected);
   }
@@ -868,7 +879,8 @@ export class Workshop {
       const blocks = [];
       // Fields bound to a property show the sample's value, as its previews do.
       const properties = pageBlockProperties(sample.markdown);
-      for (const { language, source } of pluginFences(sample.markdown)) {
+      const bare = new Set(Object.keys(manifest?.fences ?? {}));
+      for (const { language, source } of pluginFences(sample.markdown, bare)) {
         const results = await this.preview.blockResults(language, page, source, properties);
         blocks.push(
           results

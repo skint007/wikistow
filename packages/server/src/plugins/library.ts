@@ -147,14 +147,20 @@ export async function uploadPlugin(
 }
 
 /**
- * Whether an app reading manifests `reads` (`MANIFEST_READ`) takes
- * `manifest`: before 3, one without `settings`; before 2, one without
- * `inline` or `replaces` either.
+ * The first `MANIFEST_READ` that reads each optional manifest field. An
+ * app reading an older one refuses a manifest that has it.
  */
+const READ_FROM = [
+  ['inline', 2],
+  ['replaces', 2],
+  ['settings', 3],
+  ['platforms', 4],
+  ['fences', 4],
+] as const satisfies readonly (readonly [keyof Manifest, number])[];
+
+/** Whether an app reading manifests `reads` (`MANIFEST_READ`) takes `manifest`. */
 const readable = (manifest: Manifest, reads: number) =>
-  reads >= 3 ||
-  (manifest.settings === undefined &&
-    (reads >= 2 || (manifest.inline === undefined && manifest.replaces === undefined)));
+  READ_FROM.every(([field, from]) => reads >= from || manifest[field] === undefined);
 
 /**
  * Every plugin in the library `accountId` may see, with its versions,

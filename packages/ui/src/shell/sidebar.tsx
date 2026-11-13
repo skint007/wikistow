@@ -1,4 +1,5 @@
 import {
+  hasOwnOrder,
   pageOperations,
   spaceOperations,
   type FolderId,
@@ -80,14 +81,17 @@ import {
   FolderMenu,
   folderActions,
   FolderMenuItems,
+  PageMenu,
   PageMenuItems,
   RowMenu,
   shownVersion,
+  type Ordering,
   type PageAction,
   type PageInfo,
 } from './tree-menus';
 import { useAvailability } from './availability';
 import { copying, NODE_DRAG_TYPE, nodeDrag } from './node-drag';
+import { canStep, childrenOf, orderOfTree, useReorder } from './tree-order';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
@@ -127,8 +131,9 @@ function folderName(folder: Tree['folders'][number]) {
 }
 
 /**
- * The rows shown: folders first, then pages, each alphabetical. A filter
- * shows matching pages with the folders around them opened.
+ * The rows shown, each folder's in its order (#400): its own, or by name,
+ * folders first. A filter shows matching pages with the folders around
+ * them opened.
  */
 function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string): Row[] {
   const needle = filter.trim().toLowerCase();
@@ -139,33 +144,32 @@ function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string):
     tree.pages.some((p) => p.parentId === folderId && matches(p.title)) ||
     tree.folders.some((f) => f.parentId === folderId && hasMatch(f.id));
   const walk = (parentId: FolderId | null, level: number) => {
-    const folders = tree.folders
-      .filter((f) => f.parentId === parentId && (!needle || hasMatch(f.id)))
-      .map((f) => ({ folder: f, ...folderName(f) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    for (const { folder, name, emoji, tint } of folders) {
-      const open = needle ? true : expanded.has(folder.id);
-      const count =
-        tree.folders.filter((f) => f.parentId === folder.id).length +
-        tree.pages.filter((p) => p.parentId === folder.id).length;
-      rows.push({
-        kind: 'folder',
-        id: folder.id,
-        parentId,
-        level,
-        name,
-        emoji,
-        tint,
-        metadata: folder.metadata,
-        count,
-        expanded: open,
-      });
-      if (open) walk(folder.id, level + 1);
-    }
-    const pages = tree.pages
-      .filter((p) => p.parentId === parentId && matches(p.title))
-      .sort((a, b) => pageTitle(a.title).localeCompare(pageTitle(b.title)));
-    for (const page of pages) {
+    for (const child of childrenOf(tree, parentId)) {
+      if (child.kind === 'folder') {
+        const folder = child.node;
+        if (needle && !hasMatch(folder.id)) continue;
+        const { name, emoji, tint } = folderName(folder);
+        const open = needle ? true : expanded.has(folder.id);
+        const count =
+          tree.folders.filter((f) => f.parentId === folder.id).length +
+          tree.pages.filter((p) => p.parentId === folder.id).length;
+        rows.push({
+          kind: 'folder',
+          id: folder.id,
+          parentId,
+          level,
+          name,
+          emoji,
+          tint,
+          metadata: folder.metadata,
+          count,
+          expanded: open,
+        });
+        if (open) walk(folder.id, level + 1);
+        continue;
+      }
+      const page = child.node;
+      if (!matches(page.title)) continue;
       rows.push({
         kind: 'page',
         id: page.id,
@@ -182,6 +186,26 @@ function visibleRows(tree: Tree, expanded: ReadonlySet<string>, filter: string):
   walk(null, 1);
   return rows;
 }
+
+/**
+ * Where a drag is pointing: into a folder, or the top of the space for
+ * null, as before (#376); or, on a line between rows, into `parentId` just
+ * before `before`, or last there for null (#400). The line is drawn on
+ * `rowId`'s top or bottom edge, indented to `level`.
+ */
+type Target =
+  | { kind: 'into'; parentId: FolderId | null }
+  | {
+      kind: 'line';
+      parentId: FolderId | null;
+      before: string | null;
+      rowId: string;
+      edge: 'top' | 'bottom';
+      level: number;
+    };
+
+/** What a drop on a target does: a move or copy there (`Destination`), or a reorder where it is. */
+type Landing = { kind: 'reorder' } | { kind: 'move' | 'copy'; destination: Destination<FolderId> };
 
 /** Everything inside a folder, for the delete confirmation. */
 function contentsOf(tree: Tree, folderId: FolderId) {
@@ -253,9 +277,12 @@ type PageDialog = {
  */
 type Dragging = {
   moving: Moving;
+  /** Where it is now. */
+  parentId: FolderId | null;
   to: Map<FolderId | null, Destination<FolderId>>;
   copyTo: Map<FolderId | null, Destination<FolderId>>;
-  over: Destination<FolderId> | null;
+  /** Where it would go: a folder highlighted, or a line between rows. */
+  over: Target | null;
 };
 
 /**
@@ -290,6 +317,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const standing = useOwnerStanding(spaceId);
+  const reorder = useReorder(spaceId);
   const [focused, setFocused] = useState<string | null>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
 
@@ -297,6 +325,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
     () => (tree ? visibleRows(tree, expanded, filter) : []),
     [tree, expanded, filter],
   );
+  // Each folder's children in order, sorted once for each tree, for every row's menu.
+  const orderIn = useMemo(() => (tree ? orderOfTree(tree) : () => []), [tree]);
   // While filtering, every folder shows open, and the kept state waits
   // unchanged for the filter to clear. Saving drops folders the tree no
   // longer has, deleted or out of reach.
@@ -335,6 +365,24 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // failed its checks; one in a newer format still opened.
   const topOpened = tree.space?.metadata !== null;
   const canEdit = canEditAt(null) && topOpened;
+  // Whether the person can put things in order in `parentId`, or at the
+  // top: they can edit there, and it is a place of the space, not the top of
+  // folders shared with them, whose places are among folders they don't see.
+  const canOrderAt = (parentId: FolderId | null) =>
+    canEditAt(parentId) && (parentId !== null || (tree.space !== null && topOpened));
+  // Move up and Move down for a row, each only where it can go (#400). Not
+  // while filtering, which hides the rows around it.
+  const orderingOf = (row: Row): Ordering | null => {
+    if (filtering || !canOrderAt(row.parentId)) return null;
+    const step = (by: -1 | 1) =>
+      canStep(orderIn(row.parentId), availability, row.id, by)
+        ? () => void reorder.step(tree, row.id, row.parentId, by)
+        : undefined;
+    return { onMoveUp: step(-1), onMoveDown: step(1) };
+  };
+  // Sort by name, for a folder, or the top, with an order of its own.
+  const sortsAt = (parentId: FolderId | null) =>
+    canOrderAt(parentId) && hasOwnOrder(orderIn(parentId).map((child) => child.node));
   // Importing publishes what it makes, so it needs publish rights there too.
   const canImportAt = (parentId: FolderId | null) =>
     canEditAt(parentId) && ((shareCovering(tree, parentId) ?? tree.space)?.canPublish ?? false);
@@ -408,16 +456,19 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
   // Drag and drop moves, for a mouse, at once, or copies with Ctrl held
   // (Option on a Mac), and a notice offers Undo (#376). While **Ask before
   // moving** is on, a drop opens Move to… on the place dropped on instead.
-  // Keyboard users have Move to… in the menus. A drop on a page is a drop
-  // beside it, and one below the rows is at the top of the space. A drop on
-  // another space in the rail is the rail's, from what `nodeDrag` holds (#338).
-  // A drag whose row went away meanwhile, moved or deleted elsewhere, is
-  // over: the row's dragend never reaches the tree.
+  // Keyboard users have Move to…, Move up and Move down in the menus. The
+  // middle of a folder's row is a drop into it, at the end; the edges of any
+  // row, a line between rows, are a drop just there (#400): in its own folder,
+  // that puts it in order there, and into another, it moves and lands there.
+  // One below the rows is at the top of the space. A drop on another space in
+  // the rail is the rail's, from what `nodeDrag` holds (#338). A drag whose
+  // row went away meanwhile, moved or deleted elsewhere, is over: the row's
+  // dragend never reaches the tree.
   if (dragging && !rows.some((r) => r.id === dragging.moving.id)) {
     setDragging(null);
     nodeDrag.set(null);
   }
-  const startDrag = (event: DragEvent, moving: Moving) => {
+  const startDrag = (event: DragEvent, moving: Moving, parentId: FolderId | null) => {
     event.dataTransfer.effectAllowed = 'copyMove';
     event.dataTransfer.setData(NODE_DRAG_TYPE, '');
     // Where Move to… offers: offline, only within its share (`moveRoute`).
@@ -433,6 +484,7 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         : [];
     setDragging({
       moving,
+      parentId,
       to: new Map(places.map((d) => [d.parentId, d])),
       copyTo: new Map(copies.map((d) => [d.parentId, d])),
       over: null,
@@ -450,40 +502,112 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
       },
     });
   };
-  const pointAt = (over: Destination<FolderId> | null) =>
-    setDragging((current) => (current && current.over !== over ? { ...current, over } : current));
-  // Only a drag from this tree, and only where Move to… or Copy to… would
-  // offer: a move not onto itself, inside itself, or where it is.
-  const placeAt = (event: DragEvent, parentId: FolderId | null) =>
-    event.dataTransfer.types.includes(NODE_DRAG_TYPE)
-      ? ((copying(event) ? dragging?.copyTo : dragging?.to)?.get(parentId) ?? null)
-      : null;
+  const pointAt = (over: Target | null) =>
+    setDragging((current) =>
+      current && !sameTarget(current.over, over) ? { ...current, over } : current,
+    );
+  // The child after `id` in its folder's order, or null for the last.
+  const nextOf = (id: string, parentId: FolderId | null) => {
+    const children = orderIn(parentId);
+    const at = children.findIndex((child) => child.node.id === id);
+    return children[at + 1]?.node.id ?? null;
+  };
+  // What a drop on `target` would do, if anything: only a drag from this
+  // tree, and only where Move to… or Copy to… would offer, a move not onto
+  // itself, inside itself, or where it is; or a reorder in its own folder
+  // that changes something.
+  const landingAt = (event: DragEvent, target: Target): Landing | null => {
+    if (!dragging || !event.dataTransfer.types.includes(NODE_DRAG_TYPE)) return null;
+    const copy = copying(event);
+    const { parentId } = target;
+    if (target.kind === 'line' && !copy && parentId === dragging.parentId) {
+      const { id } = dragging.moving;
+      const still = target.before === id || target.before === nextOf(id, parentId);
+      const can = canOrderAt(parentId) && availability.of(id).can('reorder');
+      return can && !still ? { kind: 'reorder' } : null;
+    }
+    const destination = (copy ? dragging.copyTo : dragging.to).get(parentId);
+    return destination ? { kind: copy ? 'copy' : 'move', destination } : null;
+  };
   // For dragenter as well as dragover: a browser takes a drop on whatever
   // took either last, and moving onto a new element fires only dragenter.
-  const dragOver = (event: DragEvent, parentId: FolderId | null) => {
+  const dragOver = (event: DragEvent, target: Target) => {
     event.stopPropagation();
-    const destination = placeAt(event, parentId);
-    pointAt(destination);
-    if (!destination) return;
+    const landing = landingAt(event, target);
+    pointAt(landing ? target : null);
+    if (!landing) return;
     event.preventDefault();
     // The copy cursor while Ctrl is held; letting go of it makes it a move again.
-    event.dataTransfer.dropEffect = copying(event) ? 'copy' : 'move';
+    event.dataTransfer.dropEffect = landing.kind === 'copy' ? 'copy' : 'move';
   };
-  const drop = (event: DragEvent, parentId: FolderId | null) => {
+  const drop = (event: DragEvent, target: Target) => {
     event.preventDefault();
     event.stopPropagation();
-    const destination = placeAt(event, parentId);
-    if (dragging && destination)
+    const landing = landingAt(event, target);
+    if (dragging && landing?.kind === 'reorder' && target.kind === 'line') {
+      reorder.place(tree, {
+        nodeId: dragging.moving.id,
+        name: dragging.moving.name,
+        parentId: target.parentId,
+        before: target.before,
+      });
+    } else if (dragging && landing && landing.kind !== 'reorder') {
       startMove({
         spaceId,
         moving: dragging.moving,
-        action: copying(event) ? 'copy' : 'move',
-        to: { spaceId, spaceName: spaceName ?? 'this space', place: destination },
+        action: landing.kind,
+        to: { spaceId, spaceName: spaceName ?? 'this space', place: landing.destination },
+        ...(target.kind === 'line' && { before: target.before }),
       });
+    }
     setDragging(null);
     nodeDrag.set(null);
   };
-  const dropTarget = (row: Row) => (row.kind === 'folder' ? row.id : row.parentId);
+  // Where on a row the pointer is: its top or bottom edge is a line before
+  // or after it, the bottom of an open folder's the line before what is
+  // first in it, and the middle of a folder's row, the folder. A page's row
+  // is all edges. While filtering, rows hide what is between them: only
+  // drops into folders.
+  const targetOf = (event: DragEvent, row: Row, index: number): Target => {
+    const into = row.kind === 'folder' ? row.id : row.parentId;
+    if (filtering) return { kind: 'into', parentId: into };
+    const { top, height } = event.currentTarget.getBoundingClientRect();
+    const at = height > 0 ? (event.clientY - top) / height : 0.5;
+    const edge = row.kind === 'folder' ? 0.25 : 0.5;
+    if (at > edge && at < 1 - edge) return { kind: 'into', parentId: into };
+    const line = { kind: 'line' as const, rowId: row.id, level: row.level };
+    if (at <= edge) return { ...line, parentId: row.parentId, before: row.id, edge: 'top' };
+    const first = rows[index + 1];
+    if (row.kind === 'folder' && row.expanded && first?.parentId === row.id) {
+      return { ...line, parentId: row.id, before: first.id, edge: 'bottom', level: row.level + 1 };
+    }
+    return {
+      ...line,
+      parentId: row.parentId,
+      before: nextOf(row.id, row.parentId),
+      edge: 'bottom',
+    };
+  };
+  // Below the rows: the top of the space, or, for something already at the
+  // top and not copied, the end of it, with the line under the last row, so
+  // it can go after an open folder there.
+  const belowRows = (event: DragEvent): Target => {
+    const last = rows.at(-1);
+    return dragging?.parentId === null && last && !filtering && !copying(event)
+      ? {
+          kind: 'line',
+          parentId: null,
+          before: null,
+          rowId: last.id,
+          edge: 'bottom',
+          level: 1,
+        }
+      : { kind: 'into', parentId: null };
+  };
+  const lineOn = (row: Row) =>
+    dragging?.over?.kind === 'line' && dragging.over.rowId === row.id ? dragging.over : null;
+  const into = (parentId: FolderId | null) =>
+    dragging?.over?.kind === 'into' && dragging.over.parentId === parentId;
 
   const deletingContents = deleting ? contentsOf(tree, deleting) : null;
   const deletingName = rows.find((r) => r.id === deleting);
@@ -500,6 +624,11 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         onImport={
           canImportAt(null) && topOpened && spaceName !== null
             ? () => setImporting({ folderId: null, name: spaceName })
+            : undefined
+        }
+        onSortByName={
+          sortsAt(null) && spaceName !== null
+            ? () => reorder.sortByName(tree, null, spaceName)
             : undefined
         }
       />
@@ -558,9 +687,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               aria-label={`Pages in ${spaceName === null ? 'folders shared with you' : plainText(spaceName)}`}
               onKeyDown={onKeyDown}
               // Between rows, the place last pointed at holds.
-              onDragEnter={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
-              onDragOver={(event) => dragging?.over && dragOver(event, dragging.over.parentId)}
-              onDrop={(event) => dragging?.over && drop(event, dragging.over.parentId)}
+              onDragEnter={(event) => dragging?.over && dragOver(event, dragging.over)}
+              onDragOver={(event) => dragging?.over && dragOver(event, dragging.over)}
+              onDrop={(event) => dragging?.over && drop(event, dragging.over)}
               onDragLeave={(event) => {
                 const to = event.relatedTarget;
                 if (!(to instanceof Node) || !event.currentTarget.contains(to)) pointAt(null);
@@ -573,11 +702,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                 // `relative` keeps the rows' sr-only text inside the scroller: placed
                 // by the page instead, it stretched the window to the hidden rows.
                 'relative -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto rounded-control px-1',
-                dragging?.over?.parentId === null &&
-                  'bg-primary-soft/60 ring-2 ring-primary ring-inset',
+                into(null) && 'bg-primary-soft/60 ring-2 ring-primary ring-inset',
               )}
             >
-              {rows.map((row) => {
+              {rows.map((row, index) => {
                 const indent = {
                   paddingLeft: `${(row.level - 1) * 20 + (row.kind === 'page' ? 18 : 4)}px`,
                 };
@@ -590,10 +718,12 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                     else itemRefs.current.delete(row.id);
                   },
                   onFocus: () => setFocused(row.id),
-                  onDragEnter: (event: DragEvent) => dragOver(event, dropTarget(row)),
-                  onDragOver: (event: DragEvent) => dragOver(event, dropTarget(row)),
-                  onDrop: (event: DragEvent) => drop(event, dropTarget(row)),
+                  onDragEnter: (event: DragEvent) => dragOver(event, targetOf(event, row, index)),
+                  onDragOver: (event: DragEvent) => dragOver(event, targetOf(event, row, index)),
+                  onDrop: (event: DragEvent) => drop(event, targetOf(event, row, index)),
                 } as const;
+                const line = lineOn(row);
+                const dropLine = line && <DropLine edge={line.edge} level={line.level} />;
                 if (row.kind === 'folder') {
                   // One list for both menus, so they can't differ.
                   const actions = folderActions({
@@ -605,6 +735,10 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                           onNewFolder: () => setCreating({ kind: 'folder', parentId: row.id }),
                           onRename: () => setRenaming(row.id),
                           onRestyle: () => setRestyling(row.id),
+                          onSortByName: sortsAt(row.id)
+                            ? () => reorder.sortByName(tree, row.id, row.name)
+                            : undefined,
+                          ordering: orderingOf(row),
                           onMove: () => setMoving({ id: row.id, kind: 'folder', name: row.name }),
                           onCopy: () =>
                             setMoving({
@@ -637,13 +771,16 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                         onClick={() => openFolder(row.id)}
                         draggable={canEditAt(row.id) && availability.of(row.id).can('drag')}
                         onDragStart={(event) =>
-                          startDrag(event, { id: row.id, kind: 'folder', name: row.name })
+                          startDrag(
+                            event,
+                            { id: row.id, kind: 'folder', name: row.name },
+                            row.parentId,
+                          )
                         }
                         className={cn(
-                          'group flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
+                          'group relative flex cursor-pointer items-center gap-2 rounded-control py-1 pr-1 outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
                           shown && 'bg-primary-soft text-primary-ink',
-                          dragging?.over?.parentId === row.id &&
-                            'bg-primary-soft ring-2 ring-primary ring-inset',
+                          into(row.id) && 'bg-primary-soft ring-2 ring-primary ring-inset',
                         )}
                         style={{ ...indent, paddingLeft: `${(row.level - 1) * 20}px` }}
                       >
@@ -690,43 +827,44 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                           actions={actions}
                           waiting={availability.waiting(row.id)}
                         />
+                        {dropLine}
                       </li>
                     </RowMenu>
                   );
                 }
                 const selected = params.pageId === row.id;
+                const pageMenu = {
+                  pageId: row.id,
+                  deleter,
+                  ordering: orderingOf(row),
+                  onOpen: () => openPage(row.id),
+                  onAction: (action: PageAction, info: PageInfo) =>
+                    action === 'move' || action === 'copy'
+                      ? setMoving({ id: row.id, kind: 'page', name: row.title, action })
+                      : setPageDialog({
+                          action,
+                          pageId: row.id,
+                          title: row.title,
+                          info,
+                          open: true,
+                        }),
+                };
                 return (
-                  <RowMenu
-                    key={row.id}
-                    items={
-                      <PageMenuItems
-                        pageId={row.id}
-                        deleter={deleter}
-                        onOpen={() => openPage(row.id)}
-                        onAction={(action, info) =>
-                          action === 'move' || action === 'copy'
-                            ? setMoving({ id: row.id, kind: 'page', name: row.title, action })
-                            : setPageDialog({
-                                action,
-                                pageId: row.id,
-                                title: row.title,
-                                info,
-                                open: true,
-                              })
-                        }
-                      />
-                    }
-                  >
+                  <RowMenu key={row.id} items={<PageMenuItems {...pageMenu} />}>
                     <li
                       {...common}
                       aria-selected={selected}
                       onClick={() => openPage(row.id)}
                       draggable={canEditAt(row.parentId) && availability.of(row.id).can('drag')}
                       onDragStart={(event) =>
-                        startDrag(event, { id: row.id, kind: 'page', name: row.title })
+                        startDrag(
+                          event,
+                          { id: row.id, kind: 'page', name: row.title },
+                          row.parentId,
+                        )
                       }
                       className={cn(
-                        'flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-2.5 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong aria-selected:hover:bg-none aria-selected:active:bg-none',
+                        'group relative flex cursor-pointer items-center gap-2 rounded-row py-1.5 pr-1 text-subtle-foreground outline-offset-[-2px] hover:tint active:tint-strong has-[button:active]:bg-none aria-selected:hover:bg-none aria-selected:active:bg-none',
                         selected && 'bg-primary-soft font-bold text-primary-ink',
                       )}
                       style={indent}
@@ -747,6 +885,8 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
                           <span className="sr-only">Unpublished changes</span>
                         </span>
                       )}
+                      <PageMenu {...pageMenu} title={row.title} />
+                      {dropLine}
                     </li>
                   </RowMenu>
                 );
@@ -759,9 +899,9 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
               <li
                 aria-hidden
                 className="min-h-10 flex-1"
-                onDragEnter={(event) => dragOver(event, null)}
-                onDragOver={(event) => dragOver(event, null)}
-                onDrop={(event) => drop(event, null)}
+                onDragEnter={(event) => dragOver(event, belowRows(event))}
+                onDragOver={(event) => dragOver(event, belowRows(event))}
+                onDrop={(event) => drop(event, belowRows(event))}
               />
             </ul>
           </div>
@@ -891,6 +1031,34 @@ export function Sidebar({ spaceId, onNavigate }: { spaceId: SpaceId; onNavigate?
         </DialogContent>
       </Dialog>
     </SidebarCard>
+  );
+}
+
+const sameTarget = (a: Target | null, b: Target | null) =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.kind === b.kind &&
+    a.parentId === b.parentId &&
+    (a.kind === 'into' ||
+      (b.kind === 'line' && a.before === b.before && a.rowId === b.rowId && a.edge === b.edge)));
+
+/**
+ * Where a drop puts a page or folder among the rows (#400): a 2px line on a
+ * row's top or bottom edge, indented to the level it lands at, as the rail
+ * draws one between its tiles. A folder dropped on is highlighted instead.
+ */
+function DropLine({ edge, level }: { edge: 'top' | 'bottom'; level: number }) {
+  return (
+    <span
+      aria-hidden
+      data-drop-line={edge}
+      className={cn(
+        'pointer-events-none absolute right-1 h-0.5 rounded-full bg-primary',
+        edge === 'top' ? '-top-px' : '-bottom-px',
+      )}
+      style={{ left: `${(level - 1) * 20 + 4}px` }}
+    />
   );
 }
 

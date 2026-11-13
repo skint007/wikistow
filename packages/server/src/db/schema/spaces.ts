@@ -71,10 +71,23 @@ export const nodes = pgTable(
      * deleting for good does, takes the nodes along.
      */
     trashId: uuid().references((): AnyPgColumn => trash.id, { onDelete: 'cascade' }),
+    /**
+     * Where it sits among the others in its folder, or at the top of the
+     * space, when that has an order of its own (#400): a fractional index
+     * (`Position`), compared byte by byte, as the column's "C" collation
+     * does. Null lists it by name, after those with one. It is an order of
+     * IDs the server already sees, never a name. A move sets it with the
+     * parent; it stays through the trash, for a restore to put it back.
+     */
+    position: text(),
     createdAt: timestamptz().notNull().defaultNow(),
   },
   (table) => [
     check('nodes_id_shape', idShape(table.id)),
+    check(
+      'nodes_position_shape',
+      sql`${table.position} is null or ${table.position} ~ '^[A-Za-z][0-9A-Za-z]{1,99}$'`,
+    ),
     check(
       'nodes_page_has_no_metadata',
       sql`${table.kind} = 'folder' or ${table.metadataHead} is null`,

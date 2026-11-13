@@ -6,6 +6,7 @@ export * from './records/envelope.ts';
 export * from './records/identity.ts';
 export * from './records/ids.ts';
 export * from './records/metadata.ts';
+export * from './records/position.ts';
 export * from './records/revision.ts';
 export * from './records/share.ts';
 export * from './records/text.ts';

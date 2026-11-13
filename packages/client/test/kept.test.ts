@@ -102,6 +102,7 @@ function fakeServer(identity: PrivateIdentity) {
         draftHead: draft.revisionId,
         publishedHead: published.revisionId,
         draftChanges: true,
+        position: null,
       });
       trees.set(spaceId, pages);
       return { pageId, published, draft };

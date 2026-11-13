@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import type { PageRef, PluginErrorCode, PluginEvent, Settings } from './host.ts';
+import {
+  QUERY_LIMIT,
+  type PageRef,
+  type PluginErrorCode,
+  type PluginEvent,
+  type Settings,
+} from './host.ts';
 import { SettingsValue } from './manifest.ts';
 
 /*
@@ -29,6 +35,16 @@ export const METHODS = {
     z.string().max(1000),
     z.object({ limit: z.number().int().min(1).max(200).optional() }).optional(),
   ]),
+  'pages.index': z.tuple([Id]),
+  'pages.query': z.tuple([
+    z.object({
+      spaceId: Id,
+      from: z.string().max(1000).optional(),
+      where: z.string().max(5000).optional(),
+      sort: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(QUERY_LIMIT).optional(),
+    }),
+  ]),
   'pages.create': z.tuple([
     FolderRef,
     z.object({ title: Title, markdown: Markdown.optional(), data: Json.optional() }),
@@ -52,7 +68,7 @@ const MethodName = z.custom<Method>(
 );
 
 /** The events a script listens for: `settings.changed` is `host.settings.on('changed')`. */
-const EventName = z.enum(['page.shown', 'draft.saved', 'settings.changed']);
+const EventName = z.enum(['page.shown', 'draft.saved', 'index.changed', 'settings.changed']);
 
 /** What a script is told: its events, and its own settings changing. */
 export type ScriptEvent = PluginEvent | { event: 'settings.changed'; payload: Settings };

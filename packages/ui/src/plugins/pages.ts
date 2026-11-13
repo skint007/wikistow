@@ -10,6 +10,7 @@ import {
   type ClientContext,
   type OpenedPayload,
   type PayloadChanges,
+  treeInOrder,
 } from '@wikistow/client';
 import { FolderId, PageId, RevisionId, SpaceId, structureRoutes } from '@wikistow/contracts';
 import type { PluginScope } from '@wikistow/contracts';
@@ -27,7 +28,9 @@ import {
 import { leastAccess } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { DraftConflict } from '../page/draft-session';
+import { childrenOf, treeLabels } from '../shell/tree-order';
 import { vaultStore } from '../vault/store';
+import { pageRows, queryRows, readableSpace, readPluginQuery, type IndexChange } from './page-rows';
 
 /** Writes a plugin may make a minute, which bounds loops between plugins. */
 const WRITES_PER_MINUTE = 30;
@@ -70,7 +73,38 @@ export type EditingCaller = Caller & {
    * device and not sent yet, and offline, what the device keeps.
    */
   tree: (ctx: ClientContext, spaceId: SpaceId) => Promise<Tree>;
+  /**
+   * The person's search index, the one query tables read: up to date with
+   * what changed, built first if it isn't (`index`, `query`).
+   */
+  index: (ctx: ClientContext) => Promise<searchOperations.PageIndex>;
 };
+
+/**
+ * The spaces of `changes` where the plugin can read a page that changed
+ * there, by its folders as the index held them, each once: what it is
+ * told as `index.changed`.
+ */
+export function changedFor(
+  caller: Pick<Caller, 'access' | 'scopes'>,
+  changes: readonly IndexChange[],
+): string[] {
+  if (caller.access === 'none') return [];
+  const scopes = caller.scopes();
+  const spaces = new Set<string>();
+  for (const { spaceId, folderIds } of changes) {
+    if (spaces.has(spaceId)) continue;
+    if (
+      scopes.some(
+        (scope) =>
+          scope.spaceId === spaceId &&
+          (scope.folderId === null || folderIds.includes(scope.folderId)),
+      )
+    )
+      spaces.add(spaceId);
+  }
+  return [...spaces];
+}
 
 /** The open session, or `locked`. */
 export function session(): ClientContext {
@@ -291,6 +325,33 @@ export function pagesFor(caller: EditingCaller): HostPages {
     );
   };
 
+  /**
+   * What the plugin can read of a space, from the person's search index
+   * and the app's own tree, as `tree` reads it; null where it can read
+   * nothing there.
+   */
+  const readableOf = async (ctx: ClientContext, spaceIdText: string) => {
+    const spaceId = SpaceId.parse(spaceIdText);
+    const scopes = caller.scopes().filter((scope) => scope.spaceId === spaceId);
+    if (scopes.length === 0 || caller.access === 'none') return null;
+    const [tree, index] = await Promise.all([caller.tree(ctx, spaceId), caller.index(ctx)]);
+    const parents = new Map<string, string | null>(
+      [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
+    );
+    return readableSpace(
+      index.list({ spaceId }),
+      {
+        folders: tree.folders.map((folder) => ({
+          id: folder.id,
+          parentId: folder.parentId,
+          name: searchOperations.nameOf(folder.metadata),
+        })),
+        pages: tree.pages,
+      },
+      (nodeId) => accessIn(scopes, parents, nodeId) !== 'none',
+    );
+  };
+
   const folderOf = (ref: FolderRef) => ({
     spaceId: SpaceId.parse(ref.spaceId),
     folderId: ref.folderId === null ? null : FolderId.parse(ref.folderId),
@@ -323,24 +384,17 @@ export function pagesFor(caller: EditingCaller): HostPages {
       const { spaceId, folderId } = folderOf(ref);
       await require(ctx, spaceId, folderId, 'read');
       const tree = await spaceOperations.loadTree(ctx, spaceId);
-      return [
-        ...tree.folders
-          .filter((folder) => folder.parentId === folderId)
-          .map((folder): FolderEntry => ({
-            kind: 'folder',
-            spaceId,
-            folderId: folder.id,
-            name: searchOperations.nameOf(folder.metadata),
-          })),
-        ...tree.pages
-          .filter((page) => page.parentId === folderId)
-          .map((page): FolderEntry => ({
-            kind: 'page',
-            spaceId,
-            pageId: page.id,
-            title: page.title,
-          })),
-      ];
+      // In the folder's order, as the sidebar lists it (#400).
+      return childrenOf(tree, folderId).map((child): FolderEntry =>
+        child.kind === 'folder'
+          ? {
+              kind: 'folder',
+              spaceId,
+              folderId: child.node.id,
+              name: searchOperations.nameOf(child.node.metadata),
+            }
+          : { kind: 'page', spaceId, pageId: child.node.id, title: child.node.title },
+      );
     }),
 
     tree: guarded(async (ctx, spaceIdText) => {
@@ -353,26 +407,26 @@ export function pagesFor(caller: EditingCaller): HostPages {
         [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
       );
       const readable = (id: string) => accessIn(scopes, parents, id) !== 'none';
-      return [
-        ...tree.folders
-          .filter((folder) => readable(folder.id))
-          .map((folder): TreeEntry => ({
-            kind: 'folder',
-            spaceId,
-            folderId: folder.id,
-            name: searchOperations.nameOf(folder.metadata),
-            parentId: folder.parentId,
-          })),
-        ...tree.pages
-          .filter((page) => readable(page.id))
-          .map((page): TreeEntry => ({
-            kind: 'page',
-            spaceId,
-            pageId: page.id,
-            title: page.title,
-            parentId: page.parentId,
-          })),
-      ];
+      // As the sidebar lists them with every folder open, each in its order (#400).
+      return treeInOrder(tree, treeLabels)
+        .filter((child) => readable(child.node.id))
+        .map((child): TreeEntry =>
+          child.kind === 'folder'
+            ? {
+                kind: 'folder',
+                spaceId,
+                folderId: child.node.id,
+                name: searchOperations.nameOf(child.node.metadata),
+                parentId: child.node.parentId,
+              }
+            : {
+                kind: 'page',
+                spaceId,
+                pageId: child.node.id,
+                title: child.node.title,
+                parentId: child.node.parentId,
+              },
+        );
     }),
 
     search: guarded(async (ctx, text, options) => {
@@ -405,6 +459,17 @@ export function pagesFor(caller: EditingCaller): HostPages {
         if (found.length >= limit) break;
       }
       return found;
+    }),
+
+    index: guarded(async (ctx, spaceId) => {
+      const space = await readableOf(ctx, spaceId);
+      return space ? pageRows(space) : [];
+    }),
+
+    query: guarded(async (ctx, query) => {
+      const read = readPluginQuery(query);
+      const space = await readableOf(ctx, query.spaceId);
+      return queryRows(read, space ?? { pages: [], folders: [], parents: new Map() });
     }),
 
     create: guarded(async (ctx, ref, { title, markdown = '', data }) => {

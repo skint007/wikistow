@@ -5,6 +5,7 @@ import { Avatar } from '@/components/avatar';
 import { Name } from '@/components/name';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
+  ArrowDownAZ,
   ChevronDown,
   Copy,
   Download,
@@ -56,6 +57,7 @@ export function SpaceHeader({
   onShare,
   onExport,
   onImport,
+  onSortByName,
 }: {
   spaceId: SpaceId;
   /** Null for someone who holds only folder shares in the space. */
@@ -67,6 +69,8 @@ export function SpaceHeader({
   onExport: () => void;
   /** Unset for someone who can't edit and publish at the top of the space. */
   onImport: (() => void) | undefined;
+  /** Sort by name, for an editor at the top of a space with an order of its own (#400). */
+  onSortByName: (() => void) | undefined;
 }) {
   const ctx = useClient();
   const navigate = useNavigate();
@@ -184,6 +188,11 @@ export function SpaceHeader({
           {onImport && (
             <DropdownMenuItem {...needs.select(onImport)}>
               <Upload strokeWidth={1.75} /> Import…
+            </DropdownMenuItem>
+          )}
+          {onSortByName && (
+            <DropdownMenuItem {...needs.select(onSortByName)}>
+              <ArrowDownAZ strokeWidth={1.75} /> Sort by name
             </DropdownMenuItem>
           )}
           {deletable && (
