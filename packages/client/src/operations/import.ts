@@ -92,8 +92,10 @@ export class ImportStopped extends Error {
 /** Pages opened at a time when looking for an earlier run's. */
 const CHUNK = 100;
 /**
- * A page's attachments uploaded at once, each as its two copies. Many more
- * would soon reach the server's 400 uploads a minute, which `patient` waits out.
+ * A page's attachments uploaded at once, each's two copies one after the
+ * other. The server takes 4 uploads at once from an account, its agents'
+ * too, so this leaves room for the person's own; more would also soon
+ * reach its 400 uploads a minute, which `patient` waits out.
  */
 const ATTACHMENTS_AT_ONCE = 2;
 /** The longest name a folder takes. */
@@ -508,8 +510,7 @@ type Attached = { key: string; draft: AttachmentRef; readers: AttachmentRef };
  * Upload `files` as attachments of `page`, a few at once
  * (`ATTACHMENTS_AT_ONCE`), listed in their order. Each is sealed for the
  * draft and sealed again for readers from the same bytes, and both copies
- * go together, so publishing needn't download it (`publishPage`'s
- * `copies`). A file larger than the server takes is left out, so its
+ * go up, so publishing needn't download it (`publishPage`'s `copies`). A file larger than the server takes is left out, so its
  * links stay as written. On a failure, or `live` throwing, the uploads
  * already sent finish first.
  */
@@ -534,19 +535,14 @@ async function uploadFiles(
         to: attachmentTarget(ctx, page, 'published'),
         ...draft,
       });
-      const sent = await Promise.allSettled([
-        uploadBlob(ctx, page, 'draft', draft.blob),
-        uploadBlob(ctx, page, 'published', readers.blob),
-      ]);
-      const errors = sent.flatMap((result) =>
-        result.status === 'rejected' ? [result.reason as unknown] : [],
-      );
-      // A file larger than the server takes is left out; any other failure stops the import.
-      const failure = errors.find(
-        (error) => !(error instanceof ApiError && error.code === 'payload-too-large'),
-      );
-      if (failure !== undefined) throw failure;
-      if (errors.length === 0) done[at] = { key, draft: draft.ref, readers: readers.ref };
+      try {
+        await uploadBlob(ctx, page, 'draft', draft.blob);
+        await uploadBlob(ctx, page, 'published', readers.blob);
+        done[at] = { key, draft: draft.ref, readers: readers.ref };
+      } catch (error) {
+        // A file larger than the server takes is left out; any other failure stops the import.
+        if (!(error instanceof ApiError && error.code === 'payload-too-large')) throw error;
+      }
       live();
     }
   };
