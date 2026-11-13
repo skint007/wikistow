@@ -2,6 +2,7 @@ import {
   ownerRoutes,
   structureRoutes,
   type FolderId,
+  type Position,
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
@@ -138,15 +139,26 @@ const UNLABELLED = {
   region: null,
 } satisfies Record<keyof PageLabel, null>;
 
-// A space's tree as the server lists it, its shares checked to be in the space.
+// A space's tree as the server lists it, its shares checked to be in the
+// space, each folder and page with its place in its folder's own order, or
+// null to list it by name (#400).
 async function listTree(ctx: ClientContext, spaceId: SpaceId) {
-  const listed = await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+  const { positions = [], ...listed } = await ctx.api.call(structureRoutes.tree, {
+    params: { spaceId },
+    query: { order: '1' },
+  });
   for (const share of listed.shares) {
     if (share.spaceId !== spaceId) {
       throw new CryptoError('binding-mismatch', `Share ${share.shareId} is in another space`);
     }
   }
-  return listed;
+  const placed = new Map<string, Position>(positions.map((p) => [p.id, p.position]));
+  const at = (id: string) => placed.get(id) ?? null;
+  return {
+    ...listed,
+    folders: listed.folders.map((folder) => ({ ...folder, position: at(folder.id) })),
+    pages: listed.pages.map((page) => ({ ...page, position: at(page.id) })),
+  };
 }
 
 // The listed tree with the space's and each folder's name opened.
@@ -173,6 +185,7 @@ async function openNames(
         id: folder.id,
         parentId: folder.parentId,
         permissionVersion: folder.permissionVersion,
+        position: folder.position,
         metadata: await unlessUnreadable(() =>
           openName(ctx, { spaceId, subjectKind: 'folder', subjectId: folder.id }, folder),
         ),

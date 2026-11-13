@@ -47,6 +47,7 @@ import {
 } from './access.ts';
 import { highest } from './effective.ts';
 import { ContentError } from './errors.ts';
+import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
 import { isCommentVersion } from './comments.ts';
@@ -314,6 +315,8 @@ export async function createFolder(
         kind: 'folder',
         createdBy: caller.accountId,
         permissionVersion: parent.permissionVersion,
+        // At the end of a folder with an order of its own (section 5.4).
+        position: await placeAtEnd(tx, input),
       })
       .onConflictDoNothing()
       .returning({ id: nodes.id });
@@ -575,14 +578,27 @@ export async function saveSpaceOrder(db: Database, accountId: string, spaceIds: 
  * space's name only through the space's own share; a share root's parent is
  * withheld, so nothing above it is named, not even by ID. An agent sees the
  * same of what it was granted, from a granted folder down, which its share
- * lists as its root. It is all read in one snapshot, so a move or a share
+ * lists as its root. With `order`, it lists each listed node's position too
+ * (section 5.4). It is all read in one snapshot, so a move or a share
  * change can't land between two of its reads and mix the old tree and the new.
  */
-export function loadTree(db: Database, actor: Actor, spaceId: string, report: ReportUnreadable) {
-  return readSnapshot(db, (tx) => readTree(tx, actor, spaceId, report));
+export function loadTree(
+  db: Database,
+  actor: Actor,
+  spaceId: string,
+  report: ReportUnreadable,
+  { order = false }: { order?: boolean } = {},
+) {
+  return readSnapshot(db, (tx) => readTree(tx, actor, spaceId, report, order));
 }
 
-async function readTree(db: Database, actor: Actor, spaceId: string, report: ReportUnreadable) {
+async function readTree(
+  db: Database,
+  actor: Actor,
+  spaceId: string,
+  report: ReportUnreadable,
+  order: boolean,
+) {
   const caller = await requireCaller(db, actor);
   const [space] = await db.select().from(spaces).where(eq(spaces.id, spaceId));
   if (!space?.metadataHead) throw new ContentError('not-found');
@@ -594,6 +610,7 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
       kind: nodes.kind,
       permissionVersion: nodes.permissionVersion,
       metadataHead: nodes.metadataHead,
+      position: nodes.position,
     })
     .from(nodes)
     // A copy's new nodes show only once it finishes, and the trash never.
@@ -620,6 +637,35 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
   );
   const spaceHead = spaceAccess ? heads.get(space.metadataHead) : undefined;
   if (spaceAccess && !spaceHead) throw new ContentError('not-found');
+  const pages = await listPages(
+    db,
+    visible.flatMap(({ node, access }) =>
+      node.kind === 'page' ? [{ id: node.id, reader: !canEdit(access) }] : [],
+    ),
+    report,
+  );
+  const listedFolders = folders.flatMap(({ node }) => {
+    const head = node.metadataHead ? heads.get(node.metadataHead) : undefined;
+    if (!head) return [];
+    const parentId = view.starts.has(node.id) ? null : node.parentId;
+    const summary = readStored(
+      structureRoutes.FolderSummary,
+      { id: node.id, parentId, permissionVersion: node.permissionVersion, ...head },
+      { table: 'nodes', id: node.id },
+      report,
+    );
+    return summary ? [summary] : [];
+  });
+  // Only of what it lists, and not at a share's top for a member, whose
+  // tree starts there: its place is among folders they don't see.
+  const listed = new Set<string>([...listedFolders, ...pages].map((node) => node.id));
+  const positions = order
+    ? visible.flatMap(({ node }) =>
+        node.position !== null && listed.has(node.id) && !view.starts.has(node.id)
+          ? [{ id: node.id, position: node.position }]
+          : [],
+      )
+    : undefined;
   return {
     space:
       spaceAccess && spaceHead
@@ -636,13 +682,7 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
       const held = view.held(share);
       return held ? [{ ...shareOf(share), rootId: held.rootId, ...held.access }] : [];
     }),
-    pages: await listPages(
-      db,
-      visible.flatMap(({ node, access }) =>
-        node.kind === 'page' ? [{ id: node.id, reader: !canEdit(access) }] : [],
-      ),
-      report,
-    ),
+    pages,
     // Only pages the caller edits: an agent's drafts are no reader's business.
     agentActivity: await latestAgentEdit(
       db,
@@ -651,18 +691,8 @@ async function readTree(db: Database, actor: Actor, spaceId: string, report: Rep
         node.kind === 'page' && canEdit(access) ? [node.id] : [],
       ),
     ),
-    folders: folders.flatMap(({ node }) => {
-      const head = node.metadataHead ? heads.get(node.metadataHead) : undefined;
-      if (!head) return [];
-      const parentId = view.starts.has(node.id) ? null : node.parentId;
-      const summary = readStored(
-        structureRoutes.FolderSummary,
-        { id: node.id, parentId, permissionVersion: node.permissionVersion, ...head },
-        { table: 'nodes', id: node.id },
-        report,
-      );
-      return summary ? [summary] : [];
-    }),
+    folders: listedFolders,
+    ...(positions && { positions }),
   };
 }
 

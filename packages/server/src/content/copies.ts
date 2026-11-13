@@ -56,6 +56,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { placesAtEnd } from './order.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { recordMoves } from './moved.ts';
@@ -89,6 +90,8 @@ type Listed = {
   metadataHead: string | null;
   draftHead: string | null;
   publishedHead: string | null;
+  /** Its place in its folder's own order, which its copy keeps there (section 5.4). */
+  position: string | null;
 };
 
 async function listedSubtree(
@@ -105,10 +108,11 @@ async function listedSubtree(
     metadata_head: string | null;
     draft_head: string | null;
     published_head: string | null;
+    position: string | null;
   }>(sql`
     ${subtreeOf(spaceId, nodeId)}
     select n.id, n.parent_id, n.kind, s.depth, n.permission_version, n.metadata_head,
-      h.draft_head, h.published_head
+      h.draft_head, h.published_head, n.position
     from subtree s join nodes n on n.id = s.id
     left join page_heads h on h.page_id = n.id
     where n.copy_id is null and (n.kind = 'folder' or h.page_id is not null)
@@ -122,6 +126,7 @@ async function listedSubtree(
     metadataHead: row.metadata_head,
     draftHead: row.draft_head,
     publishedHead: row.published_head,
+    position: row.position,
   }));
 }
 
@@ -338,7 +343,7 @@ export async function openCopy(
       const rows = await tx
         .insert(nodes)
         .values(
-          chunk.map(({ node }) => ({
+          chunk.map(({ node, source }) => ({
             id: node.nodeId,
             spaceId: input.destinationSpaceId,
             parentId: node.parentId,
@@ -346,6 +351,9 @@ export async function openCopy(
             createdBy: caller.accountId,
             permissionVersion,
             copyId: input.copyId,
+            // In the order its source had there; the copy's top finds its
+            // place as it finishes (`placeTops`).
+            position: source.position,
           })),
         )
         .onConflictDoNothing()
@@ -787,6 +795,48 @@ export async function finishCopy(
   }
 }
 
+/**
+ * Where a copy's top nodes land among what is in the destination as it
+ * finishes (section 5.4): placed like something new, at the end of a
+ * folder with an order of its own, else by name. Of a whole space's top,
+ * those with a position in the source go at the end in that order, and the
+ * rest list by name after them.
+ */
+async function placeTops(tx: Database, copy: CopyRow, tops: readonly { nodeId: string }[]) {
+  const rows = await tx
+    .select({ id: nodes.id, position: nodes.position })
+    .from(nodes)
+    .where(
+      inArray(
+        nodes.id,
+        tops.map((top) => top.nodeId),
+      ),
+    );
+  const placing =
+    rows.length === 1
+      ? rows
+      : rows
+          .filter((row) => row.position !== null)
+          .toSorted((a, b) =>
+            (a.position ?? '') === (b.position ?? '')
+              ? a.id.localeCompare(b.id)
+              : (a.position ?? '') < (b.position ?? '')
+                ? -1
+                : 1,
+          );
+  const ends = await placesAtEnd(tx, {
+    spaceId: copy.destinationSpaceId,
+    parentId: copy.destinationParentId,
+    count: placing.length,
+  });
+  for (const [i, row] of placing.entries()) {
+    const position = ends[i] ?? null;
+    if (position !== row.position) {
+      await tx.update(nodes).set({ position }).where(eq(nodes.id, row.id));
+    }
+  }
+}
+
 async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<string[]> {
   const made = await tx
     .select({
@@ -891,6 +941,7 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
       going,
     );
   }
+  await placeTops(tx, copy, tops);
   // Shown, and no longer the copy's: removing it later leaves them.
   await tx.update(nodes).set({ copyId: null }).where(eq(nodes.copyId, copy.id));
   await tx.delete(copyNodes).where(eq(copyNodes.copyId, copy.id));

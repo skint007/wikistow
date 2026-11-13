@@ -28,6 +28,7 @@ import {
   SealedRevision,
   SealedRevisionV2,
 } from '../records/revision.ts';
+import { Position } from '../records/position.ts';
 import { FolderKeyEnvelope, KeyWrap, Share } from '../records/share.ts';
 import type { RouteDef } from '../route.ts';
 import { ServedMetadata } from './structure.ts';
@@ -208,6 +209,12 @@ export const move = {
     permissionVersion: z.number().int(),
     /** The destination folder's permission version, or the space's. */
     parentPermissionVersion: z.number().int(),
+    /**
+     * Where it goes among what is there (section 5.4): a position, or null
+     * to list it by name. Left out, it goes at the end of a folder with an
+     * order of its own, and by name in one without (#400).
+     */
+    position: Position.nullable().optional(),
     wraps: z.array(SubjectWrap).max(500_000).default([]),
     keyEnvelopes: z.array(KeyEnvelopeV2).max(500_000).default([]),
     metadataEnvelopes: z.array(MetadataEnvelopeV2).max(500_000).default([]),

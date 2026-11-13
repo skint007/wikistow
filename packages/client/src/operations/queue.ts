@@ -5,6 +5,7 @@ import {
   type InstallationId,
   MetadataRevisionId,
   PageId,
+  Position,
   publicLinkRoutes,
   RevisionId,
   SpaceId,
@@ -23,6 +24,8 @@ import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.
 import { resealAttachment, sealAttachment } from '../revision.ts';
 import type { ReadWikilinks } from '../link-table.ts';
 import { moveNode, previewMove } from './moves.ts';
+import { arrange } from './order.ts';
+import { positionBetween } from '../positions.ts';
 import {
   attachmentTarget,
   createPage,
@@ -166,7 +169,9 @@ export type QueuedDelete = z.output<typeof QueuedDeleteJson>;
  * within one share waits here, as one across a share's edge changes who
  * can read it. A later move takes the place of this one. `name` names it
  * should the server refuse. Nothing is recorded before its request: the
- * item's place says whether a move whose answer was lost landed.
+ * item's place says whether a move whose answer was lost landed. With
+ * `position`, it goes there among what is in `parentId` (#400): a reorder
+ * within its folder waits here too, as a move to where it is already.
  */
 const QueuedMoveJson = z.strictObject({
   kind: z.literal('move'),
@@ -175,6 +180,7 @@ const QueuedMoveJson = z.strictObject({
   spaceId: SpaceId,
   name: z.string(),
   parentId: FolderId.nullable(),
+  position: Position.nullable().exactOptional(),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -768,26 +774,39 @@ export class OfflineQueue {
     node,
     name,
     parentId,
+    position,
   }: {
     spaceId: SpaceId;
     id: PageId | FolderId;
     node: 'page' | 'folder';
     name: string;
     parentId: FolderId | null;
+    /** Where among what is there; left out, as the server places a move. */
+    position?: Position | null;
   }): Promise<void> {
     await this.#store.queueExclusive(async () => {
       const own = await this.entry(id);
+      // Made here, it is placed as the server places something new.
       if (own?.kind === 'folder' && !mayHaveLanded(own)) return this.#write({ ...own, parentId });
       if (own?.kind === 'page' && own.newPage && !mayHaveLanded(own)) {
         return this.#write({ ...own, newPage: { ...own.newPage, parentId } });
       }
       const before = await this.#keyed({ kind: 'move', id });
-      await this.#write(
-        before?.kind === 'move'
-          ? // In the order made: after what it may need moved first.
-            { ...before, parentId, failure: null, at: this.#at() }
-          : { kind: 'move', id, node, spaceId, name, parentId, failure: null, at: this.#at() },
-      );
+      // A later move takes the place of an earlier one, and of where that put it.
+      const moved =
+        before?.kind === 'move' ? before : { kind: 'move' as const, id, node, spaceId, name };
+      await this.#write({
+        kind: 'move',
+        id: moved.id,
+        node: moved.node,
+        spaceId: moved.spaceId,
+        name: moved.name,
+        parentId,
+        ...(position !== undefined && { position }),
+        failure: null,
+        // In the order made: after what it may need moved first.
+        at: this.#at(),
+      });
     });
     this.#emit({ kind: 'changed', spaceId, id });
   }
@@ -1287,14 +1306,22 @@ export class OfflineQueue {
   }
 
   async #sendMove(ctx: ClientContext, entry: QueuedMove): Promise<'offline' | void> {
-    const { spaceId, id: nodeId, parentId } = entry;
+    const { spaceId, id: nodeId, parentId, position } = entry;
     try {
       // Checked as online: where it is now, and whether keys would change.
-      const preview = await previewMove(ctx, { spaceId, nodeId, parentId });
-      // There already: moved by this, whose answer was lost, or by someone else.
+      const preview = await previewMove(ctx, {
+        spaceId,
+        nodeId,
+        parentId,
+        ...(position !== undefined && { position }),
+      });
+      // There already: moved by this, whose answer was lost, or by someone
+      // else, or put in its place there, which a position sets again.
       if (preview.fromParentId !== parentId) {
         if (preview.crossing) return this.#stop(entry, MOVES_ACROSS);
         await moveNode(ctx, { preview });
+      } else if (position !== undefined) {
+        await arrange(ctx, { spaceId, parentId, positions: [{ nodeId, position }] });
       }
     } catch (error) {
       const failure = failureOf(error);
@@ -1305,7 +1332,13 @@ export class OfflineQueue {
     await this.#store.queueExclusive(async () => {
       const current = await this.#keyed(entry);
       // Moved again while this went: the next round sends that.
-      if (current?.kind === 'move' && current.parentId === parentId) await this.#remove(current);
+      if (
+        current?.kind === 'move' &&
+        current.parentId === parentId &&
+        current.position === position
+      ) {
+        await this.#remove(current);
+      }
     });
     this.#emit({ kind: 'changed', spaceId, id: nodeId });
     this.#emit({ kind: 'sent', spaceId });
@@ -1689,16 +1722,38 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
   }
   // Only one on its way, into a place the tree has: a stopped one shows
   // where the server has it.
-  const moved = new Map<string, FolderId | null>();
+  const moved = new Map<string, QueuedMove>();
   for (const entry of here) {
     const { id } = entry;
     if (entry.kind !== 'move' || entry.failure !== null || !listed.has(id)) continue;
     if (entry.parentId !== null && !parents.has(entry.parentId)) continue;
-    moved.set(id, entry.parentId);
+    moved.set(id, entry);
     parents.set(id, entry.parentId);
   }
-  const placed = <N extends { id: string; parentId: FolderId | null }>(node: N): N =>
-    moved.has(node.id) ? { ...node, parentId: moved.get(node.id) ?? null } : node;
+  // In its new place, and where it goes there: where the person put it, or
+  // where the server will, at the end of a folder with an order of its own.
+  const placed = <N extends { id: string; parentId: FolderId | null; position: Position | null }>(
+    node: N,
+  ): N => {
+    const move = moved.get(node.id);
+    if (!move) return node;
+    const position =
+      move.position !== undefined
+        ? move.position
+        : move.parentId === node.parentId
+          ? node.position
+          : endOf(move.parentId);
+    return { ...node, parentId: move.parentId, position };
+  };
+  const endOf = (parentId: FolderId | null): Position | null => {
+    let last: Position | null = null;
+    for (const other of [...tree.folders, ...tree.pages]) {
+      if (other.parentId === parentId && other.position !== null && !moved.has(other.id)) {
+        if (last === null || other.position > last) last = other.position;
+      }
+    }
+    return last && positionBetween(last, null);
+  };
   const regionUnder = (parentId: string | null): Region | null => {
     try {
       return regionInTree({
@@ -1717,10 +1772,12 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
     if (entry.kind === 'folder') {
       const region = regionUnder(entry.parentId);
       if (!region) continue;
+      // Made here: by name until the server places it (`placeAtEnd`).
       folders.push({
         id: entry.id,
         parentId: entry.parentId,
         permissionVersion: 0,
+        position: null,
         metadata: {
           head: entry.head,
           opened: { kind: 'current', metadata: entry.metadata },
@@ -1735,6 +1792,7 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
         draftHead: entry.newPage.revisionId,
         publishedHead: null,
         draftChanges: true,
+        position: null,
         title: entry.payload.title,
         ...labelCover(entry.payload, 'draft'),
         region: regionUnder(entry.newPage.parentId) ?? OWNER_REGION,

@@ -12,6 +12,7 @@ import {
   type KeyEnvelopeV2,
   type MetadataEnvelopeV2,
   type PageId,
+  type Position,
   type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
@@ -81,6 +82,12 @@ export type MovePreview = {
   /** Everything that moves, by decrypted name: the app won't change keys for what it can't read. */
   folders: SharePreview['folders'];
   pages: SharePreview['pages'];
+  /**
+   * Where it lands among what is there (section 5.4): a position, or null
+   * to list it by name. Left out, at the end of a folder with an order of
+   * its own (#400).
+   */
+  position?: Position | null;
 };
 
 const RANK: Record<Reach, number> = { published: 1, drafts: 2 };
@@ -88,7 +95,8 @@ const rank = (reach: Reach | null | undefined) => (reach ? RANK[reach] : 0);
 
 /**
  * Work out moving `nodeId`, with everything under it, under `parentId`, or
- * to the top of the space for `null` (section 10). Nothing is wrapped,
+ * to the top of the space for `null` (section 10), to `position` among what
+ * is there if given. Nothing is wrapped,
  * sealed or sent: the app says what applies of it, then `moveNode` makes
  * the move. Refuses a destination inside what moves (`stale-head`: it went
  * there since it was chosen), one that would nest a share
@@ -103,7 +111,13 @@ export async function previewMove(
     spaceId,
     nodeId,
     parentId,
-  }: { spaceId: SpaceId; nodeId: FolderId | PageId; parentId: FolderId | null },
+    position,
+  }: {
+    spaceId: SpaceId;
+    nodeId: FolderId | PageId;
+    parentId: FolderId | null;
+    position?: Position | null;
+  },
 ): Promise<MovePreview> {
   const tree = await loadTree(ctx, spaceId);
   const folder = tree.folders.find((f) => f.id === nodeId);
@@ -165,6 +179,7 @@ export async function previewMove(
     crossing,
     folders: moving.folders.map(({ id, parentId: p, metadata }) => ({ id, parentId: p, metadata })),
     pages: moving.pages.map(({ id, parentId: p, title }) => ({ id, parentId: p, title })),
+    ...(position !== undefined && { position }),
   };
   if (!crossing) return { ...base, gains: [], losses: [], endingPicks: [] };
   if (tree.space?.role !== 'owner') {
@@ -343,6 +358,7 @@ export async function moveNode(
         expectedParentId: preview.fromParentId,
         permissionVersion: preview.permissionVersion,
         parentPermissionVersion: preview.parentPermissionVersion,
+        ...(preview.position !== undefined && { position: preview.position }),
         wraps: [],
         keyEnvelopes: [],
         metadataEnvelopes: [],
