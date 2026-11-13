@@ -97,6 +97,13 @@ function same(a: Node, b: Node): boolean {
 
 const DEFINITION = 'footnote_definition';
 
+// A block this long that a change touches is checked off the page's
+// thread, read whole, as checking it here would hold up the next key: a
+// list of 3,000 items takes about half a second. And what's read again,
+// the blocks beside it too, is at most this long.
+const TOUCHED_MAX = 10_000;
+const REGION_MAX = 100_000;
+
 // An empty paragraph, which writes as nothing.
 const blank = (node: Node) => node.type.name === 'paragraph' && node.content.size === 0;
 
@@ -129,8 +136,9 @@ const sameKeys = (a: ReadonlyMap<string, unknown>, b: ReadonlyMap<string, unknow
  * end where the page did: the blocks beside the change read as they were,
  * and the footnotes defined there the same. Null if it must be read whole:
  * as a fence or HTML left open takes in the block after it, a footnote is
- * defined or no longer is, or 1 KB or more of text is new, which may be
- * slow to read and is checked off the page's thread then (`BLOCK_TIMED`).
+ * defined or no longer is, or 1 KB or more of text is new (`BLOCK_TIMED`),
+ * or the blocks it touches are 10 KB or more (`TOUCHED_MAX`), which may be
+ * slow to read and are checked off the page's thread then.
  */
 export function byBlock({
   doc,
@@ -202,7 +210,9 @@ export function byBlock({
       ])
     : new Map<string, string>();
   const near = [...nearby.values()].map((label) => `[^${label}]: x`);
-  const checked = [withLf(text.slice(checkFrom, Math.max(checkFrom, checkTo))), ...stubs, ...near];
+  const touching = text.slice(checkFrom, Math.max(checkFrom, checkTo));
+  if (touching.length >= TOUCHED_MAX || region.length >= REGION_MAX) return null;
+  const checked = [withLf(touching), ...stubs, ...near];
   if (!kept(checked.join('\n\n'))) return null;
   let read: Node;
   try {

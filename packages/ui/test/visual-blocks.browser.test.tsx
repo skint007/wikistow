@@ -265,6 +265,13 @@ describe('an edit in the visual editor', () => {
       expect(m.handle.caret?.()).toBe('Plan [[Plan]] P'.length);
       m.unmount();
     }
+    // Not in a link's address.
+    const m = await mount('[x](https://y.org/abc) abc\n\nNext\n');
+    const view = viewOf(m.dom);
+    await typeAt(m, find(view.state.doc, 'Next') + 4, '!');
+    const end = (view.state.doc.firstChild?.nodeSize ?? 0) - 1;
+    act(() => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end))));
+    expect(m.handle.caret?.()).toBe('[x](https://y.org/abc) abc'.length);
   });
 
   it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
@@ -420,6 +427,8 @@ describe('text taken in by block', () => {
       page.replace('Two.', '  Two.'),
       // Much text new at once.
       page.replace('Two.', `Two ${'long '.repeat(250)}.`),
+      // A change in a block so long it's checked off the page's thread.
+      page.replace('- a', Array.from({ length: 1_500 }, (_, i) => `- item ${i}`).join('\n')),
     ]) {
       const m = await mount(page);
       expect(m.handle.take?.(next), next).toBe(false);

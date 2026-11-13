@@ -421,6 +421,8 @@ export class Writer {
           });
         else if (node.isInline && node.isLeaf) pieces.push({ text: this.#atom(node), atom: true });
       });
+      // A link's address and title show nothing: no text is found in them.
+      const shown = markdown.replace(/\]\([^)]*\)/g, (link) => `]${' '.repeat(link.length - 1)}`);
       let found = 0;
       for (const { text, atom } of pieces) {
         if (atom) {
@@ -430,7 +432,7 @@ export class Writer {
         }
         for (const char of text) {
           if (/\s/.test(char)) continue;
-          const next = markdown.indexOf(char, found);
+          const next = shown.indexOf(char, found);
           if (next < 0) return found;
           found = next + char.length;
         }

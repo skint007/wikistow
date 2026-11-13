@@ -77,7 +77,8 @@ const onHold = (reason: string) =>
   `The visual side is on hold. ${reason.replace('This page stays in source mode, because', 'It can’t show the source as written, because')}`;
 
 // In split, the source's text goes to the visual editor a block at a time
-// (`take`), changes this close together going in together. Text it must
+// (`take`), changes this close together going in together, or as close as
+// twice as long as the last try took. Text it must
 // read whole goes in at most this often, or every twice as long as the
 // last whole read took, as checking and reading a long page holds up the
 // next key that long (ADR 0015 decision 3).
@@ -167,6 +168,8 @@ export function PageEditor({
   // over it.
   const reading = useRef(false);
   const hurried = useRef(false);
+  // How long the last try to take text in a block at a time took.
+  const tookTake = useRef(0);
   const texts = useRef(0);
   const lastShown = useRef(0);
   // In split, the side the person was in last, where Insert in page puts its code.
@@ -303,7 +306,10 @@ export function PageEditor({
       syncing.current = null;
       const text = given.current;
       if (text === null || ask !== asked.current) return;
-      if (surface.current?.take?.(text)) {
+      const trying = performance.now();
+      const taken = surface.current?.take?.(text);
+      tookTake.current = performance.now() - trying;
+      if (taken) {
         lastShown.current = ++texts.current;
         given.current = null;
         return settle();
@@ -585,7 +591,8 @@ export function PageEditor({
     initial: body.current,
     onChange: (text) => {
       changed(text);
-      if (modeNow.current === 'split') syncVisual(text, TAKE_MS);
+      if (modeNow.current === 'split')
+        syncVisual(text, Math.max(TAKE_MS, WHOLE_SHARE * tookTake.current));
     },
     lineBreak,
     properties: propertyData,
