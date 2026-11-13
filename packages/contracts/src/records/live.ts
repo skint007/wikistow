@@ -34,6 +34,12 @@ const Format = z.looseObject({
 const Bytes32 = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
 
 /**
+ * An Ed25519 signature, 64 bytes in their one canonical base64url form, so
+ * a message or record can't carry more than its sealed part says.
+ */
+const Signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/);
+
+/**
  * A session's record: a metadata record v2 (sections 5.4 and 5.7) with
  * `subjectKind: "live"`, `subjectId` the session ID and `basedOn: null`,
  * since a session record is never edited. There is no v1 session record.
@@ -48,7 +54,7 @@ export type LiveRecord = z.infer<typeof LiveRecord>;
 
 export const SealedLiveRecord = z.strictObject({
   record: LiveRecord,
-  signature: Base64,
+  signature: Signature,
   payload: Sealed,
 });
 export type SealedLiveRecord = z.infer<typeof SealedLiveRecord>;
@@ -88,7 +94,7 @@ export const LiveMessage = z.strictObject({
   joinId: JoinId,
   seq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   sealed: Sealed,
-  signature: Base64,
+  signature: Signature,
 });
 export type LiveMessage = z.infer<typeof LiveMessage>;
 

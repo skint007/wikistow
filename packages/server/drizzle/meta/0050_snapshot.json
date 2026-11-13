@@ -1,5 +1,5 @@
 {
-  "id": "199429cd-aa13-40b4-a567-3094e1efe585",
+  "id": "59805cd4-417a-4bb0-8fae-8d7916be2aa7",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -4696,6 +4696,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "catch_up": {
+          "name": "catch_up",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "lapsed_at": {
           "name": "lapsed_at",
           "type": "timestamp with time zone",
@@ -5312,12 +5319,11 @@
           "primaryKey": false,
           "notNull": false
         },
-        "keys_lost": {
-          "name": "keys_lost",
-          "type": "boolean",
+        "ended_permission_version": {
+          "name": "ended_permission_version",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": false
         }
       },
       "indexes": {

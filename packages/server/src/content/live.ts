@@ -33,6 +33,7 @@ import {
   liveSessionIds,
   liveSessions,
   liveWraps,
+  nodes,
   metadataRevisions,
   pageHeads,
   revisions,
@@ -367,17 +368,12 @@ const ignore: ReportUnreadable = () => {};
  */
 function lapsed(
   grant: GrantRow,
-  {
-    present,
-    now,
-    heads,
-    sessionId,
-  }: { present: Set<string>; now: Date; heads: Heads; sessionId: string },
+  { present, now, heads }: { present: Set<string>; now: Date; heads: Heads },
 ) {
   if (grant.lapsedAt !== null) return true;
   if (grant.position !== null) return false;
   if (!present.has(joinKey(grant.identityId, grant.joinId))) return true;
-  if (grant.subject === sessionId) {
+  if (grant.catchUp) {
     return grant.grantedAt.getTime() + CATCH_UP_GRANT_MS <= now.getTime();
   }
   return heads.draftHead === grant.subject && grant.grantedAt.getTime() + GRACE_MS <= now.getTime();
@@ -407,10 +403,20 @@ async function takeGrant(
   session: SessionRow,
   subject: string,
   holder: JoinRow,
-  { joins, now, heads }: { joins: JoinRow[]; now: Date; heads: Heads },
+  {
+    joins,
+    now,
+    heads,
+    catchUp = false,
+  }: { joins: JoinRow[]; now: Date; heads: Heads; catchUp?: boolean },
 ) {
   const present = presentSet(joins, now);
-  const ofSubject = and(eq(liveGrants.sessionId, session.id), eq(liveGrants.subject, subject));
+  // A catch-up's grants and a fold's are kept apart, whatever their subjects.
+  const ofSubject = and(
+    eq(liveGrants.sessionId, session.id),
+    eq(liveGrants.subject, subject),
+    eq(liveGrants.catchUp, catchUp),
+  );
   const [placed] = await tx
     .select()
     .from(liveGrants)
@@ -431,14 +437,14 @@ async function takeGrant(
       ),
     )
     .orderBy(desc(liveGrants.id));
-  const at = { present, now, heads, sessionId: session.id };
+  const at = { present, now, heads };
   for (const grant of grants) {
     if (grant.lapsedAt === null && lapsed(grant, at)) {
       // When it lapsed, not when that was seen, so the 30 s wait after counts from then.
       const holder = joins.find(
         (j) => j.identityId === grant.identityId && j.joinId === grant.joinId,
       );
-      const limit = subject === session.id ? CATCH_UP_GRANT_MS : GRACE_MS;
+      const limit = catchUp ? CATCH_UP_GRANT_MS : GRACE_MS;
       const when = new Date(
         Math.min(
           now.getTime(),
@@ -474,6 +480,7 @@ async function takeGrant(
       joinId: holder.joinId,
       givenAfter: session.lastPosition,
       grantedAt: now,
+      catchUp,
     })
     .returning();
   if (!given) throw new Error('grant insert returned nothing');
@@ -697,9 +704,7 @@ async function grantsOf(
     .orderBy(desc(liveGrants.id))
     .limit(GRANTS_SERVED);
   const present = presentSet(joins ?? (await joinsOf(tx, session.id)), now);
-  return rows
-    .reverse()
-    .map((g) => servedGrant(g, lapsed(g, { present, now, heads, sessionId: session.id })));
+  return rows.reverse().map((g) => servedGrant(g, lapsed(g, { present, now, heads })));
 }
 
 /** Whether an ended session holds an `update` after the position its latest `saved` covers. */
@@ -1481,7 +1486,12 @@ export async function sendLive(db: Database, input: SendLive) {
     }
     if (catchingUp && input.messages.length > 0) {
       const heads = await headsOf(tx, page.id);
-      const taken = await takeGrant(tx, session, session.id, join, { joins, now, heads });
+      const taken = await takeGrant(tx, session, session.id, join, {
+        joins,
+        now,
+        heads,
+        catchUp: true,
+      });
       if (
         taken.lapsed ||
         taken.grant.identityId !== join.identityId ||
@@ -1615,6 +1625,7 @@ async function placedBy(
       and(
         eq(liveGrants.sessionId, session.id),
         eq(liveGrants.subject, fold),
+        eq(liveGrants.catchUp, false),
         eq(liveGrants.identityId, join.identityId),
         eq(liveGrants.joinId, join.parentJoinId),
         inArray(liveGrants.position, resent),
@@ -1659,9 +1670,14 @@ async function foldFor(
   },
 ): Promise<liveRoutes.Grant> {
   const present = presentSet(joins, now);
-  const at = { present, now, heads, sessionId: session.id };
+  const at = { present, now, heads };
   if (catchingUp) {
-    const taken = await takeGrant(tx, session, session.id, join, { joins, now, heads });
+    const taken = await takeGrant(tx, session, session.id, join, {
+      joins,
+      now,
+      heads,
+      catchUp: true,
+    });
     let grant = taken.grant;
     const mine = grant.identityId === join.identityId && grant.joinId === join.joinId;
     if (mine && !taken.lapsed && savedAt !== null) {
@@ -1705,6 +1721,7 @@ async function foldFor(
       and(
         eq(liveGrants.sessionId, session.id),
         eq(liveGrants.subject, fold),
+        eq(liveGrants.catchUp, false),
         eq(liveGrants.identityId, join.identityId),
         eq(liveGrants.joinId, join.parentJoinId),
         isNull(liveGrants.position),
@@ -1890,11 +1907,15 @@ export async function leaveLive(
 /** A participant ends the session (section 5.10, **Ending**). Ending an ended one changes nothing. */
 export async function endLive(db: Database, input: { actor: Actor; sessionId: string }) {
   return db.transaction(async (tx) => {
-    const { session } = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
+    const { session, page } = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
     if (session.endedReason !== null) return { ended: false };
     await tx
       .update(liveSessions)
-      .set({ endedAt: sql`now()`, endedReason: 'ended' })
+      .set({
+        endedAt: sql`now()`,
+        endedReason: 'ended',
+        endedPermissionVersion: page.permissionVersion,
+      })
       .where(eq(liveSessions.id, session.id));
     return { ended: true };
   });
@@ -2009,7 +2030,14 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
  * or the ending of its share nobody's do.
  */
 async function keysCount(tx: Database, session: SessionRow) {
-  if (session.keysLost) return false;
+  // Any change of access since it ended, a move back included, and nobody's count.
+  if (session.endedPermissionVersion !== null) {
+    const [page] = await tx
+      .select({ permissionVersion: nodes.permissionVersion })
+      .from(nodes)
+      .where(eq(nodes.id, session.pageId));
+    if (page?.permissionVersion !== session.endedPermissionVersion) return false;
+  }
   const share = await shareAt(tx, session.spaceId, session.pageId);
   if (session.shareId !== null) {
     if (!share || share.id !== session.shareId) return false;
@@ -2127,13 +2155,12 @@ async function sweepSome(
       const now = await dbNow(tx);
       const due = await dueToGo(tx, session, now, retentionMs);
       if (due || session.endedReason === null) return { due, keep: null };
-      // Kept: noted, with whether its keys still count, which once lost stays lost.
+      // Kept: noted when nobody is in it, so the next passes leave it a while.
       const joins = await joinsOf(tx, session.id);
       const present = presentSet(joins, now);
       return {
         due,
         keep: {
-          keysLost: !(await keysCount(tx, session)),
           settled: !joins.some((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId))),
         },
       };
@@ -2143,10 +2170,7 @@ async function sweepSome(
       if (read.keep) {
         await db
           .update(liveSessions)
-          .set({
-            keptAt: read.keep.settled ? sql`now()` : null,
-            ...(read.keep.keysLost ? { keysLost: true } : {}),
-          })
+          .set({ keptAt: read.keep.settled ? sql`now()` : null })
           .where(eq(liveSessions.id, id));
       }
       continue;

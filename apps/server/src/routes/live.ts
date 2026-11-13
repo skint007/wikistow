@@ -697,8 +697,11 @@ export function mountLiveRoutes(
           for (const presence of here.presence.values()) {
             yield { presence, draftHead: head() } satisfies Line;
           }
+          // Its own first lines, so it hears each once; the others hear of new ones as they come.
           for (const grant of joined.grants) {
-            heardGrant(here, grant);
+            if (!here.grants.has(grantKey(grant))) {
+              here.grants.set(grantKey(grant), JSON.stringify(grant));
+            }
             yield { grant, draftHead: head() } satisfies Line;
           }
           for (;;) {

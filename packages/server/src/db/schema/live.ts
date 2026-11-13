@@ -77,11 +77,12 @@ export const liveSessions = pgTable(
      */
     keptAt: timestamptz(),
     /**
-     * Its keys stopped counting once (a rotation, a move to another region,
-     * its share's ending): it is served to nobody again, even if the page
-     * comes back, and goes once its joins have left.
+     * The page's permission version as the session ended. Any change of
+     * access since, a move back included, moves it on, and then its keys
+     * count for nobody: it is served to nobody again, and goes once its
+     * joins have left.
      */
-    keysLost: boolean().notNull().default(false),
+    endedPermissionVersion: integer(),
   },
   (table) => [
     check('live_sessions_id_shape', sql`${table.id} ~ '^[A-Za-z0-9_-]{1,64}$'`),
@@ -292,6 +293,8 @@ export const liveGrants = pgTable(
     grantedAt: timestamptz().notNull().defaultNow(),
     /** Its `update`'s position once placed, or for a catch-up its `saved`'s. */
     position: position(),
+    /** A catch-up's grant (`subject` the ended session), never a fold's. */
+    catchUp: boolean().notNull().default(false),
     lapsedAt: timestamptz(),
   },
   (table) => [index('live_grants_session_idx').on(table.sessionId, table.subject)],

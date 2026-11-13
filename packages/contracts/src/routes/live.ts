@@ -187,7 +187,7 @@ export const getLive = {
  * payload names, which the server makes, present for 30 s until its stream
  * opens. Under the locks of a draft save: the record is a v2 record of
  * kind `live` for `sessionId`, signed by the caller over its payload
- * (`bad-signature`, `binding-mismatch`); the key material is the page's
+ * (`bad-signature`, `binding-mismatch`; another identity's, `forbidden`); the key material is the page's
  * region's at its key version (`region-mismatch`, `key-version`); the
  * permission version is current (`permission-version`); `revisionId` is
  * the draft head (`stale-head`, with the heads); the session and version
@@ -244,8 +244,9 @@ export type StreamLine = z.infer<typeof StreamLine>;
  * person's ninth present join `rate-limited`, as is a
  * join past `MAX_JOINS_MADE_PER_PERSON` or `MAX_JOINS_PER_SESSION`, or a
  * person's stream past the server's limit of open streams. `after` is
- * the position the app holds; if messages after it have since gone with
- * a snapshot, it is `stale-head`, and the app joins again as a newcomer.
+ * the position the app holds; below what the latest snapshot covers, which
+ * may have deleted messages after it, it is `stale-head`, and the app
+ * joins again as a newcomer.
  * `kept`, what the snapshot its fetch was built on covers, lets a
  * newcomer start below it, to fetch the rest of what that snapshot kept
  * (`ServedSession.complete`), while that snapshot is the latest

@@ -4,6 +4,7 @@
 import {
   aeadDecrypt,
   endingOperations as ending,
+  moveOperations as moves,
   fromBase64,
   metadataAd,
   newId,
@@ -808,8 +809,8 @@ describe('ending', () => {
     expect(await stays.send([{ message: saved, covers: 2 }])).toMatchObject({ positions: [3] });
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
-    // A stream opened now makes no join, and sends the end; a removal rotated the keys,
-    // so nobody's count for what the session keeps, and it sends none of it.
+    // A stream opened now makes no join, and sends the end; the saved covers what the
+    // session kept, so there is nothing to catch up from, and it sends none of it.
     const joinsBefore = (await liveOf(other, lib.page.pageId)).ended?.joins.length;
     const late = await stream(other, session, newId(JoinId), 0);
     const kept = [];
@@ -1022,11 +1023,11 @@ describe('deleting a session', () => {
     await me.send([me.message('update')]);
     await sharing.rotateKeys(owner.ctx, { spaceId: lib.spaceId, shareId });
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
-    // Nobody's keys count for it, so its stream reads nothing of it, only its end.
+    // Everyone has left, but nobody's keys count for it, so its stream reads nothing of it.
+    await everyoneLeft(session.sessionId, '1 second');
     const reading = await stream(owner, session, newId(JoinId), 0);
     expect(await reading.next()).toMatchObject({ ended: 'access' });
     expect(reading.lines.some((l) => 'message' in l)).toBe(false);
-    await everyoneLeft(session.sessionId, '1 second');
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(session.sessionId)).toBeUndefined();
 
@@ -1043,6 +1044,31 @@ describe('deleting a session', () => {
     expect((await liveOf(owner, lib.page.pageId)).ended).toBeNull();
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(last.sessionId)).toBeUndefined();
+  });
+
+  it('serves nobody a session its page moved out of, even once the page is back', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    const move = async (parentId: typeof lib.shared) =>
+      moves.moveNode(owner.ctx, {
+        preview: await moves.previewMove(owner.ctx, {
+          spaceId: lib.spaceId,
+          nodeId: lib.page.pageId,
+          parentId,
+        }),
+      });
+    await move(lib.above);
+    await move(lib.shared);
+    expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
+    await everyoneLeft(session.sessionId);
+    expect((await liveOf(owner, lib.page.pageId)).ended).toBeNull();
+    const catcher = typist(owner, session);
+    expect(await rejection(catcher.send([], { fold: session.sessionId }))).toBe('not-found');
+    await sweepLive(t.db, RETENTION);
+    expect(await sessionRow(session.sessionId)).toBeUndefined();
   });
 
   it('keeps only a page’s latest ended session with unsaved changes', async () => {
