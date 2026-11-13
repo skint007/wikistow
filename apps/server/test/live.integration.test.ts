@@ -754,6 +754,18 @@ describe('ending', () => {
     expect(await sessionRow(outside.sessionId)).toMatchObject({ endedReason: 'access' });
   });
 
+  it('takes a message stored before the end, sent again after it, as stored', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const update = me.message('update');
+    expect(await me.send([update])).toMatchObject({ positions: [2] });
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    expect(await me.send([update])).toMatchObject({ positions: [2] });
+    expect(await rejection(me.send([me.message('update')]))).toBe('forbidden');
+  });
+
   it('lets a participant end it, after which another starts', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
@@ -1305,6 +1317,34 @@ describe('limits', () => {
       where id = ${session.sessionId}`);
     await sweepLive(app.db, { retentionMs: 60_000 });
     expect(await usedBytes(app.db, editor.id)).toBeLessThan(before);
+  });
+
+  it('charges a snapshot once what it covers has gone, so it can free room for itself', async () => {
+    const app = await scratch({ limits: { uploadBytes: 1024 * 1024, storageBytes: 400_000 } });
+    const { editor, lib } = await sharedLibrary(app);
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    // Two changes that fill most of the room left.
+    const room = 400_000 - (await usedBytes(app.db, editor.id));
+    const size = 128 * Math.floor((room * 0.36) / 128);
+    await me.send([me.message('update', { size })]);
+    await me.send([me.message('update', { size })]);
+    expect(await rejection(me.send([me.message('update', { size })]))).toBe('storage-full');
+    // A snapshot as large deletes the first of them, and fits.
+    const poster = typist(editor, session);
+    expect(
+      await editor.ctx.api.call(liveRoutes.postSnapshot, {
+        params: { sessionId: session.sessionId },
+        body: {
+          joinId: poster.joinId,
+          parent: me.joinId,
+          message: poster.message('snapshot', { size }),
+          covers: 3,
+          revisionId: session.revisionId,
+        },
+      }),
+    ).toMatchObject({ position: 4 });
   });
 
   it('takes at most 16 MiB of stored messages a minute from a person', async () => {

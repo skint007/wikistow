@@ -475,6 +475,9 @@ async function takeGrant(
  */
 const SERVED_MESSAGE_BYTES = 8 * 1024 * 1024;
 
+/** Stored messages one session in a fetch serves at most, however small. */
+const SERVED_ROWS = 4096;
+
 /**
  * Grants a fetch or a stream's read lists at most, the latest: one is
  * given only for the draft head, so older ones are of drafts long folded.
@@ -558,9 +561,11 @@ async function servedSession(
             order by identity_id, join_id, position desc`)
         ).map((r) => Number(r.position));
   budget.left -= first.size + (session.snapshotPosition === null ? 0 : (snapshotSize ?? 0));
-  // Each join's latest kept change, in order, as far as the budget goes.
+  // Each join's latest kept change, in order, as far as the budget goes:
+  // each counts what its row takes besides, so small ones are bounded too.
   let served = 0;
-  const fits = (size: number) => served === 0 || budget.left - size >= 0;
+  const fits = (size: number) =>
+    served === 0 || (budget.left - size - LIVE_MESSAGE_BYTES >= 0 && served < SERVED_ROWS);
   const sizes =
     latest.length === 0
       ? []
@@ -574,7 +579,7 @@ async function servedSession(
   const taken: number[] = [];
   for (const { position, size } of sizes) {
     if (!fits(size)) break;
-    budget.left -= size;
+    budget.left -= size + LIVE_MESSAGE_BYTES;
     served++;
     taken.push(position);
   }
@@ -610,7 +615,7 @@ async function servedSession(
         complete = false;
         break;
       }
-      budget.left -= message.size;
+      budget.left -= message.size + LIVE_MESSAGE_BYTES;
       served++;
       wanted.push(message.position);
       position = message.position;
@@ -687,6 +692,19 @@ async function grantsOf(
 const unsaved = (session: SessionRow) => session.lastUpdatePosition > (session.savedCovers ?? 0);
 
 /**
+ * Whether an ended session is one to catch up from now (section 5.10,
+ * **Ending**): it holds unsaved changes under keys that still count, and
+ * every join of it has left, catch-up joins aside.
+ */
+async function catchable(tx: Database, session: SessionRow, now: Date) {
+  if (session.endedReason === null || !unsaved(session)) return false;
+  const joins = await joinsOf(tx, session.id);
+  const present = presentSet(joins, now);
+  if (joins.some((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId)))) return false;
+  return keysCount(tx, session);
+}
+
+/**
  * The page's open session, and the latest ended one kept with unsaved
  * changes once every join of it has left, for a person who can edit the
  * page now (section 5.10, **Ending**), with the caller's key material.
@@ -729,12 +747,7 @@ export async function getLive(
     const open = openRow ? await servedSession(tx, openRow, at) : null;
     let ended: liveRoutes.ServedSession | null = null;
     for (const session of endedRows) {
-      // Its joins have left; a catch-up join of someone fetching it again doesn't count.
-      const joins = await joinsOf(tx, session.id);
-      const present = presentSet(joins, now);
-      if (joins.some((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId)))) continue;
-      // Once nobody's keys count for it, it is about to go, and nobody can catch up from it.
-      if (!(await keysCount(tx, session))) continue;
+      if (!(await catchable(tx, session, now))) continue;
       ended = await servedSession(tx, session, at);
       break;
     }
@@ -1006,6 +1019,7 @@ export async function joinLive(
     after: number;
     /** What the snapshot covers that the caller's fetch, cut short, was built on. */
     kept?: number | undefined;
+    storageBytes: number;
   },
 ): Promise<Joined> {
   return db.transaction(async (tx) => {
@@ -1025,13 +1039,14 @@ export async function joinLive(
         publishedHead: heads.publishedHead,
       });
     }
-    // An ended one is read, not joined: what it keeps, then its end; nothing of
-    // one whose keys no longer count for anyone, which is about to go.
+    // An ended one is read, not joined: what it keeps, then its end, only as a
+    // fetch would serve it, to catch up from (`catchable`); otherwise its end alone.
     if (session.endedReason !== null) {
+      const readable = await catchable(tx, session, await dbNow(tx));
       return {
         ended: session.endedReason,
         draftHead: heads.draftHead,
-        lastPosition: (await keysCount(tx, session)) ? session.lastPosition : input.after,
+        lastPosition: readable ? session.lastPosition : input.after,
       };
     }
     const now = await dbNow(tx);
@@ -1064,6 +1079,7 @@ export async function joinLive(
         );
     } else {
       requireRoomForJoin(joins, present, caller.identity.id);
+      await charge(tx, caller.accountId, LIVE_JOIN_BYTES, input.storageBytes);
       await tx.insert(liveJoins).values({
         sessionId: session.id,
         identityId: caller.identity.id,
@@ -1148,7 +1164,11 @@ export async function streamClosed(
 async function joinFor(
   tx: Database,
   { caller, session }: { caller: Caller; session: SessionRow },
-  { joinId, parent }: { joinId: string; parent?: string | undefined },
+  {
+    joinId,
+    parent,
+    storageBytes,
+  }: { joinId: string; parent?: string | undefined; storageBytes: number },
   now: Date,
 ) {
   const joins = await joinsOf(tx, session.id);
@@ -1194,6 +1214,7 @@ async function joinFor(
     throw new ContentError('busy', 'That join has two further joins already');
   }
   requireRoomForJoin(joins, present, caller.identity.id);
+  await charge(tx, caller.accountId, LIVE_JOIN_BYTES, storageBytes);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
     .insert(liveJoins)
@@ -1220,6 +1241,7 @@ async function catchUpJoin(
   { caller, session }: { caller: Caller; session: SessionRow },
   joinId: string,
   now: Date,
+  storageBytes: number,
 ) {
   const joins = await joinsOf(tx, session.id);
   const present = presentSet(joins, now);
@@ -1238,6 +1260,7 @@ async function catchUpJoin(
     throw new ContentError('not-found');
   }
   requireRoomForJoin(joins, present, caller.identity.id);
+  await charge(tx, caller.accountId, LIVE_JOIN_BYTES, storageBytes);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
     .insert(liveJoins)
@@ -1412,7 +1435,7 @@ export async function sendLive(db: Database, input: SendLive) {
     // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
     const { join, joins, made } = catchingUp
-      ? await catchUpJoin(tx, ctx, input.joinId, now)
+      ? await catchUpJoin(tx, ctx, input.joinId, now, input.storageBytes)
       : await joinFor(tx, ctx, input, now);
     // Only the catch-up grant's holder sends the `saved` that lets the session go,
     // naming the session as `fold`.
@@ -1453,7 +1476,9 @@ export async function sendLive(db: Database, input: SendLive) {
     let bytes = 0;
     for (const { message, covers } of input.messages) {
       const size = checkMessage(message, caller, join.joinId);
-      if (ended && message.kind !== 'saved') {
+      // A message stored before the end, sent again after a lost answer, is taken as stored.
+      const resend = message.kind !== 'presence' && message.seq <= join.lastSeq;
+      if (ended && message.kind !== 'saved' && !resend) {
         throw new ContentError('forbidden', 'This session has ended; it takes only saved');
       }
       if (join.catchUp && message.kind !== 'saved') {
@@ -1714,7 +1739,12 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       if (stored.position === null) throw new ContentError('duplicate', 'That snapshot is gone');
       return { position: stored.position, relay: null };
     }
-    await chargeStored(tx, caller, size + LIVE_MESSAGE_BYTES, input, { stored: true });
+    await spendStoredBytes(
+      tx,
+      caller.accountId,
+      size + LIVE_MESSAGE_BYTES,
+      input.storedBytesPerMinute,
+    );
     const position = stored.row.position;
     // What it covers goes, but the first snapshot and each join's latest kept change.
     await tx.execute(sql`
@@ -1729,6 +1759,8 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       delete from ${liveMessages}
       where session_id = ${session.id} and kind = 'snapshot' and position <> 1
         and position < ${position}`);
+    // Charged once what it covers has gone, so a snapshot can free room for itself.
+    await charge(tx, caller.accountId, 0, input.storageBytes);
     session.snapshotPosition = position;
     session.snapshotCovers = input.covers;
     await saveCounters(tx, session, join, now, { touch: true });
@@ -1948,9 +1980,10 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
   }
   if (!unsaved(session)) return 'saved';
   if (!(await keysCount(tx, session))) return 'keys';
-  // Only a page's latest ended session is served to catch up from; an older one never is.
-  const [later] = await tx
-    .select({ id: liveSessions.id })
+  // Only a page's latest ended session is served to catch up from; an older one
+  // never is, once a later one holds unsaved changes under keys that still count.
+  const later = await tx
+    .select()
     .from(liveSessions)
     .where(
       and(
@@ -1960,8 +1993,8 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
         sql`${liveSessions.lastUpdatePosition} > coalesce(${liveSessions.savedCovers}, 0)`,
       ),
     )
-    .limit(1);
-  if (later) return 'superseded';
+    .limit(10);
+  for (const next of later) if (await keysCount(tx, next)) return 'superseded';
   return null;
 }
 

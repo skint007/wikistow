@@ -163,7 +163,7 @@ export function mountLiveRoutes(
 
   function push(stream: Stream, item: Queued) {
     if (stream.closed) return;
-    if ('stored' in item) stream.known = Math.max(stream.known, item.stored.position);
+    // `known` is the backlog read from the database; what is queued goes out from memory.
     stream.queue.push(item);
     stream.queuedBytes += sizeOf(item);
     if (stream.queuedBytes > MAX_QUEUED_BYTES) close(stream, null, { drop: true });
@@ -569,6 +569,7 @@ export function mountLiveRoutes(
           joinId,
           after,
           kept,
+          storageBytes,
         });
       } catch (error) {
         release();
@@ -706,6 +707,11 @@ export function mountLiveRoutes(
                   continue;
                 }
                 yield* catchUp(item.stored.position - 1);
+                // Closed while filling the gap before it: it stops there too.
+                if (stream.closed && item.stored.position > stream.sent + 1) {
+                  stream.queue = [];
+                  continue;
+                }
                 if (item.stored.position > stream.sent) {
                   stream.sent = item.stored.position;
                   yield { message: item.stored, draftHead: head() } satisfies Line;
