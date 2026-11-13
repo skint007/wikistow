@@ -50,9 +50,10 @@ export type WrapSubject = {
   /**
    * A group's name is never wrapped (section 7.8); the server keeps it in
    * the owner region. A comment's wrap has its audience as its class
-   * (section 5.9).
+   * (section 5.9), and a live session's record is always `draft` (section
+   * 5.10).
    */
-  subjectKind: 'page' | MetadataRecordV2['subjectKind'] | 'comment';
+  subjectKind: 'page' | MetadataRecordV2['subjectKind'] | 'comment' | 'live';
   subjectId: string;
   versionId: string;
 };
@@ -77,7 +78,8 @@ export const metadataWrapSubject = (
   versionId: r.metadataRevisionId,
 });
 
-const wrapAd = (
+/** A key wrap's AEAD associated data (`content-key-wrap/v1`, section 6.3). */
+export const wrapAd = (
   installationId: InstallationId,
   subject: WrapSubject,
   wrap: Pick<KeyWrap, 'shareId' | 'keyVersion'>,
