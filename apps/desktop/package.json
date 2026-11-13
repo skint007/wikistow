@@ -12,7 +12,7 @@
     "package": "node scripts/asar.ts"
   },
   "devDependencies": {
-    "@electron/asar": "^4.3.1",
+    "@electron/asar": "^4.3.2",
     "@playwright/test": "1.63.0",
     "@types/node": "^26.0.0",
     "@wikistow/contracts": "workspace:*",

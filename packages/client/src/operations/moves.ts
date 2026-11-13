@@ -17,6 +17,8 @@ import {
   type SpaceId,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
+import { requireCurrentPlan, type NewChange } from '../key-versions.ts';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import {
@@ -26,7 +28,7 @@ import {
   type HeldKeyVersion,
 } from '../folder-keys.ts';
 import { isAgentId, verifySignature, type PublicIdentity } from '../identity.ts';
-import { writeKeyVersion } from '../key-versions.ts';
+import { ENDED, writeKeyVersion } from '../key-versions.ts';
 import { grantMetadataKeyV2 } from '../metadata.ts';
 import { OWNER_REGION, requireRegion, sameRegion, type Region } from '../regions.ts';
 import { grantRevisionKeyV2 } from '../revision.ts';
@@ -119,6 +121,9 @@ export async function previewMove(
     position?: Position | null;
   },
 ): Promise<MovePreview> {
+  // The marks first, then the tree: a share ended after this reads them
+  // isn't in the tree, so it is never taken for one listed again.
+  await ctx.marks.refresh?.();
   const tree = await loadTree(ctx, spaceId);
   const folder = tree.folders.find((f) => f.id === nodeId);
   const page = tree.pages.find((p) => p.id === nodeId);
@@ -184,6 +189,16 @@ export async function previewMove(
   if (!crossing) return { ...base, gains: [], losses: [], endingPicks: [] };
   if (tree.space?.role !== 'owner') {
     throw new ApiError(403, 'forbidden', 'Only owners move across a share boundary');
+  }
+  // A share this app ended that the server lists again is a possible
+  // attack (section 6.9), on either side of the move.
+  for (const region of [from, to]) {
+    if (region.kind === 'share' && ctx.marks.get(region.spaceId, region.shareId) === ENDED) {
+      throw new CryptoError(
+        'key-version',
+        `This app ended share ${region.shareId}, but the server still lists it`,
+      );
+    }
   }
   const keys = await ownerKeys(ctx, spaceId);
   const before = await audienceOf(ctx, keys, from);
@@ -371,12 +386,64 @@ export async function moveNode(
     return;
   }
   requireReviewable(preview);
+  await ctx.marks.refresh?.();
   const rewrap = await rewrapper(ctx, preview);
   await rewrap.scan(onProgress);
+  // A move into or out of a share is pending until answered (section 6.8):
+  // no tab joins or sends in the share's live sessions meanwhile.
+  // The destination side is under the version its wraps were made at,
+  // which must still be at the mark when the move goes, however long the
+  // scan took; the source side moves out of whatever version it is at.
+  const changes: NewChange[] = [];
+  if (preview.from.kind === 'share') {
+    const { spaceId: s, shareId: h } = preview.from;
+    changes.push({
+      spaceId: s,
+      shareId: h,
+      change: 'move',
+      fromKeyVersion: Math.max(1, ctx.marks.get(s, h)),
+    });
+  }
+  if (preview.to.kind === 'share' && rewrap.keyVersion !== null) {
+    changes.push({
+      spaceId: preview.to.spaceId,
+      shareId: preview.to.shareId,
+      change: 'move',
+      fromKeyVersion: rewrap.keyVersion,
+      into: true,
+    });
+  }
+  await sendShareChange(
+    ctx,
+    changes,
+    () =>
+      sendRewrapped(send, rewrap, preview, ctx, onProgress, async () => {
+        // A try after the first one checks the mark again: a rotation may
+        // have overtaken the wraps while the server took its time.
+        await ctx.marks.refresh?.();
+        for (const change of changes) requireCurrentPlan(ctx.marks, change);
+      }),
+    () => [],
+  );
+  forgetSpaces(ctx);
+}
+
+// Send a move across a region boundary with its rewrapped records, scanning
+// again for records saved meanwhile.
+async function sendRewrapped(
+  send: (material: Partial<KeyMaterial>) => Promise<unknown>,
+  rewrap: Awaited<ReturnType<typeof rewrapper>>,
+  preview: MovePreview,
+  ctx: ClientContext,
+  onProgress: Progress | undefined,
+  again: () => Promise<void>,
+): Promise<void> {
   for (let tries = 0; ; tries++) {
+    // Its own refusal goes straight out: rescanning can't change it.
+    if (tries > 0) await again();
     try {
       await send(rewrap.material());
-      break;
+      return;
     } catch (error) {
       // The server refuses wraps for something deleted meanwhile.
       if (
@@ -400,7 +467,6 @@ export async function moveNode(
       if (!(await rewrap.scan(onProgress))) throw error;
     }
   }
-  forgetSpaces(ctx);
 }
 
 type KeyMaterial = {
@@ -499,6 +565,8 @@ async function rewrapper(ctx: ClientContext, preview: MovePreview) {
     );
   };
   return {
+    /** The destination share's key version the wraps are under, or null for the owner region. */
+    keyVersion: target.kind === 'share' ? target.held.keyVersion : null,
     material: (): KeyMaterial => {
       const all = [...done.values()];
       return {

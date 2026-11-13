@@ -130,6 +130,30 @@ export async function openSession(
 ): Promise<ClientContext> {
   const { installationId, restore } = await api.call(systemRoutes.installation);
   const kept = file && (await KeptMarks.open(file, { identity: vault.identity, installationId }));
+  try {
+    return await sessionFrom(api, vault, { installationId, restore, kept, content });
+  } catch (error) {
+    // A session that never started leaves no marks listening.
+    kept?.close();
+    throw error;
+  }
+}
+
+async function sessionFrom(
+  api: ApiClient,
+  vault: UnlockedVault,
+  {
+    installationId,
+    restore,
+    kept,
+    content,
+  }: {
+    installationId: InstallationId;
+    restore: Parameters<typeof unseenRestore>[0];
+    kept: KeptMarks | undefined;
+    content: KeptStore | undefined;
+  },
+): Promise<ClientContext> {
   const unseen = kept && unseenRestore(restore, kept.restoredAt);
   if (unseen) kept.startOver(unseen.restoredAt);
   const trust = new TrustStore(installationId);
@@ -184,7 +208,14 @@ export async function openKeptSession(
   if (!installationId) return null;
   const kept = await KeptMarks.open(file, { identity: vault.identity, installationId });
   const owner = { installationId, identity: vault.identity };
-  const book = openKeptContacts(owner, kept.contactsMark, kept.contactsRecord);
+  let book: ReturnType<typeof openKeptContacts>;
+  try {
+    book = openKeptContacts(owner, kept.contactsMark, kept.contactsRecord);
+  } catch (error) {
+    // A session that never started leaves no marks listening.
+    kept.close();
+    throw error;
+  }
   const trust = new TrustStore(installationId);
   trust.pinSelf(vault.identity);
   trust.load(book.payloads);

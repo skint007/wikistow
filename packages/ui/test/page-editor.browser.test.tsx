@@ -1,4 +1,5 @@
 import { joinBackward } from '@milkdown/kit/prose/commands';
+import { EditorView } from '@codemirror/view';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -50,7 +51,7 @@ afterEach(() => {
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 openVault();
 
-function mount(initial: string, mode: 'source' | 'visual'): Mounted {
+function mount(initial: string, mode: 'source' | 'split' | 'visual'): Mounted {
   window.localStorage.setItem('wikistow.editor', mode);
   const container = document.createElement('div');
   document.body.append(container);
@@ -93,6 +94,13 @@ const source = (m: Mounted) =>
   [...m.container.querySelectorAll('div')].some((div) =>
     div.shadowRoot?.querySelector('.cm-editor'),
   );
+// The source editor's view, in its shadow root.
+const sourceView = (m: Mounted) => {
+  const editor = [...m.container.querySelectorAll('div')]
+    .map((div) => div.shadowRoot?.querySelector('.cm-editor'))
+    .find((found) => found instanceof HTMLElement);
+  return editor instanceof HTMLElement ? EditorView.findFromDOM(editor) : null;
+};
 const shown = (m: Mounted) => (visual(m) ? 'visual' : source(m) ? 'source' : 'loading');
 const note = (m: Mounted) => m.container.querySelector('[role=status]')?.textContent || null;
 
@@ -126,16 +134,75 @@ describe('the page editor', () => {
     const editor = visual(m);
     if (!editor) throw new Error('No visual editor');
     const view = viewOf(editor);
+    // So much new at once, it's checked as a page is before it goes in.
+    const session = `From the session${' and more'.repeat(130)}`;
     act(() => {
-      m.handle.replace('Start\n\nFrom the session\n');
+      m.handle.replace(`Start\n\n${session}\n`);
       view.dispatch(view.state.tr.insertText(' typed', view.state.doc.content.size - 1));
     });
     expect(view.state.doc.textContent).toBe('Start');
-    expect(m.handle.read()).toBe('Start\n\nFrom the session\n');
-    await expect.poll(() => view.state.doc.textContent).toBe('StartFrom the session');
+    expect(m.handle.read()).toBe(`Start\n\n${session}\n`);
+    await expect.poll(() => view.state.doc.textContent).toBe(`Start${session}`);
     act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
-    await expect.poll(() => m.changes.at(-1)).toBe('Start\n\nFrom the session!\n');
+    await expect.poll(() => m.changes.at(-1)).toBe(`Start\n\n${session}!\n`);
     expect(m.editing.count).toBe(1);
+  });
+
+  it('shows text the session gives a block at a time, taking edits again at once', async () => {
+    const m = mount('Start\n\nEnd\n', 'visual');
+    await expect.poll(() => shown(m)).toBe('visual');
+    const editor = visual(m);
+    if (!editor) throw new Error('No visual editor');
+    const view = viewOf(editor);
+    act(() => m.handle.replace('Start\n\nFrom the session\n\nEnd\n'));
+    expect(view.state.doc.textContent).toBe('StartFrom the sessionEnd');
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => m.changes.at(-1)).toBe('Start\n\nFrom the session\n\nEnd!\n');
+  });
+
+  it('in split, gives the visual side the source’s typing a block at a time, its blocks as written', async () => {
+    const m = mount('Title\n=====\n\n* one\n\nBody\n', 'split');
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    const editor = visual(m);
+    if (!code || !editor) throw new Error('No editors');
+    act(() => code.dispatch({ changes: { from: code.state.doc.length - 1, insert: ' typed' } }));
+    await expect.poll(() => editor.textContent).toContain('Body typed');
+    // Edited there, the blocks it didn't change keep the source's writing.
+    const view = viewOf(editor);
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => m.changes.at(-1)).toBe('Title\n=====\n\n* one\n\nBody typed!\n');
+    await expect
+      .poll(() => code.state.doc.toString())
+      .toBe('Title\n=====\n\n* one\n\nBody typed!\n');
+  });
+
+  it('in split, shows the newest of the source’s texts, whichever way each goes in', async () => {
+    const m = mount('One\n\nTwo\n\nThree\n', 'split');
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    const editor = visual(m);
+    if (!code || !editor) throw new Error('No editors');
+    const at = (text: string) => code.state.doc.toString().indexOf(text);
+    // A fence left open, read whole; closed, a block at a time; then more.
+    act(() => code.dispatch({ changes: { from: at('Two'), insert: '```\n' } }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    act(() => code.dispatch({ changes: { from: at('Two') + 3, insert: '\n```' } }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    act(() => code.dispatch({ changes: { from: at('Three') + 5, insert: ' more' } }));
+    const view = viewOf(editor);
+    const blocks = () =>
+      view.state.doc.content.content.map((node) => [node.type.name, node.textContent]);
+    const last = [
+      ['paragraph', 'One'],
+      ['code_block', 'Two'],
+      ['paragraph', 'Three more'],
+    ];
+    await expect.poll(blocks).toEqual(last);
+    // No older text read whole goes in after it.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(blocks()).toEqual(last);
+    expect(m.handle.read()).toBe('One\n\n```\nTwo\n```\n\nThree more\n');
   });
 
   it('holds the newest text the session gives while text pasted is checked', async () => {

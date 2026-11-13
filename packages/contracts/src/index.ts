@@ -4,6 +4,7 @@ export * from './records/contacts.ts';
 export * from './records/encoding.ts';
 export * from './records/envelope.ts';
 export * from './records/identity.ts';
+export * from './records/live.ts';
 export * from './records/ids.ts';
 export * from './records/metadata.ts';
 export * from './records/position.ts';

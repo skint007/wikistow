@@ -31,6 +31,7 @@ import { leaveLastBlock } from './plugins';
 import { pluginInlineNode } from './plugin-inline';
 import { readAlone } from './read-alone';
 import { schemaChanges } from './schema';
+import { readingSpans } from './sources';
 import {
   codeBlockView,
   imageView,
@@ -454,6 +455,7 @@ export function visualPlugins(host: VisualHost, nodes: readonly SyntaxNode[]): M
     ...gfm,
     history,
     serializeWritable,
+    readingSpans,
     ...schemaChanges,
     imageView(host),
     listItemView,

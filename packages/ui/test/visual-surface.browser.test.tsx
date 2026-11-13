@@ -425,9 +425,8 @@ describe('the visual surface', () => {
     await expect.poll(() => m.handle.read()).toBe(text);
   });
 
-  // Its read back alone may take 30 s on a busy runner.
   it(
-    'writes and reads whole an edit on a long page not yet read back, if the page is hidden first',
+    'reports an edit on a long page just opened without reading it all back, writing only what changed',
     { timeout: 60_000 },
     async () => {
       const t = await transformer();
@@ -435,20 +434,19 @@ describe('the visual surface', () => {
       const body = Array.from({ length: Math.ceil(100_000 / chunk.length) }, () => chunk).join(
         '\n\n',
       );
-      // Its first block written as typed would link `https://x.org\`: only
-      // reading it back finds it must be written otherwise.
+      // Its first block written anew would be `<https://x.org>\_`: it's kept as written.
       const page = `See https://x.org_ and more.\n\n${body}\n\nEnd\n`;
       const m = await mount(page);
       const view = viewOf(m.dom);
       await typeAtEnd(m, ' more ');
       paste(m, { 'text/plain': '*word*' });
       expect(view.state.doc.lastChild?.textContent).toBe('End more word');
-      expect(m.changes).toEqual([]);
-      // Hidden, as when the tab closes, it's written and read whole at once.
+      await expect.poll(() => m.changes.length).toBeGreaterThan(0);
       window.dispatchEvent(new PageTransitionEvent('pagehide'));
-      expect(m.changes).toHaveLength(1);
-      expect(m.changes[0]).toMatch(/^See <https:\/\/x\.org>\\_ and more\.\n/);
-      expect(writesAsShown(view.state.doc, withLf(m.changes[0] ?? ''), t.parse)).toBe(true);
+      const written = page.replace(/End\n$/, 'End more *word*\n');
+      expect(m.changes.at(-1)).toBe(written);
+      expect(writesAsShown(view.state.doc, withLf(written), t.parse)).toBe(true);
+      expect(m.unfaithful).toEqual([]);
     },
   );
 
@@ -474,6 +472,45 @@ describe('the visual surface', () => {
       '[[New title]]',
     );
     expect(m.changes).toEqual([]);
+  });
+
+  it('shows text it was given while the editor was being made, read whole if it must be', async () => {
+    const next = 'One.\n\n```\nTwo.\n\nThree.\n';
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    let handle: EditorSurfaceHandle | null = null;
+    const given = (made: EditorSurfaceHandle | null) => void (handle ??= made);
+    // Given as soon as its page is there, before Milkdown says it's made.
+    let sent = false;
+    const watch = new MutationObserver(() => {
+      if (sent || !handle || !container.querySelector('#page-visual')) return;
+      sent = true;
+      handle.replace(next);
+    });
+    watch.observe(container, { childList: true, subtree: true });
+    await act(async () =>
+      root.render(
+        <VisualSurface
+          ref={given}
+          initial={'One.\n\nTwo.\n\nThree.\n'}
+          onChange={() => {}}
+          links={links}
+          attachments={{ list: [], url: async () => null }}
+          onFiles={() => {}}
+        />,
+      ),
+    );
+    await act(() => expect.poll(() => container.querySelector('#page-visual')).not.toBeNull());
+    const dom = container.querySelector<HTMLElement>('#page-visual');
+    if (!dom || !handle) throw new Error('The editor did not mount');
+    const view = viewOf(dom);
+    await expect.poll(() => view.state.doc.maybeChild(1)?.type.name).toBe('code_block');
+    expect((handle as EditorSurfaceHandle).read()).toBe(next);
+    expect(sent).toBe(true);
+    watch.disconnect();
+    act(() => root.unmount());
+    container.remove();
   });
 
   it('says at once that the person edited, before it reports the edit', async () => {

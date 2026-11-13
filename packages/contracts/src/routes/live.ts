@@ -5,9 +5,16 @@
 // The server relays and keeps ciphertext; the session payload, the sealed
 // content of messages and their extensions are the client's (`live`).
 import { z } from 'zod';
-import { Base64, PositiveInt, Sealed, Timestamp } from '../records/encoding.ts';
-import { IdentityId, JoinId, LiveSessionId, PageId, RevisionId } from '../records/ids.ts';
-import { MetadataEnvelopeV2, SealedLive } from '../records/metadata.ts';
+import { PositiveInt, Timestamp } from '../records/encoding.ts';
+import { IdentityId, PageId, RevisionId } from '../records/ids.ts';
+import {
+  JoinId,
+  LIVE_LIMITS,
+  LiveMessage,
+  LiveSessionId,
+  SealedLiveRecord,
+} from '../records/live.ts';
+import { MetadataEnvelopeV2 } from '../records/metadata.ts';
 import { KeyWrap } from '../records/share.ts';
 import type { RouteDef, StreamRouteDef } from '../route.ts';
 
@@ -21,10 +28,10 @@ export const MAX_RECORD_PAYLOAD_BYTES = 65_536;
  * 2 MiB. Every stored kind pads to a multiple of 128 bytes, so its
  * ciphertext is 16 bytes more than one.
  */
-export const PRESENCE_CIPHERTEXT_BYTES = 528;
-export const MAX_UPDATE_BYTES = 512 * 1024;
-export const MAX_SAVED_BYTES = 512 * 1024;
-export const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+export const PRESENCE_CIPHERTEXT_BYTES = LIVE_LIMITS.presence;
+export const MAX_UPDATE_BYTES = LIVE_LIMITS.update;
+export const MAX_SAVED_BYTES = LIVE_LIMITS.saved;
+export const MAX_SNAPSHOT_BYTES = LIVE_LIMITS.snapshot;
 
 /** The body limit of the routes that carry a snapshot: starting a session, and posting one. */
 export const SNAPSHOT_BODY_BYTES = 4 * 1024 * 1024;
@@ -57,25 +64,16 @@ export const JOIN_GRACE_MS = 30_000;
 /** Messages one request may carry. */
 export const MAX_MESSAGES = 64;
 
-const Seq = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 /** A message's place in its session, given by the server, from 1. */
 export const Position = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 /**
  * A message in a session, as its sender signed it (section 5.10,
- * **Messages**): a strict object. The server checks its sender, join, kind
- * and size, never its signature or what it seals.
+ * **Messages**), as `records/live.ts` has it, and the client's `live`
+ * module seals it. The server checks its sender, join, kind and size,
+ * never its signature or what it seals.
  */
-export const LiveMessage = z.strictObject({
-  kind: z.enum(['update', 'snapshot', 'presence', 'saved']),
-  senderId: IdentityId,
-  senderKeyVersion: PositiveInt,
-  joinId: JoinId,
-  seq: Seq,
-  sealed: Sealed,
-  signature: Base64.length(86),
-});
-export type LiveMessage = z.infer<typeof LiveMessage>;
+export { LiveMessage };
 
 /**
  * A stored message (`update`, `snapshot` or `saved`) with its position.
@@ -146,7 +144,7 @@ export type EndReason = z.infer<typeof EndReason>;
  */
 export const ServedSession = z.strictObject({
   sessionId: LiveSessionId,
-  record: SealedLive,
+  record: SealedLiveRecord,
   wrap: KeyWrap.nullable(),
   envelopes: z.array(MetadataEnvelopeV2),
   revisionId: RevisionId,
@@ -205,7 +203,7 @@ export const startLive = {
     sessionId: LiveSessionId,
     joinId: JoinId,
     revisionId: RevisionId,
-    metadata: SealedLive,
+    metadata: SealedLiveRecord,
     wrap: KeyWrap.nullable(),
     envelopes: z.array(MetadataEnvelopeV2).max(100),
     snapshot: LiveMessage,

@@ -2,6 +2,11 @@
 // runtimes must agree on every byte of the protocol.
 import { describe, expect, it } from 'vite-plus/test';
 import {
+  canonical,
+  hash,
+  IdentityId,
+  metadataRecordV2Bytes,
+  sealedBytes,
   acceptOwners,
   OwnerStatement,
   ownerStatementBytes,
@@ -55,6 +60,25 @@ import { sodium } from '../src/sodium.ts';
 import vectors from './vectors.json';
 import { opensFor } from '../src/owner-predicates.ts';
 import { opensAnyone } from './support/anyone.ts';
+import {
+  JoinId,
+  liveClientId,
+  liveMessageAd,
+  liveMessageBytes,
+  LiveSessionId,
+  liveWrapSubject,
+  decodeState,
+  decodeUpdate,
+  LiveDocument,
+  LiveJoins,
+  openLiveMessage,
+  pad,
+  readSaved,
+  readSnapshot,
+  SealedLiveRecord,
+  unpad,
+  type LiveBinding,
+} from '../src/live/index.ts';
 
 const identity = (raw: (typeof vectors)['author']): PrivateIdentity => ({
   public: PublicIdentity.parse(raw.public),
@@ -476,3 +500,266 @@ describe('Milestone 2 test vectors', () => {
       expect(() => fromBase64(bad)).toThrow(code('malformed'));
   });
 });
+
+describe('live session test vectors (section 5.10)', () => {
+  const live = vectors.live;
+  const starter = identity(live.starter);
+  const installationId = InstallationId.parse('vector-installation');
+  const spaceId = SpaceId.parse('vector-space');
+  const sealed = SealedLiveRecord.parse(live.session.sealed);
+  const { record } = sealed;
+  const wrap = KeyWrap.parse(live.session.wrap);
+  const draftKey = fromBase64(live.folderKeys.draftKey);
+  const sessionKey = fromBase64(live.session.payload.key);
+  const binding: LiveBinding = {
+    installationId,
+    spaceId,
+    pageId: PageId.parse(live.session.payload.pageId),
+    sessionId: record.subjectId,
+    recordHash: live.session.recordHash,
+    key: sessionKey,
+  };
+  const trust = new TrustStore(installationId);
+  trust.use(directoryEntry(starter.public));
+
+  it('sign the session record over metadata-record/v2, and hash those bytes', () => {
+    const bytes = metadataRecordV2Bytes(record);
+    expect(sodium.to_hex(bytes)).toBe(live.session.signedBytes);
+    expect(verifySignature(starter.public, bytes, sealed.signature)).toBe(true);
+    expect(toBase64(sodium.crypto_generichash(32, bytes, null))).toBe(live.session.recordHash);
+  });
+
+  it('wrap the session record under the draft key, never the published key', () => {
+    const subject = liveWrapSubject({
+      spaceId,
+      sessionId: LiveSessionId.parse(record.subjectId),
+      versionId: record.metadataRevisionId,
+    });
+    expect(subject).toEqual(live.session.subject);
+    expect(subject.audienceClass).toBe('draft');
+    const ad = sodium.from_hex(live.session.wrapAd);
+    const contentKey = aeadDecrypt({ key: draftKey, sealed: wrap.wrappedKey, ad });
+    expect(keyCommitment(contentKey)).toBe(record.keyCommitment);
+    expect(() =>
+      aeadDecrypt({ key: fromBase64(live.folderKeys.publishedKey), sealed: wrap.wrappedKey, ad }),
+    ).toThrow();
+    const payload = aeadDecrypt({
+      key: contentKey,
+      sealed: sealed.payload,
+      ad: sodium.from_hex(live.session.payloadAd),
+    });
+    expect(JSON.parse(new TextDecoder().decode(payload))).toEqual(live.session.payload);
+  });
+
+  it('derive the Yjs client ID from an 8-byte BLAKE2b over live-client/v1', () => {
+    const { client } = live;
+    const input = canonicalLiveClient(client);
+    expect(sodium.to_hex(input)).toBe(client.input);
+    expect(sodium.to_hex(sodium.crypto_generichash(8, input, null))).toBe(client.digest);
+    expect(
+      liveClientId({
+        installationId,
+        sessionId: LiveSessionId.parse(client.sessionId),
+        senderId: IdentityId.parse(client.senderId),
+        senderKeyVersion: client.senderKeyVersion,
+        joinId: JoinId.parse(client.joinId),
+      }),
+    ).toBe(client.clientId);
+    expect(client.clientId).toBe(Number(BigInt(`0x${client.digest}`) & ((1n << 53n) - 1n)));
+  });
+
+  it('seal an update with live-message-payload/v1 and sign it over live-message/v1', () => {
+    const { update } = live;
+    const header = {
+      ...update.header,
+      kind: 'update' as const,
+      senderId: IdentityId.parse(update.header.senderId),
+      joinId: JoinId.parse(update.header.joinId),
+    };
+    expect(sodium.to_hex(liveMessageAd(binding, header))).toBe(update.ad);
+    const message = update.message;
+    expect(hash(sealedBytes(message.sealed))).toBe(update.payloadHash);
+    expect(sodium.to_hex(liveMessageBytes(binding, header, update.payloadHash))).toBe(
+      update.signedBytes,
+    );
+    expect(
+      verifySignature(starter.public, sodium.from_hex(update.signedBytes), message.signature),
+    ).toBe(true);
+    const padded = aeadDecrypt({
+      key: sessionKey,
+      sealed: message.sealed,
+      ad: sodium.from_hex(update.ad),
+    });
+    expect(sodium.to_hex(padded)).toBe(update.padded);
+    expect(padded).toHaveLength(128);
+    expect(unpad('update', padded)).toEqual({
+      clock: update.clock,
+      content: sodium.from_hex(update.content),
+    });
+    const opened = openLiveMessage({ binding, trust, listed: () => true, message });
+    expect(opened).toMatchObject({ kind: 'update', seq: 2, clock: update.clock });
+    // It follows the first snapshot in its join's order.
+    const own = decodeUpdate(opened.content).structs[0];
+    expect(own?.start).toBe(decodeUpdate(sodium.from_hex(live.snapshot.state)).structs[0]?.end);
+    expect(own?.end).toBe(update.clock);
+    // Bound to its record: another record hash opens nothing.
+    const other = { ...binding, recordHash: hash(new Uint8Array([1])) };
+    expect(() => openLiveMessage({ binding: other, trust, listed: () => true, message })).toThrow();
+  });
+
+  it('pad to the edge of each bucket, after a clock of 8 bytes', () => {
+    for (const { kind, clock, content, padded } of live.padding) {
+      const bytes = sodium.from_hex(content);
+      const kindOf = kind as 'update' | 'presence';
+      expect(sodium.to_hex(pad(kindOf, clock, bytes))).toBe(padded);
+      expect(unpad(kindOf, sodium.from_hex(padded))).toEqual({ clock, content: bytes });
+    }
+    expect(live.padding.map((p) => p.padded.length / 2)).toEqual([128, 256, 512]);
+  });
+
+  it('seal a Saved notice holding a state as Y.encodeSnapshot writes it', () => {
+    const opened = openLiveMessage({
+      binding,
+      trust,
+      listed: () => true,
+      message: live.saved.message,
+    });
+    const read = readSaved(opened.content);
+    expect(read).toMatchObject({ kind: 'current', revisionId: live.saved.revisionId });
+    if (read.kind !== 'current') throw new Error('Not current');
+    expect(sodium.to_hex(read.state)).toBe(live.saved.state);
+    expect(decodeState(read.state)?.vector.get(live.client.clientId)).toBe(live.update.clock);
+  });
+
+  it('refuse padding of any other form, and a clock past 2^53 − 1', () => {
+    for (const [name, { kind, code, padded }] of Object.entries(live.paddingRefuse)) {
+      expect(() => unpad(kind as 'update' | 'presence', sodium.from_hex(padded)), name).toThrow(
+        expect.objectContaining({ code }),
+      );
+    }
+  });
+
+  it('read what each accepted update holds as Yjs counts it', () => {
+    for (const [name, ends] of Object.entries(live.acceptEnds)) {
+      const bytes = live.decoder.accept[name as keyof typeof live.decoder.accept];
+      const decoded = decodeUpdate(sodium.from_hex(bytes));
+      expect(
+        decoded.structs.map((s) => [s.client, s.start, s.end]),
+        name,
+      ).toEqual(ends);
+    }
+  });
+
+  it('find what doesn’t fit the document as Yjs places it', () => {
+    for (const [name, bytes] of Object.entries(live.placement)) {
+      const update = sodium.from_hex(bytes);
+      expect(() => decodeUpdate(update), name).not.toThrow();
+      expect(new LiveDocument(99).apply(update).length, name).toBeGreaterThan(0);
+    }
+  });
+
+  it('take the starter’s first snapshot, update and Saved notice in order', () => {
+    const joins = new LiveJoins({
+      installationId,
+      sessionId: record.subjectId,
+      starter: { senderId: starter.public.id, joinId: JoinId.parse(live.client.joinId) },
+    });
+    joins.list([
+      {
+        senderId: starter.public.id,
+        senderKeyVersion: starter.public.keyVersion,
+        joinId: JoinId.parse(live.client.joinId),
+        parent: null,
+        present: true,
+      },
+    ]);
+    for (const message of [live.snapshot.message, live.update.message, live.saved.message]) {
+      const opened = openLiveMessage({ binding, trust, listed: () => true, message });
+      const content =
+        opened.kind === 'update'
+          ? decodeUpdate(opened.content)
+          : opened.kind === 'snapshot'
+            ? decodeUpdate(sodium.from_hex(live.snapshot.state))
+            : undefined;
+      expect(joins.check(opened, content), opened.kind).toEqual({ kind: 'take' });
+      joins.take(opened);
+    }
+    expect(joins.signed(live.client.clientId)).toBe(live.update.clock);
+  });
+
+  it('decode updates in the one form section 5.10 takes', () => {
+    for (const bytes of Object.values(live.decoder.accept)) {
+      expect(() => decodeUpdate(sodium.from_hex(bytes))).not.toThrow();
+    }
+    for (const [name, bytes] of Object.entries(live.decoder.refuse)) {
+      expect(() => decodeUpdate(sodium.from_hex(bytes)), name).toThrow(
+        expect.objectContaining({ code: 'binding-mismatch' }),
+      );
+    }
+  });
+
+  it('decode states strictly, counting one that doesn’t as none', () => {
+    for (const bytes of Object.values(live.states.accept)) {
+      expect(decodeState(sodium.from_hex(bytes))).not.toBeNull();
+    }
+    for (const [name, bytes] of Object.entries(live.states.refuse)) {
+      expect(decodeState(sodium.from_hex(bytes)), name).toBeNull();
+    }
+  });
+
+  it('seal the first snapshot as the starter’s message with seq 1', () => {
+    const { snapshot } = live;
+    const opened = openLiveMessage({
+      binding,
+      trust,
+      listed: () => true,
+      message: snapshot.message,
+    });
+    expect(opened).toMatchObject({ kind: 'snapshot', seq: 1, joinId: live.client.joinId });
+    const header = { ...opened, kind: 'snapshot' as const };
+    expect(sodium.to_hex(liveMessageAd(binding, header))).toBe(snapshot.ad);
+    expect(sodium.to_hex(liveMessageBytes(binding, header, opened.payloadHash))).toBe(
+      snapshot.signedBytes,
+    );
+    const padded = aeadDecrypt({
+      key: sessionKey,
+      sealed: snapshot.message.sealed,
+      ad: sodium.from_hex(snapshot.ad),
+    });
+    expect(sodium.to_hex(padded)).toBe(snapshot.padded);
+    const read = readSnapshot(opened.content);
+    if (read.kind !== 'current') throw new Error('Not current');
+    expect(sodium.to_hex(read.state)).toBe(snapshot.state);
+    const decoded = decodeUpdate(read.state);
+    expect(decoded.structs.map((s) => s.client)).toEqual([live.client.clientId]);
+    expect(decoded.structs[0]?.end).toBe(opened.clock);
+  });
+
+  it('pad a presence to exactly 512 bytes', () => {
+    const opened = openLiveMessage({
+      binding,
+      trust,
+      listed: () => true,
+      message: live.presence.message,
+    });
+    expect(opened.kind).toBe('presence');
+    const padded = aeadDecrypt({
+      key: sessionKey,
+      sealed: live.presence.message.sealed,
+      ad: liveMessageAd(binding, { ...opened, kind: 'presence' }),
+    });
+    expect(sodium.to_hex(padded)).toBe(live.presence.padded);
+    expect(padded).toHaveLength(512);
+    expect(unpad('presence', padded).content).toEqual(opened.content);
+  });
+});
+
+function canonicalLiveClient(client: (typeof vectors)['live']['client']) {
+  return canonical('live-client/v1', [
+    'vector-installation',
+    client.sessionId,
+    client.senderId,
+    client.senderKeyVersion,
+    client.joinId,
+  ]);
+}

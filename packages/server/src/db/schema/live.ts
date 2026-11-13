@@ -42,7 +42,7 @@ export const liveSessions = pgTable(
     versionId: text().notNull().unique(),
     /** The draft it started from, which draft retention keeps while the session is kept. */
     revisionId: text().notNull(),
-    /** The SealedLive (record, signature, payload) as its starter signed it. */
+    /** The SealedLiveRecord (record, signature, payload) as its starter signed it. */
     sealed: jsonb().notNull(),
     /** The ciphertext's length, which counts toward its starter's storage. */
     payloadSize: integer()

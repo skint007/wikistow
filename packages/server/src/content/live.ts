@@ -9,7 +9,7 @@ import {
   KeyWrap,
   liveRoutes,
   MetadataEnvelopeV2,
-  SealedLive,
+  SealedLiveRecord,
   type PublicIdentity,
 } from '@wikistow/contracts';
 import {
@@ -517,7 +517,7 @@ async function servedSession(
   },
 ): Promise<liveRoutes.ServedSession | null> {
   const row = { table: 'live_sessions', id: session.id };
-  const record = readStored(SealedLive, session.sealed, row, report);
+  const record = readStored(SealedLiveRecord, session.sealed, row, report);
   if (!record) return null;
   const [wrapRow] = await tx
     .select({ wrap: liveWraps.wrap })
@@ -802,7 +802,7 @@ export type StartLive = {
   sessionId: string;
   joinId: string;
   revisionId: string;
-  metadata: SealedLive;
+  metadata: SealedLiveRecord;
   wrap: KeyWrap | null;
   envelopes: MetadataEnvelopeV2[];
   snapshot: LiveMessage;

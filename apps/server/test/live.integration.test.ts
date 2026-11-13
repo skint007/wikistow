@@ -2,8 +2,12 @@
 // served a session and may take part, how messages are numbered, relayed
 // and limited, how a session ends with the page's access, and when it goes.
 import {
+  aeadDecrypt,
   endingOperations as ending,
+  fromBase64,
+  metadataAd,
   newId,
+  openSealedKey,
   pageOperations as pages,
   sharingOperations as sharing,
   utf8,
@@ -15,6 +19,13 @@ import {
   MetadataRevisionId,
   type RevisionId,
 } from '@wikistow/contracts';
+import {
+  liveRecordHash,
+  presenceContent,
+  sealLiveMessage,
+  startLiveSession,
+  stateContent,
+} from '@wikistow/client/live';
 import {
   listenForTreeChanges,
   schema,
@@ -216,6 +227,88 @@ describe('who is served a session', () => {
       'not-found',
     );
     expect((await sessionRow(sessionId))?.endedAt).toBeNull();
+  });
+
+  it('takes a start and messages as the client’s live module seals them', async () => {
+    const { owner, lib } = await sharedLibrary();
+    const page = lib.beside;
+    const revisionId = await headOf(owner, page);
+    const owners = (await sharing.ownerKeys(owner.ctx, page.spaceId)).owners.sealingOwners();
+    const started = startLiveSession({
+      author: owner.ctx.identity,
+      installationId: owner.ctx.installationId,
+      spaceId: page.spaceId,
+      pageId: page.pageId,
+      revisionId,
+      owners,
+    });
+    // The session key, from the owner's own envelope, as opening the record finds it.
+    const [envelope] = started.envelopes;
+    if (!envelope) throw new Error('an envelope to the owner');
+    const contentKey = openSealedKey(owner.ctx.identity, envelope.sealedKey);
+    const opened = JSON.parse(
+      new TextDecoder().decode(
+        aeadDecrypt({
+          key: contentKey,
+          sealed: started.sealed.payload,
+          ad: metadataAd(started.sealed.record),
+        }),
+      ),
+    ) as { key: string };
+    const binding = {
+      installationId: owner.ctx.installationId,
+      spaceId: page.spaceId,
+      pageId: page.pageId,
+      sessionId: started.sessionId,
+      recordHash: liveRecordHash(started.sealed.record),
+      key: fromBase64(opened.key),
+    };
+    const seal = (kind: liveRoutes.LiveMessage['kind'], seq: number, content: Uint8Array) =>
+      sealLiveMessage({
+        sender: owner.ctx.identity,
+        binding,
+        kind,
+        joinId: started.joinId,
+        seq,
+        clock: 0,
+        content,
+      });
+    const { permissionVersion } = await pages.loadPage(owner.ctx, page.pageId);
+    await owner.ctx.api.call(liveRoutes.startLive, {
+      params: { pageId: page.pageId },
+      body: {
+        sessionId: started.sessionId,
+        joinId: started.joinId,
+        revisionId,
+        metadata: started.sealed,
+        wrap: started.wrap,
+        envelopes: started.envelopes,
+        snapshot: seal('snapshot', 1, stateContent(revisionId, new Uint8Array([0, 0]))),
+        permissionVersion,
+      },
+    });
+    const update = seal('update', 2, new Uint8Array([0, 0]));
+    const presence = seal(
+      'presence',
+      2,
+      presenceContent({
+        format: { major: 1, minor: 0 },
+        editor: 'source',
+        visible: true,
+        publishing: false,
+        saveFailing: null,
+        cursor: null,
+      }),
+    );
+    expect(
+      await owner.ctx.api.call(liveRoutes.sendMessages, {
+        params: { sessionId: started.sessionId },
+        body: { joinId: started.joinId, messages: [{ message: update }, { message: presence }] },
+      }),
+    ).toEqual({ positions: [2, null], grant: null });
+    const { open } = await liveOf(owner, page.pageId);
+    expect(open?.record).toEqual(started.sealed);
+    expect(open?.messages.map((m) => m.message)).toEqual([update]);
   });
 
   it('seals a session outside shares to the owners, and serves each their own envelope', async () => {

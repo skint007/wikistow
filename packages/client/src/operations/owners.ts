@@ -8,6 +8,7 @@ import {
   type MetadataEnvelopeV2,
   type SpaceId,
 } from '@wikistow/contracts';
+import { sendShareChange } from './share-changes.ts';
 import { ApiError } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { keyHash, type PublicIdentity } from '../identity.ts';
@@ -19,6 +20,8 @@ import { forgetSpaces, ownersEntry, spaceKeys, type SpaceKeys } from './keys.ts'
 import { saveContacts, type ClientContext } from './session.ts';
 import {
   applyShareRotation,
+  rotationChange,
+  rotationRaise,
   forEachRecordKey,
   listShares,
   namedBack,
@@ -218,16 +221,20 @@ export async function applyOwnerRemoval(
       throw new ApiError(409, 'stale-head', 'The removal changed; confirm it again');
     }
   }
-  await ctx.api.call(ownerRoutes.removeOwner, {
-    params: { spaceId, identityId: owner.id },
-    body: {
-      rotations: removal.rotations.map(({ plan }) => ({
-        shareId: plan.shareId,
-        ...sealPlanned(ctx, plan),
-      })),
-      permissionVersion: removal.permissionVersion,
-    },
-  });
+  const plans = removal.rotations.map(({ plan }) => plan);
+  await sendShareChange(
+    ctx,
+    plans.map(rotationChange),
+    () =>
+      ctx.api.call(ownerRoutes.removeOwner, {
+        params: { spaceId, identityId: owner.id },
+        body: {
+          rotations: plans.map((plan) => ({ shareId: plan.shareId, ...sealPlanned(ctx, plan) })),
+          permissionVersion: removal.permissionVersion,
+        },
+      }),
+    () => plans.map(rotationRaise),
+  );
   forgetSpaces(ctx);
 }
 
