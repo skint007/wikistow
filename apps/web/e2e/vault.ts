@@ -99,17 +99,63 @@ export const sourceOf = (page: Page) =>
   });
 
 /**
+ * The same person in a second browser, on `url`. Loading a page's address
+ * asks for the passphrase first (a new tab keeps no unlock), then returns
+ * there.
+ */
+export async function sameAccountElsewhere(
+  freshPage: () => Promise<Page>,
+  email: string,
+  url: string,
+) {
+  const other = await freshPage();
+  await signIn(other, email);
+  await other.getByRole('heading', { name: 'Unlock your vault' }).waitFor();
+  await other.goto(url);
+  await other.getByLabel('Vault passphrase').fill(PASSPHRASE);
+  await other.getByRole('button', { name: 'Unlock' }).click();
+  await other.waitForURL(url);
+  return other;
+}
+
+/**
  * Type `text` over everything in the page's source editor. `fill` selects
  * the text in the DOM, then types; but CodeMirror redraws its own selection
  * a moment after it gains focus, which can collapse that selection first
  * and leave the old text after the new. Selecting through the editor
  * doesn't race it.
+ *
+ * A page with properties keeps them out of the source editor, in
+ * **Properties**, so frontmatter typed there would be body text, and its
+ * properties unchanged (#408): change them with `setProperty`.
  */
 export async function fillSource(page: Page, text: string) {
+  if (/^(?:---|\.\.\.)\r?\n/.test(text) && (await properties(page).count()) > 0) {
+    throw new Error(
+      'This page has Properties, so frontmatter typed here is body text: use setProperty',
+    );
+  }
   const source = page.locator('#page-source');
   await source.focus();
   await source.press('ControlOrMeta+a');
   await page.keyboard.insertText(text);
+}
+
+const properties = (page: Page) => page.getByRole('region', { name: 'Properties' });
+
+/**
+ * Change a property of the draft in view to `value`, as typed in its field
+ * in **Properties**, opening the box first if it's closed. `label` is the
+ * row's, as the box shows the key (`Servings` for `servings`).
+ */
+export async function setProperty(page: Page, label: string, value: string) {
+  const box = properties(page);
+  const opener = box.getByRole('button', { name: /^Properties/ });
+  if ((await opener.getAttribute('aria-expanded')) === 'false') await opener.click();
+  await box.getByRole('button', { name: new RegExp(`^${label}: .*\\. Edit$`) }).click();
+  const field = box.getByLabel(label, { exact: true });
+  await field.fill(value);
+  await field.press('Enter');
 }
 
 /** Wait for the source editor to hold `expected`, as `toHaveValue` waits for a field. */
