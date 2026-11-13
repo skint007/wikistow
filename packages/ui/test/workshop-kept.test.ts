@@ -82,6 +82,8 @@ describe('the kept conversation', () => {
 describe('samples the plugin writes', () => {
   const caller: Caller = {
     id: 'calculator',
+    name: 'Calculator',
+    signal: new AbortController().signal,
     access: 'write',
     scopes: () => [],
     live: () => true,

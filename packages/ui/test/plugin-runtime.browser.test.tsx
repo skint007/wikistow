@@ -1,7 +1,8 @@
 import { PluginError, type AppHost, type PageRef, type PageVersion } from '@wikistow/plugin-sdk';
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { createLocation, type Place } from '../src/plugins/location.ts';
 import type { ShownPage } from '../src/plugins/runtime.ts';
+import type { LaunchScript } from '../src/plugins/script-worker.ts';
 import { fakeScript, noPages, shownHandle, testRuntime, testSession } from './plugin-runtime.ts';
 
 // The plugin runtime through `createRuntime`, over the in-memory store and
@@ -171,6 +172,41 @@ describe('the plugin runtime', () => {
     const refused = await runtime.runCommand('writer', 'edit', SHOWN).catch((error) => error);
     expect(refused).toBeInstanceOf(PluginError);
     expect(refused).toMatchObject({ code: 'rate-limited' });
+  });
+
+  // A script's command has 10 seconds, but a trash prompt waits for the
+  // person, and a batch saves about a page a second (#404).
+  it('stops a script command’s clock while the person answers its trash prompt', async () => {
+    const launch: LaunchScript = (on) => {
+      queueMicrotask(() => {
+        on.message({ type: 'register', command: { id: 'merge', title: 'Merge' } });
+        on.message({ type: 'ready' });
+      });
+      let invocation = -1;
+      return {
+        post(message) {
+          if (message.type === 'invoke') {
+            invocation = message.invocation;
+            on.message({ type: 'call', call: 0, method: 'pages.trash', args: [[PAGE]] });
+          } else if (message.type === 'answer') on.message({ type: 'done', invocation });
+        },
+        close: () => {},
+      };
+    };
+    const answer = Promise.withResolvers<boolean>();
+    const { runtime } = await testRuntime([{ id: 'refactor', script: launch }], {
+      pages: () => ({ ...noPages, trash: () => answer.promise }),
+    });
+    vi.useFakeTimers();
+    try {
+      const run = runtime.runCommand('refactor', 'merge', SHOWN);
+      await vi.advanceTimersByTimeAsync(30_000);
+      answer.resolve(true);
+      await expect(run).resolves.toBeUndefined();
+      expect(runtime.get().plugins[0]?.problem).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('drops an activation that finishes after the session changed', async () => {

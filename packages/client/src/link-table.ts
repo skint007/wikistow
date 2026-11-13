@@ -12,6 +12,7 @@ import { PageId as PageIdSchema } from './ids.ts';
 import {
   foldTitle,
   linkablePages,
+  placedWikilinks,
   resolveWikilinks,
   tableWikilinks,
   type LinkablePage,
@@ -22,6 +23,7 @@ import {
 import { setProperty, splitFrontmatter, type Wikilink } from './markdown/index.ts';
 import type { OpenedMetadata } from './metadata.ts';
 import type { PagePayload } from './payload.ts';
+import { headingId } from './reader/heading-ids.ts';
 import { regionInTree, sameRegion, type Region } from './regions.ts';
 
 /** The extension namespace the table lives in. */
@@ -645,6 +647,104 @@ const UNWRITABLE = /[[\]|#\r\n`<\\]/;
 /** Whether `text` can be written as a link's target or heading as it is. */
 export const writableInLink = (text: string) =>
   text !== '' && text === text.trim() && !UNWRITABLE.test(text);
+
+/**
+ * Links to a page, or to one of its headings, pointed elsewhere
+ * (`relinkMarkdown`), as a plugin's `relink` asks (#404). `names` says
+ * whether a link's target names the page they point at now, on the page
+ * being changed. With `heading`, only links to that heading match, as the
+ * reader matches one (`headingId`), and they go to `to.heading`, or to
+ * the page itself for null. Without, every link to the page matches, a
+ * link to one of its headings keeping it, and one to the page itself
+ * going to `to.heading`. `to.target` is the text naming the page they go
+ * to, `''` for the page being changed (`[[#Heading]]`), which needs a
+ * heading.
+ */
+export type LinkPointing = {
+  names: (link: PlacedWikilink) => boolean;
+  heading: string | null;
+  to: { target: string; heading: string | null };
+};
+
+/** A body link pointed elsewhere could not be written so, as when a title holds `#` or `|`. */
+export class RelinkUnwritable extends Error {
+  constructor(text: string) {
+    super(`“${text}” can’t be written into a link`);
+    this.name = 'RelinkUnwritable';
+  }
+}
+
+/**
+ * `markdown` with each body wikilink the first matching `moves` names
+ * pointed where that move says, or null if no link matches. Only the
+ * target and heading change: a link's own text (`|text`, `\|text` in a
+ * table) stays as written. Embeds, property values and references to
+ * other pages' values are left as they are. Throws `RelinkUnwritable` for
+ * a target or heading a link can't hold, and an error if the result
+ * doesn't read back as the same links, pointed so.
+ */
+export function relinkMarkdown(markdown: string, moves: readonly LinkPointing[]): string | null {
+  const links = placedWikilinks(markdown);
+  const edits: {
+    start: number;
+    end: number;
+    source: string;
+    target: string;
+    heading: string | null;
+  }[] = [];
+  for (const link of links) {
+    if (link.embed) continue;
+    const move = moves.find(
+      ({ names, heading }) =>
+        names(link) &&
+        (heading === null ||
+          (link.heading !== null && headingId(link.heading) === headingId(heading))),
+    );
+    if (!move) continue;
+    const { target } = move.to;
+    const heading = move.heading === null ? (link.heading ?? move.to.heading) : move.to.heading;
+    for (const text of [target, heading]) {
+      if (text !== null && text !== '' && !writableInLink(text)) throw new RelinkUnwritable(text);
+    }
+    if (target === '' && heading === null) throw new RelinkUnwritable('');
+    // The text after the target and heading, its bar escaped in a table: no target or heading holds one.
+    const inner = link.source.slice(2, -2);
+    const bar = inner.indexOf('|');
+    const own = bar < 0 ? '' : inner.slice(inner[bar - 1] === '\\' ? bar - 1 : bar);
+    const source = `[[${target}${heading === null ? '' : `#${heading}`}${own}]]`;
+    if (source !== link.source)
+      edits.push({ start: link.start, end: link.end, source, target, heading });
+  }
+  if (edits.length === 0) return null;
+  let relinked = markdown;
+  for (const { start, end, source } of edits.toReversed()) {
+    relinked = relinked.slice(0, start) + source + relinked.slice(end);
+  }
+  // Read back: as many links, and each changed one where it was sent.
+  const after = placedWikilinks(relinked);
+  let shift = 0;
+  let next = 0;
+  const reads =
+    after.length === links.length &&
+    links.every((link, i) => {
+      const read = after[i];
+      const edit = edits[next];
+      if (!read) return false;
+      if (edit?.start === link.start) {
+        next += 1;
+        const ok =
+          read.start === link.start + shift &&
+          read.target === edit.target &&
+          read.heading === edit.heading &&
+          read.shown === link.shown;
+        shift += edit.source.length - (link.end - link.start);
+        return ok;
+      }
+      return read.source === link.source && read.start === link.start + shift;
+    });
+  if (!reads || next !== edits.length) throw new Error('The links didn’t read back as pointed');
+  return relinked;
+}
 
 /**
  * The target text naming `target` by `title`, or null when the link

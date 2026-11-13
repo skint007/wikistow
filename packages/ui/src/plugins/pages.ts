@@ -1,13 +1,25 @@
 import {
   ApiError,
   CryptoError,
+  linkablePages,
+  linkKey,
+  linkTableOf,
   moveOperations,
+  pageIndex,
   pageOperations,
+  pagesTitled,
   PageTooLarge,
+  patient,
+  relinkMarkdown,
+  RelinkUnwritable,
+  type LinkablePage,
   revisePayload,
   searchOperations,
   spaceOperations,
+  writableInLink,
   type ClientContext,
+  type LinkPointing,
+  type PageIndex as LinkIndex,
   type OpenedPayload,
   type PayloadChanges,
   treeInOrder,
@@ -15,8 +27,12 @@ import {
 import { FolderId, PageId, RevisionId, SpaceId, structureRoutes } from '@wikistow/contracts';
 import type { PluginScope } from '@wikistow/contracts';
 import {
+  BATCH_LIMIT,
   PluginError,
+  RELINK_LIMIT,
+  type DraftResult,
   type FolderEntry,
+  type LinkMove,
   type FolderRef,
   type PageAccess,
   type PageChange,
@@ -32,12 +48,45 @@ import { childrenOf, treeLabels } from '../shell/tree-order';
 import { vaultStore } from '../vault/store';
 import { pageRows, queryRows, readableSpace, readPluginQuery, type IndexChange } from './page-rows';
 
-/** Writes a plugin may make a minute, which bounds loops between plugins. */
+/** Writes a plugin may make a minute, which bounds loops between plugins. A batch is one. */
 const WRITES_PER_MINUTE = 30;
+
+/**
+ * How far apart a batch's saves start (#404): about one a second, half
+ * the server's 120 a minute for a route, which leaves the rest to the
+ * person's own autosave, which saves about once a second as they type.
+ */
+export const BATCH_INTERVAL_MS = 1000;
+
+/**
+ * Turns for the saves and deletes of every plugin's batches in this
+ * window, `interval` apart, whichever plugin asks: so several batches
+ * together keep to the same pace.
+ */
+export function batchTurns(interval = BATCH_INTERVAL_MS) {
+  let last = -Infinity;
+  let queue: Promise<void> = Promise.resolve();
+  return <T>(run: () => Promise<T>): Promise<T> => {
+    const turn = queue.then(async () => {
+      const wait = last + interval - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      last = Date.now();
+    });
+    queue = turn;
+    return turn.then(run);
+  };
+}
+
+/** The turns every batch in this window takes. */
+export const batchTurn = batchTurns();
 
 /** What the page operations need to know about the plugin calling them. */
 export type Caller = {
   id: string;
+  /** Its name, as the person knows it, for what the app asks them on its behalf. */
+  name: string;
+  /** Aborted as it unloads, as its `host.signal` is. */
+  signal: AbortSignal;
   /** The most the manifest asked for. */
   access: PageAccess;
   /** The person's page access settings for it, read at each call. */
@@ -78,6 +127,14 @@ export type EditingCaller = Caller & {
    * what changed, built first if it isn't (`index`, `query`).
    */
   index: (ctx: ClientContext) => Promise<searchOperations.PageIndex>;
+  /** Save what is typed in `page`, if this window's draft view has it open, so a read gets it. */
+  flush: (page: PageRef) => Promise<void>;
+  /**
+   * Move `pages` to the trash once the person agrees, asked once for them
+   * all: true once they are in it, false if they said no. `forbidden`
+   * where the person doesn't own the space, before anything is asked.
+   */
+  trash: (ctx: ClientContext, pages: readonly PageRef[]) => Promise<boolean>;
 };
 
 /**
@@ -240,6 +297,96 @@ export async function saveOn(
   });
 }
 
+/** The pages of a space as links resolve there: each with its title and folders, and by title. */
+type Linkable = { pages: readonly LinkablePage[]; index: LinkIndex };
+
+/** `pages` as `relink` reads links among them. */
+export const linkableAs = (pages: readonly LinkablePage[]): Linkable => ({
+  pages,
+  index: pageIndex(pages),
+});
+
+/** Check what `relink` was asked, before reading anything: its size, space and headings. */
+export function checkMoves(moves: readonly LinkMove[]): void {
+  if (moves.length > RELINK_LIMIT)
+    throw new PluginError('invalid', `At most ${RELINK_LIMIT} moves at a time`);
+  const spaceId = moves[0]?.from.page.spaceId;
+  if (moves.some(({ from, to }) => from.page.spaceId !== spaceId || to.page.spaceId !== spaceId))
+    throw new PluginError('invalid', 'Links stay in one space');
+  for (const { from, to } of moves) {
+    for (const heading of [from.heading, to.heading])
+      if (heading !== undefined && !writableInLink(heading))
+        throw new PluginError('invalid', `“${heading}” can’t be written into a link`);
+  }
+}
+
+/**
+ * The text naming each page `moves` go to, as anyone in the space
+ * resolves it: its title, else with as many of its folders as tell it
+ * apart. `invalid` for one a link can't name.
+ */
+export function moveTargets(moves: readonly LinkMove[], { pages, index }: Linkable): string[] {
+  return moves.map(({ to }) => {
+    const page = pages.find(({ id }) => id === to.page.pageId);
+    const title = page?.title ?? null;
+    if (title === null || !writableInLink(title))
+      throw new PluginError('invalid', 'That page’s title can’t be written into a link');
+    const folders = page?.folders ?? [];
+    for (let n = 0; n <= folders.length; n++) {
+      const above = folders.slice(folders.length - n);
+      if (!above.every(writableInLink)) break;
+      const [only, ...more] = pagesTitled([...above, title].join('/'), pages, index);
+      if (only === to.page.pageId && more.length === 0) return [...above, title].join('/');
+    }
+    throw new PluginError('invalid', `“${title}” names several pages; give it a title of its own`);
+  });
+}
+
+/**
+ * Page `pageId`'s Markdown with its links pointed as `moves` say, or null
+ * if none of its links go there. A link names a page by the page's link
+ * table (`table`) where that holds an entry for it, else by title among
+ * `linkable`. `targets` are `moveTargets`'. `invalid` for a link it can't
+ * write so.
+ */
+export function relinkPage(
+  markdown: string,
+  pageId: string,
+  table: ReadonlyMap<string, string>,
+  moves: readonly LinkMove[],
+  targets: readonly string[],
+  { pages, index }: Linkable,
+): string | null {
+  const names =
+    (fromId: string): LinkPointing['names'] =>
+    (link) => {
+      if (link.target === '') return pageId === fromId;
+      const entry = table.get(linkKey(link));
+      if (entry !== undefined && index.titles.has(entry)) return entry === fromId;
+      const [only, ...more] = pagesTitled(link.target, pages, index);
+      return only === fromId && more.length === 0;
+    };
+  try {
+    return relinkMarkdown(
+      markdown,
+      moves.map(({ from, to }, i) => ({
+        names: names(from.page.pageId),
+        heading: from.heading ?? null,
+        to: {
+          // On the page moved to, a link to one of its headings needs no title.
+          target: to.page.pageId === pageId && to.heading !== undefined ? '' : (targets[i] ?? ''),
+          heading: to.heading ?? null,
+        },
+      })),
+    );
+  } catch (error) {
+    throw new PluginError(
+      'invalid',
+      error instanceof RelinkUnwritable ? error.message : 'Its links didn’t read back as pointed',
+    );
+  }
+}
+
 /** Counts a plugin's writes over the last minute. */
 export function writeLimit() {
   const writes: number[] = [];
@@ -314,8 +461,9 @@ export function pagesFor(caller: EditingCaller): HostPages {
     spaceId: SpaceId,
     nodeId: string | null,
     needs: 'read' | 'write',
+    trees?: Map<SpaceId, ReturnType<typeof parentsIn>>,
   ) => {
-    const has = await accessAt(ctx, spaceId, nodeId);
+    const has = await accessAt(ctx, spaceId, nodeId, trees);
     if (has === 'write' || has === needs) return;
     throw new PluginError(
       'not-granted',
@@ -356,6 +504,36 @@ export function pagesFor(caller: EditingCaller): HostPages {
     spaceId: SpaceId.parse(ref.spaceId),
     folderId: ref.folderId === null ? null : FolderId.parse(ref.folderId),
   });
+
+  const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
+
+  /**
+   * Each of `saves` saved as `saveDraft` saves it, in turn, at the pace of
+   * every batch (`batchTurn`), waiting out the server's own limits, each
+   * result saying how it went. It stops once the plugin unloads.
+   */
+  const saveEach = async (
+    ctx: ClientContext,
+    saves: readonly { page: PageRef; base: string; change: PageChange }[],
+  ): Promise<DraftResult[]> => {
+    const waiting = patient(ctx, unloaded, caller.signal);
+    const results: DraftResult[] = [];
+    for (const { page: ref, base, change } of saves) {
+      if (!caller.live()) break;
+      const page = { spaceId: ref.spaceId, pageId: ref.pageId };
+      try {
+        const version = await batchTurn(
+          async () =>
+            (await caller.open(page, base, change)) ?? saveOn(caller, waiting, page, base, change),
+        );
+        results.push({ page, ok: true, version });
+      } catch (error) {
+        const { code, message } = pluginError(error);
+        results.push({ page, ok: false, code, message });
+      }
+    }
+    return results;
+  };
 
   const guarded =
     <A extends unknown[], R>(run: (ctx: ClientContext, ...args: A) => Promise<R>) =>
@@ -504,6 +682,109 @@ export function pagesFor(caller: EditingCaller): HostPages {
       await require(ctx, SpaceId.parse(ref.spaceId), PageId.parse(ref.pageId), 'write');
       write();
       return (await caller.open(ref, base, change)) ?? saveOn(caller, ctx, ref, base, change);
+    }),
+
+    saveDrafts: guarded(async (ctx, changes) => {
+      if (changes.length > BATCH_LIMIT)
+        throw new PluginError('invalid', `At most ${BATCH_LIMIT} pages a batch`);
+      // Every page first: nothing is saved unless it may change them all.
+      const trees = new Map<SpaceId, ReturnType<typeof parentsIn>>();
+      for (const { page } of changes)
+        await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(page.pageId), 'write', trees);
+      if (changes.length === 0) return [];
+      write();
+      return saveEach(
+        ctx,
+        changes.map(({ page, base, ...change }) => ({ page, base, change })),
+      );
+    }),
+
+    trash: guarded(async (ctx, refs) => {
+      if (refs.length === 0 || refs.length > BATCH_LIMIT)
+        throw new PluginError('invalid', `From 1 to ${BATCH_LIMIT} pages at a time`);
+      const pages = [
+        ...new Map(
+          refs.map((ref) => [
+            ref.pageId,
+            { spaceId: SpaceId.parse(ref.spaceId), pageId: PageId.parse(ref.pageId) },
+          ]),
+        ).values(),
+      ];
+      const trees = new Map<SpaceId, ReturnType<typeof parentsIn>>();
+      for (const page of pages) await require(ctx, page.spaceId, page.pageId, 'write', trees);
+      write();
+      return caller.trash(ctx, pages);
+    }),
+
+    relink: guarded(async (ctx, moves) => {
+      checkMoves(moves);
+      const [first] = moves;
+      if (!first) return [];
+      const spaceId = SpaceId.parse(first.from.page.spaceId);
+      const trees = new Map<SpaceId, ReturnType<typeof parentsIn>>();
+      for (const { from, to } of moves) {
+        await require(ctx, spaceId, PageId.parse(from.page.pageId), 'read', trees);
+        await require(ctx, spaceId, PageId.parse(to.page.pageId), 'read', trees);
+      }
+      const [tree, index] = await Promise.all([caller.tree(ctx, spaceId), caller.index(ctx)]);
+      const linkable = linkableAs(linkablePages(tree));
+      const targets = moveTargets(moves, linkable);
+      // The pages linking to a page moved from, and each of those, for its `[[#heading]]` links.
+      const candidates = new Set<PageId>();
+      for (const { from } of moves) {
+        const fromId = PageId.parse(from.page.pageId);
+        for (const entry of index.linksTo(spaceId, fromId)) candidates.add(entry.pageId);
+        candidates.add(fromId);
+      }
+      const saves: { page: PageRef; base: string; change: PageChange }[] = [];
+      const refused: DraftResult[] = [];
+      for (const pageId of candidates) {
+        const page = { spaceId, pageId };
+        // One it can't read isn't named, nor whether it links there.
+        const has = await accessAt(ctx, spaceId, pageId, trees).catch((error: unknown) => {
+          if (error instanceof PluginError && error.code === 'not-found') return 'none' as const;
+          throw error;
+        });
+        if (has === 'none') continue;
+        await caller.flush(page);
+        const read = await readPage(caller, ctx, page);
+        if (read.opened.opened.kind !== 'current') continue;
+        const { payload } = read.opened.opened;
+        let markdown: string | null;
+        try {
+          markdown = relinkPage(
+            payload.markdown,
+            pageId,
+            linkTableOf(payload),
+            moves,
+            targets,
+            linkable,
+          );
+        } catch (error) {
+          const { code, message } = pluginError(error);
+          refused.push({ page, ok: false, code, message });
+          continue;
+        }
+        if (markdown === null) continue;
+        if (has !== 'write') {
+          refused.push({
+            page,
+            ok: false,
+            code: 'not-granted',
+            message: 'This plugin may not change pages there',
+          });
+        } else if (read.version.version !== 'draft') {
+          refused.push({
+            page,
+            ok: false,
+            code: 'forbidden',
+            message: 'The person can’t edit this page',
+          });
+        } else saves.push({ page, base: read.version.revision, change: { markdown } });
+      }
+      if (saves.length === 0) return refused;
+      write();
+      return [...refused, ...(await saveEach(ctx, saves))];
     }),
 
     move: guarded(async (ctx, node, parent) => {

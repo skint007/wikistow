@@ -32,6 +32,7 @@ import { ScopePill, SettingRow, THIS_DEVICE } from '../settings/rows';
 import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ChooseFolder } from './choose-folder';
+import { CommandShortcuts } from './command-shortcuts';
 import { DeclaredSettings } from './declared-settings';
 import { ApprovalDevices } from './devices';
 import { pickFolder } from './development';
@@ -738,7 +739,7 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
  * One installed plugin on the Plugins page: its name, version, trust level,
  * where it came from and on/off (for a library plugin, for the account and,
  * while that is on, on this device), its description and any problem, Remove
- * beside `actions`, then its page access. Settings opens its settings
+ * beside `actions`, then its commands' shortcuts and its page access. Settings opens its settings
  * under it: those its manifest declares, drawn by the app, then its own
  * sections (`settings.section`). The page's `plugin` search, which a
  * plugin's `navigate({ kind: 'settings' })` sets, opens them at once.
@@ -851,6 +852,7 @@ export function PluginRow({
       </div>
       {settingsOpen && declared && <DeclaredSettings plugin={plugin} />}
       {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
+      {here && <CommandShortcuts pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
         <PageAccessEditor plugin={refOf(plugin)} most={manifest.access} />
       )}

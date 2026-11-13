@@ -77,6 +77,9 @@ export const noPages: HostPages = {
   createFolder: nowhere,
   saveDraft: nowhere,
   move: nowhere,
+  saveDrafts: nowhere,
+  trash: nowhere,
+  relink: nowhere,
 };
 
 /** The handle for the page shown, which can't be read or edited. */

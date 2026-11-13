@@ -21,6 +21,7 @@ import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
 import { useAppPlugins } from '../plugins/app-plugins';
 import { appReader, RenderedMarkdown } from '../plugins/rendered-markdown';
+import { PluginTrashPrompt } from '../plugins/trash-prompt';
 import { SafeModeBanner } from '../plugins/safe-mode-banner';
 import { runCommand } from '../commands/command';
 import { isPaletteKey } from '../commands/palette';
@@ -213,6 +214,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <RenderedMarkdown drawings={plugins.markdown} Reader={reader} />
             )}
             <SafeModeBanner />
+            {vault.status === 'unlocked' && <PluginTrashPrompt />}
             <RestoreNotice />
             {vault.status === 'unlocked' && <UndoNotice ctx={vault.ctx} />}
             {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}

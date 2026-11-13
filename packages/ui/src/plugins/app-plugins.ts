@@ -1,6 +1,6 @@
-import { searchOperations } from '@wikistow/client';
+import { patient, searchOperations, trashOperations } from '@wikistow/client';
 import { PageId, SpaceId } from '@wikistow/contracts';
-import type { PageRef } from '@wikistow/plugin-sdk';
+import { PluginError, type PageRef } from '@wikistow/plugin-sdk';
 import {
   QueryObserver,
   type FetchQueryOptions,
@@ -9,7 +9,10 @@ import {
 } from '@tanstack/react-query';
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
-import { searchIndexQuery, spacesQuery, treeQuery } from '../data/queries';
+import { pageWriter } from '../data/offline-changes';
+import { searchIndexQuery, spacesQuery, trashQuery, treeQuery } from '../data/queries';
+import { showNotice } from '../page/undo-notice';
+import { pageTitle } from '../shell/sidebar';
 import { desktop } from '../desktop';
 import { PLAIN, vaultStore } from '../vault/store';
 import { desktopStore } from './desktop-store';
@@ -18,9 +21,10 @@ import { browserStore } from './library';
 import { createLocation } from './location';
 import { createMarkdownDrawings } from './markdown-drawings';
 import { indexChanges } from './page-rows';
-import { pagesFor, session } from './pages';
+import { batchTurn, pagesFor, pluginError, session, type Caller } from './pages';
 import { createRuntime, type OpenDraft, type PluginSession } from './runtime';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
+import { pluginTrashPrompts } from './trash-prompt';
 import type { AppPluginStore } from './store';
 
 /** The vault's session, as the app's plugins and the workshop's preview run in it. */
@@ -86,6 +90,69 @@ export function startAppPlugins(queryClient: QueryClient) {
       if (watchers === 0) unfollow();
     };
   };
+  /**
+   * Move `pages` to the trash for `caller`, once the person agrees in one
+   * prompt listing them all, as the app's own Delete does: one at a time,
+   * at the batches' pace, waiting out the server's limits. Then the trees
+   * show them gone, and a notice offers Undo, as for a page deleted in the
+   * app. Only a space's owners delete there, which is checked before
+   * anything is asked.
+   */
+  const trash = async (
+    caller: Caller,
+    ctx: ReturnType<typeof session>,
+    pages: readonly PageRef[],
+  ): Promise<boolean> => {
+    const spaceIds = [...new Set(pages.map(({ spaceId }) => SpaceId.parse(spaceId)))];
+    const spaces = await latest(spacesQuery(ctx));
+    if (!spaceIds.every((id) => spaces.find((space) => space.id === id)?.role === 'owner'))
+      throw new PluginError('forbidden', 'Only a space’s owners move its pages to the trash');
+    const titles = new Map<string, string | null>();
+    for (const spaceId of spaceIds) {
+      for (const page of (await latest(treeQuery(ctx, spaceId))).pages)
+        titles.set(page.id, page.title);
+    }
+    const named = pages.map((page) => ({ ...page, title: titles.get(page.pageId) ?? null }));
+    const agreed = await pluginTrashPrompts.ask(
+      { plugin: caller.name, titles: named.map(({ title }) => title) },
+      caller.signal,
+    );
+    if (!agreed || !caller.live()) return false;
+    const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
+    const writer = pageWriter(patient(ctx, unloaded, caller.signal));
+    const trashed: PageId[] = [];
+    try {
+      for (const { spaceId, pageId, title } of named) {
+        const nodeId = PageId.parse(pageId);
+        const done = await batchTurn(() =>
+          writer.deleteNode({
+            spaceId: SpaceId.parse(spaceId),
+            nodeId,
+            node: 'page',
+            name: pageTitle(title),
+          }),
+        );
+        if (done === 'trashed') trashed.push(nodeId);
+      }
+    } finally {
+      for (const spaceId of spaceIds) void contentChanged(queryClient, ctx, { spaceId });
+      void queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
+      if (trashed.length > 0) {
+        const count = trashed.length === 1 ? 'a page' : `${trashed.length} pages`;
+        showNotice({
+          ctx,
+          message: `${caller.name} moved ${count} to the trash.`,
+          undo: async () => {
+            for (const nodeId of trashed) await trashOperations.restoreDeleted(ctx, nodeId);
+            for (const spaceId of spaceIds) await contentChanged(queryClient, ctx, { spaceId });
+            await queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey });
+          },
+        });
+      }
+    }
+    return true;
+  };
+
   const own = createRuntime(store, {
     session: vaultSession,
     pages: (caller) =>
@@ -97,6 +164,11 @@ export function startAppPlugins(queryClient: QueryClient) {
         tree: (ctx, spaceId) => latest(treeQuery(ctx, spaceId)),
         // The index query tables read, as up to date as `tree`.
         index: (ctx) => latest(searchIndexQuery(ctx, queryClient)),
+        flush: (page) => drafts.flush(caller, page),
+        trash: (ctx, pages) =>
+          trash(caller, ctx, pages).catch((error: unknown) => {
+            throw pluginError(error);
+          }),
       }),
     watchIndex,
     handle: (caller, shown) => drafts.handle(caller, shown),
