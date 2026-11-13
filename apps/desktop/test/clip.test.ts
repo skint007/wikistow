@@ -198,6 +198,14 @@ describe.runIf(unix)('the clip listener', () => {
     const { socket, token } = await listening();
     // As other accounts on Windows can open the pipe to read, and wait.
     const idle = await Promise.all(Array.from({ length: 20 }, () => helper(socket)));
+    // Partway through a challenge, which a silent one never pushes out.
+    const started = await helper(socket);
+    started.send({ v: 1, type: 'challenge', nonce: randomBytes(32).toString('base64') });
+    expect((await started.next())?.['type']).toBe('proof');
+    for (const more of await Promise.all(Array.from({ length: 20 }, () => helper(socket)))) {
+      idle.push(more);
+    }
+    expect(started.closed).toBe(false);
     const client = await helper(socket);
     await prove(client, token);
     client.send({ v: 1, id: 'a', type: 'hello' });
@@ -210,6 +218,7 @@ describe.runIf(unix)('the clip listener', () => {
     const client = await helper(socket);
     await prove(client, token, 'chrome-extension://pppppppppppppppppppppppppppppppp/');
     client.send({ v: 1, id: 'a', type: 'hello' });
+    expect(await client.next()).toEqual({ v: 1, type: 'error', code: 'not-allowed' });
     expect(await client.next()).toBeNull();
   });
 

@@ -223,10 +223,10 @@ export function desktopClipping(options: ClippingOptions) {
     },
     set(next: boolean): Promise<ClippingState> {
       const run = changing.then(async () => {
-        on = next;
         const file = `${settingFile}.next`;
-        await writeFile(file, JSON.stringify({ on }), { mode: 0o600 });
+        await writeFile(file, JSON.stringify({ on: next }), { mode: 0o600 });
         await rename(file, settingFile);
+        on = next;
         await apply();
         await manifests();
         return state();

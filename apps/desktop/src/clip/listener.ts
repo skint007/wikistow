@@ -29,8 +29,9 @@ const MAX_CONNECTIONS = 16;
 /**
  * At most this many connections still to prove themselves. On Windows any
  * account, or another computer through file sharing, can open the pipe to
- * read, which proves nothing; the oldest such goes to make room, so they
- * can't keep the person's helper out, which proves itself in milliseconds.
+ * read, and can never send a byte; the oldest that sent none goes to make
+ * room, so they can't keep out the person's helper, which sends its
+ * challenge at once.
  */
 const MAX_UNPROVEN = 16;
 /** A socket's path must fit `sockaddr_un`, 104 bytes on a Mac with its ending. */
@@ -81,6 +82,8 @@ export function clipListener(options: ClipListenerOptions) {
   const connections = new Set<Socket>();
   /** Connections not yet past the token's challenge, oldest first. */
   const unproven = new Set<Socket>();
+  /** Those that haven't sent a byte yet. */
+  const silent = new Set<Socket>();
   /** This run wrote clip-host.json, so it is this run's to delete. */
   let wrote = false;
 
@@ -98,10 +101,20 @@ export function clipListener(options: ClipListenerOptions) {
     address = await listenAddress(options.endpoint);
     const token = randomBytes(32);
     const listening = createServer({ allowHalfOpen: false }, (socket) => {
-      if (unproven.size >= MAX_UNPROVEN) unproven.values().next().value?.destroy();
+      if (unproven.size >= MAX_UNPROVEN) {
+        const oldest = silent.values().next().value;
+        // All mid-challenge: this one waits its turn.
+        if (!oldest) return void socket.destroy();
+        oldest.destroy();
+        unproven.delete(oldest);
+        silent.delete(oldest);
+      }
       unproven.add(socket);
+      silent.add(socket);
+      socket.once('data', () => silent.delete(socket));
       socket.once('close', () => {
         unproven.delete(socket);
+        silent.delete(socket);
         connections.delete(socket);
       });
       serve(socket, token, options, () => {
@@ -223,7 +236,10 @@ function serve(
     }
     if (step === 'proof') {
       const proven = challenge.proven(body);
-      if (!proven || !options.allowed(proven.caller) || !admit()) return drop();
+      if (!proven) return drop();
+      // It holds the token, so it may hear why.
+      if (!options.allowed(proven.caller)) return drop('not-allowed');
+      if (!admit()) return drop('busy');
       clearTimeout(timer);
       caller = proven.caller;
       step = 'open';
