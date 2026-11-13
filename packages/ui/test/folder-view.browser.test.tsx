@@ -39,7 +39,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const ctx = {
   installationId: 'install',
   identity: { boxSecretKey: new Uint8Array(32) },
-  revisions: { generation: 0 },
+  revisions: { generation: 0, get: () => undefined },
   api: { call: () => new Promise(() => {}) },
 } as unknown as ClientContext;
 vaultStore.unlock(ctx, { accountId: 'account' } as unknown as UnlockedVault);
