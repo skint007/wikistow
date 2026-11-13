@@ -4,7 +4,7 @@
 // it as pending in its kept marks and tells its other tabs, so tabs in a
 // session of the share stop sending at once; a definite answer clears it,
 // raising the No going back mark when the change was accepted.
-import { sharingRoutes, structureRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
+import { sharingRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
 import { outcomeUnknown } from '../api/client.ts';
 import {
   ENDED,
@@ -15,7 +15,7 @@ import {
   type NewChange,
   type PendingChange,
 } from '../key-versions.ts';
-import { forgetSpaces, spaceKeys } from './keys.ts';
+import { spaceKeys } from './keys.ts';
 import type { ClientContext } from './session.ts';
 
 /**
@@ -42,6 +42,10 @@ export async function sendShareChange<T>(
   const { marks } = ctx;
   const begun = (await marks.begin?.(changes)) ?? [];
   const ids = begun.map((change) => change.id);
+  // This tab never settles by a fetch a change it is still sending, even
+  // when its renewals fell behind, as after a laptop slept.
+  const mine = inFlight(marks);
+  for (const id of ids) mine.add(id);
   // Renewed while it is sent, so no fetch takes it for gone silent.
   const renewing = ids.length > 0 ? setInterval(() => void marks.renew?.(ids), RENEW_MS) : null;
   let result: T;
@@ -57,6 +61,7 @@ export async function sendShareChange<T>(
     throw error;
   } finally {
     if (renewing) clearInterval(renewing);
+    for (const id of ids) mine.delete(id);
   }
   const raises = accepted(result);
   if (marks.settle) await marks.settle(ids, raises);
@@ -78,11 +83,13 @@ function settleAfterGrace(ctx: ClientContext, changes: readonly NewChange[]): vo
     let tries = 0;
     const attempt = () => {
       const timer = setTimeout(() => {
+        // Nothing left to settle, as after sign-out or another tab's settle.
+        if (settleable(ctx, spaceId).length === 0) return;
         void spaceKeys(ctx, spaceId, { refresh: true })
           .catch(() => {})
           .then(() => {
             tries += 1;
-            if (tries < SETTLE_TRIES && settleable(ctx, spaceId).length > 0) attempt();
+            if (tries < SETTLE_TRIES) attempt();
           });
       }, LOST_GRACE_MS + 1_000);
       (timer as { unref?: () => void }).unref?.();
@@ -101,9 +108,11 @@ export function settleable(
   spaceId: SpaceId,
   now = Date.now(),
 ): PendingChange[] {
+  const mine = inFlight(ctx.marks);
   return (ctx.marks.pending?.() ?? []).filter(
     (change) =>
       change.spaceId === spaceId &&
+      !mine.has(change.id) &&
       ((change.lostAt !== null && now - change.lostAt > LOST_GRACE_MS) ||
         now - change.at > SEND_LIMIT_MS),
   );
@@ -115,7 +124,9 @@ export function settleable(
  * one it was sent from and is one whose keys this app sealed, which it
  * holds once it has worked out the space again; an ending only when the
  * share is gone. A move, or a kind this app doesn't know, raises nothing.
- * Everything listed is settled.
+ * Everything listed is settled. Once a move's hold lifts, whatever joins
+ * the page's sessions reads its region again from the tree first: a lost
+ * answer leaves no sign here of which region the page is in.
  */
 export function outcomes(
   pending: readonly PendingChange[],
@@ -155,16 +166,20 @@ export async function settleShareChanges(
   spaceId: SpaceId,
   now = Date.now(),
 ): Promise<void> {
+  if (settleable(ctx, spaceId, now).length === 0) return;
+  let shares: readonly { shareId: ShareId; currentKeyVersion: number }[];
+  try {
+    ({ shares } = await ctx.api.call(sharingRoutes.listShares, { params: { spaceId } }));
+  } catch (error) {
+    if (outcomeUnknown(error)) throw error;
+    // The server says this person can't list the space's shares: they are
+    // no owner now, so no change they sent can stand for them. Nothing to raise.
+    shares = [];
+  }
+  // A renewal or a clear from another tab may have come meanwhile.
+  await ctx.marks.refresh?.();
   const pending = settleable(ctx, spaceId, now);
   if (pending.length === 0) return;
-  const { shares } = await ctx.api.call(sharingRoutes.listShares, { params: { spaceId } });
-  // Which way a move went is in the tree: fetch it afresh, and drop what
-  // this app worked out before, so the page's region is read again from
-  // it, not from a tree from before the move.
-  if (pending.some((change) => change.change === 'move')) {
-    await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
-    forgetSpaces(ctx);
-  }
   const self = ctx.identity.public.id;
   const sealedHere = (shareId: ShareId, keyVersion: number) =>
     ctx.keyring
@@ -174,4 +189,30 @@ export async function settleShareChanges(
     pending.map((change) => change.id),
     outcomes(pending, shares, sealedHere),
   );
+}
+
+// The IDs of changes this tab is sending, by its marks.
+const sending = new WeakMap<object, Set<string>>();
+function inFlight(marks: object): Set<string> {
+  let ids = sending.get(marks);
+  if (!ids) sending.set(marks, (ids = new Set()));
+  return ids;
+}
+
+// When each space was last fetched again to settle what was pending.
+const lastFetched = new WeakMap<object, Map<SpaceId, number>>();
+
+/**
+ * Whether a load of the space's keys should fetch again rather than use
+ * what it worked out, to settle a pending change: only while something is
+ * settleable, and at most once per grace period, so loads made at once,
+ * or a person who can never settle, don't fetch on every call.
+ */
+export function fetchToSettle(ctx: ClientContext, spaceId: SpaceId, now = Date.now()): boolean {
+  if (settleable(ctx, spaceId, now).length === 0) return false;
+  const times = lastFetched.get(ctx.spaces) ?? new Map<SpaceId, number>();
+  lastFetched.set(ctx.spaces, times);
+  if (now - (times.get(spaceId) ?? 0) < LOST_GRACE_MS) return false;
+  times.set(spaceId, now);
+  return true;
 }

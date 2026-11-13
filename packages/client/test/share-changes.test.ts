@@ -19,7 +19,11 @@ import {
   SEND_LIMIT_MS,
   type NewChange,
 } from '../src/key-versions.ts';
-import { sendShareChange, settleShareChanges } from '../src/operations/share-changes.ts';
+import {
+  fetchToSettle,
+  sendShareChange,
+  settleShareChanges,
+} from '../src/operations/share-changes.ts';
 
 const alice = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human' });
 const spaceId = SpaceId.parse('space');
@@ -177,14 +181,32 @@ describe('settling a change whose answer was lost', () => {
     }
   });
 
-  it('settles a lost move only once it has fetched the tree again, forgetting what it worked out', async () => {
-    const { ctx, marks, asked, spaces } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
+  it('settles a lost move, raising nothing', async () => {
+    const { ctx, marks } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
     await lostOne(marks, { ...rotation, change: 'move' });
     await settleShareChanges(ctx, spaceId, later());
     expect(changePending(marks, spaceId, shareId)).toBe(false);
-    expect(asked.some((path) => path.includes('tree'))).toBe(true);
-    expect(spaces.size).toBe(0);
     expect(marks.get(spaceId, shareId)).toBe(0);
+  });
+
+  it('clears what a person who can’t list the shares any more sent', async () => {
+    const { ctx, marks } = context();
+    (ctx as unknown as { api: unknown }).api = {
+      call: () => Promise.reject(new ApiError(403, 'forbidden', 'Not an owner')),
+    };
+    await lostOne(marks);
+    await settleShareChanges(ctx, spaceId, later());
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
+    expect(marks.get(spaceId, shareId)).toBe(0);
+  });
+
+  it('fetches again to settle at most once per grace period', async () => {
+    const { ctx, marks } = context();
+    await lostOne(marks);
+    const at = later();
+    expect(fetchToSettle(ctx, spaceId, at)).toBe(true);
+    expect(fetchToSettle(ctx, spaceId, at + 1)).toBe(false);
+    expect(fetchToSettle(ctx, spaceId, at + LOST_GRACE_MS + 1)).toBe(true);
   });
 
   it('marks an ending done only when the share is gone', async () => {
@@ -206,5 +228,22 @@ describe('settling a change whose answer was lost', () => {
     expect(changePending(marks, spaceId, shareId)).toBe(true);
     await settleShareChanges(ctx, spaceId, (begun?.at ?? 0) + SEND_LIMIT_MS + 1);
     expect(changePending(marks, spaceId, shareId)).toBe(false);
+  });
+
+  it('never settles a change this tab is still sending, however late its renewals', async () => {
+    const { ctx, marks } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
+    let finish: () => void = () => {};
+    const sent = sendShareChange(
+      ctx,
+      [rotation],
+      () => new Promise<void>((resolve) => (finish = resolve)),
+      () => [{ spaceId, shareId, keyVersion: 2 }],
+    );
+    await expect.poll(() => changePending(marks, spaceId, shareId)).toBe(true);
+    await settleShareChanges(ctx, spaceId, Date.now() + SEND_LIMIT_MS + LOST_GRACE_MS + 1);
+    expect(changePending(marks, spaceId, shareId)).toBe(true);
+    finish();
+    await sent;
+    expect(marks.get(spaceId, shareId)).toBe(2);
   });
 });
