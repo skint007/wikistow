@@ -151,6 +151,16 @@ describe('a page’s passages', () => {
     ]);
   });
 
+  it('keeps the pieces of a word it cut apart, as its tokens aren’t theirs added up', () => {
+    // A token a word up to 10 characters, and one a character past that.
+    const countTokens = (word: string) => (word.length > 10 ? word.length : 1);
+    const pieces = meaningPassages(
+      { title: 'T', text: 'a'.repeat(12), headings: [] },
+      { maxTokens: 8, countTokens },
+    );
+    expect(pieces.map(({ text }) => text)).toEqual([`T\n${'a'.repeat(10)}`, 'T\naa']);
+  });
+
   it('cuts a title longer than half a passage to half of one', () => {
     const title = 'one two three four five six';
     expect(cut(title, 'Body text here.\n\n# Next\n\nMore.').map(({ passage }) => passage)).toEqual([
@@ -190,6 +200,8 @@ describe('a page’s passages', () => {
     expect(estimateTokens('aGVsbG8gd29ybGQgdGhpcyBpcyBiYXNlNjQ=')).toBe(36);
     expect(estimateTokens(`sha256:${'0a'.repeat(32)}`)).toBe(71);
     expect(estimateTokens('iPhone')).toBe(6);
+    expect(estimateTokens('a'.repeat(10) + 'e'.repeat(10))).toBe(5);
+    expect(estimateTokens('a'.repeat(21))).toBe(21);
     expect(estimateTokens('Pneumonoultramicroscopicsilicovolcanoconiosis')).toBe(45);
   });
 

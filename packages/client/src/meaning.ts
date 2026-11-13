@@ -119,7 +119,9 @@ export function meaningPassages(
     for (let line = from; line < to;) {
       const lineEnd = Math.min(to, text.indexOf('\n', line) < 0 ? to : text.indexOf('\n', line));
       for (const piece of chunks(text, line, lineEnd, budget, countTokens)) {
-        if (open && open.tokens + piece.tokens <= budget) {
+        // Pieces of one word cut between characters stay apart: its tokens
+        // aren't its pieces' added up.
+        if (open && open.end < piece.start && open.tokens + piece.tokens <= budget) {
           open.end = piece.end;
           open.tokens += piece.tokens;
         } else {
@@ -253,7 +255,7 @@ const MARK = /^\p{M}$/u;
 const LATIN = /^[\p{Script=Latin}\p{Nd}]$/u;
 const SPACE = /^\s$/u;
 /** Letters cased as a word is: all small, all capitals, or a capital first. */
-const WORDLIKE = /^(?:\p{Lu}?\p{Ll}{1,19}|\p{Lu}{1,20})$/u;
+const WORDLIKE = /^(?:\p{Ll}{1,20}|\p{Lu}\p{Ll}{1,19}|\p{Lu}{1,20})$/u;
 const vowels = (run: string) => run.match(/[aeiouy]/gi)?.length ?? 0;
 const wordTokens = (run: string) => (run.length <= 6 ? 1 : Math.ceil(run.length / 4));
 
