@@ -1,0 +1,12 @@
+{
+  "id": "vault-tables",
+  "name": "Vault tables",
+  "version": "0.1.0",
+  "api": 1,
+  "description": "Draws an imported Obsidian vault's dataview TABLE and LIST blocks as tables of the pages they list, from the pages you give it, kept up to date as they change. It reads a part of Dataview's query language: FROM a folder or tag, WHERE, SORT and LIMIT.",
+  "ui": "ui.js",
+  "styles": ["vault-tables.css"],
+  "access": "read",
+  "blocks": ["query"],
+  "fences": { "dataview": "query" }
+}

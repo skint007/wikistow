@@ -46,6 +46,58 @@ export type TreeEntry = FolderEntry & { parentId: string | null };
 
 export type SearchResult = PageRef & { title: string; draft: boolean };
 
+/**
+ * A page as the person's search index holds it (`index`, `query`): the
+ * version they see, as `read` gives it, without its text.
+ */
+export type PageRow = {
+  page: PageRef;
+  title: string;
+  /** The folder it is directly in, or null at the top of the space, as a `tree` entry's `parentId`. */
+  folderId: string | null;
+  /**
+   * The names of the folders it is in, outermost first, as far up as the
+   * plugin can read: null for a name that can't be opened.
+   */
+  path: (string | null)[];
+  /**
+   * Its tags, from its `tags` property and Obsidian's older `tag`, as a
+   * query's `from: '#tag'` finds them: each
+   * text, number or `true`/`false` in it as text, without a `#` before it,
+   * once each, as first written.
+   */
+  tags: string[];
+  /** Its properties, as a block on it gets them (`BlockProps.properties`). */
+  properties: Readonly<Record<string, PropertyValue>>;
+  /** The version indexed, as `read` gives it: the draft for an editor, else the publication. */
+  revision: string;
+  /** The version indexed is a draft readers don't see, as in `SearchResult`. */
+  draft: boolean;
+};
+
+/**
+ * A query over one space's pages, as a `wikistow-query` block says it: each
+ * part is what its block's line holds after `from:`, `where:`, `sort:`
+ * and `limit:`, and reads as there. A part may not hold a line break.
+ */
+export type PageQuery = {
+  spaceId: string;
+  /** A folder's path, such as `Recipes/Soups`, taking the folders under it too, or one `#tag`. The whole space if left out. */
+  from?: string | undefined;
+  /** Conditions joined by commas, all of which must hold: `tried = true, servings >= 2`. */
+  where?: string | undefined;
+  /** A property name or `title`, then `asc` or `desc`: `cook_time desc`. As they come if left out. */
+  sort?: string | undefined;
+  /** From 1 to `QUERY_LIMIT`; 100 if left out. */
+  limit?: number | undefined;
+};
+
+/** The most rows a query lists. */
+export const QUERY_LIMIT = 500;
+
+/** What a query found: its rows, up to its limit, and how many pages it found in all. */
+export type PageQueryResult = { rows: PageRow[]; total: number };
+
 /** A change to a page: what isn't named stays as it is. */
 export type PageChange = {
   title?: string | undefined;
@@ -73,6 +125,26 @@ export interface Pages {
    * `status:"in progress"`.
    */
   search(text: string, options?: { limit?: number | undefined }): Promise<SearchResult[]>;
+  /**
+   * Every page of a space the plugin can read, with its properties
+   * (`PageRow`), by title: from the person's search index, the one query
+   * tables read, never by reading the pages again. Pages it can't read
+   * aren't in it, and their folders' names aren't either. Empty where it
+   * can read nothing there. The first call may wait while the index is
+   * built. `index.changed` says when it changed. Missing (undefined) in an
+   * app older than it; in a script it is always there, and such an app
+   * stops the script that calls it.
+   */
+  index?(spaceId: string): Promise<PageRow[]>;
+  /**
+   * The pages a `wikistow-query` block of `query` would list, among those
+   * `index` gives: in the folder or with the tag `from` names, meeting
+   * every condition of `where`, sorted, up to `limit`. A folder is found
+   * among those the plugin can read. Fails with `invalid`, its message
+   * saying why as the block would, for a query that doesn't read or can't
+   * run. Missing (undefined) in an app older than it, as `index` is.
+   */
+  query?(query: PageQuery): Promise<PageQueryResult>;
   create(
     folder: FolderRef,
     page: { title: string; markdown?: string | undefined; data?: Json | undefined },
@@ -142,6 +214,16 @@ export type PluginEvents = {
   'page.shown': { page: PageRef; revision: string; version: 'draft' | 'published' };
   /** This app saved a draft, by the editor or another plugin, never this one. */
   'draft.saved': { page: PageRef; revision: string };
+  /**
+   * The search index changed, for pages the plugin can read in `spaceIds`:
+   * what `index` and `query` give there may have changed. Told as the
+   * index takes in a change, made on this device or told by the server,
+   * as query tables redraw, and as the person changes the plugin's page
+   * access there. While a plugin listens, the index is kept up to date. An
+   * app older than it refuses it: app code gets `unsupported`, and a script
+   * that listens is stopped.
+   */
+  'index.changed': { spaceIds: string[] };
 };
 
 /** One event, with its payload. */
@@ -418,8 +500,9 @@ export type BlockProps = {
 
 /**
  * A block a plugin draws in place of a fence it claims (`blocks` in its
- * manifest), in the reader and the visual editor. Without the plugin the
- * fence is ordinary code.
+ * manifest), in the reader and the visual editor: `plugin:<id>/<type>`,
+ * and each bare language its manifest's `fences` gives the type, such as
+ * `dataview`. Without the plugin the fence is ordinary code.
  */
 export type Block = { type: string; view: View<BlockProps> };
 

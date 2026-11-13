@@ -1,10 +1,15 @@
 import { searchOperations } from '@wikistow/client';
 import { PageId, SpaceId } from '@wikistow/contracts';
 import type { PageRef } from '@wikistow/plugin-sdk';
-import type { FetchQueryOptions, QueryClient, QueryKey } from '@tanstack/react-query';
+import {
+  QueryObserver,
+  type FetchQueryOptions,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
-import { spacesQuery, treeQuery } from '../data/queries';
+import { searchIndexQuery, spacesQuery, treeQuery } from '../data/queries';
 import { desktop } from '../desktop';
 import { PLAIN, vaultStore } from '../vault/store';
 import { desktopStore } from './desktop-store';
@@ -12,6 +17,7 @@ import { editorDrafts } from './drafts';
 import { browserStore } from './library';
 import { createLocation } from './location';
 import { createMarkdownDrawings } from './markdown-drawings';
+import { indexChanges } from './page-rows';
 import { pagesFor, session } from './pages';
 import { createRuntime, type OpenDraft, type PluginSession } from './runtime';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
@@ -51,6 +57,35 @@ export function startAppPlugins(queryClient: QueryClient) {
    */
   const latest = <T, K extends QueryKey>(query: FetchQueryOptions<T, Error, T, K>) =>
     queryClient.fetchQuery({ ...query, staleTime: Infinity });
+
+  /**
+   * The search index followed, as a query table follows it while shown:
+   * built if it isn't, updated after each change, and each new index told
+   * to the runtime as what changed since the one before.
+   */
+  const followIndex = () => {
+    const vault = vaultStore.get();
+    if (vault.status !== 'unlocked') return () => {};
+    const observer = new QueryObserver(queryClient, searchIndexQuery(vault.ctx, queryClient));
+    let told = observer.getCurrentResult().data;
+    return observer.subscribe(({ data }) => {
+      if (!data || data === told) return;
+      const changes = indexChanges(told, data);
+      told = data;
+      own.indexChanged(changes);
+    });
+  };
+  // Followed while any plugin listens for `index.changed`.
+  let watchers = 0;
+  let unfollow = () => {};
+  const watchIndex = () => {
+    watchers += 1;
+    if (watchers === 1) unfollow = followIndex();
+    return () => {
+      watchers -= 1;
+      if (watchers === 0) unfollow();
+    };
+  };
   const own = createRuntime(store, {
     session: vaultSession,
     pages: (caller) =>
@@ -60,7 +95,10 @@ export function startAppPlugins(queryClient: QueryClient) {
         // The sidebar's own tree, read again once a change marked it,
         // whether or not anything shows it (`latest`).
         tree: (ctx, spaceId) => latest(treeQuery(ctx, spaceId)),
+        // The index query tables read, as up to date as `tree`.
+        index: (ctx) => latest(searchIndexQuery(ctx, queryClient)),
       }),
+    watchIndex,
     handle: (caller, shown) => drafts.handle(caller, shown),
     changed(spaceIdText, page) {
       const vault = vaultStore.get();

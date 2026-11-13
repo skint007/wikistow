@@ -1,6 +1,7 @@
 import { searchOperations, type ClientContext } from '@wikistow/client';
 import type { InstalledPlugin, PluginCandidate, PluginScope } from '@wikistow/contracts';
 import {
+  blockLanguage,
   isReplaceable,
   REGIONS,
   type Manifest,
@@ -8,6 +9,7 @@ import {
   type Replacements,
   type TrustLevel,
 } from '@wikistow/plugin-sdk';
+import { fencePart } from '@wikistow/plugin-sdk/manifest';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -74,6 +76,12 @@ const replacedParts = (manifest: Manifest) =>
   (manifest.replaces ?? []).filter(isReplaceable).map((region) => REPLACED[region].part);
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** The most parts of the app one plugin's approval gives back (`ownParts`), regions and languages. */
+const MAX_OWN_PARTS = 20;
+
+/** The bare fence languages a manifest claims (`fences`), in its order. */
+const fencesOf = (manifest: Manifest) => Object.keys(manifest.fences ?? {});
 
 /** Says safe mode is on, with the way out, on the Plugins page wherever plugins come from. */
 export function SafeModeNotice() {
@@ -370,6 +378,7 @@ export function PluginSettings({ tab, query }: PluginsView) {
       {error && <FormMessage>{error}</FormMessage>}
       {notice && <FormMessage tone="notice">{notice}</FormMessage>}
       {tab === 'installed' && <ReplacedParts />}
+      {tab === 'installed' && <ClaimedFences />}
       {vault.status === 'unlocked' ? (
         <Library ctx={vault.ctx} tab={tab} query={query} folder={folder} />
       ) : folders ? (
@@ -457,6 +466,13 @@ export function Approval<T extends ApprovalRequest>({
               <p>
                 It replaces {listed.format(replacedParts(candidate.manifest))} with its own. You can
                 use the app’s own again in Settings → Plugins.
+              </p>
+            )}
+            {fencesOf(candidate.manifest).length > 0 && (
+              <p>
+                It draws {listed.format(fencesOf(candidate.manifest))} code blocks as its own, on
+                every page you open, whoever wrote them. You can show them as code again in Settings
+                → Plugins.
               </p>
             )}
             {candidate.replaces && <Replaces candidate={candidate} />}
@@ -564,6 +580,122 @@ function ReplacedParts() {
                   onClick={() =>
                     choose(region, replacing.slice(0, replacing.indexOf(plugin)), plugin)
                   }
+                >
+                  Use {plugin.manifest.name}
+                </Button>
+              ))}
+          </li>
+        ))}
+      </ul>
+      {error && <FormMessage>{error}</FormMessage>}
+    </section>
+  );
+}
+
+/**
+ * Which plugin draws each bare fence language plugins claim (`fences`,
+ * #401), with **Show as code**: the first in this list's order that claims
+ * it, unless the person chose otherwise, kept as a replaced part's choice
+ * is (`fencePart` in its `ownParts`). Choosing one plugin's gives the
+ * language back from those before it, so two plugins claiming one show
+ * which draws it and let the person change that. Not in safe mode, where
+ * every block is code.
+ */
+function ClaimedFences() {
+  const { store: pluginStore, runtime: pluginRuntime } = useAppPlugins();
+  const { plugins, safeMode, blocks } = usePlugins();
+  const [error, setError] = useState<string | null>(null);
+  if (safeMode) return null;
+  // Only plugins that draw the block here, running with it registered, can draw the language.
+  const drawers = plugins
+    .map(({ plugin }) => plugin)
+    .filter((plugin) => plugin.enabled && plugin.level === 'app');
+  const draws = (plugin: InstalledPlugin, language: string) => {
+    const type = plugin.manifest.fences?.[language];
+    // As the runtime takes it: app code's view, not a script's form registered over it.
+    return (
+      type !== undefined && blocks.get(blockLanguage(plugin.manifest.id, type))?.part === 'app'
+    );
+  };
+  const languages = [...new Set(drawers.flatMap((plugin) => fencesOf(plugin.manifest)))]
+    .filter((language) => drawers.some((plugin) => draws(plugin, language)))
+    .sort();
+  if (languages.length === 0) return null;
+  const rows = languages.map((language) => {
+    const claiming = drawers.filter((plugin) => draws(plugin, language));
+    // The plugin the runtime draws it with, so a claim whose block never registered isn't named.
+    const drawer = blocks.get(language)?.pluginId;
+    return {
+      language,
+      part: fencePart(language),
+      claiming,
+      drawing: claiming.find((plugin) => plugin.manifest.id === drawer) ?? null,
+    };
+  });
+
+  /** `plugin`'s `ownParts` without the languages its manifest no longer claims, so they don't pile up. */
+  const current = (plugin: InstalledPlugin) =>
+    plugin.ownParts.filter(
+      (own) =>
+        !own.startsWith(fencePart('')) ||
+        fencesOf(plugin.manifest).some((language) => fencePart(language) === own),
+    );
+
+  /** Show `part`'s blocks as code for each of `own`, and drawn by `chosen` if given. */
+  const choose = (part: string, own: InstalledPlugin[], chosen?: InstalledPlugin) =>
+    void (async () => {
+      setError(null);
+      try {
+        for (const plugin of own) {
+          if (plugin.ownParts.includes(part)) continue;
+          const next = [...current(plugin), part];
+          // What an approval keeps: more would make it unreadable.
+          if (next.length > MAX_OWN_PARTS)
+            throw new Error(
+              `${plugin.manifest.name} already has ${MAX_OWN_PARTS} parts of the app given back.`,
+            );
+          await pluginStore.setOwnParts(refOf(plugin), next);
+        }
+        if (chosen)
+          await pluginStore.setOwnParts(
+            refOf(chosen),
+            current(chosen).filter((own) => own !== part),
+          );
+      } catch (failure) {
+        setError(message(failure));
+      }
+      await pluginRuntime.refresh();
+    })();
+
+  return (
+    <section aria-label="Code blocks plugins draw" className="grid gap-2 text-sm">
+      <h3 className="font-bold">Code blocks plugins draw</h3>
+      <ul className="grid gap-2">
+        {rows.map(({ language, part, claiming, drawing }) => (
+          <li key={language} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-48 flex-1">
+              <code>{language}</code> blocks:{' '}
+              {drawing ? `${drawing.manifest.name} draws them.` : 'shown as code.'}
+              {claiming.length > 1 &&
+                ` Also claimed by ${listed.format(
+                  claiming
+                    .filter((plugin) => plugin !== drawing)
+                    .map((plugin) => plugin.manifest.name),
+                )}.`}
+            </span>
+            {drawing && (
+              <Button size="sm" variant="outline" onClick={() => choose(part, claiming)}>
+                Show as code
+              </Button>
+            )}
+            {claiming
+              .filter((plugin) => plugin !== drawing)
+              .map((plugin) => (
+                <Button
+                  key={`${plugin.library}:${plugin.manifest.id}`}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => choose(part, claiming.slice(0, claiming.indexOf(plugin)), plugin)}
                 >
                   Use {plugin.manifest.name}
                 </Button>
