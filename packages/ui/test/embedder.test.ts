@@ -19,10 +19,12 @@ class FakeWorker {
   readonly asked: EmbedRequest[] = [];
   terminated = false;
 
-  constructor(
-    readonly url: URL,
-    readonly options: WorkerOptions,
-  ) {
+  readonly url: URL;
+  readonly options: WorkerOptions;
+
+  constructor(url: URL, options: WorkerOptions) {
+    this.url = url;
+    this.options = options;
     FakeWorker.started.push(this);
   }
 
