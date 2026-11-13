@@ -33,7 +33,6 @@ import {
   liveSessionIds,
   liveSessions,
   liveWraps,
-  nodes,
   metadataRevisions,
   pageHeads,
   revisions,
@@ -741,6 +740,7 @@ const laterEnded = (tx: Database, session: SessionRow) =>
         sql`${liveSessions.lastUpdatePosition} > coalesce(${liveSessions.savedCovers}, 0)`,
       ),
     )
+    .orderBy(desc(liveSessions.endedAt))
     .limit(10);
 
 /**
@@ -885,6 +885,10 @@ export async function startLive(db: Database, input: StartLive) {
     }
     if (decodedLength(payload.ciphertext) > liveRoutes.MAX_RECORD_PAYLOAD_BYTES) {
       throw new ContentError('too-large', 'This session record is too large');
+    }
+    // A sealed 32-byte key is 80 bytes, so an envelope holds nothing its charge leaves out.
+    if (input.envelopes.some((e) => decodedLength(e.sealedKey) !== 80)) {
+      throw new ContentError('invalid-request', 'An envelope seals a 32-byte key');
     }
     await checkKeyMaterial(tx, {
       spaceId: page.spaceId,
@@ -1084,7 +1088,17 @@ export async function joinLive(
     // An ended one is read, not joined: what it keeps, then its end, only as a
     // fetch would serve it, to catch up from (`catchable`); otherwise its end alone.
     if (session.endedReason !== null) {
-      const readable = await catchable(tx, session, await dbNow(tx));
+      // As a fetch would serve it, or to someone who took part, for what it relayed them.
+      const [took] = await tx
+        .select({ joinId: liveJoins.joinId })
+        .from(liveJoins)
+        .where(
+          and(eq(liveJoins.sessionId, session.id), eq(liveJoins.identityId, caller.identity.id)),
+        )
+        .limit(1);
+      const readable = took
+        ? await keysCount(tx, session)
+        : await catchable(tx, session, await dbNow(tx));
       return {
         ended: session.endedReason,
         draftHead: heads.draftHead,
@@ -1907,15 +1921,11 @@ export async function leaveLive(
 /** A participant ends the session (section 5.10, **Ending**). Ending an ended one changes nothing. */
 export async function endLive(db: Database, input: { actor: Actor; sessionId: string }) {
   return db.transaction(async (tx) => {
-    const { session, page } = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
+    const { session } = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
     if (session.endedReason !== null) return { ended: false };
     await tx
       .update(liveSessions)
-      .set({
-        endedAt: sql`now()`,
-        endedReason: 'ended',
-        endedPermissionVersion: page.permissionVersion,
-      })
+      .set({ endedAt: sql`now()`, endedReason: 'ended' })
       .where(eq(liveSessions.id, session.id));
     return { ended: true };
   });
@@ -2023,6 +2033,19 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
 // --- Deletion --------------------------------------------------------------
 
 /**
+ * The pages `nodeIds` leave their region (a move across regions, a share
+ * made or ended over them): their sessions' keys count for nobody from now
+ * on, even if the pages come back, in the transaction that moves them.
+ */
+export async function loseLiveKeys(tx: Database, nodeIds: readonly string[]) {
+  if (nodeIds.length === 0) return;
+  await tx
+    .update(liveSessions)
+    .set({ keysLost: true })
+    .where(sql`${liveSessions.pageId} = any(${sql.param([...nodeIds])}::text[])`);
+}
+
+/**
  * Whether the keys a session's record is under still count: in a share,
  * the page is still in the share it started in, at the key version it
  * started under; in the owner region, the page is still there and every
@@ -2030,14 +2053,8 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
  * or the ending of its share nobody's do.
  */
 async function keysCount(tx: Database, session: SessionRow) {
-  // Any change of access since it ended, a move back included, and nobody's count.
-  if (session.endedPermissionVersion !== null) {
-    const [page] = await tx
-      .select({ permissionVersion: nodes.permissionVersion })
-      .from(nodes)
-      .where(eq(nodes.id, session.pageId));
-    if (page?.permissionVersion !== session.endedPermissionVersion) return false;
-  }
+  // Its page left its region once: nobody's count, even if it came back.
+  if (session.keysLost) return false;
   const share = await shareAt(tx, session.spaceId, session.pageId);
   if (session.shareId !== null) {
     if (!share || share.id !== session.shareId) return false;

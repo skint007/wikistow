@@ -58,6 +58,7 @@ import {
   type Grant,
 } from './effective.ts';
 import { ContentError } from './errors.ts';
+import { loseLiveKeys } from './live.ts';
 import { lookupIdentities, requireCaller, type Actor, type Caller } from './identities.ts';
 import { revisionKeyMaterial, servedMetadata } from './serving.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
@@ -700,6 +701,7 @@ export async function makeShare(
     if (records.comment.length > 0) {
       await tx.delete(commentEnvelopes).where(anyId(commentEnvelopes.versionId, records.comment));
     }
+    await loseLiveKeys(tx, records.nodeIds);
     await bumpPermissions(tx, input.spaceId, records.nodeIds);
     await audit(tx, {
       actor: input.accountId,

@@ -77,12 +77,12 @@ export const liveSessions = pgTable(
      */
     keptAt: timestamptz(),
     /**
-     * The page's permission version as the session ended. Any change of
-     * access since, a move back included, moves it on, and then its keys
-     * count for nobody: it is served to nobody again, and goes once its
-     * joins have left.
+     * Its page left its region once: a move across regions, or a share made
+     * or ended over it (`loseLiveKeys`). Its keys then count for nobody, even
+     * if the page comes back: it is served to nobody again, and goes once
+     * its joins have left.
      */
-    endedPermissionVersion: integer(),
+    keysLost: boolean().notNull().default(false),
   },
   (table) => [
     check('live_sessions_id_shape', sql`${table.id} ~ '^[A-Za-z0-9_-]{1,64}$'`),
@@ -93,7 +93,7 @@ export const liveSessions = pgTable(
     uniqueIndex('live_sessions_open_page_idx')
       .on(table.pageId)
       .where(sql`${table.endedAt} is null`),
-    index('live_sessions_page_idx').on(table.pageId),
+    index('live_sessions_page_idx').on(table.pageId, table.endedAt),
     index('live_sessions_revision_idx').on(table.revisionId),
     index('live_sessions_starter_account_idx').on(table.starterAccountId),
   ],

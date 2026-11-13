@@ -85,7 +85,7 @@ CREATE TABLE "live_sessions" (
 	"ended_at" timestamp with time zone,
 	"ended_reason" text,
 	"kept_at" timestamp with time zone,
-	"ended_permission_version" integer,
+	"keys_lost" boolean DEFAULT false NOT NULL,
 	CONSTRAINT "live_sessions_versionId_unique" UNIQUE("version_id"),
 	CONSTRAINT "live_sessions_id_shape" CHECK ("live_sessions"."id" ~ '^[A-Za-z0-9_-]{1,64}$'),
 	CONSTRAINT "live_sessions_version_id_shape" CHECK ("live_sessions"."version_id" ~ '^[A-Za-z0-9_-]{1,64}$'),
@@ -127,7 +127,7 @@ CREATE INDEX "live_messages_account_idx" ON "live_messages" USING btree ("accoun
 CREATE INDEX "live_messages_revision_idx" ON "live_messages" USING btree ("revision_id") WHERE "live_messages"."revision_id" is not null;--> statement-breakpoint
 CREATE INDEX "live_session_ids_starter_account_idx" ON "live_session_ids" USING btree ("starter_account_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "live_sessions_open_page_idx" ON "live_sessions" USING btree ("page_id") WHERE "live_sessions"."ended_at" is null;--> statement-breakpoint
-CREATE INDEX "live_sessions_page_idx" ON "live_sessions" USING btree ("page_id");--> statement-breakpoint
+CREATE INDEX "live_sessions_page_idx" ON "live_sessions" USING btree ("page_id","ended_at");--> statement-breakpoint
 CREATE INDEX "live_sessions_revision_idx" ON "live_sessions" USING btree ("revision_id");--> statement-breakpoint
 CREATE INDEX "live_sessions_starter_account_idx" ON "live_sessions" USING btree ("starter_account_id");--> statement-breakpoint
 CREATE INDEX "live_wraps_share_idx" ON "live_wraps" USING btree ("share_id");--> statement-breakpoint
@@ -139,12 +139,8 @@ CREATE INDEX "live_wraps_share_idx" ON "live_wraps" USING btree ("share_id");-->
 -- then find the session ended, or this waits for them.
 CREATE FUNCTION "wikistow_live_end"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access',
-      "ended_permission_version" = NEW."permission_version"
+  UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access'
     WHERE "page_id" = NEW."id" AND "ended_at" IS NULL;
-  -- Moved on again in the transaction that ended it: the version it ended at.
-  UPDATE "live_sessions" SET "ended_permission_version" = NEW."permission_version"
-    WHERE "page_id" = NEW."id" AND "ended_at" = now();
   RETURN NULL;
 END $$;
 --> statement-breakpoint

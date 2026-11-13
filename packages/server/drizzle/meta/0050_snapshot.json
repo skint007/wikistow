@@ -1,5 +1,5 @@
 {
-  "id": "59805cd4-417a-4bb0-8fae-8d7916be2aa7",
+  "id": "05155dd0-3871-406d-938d-dd80806b4938",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5319,11 +5319,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ended_permission_version": {
-          "name": "ended_permission_version",
-          "type": "integer",
+        "keys_lost": {
+          "name": "keys_lost",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {
@@ -5348,6 +5349,12 @@
           "columns": [
             {
               "expression": "page_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ended_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

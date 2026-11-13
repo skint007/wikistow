@@ -5,6 +5,7 @@ import {
   aeadDecrypt,
   endingOperations as ending,
   moveOperations as moves,
+  trashOperations as trash,
   fromBase64,
   metadataAd,
   newId,
@@ -613,9 +614,9 @@ describe('messages', () => {
     expect(await streamRefusal(editor, session, first.joinId)).toBe('not-found');
 
     // Eight present joins of one person, further joins included.
-    const more = await Promise.all(
-      Array.from({ length: 5 }, () => stream(editor, session, newId(JoinId), 1)),
-    );
+    // One after another, as an app opens them.
+    const more = [];
+    for (let i = 0; i < 5; i++) more.push(await stream(editor, session, newId(JoinId), 1));
     expect(more).toHaveLength(5);
     expect(await streamRefusal(editor, session, newId(JoinId), 1)).toBe('rate-limited');
     // Once one leaves, there is room again.
@@ -759,7 +760,7 @@ describe('messages', () => {
     for (const session of [a, b]) {
       // The starter's join and seven more: eight in each.
       await stream(owner, session, session.joinId, 1);
-      await Promise.all(Array.from({ length: 7 }, () => stream(owner, session, newId(JoinId), 1)));
+      for (let i = 0; i < 7; i++) await stream(owner, session, newId(JoinId), 1);
     }
     expect(await streamRefusal(owner, c, newId(JoinId), 1)).toBe('rate-limited');
   });
@@ -1044,6 +1045,24 @@ describe('deleting a session', () => {
     expect((await liveOf(owner, lib.page.pageId)).ended).toBeNull();
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(last.sessionId)).toBeUndefined();
+  });
+
+  it('keeps a session the trash ended for after a restore, to catch up from', async () => {
+    const { owner, lib } = await sharedLibrary();
+    const page = lib.beside;
+    const session = await startSession(owner, page);
+    const me = typist(owner, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: page.pageId });
+    expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
+    const entry = (await trash.loadTrash(owner.ctx)).find((item) => item.nodeId === page.pageId);
+    if (!entry) throw new Error('expected it in the trash');
+    await everyoneLeft(session.sessionId);
+    await sweepLive(t.db, RETENTION);
+    await trash.restoreTrash(owner.ctx, entry.trashId);
+    await sweepLive(t.db, RETENTION);
+    expect((await liveOf(owner, page.pageId)).ended?.sessionId).toBe(session.sessionId);
   });
 
   it('serves nobody a session its page moved out of, even once the page is back', async () => {

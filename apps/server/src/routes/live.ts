@@ -67,10 +67,11 @@ const MAX_FETCHES_PER_ACCOUNT = 2;
 const READ_LIMIT = { windowMs: 60_000, max: 120 };
 
 /**
- * Live writes one person may have in hand at once, so a burst waits on
- * their own requests, never on every connection the server has.
+ * Live requests one person may have in hand at once against the database,
+ * writes, stream openings and fetches together, so a burst of theirs waits
+ * on their own requests and never takes most of the pool's ten connections.
  */
-const MAX_WRITES_PER_ACCOUNT = 8;
+const MAX_WRITES_PER_ACCOUNT = 4;
 /** How long a closed stream has to send what it had queued before it is cut off. */
 const DRAIN_MS = 5000;
 
@@ -397,7 +398,7 @@ export function mountLiveRoutes(
   }
 
   const writes = new Map<string, number>();
-  // A write of `actor`'s, one of at most `MAX_WRITES_PER_ACCOUNT` at once.
+  // A request of `actor`'s against the database, one of at most `MAX_WRITES_PER_ACCOUNT` at once.
   async function writing<T>(actor: Actor, run: () => Promise<T>): Promise<T> {
     if (actor.agentId !== null) throw new ApiError('not-found', 'Not found');
     if ((writes.get(actor.accountId) ?? 0) >= MAX_WRITES_PER_ACCOUNT) {
@@ -428,7 +429,9 @@ export function mountLiveRoutes(
       count(fetching, actor.accountId, 1);
       try {
         await countRead(actor.accountId);
-        return await getLive(db, actor, params.pageId, report).catch(toApiError);
+        return await writing(actor, () =>
+          getLive(db, actor, params.pageId, report).catch(toApiError),
+        );
       } finally {
         count(fetching, actor.accountId, -1);
       }
@@ -569,14 +572,10 @@ export function mountLiveRoutes(
       };
       let joined: Awaited<ReturnType<typeof joinLive>>;
       try {
-        joined = await joinLive(db, {
-          actor: humanActor(account),
-          sessionId,
-          joinId,
-          after,
-          kept,
-          storageBytes,
-        });
+        const actor = humanActor(account);
+        joined = await writing(actor, () =>
+          joinLive(db, { actor, sessionId, joinId, after, kept, storageBytes }),
+        );
       } catch (error) {
         release();
         return toApiError(error);
