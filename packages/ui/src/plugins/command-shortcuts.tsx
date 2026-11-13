@@ -25,15 +25,19 @@ const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'C
  * command and keeps none, as while it is off.
  */
 export function CommandShortcuts({ pluginId }: { pluginId: string }) {
-  const { commands, plugins } = usePlugins();
+  const { commands, plugins, unavailable } = usePlugins();
   const shortcuts = usePluginShortcuts();
   const [recording, setRecording] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ commandId: string; message: string } | null>(null);
   const own = commands.filter((command) => command.pluginId === pluginId);
   // Every shortcut kept for an installed plugin's command, registered now
-  // or not (a plugin that is off, or one that registers it only at times),
+  // or not (a plugin that is off or couldn't load, or one that registers it only at times),
   // so none is given twice. A removed plugin's frees its keys.
-  const installed = new Set(plugins.map(({ plugin }) => plugin.manifest.id));
+  // Those it knows of but couldn't load are installed too, as offline at the start.
+  const installed = new Set([
+    ...plugins.map(({ plugin }) => plugin.manifest.id),
+    ...Object.keys(unavailable),
+  ]);
   const kept = Object.entries(shortcuts).flatMap(([at, keys]) => {
     const slash = at.indexOf('/');
     const [of, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
