@@ -7,6 +7,7 @@ import {
   SealedMetadata,
   SealedMetadataV2,
   type CommentRecord,
+  type LiveRecord,
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { z } from 'zod';
@@ -307,8 +308,11 @@ export const metadataEnvelopeBytes = (
     e.granterKeyVersion,
   ]);
 
-/** The bytes an author signs for a v2 metadata record: a name's, or a comment's (section 5.9). */
-export const metadataRecordV2Bytes = (r: MetadataRecordV2 | CommentRecord) =>
+/**
+ * The bytes an author signs for a v2 metadata record: a name's, a
+ * comment's (section 5.9), or a live session's (section 5.10).
+ */
+export const metadataRecordV2Bytes = (r: MetadataRecordV2 | CommentRecord | LiveRecord) =>
   canonical('metadata-record/v2', [
     r.protocol,
     r.installationId,

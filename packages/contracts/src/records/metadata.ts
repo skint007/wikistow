@@ -5,6 +5,7 @@ import {
   CommentId,
   IdentityId,
   InstallationId,
+  LiveSessionId,
   MetadataRevisionId,
   NodeId,
   SpaceId,
@@ -14,7 +15,8 @@ import {
  * A signed, immutable version of a space's or folder's encrypted metadata
  * (name, emoji, tint). Renaming writes a new version based on the current
  * head, exactly like a page draft. A v1 record names a space or folder
- * only: a group's name and a comment are v2 records (sections 5.7 and 5.9).
+ * only: a group's name, a comment and a live session are v2 records
+ * (sections 5.7, 5.9 and 5.10).
  */
 export const MetadataRecord = z.strictObject({
   protocol: z.literal(1),
@@ -35,8 +37,8 @@ export type MetadataRecord = z.infer<typeof MetadataRecord>;
  * A metadata record from Milestone 2 on, of a name: a space's, a folder's,
  * or a group's, which is always in the space's owner region (protocol
  * section 6.6). Selected by `protocol: 2`. A comment has the same signed
- * layout, but its own schema (`CommentRecord`), so no route that takes a
- * name takes a comment.
+ * layout, but its own schema (`CommentRecord`), as has a live session's
+ * (`LiveRecord`), so no route that takes a name takes either.
  */
 export const MetadataRecordV2 = z.strictObject({
   ...MetadataRecord.shape,
@@ -59,6 +61,20 @@ export const CommentRecord = z.strictObject({
 });
 export type CommentRecord = z.infer<typeof CommentRecord>;
 
+/**
+ * A live session's record (protocol section 5.10): a metadata record v2
+ * with `subjectKind: "live"`, `subjectId` the session's ID, `basedOn`
+ * null, never edited, and `metadataRevisionId` an ID of its own in the set
+ * of metadata and comment version IDs. There is no v1 session record.
+ */
+export const LiveRecord = z.strictObject({
+  ...MetadataRecordV2.shape,
+  subjectKind: z.literal('live'),
+  subjectId: LiveSessionId,
+  basedOn: z.null(),
+});
+export type LiveRecord = z.infer<typeof LiveRecord>;
+
 export const SealedMetadata = z.strictObject({
   record: MetadataRecord,
   signature: Base64,
@@ -79,6 +95,13 @@ export const SealedComment = z.strictObject({
   payload: Sealed,
 });
 export type SealedComment = z.infer<typeof SealedComment>;
+
+export const SealedLive = z.strictObject({
+  record: LiveRecord,
+  signature: Base64,
+  payload: Sealed,
+});
+export type SealedLive = z.infer<typeof SealedLive>;
 
 /** A metadata version's key, sealed to one recipient, signed by its granter. */
 export const MetadataEnvelope = z.strictObject({

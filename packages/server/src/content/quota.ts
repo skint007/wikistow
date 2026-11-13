@@ -6,6 +6,8 @@ import {
   commentVersions,
   contactsRecords,
   identities,
+  liveMessages,
+  liveSessions,
   metadataRevisions,
   publicCopies,
   publicFiles,
@@ -22,8 +24,10 @@ const total = async (query: Promise<{ bytes: string }[]>) => Number((await query
 
 /**
  * Everything stored on an account's behalf: attachments it uploaded, page
- * and metadata versions and comments it wrote, what is kept of its contacts
- * record, and the files of public copies it uploaded.
+ * and metadata versions and comments it wrote, live sessions it started and
+ * their messages it sent, while the session is kept (protocol section 5.10),
+ * what is kept of its contacts record, and the files of public copies it
+ * uploaded.
  * The sums run one after another: in a transaction they share a connection.
  */
 export async function usedBytes(db: Database, accountId: string): Promise<number> {
@@ -60,6 +64,18 @@ export async function usedBytes(db: Database, accountId: string): Promise<number
         .from(commentVersions)
         .innerJoin(comments, eq(comments.id, commentVersions.commentId))
         .where(eq(comments.authorAccountId, accountId)),
+    ),
+    await total(
+      db
+        .select({ bytes: sum(liveSessions.payloadSize) })
+        .from(liveSessions)
+        .where(eq(liveSessions.starterAccountId, accountId)),
+    ),
+    await total(
+      db
+        .select({ bytes: sum(liveMessages.size) })
+        .from(liveMessages)
+        .where(eq(liveMessages.accountId, accountId)),
     ),
     await total(
       db

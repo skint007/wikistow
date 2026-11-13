@@ -56,6 +56,16 @@ export type MetadataRevisionId = z.infer<typeof MetadataRevisionId>;
  */
 export const CommentId = id.brand<'CommentId'>();
 export type CommentId = z.infer<typeof CommentId>;
+/**
+ * A live session on a page (protocol section 5.10). Made by clients with
+ * `newId`; the server keeps the sessions it holds unique across the
+ * installation. Its record's version ID is a metadata version ID.
+ */
+export const LiveSessionId = id.brand<'LiveSessionId'>();
+export type LiveSessionId = z.infer<typeof LiveSessionId>;
+/** One app's join of a live session (section 5.10), made with `newId` each time it joins. */
+export const JoinId = id.brand<'JoinId'>();
+export type JoinId = z.infer<typeof JoinId>;
 /** A folder or page: anything in a space's tree. */
 export const NodeId = id;
 export const AttachmentId = id.brand<'AttachmentId'>();

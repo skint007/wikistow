@@ -1,0 +1,333 @@
+// Live sessions (protocol section 5.10, ADR 0015). New routes only:
+// released apps parse existing answers strictly, so no answer gains a field.
+// Every route answers `not-found` to an agent, and to anyone who can't
+// edit the page now, before anything that shows whether a session exists.
+// The server relays and keeps ciphertext; the session payload, the sealed
+// content of messages and their extensions are the client's (`live`).
+import { z } from 'zod';
+import { Base64, PositiveInt, Sealed, Timestamp } from '../records/encoding.ts';
+import { IdentityId, JoinId, LiveSessionId, PageId, RevisionId } from '../records/ids.ts';
+import { MetadataEnvelopeV2, SealedLive } from '../records/metadata.ts';
+import { KeyWrap } from '../records/share.ts';
+import type { RouteDef, StreamRouteDef } from '../route.ts';
+
+/** Bytes a session record's sealed payload may hold, decoded, as a comment's may. */
+export const MAX_RECORD_PAYLOAD_BYTES = 65_536;
+
+/**
+ * Bytes of sealed ciphertext, decoded, each kind of message may hold
+ * (`payload-too-large`): a presence is always 512 bytes padded, so 528
+ * sealed; an `update` and a `saved` at most 512 KiB; a `snapshot` at most
+ * 2 MiB. Every stored kind pads to a multiple of 128 bytes, so its
+ * ciphertext is 16 bytes more than one.
+ */
+export const PRESENCE_CIPHERTEXT_BYTES = 528;
+export const MAX_UPDATE_BYTES = 512 * 1024;
+export const MAX_SAVED_BYTES = 512 * 1024;
+export const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
+
+/** The body limit of the routes that carry a snapshot: starting a session, and posting one. */
+export const SNAPSHOT_BODY_BYTES = 4 * 1024 * 1024;
+
+/** Stored messages a person may send in a minute, in bytes of ciphertext (`rate-limited`). */
+export const STORED_BYTES_PER_MINUTE = 16 * 1024 * 1024;
+
+/** Joins a person may have present in one session, further joins included (`rate-limited`). */
+export const MAX_JOINS_PER_PERSON = 8;
+
+/** Further joins one join may have present at a time (`rate-limited`). */
+export const MAX_FURTHER_JOINS = 2;
+
+/**
+ * How long a join stays present after its stream breaks or after its last
+ * message, presence included, whichever is sooner, and how long a fold
+ * grant lasts unplaced while its revision is the draft head.
+ */
+export const JOIN_GRACE_MS = 30_000;
+
+/** Messages one request may carry. */
+export const MAX_MESSAGES = 64;
+
+const Seq = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/** A message's place in its session, given by the server, from 1. */
+export const Position = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A message in a session, as its sender signed it (section 5.10,
+ * **Messages**): a strict object. The server checks its sender, join, kind
+ * and size, never its signature or what it seals.
+ */
+export const LiveMessage = z.strictObject({
+  kind: z.enum(['update', 'snapshot', 'presence', 'saved']),
+  senderId: IdentityId,
+  senderKeyVersion: PositiveInt,
+  joinId: JoinId,
+  seq: Seq,
+  sealed: Sealed,
+  signature: Base64.length(86),
+});
+export type LiveMessage = z.infer<typeof LiveMessage>;
+
+/**
+ * A stored message (`update`, `snapshot` or `saved`) with its position.
+ * `covers` is what its sender named, unsigned: for a snapshot, the
+ * position up to which it holds every stored message; for a `saved`, the
+ * position up to which the saved document held them; null for an
+ * `update`. `revisionId` is the draft a snapshot was made at, named in the
+ * clear; null for the other kinds.
+ */
+export const StoredMessage = z.strictObject({
+  position: Position,
+  message: LiveMessage,
+  covers: Position.nullable(),
+  revisionId: RevisionId.nullable(),
+});
+export type StoredMessage = z.infer<typeof StoredMessage>;
+
+/**
+ * A join of the session, past or present, as the server lists it: its
+ * person's identity and key version, its `joinId`, the order joins were
+ * made in (from 1), the join a further join belongs to, and whether it is
+ * still present. Only whether it is present ever changes.
+ */
+export const Join = z.strictObject({
+  senderId: IdentityId,
+  senderKeyVersion: PositiveInt,
+  joinId: JoinId,
+  order: PositiveInt,
+  parent: JoinId.nullable(),
+  present: z.boolean(),
+});
+export type Join = z.infer<typeof Join>;
+
+/**
+ * A fold grant (section 5.10, **Saving**): for an outsider's draft
+ * (`subject` its revision ID), or for catching up from an ended session
+ * (`subject` that session's ID), held by one join at a time. `position`
+ * is its `update`'s once placed, or for a catch-up its `saved`'s.
+ * `lapsed` once its join went, or once 30 s passed with neither the draft
+ * head moved on nor its `update` placed.
+ */
+export const Grant = z.strictObject({
+  subject: z.union([RevisionId, LiveSessionId]),
+  holder: z.strictObject({ senderId: IdentityId, joinId: JoinId }),
+  grantedAt: Timestamp,
+  position: Position.nullable(),
+  lapsed: z.boolean(),
+});
+export type Grant = z.infer<typeof Grant>;
+
+/** Why a session ended: the page's access changed, or a participant ended it. */
+export const EndReason = z.enum(['access', 'ended']);
+export type EndReason = z.infer<typeof EndReason>;
+
+/**
+ * A session as served to one person who can edit its page: its record,
+ * with the wrap, or their own envelopes, which may be none; its first
+ * snapshot; its latest later snapshot, if any; each join's latest kept
+ * `update` or `saved` at or before the position that snapshot covers;
+ * and the stored messages after it, up to `position`, oldest first. When
+ * `complete` is false there are more, which the stream serves from
+ * `position`. `grants` are those given since the latest snapshot, and the
+ * one for the current draft head.
+ */
+export const ServedSession = z.strictObject({
+  sessionId: LiveSessionId,
+  record: SealedLive,
+  wrap: KeyWrap.nullable(),
+  envelopes: z.array(MetadataEnvelopeV2),
+  revisionId: RevisionId,
+  startedAt: Timestamp,
+  ended: EndReason.nullable(),
+  firstSnapshot: StoredMessage,
+  snapshot: StoredMessage.nullable(),
+  latest: z.array(StoredMessage),
+  messages: z.array(StoredMessage),
+  position: Position,
+  complete: z.boolean(),
+  joins: z.array(Join),
+  grants: z.array(Grant),
+});
+export type ServedSession = z.infer<typeof ServedSession>;
+
+const PageParams = z.object({ pageId: PageId });
+const SessionParams = z.object({ sessionId: LiveSessionId });
+const Ok = z.strictObject({ ok: z.literal(true) });
+
+/**
+ * The page's open session, and beside it an ended one kept with unsaved
+ * changes, once every join of it has left; either may be null. The page's
+ * draft head is the one the stream's lines carry.
+ */
+export const getLive = {
+  method: 'GET',
+  path: '/api/pages/:pageId/live',
+  params: PageParams,
+  response: z.strictObject({
+    open: ServedSession.nullable(),
+    ended: ServedSession.nullable(),
+    draftHead: RevisionId.nullable(),
+  }),
+} as const satisfies RouteDef;
+
+/**
+ * Start a session on the page (section 5.10, **Writing the record**), with
+ * its first snapshot, the message with `seq` 1 of the join `joinId` the
+ * payload names, which the server makes, present for 30 s until its stream
+ * opens. Under the locks of a draft save: the record is a v2 record of
+ * kind `live` for `sessionId`, signed by the caller over its payload
+ * (`bad-signature`, `binding-mismatch`); the key material is the page's
+ * region's at its key version (`region-mismatch`, `key-version`); the
+ * permission version is current (`permission-version`); `revisionId` is
+ * the draft head (`stale-head`, with the heads); the session and version
+ * IDs are new, and the page has no open session (`duplicate`). A start
+ * sent again byte for byte after a lost answer is answered as before;
+ * any other start is made afresh, with a new session ID and key.
+ */
+export const startLive = {
+  method: 'POST',
+  path: '/api/pages/:pageId/live',
+  params: PageParams,
+  body: z.object({
+    sessionId: LiveSessionId,
+    joinId: JoinId,
+    revisionId: RevisionId,
+    metadata: SealedLive,
+    wrap: KeyWrap.nullable(),
+    envelopes: z.array(MetadataEnvelopeV2).max(100),
+    snapshot: LiveMessage,
+    /** The page's permission version. */
+    permissionVersion: z.number().int(),
+  }),
+  response: z.strictObject({ sessionId: LiveSessionId, position: Position }),
+  status: 201,
+} as const satisfies RouteDef;
+
+/**
+ * A line of the session's stream. Every line carries the page's draft
+ * head. The first is `joins`, the session's joins past and present, sent
+ * again whenever one comes or goes; then each stored message after
+ * `after`, in order, and from then on each as it is stored; each presence
+ * as it is relayed, and on opening each present join's latest; each fold
+ * grant as it is given, placed or lapses; `draftHead` alone when only it
+ * moved; and last `ended`, after which the stream closes.
+ */
+export const StreamLine = z.union([
+  z.strictObject({ joins: z.array(Join), draftHead: RevisionId.nullable() }),
+  z.strictObject({ message: StoredMessage, draftHead: RevisionId.nullable() }),
+  z.strictObject({ presence: LiveMessage, draftHead: RevisionId.nullable() }),
+  z.strictObject({ grant: Grant, draftHead: RevisionId.nullable() }),
+  z.strictObject({ draftHead: RevisionId.nullable() }),
+  z.strictObject({
+    ended: z.union([EndReason, z.literal('deleted')]),
+    draftHead: RevisionId.nullable(),
+  }),
+]);
+export type StreamLine = z.infer<typeof StreamLine>;
+
+/**
+ * The session's stream, in NDJSON. Opening it joins the session as
+ * `joinId`: a new join, or one of the caller's still present, which it
+ * resumes; a join of the caller's that has gone is `duplicate`, and a
+ * person's ninth present join `rate-limited`. `after` is the position the
+ * app holds; if messages after it have since gone with a snapshot, it is
+ * `stale-head`, and the app joins again as a newcomer. An ended session's
+ * stream sends `ended` and closes, making no join.
+ */
+export const stream = {
+  method: 'GET',
+  path: '/api/live/:sessionId/stream',
+  params: SessionParams,
+  query: z.object({ after: z.coerce.number().pipe(Position), joinId: JoinId }),
+  event: StreamLine,
+} as const satisfies StreamRouteDef;
+
+/**
+ * One message a request sends, with `covers` for a `saved`, the position
+ * up to which the saved document held every stored message (unsigned),
+ * and for no other kind.
+ */
+export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.optional() });
+
+/**
+ * Send messages from the caller's join `joinId`, in `seq` order: stored
+ * kinds numbered from one more than the join's last stored, a presence
+ * with the `seq` of the last stored before it (`invalid-request`). A
+ * stored message sent again unchanged after a lost answer is taken as
+ * stored; another at its `seq` is `duplicate`. `parent` makes `joinId` a
+ * further join of the caller's present join `parent` (at most two present,
+ * `rate-limited`), which keeps no presence and goes when `parent` goes.
+ * Snapshots go to `postSnapshot`. Over the limits: `payload-too-large`,
+ * `rate-limited` (16 MiB of stored messages a minute per person) or
+ * `storage-full`. An ended session takes only `saved` (`forbidden`).
+ *
+ * `fold` asks for the fold grant of the outsider's revision `fold`, which
+ * must be the draft head; the grant goes to the main join (`joinId`, or
+ * its `parent`). A request naming `fold` from a further join of the
+ * grant's holder places the grant: its one `update` is the grant's. In an
+ * ended session every join of which has left, `fold` is the session's own
+ * ID and asks to catch up from it: `joinId` becomes the caller's join for
+ * that, whose `saved` then lets the server delete the session.
+ * `grant` is that revision's grant as it stands, someone else's included.
+ */
+export const sendMessages = {
+  method: 'POST',
+  path: '/api/live/:sessionId/messages',
+  params: SessionParams,
+  body: z.object({
+    joinId: JoinId,
+    messages: z.array(Outgoing).max(MAX_MESSAGES),
+    parent: JoinId.optional(),
+    fold: z.union([RevisionId, LiveSessionId]).optional(),
+  }),
+  response: z.strictObject({
+    /** Each message's position, in order; null for a presence. */
+    positions: z.array(Position.nullable()),
+    grant: Grant.nullable(),
+  }),
+} as const satisfies RouteDef;
+
+/**
+ * Post a later snapshot (section 5.10), from the caller's join `joinId`,
+ * a further join for it as `sendMessages` makes one, naming in the clear
+ * the draft of the page it was made at, which the server then keeps.
+ * `covers` must not be below the latest kept snapshot's (`stale-head`),
+ * nor past the last position. The server then deletes the stored
+ * messages it covers but the first snapshot and each join's latest
+ * `update` or `saved`, and older later snapshots.
+ */
+export const postSnapshot = {
+  method: 'POST',
+  path: '/api/live/:sessionId/snapshots',
+  params: SessionParams,
+  body: z.object({
+    joinId: JoinId,
+    parent: JoinId.optional(),
+    message: LiveMessage,
+    covers: Position,
+    revisionId: RevisionId,
+  }),
+  response: z.strictObject({ position: Position }),
+  status: 201,
+} as const satisfies RouteDef;
+
+/** The caller's join `joinId` leaves at once, with its further joins. */
+export const leave = {
+  method: 'POST',
+  path: '/api/live/:sessionId/leave',
+  params: SessionParams,
+  body: z.object({ joinId: JoinId }),
+  response: Ok,
+} as const satisfies RouteDef;
+
+/**
+ * End the session (section 5.10, **Ending**), for anyone who can edit the
+ * page: the saver to start again, or an app that can't take part. It
+ * takes only `saved` from then on. Ending an ended session changes nothing.
+ */
+export const end = {
+  method: 'POST',
+  path: '/api/live/:sessionId/end',
+  params: SessionParams,
+  response: Ok,
+} as const satisfies RouteDef;

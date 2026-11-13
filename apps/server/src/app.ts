@@ -43,6 +43,7 @@ import { mountPublicLinkRoutes } from './routes/public-links.ts';
 import { mountSystemRoutes } from './routes/system.ts';
 import { mountTreeChangeRoutes } from './routes/tree-changes.ts';
 import { mountCommentChangeRoutes } from './routes/comment-changes.ts';
+import { mountLiveRoutes } from './routes/live.ts';
 import { aiSetup, mailSetup } from './settings.ts';
 
 /**
@@ -196,6 +197,8 @@ export function createApp({
   const treeChanges = mountTreeChangeRoutes(routes, { db, log });
   // And each change to a comment, on the same listener.
   const commentChanges = mountCommentChangeRoutes(routes, { db, log });
+  // Live sessions relay in memory, and hear of ends and moved heads on the same listener.
+  const live = mountLiveRoutes(routes, { db, log, storageBytes: config.limits.storageBytes });
   mountAgentRoutes(routes, { db });
   mountDesktopRoutes(routes, { db, auth });
   mountAdminAiRoutes(routes, { db, config, log });
@@ -214,5 +217,5 @@ export function createApp({
 
   app.notFound((c) => errorResponse(c, new ApiError('not-found', 'Not found')));
   app.onError(onError(log));
-  return { app, auth, treeChanges, commentChanges, renderer };
+  return { app, auth, treeChanges, commentChanges, live, renderer };
 }
