@@ -17,6 +17,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
+import { invite, shareFolder } from './support/sharing.ts';
 
 let t: TestApp;
 let person: Awaited<ReturnType<typeof personWithVault>>;
@@ -76,12 +77,12 @@ function added(base: readonly string[], more: readonly string[]) {
   return diff;
 }
 
-/** The page published as `pageId`, as its readers get it. */
-async function publication(spaceId: SpaceId, pageId: PageId) {
+/** The page published as `pageId`, as a reader, by default its owner, gets it. */
+async function publication(spaceId: SpaceId, pageId: PageId, ctx = person.ctx) {
   const page = { spaceId, pageId };
-  const { heads } = await pages.loadPage(person.ctx, pageId);
+  const { heads } = await pages.loadPage(ctx, pageId);
   if (!heads.publishedHead) throw new Error('expected a publication');
-  const version = await pages.openRevisionOf(person.ctx, page, 'published', heads.publishedHead);
+  const version = await pages.openRevisionOf(ctx, page, 'published', heads.publishedHead);
   if (version.opened.kind !== 'current') throw new Error('expected the current format');
   return { page, payload: version.opened.payload };
 }
@@ -210,5 +211,48 @@ describe('an import', () => {
     // Each change had a key, and only a lost one's was sent twice.
     expect(keys.every((key) => key?.startsWith('import:'))).toBe(true);
     expect(keys.length - new Set(keys).size).toBe(4);
+  });
+
+  it('finishes when its folder is shared partway through', async () => {
+    const spaceId = await spaceOperations.createSpace(person.ctx, { name: 'Shared midway' });
+    const folderId = await spaceOperations.createFolder(person.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Inbox',
+    });
+    const reader = await personWithVault(t);
+    const source = await vault([
+      file('A.md', 'Plain words.'),
+      file('C.md', 'See [[A]]. ![[photo.png]]'),
+      file('photo.png', 'PNG bytes'),
+    ]);
+    // Shared, by its owner's other app, just before the first page is published:
+    // where the import was told to write has moved into a share.
+    let shared: Promise<unknown> | undefined;
+    const sharing: Fetch = async (url, init) => {
+      if (routeOf(url, init) === 'POST /api/pages/:id/publications') {
+        shared ??= invite(person, reader, 'reader').then((member) =>
+          shareFolder(person.ctx, { spaceId, rootId: folderId, people: [member] }),
+        );
+      }
+      await shared;
+      return person.browser.fetch(url, init);
+    };
+    const { ctx } = through(person.ctx, sharing);
+    const summary = await importOperations.importNotes(ctx, {
+      scope: { spaceId, folderId },
+      source,
+    });
+    expect(summary).toMatchObject({ attachments: 1, unresolved: [], skipped: [] });
+    expect(summary.pages).toHaveLength(2);
+
+    // Its member reads both, the file too.
+    const a = await publication(spaceId, pageIdOf(summary, 'A.md'), reader.ctx);
+    expect(a.payload.markdown).toBe('Plain words.');
+    const c = await publication(spaceId, pageIdOf(summary, 'C.md'), reader.ctx);
+    const [ref] = c.payload.attachments;
+    if (!ref) throw new Error('expected an attachment');
+    const bytes = await pages.readAttachment(reader.ctx, c.page, 'published', ref);
+    expect(new TextDecoder().decode(bytes)).toBe('PNG bytes');
   });
 });

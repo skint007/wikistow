@@ -160,21 +160,15 @@ export async function importNotes(
   const stopped = () => new ImportStopped(placed.filter((p) => p.empty).length);
   // Hundreds of notes take longer than the server's write limits allow at once.
   ctx = onceEach(patient(ctx, stopped, signal), stopped, signal);
-  // The folder each page this import fills is in.
-  const folderOfPage = new Map<PageId, FolderId | null>();
-  const targets = targetsByFolder(ctx, scope.spaceId, folderOfPage);
+  const targets = targetsByFolder(ctx, scope.spaceId);
   ctx = targets.ctx;
   // Once more if who may read there changed, asking the server where to
   // write afresh: `step` is told it is a retry, to trust nothing it kept.
-  const again = async <T>(
-    pageId: PageId | null,
-    step: (retry: boolean) => Promise<T>,
-  ): Promise<T> => {
+  const again = async <T>(step: (retry: boolean) => Promise<T>): Promise<T> => {
     try {
       return await step(false);
     } catch (error) {
       if (!(error instanceof ApiError && error.code === 'permission-version')) throw error;
-      if (pageId !== null) targets.askAbout(pageId);
       return step(true);
     }
   };
@@ -213,7 +207,7 @@ export async function importNotes(
     const parentId = parentOf(folder.parent);
     let folderId = earlierFolders.get(placedAt(parentId, folder.key));
     if (folderId === undefined) {
-      folderId = await again(null, () =>
+      folderId = await again(() =>
         createFolder(ctx, {
           spaceId,
           parentId,
@@ -270,7 +264,6 @@ export async function importNotes(
       let pageId: PageId;
       if (earlier) {
         pageId = earlier.pageId;
-        folderOfPage.set(pageId, parentId);
         const { opened } = earlier.draft;
         if (opened.kind === 'current') savedBefore.set(note.key, opened.payload);
         // An earlier run cut short after saving the body has only to publish it.
@@ -282,7 +275,6 @@ export async function importNotes(
       } else {
         pageId = newId(PageIdSchema);
         const revisionId = newId(RevisionIdSchema);
-        folderOfPage.set(pageId, parentId);
         // A note that names no other note or file reads the same whatever
         // the other pages are, so its page is made with its body at once.
         const whole =
@@ -290,7 +282,7 @@ export async function importNotes(
           !note.markdown.includes('[[') &&
           !repairText(note.markdown).repaired;
         const make = (markdown: string) =>
-          again(pageId, () =>
+          again(() =>
             createPage(ctx, {
               spaceId,
               parentId,
@@ -310,6 +302,7 @@ export async function importNotes(
           await make('');
           empty = true;
         }
+        targets.made(pageId, parentId);
         live();
         placed.push({
           note,
@@ -419,7 +412,7 @@ export async function importNotes(
             extensions: importMark(from, note.key),
           });
       try {
-        const written = await again(pageId, () =>
+        const written = await again(() =>
           saveDraft(ctx, {
             page,
             basedOn: draftHead,
@@ -446,7 +439,7 @@ export async function importNotes(
       // as kept may be older than a share made since, as on a retry.
       const { written } = entry;
       const { publishedHead } = heads;
-      const published = await again(pageId, (retry) =>
+      const published = await again((retry) =>
         publishPage(ctx, page, {
           tree,
           expected: { draftHead, publishedHead },
@@ -606,23 +599,20 @@ type Target = Awaited<ReturnType<typeof treeTarget>>;
 
 /**
  * `ctx` asking the server where to write (`treeTarget`) once for each
- * folder an import fills, rather than for every change. A page made in a
- * folder takes its folder's permission version and is in its share, so a
- * page in `folderOf` gets its folder's answer, without the folder's name.
- * The server still checks each change against its own word. A refused
- * change forgets every answer, so the next change, or the same one sealed
- * again with fresh keys, asks again. `askAbout` has a page asked about
- * itself from then on, as for one whose permission version moved on from
- * its folder's.
+ * folder an import fills, rather than for every change. A page takes the
+ * permission version of the folder it was made in, as it was then, and is
+ * in its share, so a page this import made (`made`) gets the answer its
+ * folder gave for making it, without the folder's name. Any other page is
+ * asked about once. The server still checks each change against its own
+ * word. A refused change forgets every answer, so the next change, or the
+ * same one sealed again with fresh keys, asks again.
  */
-function targetsByFolder(
-  ctx: ClientContext,
-  spaceId: SpaceId,
-  folderOf: ReadonlyMap<string, FolderId | null>,
-) {
+function targetsByFolder(ctx: ClientContext, spaceId: SpaceId) {
   const { api } = ctx;
+  // By node: a folder, the space (null), or a page asked about itself.
   const answers = new Map<string | null, Promise<Target>>();
-  const own = new Set<string>();
+  // By page this import made: the answer it was made with.
+  const pinned = new Map<string, Promise<Target>>();
   const ask = (nodeId: string | null) => {
     const known = answers.get(nodeId);
     if (known) return known;
@@ -642,22 +632,26 @@ function targetsByFolder(
       const { params, query } = input as CallInput<typeof structureRoutes.target>;
       if (params.spaceId !== spaceId) return api.call(...args);
       const nodeId = query.nodeId ?? null;
-      const folder = nodeId === null || own.has(nodeId) ? undefined : folderOf.get(nodeId);
-      if (folder === undefined) return ask(nodeId);
-      return { ...(await ask(folder)), name: null } satisfies Target;
+      const madeWith = nodeId === null ? undefined : pinned.get(nodeId);
+      if (madeWith === undefined) return ask(nodeId);
+      return { ...(await madeWith), name: null } satisfies Target;
     }
     try {
       return await api.call(...args);
     } catch (error) {
-      if (KEYED.has(route) && error instanceof ApiError) answers.clear();
+      if (KEYED.has(route) && error instanceof ApiError) {
+        answers.clear();
+        pinned.clear();
+      }
       throw error;
     }
   }) as ApiClient['call'];
   return {
     ctx: { ...ctx, api: { ...api, call } },
-    askAbout: (pageId: PageId) => {
-      own.add(pageId);
-      answers.delete(pageId);
+    /** `pageId` was just made in `parentId`, with the answer asked last for it. */
+    made: (pageId: PageId, parentId: FolderId | null) => {
+      const used = answers.get(parentId);
+      if (used) pinned.set(pageId, used);
     },
   };
 }
