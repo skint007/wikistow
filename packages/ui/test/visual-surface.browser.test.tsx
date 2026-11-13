@@ -425,9 +425,8 @@ describe('the visual surface', () => {
     await expect.poll(() => m.handle.read()).toBe(text);
   });
 
-  // Its read back alone may take 30 s on a busy runner.
   it(
-    'writes and reads whole an edit on a long page not yet read back, if the page is hidden first',
+    'reports an edit on a long page just opened without reading it all back, writing only what changed',
     { timeout: 60_000 },
     async () => {
       const t = await transformer();
@@ -435,20 +434,19 @@ describe('the visual surface', () => {
       const body = Array.from({ length: Math.ceil(100_000 / chunk.length) }, () => chunk).join(
         '\n\n',
       );
-      // Its first block written as typed would link `https://x.org\`: only
-      // reading it back finds it must be written otherwise.
+      // Its first block written anew would be `<https://x.org>\_`: it's kept as written.
       const page = `See https://x.org_ and more.\n\n${body}\n\nEnd\n`;
       const m = await mount(page);
       const view = viewOf(m.dom);
       await typeAtEnd(m, ' more ');
       paste(m, { 'text/plain': '*word*' });
       expect(view.state.doc.lastChild?.textContent).toBe('End more word');
-      expect(m.changes).toEqual([]);
-      // Hidden, as when the tab closes, it's written and read whole at once.
+      await expect.poll(() => m.changes.length).toBeGreaterThan(0);
       window.dispatchEvent(new PageTransitionEvent('pagehide'));
-      expect(m.changes).toHaveLength(1);
-      expect(m.changes[0]).toMatch(/^See <https:\/\/x\.org>\\_ and more\.\n/);
-      expect(writesAsShown(view.state.doc, withLf(m.changes[0] ?? ''), t.parse)).toBe(true);
+      const written = page.replace(/End\n$/, 'End more *word*\n');
+      expect(m.changes.at(-1)).toBe(written);
+      expect(writesAsShown(view.state.doc, withLf(written), t.parse)).toBe(true);
+      expect(m.unfaithful).toEqual([]);
     },
   );
 
