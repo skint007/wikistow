@@ -326,7 +326,7 @@ declare const __APP_VERSION__: string;
  * missed meanwhile (`searchIndexChanged`), updates the one in memory
  * (`updateIndex`): only the spaces named are listed again, and every one
  * if none are, as when it is shown again a minute old. Only pages whose
- * version changed are opened and indexed again, and an update that finds
+ * version changed, or held without its time, are opened and indexed again, and an update that finds
  * nothing changed leaves the same index. Locking drops it with everything
  * else, and `refreshAccess` builds it afresh, so nothing outlives a lost
  * grant. Where it is kept, it is kept once this person's saves pause, and at
