@@ -136,10 +136,12 @@ export type EndReason = z.infer<typeof EndReason>;
  * with the wrap, or their own envelopes, which may be none; its first
  * snapshot; its latest later snapshot, if any; each join's latest kept
  * `update` or `saved` at or before the position that snapshot covers;
- * and the stored messages after it, up to `position`, oldest first. When
+ * and the stored messages after it, up to `position`, oldest first. One
+ * fetch serves about 8 MiB of messages, its sessions together. When
  * `complete` is false there are more, which the stream serves from
- * `position`. `grants` are those given since the latest snapshot, and the
- * one for the current draft head.
+ * `position`, with `kept=1` while `position` is below what the snapshot
+ * covers (the rest of `latest`). `grants` are those given since the
+ * latest snapshot, and the one for the current draft head.
  */
 export const ServedSession = z.strictObject({
   sessionId: LiveSessionId,
@@ -241,16 +243,25 @@ export type StreamLine = z.infer<typeof StreamLine>;
  * resumes; a join of the caller's that has gone, or a further join, is
  * `not-found`, and a person's ninth present join `rate-limited`, as is a
  * join past `MAX_JOINS_MADE_PER_PERSON` or `MAX_JOINS_PER_SESSION`, or a
- * person's stream past the server's limit of open streams. `after` is the position the
- * app holds; if messages after it have since gone with a snapshot, it is
- * `stale-head`, and the app joins again as a newcomer. An ended session's
- * stream sends `ended` and closes, making no join.
+ * person's stream past the server's limit of open streams. `after` is
+ * the position the app holds; if messages after it have since gone with
+ * a snapshot, it is `stale-head`, and the app joins again as a newcomer.
+ * `kept=1` lets a newcomer start below what the latest snapshot covers,
+ * to fetch the rest of what it kept (`ServedSession.complete`). A stream
+ * that a newer snapshot leaves short of messages closes, as one too slow
+ * to read does; the app opens it again from where it got. A stream opened
+ * from another site is `forbidden`. An ended session's stream sends
+ * `ended` and closes, making no join.
  */
 export const stream = {
   method: 'GET',
   path: '/api/live/:sessionId/stream',
   params: SessionParams,
-  query: z.object({ after: z.coerce.number().pipe(Position), joinId: JoinId }),
+  query: z.object({
+    after: z.coerce.number().pipe(Position),
+    joinId: JoinId,
+    kept: z.literal('1').optional(),
+  }),
   event: StreamLine,
 } as const satisfies StreamRouteDef;
 
@@ -263,13 +274,16 @@ export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.
 
 /**
  * Send messages from the caller's join `joinId`, in `seq` order: stored
- * kinds numbered from one more than the join's last stored, a presence
- * with the `seq` of the last stored before it (`invalid-request`). A
+ * kinds numbered from one more than the join's last stored, at most one
+ * presence, with the `seq` of the last stored before it (`invalid-request`). A
  * stored message sent again unchanged after a lost answer is taken as
  * stored; another at its `seq` is `duplicate`. `parent` makes `joinId` a
  * further join of the caller's present join `parent` (at most two present,
- * `rate-limited`), which keeps no presence and goes when `parent` goes.
- * A join that has gone is `not-found`; the app joins afresh. A starter's
+ * `rate-limited`), which keeps no presence and goes when `parent` goes,
+ * or 30 s after its last request: an app keeps one through a long save
+ * with a request from it with no messages. Any request from a join keeps
+ * it present, in an open session. A join that has gone is `not-found`;
+ * the app joins afresh. A starter's
  * join is present for 30 s until its stream opens, whatever it sends.
  * Snapshots go to `postSnapshot`. Over the limits: `payload-too-large`,
  * `rate-limited` (16 MiB of stored messages a minute per person) or

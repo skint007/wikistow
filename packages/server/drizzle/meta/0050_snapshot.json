@@ -1,5 +1,5 @@
 {
-  "id": "a39eef07-e571-40fb-bdf5-3b29dd86255c",
+  "id": "e0e472bb-9ac7-44e4-b19e-bd2d1a1adb33",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -4820,6 +4820,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "stream_token": {
+          "name": "stream_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "stream_broke_at": {
           "name": "stream_broke_at",

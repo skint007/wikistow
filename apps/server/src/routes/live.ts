@@ -50,8 +50,15 @@ const ACCESS_MS = 10_000;
  * dropped, for a reader that stopped reading; it joins again from where it got.
  */
 const MAX_QUEUED_BYTES = 8 * 1024 * 1024;
-/** Streams one person may have open at once, every session together (`rate-limited`). */
+/**
+ * Streams one person may have open at once, every session together,
+ * counted from before the join until the stream has finished
+ * (`rate-limited`), and fetches of a session at once.
+ */
 const MAX_STREAMS_PER_ACCOUNT = 16;
+const MAX_FETCHES_PER_ACCOUNT = 2;
+/** How long a closed stream has to send what it had queued before it is cut off. */
+const DRAIN_MS = 5000;
 
 type LiveMessage = liveRoutes.LiveMessage;
 type Line = z.input<typeof liveRoutes.StreamLine>;
@@ -75,6 +82,11 @@ type Stream = {
   /** Ended without telling the database its join's stream broke: a newer one replaced it. */
   replaced: boolean;
   wake: (() => void) | null;
+  /** When it opened, and what the latest snapshot covered then. */
+  openedAt: number;
+  openCovers: number;
+  /** End its response now, read or not. */
+  stop: () => void;
 };
 
 type Followed = {
@@ -111,8 +123,16 @@ export function mountLiveRoutes(
     log({ level: 'warn', event: 'unreadable-row', table, rowId: id });
   const followed = new Map<string, Followed>();
   const closing = new AbortController();
-  // People with a fetch of a session in hand: one at a time each, since one can be large.
-  const fetching = new Set<string>();
+  // Each person's fetches of a session in hand, and streams from before their join until done.
+  const fetching = new Map<string, number>();
+  const streaming = new Map<string, number>();
+  const count = (counts: Map<string, number>, key: string, by: number) => {
+    const next = (counts.get(key) ?? 0) + by;
+    if (next > 0) counts.set(key, next);
+    else counts.delete(key);
+  };
+  // Each session's reads one after another, so an older one never lands after a newer.
+  const reading = new Map<string, Promise<void>>();
 
   function failed(error: unknown) {
     log({
@@ -148,6 +168,8 @@ export function mountLiveRoutes(
     stream.final = drop ? null : final;
     stream.closed = true;
     stream.wake?.();
+    // A reader that doesn't read never lets it finish: cut it off.
+    setTimeout(() => stream.stop(), drop ? 0 : DRAIN_MS).unref();
   }
 
   function pushAll(session: Followed, line: Bare) {
@@ -161,6 +183,20 @@ export function mountLiveRoutes(
     session.draftHead = draftHead;
     session.draftCount = draftCount;
     pushAll(session, {});
+  }
+
+  // A grant as it stands, told only when it moved on: placed, or lapsed,
+  // never back, whichever of a read and a request comes first.
+  function heardGrant(session: Followed, grant: liveRoutes.Grant) {
+    const known = session.grants.get(grantKey(grant));
+    if (known) {
+      const before = JSON.parse(known) as liveRoutes.Grant;
+      if (JSON.stringify(before) === JSON.stringify(grant)) return;
+      if (before.position !== null && grant.position === null) return;
+      if (before.lapsed && !grant.lapsed) return;
+    }
+    session.grants.set(grantKey(grant), JSON.stringify(grant));
+    pushAll(session, { grant });
   }
 
   /** Every stream of a session that ended or went gets that as its last line. */
@@ -177,10 +213,22 @@ export function mountLiveRoutes(
     if (session.streams.size === 0) followed.delete(sessionId);
   }
 
-  // A session read again: what changed goes to its streams.
-  async function refresh(sessionId: string) {
+  // A session read again, after any read of it already going.
+  function refresh(sessionId: string): Promise<void> {
+    const next = (reading.get(sessionId) ?? Promise.resolve())
+      .then(() => readAgain(sessionId))
+      .finally(() => {
+        if (reading.get(sessionId) === next) reading.delete(sessionId);
+      });
+    reading.set(sessionId, next);
+    return next;
+  }
+
+  // What changed goes to its streams.
+  async function readAgain(sessionId: string) {
     const session = followed.get(sessionId);
     if (!session) return;
+    const startedAt = Date.now();
     const state = await liveState(db, sessionId);
     if (!state) {
       endAll(session, 'deleted');
@@ -199,17 +247,14 @@ export function mountLiveRoutes(
       for (const key of session.presence.keys()) {
         if (!present.has(key)) session.presence.delete(key);
       }
-      // A stream whose join went is closed; its app joins afresh.
+      // A stream whose join went is closed; its app joins afresh. One opened
+      // since the read began may not be in it yet.
       for (const stream of session.streams) {
+        if (stream.openedAt >= startedAt) continue;
         if (!present.has(joinKey(stream.identityId, stream.joinId))) close(stream);
       }
     }
-    for (const grant of state.grants) {
-      const json = JSON.stringify(grant);
-      if (session.grants.get(grantKey(grant)) === json) continue;
-      session.grants.set(grantKey(grant), json);
-      pushAll(session, { grant });
-    }
+    for (const grant of state.grants) heardGrant(session, grant);
     for (const stream of session.streams) {
       if (state.lastPosition > stream.known) {
         stream.known = state.lastPosition;
@@ -289,20 +334,21 @@ export function mountLiveRoutes(
       return;
     }
     setHead(session, change.draftHead, change.draftCount);
-    for (const stored of change.stored) {
-      if (stored.message.kind === 'snapshot' && stored.covers !== null) {
-        session.snapshotCovers = Math.max(session.snapshotCovers, stored.covers);
+    // In the order the request sent them, presence among the rest.
+    for (const item of change.sent) {
+      if ('stored' in item) {
+        const { stored } = item;
+        if (stored.message.kind === 'snapshot' && stored.covers !== null) {
+          session.snapshotCovers = Math.max(session.snapshotCovers, stored.covers);
+        }
+        for (const stream of session.streams) push(stream, { stored });
+      } else {
+        const { presence } = item;
+        session.presence.set(joinKey(presence.senderId, presence.joinId), presence);
+        pushAll(session, { presence });
       }
-      for (const stream of session.streams) push(stream, { stored });
     }
-    for (const presence of change.presence) {
-      session.presence.set(joinKey(presence.senderId, presence.joinId), presence);
-      pushAll(session, { presence });
-    }
-    for (const grant of change.grants) {
-      session.grants.set(grantKey(grant), JSON.stringify(grant));
-      pushAll(session, { grant });
-    }
+    for (const grant of change.grants) heardGrant(session, grant);
     if (change.joinsChanged) refresh(change.sessionId).catch(failed);
   }
 
@@ -314,14 +360,14 @@ export function mountLiveRoutes(
   routes.content(
     liveRoutes.getLive,
     async ({ params }, { actor }) => {
-      if (fetching.has(actor.accountId)) {
-        throw new ApiError('rate-limited', 'Fetching a session already; try again shortly');
+      if ((fetching.get(actor.accountId) ?? 0) >= MAX_FETCHES_PER_ACCOUNT) {
+        throw new ApiError('rate-limited', 'Fetching sessions already; try again shortly');
       }
-      fetching.add(actor.accountId);
+      count(fetching, actor.accountId, 1);
       try {
         return await getLive(db, actor, params.pageId, report).catch(toApiError);
       } finally {
-        fetching.delete(actor.accountId);
+        count(fetching, actor.accountId, -1);
       }
     },
     SHARED,
@@ -420,23 +466,44 @@ export function mountLiveRoutes(
 
   routes.stream(
     liveRoutes.stream,
-    async (_body, { principal, signal, input }) => {
+    async (_body, { c, principal, signal, input, stop }) => {
       const { sessionId } = input.params;
-      const { joinId, after } = input.query;
-      const open = [...followed.values()]
-        .flatMap((s) => [...s.streams])
-        .filter((s) => s.accountId === principal.accountId && !s.closed && s.joinId !== joinId);
-      if (open.length >= MAX_STREAMS_PER_ACCOUNT) {
+      const { joinId, after, kept } = input.query;
+      // A GET that joins: never from another site, as a navigation would be.
+      const site = c.req.header('sec-fetch-site');
+      if (site !== undefined && site !== 'same-origin' && site !== 'none') {
+        throw new ApiError('forbidden', 'Cross-origin request refused');
+      }
+      const account = principal.accountId;
+      const replacing = [...(followed.get(sessionId)?.streams ?? [])].some(
+        (s) => s.accountId === account && s.joinId === joinId,
+      );
+      if ((streaming.get(account) ?? 0) >= MAX_STREAMS_PER_ACCOUNT && !replacing) {
         throw new ApiError('rate-limited', 'Too many sessions open at once');
       }
-      const joined = await joinLive(db, {
-        actor: humanActor(principal.accountId),
-        sessionId,
-        joinId,
-        after,
-      }).catch(toApiError);
+      // Counted from now until the stream has finished, its join included.
+      count(streaming, account, 1);
+      let counted = true;
+      const release = () => {
+        if (counted) count(streaming, account, -1);
+        counted = false;
+      };
+      let joined: Awaited<ReturnType<typeof joinLive>>;
+      try {
+        joined = await joinLive(db, {
+          actor: humanActor(account),
+          sessionId,
+          joinId,
+          after,
+          kept: kept === '1',
+        });
+      } catch (error) {
+        release();
+        return toApiError(error);
+      }
       const draftHead = joined.draftHead as Line['draftHead'];
       if (joined.ended !== null) {
+        release();
         const reason = joined.ended;
         return (async function* () {
           yield { ended: reason, draftHead } satisfies Line;
@@ -458,15 +525,15 @@ export function mountLiveRoutes(
       }
       const here = session;
       setHead(here, joined.draftHead, joined.draftCount);
-      // A newer stream of a join replaces the older one.
+      // A newer stream of a join replaces the older one, which sends nothing more.
       for (const other of here.streams) {
         if (other.identityId === joined.identityId && other.joinId === joined.joinId) {
           other.replaced = true;
-          close(other);
+          close(other, null, { drop: true });
         }
       }
       const stream: Stream = {
-        accountId: principal.accountId,
+        accountId: account,
         authSessionId: principal.sessionId,
         identityId: joined.identityId,
         joinId: joined.joinId,
@@ -478,41 +545,51 @@ export function mountLiveRoutes(
         closed: false,
         replaced: false,
         wake: null,
+        openedAt: Date.now(),
+        openCovers: joined.snapshotCovers,
+        stop,
       };
       const ended = AbortSignal.any([signal, closing.signal]);
-      const stop = () => close(stream);
-      ended.addEventListener('abort', stop, { once: true });
+      const abort = () => close(stream);
+      ended.addEventListener('abort', abort, { once: true });
       here.streams.add(stream);
       // Others hear of the join; the tick reads the session soon in any case.
       refresh(sessionId).catch(failed);
 
       const head = () => here.draftHead as Line['draftHead'];
       const finish = () => {
-        ended.removeEventListener('abort', stop);
+        ended.removeEventListener('abort', abort);
         here.streams.delete(stream);
+        release();
         forget(sessionId, here);
         if (!stream.replaced) {
           streamClosed(db, {
             sessionId,
             identityId: stream.identityId,
             joinId: stream.joinId,
+            token: joined.token,
           })
             .then(() => refresh(sessionId))
             .catch(failed);
         }
       };
 
-      // Stored messages after `sent` up to `upTo`, from the database, in order.
+      // Stored messages after `sent` up to `upTo`, from the database, in
+      // order. A snapshot that deleted some of them since the stream opened
+      // leaves it short: it closes, and its app opens it again from `sent`.
       async function* catchUp(upTo: number) {
         while (stream.sent < upTo && !stream.closed) {
-          // Messages a later snapshot covered are gone: the app joins afresh.
-          if (stream.sent < here.snapshotCovers) {
-            close(stream);
+          const { messages, snapshotCovers } = await storedAfter(db, sessionId, stream.sent, {
+            upTo,
+          });
+          here.snapshotCovers = Math.max(here.snapshotCovers, snapshotCovers);
+          if (snapshotCovers > Math.max(stream.sent, stream.openCovers)) {
+            close(stream, null, { drop: true });
             return;
           }
-          const batch = await storedAfter(db, sessionId, stream.sent, { upTo });
-          if (batch.length === 0) return;
-          for (const stored of batch) {
+          if (messages.length === 0) return;
+          for (const stored of messages) {
+            if (stream.closed) return;
             stream.sent = stored.position;
             yield { message: stored, draftHead: head() } satisfies Line;
           }

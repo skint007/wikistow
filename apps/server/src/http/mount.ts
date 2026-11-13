@@ -448,7 +448,12 @@ export function createRoutes({
       route: R,
       handler: (
         body: StreamBody<R>,
-        ctx: AccountCtx & { signal: AbortSignal; input: StreamInput<R> },
+        ctx: AccountCtx & {
+          signal: AbortSignal;
+          input: StreamInput<R>;
+          /** End the response now, whether or not its reader is reading. */
+          stop: () => void;
+        },
       ) => AsyncIterable<z.input<R['event']>> | Promise<AsyncIterable<z.input<R['event']>>>,
       options: Pick<Options, 'rateLimit'> & {
         /**
@@ -482,7 +487,9 @@ export function createRoutes({
         // handler can stop its own work (the provider's request) at once.
         const left = new AbortController();
         const signal = AbortSignal.any([c.req.raw.signal, left.signal]);
-        const events = await handler(body, { c, principal, signal, input });
+        let stop = () => {};
+        let stopped = false;
+        const events = await handler(body, { c, principal, signal, input, stop: () => stop() });
         const iterator = events[Symbol.asyncIterator]();
         const encoder = new TextEncoder();
         // The event being waited for, kept across a keep-alive. Handled here
@@ -491,6 +498,19 @@ export function createRoutes({
         // Pulled one event at a time, so a slow reader slows the provider's
         // stream rather than filling memory.
         const lines = new ReadableStream<Uint8Array>({
+          start(controller) {
+            stop = () => {
+              if (stopped) return;
+              stopped = true;
+              left.abort();
+              void iterator.return?.();
+              try {
+                controller.close();
+              } catch {
+                // Closed already.
+              }
+            };
+          },
           async pull(controller) {
             if (!pending) {
               pending = iterator.next();
@@ -504,6 +524,7 @@ export function createRoutes({
               timer = setTimeout(resolve, STREAM_KEEPALIVE_MS, null);
             });
             const next = await Promise.race([pending, quiet]).finally(() => clearTimeout(timer));
+            if (stopped) return;
             if (next === null) {
               controller.enqueue(encoder.encode('\n'));
               return;

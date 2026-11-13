@@ -19,6 +19,7 @@ import {
   sealedBytes,
   verifySignature,
 } from '@wikistow/client';
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import {
@@ -378,8 +379,9 @@ function servedGrant(grant: GrantRow, isLapsed: boolean): liveRoutes.Grant {
  * The fold grant for `subject`, giving it to `holder` if nobody holds it
  * (section 5.10, **Saving**). None is given for a revision whose fold was
  * placed, and the latest grant comes back as it stands. Once a person's
- * grant lapsed, a join of theirs gets it next only while no other person
- * has a join present, so one member can't hold the session's saves up by
+ * grant lapsed, a join of theirs gets it again only 30 s later, or sooner
+ * if no other person has a join present, so another who asks meanwhile
+ * gets it first, and one member can't hold the session's saves up by
  * taking it again and again.
  */
 async function takeGrant(
@@ -406,12 +408,17 @@ async function takeGrant(
   }
   const held = grants.find((g) => g.lapsedAt === null);
   if (held) return { grant: held, lapsed: false };
-  // The person whose grant lapsed last waits while anyone else could ask.
+  // The person whose grant lapsed last waits 30 s, while anyone else here may ask first.
   const latest = grants[0];
   const othersHere = joins.some(
     (j) => j.identityId !== holder.identityId && present.has(joinKey(j.identityId, j.joinId)),
   );
-  if (latest && latest.identityId === holder.identityId && othersHere) {
+  if (
+    latest?.lapsedAt &&
+    latest.identityId === holder.identityId &&
+    othersHere &&
+    latest.lapsedAt.getTime() + GRACE_MS > now.getTime()
+  ) {
     return { grant: latest, lapsed: true };
   }
   const [given] = await tx
@@ -431,7 +438,11 @@ async function takeGrant(
 
 // --- Serving ---------------------------------------------------------------
 
-/** Bytes of stored messages one fetch of a session serves at most; the stream serves the rest. */
+/**
+ * Bytes of stored messages one fetch serves at most, its sessions
+ * together, snapshots included; past them it serves at least one more of
+ * each session, and the stream serves the rest.
+ */
 const SERVED_MESSAGE_BYTES = 8 * 1024 * 1024;
 
 async function servedSession(
@@ -442,7 +453,15 @@ async function servedSession(
     heads,
     now,
     report,
-  }: { identity: PublicIdentity; heads: Heads; now: Date; report: ReportUnreadable },
+    budget,
+  }: {
+    identity: PublicIdentity;
+    heads: Heads;
+    now: Date;
+    report: ReportUnreadable;
+    /** Bytes left of the fetch's `SERVED_MESSAGE_BYTES`. */
+    budget: { left: number };
+  },
 ): Promise<liveRoutes.ServedSession | null> {
   const row = { table: 'live_sessions', id: session.id };
   const record = readStored(SealedLive, session.sealed, row, report);
@@ -476,6 +495,7 @@ async function servedSession(
   const firstSnapshot = first && servedMessage(first, report);
   if (!firstSnapshot) return null;
   let snapshot: liveRoutes.StoredMessage | null = null;
+  let snapshotSize: number | null = null;
   if (session.snapshotPosition !== null) {
     const [later] = await tx
       .select()
@@ -488,6 +508,7 @@ async function servedSession(
       );
     snapshot = (later && servedMessage(later, report)) ?? null;
     if (!snapshot) return null;
+    snapshotSize = later?.size ?? 0;
   }
   // Each join's latest kept `update` or `saved` at or before what the snapshot covers.
   const latest =
@@ -500,21 +521,39 @@ async function servedSession(
               and kind in ('update', 'saved')
             order by identity_id, join_id, position desc`)
         ).map((r) => Number(r.position));
-  const latestRows =
+  budget.left -= first.size + (session.snapshotPosition === null ? 0 : (snapshotSize ?? 0));
+  // Each join's latest kept change, in order, as far as the budget goes.
+  let served = 0;
+  const fits = (size: number) => served === 0 || budget.left - size >= 0;
+  const sizes =
     latest.length === 0
       ? []
       : await tx
-          .select()
+          .select({ position: liveMessages.position, size: liveMessages.size })
           .from(liveMessages)
           .where(
             and(eq(liveMessages.sessionId, session.id), inArray(liveMessages.position, latest)),
           )
           .orderBy(asc(liveMessages.position));
+  const taken: number[] = [];
+  for (const { position, size } of sizes) {
+    if (!fits(size)) break;
+    budget.left -= size;
+    served++;
+    taken.push(position);
+  }
+  const latestRows =
+    taken.length === 0
+      ? []
+      : await tx
+          .select()
+          .from(liveMessages)
+          .where(and(eq(liveMessages.sessionId, session.id), inArray(liveMessages.position, taken)))
+          .orderBy(asc(liveMessages.position));
   const messages: liveRoutes.StoredMessage[] = [];
-  // Each join's latest kept change counts toward what one fetch serves.
-  let bytes = latestRows.reduce((total, r) => total + r.size, 0);
-  let position = base;
-  let complete = true;
+  let position = taken.at(-1) ?? base;
+  let complete = taken.length === sizes.length;
+  if (complete) position = base;
   for (let after = base; complete;) {
     const batch = await tx
       .select()
@@ -529,13 +568,14 @@ async function servedSession(
         position = message.position;
         continue;
       }
-      if (bytes + message.size > SERVED_MESSAGE_BYTES) {
+      if (!fits(message.size)) {
         complete = false;
         break;
       }
-      bytes += message.size;
-      const served = servedMessage(message, report);
-      if (served) messages.push(served);
+      budget.left -= message.size;
+      served++;
+      const one = servedMessage(message, report);
+      if (one) messages.push(one);
       position = message.position;
     }
   }
@@ -614,7 +654,15 @@ export async function getLive(
       )
       .orderBy(desc(liveSessions.endedAt))
       .limit(10);
-    const at = { identity: caller.identity, heads, now, report };
+    const at = {
+      identity: caller.identity,
+      heads,
+      now,
+      report,
+      budget: { left: SERVED_MESSAGE_BYTES },
+    };
+    // The open one first, so the budget goes to it.
+    const open = openRow ? await servedSession(tx, openRow, at) : null;
     let ended: liveRoutes.ServedSession | null = null;
     for (const session of endedRows) {
       if (presentSet(await joinsOf(tx, session.id), now).size > 0) continue;
@@ -624,7 +672,7 @@ export async function getLive(
       break;
     }
     return {
-      open: openRow ? await servedSession(tx, openRow, at) : null,
+      open,
       ended,
       draftHead: heads.draftHead as liveRoutes.ServedSession['revisionId'] | null,
     };
@@ -849,6 +897,7 @@ export type Joined =
       draftCount: number;
       lastPosition: number;
       snapshotCovers: number;
+      token: string;
     };
 
 /**
@@ -857,11 +906,14 @@ export type Joined =
  * caller's that has gone is `not-found`, and so is a further join, which
  * has no stream. `after` past the last position is `invalid-request`, and
  * below what the latest later snapshot covers, whose messages are gone,
- * `stale-head`. An ended session makes no join.
+ * `stale-head`, but with `kept`, for a newcomer still fetching what that
+ * snapshot kept. An ended session makes no join. Each stream gets a token
+ * of its own, so a stream that broke marks its join only while it is the
+ * join's latest.
  */
 export async function joinLive(
   db: Database,
-  input: { actor: Actor; sessionId: string; joinId: string; after: number },
+  input: { actor: Actor; sessionId: string; joinId: string; after: number; kept?: boolean },
 ): Promise<Joined> {
   return db.transaction(async (tx) => {
     const { caller, page, session } = await sessionFor(tx, input.actor, input.sessionId, {
@@ -874,13 +926,14 @@ export async function joinLive(
     if (input.after > session.lastPosition) {
       throw new ContentError('invalid-request', 'That position is past the session’s last');
     }
-    if (session.snapshotCovers !== null && input.after < session.snapshotCovers) {
+    if (session.snapshotCovers !== null && input.after < session.snapshotCovers && !input.kept) {
       throw new ContentError('stale-head', 'A snapshot has covered what you missed; join afresh', {
         draftHead: heads.draftHead,
         publishedHead: heads.publishedHead,
       });
     }
     const now = await dbNow(tx);
+    const token = randomUUID();
     const joins = await joinsOf(tx, session.id);
     const present = presentSet(joins, now);
     const mine = joins.find(
@@ -899,7 +952,7 @@ export async function joinLive(
       }
       await tx
         .update(liveJoins)
-        .set({ streamOpen: true, streamBrokeAt: null, lastMessageAt: now })
+        .set({ streamOpen: true, streamToken: token, streamBrokeAt: null, lastMessageAt: now })
         .where(
           and(
             eq(liveJoins.sessionId, session.id),
@@ -917,6 +970,7 @@ export async function joinLive(
         accountId: caller.accountId,
         ordinal: session.joinsMade + 1,
         streamOpen: true,
+        streamToken: token,
         lastMessageAt: now,
       });
       await tx
@@ -934,6 +988,7 @@ export async function joinLive(
       draftCount: heads.draftCount,
       lastPosition: session.lastPosition,
       snapshotCovers: session.snapshotCovers ?? 0,
+      token,
     };
   });
 }
@@ -960,20 +1015,23 @@ function requireRoomForJoin(joins: readonly JoinRow[], present: Set<string>, ide
   }
 }
 
-/** A stream of `joinId` broke: the join stays present for 30 s more at most. */
+/**
+ * The stream `token` of `joinId` broke: the join stays present for 30 s
+ * more at most, unless a newer stream of it opened meanwhile.
+ */
 export async function streamClosed(
   db: Database,
-  input: { sessionId: string; identityId: string; joinId: string },
+  input: { sessionId: string; identityId: string; joinId: string; token: string },
 ) {
   await db
     .update(liveJoins)
-    .set({ streamOpen: false, streamBrokeAt: sql`now()` })
+    .set({ streamOpen: false, streamToken: null, streamBrokeAt: sql`now()` })
     .where(
       and(
         eq(liveJoins.sessionId, input.sessionId),
         eq(liveJoins.identityId, input.identityId),
         eq(liveJoins.joinId, input.joinId),
-        eq(liveJoins.streamOpen, true),
+        eq(liveJoins.streamToken, input.token),
       ),
     );
 }
@@ -1098,8 +1156,8 @@ async function catchUpJoin(
 export type Relay = {
   sessionId: string;
   pageId: string;
-  stored: liveRoutes.StoredMessage[];
-  presence: LiveMessage[];
+  /** What it stored and relayed, in the order the request sent it. */
+  sent: ({ stored: liveRoutes.StoredMessage } | { presence: LiveMessage })[];
   grants: liveRoutes.Grant[];
   joinsChanged: boolean;
   /** The session went with this request: a catch-up finished. */
@@ -1188,8 +1246,8 @@ async function storeMessage(
 /**
  * Store what a request moved on. `touch` keeps its join present: any
  * request of a join in an open session, and of a catch-up join, but in an
- * ended session only one that stored a message, so nobody keeps an ended
- * session from going by sending nothing.
+ * ended session no other, so nobody keeps an ended session from going, or
+ * a join that went from coming back.
  */
 async function saveCounters(
   tx: Database,
@@ -1251,8 +1309,7 @@ export async function sendLive(db: Database, input: SendLive) {
     const relay: Relay = {
       sessionId: session.id,
       pageId: page.id,
-      stored: [],
-      presence: [],
+      sent: [],
       grants: [],
       joinsChanged: made,
       deleted: false,
@@ -1289,7 +1346,10 @@ export async function sendLive(db: Database, input: SendLive) {
         if (message.seq !== join.lastSeq) {
           throw new ContentError('invalid-request', 'A presence carries its join’s last seq');
         }
-        relay.presence.push(message);
+        if (relay.sent.some((item) => 'presence' in item)) {
+          throw new ContentError('invalid-request', 'A request carries one presence at most');
+        }
+        relay.sent.push({ presence: message });
         positions.push(null);
         continue;
       }
@@ -1309,12 +1369,12 @@ export async function sendLive(db: Database, input: SendLive) {
       }
       bytes += size;
       const served = servedMessage(stored.row, ignore);
-      if (served) relay.stored.push(served);
+      if (served) relay.sent.push({ stored: served });
       if (message.kind === 'update') updates.push(stored.row.position);
       if (message.kind === 'saved') savedAt = stored.row.position;
     }
     await chargeStored(tx, caller, bytes, input, { stored: true });
-    await saveCounters(tx, session, join, now, { touch: !ended || join.catchUp || bytes > 0 });
+    await saveCounters(tx, session, join, now, { touch: !ended || join.catchUp });
     const heads = await headsOf(tx, page.id);
     relay.draftHead = heads.draftHead;
     relay.draftCount = heads.draftCount;
@@ -1546,8 +1606,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     const relay: Relay = {
       sessionId: session.id,
       pageId: page.id,
-      stored: served ? [served] : [],
-      presence: [],
+      sent: served ? [{ stored: served }] : [],
       grants: [],
       joinsChanged: made,
       deleted: false,
@@ -1646,7 +1705,9 @@ const STREAM_BATCH_BYTES = 2 * 1024 * 1024;
 /**
  * Stored messages of a session after `after`, up to `upTo`, oldest first:
  * at most 200, and no more than 2 MiB of ciphertext past the first, so a
- * stream that isn't read holds little.
+ * stream that isn't read holds little; with what the session's latest
+ * snapshot covers as they were read, so a stream can tell when a snapshot
+ * has deleted what it was about to read.
  */
 export async function storedAfter(
   db: Database,
@@ -1659,8 +1720,11 @@ export async function storedAfter(
     message: unknown;
     covers: number | string | null;
     revision_id: string | null;
+    snapshot_covers: number | string | null;
   }>(sql`
-    select position, message, covers, revision_id from (
+    select position, message, covers, revision_id,
+      (select snapshot_covers from ${liveSessions} where id = ${sessionId}) as snapshot_covers
+    from (
       select position, message, covers, revision_id, size,
         sum(size) over (order by position) as running
       from ${liveMessages}
@@ -1670,7 +1734,9 @@ export async function storedAfter(
     ) batch
     where running - size < ${STREAM_BATCH_BYTES}
     order by position`);
-  return rows.flatMap((row) => {
+  // Read in the same statement as the rows, so they agree.
+  const snapshotCovers = Number(rows[0]?.snapshot_covers ?? 0);
+  const messages = rows.flatMap((row) => {
     const served = readStored(
       liveRoutes.StoredMessage,
       {
@@ -1684,6 +1750,7 @@ export async function storedAfter(
     );
     return served ? [served] : [];
   });
+  return { messages, snapshotCovers };
 }
 
 /**

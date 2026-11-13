@@ -165,8 +165,9 @@ export const liveJoins = pgTable(
     /** The `seq` of its last stored message, 0 for none. */
     lastSeq: bigint({ mode: 'number' }).notNull().default(0),
     lastMessageAt: timestamptz().notNull().defaultNow(),
-    /** Whether a stream of this server's is open for it now. */
+    /** Whether a stream of this server's is open for it now, and which one. */
     streamOpen: boolean().notNull().default(false),
+    streamToken: text(),
     streamBrokeAt: timestamptz(),
     leftAt: timestamptz(),
     createdAt: timestamptz().notNull().defaultNow(),

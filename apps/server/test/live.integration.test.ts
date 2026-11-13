@@ -93,6 +93,27 @@ const streamRefusal = (person: Person, session: TestSession, joinId: JoinId, aft
     (error: { code?: string }) => error.code,
   );
 
+/** The first `count` message lines of a stream, then it is cancelled. */
+async function readLines(response: Response, count: number) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('no body');
+  const lines: liveRoutes.StreamLine[] = [];
+  let rest = '';
+  const decoder = new TextDecoder();
+  while (lines.filter((line) => 'message' in line).length < count) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    rest += decoder.decode(value, { stream: true });
+    const parts = rest.split('\n');
+    rest = parts.pop() ?? '';
+    for (const part of parts) {
+      if (part.trim() !== '') lines.push(liveRoutes.StreamLine.parse(JSON.parse(part)));
+    }
+  }
+  await reader.cancel();
+  return lines;
+}
+
 const sessionRow = async (sessionId: string) =>
   (await t.db.select().from(schema.liveSessions).where(eq(schema.liveSessions.id, sessionId)))[0];
 
@@ -589,10 +610,47 @@ describe('messages', () => {
     me.started();
     const size = liveRoutes.MAX_UPDATE_BYTES - 128;
     for (let i = 0; i < 6; i++) await me.send([me.message('update', { size })]);
-    const batch = await storedAfter(t.db, session.sessionId, 1);
+    const { messages: batch } = await storedAfter(t.db, session.sessionId, 1);
     // Four past the first make 2 MiB, so a fifth starts the next read.
     expect(batch.map((m) => m.position)).toEqual([2, 3, 4, 5, 6]);
-    expect((await storedAfter(t.db, session.sessionId, 6)).map((m) => m.position)).toEqual([7]);
+    const { messages: rest } = await storedAfter(t.db, session.sessionId, 6);
+    expect(rest.map((m) => m.position)).toEqual([7]);
+  });
+
+  it('takes one presence a request, and opens no stream from another site', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    expect(await rejection(me.send([me.message('presence'), me.message('presence')]))).toBe(
+      'invalid-request',
+    );
+    const response = await editor.browser.request(
+      `/api/live/${session.sessionId}/stream?after=1&joinId=${newId(JoinId)}`,
+      { headers: { 'sec-fetch-site': 'cross-site' } },
+    );
+    expect(response.status).toBe(403);
+    expect((await liveOf(editor, lib.page.pageId)).open?.joins).toHaveLength(1);
+  });
+
+  it('keeps a person to 16 open streams, every session together', async () => {
+    const { owner, lib } = await sharedLibrary();
+    const more = await Promise.all(
+      ['A', 'B', 'C'].map((title) =>
+        pages.createPage(owner.ctx, { spaceId: lib.spaceId, parentId: null, title }),
+      ),
+    );
+    const sessions = [];
+    for (const pageId of more)
+      sessions.push(await startSession(owner, { spaceId: lib.spaceId, pageId }));
+    const [a, b, c] = sessions;
+    if (!a || !b || !c) throw new Error('three');
+    for (const session of [a, b]) {
+      // The starter's join and seven more: eight in each.
+      await stream(owner, session, session.joinId, 1);
+      await Promise.all(Array.from({ length: 7 }, () => stream(owner, session, newId(JoinId), 1)));
+    }
+    expect(await streamRefusal(owner, c, newId(JoinId), 1)).toBe('rate-limited');
   });
 
   it('opens no stream past the last position, nor from below what a snapshot covered', async () => {
@@ -919,6 +977,52 @@ describe('snapshots', () => {
     expect(left.map((r) => r.position).sort((a, b) => a - b)).toEqual([1, 3, 4, 6]);
   });
 
+  it('serves what a snapshot kept within one fetch’s budget, and the rest from the stream', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const size = liveRoutes.MAX_UPDATE_BYTES - 128;
+    // Twenty joins each keep one large change once a snapshot covers them.
+    for (let i = 0; i < 20; i++) {
+      const copy = typist(editor, session);
+      await copy.send([copy.message('update', { size })], { parent: session.joinId });
+      await editor.ctx.api.call(liveRoutes.leave, {
+        params: { sessionId: session.sessionId },
+        body: { joinId: copy.joinId },
+      });
+    }
+    const poster = typist(editor, session);
+    await editor.ctx.api.call(liveRoutes.postSnapshot, {
+      params: { sessionId: session.sessionId },
+      body: {
+        joinId: poster.joinId,
+        parent: session.joinId,
+        message: poster.message('snapshot'),
+        covers: 21,
+        revisionId: session.revisionId,
+      },
+    });
+    const { open } = await liveOf(owner, lib.page.pageId);
+    if (!open) throw new Error('expected the session');
+    expect(open.complete).toBe(false);
+    expect(open.messages).toEqual([]);
+    const served = open.latest.map((m) => m.position);
+    expect(served.length).toBeGreaterThan(10);
+    expect(served.length).toBeLessThan(20);
+    expect(open.position).toBe(served.at(-1));
+    // Without `kept`, below what the snapshot covers is refused; with it, the rest comes.
+    const join = newId(JoinId);
+    expect(await streamRefusal(owner, session, join, open.position)).toBe('stale-head');
+    const response = await owner.browser.request(
+      `/api/live/${session.sessionId}/stream?after=${open.position}&joinId=${join}&kept=1`,
+    );
+    expect(response.ok).toBe(true);
+    // The rest of what it kept, then the snapshot itself, at 22.
+    const left = 22 - (served.length + 1);
+    const text = await readLines(response, left);
+    const positions = text.flatMap((line) => ('message' in line ? [line.message.position] : []));
+    expect(positions).toEqual(Array.from({ length: left }, (_, i) => served.length + 2 + i));
+  });
+
   it('keeps the drafts a kept session names past draft retention, and lets them go after', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
@@ -1010,6 +1114,29 @@ describe('fold grants', () => {
     });
     const { open } = await liveOf(owner, lib.page.pageId);
     expect(open?.grants).toEqual([expect.objectContaining({ subject: outsider })]);
+  });
+
+  it('gives a lapsed grant back to its holder 30 s on, when nobody else asked', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const saver = typist(editor, session, session.joinId);
+    saver.started();
+    const other = typist(owner, session);
+    await stream(owner, session, other.joinId, 1);
+    await pages.editDraft(owner.ctx, lib.page, { markdown: 'from outside' });
+    const outsider = await headOf(owner, lib.page);
+    await saver.send([], { fold: outsider });
+    await t.db.execute(sql`
+      update live_grants set granted_at = now() - interval '31 seconds'
+      where session_id = ${session.sessionId}`);
+    expect((await saver.send([], { fold: outsider })).grant?.lapsed).toBe(true);
+    await t.db.execute(sql`
+      update live_grants set lapsed_at = now() - interval '31 seconds'
+      where session_id = ${session.sessionId}`);
+    expect((await saver.send([], { fold: outsider })).grant).toMatchObject({
+      holder: { joinId: saver.joinId },
+      lapsed: false,
+    });
   });
 
   it('passes a lapsed grant to another person before the one whose grant lapsed', async () => {

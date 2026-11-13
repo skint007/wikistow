@@ -30,6 +30,7 @@ CREATE TABLE "live_joins" (
 	"last_seq" bigint DEFAULT 0 NOT NULL,
 	"last_message_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"stream_open" boolean DEFAULT false NOT NULL,
+	"stream_token" text,
 	"stream_broke_at" timestamp with time zone,
 	"left_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
