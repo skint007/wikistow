@@ -60,6 +60,7 @@ const PAGES: Page[] = [
     'Tomato soup',
     [
       { key: 'tag', type: 'text', value: 'soup' },
+      { key: 'tags', type: 'list', value: ['tomato'] },
       { key: 'servings', type: 'number', value: 6 },
       { key: 'tried', type: 'boolean', value: true },
     ],
@@ -115,8 +116,8 @@ describe('a space’s rows', () => {
       revision: 'r-p-bread-1',
       draft: false,
     });
-    // Obsidian's older `tag`, alone.
-    expect(rows[2]?.tags).toEqual(['soup']);
+    // Obsidian's older `tag` too, as `from: #tag` finds it.
+    expect(rows[2]?.tags).toEqual(['tomato', 'soup']);
     expect(rows[2]?.path).toEqual(['Recipes', 'Soups']);
   });
 

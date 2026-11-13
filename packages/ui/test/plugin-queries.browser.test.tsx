@@ -94,7 +94,7 @@ describe('index.changed', () => {
         );
       },
     });
-    const { runtime, session } = await testRuntime([listener('tables'), listener('blind')], {
+    const { runtime, session, store } = await testRuntime([listener('tables'), listener('blind')], {
       watchIndex: () => {
         following += 1;
         return () => (following -= 1);
@@ -129,6 +129,13 @@ describe('index.changed', () => {
     runtime.indexChanged([{ spaceId: 's', folderIds: ['f'] }]);
     runtime.indexChanged([{ spaceId: 'u', folderIds: ['x'] }]);
     await expect.poll(() => heard['tables']).toEqual([['s'], ['u'], ['s', 'u']]);
+
+    // Access changed elsewhere, as on another device, read at the next listing.
+    await store.setAccess({ id: 'tables', library: true }, [
+      { spaceId: 'v', folderId: null, access: 'read' },
+    ]);
+    await runtime.refresh();
+    await expect.poll(() => heard['tables']?.at(-1)).toEqual(['s', 'u', 'v']);
 
     stops[0]?.();
     expect(following).toBe(1);

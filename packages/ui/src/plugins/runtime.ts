@@ -488,6 +488,13 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     })();
   }
 
+  /** `entry`'s page access went from `was` to `now`: what `index` and `query` give it there may have changed. */
+  function accessChanged(entry: Loaded, was: readonly PluginScope[], now: readonly PluginScope[]) {
+    const spaceIds = [...new Set([...was, ...now].map(({ spaceId }) => spaceId))];
+    if (entry.active && entry.active.caller.access !== 'none' && spaceIds.length > 0)
+      tell(entry, { event: 'index.changed', payload: { spaceIds } });
+  }
+
   /** The settings `plugin` reads now: what is stored, with its declared fields' defaults. */
   const settingsOf = (plugin: InstalledPlugin) =>
     settingsWithDefaults(plugin.manifest.settings, settings[plugin.manifest.id] ?? {});
@@ -855,6 +862,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     const open = session.get() !== null;
     if (open) {
       const before = settings;
+      const scopesBefore = access;
       access = state.access;
       settings = state.settings;
       // Changed since the last listing, as when a save read the record again.
@@ -862,6 +870,10 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
         const id = entry.plugin.manifest.id;
         if (JSON.stringify(before[id] ?? {}) !== JSON.stringify(settings[id] ?? {}))
           tell(entry, { event: 'settings.changed', payload: settingsOf(entry.plugin) });
+        // Its page access changed, as on another device: what `index` gives there may have.
+        const [was, now] = [scopesBefore[id] ?? [], access[id] ?? []];
+        if (entry.active && JSON.stringify(was) !== JSON.stringify(now))
+          accessChanged(entry, was, now);
       }
     }
     for (const plugin of wanted.values()) {
@@ -948,11 +960,8 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       await store.setAccess(plugin, scopes);
       access = { ...access, [plugin.id]: scopes };
       emit();
-      // What `index` and `query` give it there changed with its access.
       const entry = loaded.get(plugin.id);
-      const spaceIds = [...new Set([...before, ...scopes].map(({ spaceId }) => spaceId))];
-      if (entry?.active && entry.active.caller.access !== 'none' && spaceIds.length > 0)
-        tell(entry, { event: 'index.changed', payload: { spaceIds } });
+      if (entry) accessChanged(entry, before, scopes);
     },
     /** Tell every running plugin but `from` of `event`. */
     deliver: (event: AppEvent, from: string | null = null) => deliver(event, from),

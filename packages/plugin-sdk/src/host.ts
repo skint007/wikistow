@@ -61,7 +61,8 @@ export type PageRow = {
    */
   path: (string | null)[];
   /**
-   * Its tags, from its `tags` property, else Obsidian's older `tag`: each
+   * Its tags, from its `tags` property and Obsidian's older `tag`, as a
+   * query's `from: '#tag'` finds them: each
    * text, number or `true`/`false` in it as text, without a `#` before it,
    * once each, as first written.
    */

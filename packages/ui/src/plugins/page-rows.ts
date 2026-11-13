@@ -63,10 +63,10 @@ export function readableSpace(
 
 /** A page's tags, as `PageRow.tags` gives them. */
 function tagsOf(properties: readonly Readonly<PropertyData>[]): string[] {
-  const [property] = tagProperties(properties);
-  if (!property) return [];
-  const { value } = property;
-  const items: unknown[] = Array.isArray(value) ? value.flat() : [value];
+  // Both, as `from: #tag` matches either (`hasTag`).
+  const items: unknown[] = tagProperties(properties).flatMap(({ value }) =>
+    Array.isArray(value) ? value.flat() : [value],
+  );
   const tags = new Map<string, string>();
   for (const item of items) {
     if (typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean') continue;
