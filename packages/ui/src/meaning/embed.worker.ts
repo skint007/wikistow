@@ -38,9 +38,9 @@ const FILES: readonly File[] = [
 ];
 
 /**
- * The bytes at `url`, or an error naming it. A file the worker keeps
- * itself skips the browser's HTTP cache, so forgetting the model leaves no
- * copy there.
+ * The bytes at `url`, or an error naming it. In a browser (`keeping`) it
+ * skips the browser's HTTP cache, so forgetting the model leaves no copy
+ * there.
  */
 async function fetched(url: string, keeping: boolean): Promise<ArrayBuffer> {
   const response = await fetch(url, keeping ? { cache: 'no-store' } : {});
@@ -84,7 +84,8 @@ async function opened(): Promise<Cache | null> {
 async function read(keep: boolean) {
   const cache = keep ? await opened() : null;
   if (!cache) {
-    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url, false)));
+    // Kept nowhere, so nothing is left behind to forget, even in the HTTP cache.
+    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url, keep)));
     return { bytes, from: keep ? ('network' as const) : ('files' as const) };
   }
   let fetchedAny = false;
