@@ -116,7 +116,9 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       # The web clipper's helper, for every package's system, from here
-      # (apps/desktop/scripts/clip-host.sh).
+      # (apps/desktop/scripts/clip-host.sh). Go fetches its modules over TLS,
+      # which the slim image has no certificates for.
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: apps/desktop/clip-host/go.mod
