@@ -212,11 +212,13 @@ const Table: NonNullable<Components['table']> = ({ node: _node, ...props }) => (
  * Only the reader's label has a button that copies the code.
  */
 const CodeBlock: NonNullable<Components['pre']> = ({ node, ...props }) => {
+  const { blocks } = usePlugins();
   const code = node?.children.find((child) => child.type === 'element' && child.tagName === 'code');
   const own = <OwnCodeBlock node={node} {...props} />;
   if (code?.type !== 'element') return own;
   const language = languageOf(code.properties);
-  return fencedAsSource(language) ? (
+  // A bare language a running plugin claims (`fences`) is its view too.
+  return fencedAsSource(language) || (language !== undefined && blocks.has(language)) ? (
     <OwnSource source={ownSource.fence(language!, textOf(code))} block>
       {own}
     </OwnSource>

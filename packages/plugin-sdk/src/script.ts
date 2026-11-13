@@ -7,7 +7,9 @@ import {
   type FolderRef,
   type OutputValue,
   type PageHandle,
+  type PageQueryResult,
   type PageRef,
+  type PageRow,
   type PageVersion,
   type PluginEvents,
   type ScriptBlock,
@@ -59,6 +61,7 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
   const handlers: Handlers = {
     'page.shown': new Set(),
     'draft.saved': new Set(),
+    'index.changed': new Set(),
     'settings.changed': new Set(),
   };
   const listen = <E extends keyof Heard>(
@@ -87,6 +90,8 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
       tree: (spaceId) => call<TreeEntry[]>('pages.tree', [spaceId]),
       search: (text, options) =>
         call<SearchResult[]>('pages.search', options ? [text, options] : [text]),
+      index: (spaceId) => call<PageRow[]>('pages.index', [spaceId]),
+      query: (query) => call<PageQueryResult>('pages.query', [query]),
       create: (folder, page) => call<PageVersion>('pages.create', [folder, page]),
       createFolder: (parent, name) => call<FolderRef>('pages.createFolder', [parent, name]),
       saveDraft: (page, change) => call<PageVersion>('pages.saveDraft', [page, change]),

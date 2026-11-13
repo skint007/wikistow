@@ -27,6 +27,7 @@ import {
   type View,
 } from '@wikistow/plugin-sdk';
 import {
+  fencePart,
   misfit,
   settingFits,
   settingsFit,
@@ -36,7 +37,8 @@ import {
 import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
 import type { BlockProperties } from './block-properties';
-import { pluginError, writeLimit, type Caller, type HostPages } from './pages';
+import { changedFor, pluginError, writeLimit, type Caller, type HostPages } from './pages';
+import type { IndexChange } from './page-rows';
 import {
   createRegistry,
   perRegion,
@@ -207,9 +209,36 @@ const replacedBy = (entries: Loaded[]) =>
     return null;
   });
 
+/**
+ * Each block a running plugin draws, by its fence's info string: its own
+ * `plugin:<id>/<type>`, and each bare language its manifest's `fences`
+ * gives the type (#401). A bare language is the first plugin's of
+ * `running`, in Settings' order, that draws that block, but for one the
+ * person gave the language back from (`fencePart` in its `ownParts`).
+ */
+function blocksOf(
+  running: readonly { plugin: InstalledPlugin; pluginId: string; registry: Registry }[],
+): Map<string, PluginBlock> {
+  const blocks = new Map<string, PluginBlock>();
+  for (const { pluginId, registry } of running) {
+    for (const { type, view } of registry.blocks())
+      blocks.set(blockLanguage(pluginId, type), { pluginId, type, view });
+  }
+  for (const { plugin, pluginId, registry } of running) {
+    for (const [language, type] of Object.entries(plugin.manifest.fences ?? {})) {
+      if (blocks.has(language) || plugin.ownParts.includes(fencePart(language))) continue;
+      for (const block of registry.blocks()) {
+        if (block.type === type) blocks.set(language, { pluginId, type, view: block.view });
+      }
+    }
+  }
+  return blocks;
+}
+
 const EVENTS = {
   'page.shown': true,
   'draft.saved': true,
+  'index.changed': true,
   'location.changed': true,
 } as const satisfies {
   [E in AppEvent['event']]: true;
@@ -279,6 +308,12 @@ export type PluginReach = {
   renderMarkdown(drawing: MarkdownDrawing): Disposer;
   /** Where plugins' code comes from: `servedCode` unless given. */
   code?: PluginCode;
+  /**
+   * A plugin listens for `index.changed`: keep the search index up to date,
+   * telling the runtime of each change (`indexChanged`), until what it
+   * returns runs. Without it, nothing keeps the index up to date for them.
+   */
+  watchIndex?: () => Disposer;
 };
 
 /**
@@ -336,7 +371,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       (a, b) => rank(a.plugin.manifest.id) - rank(b.plugin.manifest.id),
     );
     const running = entries.flatMap(({ plugin, active }) =>
-      active ? [{ pluginId: plugin.manifest.id, registry: active.registry }] : [],
+      active ? [{ plugin, pluginId: plugin.manifest.id, registry: active.registry }] : [],
     );
     snapshot = {
       listed,
@@ -365,14 +400,7 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           href: fileUrl(plugin, stylesheet),
         })),
       ),
-      blocks: new Map(
-        running.flatMap(({ pluginId, registry }) =>
-          [...registry.blocks()].map(({ type, view }): [string, PluginBlock] => [
-            blockLanguage(pluginId, type),
-            { pluginId, type, view },
-          ]),
-        ),
-      ),
+      blocks: blocksOf(running),
       inline: new Map(
         running.flatMap(({ pluginId, registry }) =>
           [...registry.inline()].map(({ type, view }): [string, PluginBlock] => [
@@ -407,12 +435,24 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     // One run of its handlers at a time per event and page (or for the
     // location and its settings, which name none); the latest waiting replaces the rest.
     const key =
-      event.event === 'location.changed' || event.event === 'settings.changed'
+      event.event === 'location.changed' ||
+      event.event === 'settings.changed' ||
+      event.event === 'index.changed'
         ? event.event
         : `${event.event}:${event.payload.page.pageId}`;
     const running = active.running.get(key);
     if (running) {
-      running.next = event;
+      // Index changes waiting together are told as one, for every space they name.
+      const waiting = running.next;
+      running.next =
+        waiting?.event === 'index.changed' && event.event === 'index.changed'
+          ? {
+              event: 'index.changed',
+              payload: {
+                spaceIds: [...new Set([...waiting.payload.spaceIds, ...event.payload.spaceIds])],
+              },
+            }
+          : event;
       return;
     }
     const slot: { next: HostEvent | null } = { next: null };
@@ -568,14 +608,34 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
     /** Register, unless this activation is over. */
     const whileLive = (register: () => Disposer): Disposer => (live() ? register() : () => {});
     const claims = (type: string) => manifest.blocks.includes(type);
+    /** `off`, for a handler of `event`: one of `index.changed` keeps the index up to date until it goes. */
+    const watched = (event: string, off: Disposer): Disposer => {
+      if (event !== 'index.changed' || !reach.watchIndex) return off;
+      const unwatch = reach.watchIndex();
+      let watching = true;
+      const stop = () => {
+        if (!watching) return;
+        watching = false;
+        active.controller.signal.removeEventListener('abort', stop);
+        unwatch();
+      };
+      active.controller.signal.addEventListener('abort', stop, { once: true });
+      return () => {
+        off();
+        stop();
+      };
+    };
     const on: AppHost['events']['on'] = (event, handler) => {
       if (!live()) return () => {};
       // A plugin built for a newer app may name an event this one lacks.
       if (!isEvent(event)) throw new PluginError('unsupported', `No event ${String(event)}`);
-      return registry.addHandler(event, {
-        part: 'app',
-        run: async ({ payload }) => handler(payload),
-      });
+      return watched(
+        event,
+        registry.addHandler(event, {
+          part: 'app',
+          run: async ({ payload }) => handler(payload),
+        }),
+      );
     };
     const host: AppHost = {
       api: PLUGIN_API,
@@ -717,7 +777,9 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
           });
         },
         listen: (event, deliverTo) =>
-          whileLive(() => registry.addHandler(event, { part: 'script', run: deliverTo })),
+          whileLive(() =>
+            watched(event, registry.addHandler(event, { part: 'script', run: deliverTo })),
+          ),
         problem: (message) => {
           if (live()) problem(entry, 'script', message);
         },
@@ -915,13 +977,25 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
       source: string,
       properties: BlockProperties = null,
     ): Promise<BlockResults | null> {
-      for (const { plugin, active } of loaded.values()) {
-        for (const { type, results } of active?.registry.blocks() ?? []) {
-          if (results && blockLanguage(plugin.manifest.id, type) === language)
-            return results(page, source, properties);
-        }
+      // The block that draws the language, a bare one too (`blocksOf`).
+      const drawn = snapshot.blocks.get(language);
+      const active = drawn && loaded.get(drawn.pluginId)?.active;
+      for (const { type, results } of active?.registry.blocks() ?? []) {
+        if (results && type === drawn?.type) return results(page, source, properties);
       }
       return null;
+    },
+    /**
+     * The search index took in `changes`: told as `index.changed` to each
+     * running plugin that can read where one of them is, naming those spaces.
+     */
+    indexChanged(changes: readonly IndexChange[]) {
+      if (changes.length === 0) return;
+      for (const entry of loaded.values()) {
+        if (!entry.active) continue;
+        const spaceIds = changedFor(entry.active.caller, changes);
+        if (spaceIds.length > 0) tell(entry, { event: 'index.changed', payload: { spaceIds } });
+      }
     },
     /**
      * Settled once a plugin has started: its app code's `activate` has

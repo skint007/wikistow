@@ -138,6 +138,8 @@ export class ScriptWorker {
       'pages.list': (args) => pages.list(...METHODS['pages.list'].parse(args)),
       'pages.tree': (args) => pages.tree(...METHODS['pages.tree'].parse(args)),
       'pages.search': (args) => pages.search(...METHODS['pages.search'].parse(args)),
+      'pages.index': (args) => pages.index(...METHODS['pages.index'].parse(args)),
+      'pages.query': (args) => pages.query(...METHODS['pages.query'].parse(args)),
       'pages.create': (args) => pages.create(...METHODS['pages.create'].parse(args)),
       'pages.createFolder': (args) =>
         pages.createFolder(...METHODS['pages.createFolder'].parse(args)),

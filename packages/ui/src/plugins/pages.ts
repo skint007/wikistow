@@ -28,6 +28,7 @@ import { leastAccess } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { DraftConflict } from '../page/draft-session';
 import { vaultStore } from '../vault/store';
+import { pageRows, queryRows, readableSpace, readPluginQuery, type IndexChange } from './page-rows';
 
 /** Writes a plugin may make a minute, which bounds loops between plugins. */
 const WRITES_PER_MINUTE = 30;
@@ -70,7 +71,38 @@ export type EditingCaller = Caller & {
    * device and not sent yet, and offline, what the device keeps.
    */
   tree: (ctx: ClientContext, spaceId: SpaceId) => Promise<Tree>;
+  /**
+   * The person's search index, the one query tables read: up to date with
+   * what changed, built first if it isn't (`index`, `query`).
+   */
+  index: (ctx: ClientContext) => Promise<searchOperations.PageIndex>;
 };
+
+/**
+ * The spaces of `changes` where the plugin can read a page that changed
+ * there, by its folders as the index held them, each once: what it is
+ * told as `index.changed`.
+ */
+export function changedFor(
+  caller: Pick<Caller, 'access' | 'scopes'>,
+  changes: readonly IndexChange[],
+): string[] {
+  if (caller.access === 'none') return [];
+  const scopes = caller.scopes();
+  const spaces = new Set<string>();
+  for (const { spaceId, folderIds } of changes) {
+    if (spaces.has(spaceId)) continue;
+    if (
+      scopes.some(
+        (scope) =>
+          scope.spaceId === spaceId &&
+          (scope.folderId === null || folderIds.includes(scope.folderId)),
+      )
+    )
+      spaces.add(spaceId);
+  }
+  return [...spaces];
+}
 
 /** The open session, or `locked`. */
 export function session(): ClientContext {
@@ -291,6 +323,33 @@ export function pagesFor(caller: EditingCaller): HostPages {
     );
   };
 
+  /**
+   * What the plugin can read of a space, from the person's search index
+   * and the app's own tree, as `tree` reads it; null where it can read
+   * nothing there.
+   */
+  const readableOf = async (ctx: ClientContext, spaceIdText: string) => {
+    const spaceId = SpaceId.parse(spaceIdText);
+    const scopes = caller.scopes().filter((scope) => scope.spaceId === spaceId);
+    if (scopes.length === 0 || caller.access === 'none') return null;
+    const [tree, index] = await Promise.all([caller.tree(ctx, spaceId), caller.index(ctx)]);
+    const parents = new Map<string, string | null>(
+      [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
+    );
+    return readableSpace(
+      index.list({ spaceId }),
+      {
+        folders: tree.folders.map((folder) => ({
+          id: folder.id,
+          parentId: folder.parentId,
+          name: searchOperations.nameOf(folder.metadata),
+        })),
+        pages: tree.pages,
+      },
+      (nodeId) => accessIn(scopes, parents, nodeId) !== 'none',
+    );
+  };
+
   const folderOf = (ref: FolderRef) => ({
     spaceId: SpaceId.parse(ref.spaceId),
     folderId: ref.folderId === null ? null : FolderId.parse(ref.folderId),
@@ -405,6 +464,16 @@ export function pagesFor(caller: EditingCaller): HostPages {
         if (found.length >= limit) break;
       }
       return found;
+    }),
+
+    index: guarded(async (ctx, spaceId) => {
+      const space = await readableOf(ctx, spaceId);
+      return space ? pageRows(space) : [];
+    }),
+
+    query: guarded(async (ctx, query) => {
+      const read = readPluginQuery(query);
+      return queryRows(read, (await readableOf(ctx, query.spaceId)) ?? { pages: [], folders: [] });
     }),
 
     create: guarded(async (ctx, ref, { title, markdown = '', data }) => {

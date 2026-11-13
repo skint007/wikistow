@@ -155,6 +155,7 @@ const READ_FROM = [
   ['replaces', 2],
   ['settings', 3],
   ['platforms', 4],
+  ['fences', 4],
 ] as const satisfies readonly (readonly [keyof Manifest, number])[];
 
 /** Whether an app reading manifests `reads` (`MANIFEST_READ`) takes `manifest`. */

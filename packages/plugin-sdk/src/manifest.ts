@@ -101,71 +101,116 @@ export const Platforms = z.strictObject({
 });
 export type Platforms = z.infer<typeof Platforms>;
 
+const BlockType = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
+
+/**
+ * The fence languages the app draws itself, which no plugin claims: query
+ * tables, diagrams and math.
+ */
+export const OWN_FENCES: readonly string[] = ['wikistow-query', 'mermaid', 'math'];
+
+/**
+ * A fence's language a plugin can claim bare (#401), as written after the
+ * backticks: a lowercase letter, then lowercase letters, digits, `_`, `+`
+ * and `-`, at most 34 in all.
+ */
+export const FenceLanguage = z
+  .string()
+  .regex(/^[a-z][a-z0-9_+-]{0,33}$/, 'A fence language: a–z, then a–z, 0–9, _, + and -')
+  .refine((language) => !OWN_FENCES.includes(language), 'The app draws that language itself');
+
+/** The most bare fence languages one plugin claims. */
+export const MAX_FENCES = 10;
+
+/**
+ * The person's choice that `language` fences aren't drawn by a plugin, kept
+ * in its `ownParts` beside the regions it gives back (ADR 0011, as changed
+ * by #401).
+ */
+export const fencePart = (language: string) => `fence:${language}`;
+
 /** `wikistow-plugin.json`: what a plugin is and what it contains. */
-export const Manifest = z.strictObject({
-  id: PluginId,
-  name: z.string().min(1).max(60),
-  version: z.string().min(1).max(40),
-  api: z.literal(PLUGIN_API),
-  description: z.string().max(400).optional(),
-  /** Interface code, run in the app's page: an app plugin. */
-  ui: PluginFile.optional(),
-  /** Code run in a worker of its own, which reaches pages only through the host. */
-  script: PluginFile.optional(),
-  /** Stylesheets loaded while the plugin is enabled. */
-  styles: z.array(PluginFile).max(20).default([]),
-  themes: z.array(PluginTheme).max(20).default([]),
-  /** The most page access the person may give it. */
-  access: PageAccess.default('none'),
-  /** The fenced block types it claims, written `plugin:<id>/<block>`. */
-  blocks: z
-    .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
-    .max(20)
-    .default([]),
-  /**
-   * The inline code types it claims, written `` `plugin:<id>/<type> <text>` ``
-   * (ADR 0011, decision 7). Left out, not defaulted: released apps read
-   * manifests strictly, and would refuse one with a key they don't know.
-   */
-  inline: z
-    .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
-    .max(20)
-    .optional(),
-  /**
-   * The regions it draws in place of the app's own part, with
-   * `host.ui.replace` (ADR 0011), which the approval dialog names. Names
-   * this app doesn't know are kept and never drawn, so a plugin built for
-   * a newer app still loads. Left out, not defaulted, as `inline` is.
-   */
-  replaces: z
-    .array(z.string().regex(/^[a-z][a-z0-9.-]{0,39}$/))
-    .max(20)
-    .optional(),
-  /**
-   * The settings the host draws for it in Settings → Plugins (#310), each
-   * key once, each default a value its field takes. Left out, not
-   * defaulted, as `inline` is.
-   */
-  settings: z
-    .array(SettingField)
-    .max(30)
-    .refine(
-      (fields) => new Set(fields.map(({ key }) => key)).size === fields.length,
-      'Each setting needs a key of its own',
-    )
-    .refine(
-      (fields) =>
-        fields.every((field) => field.default === undefined || settingFits(field, field.default)),
-      'A setting’s default must be a value it takes',
-    )
-    .optional(),
-  /**
-   * Which devices it works on (#405), shown as tags in the library and the
-   * approval dialog. Left out, it makes no claim ("Not stated"); left out,
-   * not defaulted, as `inline` is.
-   */
-  platforms: Platforms.optional(),
-});
+export const Manifest = z
+  .strictObject({
+    id: PluginId,
+    name: z.string().min(1).max(60),
+    version: z.string().min(1).max(40),
+    api: z.literal(PLUGIN_API),
+    description: z.string().max(400).optional(),
+    /** Interface code, run in the app's page: an app plugin. */
+    ui: PluginFile.optional(),
+    /** Code run in a worker of its own, which reaches pages only through the host. */
+    script: PluginFile.optional(),
+    /** Stylesheets loaded while the plugin is enabled. */
+    styles: z.array(PluginFile).max(20).default([]),
+    themes: z.array(PluginTheme).max(20).default([]),
+    /** The most page access the person may give it. */
+    access: PageAccess.default('none'),
+    /** The fenced block types it claims, written `plugin:<id>/<block>`. */
+    blocks: z.array(BlockType).max(20).default([]),
+    /**
+     * Bare fence languages it draws as one of its `blocks`, each with that
+     * block's type: `{ "dataview": "query" }` draws a ```` ```dataview ````
+     * fence as its `query` block (#401). Where two running plugins claim a
+     * language, the first in Settings' order draws it, unless the person
+     * chose otherwise there (`fencePart`). Left out, not defaulted, as
+     * `inline` is.
+     */
+    fences: z
+      .record(FenceLanguage, BlockType)
+      .refine(
+        (fences) => Object.keys(fences).length <= MAX_FENCES,
+        `At most ${MAX_FENCES} fence languages`,
+      )
+      .optional(),
+    /**
+     * The inline code types it claims, written `` `plugin:<id>/<type> <text>` ``
+     * (ADR 0011, decision 7). Left out, not defaulted: released apps read
+     * manifests strictly, and would refuse one with a key they don't know.
+     */
+    inline: z
+      .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
+      .max(20)
+      .optional(),
+    /**
+     * The regions it draws in place of the app's own part, with
+     * `host.ui.replace` (ADR 0011), which the approval dialog names. Names
+     * this app doesn't know are kept and never drawn, so a plugin built for
+     * a newer app still loads. Left out, not defaulted, as `inline` is.
+     */
+    replaces: z
+      .array(z.string().regex(/^[a-z][a-z0-9.-]{0,39}$/))
+      .max(20)
+      .optional(),
+    /**
+     * The settings the host draws for it in Settings → Plugins (#310), each
+     * key once, each default a value its field takes. Left out, not
+     * defaulted, as `inline` is.
+     */
+    settings: z
+      .array(SettingField)
+      .max(30)
+      .refine(
+        (fields) => new Set(fields.map(({ key }) => key)).size === fields.length,
+        'Each setting needs a key of its own',
+      )
+      .refine(
+        (fields) =>
+          fields.every((field) => field.default === undefined || settingFits(field, field.default)),
+        'A setting’s default must be a value it takes',
+      )
+      .optional(),
+    /**
+     * Which devices it works on (#405), shown as tags in the library and the
+     * approval dialog. Left out, it makes no claim ("Not stated"); left out,
+     * not defaulted, as `inline` is.
+     */
+    platforms: Platforms.optional(),
+  })
+  .refine(
+    ({ blocks, fences }) => Object.values(fences ?? {}).every((type) => blocks.includes(type)),
+    { message: 'Each fence language draws one of its blocks', path: ['fences'] },
+  );
 export type Manifest = z.infer<typeof Manifest>;
 
 /**

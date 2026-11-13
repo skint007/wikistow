@@ -1,3 +1,4 @@
+import { indexedContent, PageId, RevisionId, searchOperations, SpaceId } from '@wikistow/client';
 import {
   PluginError,
   type Json,
@@ -6,6 +7,7 @@ import {
   type PageRef,
   type PageVersion,
 } from '@wikistow/plugin-sdk';
+import { pageRows, queryRows, readableSpace, readPluginQuery } from '../plugins/page-rows';
 import type { Caller, HostPages } from '../plugins/pages';
 import type { ShownPage } from '../plugins/runtime';
 
@@ -129,6 +131,33 @@ export function sampleStore() {
     const saved = find(ref);
     if (!saved) throw elsewhere();
     return versionOf(saved, 'draft');
+  };
+
+  /** The samples as the app's search index would hold them, with what is typed: drafts, at the top of the space. */
+  const indexed = () => {
+    for (const pageId of editors.keys()) flush(pageId);
+    const index = new searchOperations.PageIndex();
+    const spaceId = SpaceId.parse(SAMPLE_SPACE);
+    for (const sample of samples) {
+      index.addText(
+        {
+          spaceId,
+          pageId: PageId.parse(sample.pageId),
+          revisionId: RevisionId.parse(String(sample.revision)),
+          parentId: null,
+          folderIds: [],
+          path: [],
+          draft: true,
+          unpublished: false,
+        },
+        { title: sample.title, ...indexedContent(sample.markdown) },
+      );
+    }
+    return readableSpace(
+      index.list({ spaceId }),
+      { folders: [], pages: samples.map((sample) => ({ id: sample.pageId })) },
+      () => true,
+    );
   };
 
   return {
@@ -272,6 +301,17 @@ export function sampleStore() {
               title: sample.title,
               draft: true,
             }));
+        },
+        async index(spaceId) {
+          allow('read');
+          if (spaceId !== SAMPLE_SPACE) throw elsewhere();
+          return pageRows(indexed());
+        },
+        async query(query) {
+          allow('read');
+          const read = readPluginQuery(query);
+          if (query.spaceId !== SAMPLE_SPACE) throw elsewhere();
+          return queryRows(read, indexed());
         },
         async create({ spaceId, folderId }, { title, markdown = '', data }) {
           allow('write');
