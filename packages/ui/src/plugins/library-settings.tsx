@@ -1,6 +1,6 @@
 import type { ClientContext } from '@wikistow/client';
 import { libraryInstall, pluginRoutes } from '@wikistow/contracts';
-import { MANIFEST_FILE, trustLevel } from '@wikistow/plugin-sdk/manifest';
+import { MANIFEST_FILE, platformWarnings, trustLevel } from '@wikistow/plugin-sdk/manifest';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
@@ -16,12 +16,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Picker } from '@/components/ui/picker';
+import { Switch } from '@/components/ui/switch';
 import { aiStatusQuery } from '../ai/session';
 import { api, meQuery } from '../api';
 import { desktop } from '../desktop';
 import { errorMessage } from '../errors';
 import { useNewDraft } from '../workshop/drafts';
 import { ChooseFolder, folderFiles } from './choose-folder';
+import { DEVICE_LABELS, DeviceTags, useDevice, Warning, worksOn } from './devices';
 import {
   LIBRARY_KEY,
   libraryQuery,
@@ -102,6 +104,9 @@ export function Library({
   const [upload, setUpload] = useState<PluginUpload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Only the plugins that say they work on this device, fully or partly.
+  const [here, setHere] = useState(false);
+  const device = useDevice();
   const admin = me?.account.role === 'admin';
 
   /** Run a change, then show the library and the runtime afresh. A string it returns is said. */
@@ -223,8 +228,13 @@ export function Library({
   });
   const listedHere = library?.filter((plugin) => {
     const [newest] = plugin.versions;
-    return newest && matches(query, itemText(newest.manifest));
+    return (
+      newest &&
+      matches(query, itemText(newest.manifest)) &&
+      (!here || worksOn(newest.manifest.platforms, device))
+    );
   });
+  const thisDevice = `this ${DEVICE_LABELS[device].toLowerCase()}`;
 
   return (
     <div className="grid gap-4">
@@ -258,11 +268,21 @@ export function Library({
               />
             </div>
           )}
+          {library && library.length > 0 && (
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={here} onCheckedChange={setHere} />
+              Works on {thisDevice}
+            </label>
+          )}
           {library?.length === 0 && (
             <p className="text-sm text-muted-foreground">Nobody has uploaded a plugin yet.</p>
           )}
           {library && library.length > 0 && listedHere?.length === 0 && (
-            <p className="text-sm text-muted-foreground">No plugin in the library matches.</p>
+            <p className="text-sm text-muted-foreground">
+              {here
+                ? `No plugin in the library that matches says it works on ${thisDevice}.`
+                : 'No plugin in the library matches.'}
+            </p>
           )}
           {listedHere && listedHere.length > 0 && (
             <ul className="grid gap-3" aria-label="Plugin library">
@@ -332,7 +352,7 @@ export function Library({
 
 /**
  * One plugin in the library: its newest version's name, description, trust
- * level and most page access, its owner, Install unless it is installed,
+ * level, devices and most page access, its owner, Install unless it is installed,
  * Change with the assistant if the version carries its source, and its
  * versions with their hashes.
  */
@@ -368,10 +388,14 @@ function LibraryRow({
         <strong>{manifest.name}</strong>
         <span className="text-sm text-muted-foreground">{manifest.version}</span>
         <Badge variant="secondary">{level.label}</Badge>
+        <DeviceTags platforms={manifest.platforms} />
         {installed && <Badge variant="outline">Installed</Badge>}
         {plugin.mine && visibility === 'private' && <Badge variant="outline">Only me</Badge>}
       </div>
       {manifest.description && <p className="text-sm">{manifest.description}</p>}
+      {manifest.platforms?.note && (
+        <p className="text-sm text-muted-foreground">{manifest.platforms.note}</p>
+      )}
       <p className="text-sm text-muted-foreground">
         Asks for {ACCESS[manifest.access]}. Uploaded by {plugin.owner.name}
         {plugin.mine && ' (you)'}.
@@ -471,7 +495,8 @@ function RemoveFromLibrary({
 /**
  * Confirm uploading a plugin to the library (ADR 0004), whichever way it
  * is uploaded: the approval dialog for its version, as an update of the
- * one installed if there is one, with the choice of Shared or Only me.
+ * one installed if there is one, with the choice of Shared or Only me,
+ * and a warning where its devices contradict its code (`platformWarnings`).
  * Uploading installs it for the person, so confirming does both:
  * `onUpload` runs `uploadAndInstall` and says how it went. `visibility` is
  * left out unless it changes, so a server from before ADR 0004, which
@@ -512,6 +537,9 @@ export function ConfirmUpload({
     ...upload,
     ...libraryRequest(upload, installed && approved?.hash !== upload.hash ? installed : null),
   };
+  const warnings = upload
+    ? platformWarnings(upload.manifest, new Map(upload.files.map(({ path, data }) => [path, data])))
+    : [];
   return (
     <Approval
       candidate={candidate}
@@ -519,6 +547,9 @@ export function ConfirmUpload({
       onDone={onDone}
       onApprove={(chosen) => onUpload(chosen, visibility === current ? undefined : visibility)}
     >
+      {warnings.map((warning) => (
+        <Warning key={warning}>{warning}</Warning>
+      ))}
       <Picker
         label="Who sees it"
         className="w-auto justify-self-start"

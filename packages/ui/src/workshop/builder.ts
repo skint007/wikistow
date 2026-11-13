@@ -1,6 +1,6 @@
 import { pluginRoutes, type BuildDiagnostic } from '@wikistow/contracts';
 import { checkPlugin, PluginFolderError, type CheckedPlugin } from '@wikistow/plugin-sdk/files';
-import { Manifest, MANIFEST_FILE } from '@wikistow/plugin-sdk/manifest';
+import { Manifest, MANIFEST_FILE, platformWarnings } from '@wikistow/plugin-sdk/manifest';
 
 /** What the build worker bundles: the draft's files, and each output's entry among them. */
 export type BuildRequest = {
@@ -104,7 +104,8 @@ function libraryProblem(bytes: ReadonlyMap<string, Uint8Array>, manifest: Manife
  * `public/`'s files at the top, its fonts and images (`binary`) among
  * them, plus every draft file under `source/`, so a published version
  * carries its source. Checked with the library's limits, so a build that
- * couldn't be published fails as a build, and hashed as an install hashes it.
+ * couldn't be published fails as a build, and hashed as an install hashes
+ * it. Where its `platforms` contradict its code, the build warns.
  */
 export async function buildDraft(
   texts: ReadonlyMap<string, string>,
@@ -155,7 +156,12 @@ export async function buildDraft(
   const problem = libraryProblem(bytes, manifest);
   if (problem) return failed([...diagnostics, error(problem)]);
   try {
-    return { diagnostics, built: { ...(await checkPlugin(bytes)), bytes } };
+    const checked = await checkPlugin(bytes);
+    const warnings = platformWarnings(manifest, bytes).map((message): BuildDiagnostic => ({
+      ...error(message, MANIFEST_FILE),
+      severity: 'warning',
+    }));
+    return { diagnostics: [...diagnostics, ...warnings], built: { ...checked, bytes } };
   } catch (thrown) {
     if (!(thrown instanceof PluginFolderError)) throw thrown;
     return failed([...diagnostics, error(thrown.message)]);

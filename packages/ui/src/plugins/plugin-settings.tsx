@@ -31,6 +31,7 @@ import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ChooseFolder } from './choose-folder';
 import { DeclaredSettings } from './declared-settings';
+import { ApprovalDevices } from './devices';
 import { pickFolder } from './development';
 import { ConfirmUpload, Library } from './library-settings';
 // This file's own `Place` is a place for page access.
@@ -409,7 +410,8 @@ export function PluginSettings({ tab, query }: PluginsView) {
 
 /**
  * Ask the person to approve a plugin before it runs: its name, version,
- * trust level, the most page access it may ask for and the hash approved,
+ * trust level, the most page access it may ask for, the devices it says
+ * it works on (warning when this isn't one) and the hash approved,
  * and for an update what it replaces, with any change of level or access.
  * `verb` names what confirming does, if not installing, updating or
  * loading; `children` go after the hash.
@@ -450,6 +452,7 @@ export function Approval<T extends ApprovalRequest>({
               <Badge variant="secondary">{level.label}</Badge> {level.trust}
             </p>
             <p>It asks for {ACCESS[candidate.manifest.access]}.</p>
+            <ApprovalDevices platforms={candidate.manifest.platforms} />
             {replacedParts(candidate.manifest).length > 0 && (
               <p>
                 It replaces {listed.format(replacedParts(candidate.manifest))} with its own. You can
