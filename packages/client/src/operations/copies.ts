@@ -796,10 +796,13 @@ async function sendNodes(
       try {
         await send();
       } catch (error) {
+        // A mark another tab raised may be past the keys worked out before,
+        // as the server's key-version is: work them out again once.
         const stale =
           (error instanceof ApiError &&
             (error.code === 'key-version' || error.code === 'recipients-mismatch')) ||
-          (error instanceof CryptoError && error.code === 'missing-key');
+          (error instanceof CryptoError &&
+            (error.code === 'missing-key' || error.code === 'key-version'));
         if (!stale) throw error;
         await sealing.refresh();
         await send();

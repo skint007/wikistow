@@ -28,7 +28,7 @@ import {
   type HeldKeyVersion,
 } from '../folder-keys.ts';
 import { isAgentId, verifySignature, type PublicIdentity } from '../identity.ts';
-import { writeKeyVersion } from '../key-versions.ts';
+import { ENDED, writeKeyVersion } from '../key-versions.ts';
 import { grantMetadataKeyV2 } from '../metadata.ts';
 import { OWNER_REGION, requireRegion, sameRegion, type Region } from '../regions.ts';
 import { grantRevisionKeyV2 } from '../revision.ts';
@@ -186,6 +186,17 @@ export async function previewMove(
   if (!crossing) return { ...base, gains: [], losses: [], endingPicks: [] };
   if (tree.space?.role !== 'owner') {
     throw new ApiError(403, 'forbidden', 'Only owners move across a share boundary');
+  }
+  // A share this app ended that the server lists again is a possible
+  // attack (section 6.9), on either side of the move.
+  await ctx.marks.refresh?.();
+  for (const region of [from, to]) {
+    if (region.kind === 'share' && ctx.marks.get(region.spaceId, region.shareId) === ENDED) {
+      throw new CryptoError(
+        'key-version',
+        `This app ended share ${region.shareId}, but the server still lists it`,
+      );
+    }
   }
   const keys = await ownerKeys(ctx, spaceId);
   const before = await audienceOf(ctx, keys, from);
