@@ -23,6 +23,14 @@ const { version } = JSON.parse(await readFile(join(APP_DIR, 'package.json'), 'ut
   version: string;
 };
 
+/** This process's environment, without the names it has no value for. */
+const definedEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+
 type Conversation = { received: Record<string, unknown>[]; error?: string | null };
 
 let desktop: Desktop | null = null;
@@ -65,7 +73,7 @@ test('an extension reaches the app through the helper', async ({
   const config = join(root, 'config');
   await mkdir(join(config, 'chromium'), { recursive: true });
   await mkdir(join(home, '.mozilla'), { recursive: true });
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: config };
+  const env = { ...definedEnv(), HOME: home, XDG_CONFIG_HOME: config };
   const profile = join(config, 'WikiStow');
   desktop = await launch(
     profile,

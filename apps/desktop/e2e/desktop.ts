@@ -30,7 +30,7 @@ export async function launch(
   profile: string,
   args: string[] = [],
   appPath = APP_DIR,
-  env?: NodeJS.ProcessEnv,
+  env?: Record<string, string>,
 ): Promise<Desktop> {
   // The plain-text store unless a test asks for the keyring, which the app
   // would otherwise find on the developer's own desktop.
@@ -43,6 +43,31 @@ export async function launch(
     ...(env ? { env } : {}),
   });
   return { app, window: await app.firstWindow(), profile };
+}
+
+/**
+ * Ask the web clipper's helper one message, as a browser starts it, and
+ * answer its first reply (docs/adr/0017-web-clipper.md, decision 4).
+ */
+export async function askHelper(
+  helper: string,
+  args: string[],
+  message: object,
+): Promise<Record<string, unknown>> {
+  const child = spawn(helper, args, { stdio: ['pipe', 'pipe', 'inherit'] });
+  const body = Buffer.from(JSON.stringify(message));
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length);
+  child.stdin.write(Buffer.concat([header, body]));
+  let held = Buffer.alloc(0);
+  for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
+    held = Buffer.concat([held, chunk]);
+    if (held.length >= 4 && held.length >= 4 + held.readUInt32LE(0)) {
+      child.stdin.end();
+      return JSON.parse(held.subarray(4, 4 + held.readUInt32LE(0)).toString('utf8'));
+    }
+  }
+  throw new Error('The helper answered nothing');
 }
 
 /** Stop the app opening the system browser; answer the next address it tries. */
