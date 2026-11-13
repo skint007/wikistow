@@ -312,6 +312,33 @@ describe('pending changes across tabs', () => {
     await expect(marks.begin([])).resolves.toEqual([]);
   });
 
+  it('lands an answer that comes after the app locked, but never after a sign-out', async () => {
+    const b = browser();
+    const file = b.tab();
+    const one = await KeptMarks.open(file, who);
+    const [begun] = await one.begin([change()]);
+    one.close();
+    await one.settle([begun?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
+    const later = await KeptMarks.open(b.tab(), who);
+    expect(later.get(spaceId, shareId)).toBe(2);
+    expect(changePending(later, spaceId, shareId)).toBe(false);
+    // Signed out: the file is gone, and nothing writes it back.
+    let kept: Uint8Array | null = null;
+    const gone: KeptFile = {
+      read: () => Promise.resolve(kept),
+      write: (sealed) => {
+        kept = sealed;
+        return Promise.resolve();
+      },
+    };
+    const two = await KeptMarks.open(gone, who);
+    const [other] = await two.begin([change()]);
+    two.close();
+    kept = null;
+    await two.settle([other?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
+    expect(kept).toBeNull();
+  });
+
   it('stops listening once closed', async () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);

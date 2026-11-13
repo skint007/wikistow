@@ -279,7 +279,7 @@ export class KeptMarks implements KeyVersionMarks {
     const now = Date.now();
     const marks = { ...raised(this.#contents.marks, raises) };
     for (const id of ids) marks[`${CLEARED} ${id}`] = now;
-    await this.#change({ ...this.#contents, marks: tidied(marks) });
+    await this.#change({ ...this.#contents, marks: tidied(marks) }, { afterClose: true });
   }
 
   /** The answer to pending changes was lost: a fetch of their shares settles them. */
@@ -287,7 +287,7 @@ export class KeptMarks implements KeyVersionMarks {
     const now = Date.now();
     const marks = { ...this.#contents.marks };
     for (const id of ids) marks[`${LOST} ${id}`] = now;
-    await this.#change({ ...this.#contents, marks });
+    await this.#change({ ...this.#contents, marks }, { afterClose: true });
   }
 
   /**
@@ -346,31 +346,47 @@ export class KeptMarks implements KeyVersionMarks {
 
   #change(
     contents: Contents,
-    { strict = false, check }: { strict?: boolean; check?: () => void } = {},
+    {
+      strict = false,
+      check,
+      afterClose = false,
+    }: {
+      strict?: boolean;
+      check?: () => void;
+      /**
+       * Still write once the session has closed, while the file is there:
+       * an answer to a change sent before the app locked must land, but
+       * nothing may bring the file back after a sign-out deleted it.
+       */
+      afterClose?: boolean;
+    } = {},
   ): Promise<void> {
     this.#contents = contents;
     const write = async () => {
-      if (this.#closed) {
+      if (this.#closed && !afterClose) {
         if (strict) throw new Error('The session has ended; its marks are closed');
         return;
       }
       const file = this.#file;
-      if (!file.exclusive) {
+      const land = async () => {
+        const disk = this.#open(await file.read().catch(() => null));
+        if (disk) this.#contents = merged(this.#contents, disk);
+        // What it took in counts, even if this write is refused or fails.
+        this.#notify();
+        if (this.#closed && !afterClose) {
+          if (strict) throw new Error('The session has ended; its marks are closed');
+          return;
+        }
+        check?.();
+        // Once closed, only into a file that is still there.
+        if (this.#closed && !disk) return;
+        await file.write(this.#seal(this.#contents));
+      };
+      if (file.exclusive) await file.exclusive(land);
+      else if (this.#closed) await land();
+      else {
         check?.();
         await file.write(this.#seal(this.#contents));
-      } else {
-        await file.exclusive(async () => {
-          const disk = this.#open(await file.read().catch(() => null));
-          if (disk) this.#contents = merged(this.#contents, disk);
-          // What it took in counts, even if this write is refused or fails.
-          this.#notify();
-          check?.();
-          if (this.#closed) {
-            if (strict) throw new Error('The session has ended; its marks are closed');
-            return;
-          }
-          await file.write(this.#seal(this.#contents));
-        });
       }
       if (!this.#closed) {
         this.#channel?.post();
