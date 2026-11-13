@@ -26,6 +26,8 @@ async function openMenu(waiting: Waiting) {
       onNewFolder: run('new folder'),
       onRename: run('rename'),
       onRestyle: run('restyle'),
+      onSortByName: run('sort by name'),
+      ordering: { onMoveUp: run('move up'), onMoveDown: run('move down') },
       onMove: run('move'),
       onCopy: run('copy'),
       onShare: run('share'),

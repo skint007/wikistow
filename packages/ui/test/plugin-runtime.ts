@@ -1,5 +1,11 @@
 import { installedPlugin } from '@wikistow/contracts';
-import { definePlugin, PluginError, type AppHost, type PageHandle } from '@wikistow/plugin-sdk';
+import {
+  definePlugin,
+  PluginError,
+  type AppHost,
+  type PageAccess,
+  type PageHandle,
+} from '@wikistow/plugin-sdk';
 import { Manifest } from '@wikistow/plugin-sdk/manifest';
 import type { HostMessage, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
 import {
@@ -29,6 +35,12 @@ export type TestPlugin = {
   inline?: string[];
   /** The regions its manifest replaces. */
   replaces?: string[];
+  /** The bare fence languages its manifest claims, each with its block's type. */
+  fences?: Record<string, string>;
+  /** What the person gave back to the app's own (`InstalledPlugin.ownParts`). */
+  ownParts?: string[];
+  /** The most page access its manifest asks for. */
+  access?: PageAccess;
 };
 
 /** A vault session a test opens and locks. */
@@ -59,6 +71,8 @@ export const noPages: HostPages = {
   list: nowhere,
   tree: nowhere,
   search: nowhere,
+  index: nowhere,
+  query: nowhere,
   create: nowhere,
   createFolder: nowhere,
   saveDraft: nowhere,
@@ -90,24 +104,28 @@ export async function testRuntime(
     return plugin;
   };
   const store = memoryStore({
-    plugins: plugins.map(({ id, activate, script, blocks = [], inline, replaces }) =>
-      installedPlugin({
-        manifest: Manifest.parse({
-          id,
-          name: id,
-          version: '1.0.0',
-          api: 1,
-          ui: activate ? 'ui.js' : undefined,
-          script: script ? 'script.js' : undefined,
-          blocks,
-          inline,
-          replaces,
+    plugins: plugins.map(
+      ({ id, activate, script, blocks = [], inline, replaces, fences, ownParts, access }) =>
+        installedPlugin({
+          manifest: Manifest.parse({
+            id,
+            name: id,
+            version: '1.0.0',
+            api: 1,
+            ui: activate ? 'ui.js' : undefined,
+            script: script ? 'script.js' : undefined,
+            blocks,
+            inline,
+            replaces,
+            fences,
+            access,
+          }),
+          key: 'one',
+          development: null,
+          library: true,
+          enabled: true,
+          ownParts,
         }),
-        key: 'one',
-        development: null,
-        library: true,
-        enabled: true,
-      }),
     ),
   });
   const runtime = createRuntime(store, {

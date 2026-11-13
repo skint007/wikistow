@@ -42,6 +42,8 @@ import {
   type MoveTree,
 } from './move-model';
 import {
+  landWhereDropped,
+  restoring,
   moveNotes,
   MoveNotesLines,
   moveNow,
@@ -72,6 +74,8 @@ export type Moving = {
   /** Move to… (the default) or Copy to…. */
   action?: 'move' | 'copy';
   to?: Destination<FolderId>;
+  /** Dropped on a line between rows of `to`: it lands just before this, or last for null (#400). */
+  before?: string | null;
   into?: SpaceId;
 };
 
@@ -234,7 +238,12 @@ export function useStartMove(open: (spaceId: SpaceId, moving: Moving) => void) {
     open(
       spaceId,
       to.spaceId === spaceId
-        ? { ...moving, action, to: to.place }
+        ? {
+            ...moving,
+            action,
+            to: to.place,
+            ...(drop.before !== undefined && { before: drop.before }),
+          }
         : { ...moving, action, into: to.spaceId },
     );
   };
@@ -304,6 +313,12 @@ function MoveSteps({
               chosen={chosen}
               onBusy={setBusy}
               onDone={onDone}
+              // Where it was dropped, if this is the place it was dropped on.
+              before={
+                chosen.spaceId === spaceId && moving.to?.parentId === chosen.place.parentId
+                  ? moving.before
+                  : undefined
+              }
             />
           )
         }
@@ -749,37 +764,60 @@ function MoveHere({
     run(async () => {
       if (!tree) return;
       setChanged(false);
-      const back = { spaceId, moving, parentId: parentIn(tree, moving) };
+      const back = { spaceId, moving, parentId: parentIn(tree, moving), position: node?.position };
+      // Where it was dropped, if this is the place it was dropped on (#400).
+      const landed = await landWhereDropped(ctx, availability, {
+        tree,
+        spaceId,
+        nodeId: moving.id,
+        parentId,
+        before: moving.to?.parentId === parentId ? moving.before : undefined,
+      });
+      const position = landed?.position;
       let undo;
-      if (route === 'device') {
-        await moveOnDevice(ctx, spaceId, moving, parentId);
-        undo = undoOnDevice(ctx, back);
-      } else {
-        const confirmed =
-          shown ??
-          (await moveOperations.previewMove(ctx, { spaceId, nodeId: moving.id, parentId }));
-        // It crosses after all, which the tree didn't show: its notes come first.
-        if (confirmed.crossing && !shown) {
-          await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
-          setChanged(true);
-          return;
+      // Unless it moved, the folder it was dropped in lists as it did.
+      let moved = false;
+      try {
+        if (route === 'device') {
+          await moveOnDevice(ctx, spaceId, moving, parentId, position);
+          moved = true;
+          undo = restoring(undoOnDevice(ctx, back), landed);
+        } else {
+          // The preview shown, if any, is what moves, at the place dropped on.
+          const confirmed = shown
+            ? { ...shown, ...(position !== undefined && { position }) }
+            : await moveOperations.previewMove(ctx, {
+                spaceId,
+                nodeId: moving.id,
+                parentId,
+                ...(position !== undefined && { position }),
+              });
+          // It crosses after all, which the tree didn't show: its notes come first.
+          if (confirmed.crossing && !shown) {
+            await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });
+            setChanged(true);
+            return;
+          }
+          setProgress(confirmed.crossing ? { records: 0, total: null } : null);
+          try {
+            await moveNow(ctx, confirmed, setProgress);
+          } catch (caught) {
+            if (!isStale(caught)) throw caught;
+            await Promise.all([
+              crossing && preview.refetch(),
+              queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
+            ]);
+            setChanged(true);
+            return;
+          } finally {
+            setProgress(null);
+          }
+          moved = true;
+          await refreshMoved(queryClient, ctx);
+          undo = restoring(undoMove(ctx, queryClient, back), landed);
         }
-        setProgress(confirmed.crossing ? { records: 0, total: null } : null);
-        try {
-          await moveNow(ctx, confirmed, setProgress);
-        } catch (caught) {
-          if (!isStale(caught)) throw caught;
-          await Promise.all([
-            crossing && preview.refetch(),
-            queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey }),
-          ]);
-          setChanged(true);
-          return;
-        } finally {
-          setProgress(null);
-        }
-        await refreshMoved(queryClient, ctx);
-        undo = undoMove(ctx, queryClient, back);
+      } finally {
+        if (!moved) await landed?.restore().catch(() => {});
       }
       onDone();
       noteMoved(ctx, { moving, to: chosen, sameSpace: true, copy: false, undo });

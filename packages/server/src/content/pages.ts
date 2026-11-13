@@ -58,6 +58,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
@@ -397,6 +398,8 @@ export async function createPage(
         kind: 'page',
         createdBy: caller.accountId,
         permissionVersion: parent.permissionVersion,
+        // At the end of a folder with an order of its own (section 10, Order).
+        position: await placeAtEnd(tx, input),
       })
       .onConflictDoNothing()
       .returning({ id: nodes.id });

@@ -39,6 +39,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { placeAtEnd } from './order.ts';
 import {
   bumpPermissions,
   insertChunked,
@@ -96,7 +97,8 @@ export async function checkMover(
  *   the subtree comes rewrapped under the destination share's current key
  *   version, or sealed to exactly the space's current owners. One written
  *   meanwhile and missing is `stale-head`, so the owner's app adds it.
- * Then the subtree moves, its old wraps or envelopes give way to the new
+ * Then the subtree moves, to `position` among what is there, or the end of
+ * a folder with an order of its own, its old wraps or envelopes give way to the new
  * ones, agents' picks that left their share end, and permission versions
  * move on, all at once. Envelope signatures are checked before the lock,
  * so nothing in the space waits on them. A stored record of the subtree
@@ -191,7 +193,13 @@ export async function moveNode(
       throw new ContentError('region-mismatch', 'A move within one region changes no keys');
     }
 
-    await tx.update(nodes).set({ parentId }).where(eq(nodes.id, nodeId));
+    // Where it lands among what is there (section 10, Order): where the app put it,
+    // or at the end of a folder with an order of its own.
+    const position =
+      input.position !== undefined
+        ? input.position
+        : await placeAtEnd(tx, { spaceId, parentId, except: [nodeId] });
+    await tx.update(nodes).set({ parentId, position }).where(eq(nodes.id, nodeId));
     if (rewrapped) {
       await replaceKeyMaterial(tx, input, records);
       // An agent's pick that moved out of its share ends there (section 9.4).

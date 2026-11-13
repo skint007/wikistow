@@ -41,6 +41,7 @@ export * from './content/serving.ts';
 export * from './content/sharing.ts';
 export * from './content/groups.ts';
 export * from './content/moves.ts';
+export * from './content/order.ts';
 export * from './content/ending.ts';
 export * from './content/copies.ts';
 export * from './content/moved.ts';

@@ -5,6 +5,7 @@ import {
   cellKey,
   cellProblem,
   folderColumns,
+  inFolderOrder,
   nextOwnWrite,
   NO_CHOICE,
   shownVersion,
@@ -64,5 +65,17 @@ describe('a cell’s edit', () => {
       kind: 'conflict',
     });
     expect(cellProblem(new Error('The connection dropped'))).toMatchObject({ kind: 'failed' });
+  });
+});
+
+describe('inFolderOrder', () => {
+  it('lists pages in the folder’s order, and any the tree doesn’t have yet after, as given', () => {
+    const entries = ['bread', 'apple', 'new', 'cheese'].map((pageId) => ({ pageId }));
+    expect(inFolderOrder(entries, ['cheese', 'apple', 'bread']).map((e) => e.pageId)).toEqual([
+      'cheese',
+      'apple',
+      'bread',
+      'new',
+    ]);
   });
 });

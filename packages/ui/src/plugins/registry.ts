@@ -114,6 +114,7 @@ export function createRegistry(changed: () => void) {
   const handlers: Handlers = {
     'page.shown': new Set(),
     'draft.saved': new Set(),
+    'index.changed': new Set(),
     'location.changed': new Set(),
     'settings.changed': new Set(),
   };

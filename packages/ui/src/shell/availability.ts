@@ -44,6 +44,11 @@ export type ActionKind =
   /** A page or folder dragged in the sidebar, which moves it. */
   | 'drag'
   /**
+   * A page or folder put in another place in its folder's own order: Move
+   * up, Move down, or a drag within its folder (#400).
+   */
+  | 'reorder'
+  /**
    * A page or folder copied into this folder, or a page published into it
    * from another space. The action itself waits for the connection: this
    * is about the folder only. A move into it goes by `moveAvailability`.
@@ -87,6 +92,9 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   // published until it is made.
   move: { offline: true, holds: 'never' },
   drag: { offline: true, holds: 'never' },
+  // Waits on this device as a move to where it is already. One made offline
+  // is placed as the server makes it, so it waits for that.
+  reorder: { offline: true, holds: 'made' },
   publish: { offline: true, holds: 'made' },
   // Act on the page's draft, so never on the one from before its change (decision 8).
   copy: { offline: false, holds: 'changed' },

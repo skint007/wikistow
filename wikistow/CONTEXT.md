@@ -92,6 +92,10 @@ A container within a space with one parent and any number of child folders or pa
 **Page**
 A document with one location, an editable draft, and zero or more published versions. Its title and Markdown content belong to each version.
 
+**Order**
+How a folder, or the top of a space, lists what is in it, the same for everyone who sees it. By name, folders first, until an editor puts something in place; then the folder has an order of its own, folders and pages mixed, until someone chooses **Sort by name**. Each item's place in it is its position.
+_Avoid_: Sort order (a person's own choice, which this isn't), rank, index.
+
 **Draft**
 The current unpublished content of a page. Editors can see it; readers cannot.
 
@@ -207,7 +211,7 @@ The spaces and folders a person lets one plugin read or write for their account,
 _Avoid_: Grant, which is a share membership or an agent's folder.
 
 **Plugin block**
-A fenced code block in a page that names a plugin, which shows and edits it where that plugin is enabled. Elsewhere it is ordinary code. Its inline counterpart is **claimed inline code**, inline code naming a plugin, kept exactly as written and drawn by the plugin where it runs. A script plugin's block is a form: **fields**, whose values are lines of the block's text, and **outputs**, which the script calculates from them and which are never stored.
+A fenced code block in a page that names a plugin, which shows and edits it where that plugin is enabled. Elsewhere it is ordinary code. A plugin can also **claim a fence language**, such as `dataview`, so the blocks an imported vault already has are drawn as one of its blocks; where two claim one, the first in Settings' order draws it unless the person chooses another. Its inline counterpart is **claimed inline code**, inline code naming a plugin, kept exactly as written and drawn by the plugin where it runs. A script plugin's block is a form: **fields**, whose values are lines of the block's text, and **outputs**, which the script calculates from them and which are never stored.
 _Avoid_: Page script; pages never carry code.
 
 **Workshop**

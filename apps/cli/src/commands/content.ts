@@ -19,7 +19,9 @@ import {
   revisePayload,
   searchOperations,
   sharingOperations,
+  shownTitle,
   spaceOperations,
+  treeInOrder,
   type AttachmentRef,
   type ClientContext,
   type LinkTree,
@@ -128,7 +130,11 @@ type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 
 type LinkablePage = { id: PageId; title: string | null; parentId: FolderId | null };
 
-/** `tree --space`: the folders and pages this agent can see, with names and titles. */
+/**
+ * `tree --space`: the folders and pages this agent can see, with names and
+ * titles, as the app's sidebar lists them with every folder open: each
+ * folder followed by what is in it, each in its folder's order (#400).
+ */
 export async function tree(
   io: Io,
   out: Printer,
@@ -138,45 +144,55 @@ export async function tree(
   const loaded = await withAgent(io, out, args, deps, ({ ctx }) =>
     spaceOperations.loadTree(ctx, args.spaceId),
   );
+  const ordered = treeInOrder(loaded, {
+    // The sidebar's label for one it can't read, so the order by name matches it.
+    folder: (f) => nameOf(f.metadata) ?? 'Unreadable folder',
+    page: (p) => shownTitle(p.title),
+  });
   const result = {
     spaceId: args.spaceId,
     space: loaded.space && { name: nameOf(loaded.space.metadata), role: loaded.space.role },
     shares: loaded.shares,
-    folders: loaded.folders.map((f) => ({
-      id: f.id,
-      parentId: f.parentId,
-      name: nameOf(f.metadata),
-    })),
-    pages: loaded.pages.map((p) => ({
-      id: p.id,
-      parentId: p.parentId,
-      title: p.title,
-      permissionVersion: p.permissionVersion,
-      draftHead: p.draftHead,
-      publishedHead: p.publishedHead,
-      draftChanges: p.draftChanges,
-    })),
+    // `order`: where each comes in the app's listing, folders and pages together.
+    folders: ordered.flatMap(({ kind, node }, order) =>
+      kind === 'folder'
+        ? [{ id: node.id, parentId: node.parentId, name: nameOf(node.metadata), order }]
+        : [],
+    ),
+    pages: ordered
+      .flatMap(({ kind, node }, order) => (kind === 'page' ? [{ ...node, order }] : []))
+      .map((p) => ({
+        id: p.id,
+        parentId: p.parentId,
+        order: p.order,
+        title: p.title,
+        permissionVersion: p.permissionVersion,
+        draftHead: p.draftHead,
+        publishedHead: p.publishedHead,
+        draftChanges: p.draftChanges,
+      })),
   };
   out.result(result, () => {
-    const print = (parentId: FolderId | null, depth: number) => {
+    const depths = new Map<string | null, number>([[null, 0]]);
+    for (const { kind, node } of ordered) {
+      const depth = depths.get(node.parentId) ?? 0;
       const indent = '  '.repeat(depth);
-      for (const folder of result.folders.filter((f) => f.parentId === parentId)) {
-        out.line(`${indent}${out.foreign(folder.name ?? '(unreadable name)')}/  ${folder.id}`);
-        print(folder.id, depth + 1);
+      if (kind === 'folder') {
+        depths.set(node.id, depth + 1);
+        const folder = result.folders.find((f) => f.id === node.id);
+        out.line(`${indent}${out.foreign(folder?.name ?? '(unreadable name)')}/  ${node.id}`);
+        continue;
       }
-      for (const page of result.pages.filter((p) => p.parentId === parentId)) {
-        const state =
-          page.publishedHead === null
-            ? 'unpublished'
-            : page.draftChanges
-              ? 'draft changes'
-              : 'published';
-        out.line(
-          `${indent}${out.foreign(page.title ?? '(unreadable title)')}  ${page.id}  [${state}]`,
-        );
-      }
-    };
-    print(null, 0);
+      const state =
+        node.publishedHead === null
+          ? 'unpublished'
+          : node.draftChanges
+            ? 'draft changes'
+            : 'published';
+      out.line(
+        `${indent}${out.foreign(node.title ?? '(unreadable title)')}  ${node.id}  [${state}]`,
+      );
+    }
   });
 }
 

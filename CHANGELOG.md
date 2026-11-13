@@ -4,11 +4,35 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- Plugins can say which devices they work on: the desktop app, a computer’s browser and a phone. The library and the install dialog show it as tags, Works on this phone lists only the plugins that work there, and installing one where it says it doesn’t work warns first.
+- Plugins can list pages by their properties, and draw an imported vault’s dataview blocks. Settings → Plugins shows which plugin draws each kind of code block.
+- Put pages and folders in an order of your own: drag one between two rows, or use Move up and Move down in its menu. Everyone who sees the folder sees the same order, and Sort by name puts it back.
+
+#### Optimizations
+
+- Importing notes sends about a third as many requests, so an import over a slow connection takes about 40% of the time it did.
+
 ### Changes
 
 #### App
 
+- A plugin's manifest can name the devices it works on, `platforms`: the desktop app, a browser on a computer and a phone (wherever the app shows its phone layout), each `full`, `partial` or `none`, with a short note. The library and the approval dialog show it as tags, such as **Desktop app only** or **Phone partial**, or **Devices not stated**. **Works on this phone** (or this browser, or this desktop app) in the library lists only the plugins that say they work there. Installing one on a device it says it doesn't work on warns, then installs. A plugin that registers a view in `app.titlebar`, which only the desktop app has, warns at upload, on each workshop build and in `wikistow-plugin build` when it says it works fully in a browser or on a phone, or not in the desktop app. The workshop's assistant sets the field. The library lists versions with `platforms` only to apps that send `manifest=4`. (#407)
+- **Import…** and `wikistow import` send about a third as many requests: 2 for a page whose note names no other note or file, 3 for one that links, and 2 for an attachment, down from about 8 and 3. Where to write is asked once a folder, a page is published from the draft just saved, and each attachment's copy for readers is sealed from the file read rather than downloaded again, two attachments at a time. Each change goes with an idempotency key and is sent again when its answer is lost, so nothing is made twice. 100 notes at a 300 ms round trip took 107 s instead of 280 s. (#410)
+- Plugins can list pages by their properties. `host.pages.index(spaceId)` gives each page of a space they can read with its title, folder, tags and properties, and `host.pages.query({ spaceId, from, where, sort, limit })` lists what a `wikistow-query` block of those lines would. Both read your search index, never the pages again, and cover only the pages you gave the plugin. `index.changed` tells a plugin when that index changes, or its page access does. Scripts get them too. An app plugin can claim a bare fence language in its manifest's `fences`, such as `dataview`, so an imported vault's blocks are drawn by it: the approval dialog says so, and **Code blocks plugins draw** in Settings → Plugins shows which plugin draws each, with **Show as code** and **Use _plugin_**. Without the plugin they stay code. The library lists versions with `fences` only to apps that send `manifest=4`. A new example, `vault-tables`, draws a part of Dataview's `TABLE` and `LIST` queries. (#411)
+- Each folder, and the top of a space, has one order, shared by everyone who sees it. A drop on the line between two rows puts a page or folder there: in its own folder it reorders, and in another it moves and lands there, with Ctrl to copy, Undo, and Ask before moving as before. A drop on a folder's row still moves it in, last. **Move up** and **Move down** are in each row's menu, and page rows have a ⋯ menu, so phones reach them. **Sort by name**, in a folder's menu or the space's for its top, lists it by name again. Folders and pages mix; something new, moved or copied in goes last, and a restore goes back to its place. The folder view, plugins' `pages.list` and `pages.tree`, `wikistow tree` and agents' `list_pages` list in the same order. Offline, a reorder waits on the device as one change to its folder. (#413)
 - The visual editor writes again only the blocks you edit. The rest of the page keeps its own Markdown, byte for byte, where an edit used to rewrite every block in the editor's style. Text typed in the source in **Split**, and changes the app makes such as a renamed link, go into the visual editor a block at a time, and a long page's first edit no longer waits for the whole page to be read back (ADR 0015, step 2). (#PR)
+
+#### Server
+
+- A page's or folder's `position` among what is in its folder, a fractional index (migration `0049_node_positions`). `GET /api/spaces/:spaceId/tree?order=1` lists positions, which released apps never ask for. `POST /api/spaces/:spaceId/order` sets them and `POST /api/spaces/:spaceId/order/by-name` clears them, for editors there and their agents. A move may carry a `position`; without one, as from released apps, it goes last in a folder with an order of its own. (#413)
+
+#### CLI
+
+- `wikistow tree` lists each folder's pages and folders in its order, and its JSON gives each an `order`. (#413)
 
 ## 0.25.0 - 2026-11-11
 

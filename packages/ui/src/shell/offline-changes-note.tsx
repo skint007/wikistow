@@ -34,6 +34,7 @@ function nameOf(entry: Entry): string {
       return queueOperations.renamedMetadata(entry).name;
     case 'delete':
     case 'move':
+    case 'order':
       return entry.name || 'Untitled';
     case 'publish':
       return entry.title || 'Untitled';
@@ -57,6 +58,8 @@ function goneText(entry: Entry): string {
       return 'This, or the folder it was moved to, was deleted, or you lost access to it, while you were offline, so it wasn’t moved.';
     case 'publish':
       return 'This page was deleted, or you can no longer publish it, so it wasn’t published.';
+    case 'order':
+      return 'This folder was deleted, or you lost access to it, while you were offline, so it wasn’t put in order.';
   }
 }
 
@@ -68,6 +71,7 @@ const REFUSED: Record<Entry['kind'], string> = {
   delete: 'Couldn’t be saved.',
   move: 'Couldn’t be moved.',
   publish: 'Wasn’t published.',
+  order: 'Wasn’t put in order.',
 };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -105,6 +109,7 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const nothingLeft = (entry: Entry) =>
     entry.kind === 'publish' ||
     entry.kind === 'move' ||
+    entry.kind === 'order' ||
     ((entry.kind === 'rename' || entry.kind === 'delete') && entry.failure?.kind === 'gone');
   const copy = (entry: queueOperations.QueuedPage) =>
     navigator.clipboard.writeText(queueOperations.changeText(entry.payload));

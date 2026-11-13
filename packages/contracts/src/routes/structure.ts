@@ -6,6 +6,7 @@ import {
   SealedMetadata,
   SealedMetadataV2,
 } from '../records/metadata.ts';
+import { Position } from '../records/position.ts';
 import { KeyWrap, Share } from '../records/share.ts';
 import type { RouteDef, StreamRouteDef } from '../route.ts';
 
@@ -126,16 +127,22 @@ export const createSpace = {
   status: 201,
 } as const satisfies RouteDef;
 
+/** A page's or folder's place in its folder's own order (section 10, Order). */
+export const Placed = z.strictObject({ id: NodeId, position: Position });
+
 /**
  * What the caller can see of a space: everything, for an owner or a member
  * of the space's share; for a member of folder shares, only those folders
  * and what is in them, with no space name and nothing above them (section
- * 7.7).
+ * 7.7). With `order=1`, `positions` lists the place of each folder and page
+ * it lists that has one (#400). Released apps parse this answer strictly and
+ * never ask, so they get it as before.
  */
 export const tree = {
   method: 'GET',
   path: '/api/spaces/:spaceId/tree',
   params: SpaceParams,
+  query: z.object({ order: z.literal('1').optional() }),
   response: z.strictObject({
     /** Null for someone who holds only folder shares in the space. */
     space: SpaceSummary.nullable(),
@@ -147,7 +154,43 @@ export const tree = {
      * whether it is still only a draft (nothing published since), or null.
      */
     agentActivity: AgentEdit.extend({ pageId: PageId, draftOnly: z.boolean() }).nullable(),
+    /** Only with `order=1`: the listed folders and pages with a position, in no order. */
+    positions: z.array(Placed).optional(),
   }),
+} as const satisfies RouteDef;
+
+/**
+ * Put pages and folders in order in one folder, or at the top of the space
+ * for a null `parentId` (section 10, Order): each named node gets its position,
+ * or none for null, which lists it by name after those with one. Needs edit
+ * rights there, as a move does. Each node must be in that folder now, or
+ * the answer is `stale-head`. Keys and permission versions don't change.
+ */
+export const arrange = {
+  method: 'POST',
+  path: '/api/spaces/:spaceId/order',
+  params: SpaceParams,
+  body: z.object({
+    parentId: FolderId.nullable(),
+    positions: z
+      .array(z.object({ nodeId: NodeId, position: Position.nullable() }))
+      .min(1)
+      .max(1000),
+  }),
+  response: z.strictObject({ ok: z.literal(true) }),
+} as const satisfies RouteDef;
+
+/**
+ * Sort by name: clear the position of everything in one folder, or at the
+ * top of the space, so it lists by name again, folders first (section
+ * 5.4). Needs edit rights there.
+ */
+export const sortByName = {
+  method: 'POST',
+  path: '/api/spaces/:spaceId/order/by-name',
+  params: SpaceParams,
+  body: z.object({ parentId: FolderId.nullable() }),
+  response: z.strictObject({ ok: z.literal(true) }),
 } as const satisfies RouteDef;
 
 /**

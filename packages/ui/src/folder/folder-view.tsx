@@ -21,15 +21,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { AlertTriangle, Columns3, List, Table2, X } from 'lucide-react';
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-  type RefObject,
-} from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,12 +40,15 @@ import { useMovedRows } from '../page/moved-links';
 import { propertyIcon, PropertyValueView, type LinkScope } from '../page/property-value';
 import { shareCovering } from '../sharing/model';
 import { folderLook, FolderTile } from '../shell/folder-look';
+import { usePhoneLayout } from '../shell/phone-layout';
 import { PageRowIcon, pageTitle } from '../shell/sidebar';
+import { childrenOf } from '../shell/tree-order';
 import { useClient } from '../vault/store';
 import { useFolderChoice } from './folder-choice';
 import {
   cellKey,
   folderColumns,
+  inFolderOrder,
   shownVersion,
   withColumn,
   type Column,
@@ -69,18 +64,6 @@ import { useNotKept, useOffline } from '../data/connection';
 
 type Tree = Awaited<ReturnType<typeof spaceOperations.loadTree>>;
 type TreePage = Tree['pages'][number];
-
-/** Narrow enough to be a phone, where the layout is the list unless the person chose. */
-const NARROW = '(max-width: 899px)';
-const useNarrow = () =>
-  useSyncExternalStore(
-    (listener) => {
-      const query = window.matchMedia(NARROW);
-      query.addEventListener('change', listener);
-      return () => query.removeEventListener('change', listener);
-    },
-    () => window.matchMedia(NARROW).matches,
-  );
 
 const LAYOUTS = [
   { layout: 'list', label: 'List', Icon: List },
@@ -104,12 +87,16 @@ export function FolderView({
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const { index, progress, error, updating, retry } = usePageIndex(ctx);
   const [choice, setChoice] = useFolderChoice(spaceId, folderId);
-  const narrow = useNarrow();
+  // The phone layout shows the list unless the person chose.
+  const narrow = usePhoneLayout();
   const layout = choice.layout ?? (narrow ? 'list' : 'table');
-  const entries = useMemo(
-    () => index?.list({ spaceId, folderId, nested: false }) ?? [],
-    [index, spaceId, folderId],
-  );
+  // In the folder's order, as the sidebar lists them (#400).
+  const entries = useMemo(() => {
+    const listed = index?.list({ spaceId, folderId, nested: false }) ?? [];
+    if (!tree) return listed;
+    const order = childrenOf(tree, folderId).map((child) => child.node.id);
+    return inFolderOrder(listed, order);
+  }, [index, spaceId, folderId, tree]);
   const keys = useMemo(() => index?.keys({ spaceId, folderId }) ?? [], [index, spaceId, folderId]);
   // Hidden columns are kept as tags, worked out once each.
   const tag = useMemo(() => {

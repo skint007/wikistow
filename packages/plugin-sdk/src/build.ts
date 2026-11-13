@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { cp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { build } from 'vite-plus';
-import { Manifest, MANIFEST_FILE, manifestFiles } from './manifest.ts';
+import { Manifest, MANIFEST_FILE, manifestFiles, platformWarnings } from './manifest.ts';
 
 async function buildPlugin(folder: string) {
   const manifest = Manifest.parse(JSON.parse(await readFile(join(folder, MANIFEST_FILE), 'utf8')));
@@ -42,6 +42,9 @@ async function buildPlugin(folder: string) {
   const missing = manifestFiles(manifest).filter((file) => !existsSync(join(out, file)));
   if (missing.length > 0)
     throw new Error(`The manifest names files dist/ lacks: ${missing.join(', ')}`);
+  const ui = manifest.ui ? new Map([[manifest.ui, await readFile(join(out, manifest.ui))]]) : null;
+  for (const warning of ui ? platformWarnings(manifest, ui) : [])
+    process.stderr.write(`Warning: ${warning}\n`);
   return out;
 }
 

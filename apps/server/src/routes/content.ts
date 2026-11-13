@@ -64,6 +64,8 @@ import {
   shareEnding,
   checkMover,
   moveNode,
+  arrangeNodes,
+  sortByName,
   cancelCopy,
   checkCopyOpener,
   finishCopy,
@@ -284,8 +286,26 @@ export function mountContentRoutes(
     { rateLimit: WRITE_LIMIT },
   );
 
-  routes.content(structureRoutes.tree, async ({ params }, { actor }) =>
-    loadTree(db, actor, params.spaceId, report).catch(toApiError),
+  routes.content(structureRoutes.tree, async ({ params, query }, { actor }) =>
+    loadTree(db, actor, params.spaceId, report, { order: query.order === '1' }).catch(toApiError),
+  );
+
+  routes.content(
+    structureRoutes.arrange,
+    async ({ params, body }, { actor, once }) => {
+      await arrangeNodes(db, { actor, ...params, ...body, once }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT, idempotent: true },
+  );
+
+  routes.content(
+    structureRoutes.sortByName,
+    async ({ params, body }, { actor, once }) => {
+      await sortByName(db, { actor, ...params, ...body, once }).catch(toApiError);
+      return { ok: true as const };
+    },
+    { rateLimit: WRITE_LIMIT, idempotent: true },
   );
 
   routes.content(structureRoutes.target, async ({ params, query }, { actor }) =>

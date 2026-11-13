@@ -6,6 +6,20 @@ import { propertyLabel } from '../page/property-model';
 // A folder's view of the pages directly in it (ADR 0006, decision 8): its
 // columns, and what a cell's edit builds on and how it ended.
 
+/**
+ * `entries`, the pages the index lists in a folder, in the order the folder
+ * lists them (#400): `order`, their IDs as the tree has them, its own order
+ * or by name. One the tree doesn't list yet comes after, as the index had it.
+ */
+export function inFolderOrder<E extends { pageId: string }>(
+  entries: readonly E[],
+  order: readonly string[],
+): E[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const at = (entry: E) => rank.get(entry.pageId) ?? order.length;
+  return entries.toSorted((a, b) => at(a) - at(b));
+}
+
 /** How a folder shows its pages. */
 export type FolderLayout = 'list' | 'table';
 

@@ -4,6 +4,7 @@ import {
   FolderId,
   MetadataRevisionId,
   PageId,
+  Position,
   PublicIdentity,
   RevisionId,
   RevisionRecord,
@@ -102,15 +103,19 @@ const KeptTreeJson = z.strictObject({
     })
     .nullable(),
   shares: z.array(structureRoutes.ShareSummary),
+  // A tree kept before folders had orders of their own lists by name.
   folders: z.array(
     z.strictObject({
       id: FolderId,
       parentId: FolderId.nullable(),
       permissionVersion: z.number().int(),
+      position: Position.nullable().default(null),
       metadata: KeptMetadata.nullable(),
     }),
   ),
-  pages: z.array(structureRoutes.PageSummary),
+  pages: z.array(
+    structureRoutes.PageSummary.extend({ position: Position.nullable().default(null) }),
+  ),
   agentActivity: structureRoutes.tree.response.shape.agentActivity,
 }) satisfies z.ZodType<KeptTree, unknown>;
 

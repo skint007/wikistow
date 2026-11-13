@@ -553,7 +553,8 @@ embeds, .canvas files among them, are left out and listed.
 Each folder and page remembers the note it came from. So running the same
 import again into the same place makes nothing twice, leaves what it
 imported as it is, and finishes anything a run cut short: after any
-failure, or Ctrl-C, run it again. It takes no --idempotency-key.
+failure, or Ctrl-C, run it again. It takes no --idempotency-key: it
+sends each change with a key of its own, and again if no answer came back.
 
 With --json:
   {"spaceId":"...","folderId":"...","format":"markdown|jex|obsidian",
