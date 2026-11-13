@@ -133,7 +133,7 @@ export async function fillSource(page: Page, text: string) {
   const source = page.locator('#page-source');
   // Properties draw with the source editor, so once it shows they would too.
   await source.waitFor();
-  if (/^(?:---|\.\.\.)\r?\n/.test(text) && (await properties(page).count()) > 0) {
+  if (FRONTMATTER.test(text) && (await properties(page).count()) > 0) {
     throw new Error(
       'This page has Properties, so frontmatter typed here is body text: use setProperty',
     );
@@ -142,6 +142,9 @@ export async function fillSource(page: Page, text: string) {
   await source.press('ControlOrMeta+a');
   await page.keyboard.insertText(text);
 }
+
+// A first line of `---` closed by a later `---` or `...` line, as the app splits it off.
+const FRONTMATTER = /^---\r?\n(?:[^\n]*\n)*?(?:---|\.\.\.)\r?(?:\n|$)/;
 
 const properties = (page: Page) => page.getByRole('region', { name: 'Properties' });
 
