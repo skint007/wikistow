@@ -56,7 +56,11 @@ export async function contentChanged(
       // The server's answer to a save says no time, so this device's. A
       // save into this device's queue isn't taken yet, and keeps its base's.
       const stamp = !queued(each.saved) && each.saved.updated === undefined;
-      const saved = stamp ? { ...each.saved, updated: new Date().toISOString() } : each.saved;
+      // As the revision cache took it when written (`cacheWritten`), so one time.
+      const written = (): string =>
+        ctx.revisions.get({ ...each.saved, audience: 'draft' })?.createdAt ??
+        new Date().toISOString();
+      const saved = stamp ? { ...each.saved, updated: written() } : each.saved;
       searchIndexChanged(queryClient, { saved });
       loads.push(patchTree(queryClient, ctx, each.saved, refetchType));
       pages.set(each.saved.pageId, each.saved);

@@ -1,5 +1,5 @@
 // What each kind of change loads again, and what it tells the search index.
-import { PageId, RevisionId, SpaceId, type ClientContext } from '@wikistow/client';
+import { PageId, RevisionCache, RevisionId, SpaceId, type ClientContext } from '@wikistow/client';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vite-plus/test';
 import { PLAIN } from '../src/vault/store.ts';
@@ -16,7 +16,7 @@ const home = SpaceId.parse('home');
 const work = SpaceId.parse('work');
 const soup = PageId.parse('soup');
 const notes = PageId.parse('notes');
-const ctx = {} as ClientContext;
+const ctx = { revisions: new RevisionCache() } as unknown as ClientContext;
 
 /** A page entry in home's tree, as last loaded. */
 const entry = {
@@ -109,6 +109,16 @@ describe('contentChanged', () => {
     // The next is patched in alone, the tree as loaded holding its marker by now.
     queryClient.setQueryData([PLAIN, 'tree', home], { pages: [{ ...entry, draftChanges: true }] });
     const next = saved('r2', 'r3');
+    // Written here, it is held with the time it was written (`cacheWritten`), which the index takes.
+    const writtenAt = '2026-11-13T09:30:00.000Z';
+    ctx.revisions.put({
+      record: { spaceId: home, pageId: soup, revisionId: next.revisionId, audience: 'draft' },
+      opened: { kind: 'current', payload: next.payload },
+      region: next.region,
+      keyVersion: null,
+      createdAt: writtenAt,
+    } as unknown as Parameters<typeof ctx.revisions.put>[0]);
+    vi.mocked(searchIndexChanged).mockClear();
     expect(await loadsOf(() => contentChanged(queryClient, ctx, { saved: next }))).toEqual([
       'history soup',
       'page soup',
@@ -127,6 +137,9 @@ describe('contentChanged', () => {
         },
       ],
     });
+    expect(vi.mocked(searchIndexChanged).mock.calls).toEqual([
+      [queryClient, { saved: { ...next, updated: writtenAt } }],
+    ]);
     // One saved into this device's queue, on its base, isn't taken yet: the
     // index keeps its base's time.
     vi.mocked(searchIndexChanged).mockClear();
