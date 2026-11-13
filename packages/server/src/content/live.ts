@@ -33,6 +33,7 @@ import {
   liveSessionIds,
   liveSessions,
   liveWraps,
+  nodes,
   metadataRevisions,
   pageHeads,
   revisions,
@@ -103,16 +104,15 @@ function presentSet(joins: readonly JoinRow[], now: Date) {
   const alone = new Set(
     joins.filter((j) => presentAlone(j, now)).map((j) => joinKey(j.identityId, j.joinId)),
   );
-  return new Set(
-    [...alone].filter((key) => {
-      const join = joins.find((j) => joinKey(j.identityId, j.joinId) === key);
-      return (
-        !join ||
-        join.parentJoinId === null ||
-        alone.has(joinKey(join.identityId, join.parentJoinId))
-      );
-    }),
-  );
+  const present = new Set<string>();
+  for (const join of joins) {
+    const key = joinKey(join.identityId, join.joinId);
+    if (!alone.has(key)) continue;
+    if (join.parentJoinId === null || alone.has(joinKey(join.identityId, join.parentJoinId))) {
+      present.add(key);
+    }
+  }
+  return present;
 }
 
 /** When a join went, or will go if nothing else comes from it. */
@@ -2045,12 +2045,18 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
  * made or ended over them): their sessions' keys count for nobody from now
  * on, even if the pages come back, in the transaction that moves them.
  */
-export async function loseLiveKeys(tx: Database, nodeIds: readonly string[]) {
+export async function loseLiveKeys(tx: Database, spaceId: string, nodeIds: readonly string[]) {
   if (nodeIds.length === 0) return;
-  await tx
-    .update(liveSessions)
-    .set({ keysLost: true })
-    .where(sql`${liveSessions.pageId} = any(${sql.param([...nodeIds])}::text[])`);
+  // Pages in the trash under them too, which move with their folder.
+  await tx.execute(sql`
+    with recursive under(id) as (
+      select unnest(${sql.param([...nodeIds])}::text[])
+      union
+      select n.id from ${nodes} n join under u on n.parent_id = u.id
+      where n.space_id = ${spaceId}
+    )
+    update ${liveSessions} set keys_lost = true
+    where page_id in (select id from under)`);
 }
 
 /**

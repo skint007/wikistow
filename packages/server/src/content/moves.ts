@@ -210,7 +210,7 @@ export async function moveNode(
           .where(and(eq(agentGrants.shareId, from.id), inArray(agentGrants.folderId, subtree)));
       }
     }
-    if (crossing) await loseLiveKeys(tx, subtree);
+    if (crossing) await loseLiveKeys(tx, spaceId, subtree);
     await bumpPermissions(tx, spaceId, subtree);
     if (rewrapped) {
       // Its public links and copies whose people can't publish it where it

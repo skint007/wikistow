@@ -12,6 +12,7 @@ import {
   openSealedKey,
   pageOperations as pages,
   sharingOperations as sharing,
+  spaceOperations,
   utf8,
 } from '@wikistow/client';
 import {
@@ -1088,6 +1089,42 @@ describe('deleting a session', () => {
     expect(await rejection(catcher.send([], { fold: session.sessionId }))).toBe('not-found');
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(session.sessionId)).toBeUndefined();
+  });
+
+  it('loses the keys of a trashed page’s session when its folder crosses regions', async () => {
+    const { owner, lib } = await sharedLibrary();
+    const folder = await spaceOperations.createFolder(owner.ctx, {
+      spaceId: lib.spaceId,
+      parentId: lib.shared,
+      name: 'Inner',
+    });
+    const pageId = await pages.createPage(owner.ctx, {
+      spaceId: lib.spaceId,
+      parentId: folder,
+      title: 'Kept',
+    });
+    const page = { spaceId: lib.spaceId, pageId };
+    const session = await startSession(owner, page);
+    const me = typist(owner, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    await pages.deleteNode(owner.ctx, { spaceId: lib.spaceId, nodeId: pageId });
+    const entry = (await trash.loadTrash(owner.ctx)).find((item) => item.nodeId === pageId);
+    if (!entry) throw new Error('expected it in the trash');
+    const move = async (parentId: typeof lib.shared) =>
+      moves.moveNode(owner.ctx, {
+        preview: await moves.previewMove(owner.ctx, {
+          spaceId: lib.spaceId,
+          nodeId: folder,
+          parentId,
+        }),
+      });
+    await move(lib.above);
+    await move(lib.shared);
+    await trash.restoreTrash(owner.ctx, entry.trashId);
+    await everyoneLeft(session.sessionId);
+    expect((await liveOf(owner, pageId)).ended).toBeNull();
+    expect(await sessionRow(session.sessionId)).toMatchObject({ keysLost: true });
   });
 
   it('keeps only a page’s latest ended session with unsaved changes', async () => {

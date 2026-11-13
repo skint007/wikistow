@@ -115,6 +115,8 @@ type Followed = {
   joins: string;
   grants: Map<string, string>;
   snapshotCovers: number;
+  /** Ended or gone: its head and what it holds stand as they were then. */
+  over: boolean;
 };
 
 const joinKey = (identityId: string, joinId: string) => `${identityId} ${joinId}`;
@@ -198,6 +200,8 @@ export function mountLiveRoutes(
 
   // A draft head heard of, applied only if newer than the one streams carry.
   function setHead(session: Followed, draftHead: string | null, draftCount: number) {
+    // Nothing after its end reaches its closing streams, a later head included.
+    if (session.over) return;
     if (draftCount < session.draftCount) return;
     if (draftCount === session.draftCount && draftHead === session.draftHead) return;
     session.draftHead = draftHead;
@@ -221,6 +225,7 @@ export function mountLiveRoutes(
 
   /** Every stream of a session that ended or went gets that as its last line. */
   function endAll(session: Followed, reason: 'access' | 'ended' | 'deleted') {
+    session.over = true;
     for (const stream of session.streams) {
       close(stream, { ended: reason, draftHead: session.draftHead as Line['draftHead'] });
     }
@@ -282,6 +287,12 @@ export function mountLiveRoutes(
     for (const key of session.grants.keys()) if (!listed.has(key)) session.grants.delete(key);
     // Only what is past both what it sent and what waits in its queue is
     // read from the database: what is queued goes out from memory.
+    // Ended: what was stored after is never relayed, so nobody is sent to wait for it.
+    if (state.ended) {
+      endAll(session, state.ended);
+      forget(sessionId, session);
+      return;
+    }
     for (const stream of session.streams) {
       const queued = stream.queue.reduce(
         (last, item) => ('stored' in item ? Math.max(last, item.stored.position) : last),
@@ -292,7 +303,6 @@ export function mountLiveRoutes(
         stream.wake?.();
       }
     }
-    if (state.ended) endAll(session, state.ended);
     forget(sessionId, session);
   }
 
@@ -642,6 +652,7 @@ export function mountLiveRoutes(
           joins: JSON.stringify(joined.joins),
           grants: new Map(),
           snapshotCovers: joined.snapshotCovers,
+          over: false,
         };
         followed.set(sessionId, session);
       }
