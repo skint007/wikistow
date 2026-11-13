@@ -474,6 +474,45 @@ describe('the visual surface', () => {
     expect(m.changes).toEqual([]);
   });
 
+  it('shows text it was given while the editor was being made, read whole if it must be', async () => {
+    const next = 'One.\n\n```\nTwo.\n\nThree.\n';
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    let handle: EditorSurfaceHandle | null = null;
+    const given = (made: EditorSurfaceHandle | null) => void (handle ??= made);
+    // Given as soon as its page is there, before Milkdown says it's made.
+    let sent = false;
+    const watch = new MutationObserver(() => {
+      if (sent || !handle || !container.querySelector('#page-visual')) return;
+      sent = true;
+      handle.replace(next);
+    });
+    watch.observe(container, { childList: true, subtree: true });
+    await act(async () =>
+      root.render(
+        <VisualSurface
+          ref={given}
+          initial={'One.\n\nTwo.\n\nThree.\n'}
+          onChange={() => {}}
+          links={links}
+          attachments={{ list: [], url: async () => null }}
+          onFiles={() => {}}
+        />,
+      ),
+    );
+    await act(() => expect.poll(() => container.querySelector('#page-visual')).not.toBeNull());
+    const dom = container.querySelector<HTMLElement>('#page-visual');
+    if (!dom || !handle) throw new Error('The editor did not mount');
+    const view = viewOf(dom);
+    await expect.poll(() => view.state.doc.maybeChild(1)?.type.name).toBe('code_block');
+    expect((handle as EditorSurfaceHandle).read()).toBe(next);
+    expect(sent).toBe(true);
+    watch.disconnect();
+    act(() => root.unmount());
+    container.remove();
+  });
+
   it('says at once that the person edited, before it reports the edit', async () => {
     const m = await mount('One\n');
     const view = viewOf(m.dom);

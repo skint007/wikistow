@@ -636,8 +636,10 @@ function Surface({
         origin.current = { markdown: given, doc };
         // Where each block was read from, as Milkdown read the page (`readingSpans`).
         sourceAs(write, doc, given, doc);
-        // Text the session showed while it was being made.
-        if (text.current !== given && !surface.take(text.current)) surface.show(text.current);
+        // Text the session showed while it was being made, which reading it
+        // as it is would replace.
+        const shown = text.current;
+        if (shown !== given && !surface.take(shown)) surface.show(shown);
         // Ready for the first edit, written meanwhile.
         else surface.later();
         // Focus asked for meanwhile, unless the person went elsewhere.
