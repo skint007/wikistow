@@ -409,13 +409,31 @@ export class Writer {
     const marked = new Transform(this.#doc([nodes]));
     const at = pos + (marked.doc.firstChild?.nodeSize ?? 0);
     if (unit.sourced) {
-      const before = marked.doc.textBetween(marked.doc.firstChild?.nodeSize ?? 0, at, '\n', ' ');
+      // Its text before the cursor, each atom as the editor writes it, which
+      // is most often as the page did.
+      const start = marked.doc.firstChild?.nodeSize ?? 0;
+      const pieces: { text: string; atom: boolean }[] = [];
+      marked.doc.nodesBetween(start, at, (node, from) => {
+        if (node.isText)
+          pieces.push({
+            text: (node.text ?? '').slice(Math.max(0, start - from), at - from),
+            atom: false,
+          });
+        else if (node.isInline && node.isLeaf) pieces.push({ text: this.#atom(node), atom: true });
+      });
       let found = 0;
-      for (const char of before) {
-        if (/\s/.test(char)) continue;
-        const next = markdown.indexOf(char, found);
-        if (next < 0) break;
-        found = next + char.length;
+      for (const { text, atom } of pieces) {
+        if (atom) {
+          const next = text.trim() ? markdown.indexOf(text, found) : -1;
+          if (next >= 0) found = next + text.length;
+          continue;
+        }
+        for (const char of text) {
+          if (/\s/.test(char)) continue;
+          const next = markdown.indexOf(char, found);
+          if (next < 0) return found;
+          found = next + char.length;
+        }
       }
       return found;
     }
@@ -429,6 +447,17 @@ export class Writer {
     const [written] = this.#alone([blocks], unit.literals) ?? [];
     const caret = written?.indexOf(CARET) ?? 0;
     return Math.max(0, Math.min(caret, markdown.length));
+  }
+
+  // `atom`, an inline node not text, as the editor writes it alone.
+  #atom(atom: Node): string {
+    const paragraph = atom.type.schema.nodes['paragraph'];
+    if (!paragraph) return '';
+    try {
+      return this.#alone([[paragraph.create(null, atom.mark([]))]], false)?.[0] ?? '';
+    } catch {
+      return '';
+    }
   }
 
   #composed(doc: Node, final: boolean): Composed {

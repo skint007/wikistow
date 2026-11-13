@@ -247,6 +247,26 @@ describe('an edit in the visual editor', () => {
     expect(m.handle.read()).toBe(PAGE);
   });
 
+  it('says where the cursor is in a block kept as written, past its atoms too', async () => {
+    for (const lineBreak of ['\n', '\r\n']) {
+      const page = ['Plan [[Plan]] P and *x*', '', 'Next', ''].join(lineBreak);
+      const m = await mount(page);
+      const view = viewOf(m.dom);
+      await typeAt(m, find(view.state.doc, 'Next') + 4, '!');
+      const end = (view.state.doc.firstChild?.nodeSize ?? 0) - 1;
+      act(() =>
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end))),
+      );
+      expect(m.handle.caret?.(), JSON.stringify(lineBreak)).toBe('Plan [[Plan]] P and *x'.length);
+      const p = find(view.state.doc, ' P');
+      act(() =>
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, p + 2))),
+      );
+      expect(m.handle.caret?.()).toBe('Plan [[Plan]] P'.length);
+      m.unmount();
+    }
+  });
+
   it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
     for (const [page, kept] of [
       ['Para.\n\n  ```\n  code\n  ```\n', '  ```\n  code\n  ```\n'],

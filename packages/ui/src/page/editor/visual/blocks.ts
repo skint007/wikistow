@@ -191,7 +191,19 @@ export function byBlock({
     : new Map<string, string>();
   const stubs = [...outside.values()].map((label) => `[^${label}]: x`);
   const lf = [withLf(region), ...stubs].join('\n\n');
-  if (!kept(lf)) return null;
+  // Checked, the text of the blocks it touches alone: those beside them
+  // must read as they did, which was checked as they went in.
+  const shift = text.length - page.length;
+  const [checkFrom, checkTo] = [a < lo ? before.to : from, (b > hi ? after.from : to) + shift];
+  const nearby = notes
+    ? definedIn([
+        ...(a < lo ? doc.content.content.slice(before.first, before.first + before.count) : []),
+        ...(b > hi ? doc.content.content.slice(after.first, after.first + after.count) : []),
+      ])
+    : new Map<string, string>();
+  const near = [...nearby.values()].map((label) => `[^${label}]: x`);
+  const checked = [withLf(text.slice(checkFrom, Math.max(checkFrom, checkTo))), ...stubs, ...near];
+  if (!kept(checked.join('\n\n'))) return null;
   let read: Node;
   try {
     read = parse(lf);
@@ -230,7 +242,6 @@ export function byBlock({
     if (offset < 0 || !was.every((node, i) => same(node, nodes[offset + i] as Node))) return null;
   }
   if (first === 0 && past === doc.childCount && nodes.length === 0) return null;
-  const shift = text.length - page.length;
   const moved = (span: Span | null) => span && { from: span.from + shift, to: span.to + shift };
   const placed = inText(region, at).map(
     (span) => span && { from: span.from + from, to: span.to + from },
