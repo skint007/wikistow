@@ -512,6 +512,32 @@ export function searchIndexChanged(
   change: IndexChange = { spaces: 'all' },
 ) {
   trackerOf(queryClient).note(change);
+  if ('saved' in change) for (const listener of savesHeard(queryClient)) listener(change.saved);
+}
+
+const saveListeners = new WeakMap<
+  QueryClient,
+  Set<(save: searchOperations.SavedVersion) => void>
+>();
+const savesHeard = (queryClient: QueryClient) => {
+  let listeners = saveListeners.get(queryClient);
+  if (!listeners) saveListeners.set(queryClient, (listeners = new Set()));
+  return listeners;
+};
+
+/**
+ * Call `listener` with each draft this person saves, as the index hears of
+ * it (`searchIndexChanged`), until the returned function is called: search
+ * by meaning waits for a page's saves to pause before embedding it.
+ */
+export function onDraftSaved(
+  queryClient: QueryClient,
+  listener: (save: searchOperations.SavedVersion) => void,
+): () => void {
+  savesHeard(queryClient).add(listener);
+  return () => {
+    savesHeard(queryClient).delete(listener);
+  };
 }
 
 /**

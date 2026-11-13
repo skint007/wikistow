@@ -1,3 +1,5 @@
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect, test } from '../../web/e2e/fixtures';
 import {
   adminTab,
@@ -55,6 +57,22 @@ test('starts offline, unlocks and reads what it kept', async ({
   // The desktop keeps every page: Settings counts it once the keeper ran.
   await first.window.getByRole('link', { name: 'Settings' }).click();
   await expect(first.window.getByText(/^1 page, /)).toBeVisible({ timeout: 30_000 });
+  // Search by meaning is on by default with a keyring (ADR 0016, decision
+  // 5): the page is embedded in the background, and the vectors kept,
+  // sealed, in the app's data folder beside the search index.
+  await expect(first.window.getByRole('switch', { name: 'Search by meaning' })).toBeChecked();
+  await expect
+    .poll(
+      () =>
+        stat(join(profile, 'meaning-index')).then(
+          ({ size }) => size,
+          () => 0,
+        ),
+      {
+        timeout: 60_000,
+      },
+    )
+    .toBeGreaterThan(384);
   await first.app.close();
   running = [];
 

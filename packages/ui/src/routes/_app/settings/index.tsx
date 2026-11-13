@@ -30,6 +30,10 @@ import { errorMessage, unwrap } from '../../../errors';
 import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-moves';
 import { showProperties, useShowProperties } from '../../../page/properties-shown';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
+import { useMeaningStatus } from '../../../meaning/background';
+import { forgetModel } from '../../../meaning/embedder';
+import { dropMeaningIndex } from '../../../meaning/meaning-file';
+import { meaningSettingState, searchByMeaning, useMeaningOffer } from '../../../meaning/setting';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
@@ -98,6 +102,7 @@ function Settings() {
               <AskBeforeMoves />
               <ShowProperties />
               <KeepForOffline />
+              <SearchByMeaning />
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />
@@ -291,6 +296,37 @@ function KeepForOffline() {
           disabled={keyless}
           onChange={change}
         />
+      }
+    />
+  );
+}
+
+/**
+ * **Search by meaning** (ADR 0016, decision 5): on by default in the
+ * desktop app, and for a computer's browser to turn on, both only with
+ * **Keep for offline** on Every page, and not shown on phones yet. While on, it
+ * says how far indexing has got. Turning it off deletes the vectors kept
+ * and the model's files the browser kept.
+ */
+function SearchByMeaning() {
+  const on = useDeviceSwitch(searchByMeaning());
+  const offer = useMeaningOffer();
+  const status = useMeaningStatus();
+  function change(next: boolean) {
+    searchByMeaning().set(next);
+    if (!next) void Promise.all([dropMeaningIndex(), forgetModel().catch(() => {})]);
+  }
+  // Not on phones yet; where it needs Every page, it says so, with no switch.
+  if (offer === null || offer === 'phone') return null;
+  return (
+    <SettingRow
+      name="Search by meaning"
+      scope={THIS_DEVICE}
+      state={meaningSettingState(offer, { on, desktop: desktop !== null, status })}
+      action={
+        offer === 'offered' && (
+          <Switch aria-label="Search by meaning" checked={on} onCheckedChange={change} />
+        )
       }
     />
   );

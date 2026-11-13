@@ -1,5 +1,7 @@
 import { CSP } from '@wikistow/contracts';
-import { expect, test } from './fixtures';
+import type { Page } from '@playwright/test';
+import { expect, pick, test } from './fixtures';
+import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './vault';
 import { embedIn, embedWorker, PASSAGES, QUERY, type Run } from './meaning';
 
 /** Each run's times, beside the test's result (`--reporter=json`), for ADR 0016's measurements. */
@@ -83,4 +85,171 @@ test('embeds a text under the app’s policy, from its own files, offline too', 
   const offline = await embedIn(page, worker, { keep: true, query: QUERY, passages: PASSAGES });
   expect(offline.from).toBe('cache');
   expect(offline.query).toEqual(first.query);
+});
+
+/** About 150 words of a travel diary's day, different each day. */
+const diaryDay = (day: number) =>
+  `## Day ${day}\n\n` +
+  Array.from(
+    { length: 10 },
+    (_, line) =>
+      `On day ${day} we walked ${line + 2} miles along the cliffs, ate fish by the harbour, and watched the tide come in over the rocks at evening.`,
+  ).join(' ');
+
+/** Keyboard events from now on that took past a frame to paint, as Event Timing reports them. */
+async function watchKeys(page: Page) {
+  await page.evaluate(() => {
+    const seen: { name: string; duration: number }[] = [];
+    (window as unknown as { keysSeen: typeof seen }).keysSeen = seen;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (/^key|input/.test(entry.name))
+          seen.push({ name: entry.name, duration: entry.duration });
+      }
+    }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
+  });
+}
+const slowestKey = (page: Page) =>
+  page.evaluate(() =>
+    Math.max(
+      0,
+      ...(window as unknown as { keysSeen: { duration: number }[] }).keysSeen.map(
+        ({ duration }) => duration,
+      ),
+    ),
+  );
+
+/** The vectors this browser keeps, sealed, beside the search index: their size, or 0. */
+const keptVectors = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<number>((resolve, reject) => {
+        const opening = indexedDB.open('wikistow-kept');
+        opening.onerror = () => reject(opening.error);
+        opening.onsuccess = () => {
+          const db = opening.result;
+          const read = db.transaction('meta').objectStore('meta').get('meaning-index');
+          read.onsuccess = () => {
+            db.close();
+            resolve(read.result instanceof Uint8Array ? read.result.length : 0);
+          };
+          read.onerror = () => reject(read.error);
+        };
+      }),
+  );
+
+/**
+ * Search by meaning, turned on in a computer's browser with Every page
+ * kept (ADR 0016, step 4), indexes the pages in the background, with the
+ * real model in its worker. Typing in a page and searching stay
+ * responsive while it does: no keypress takes past 200 ms to paint, the
+ * bound of a good Interaction to Next Paint. Once done, the vectors are
+ * kept, sealed, and a reload opens them rather than embed anything again.
+ */
+test('indexes by meaning in the background, typing and searching staying responsive', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(300_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Cornwall diary');
+  // About 60 passages: some 20 s for the model.
+  await fillSource(page, Array.from({ length: 60 }, (_, day) => diaryDay(day + 1)).join('\n\n'));
+  await waitForSave(page);
+  await newPage(page, 'Notes');
+  await fillSource(page, 'Things to remember.');
+  await waitForSave(page);
+
+  const workers: string[] = [];
+  let saved = 0;
+  page.on('worker', (worker) => workers.push(worker.url()));
+  // The setting's state, which its name is described by.
+  const row = page.getByRole('heading', { level: 3, name: /^Search by meaning/ });
+  await test.step('turned on in Settings, once Every page is kept', async () => {
+    await page.getByRole('link', { name: 'Settings' }).click();
+    const toggle = page.getByRole('switch', { name: 'Search by meaning' });
+    await expect(row).toHaveAccessibleDescription(/^Needs Keep for offline on Every page/);
+    await expect(toggle).toHaveCount(0);
+    await pick(page.getByLabel(/^Keep for offline: /), 'Every page');
+    await expect(row).toHaveAccessibleDescription(/Downloads 26 MB once/);
+    await toggle.click();
+    await expect(toggle).toBeChecked();
+    await expect(row).toHaveAccessibleDescription(/By meaning: \d of 2 pages so far/, {
+      timeout: 30_000,
+    });
+  });
+
+  await test.step('typing in a page stays responsive while it indexes', async () => {
+    // Back to the page Settings was opened from, in the app: nothing reloads.
+    await page.goBack();
+    await expect(page.locator('#page-title')).toHaveValue('Notes');
+    await watchKeys(page);
+    const source = page.locator('#page-source');
+    await source.click();
+    await page.keyboard.press('ControlOrMeta+End');
+    await page.keyboard.type(' Pack a coat for the cliffs, and sun cream.', { delay: 30 });
+    await waitForSave(page);
+    saved = Date.now();
+    const slowest = await slowestKey(page);
+    test
+      .info()
+      .annotations.push({ type: 'timing', description: `slowest keypress typing: ${slowest} ms` });
+    expect(slowest).toBeLessThan(200);
+  });
+
+  await test.step('searching stays responsive while it indexes', async () => {
+    await watchKeys(page);
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    const search = page.getByRole('dialog', { name: 'Search' });
+    const box = search.getByRole('combobox', { name: 'Search pages' });
+    await box.pressSequentially('harbour', { delay: 30 });
+    await expect(search.getByRole('option').locator('.font-extrabold')).toHaveText([
+      'Cornwall diary',
+    ]);
+    const slowest = await slowestKey(page);
+    test.info().annotations.push({
+      type: 'timing',
+      description: `slowest keypress searching: ${slowest} ms`,
+    });
+    expect(slowest).toBeLessThan(200);
+    await page.keyboard.press('Escape');
+  });
+
+  await test.step('it was indexing all the while, and keeps the vectors once done', async () => {
+    await page.getByRole('link', { name: 'Settings' }).click();
+    // Still going after the typing and the search: they didn't wait on it.
+    await expect(row).toHaveAccessibleDescription(/By meaning: \d of 2 pages so far/);
+    expect(workers.filter((url) => /\/embed\.worker-[\w-]+\.js$/.test(url))).toHaveLength(1);
+    await expect(row).not.toHaveAccessibleDescription(/so far/, { timeout: 120_000 });
+    // The note typed in is embedded once its saves have paused for 30 s,
+    // and the vectors kept 5 s after.
+    await page.waitForTimeout(Math.max(0, saved + 40_000 - Date.now()));
+    await expect.poll(() => keptVectors(page), { timeout: 30_000 }).toBeGreaterThan(60 * 400);
+  });
+
+  await test.step('a reload opens the kept vectors, embedding nothing again', async () => {
+    workers.length = 0;
+    await page.reload();
+    await expect(page.getByRole('switch', { name: 'Search by meaning' })).toBeChecked();
+    await expect(
+      page.getByText(/Nothing you search for or write leaves this device/),
+    ).toBeVisible();
+    // Long enough for the word index and the kept vectors to open.
+    await page.waitForTimeout(5_000);
+    await expect(row).not.toHaveAccessibleDescription(/so far/);
+    expect(workers.filter((url) => url.includes('embed.worker'))).toEqual([]);
+  });
+
+  await test.step('turning it off deletes the vectors and the model’s files', async () => {
+    await page.getByRole('switch', { name: 'Search by meaning' }).click();
+    await expect.poll(() => keptVectors(page)).toBe(0);
+    await expect
+      .poll(() =>
+        page.evaluate(async () =>
+          (await caches.keys()).filter((name) => name.startsWith('wikistow-meaning-')),
+        ),
+      )
+      .toEqual([]);
+  });
 });

@@ -1,0 +1,562 @@
+import {
+  estimateTokens,
+  meaningPassages,
+  nearestPages,
+  quantizeVector,
+  type IndexedPage as IndexedOf,
+  type KeptMeaning,
+  type MeaningPassage,
+  type PageId,
+  type RevisionId,
+  type searchOperations,
+  type SpaceId,
+  type Vector8,
+} from '@wikistow/client';
+import { KEEP_AT_MOST_MS, KEEP_MS, systemClock, type Clock } from '../data/index-tracker';
+
+// Search by meaning's background queue (ADR 0016, decision 4): the vectors
+// of each page the word index holds, made one passage at a time after the
+// word index is built, kept by version, and kept on the device where the
+// word index is. Nothing here knows React, React Query or the worker: the
+// app hands it the word index as it changes and what it needs as
+// `MeaningWork` (`background.ts`), so tests drive it by hand.
+
+/** How long a draft this person types waits after its last save before it is embedded. */
+export const DRAFT_PAUSE_MS = 30_000;
+
+/**
+ * How long the queue rests after each passage, as a share of the time the
+ * passage took, so the worker takes at most two thirds of a core; and at
+ * least, so the page always gets a turn.
+ */
+export const REST_SHARE = 0.5;
+export const REST_AT_LEAST_MS = 20;
+
+/** How long the queue waits before looking again while a page opens or the word index updates. */
+export const BUSY_WAIT_MS = 250;
+
+/** How long the queue waits after the worker failed, before it tries again. */
+export const RETRY_MS = 60_000;
+
+/** How far the vectors have got: pages with vectors, of the pages the word index holds. */
+export type MeaningStatus = { pages: number; total: number };
+
+/** "By meaning: 340 of 1,200 pages so far" while pages are left to embed, else null. */
+export function meaningProgress(status: MeaningStatus | null): string | null {
+  if (!status || status.pages >= status.total) return null;
+  return `By meaning: ${status.pages.toLocaleString('en')} of ${status.total.toLocaleString('en')} pages so far`;
+}
+
+/** Where this device keeps the vectors, sealed (`sealMeaningIndex`). */
+export type MeaningFile = {
+  read(): Promise<Uint8Array | null>;
+  write(sealed: Uint8Array): Promise<void>;
+};
+
+/** What the queue needs from the app. */
+export type MeaningWork = {
+  /** The model, in its worker (`Embedder`). */
+  embedder: {
+    count(words: string[]): Promise<number[]>;
+    embed(kind: 'passage', texts: string[]): Promise<{ vectors: Float32Array[] }>;
+    stop(): void;
+  };
+  /** Where the vectors are kept now, or null to keep them only in memory. */
+  file(): Promise<MeaningFile | null>;
+  /** The vectors, sealed for this person and model. */
+  seal(kept: KeptMeaning): Uint8Array;
+  /** What `seal` sealed, or null if it isn't this person's for this model. */
+  open(sealed: Uint8Array): KeptMeaning | null;
+  /** A page is opening, or the word index updating: the queue waits. */
+  busy(): boolean;
+  /** Resolves once the page has a moment free (`requestIdleCallback`). */
+  idle(): Promise<void>;
+  clock?: Clock;
+};
+
+/** A page found by meaning (`MeaningIndexer.nearest`), with the passage that matched best. */
+export type MeaningHit = {
+  spaceId: SpaceId;
+  pageId: PageId;
+  passage: MeaningPassage;
+  score: number;
+};
+
+type IndexedPage = Readonly<IndexedOf<searchOperations.SearchPage>>;
+type SavedVersion = Pick<
+  searchOperations.SavedVersion,
+  'spaceId' | 'pageId' | 'revisionId' | 'basedOn'
+>;
+
+const keyOf = (spaceId: SpaceId, pageId: PageId) => `${spaceId}/${pageId}`;
+
+/** A run without spaces: what the tokenizer counts (`meaningPassages`). */
+const WORD = /\S+/g;
+
+/**
+ * The vectors of every page the word index holds, each in the version it
+ * shows (ADR 0016, decision 4):
+ *
+ * - **Kept vectors open first.** The file kept before is read and opened
+ *   before anything else; only versions without vectors are embedded.
+ * - **In the background,** each page whose version has no vectors yet,
+ *   most recently changed first, one passage at a time. After each passage
+ *   it rests half as long as the passage took, and waits while a page opens
+ *   or the word index updates and for the page to have a moment free, so a
+ *   search or a page opening never waits behind it. A passage whose text
+ *   has a vector already, in any version kept, isn't embedded again, so an
+ *   edit to one section embeds one passage.
+ * - **Drafts.** A version this person saved is embedded once their saves
+ *   of the page have paused for `DRAFT_PAUSE_MS`; until then, the version
+ *   before stands in. Any other version replaced, and any page the word
+ *   index lets go, goes at once.
+ * - **Kept** where `file` says, once embedding pauses (`KEEP_MS`), at least
+ *   once a minute while it goes on (`KEEP_AT_MOST_MS`), and at once after a
+ *   version goes that isn't this person's draft saved over.
+ * - **Stopped** (`stop`), as at a lock, it drops every vector and the
+ *   worker, and keeps nothing after.
+ */
+export class MeaningIndexer {
+  readonly #work: MeaningWork;
+  readonly #clock: Clock;
+  /** The vectors of each version, by revision ID. */
+  readonly #kept = new Map<RevisionId, readonly MeaningPassage[]>();
+  /** Each passage's vector by its text's hash, of the versions kept. */
+  readonly #byHash = new Map<string, Vector8>();
+  /** What each version's vectors were made from, this session; one from the file isn't known. */
+  readonly #madeFrom = new Map<RevisionId, { title: string; text: string }>();
+  /** Versions whose text changed under the same revision ID, as a save into the queue does. */
+  readonly #rewritten = new Set<RevisionId>();
+  /** For a page whose draft waits, the version whose vectors stand in for it. */
+  readonly #held = new Map<string, RevisionId>();
+  /** When this person last saved each page, and the versions they saved. */
+  readonly #savedAt = new Map<string, number>();
+  readonly #ownVersions = new Set<RevisionId>();
+  /**
+   * For a page whose version was replaced, or given up as it changed while
+   * embedded, the vectors of the passages made so far, by hash: in memory
+   * only, never searched or kept, until the page's next version has its
+   * own, so an edit to one section embeds that passage alone.
+   */
+  readonly #reusable = new Map<string, Map<string, Vector8>>();
+  readonly #listeners = new Set<() => void>();
+
+  #index: searchOperations.PageIndex | null = null;
+  /** Each page the word index holds, by key. */
+  #shown = new Map<string, IndexedPage>();
+  /** The pages left to embed, best first, from `#cursor` on. */
+  #todo: string[] = [];
+  #cursor = 0;
+  #status: MeaningStatus | null = null;
+  #opened: Promise<void>;
+  #isOpen = false;
+  #running = false;
+  #again = false;
+  #stopped = false;
+  /** When the rest after the last passage ends. */
+  #restUntil = 0;
+  #wakeAt: { at: number; cancel: () => void } | null = null;
+  #keeping: { since: number; now: boolean; cancel: () => void } | null = null;
+
+  constructor(work: MeaningWork) {
+    this.#work = work;
+    this.#clock = work.clock ?? systemClock;
+    this.#opened = this.#open();
+  }
+
+  /** Read and open the vectors kept before, if any. */
+  async #open() {
+    try {
+      const file = await this.#work.file();
+      const sealed = file && (await file.read());
+      if (this.#stopped || !sealed) return;
+      // Opening takes some milliseconds a thousand pages: in a moment free.
+      await this.#work.idle();
+      if (this.#stopped) return;
+      const kept = this.#work.open(sealed);
+      if (!kept || this.#stopped) return;
+      for (const [revisionId, passages] of kept) this.#store(revisionId, passages);
+    } catch {
+      // Nothing kept, or it can't be read: every page is embedded again.
+    } finally {
+      this.#isOpen = true;
+    }
+  }
+
+  /** The word index, built or updated: what to embed, and what to let go. */
+  indexChanged(index: searchOperations.PageIndex) {
+    if (this.#stopped || index === this.#index) return;
+    this.#index = index;
+    if (!this.#isOpen) {
+      void this.#opened.then(() => {
+        if (this.#index === index) this.#follow(index);
+      });
+      return;
+    }
+    this.#follow(index);
+  }
+
+  #follow(index: searchOperations.PageIndex) {
+    if (this.#stopped) return;
+    const before = this.#shown;
+    const shown = new Map<string, IndexedPage>();
+    for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
+    this.#shown = shown;
+    // A version of this person's draft stands in for the page until the one
+    // replacing it is embedded; for any other, nothing does.
+    for (const [key, page] of shown) {
+      const old = before.get(key)?.doc.revisionId;
+      if (!old || old === page.doc.revisionId) continue;
+      this.#reuse(key, this.#kept.get(old));
+      if (this.#ownVersions.has(page.doc.revisionId)) {
+        const standing = this.#held.get(key) ?? old;
+        if (this.#kept.has(standing)) this.#held.set(key, standing);
+      } else this.#held.delete(key);
+    }
+    for (const key of this.#held.keys()) if (!shown.has(key)) this.#held.delete(key);
+    for (const key of this.#reusable.keys()) if (!shown.has(key)) this.#reusable.delete(key);
+    if (this.#prune()) this.#keep(true);
+    this.#plan();
+    this.#wake();
+  }
+
+  /** A draft this person saved: it waits until their saves of the page pause. */
+  saved(save: SavedVersion) {
+    if (this.#stopped) return;
+    const key = keyOf(save.spaceId, save.pageId);
+    this.#savedAt.set(key, this.#clock.now());
+    this.#ownVersions.add(save.revisionId);
+    // Into this device's queue, on its base: the same version, another text.
+    if (save.revisionId === save.basedOn) this.#rewritten.add(save.revisionId);
+    this.#wakeIn(DRAFT_PAUSE_MS);
+  }
+
+  /** How far the vectors have got, or null before the word index is built, or once stopped. */
+  status(): MeaningStatus | null {
+    return this.#status;
+  }
+
+  /** Call `listener` each time `status` changes, until the returned function is called. */
+  subscribe(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  /**
+   * The `limit` pages whose vectors are nearest `query`, best first, of
+   * those the word index holds and `include` keeps (`nearestPages`): each
+   * by its best passage, in the version it shows, or the one standing in
+   * for a draft.
+   */
+  nearest(
+    query: ArrayLike<number>,
+    limit: number,
+    include?: (entry: searchOperations.IndexedEntry) => boolean,
+  ): MeaningHit[] {
+    const index = this.#index;
+    if (this.#stopped || !index) return [];
+    const pages = new Map<string, { page: IndexedPage; passages: readonly MeaningPassage[] }>();
+    for (const [key, page] of this.#shown) {
+      const passages = this.#standing(key, page);
+      if (!passages || passages.length === 0) continue;
+      if (include) {
+        const entry = index.page(page.doc.spaceId, page.doc.pageId);
+        if (!entry || !include(entry)) continue;
+      }
+      pages.set(key, { page, passages });
+    }
+    const found = nearestPages(
+      query,
+      [...pages].map(([key, { passages }]) => [key, passages] as const),
+      limit,
+    );
+    return found.map(({ key, passage, score }) => {
+      const { page, passages } = pages.get(key)!;
+      return {
+        spaceId: page.doc.spaceId,
+        pageId: page.doc.pageId,
+        passage: passages[passage]!,
+        score,
+      };
+    });
+  }
+
+  /** Stop, as at a lock: the vectors and the worker go, and nothing is kept after. */
+  stop() {
+    if (this.#stopped) return;
+    this.#stopped = true;
+    this.#work.embedder.stop();
+    this.#wakeAt?.cancel();
+    this.#keeping?.cancel();
+    this.#wakeAt = null;
+    this.#keeping = null;
+    this.#kept.clear();
+    this.#byHash.clear();
+    this.#madeFrom.clear();
+    this.#held.clear();
+    this.#reusable.clear();
+    this.#shown = new Map();
+    this.#todo = [];
+    this.#index = null;
+    this.#setStatus(null);
+  }
+
+  /**
+   * The vectors that stand for `page` now: its version's; for a draft, the
+   * version before's; for a save into the queue, those of its text before.
+   */
+  #standing(key: string, page: IndexedPage): readonly MeaningPassage[] | undefined {
+    const own = this.#kept.get(page.doc.revisionId);
+    if (own && this.#done(page)) return own;
+    const held = this.#held.get(key);
+    return (held === undefined ? undefined : this.#kept.get(held)) ?? own;
+  }
+
+  /** `page`'s version has its vectors, made from the text the word index holds. */
+  #done(page: IndexedPage): boolean {
+    const { revisionId } = page.doc;
+    if (!this.#kept.has(revisionId) || this.#rewritten.has(revisionId)) return false;
+    const made = this.#madeFrom.get(revisionId);
+    return !made || (made.title === page.title && made.text === page.text);
+  }
+
+  /** How long until this person's saves of the page have paused for `DRAFT_PAUSE_MS`, or 0. */
+  #pauseLeft(key: string): number {
+    const at = this.#savedAt.get(key);
+    return at === undefined ? 0 : Math.max(0, at + DRAFT_PAUSE_MS - this.#clock.now());
+  }
+
+  /** Keep `passages`' vectors for `key`'s next version (`#reusable`). */
+  #reuse(key: string, passages: Iterable<{ hash: string; vector: Vector8 }> | undefined) {
+    if (!passages) return;
+    let reusable = this.#reusable.get(key);
+    if (!reusable) this.#reusable.set(key, (reusable = new Map()));
+    for (const { hash, vector } of passages) reusable.set(hash, vector);
+  }
+
+  #store(revisionId: RevisionId, passages: readonly MeaningPassage[]) {
+    this.#kept.set(revisionId, passages);
+    for (const { hash, vector } of passages) this.#byHash.set(hash, vector);
+  }
+
+  /**
+   * Let go of every version no page shows, and no draft stands in on: true
+   * if any went that wasn't this person's own draft saved over, which the
+   * file then lets go of at once.
+   */
+  #prune(): boolean {
+    const wanted = new Set<RevisionId>(this.#held.values());
+    for (const page of this.#shown.values()) wanted.add(page.doc.revisionId);
+    let letGo = false;
+    let any = false;
+    for (const revisionId of this.#kept.keys()) {
+      if (wanted.has(revisionId)) continue;
+      this.#kept.delete(revisionId);
+      this.#madeFrom.delete(revisionId);
+      this.#rewritten.delete(revisionId);
+      any = true;
+      if (!this.#ownVersions.has(revisionId)) letGo = true;
+    }
+    if (any) {
+      this.#byHash.clear();
+      for (const passages of this.#kept.values()) {
+        for (const { hash, vector } of passages) this.#byHash.set(hash, vector);
+      }
+    }
+    return letGo;
+  }
+
+  /** The pages left to embed, most recently changed first, and the status. */
+  #plan() {
+    const left: IndexedPage[] = [];
+    let pages = 0;
+    for (const [key, page] of this.#shown) {
+      if (this.#standing(key, page)) pages++;
+      if (!this.#done(page)) left.push(page);
+    }
+    left.sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
+    this.#todo = left.map((page) => keyOf(page.doc.spaceId, page.doc.pageId));
+    this.#cursor = 0;
+    this.#setStatus({ pages, total: this.#shown.size });
+  }
+
+  #setStatus(status: MeaningStatus | null) {
+    const before = this.#status;
+    if (before === status) return;
+    if (before && status && before.pages === status.pages && before.total === status.total) return;
+    this.#status = status;
+    for (const listener of this.#listeners) listener();
+  }
+
+  /** The next page to embed, or null; a draft still being typed waits, and wakes the queue later. */
+  #next(): IndexedPage | null {
+    let soonest = Infinity;
+    while (this.#cursor < this.#todo.length) {
+      const key = this.#todo[this.#cursor]!;
+      const page = this.#shown.get(key);
+      if (!page || this.#done(page)) {
+        this.#cursor++;
+        continue;
+      }
+      const left = this.#pauseLeft(key);
+      if (left > 0) {
+        soonest = Math.min(soonest, left);
+        this.#cursor++;
+        continue;
+      }
+      return page;
+    }
+    // Drafts passed over are planned again once their pause ends.
+    if (soonest < Infinity) this.#wakeIn(soonest);
+    return null;
+  }
+
+  /** Wake the queue in `ms`, or sooner if already due. */
+  #wakeIn(ms: number) {
+    const at = this.#clock.now() + ms;
+    if (this.#wakeAt && this.#wakeAt.at <= at) return;
+    this.#wakeAt?.cancel();
+    this.#wakeAt = {
+      at,
+      cancel: this.#clock.after(ms, () => {
+        this.#wakeAt = null;
+        if (this.#stopped) return;
+        this.#plan();
+        this.#wake();
+      }),
+    };
+  }
+
+  /** Run the queue, unless it runs already; one running takes what changed at its next page. */
+  #wake() {
+    if (this.#stopped) return;
+    if (this.#running) {
+      this.#again = true;
+      return;
+    }
+    this.#running = true;
+    void this.#run();
+  }
+
+  async #run() {
+    try {
+      for (;;) {
+        this.#again = false;
+        const page = this.#stopped ? null : this.#next();
+        if (!page) {
+          if (this.#again && !this.#stopped) continue;
+          break;
+        }
+        try {
+          await this.#embedPage(page);
+        } catch {
+          // The worker failed: try again later, from the page it was on.
+          if (this.#stopped) break;
+          await this.#sleep(RETRY_MS);
+          this.#plan();
+        }
+      }
+    } finally {
+      this.#running = false;
+    }
+  }
+
+  /** `page` changed, left, or waits on its draft since its embedding started: give it up. */
+  #given(key: string, page: IndexedPage): boolean {
+    if (this.#stopped || this.#pauseLeft(key) > 0) return true;
+    const now = this.#shown.get(key);
+    return (
+      !now ||
+      now.doc.revisionId !== page.doc.revisionId ||
+      now.title !== page.title ||
+      now.text !== page.text
+    );
+  }
+
+  async #embedPage(page: IndexedPage) {
+    const key = keyOf(page.doc.spaceId, page.doc.pageId);
+    const { revisionId } = page.doc;
+    // Passages are cut by the model's own count of each word's tokens.
+    const words = [...new Set([...`${page.title}\n${page.text}`.matchAll(WORD)].map(([w]) => w))];
+    const counts = await this.#work.embedder.count(words);
+    if (this.#given(key, page)) return;
+    const counted = new Map(words.map((word, i) => [word, counts[i] ?? estimateTokens(word)]));
+    const passages = meaningPassages(page, {
+      countTokens: (word) => counted.get(word) ?? estimateTokens(word),
+    });
+    const made: MeaningPassage[] = [];
+    for (const passage of passages) {
+      let vector = this.#byHash.get(passage.hash) ?? this.#reusable.get(key)?.get(passage.hash);
+      if (!vector) {
+        await this.#pace();
+        if (this.#given(key, page)) return;
+        const started = this.#clock.now();
+        const { vectors } = await this.#work.embedder.embed('passage', [passage.text]);
+        const ended = this.#clock.now();
+        this.#restUntil = ended + Math.max(REST_AT_LEAST_MS, (ended - started) * REST_SHARE);
+        if (!vectors[0]) throw new Error('The embedding worker gave no vector.');
+        vector = quantizeVector(vectors[0]);
+        if (this.#given(key, page)) {
+          if (!this.#stopped) this.#reuse(key, [...made, { hash: passage.hash, vector }]);
+          return;
+        }
+      }
+      made.push({ hash: passage.hash, start: passage.start, vector });
+    }
+    this.#reusable.delete(key);
+    const had = this.#standing(key, page) !== undefined;
+    this.#store(revisionId, made);
+    this.#madeFrom.set(revisionId, { title: page.title, text: page.text });
+    this.#rewritten.delete(revisionId);
+    const held = this.#held.get(key);
+    this.#held.delete(key);
+    if (held !== undefined) this.#prune();
+    const status = this.#status;
+    if (status && !had) this.#setStatus({ pages: status.pages + 1, total: status.total });
+    this.#keep(false);
+  }
+
+  /** Rest after the last passage, then wait while a page opens or the index updates, and for a moment free. */
+  async #pace() {
+    const rest = this.#restUntil - this.#clock.now();
+    if (rest > 0) await this.#sleep(rest);
+    while (!this.#stopped && this.#work.busy()) await this.#sleep(BUSY_WAIT_MS);
+    if (!this.#stopped) await this.#work.idle();
+  }
+
+  #sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => this.#clock.after(ms, resolve));
+  }
+
+  /**
+   * Keep the vectors once they stop changing for `KEEP_MS`, or
+   * `KEEP_AT_MOST_MS` after they first changed; with `now`, at once.
+   */
+  #keep(now: boolean) {
+    if (this.#stopped || this.#keeping?.now) return;
+    const at = this.#clock.now();
+    const since = this.#keeping?.since ?? at;
+    this.#keeping?.cancel();
+    const wait = now ? 0 : Math.max(0, Math.min(KEEP_MS, since + KEEP_AT_MOST_MS - at));
+    this.#keeping = {
+      since: now ? at : since,
+      now,
+      cancel: this.#clock.after(wait, () => {
+        this.#keeping = null;
+        void this.#write().catch(() => {});
+      }),
+    };
+  }
+
+  async #write() {
+    await this.#opened;
+    const file = await this.#work.file();
+    // Sealing takes some milliseconds a thousand pages: in a moment free.
+    if (file && !this.#stopped) await this.#work.idle();
+    // Stopped meanwhile, the keys may be gone: nothing is sealed with them.
+    if (!file || this.#stopped) return;
+    await file.write(this.#work.seal(this.#kept));
+  }
+}
