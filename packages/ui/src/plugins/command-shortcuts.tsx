@@ -30,13 +30,20 @@ export function CommandShortcuts({ pluginId }: { pluginId: string }) {
   const own = commands.filter((command) => command.pluginId === pluginId);
   if (own.length === 0) return null;
   const name = pluginName(plugins, pluginId);
-  // Every shortcut kept here, a plugin's that is off or not started yet too, so none is given twice.
+  // The shortcuts kept here that still run something: a running plugin's
+  // commands', and every one of an installed plugin that is off or not
+  // started yet, so none is given twice. A removed plugin's, or a command
+  // a running plugin no longer has, frees its keys.
+  const installed = new Set(plugins.map(({ plugin }) => plugin.manifest.id));
+  const runningPlugins = new Set(commands.map((each) => each.pluginId));
   const taken = Object.entries(shortcuts).flatMap(([at, keys]) => {
     const slash = at.indexOf('/');
     const [pluginId, commandId] = [at.slice(0, slash), at.slice(slash + 1)];
     const running = commands.find((each) => each.pluginId === pluginId && each.id === commandId);
+    if (slash < 0 || !installed.has(pluginId) || (runningPlugins.has(pluginId) && !running))
+      return [];
     const title = `${pluginName(plugins, pluginId)}: ${running?.title ?? commandId}`;
-    return slash < 0 ? [] : [{ pluginId, commandId, title, keys }];
+    return [{ pluginId, commandId, title, keys }];
   });
 
   const pressed = (command: CommandKey, event: KeyboardEvent<HTMLButtonElement>) => {

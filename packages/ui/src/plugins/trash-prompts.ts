@@ -1,5 +1,12 @@
-/** What a plugin asks to move to the trash (`host.pages.trash`): its name, and each page's title. */
-export type TrashRequest = { plugin: string; titles: readonly (string | null)[] };
+/**
+ * What a plugin asks to move to the trash (`host.pages.trash`): its name,
+ * and each page's title with the names of the folders it is in, so two of
+ * one title can be told apart.
+ */
+export type TrashRequest = {
+  plugin: string;
+  pages: readonly { title: string | null; folders: readonly string[] }[];
+};
 
 type Asked = TrashRequest & { id: number; answer: (agreed: boolean) => void };
 

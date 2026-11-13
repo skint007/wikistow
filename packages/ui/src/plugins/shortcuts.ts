@@ -172,6 +172,8 @@ export const APP_SHORTCUTS: Readonly<Record<string, string>> = Object.fromEntrie
     'Mod-Ctrl-f': 'Full screen',
     'Mod-Shift-i': 'Developer tools',
     'Mod-Alt-i': 'Developer tools',
+    'Mod-Alt-h': 'Hide others',
+    'Mod-Alt-Shift-v': 'Paste and match style',
     F12: 'Developer tools',
     'Mod-w': 'Close the window',
     'Mod-q': 'Quit',

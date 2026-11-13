@@ -379,7 +379,9 @@ export function sampleStore() {
           const agreed = await pluginTrashPrompts.ask(
             {
               plugin: caller.name,
-              titles: samples.filter(({ pageId }) => ids.has(pageId)).map(({ title }) => title),
+              pages: samples
+                .filter(({ pageId }) => ids.has(pageId))
+                .map(({ title }) => ({ title, folders: [] })),
             },
             caller.signal,
           );

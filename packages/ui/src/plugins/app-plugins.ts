@@ -1,4 +1,10 @@
-import { patient, queueOperations, searchOperations, trashOperations } from '@wikistow/client';
+import {
+  linkablePages,
+  patient,
+  queueOperations,
+  searchOperations,
+  trashOperations,
+} from '@wikistow/client';
 import { PageId, pageRoutes, SpaceId } from '@wikistow/contracts';
 import { PluginError, type PageRef } from '@wikistow/plugin-sdk';
 import {
@@ -108,10 +114,10 @@ export function startAppPlugins(queryClient: QueryClient) {
     const spaces = await latest(spacesQuery(ctx));
     if (!spaceIds.every((id) => spaces.find((space) => space.id === id)?.role === 'owner'))
       throw new PluginError('forbidden', 'Only a space’s owners move its pages to the trash');
-    const titles = new Map<string, string | null>();
+    const titles = new Map<string, { title: string | null; folders: readonly string[] }>();
     for (const spaceId of spaceIds) {
-      for (const page of (await latest(treeQuery(ctx, spaceId))).pages)
-        titles.set(page.id, page.title);
+      for (const { id, title, folders } of linkablePages(await latest(treeQuery(ctx, spaceId))))
+        titles.set(id, { title, folders });
     }
     // A page only: a folder's ID would take everything in it, which the prompt wouldn't list.
     if (!pages.every(({ pageId }) => titles.has(pageId)))
@@ -126,9 +132,13 @@ export function startAppPlugins(queryClient: QueryClient) {
           'A page made on this device isn’t sent yet. Try again once it is.',
         );
     }
-    const named = pages.map((page) => ({ ...page, title: titles.get(page.pageId) ?? null }));
+    const named = pages.map((page) => ({
+      ...page,
+      title: titles.get(page.pageId)?.title ?? null,
+      folders: titles.get(page.pageId)?.folders ?? [],
+    }));
     const agreed = await pluginTrashPrompts.ask(
-      { plugin: caller.name, titles: named.map(({ title }) => title) },
+      { plugin: caller.name, pages: named.map(({ title, folders }) => ({ title, folders })) },
       caller.signal,
     );
     if (!agreed || !caller.live()) return false;
@@ -137,6 +147,8 @@ export function startAppPlugins(queryClient: QueryClient) {
     const trashed: PageId[] = [];
     try {
       for (const { spaceId, pageId, title } of named) {
+        // Turned off meanwhile: the rest stay, as the batches stop.
+        if (!caller.live()) throw unloaded();
         const nodeId = PageId.parse(pageId);
         const done = await batchTurn(async () => {
           await mayStill({ spaceId: SpaceId.parse(spaceId), pageId: nodeId });
