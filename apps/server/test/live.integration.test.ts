@@ -720,14 +720,15 @@ describe('ending', () => {
     }
     // A reader saw none of it at any point.
     expect(await rejection(liveOf(reader, lib.page.pageId))).toBe('not-found');
-    // A stream opened now sends what the session keeps, then the end, and makes no join.
+    // A stream opened now makes no join, and sends the end; a removal rotated the keys,
+    // so nobody's count for what the session keeps, and it sends none of it.
     const joinsBefore = (await liveOf(other, lib.page.pageId)).ended?.joins.length;
     const late = await stream(other, session, newId(JoinId), 0);
     const kept = [];
     for (let line = await late.next(); !('ended' in line); line = await late.next()) {
       if ('message' in line) kept.push(line.message.position);
     }
-    expect(kept).toEqual([1, 2, 3]);
+    expect(kept).toEqual([]);
     await late.closed();
     expect((await liveOf(other, lib.page.pageId)).ended?.joins.length).toBe(joinsBefore);
   });
@@ -918,6 +919,10 @@ describe('deleting a session', () => {
     await me.send([me.message('update')]);
     await sharing.rotateKeys(owner.ctx, { spaceId: lib.spaceId, shareId });
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
+    // Nobody's keys count for it, so its stream reads nothing of it, only its end.
+    const reading = await stream(owner, session, newId(JoinId), 0);
+    expect(await reading.next()).toMatchObject({ ended: 'access' });
+    expect(reading.lines.some((l) => 'message' in l)).toBe(false);
     await everyoneLeft(session.sessionId, '1 second');
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(session.sessionId)).toBeUndefined();
@@ -935,6 +940,26 @@ describe('deleting a session', () => {
     expect((await liveOf(owner, lib.page.pageId)).ended).toBeNull();
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(last.sessionId)).toBeUndefined();
+  });
+
+  it('keeps only a page’s latest ended session with unsaved changes', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const sessions = [];
+    for (let i = 0; i < 2; i++) {
+      const session = await startSession(editor, lib.page);
+      const me = typist(editor, session, session.joinId);
+      me.started();
+      await me.send([me.message('update')]);
+      await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+      await everyoneLeft(session.sessionId);
+      sessions.push(session);
+    }
+    const [older, newer] = sessions;
+    if (!older || !newer) throw new Error('two');
+    await sweepLive(t.db, RETENTION);
+    expect(await sessionRow(older.sessionId)).toBeUndefined();
+    expect(await sessionRow(newer.sessionId)).toBeDefined();
+    expect((await liveOf(editor, lib.page.pageId)).ended?.sessionId).toBe(newer.sessionId);
   });
 
   it('keeps session IDs and their version IDs taken after the session goes', async () => {
@@ -1265,8 +1290,10 @@ describe('limits', () => {
     expect(size + 16).toBeLessThan(room);
     expect(2 * (size + 16)).toBeGreaterThan(room);
     await me.send([me.message('update', { size })]);
-    // Its ciphertext, and what its row takes besides.
-    expect(await usedBytes(app.db, editor.id)).toBe(before + size + 16 + schema.LIVE_MESSAGE_BYTES);
+    // Its ciphertext as stored, and what its row takes besides.
+    expect(await usedBytes(app.db, editor.id)).toBe(
+      before + Math.ceil(((size + 16) * 4) / 3) + schema.LIVE_MESSAGE_BYTES,
+    );
     expect(await rejection(me.send([me.message('update', { size })]))).toBe('storage-full');
     // And it stops counting once the session goes.
     await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });

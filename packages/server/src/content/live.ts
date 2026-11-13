@@ -32,7 +32,6 @@ import {
   liveMessages,
   liveSessionIds,
   liveSessions,
-  liveUsage,
   liveWraps,
   metadataRevisions,
   pageHeads,
@@ -65,6 +64,9 @@ const EMPTY_MS = 60_000;
  * editor can't keep everyone else from catching up.
  */
 const CATCH_UP_GRANT_MS = 10 * 60_000;
+
+/** What a stored message of `size` bytes of ciphertext takes, as `live_usage` counts it. */
+const storedSize = (size: number) => Math.ceil((size * 4) / 3) + LIVE_MESSAGE_BYTES;
 
 /** Bytes of a base64url text, decoded (unpadded: three bytes in every four characters). */
 const decodedLength = (text: string) => Math.floor((text.length * 3) / 4);
@@ -312,24 +314,12 @@ async function spendStoredBytes(
 /**
  * Take, before any live row is written, the locks a charge takes, in the
  * order `startLive` takes them: the person's minute, then their quota. Rows
- * written after lock their `live_usage` row, last, so one person's
- * transactions never wait on each other in a ring.
+ * written after lock their `live_usage` row for the session, last, so one
+ * person's transactions never wait on each other in a ring.
  */
 async function lockCharges(tx: Database, accountId: string, limit: number | null) {
   if (limit !== null) await spendStoredBytes(tx, accountId, 0, limit, { lockOnly: true });
   await lockQuota(tx, accountId);
-}
-
-/**
- * Lock the `live_usage` rows of every account a delete will take storage
- * from, in one order, so two deletes across sessions never wait in a ring.
- */
-async function lockUsage(tx: Database, accountIds: Iterable<string | null>) {
-  const ids = [...new Set([...accountIds].filter((id): id is string => id !== null))].sort();
-  if (ids.length === 0) return;
-  await tx.execute(sql`
-    select account_id from ${liveUsage} where account_id = any(${sql.param(ids)}::uuid[])
-    order by account_id for update`);
 }
 
 /**
@@ -867,14 +857,18 @@ export async function startLive(db: Database, input: StartLive) {
       .from(liveSessions)
       .where(and(eq(liveSessions.pageId, page.id), isNull(liveSessions.endedAt)));
     if (open) throw new ContentError('duplicate', 'The page has an open session');
-    const overhead = LIVE_ID_BYTES + LIVE_MESSAGE_BYTES + LIVE_JOIN_BYTES;
-    await chargeStored(tx, caller, size + payload.ciphertext.length + overhead, input, {
-      stored: false,
-    });
+    // What `live_usage` will count for it: the record, the ID, the snapshot as stored, the join.
+    const stored = payload.ciphertext.length + LIVE_ID_BYTES + storedSize(size) + LIVE_JOIN_BYTES;
+    await spendStoredBytes(
+      tx,
+      caller.accountId,
+      size + LIVE_MESSAGE_BYTES,
+      input.storedBytesPerMinute,
+    );
+    await charge(tx, caller.accountId, stored, input.storageBytes);
     await tx.insert(liveSessionIds).values({
       id: input.sessionId,
       versionId: record.metadataRevisionId,
-      spaceId: page.spaceId,
       starterAccountId: caller.accountId,
     });
     await tx.insert(liveSessions).values({
@@ -1031,12 +1025,13 @@ export async function joinLive(
         publishedHead: heads.publishedHead,
       });
     }
-    // An ended one is read, not joined: what it keeps, then its end.
+    // An ended one is read, not joined: what it keeps, then its end; nothing of
+    // one whose keys no longer count for anyone, which is about to go.
     if (session.endedReason !== null) {
       return {
         ended: session.endedReason,
         draftHead: heads.draftHead,
-        lastPosition: session.lastPosition,
+        lastPosition: (await keysCount(tx, session)) ? session.lastPosition : input.after,
       };
     }
     const now = await dbNow(tx);
@@ -1416,10 +1411,6 @@ export async function sendLive(db: Database, input: SendLive) {
     const catchingUp = ended && input.fold === session.id;
     // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
-    // A catch-up's saved deletes the session: everyone's storage, locked in one order first.
-    if (catchingUp && input.messages.length > 0) {
-      await lockUsage(tx, [caller.accountId, ...(await accountsIn(tx, session))]);
-    }
     const { join, joins, made } = catchingUp
       ? await catchUpJoin(tx, ctx, input.joinId, now)
       : await joinFor(tx, ctx, input, now);
@@ -1586,7 +1577,6 @@ async function foldFor(
         .where(eq(liveGrants.id, grant.id))
         .returning();
       // Caught up: nothing in it is left to save (section 5.10, **Ending**).
-      await lockUsage(tx, await accountsIn(tx, session));
       await tx.delete(liveSessions).where(eq(liveSessions.id, session.id));
       relay.deleted = true;
     }
@@ -1685,19 +1675,8 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       throw new ContentError('forbidden', 'This session has ended');
     }
     const now = await dbNow(tx);
-    // Every lock a charge takes, then everyone's storage the deletes free and
-    // the poster's, in one order, before any row is written (a join's included).
+    // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
-    const senders = await tx
-      .selectDistinct({ accountId: liveMessages.accountId })
-      .from(liveMessages)
-      .where(
-        and(
-          eq(liveMessages.sessionId, session.id),
-          sql`${liveMessages.position} <= ${input.covers}`,
-        ),
-      );
-    await lockUsage(tx, [caller.accountId, ...senders.map((r) => r.accountId)]);
     const { join, made } = await joinFor(tx, ctx, input, now);
     const size = checkMessage(input.message, caller, join.joinId);
     if (input.message.kind !== 'snapshot') {
@@ -1941,14 +1920,6 @@ async function keysCount(tx: Database, session: SessionRow) {
   return recipients.length > 0 && recipients.every((r) => owners.has(r.id));
 }
 
-/** Every account a session's rows count for, whose storage deleting it frees. */
-async function accountsIn(tx: Database, session: SessionRow) {
-  const rows = await tx.execute<{ account_id: string | null }>(sql`
-    select account_id from ${liveMessages} where session_id = ${session.id}
-    union select account_id from ${liveJoins} where session_id = ${session.id}`);
-  return [session.starterAccountId, ...rows.map((r) => r.account_id)];
-}
-
 /**
  * Why a session should go now, if it should (section 5.10, **Ending**). An
  * ended one goes after the draft retention from its end whoever is still
@@ -1977,6 +1948,20 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
   }
   if (!unsaved(session)) return 'saved';
   if (!(await keysCount(tx, session))) return 'keys';
+  // Only a page's latest ended session is served to catch up from; an older one never is.
+  const [later] = await tx
+    .select({ id: liveSessions.id })
+    .from(liveSessions)
+    .where(
+      and(
+        eq(liveSessions.pageId, session.pageId),
+        // Against its own row, in microseconds, which a JavaScript date drops.
+        sql`${liveSessions.endedAt} > (select ended_at from ${liveSessions} where id = ${session.id})`,
+        sql`${liveSessions.lastUpdatePosition} > coalesce(${liveSessions.savedCovers}, 0)`,
+      ),
+    )
+    .limit(1);
+  if (later) return 'superseded';
   return null;
 }
 
@@ -2044,7 +2029,6 @@ async function sweepSome(
       if (!session) return false;
       const why = await dueToGo(tx, session, await dbNow(tx), retentionMs);
       if (!why) return false;
-      await lockUsage(tx, await accountsIn(tx, session));
       await tx.delete(liveSessions).where(eq(liveSessions.id, id));
       return true;
     });

@@ -57,7 +57,6 @@ CREATE TABLE "live_messages" (
 CREATE TABLE "live_session_ids" (
 	"id" text PRIMARY KEY NOT NULL,
 	"version_id" text NOT NULL,
-	"space_id" text NOT NULL,
 	"starter_account_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "live_session_ids_versionId_unique" UNIQUE("version_id")
@@ -92,8 +91,10 @@ CREATE TABLE "live_sessions" (
 );
 --> statement-breakpoint
 CREATE TABLE "live_usage" (
-	"account_id" uuid PRIMARY KEY NOT NULL,
-	"bytes" bigint DEFAULT 0 NOT NULL
+	"account_id" uuid NOT NULL,
+	"session_id" text NOT NULL,
+	"bytes" bigint DEFAULT 0 NOT NULL,
+	CONSTRAINT "live_usage_account_id_session_id_pk" PRIMARY KEY("account_id","session_id")
 );
 --> statement-breakpoint
 CREATE TABLE "live_wraps" (
@@ -110,8 +111,7 @@ ALTER TABLE "live_joins" ADD CONSTRAINT "live_joins_session_id_live_sessions_id_
 ALTER TABLE "live_joins" ADD CONSTRAINT "live_joins_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_messages" ADD CONSTRAINT "live_messages_session_id_live_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."live_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_messages" ADD CONSTRAINT "live_messages_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_space_id_spaces_id_fk" FOREIGN KEY ("space_id") REFERENCES "public"."spaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "live_session_ids" ADD CONSTRAINT "live_session_ids_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_page_id_nodes_id_fk" FOREIGN KEY ("page_id") REFERENCES "public"."nodes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_sessions" ADD CONSTRAINT "live_sessions_starter_account_id_users_id_fk" FOREIGN KEY ("starter_account_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "live_usage" ADD CONSTRAINT "live_usage_account_id_users_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -122,7 +122,6 @@ CREATE INDEX "live_joins_account_idx" ON "live_joins" USING btree ("account_id")
 CREATE UNIQUE INDEX "live_messages_seq_idx" ON "live_messages" USING btree ("session_id","identity_id","join_id","seq");--> statement-breakpoint
 CREATE INDEX "live_messages_account_idx" ON "live_messages" USING btree ("account_id");--> statement-breakpoint
 CREATE INDEX "live_messages_revision_idx" ON "live_messages" USING btree ("revision_id") WHERE "live_messages"."revision_id" is not null;--> statement-breakpoint
-CREATE INDEX "live_session_ids_space_idx" ON "live_session_ids" USING btree ("space_id");--> statement-breakpoint
 CREATE INDEX "live_session_ids_starter_account_idx" ON "live_session_ids" USING btree ("starter_account_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "live_sessions_open_page_idx" ON "live_sessions" USING btree ("page_id") WHERE "live_sessions"."ended_at" is null;--> statement-breakpoint
 CREATE INDEX "live_sessions_page_idx" ON "live_sessions" USING btree ("page_id");--> statement-breakpoint
@@ -176,35 +175,46 @@ CREATE TRIGGER "page_heads_live_head" AFTER UPDATE OF "draft_head" ON "page_head
   FOR EACH ROW WHEN (OLD."draft_head" IS DISTINCT FROM NEW."draft_head")
   EXECUTE FUNCTION "wikistow_live_head"();
 --> statement-breakpoint
--- Each account's live storage (protocol section 5.10), kept as rows come and
--- go, so a quota check reads one row: a session's record and its used ID
--- count for its starter, a stored message and a join for their sender, each
--- with what its row takes besides (LIVE_ID_BYTES, LIVE_MESSAGE_BYTES and
--- LIVE_JOIN_BYTES in schema/live.ts). Rows whose account went count for nobody.
+-- Each account's live storage in each session (protocol section 5.10), kept
+-- as rows come and go, so a quota check sums one account's rows: a
+-- session's record and its used ID count for its starter, a stored message
+-- and a join for their sender. A message counts its ciphertext as stored,
+-- base64url, and each row what it takes besides (LIVE_ID_BYTES,
+-- LIVE_MESSAGE_BYTES and LIVE_JOIN_BYTES in schema/live.ts). One row per
+-- account and session, so two sessions' writes never wait on each other's.
+-- Rows whose account went count for nobody; a row that comes to nothing goes.
 CREATE FUNCTION "wikistow_live_usage"() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
   account uuid;
+  session text;
   delta bigint;
 BEGIN
   IF TG_TABLE_NAME = 'live_messages' THEN
     account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
-    delta := CASE WHEN TG_OP = 'DELETE' THEN OLD."size" ELSE NEW."size" END + 1024;
+    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."session_id" ELSE NEW."session_id" END;
+    delta := (CASE WHEN TG_OP = 'DELETE' THEN OLD."size" ELSE NEW."size" END * 4 + 2) / 3 + 1024;
   ELSIF TG_TABLE_NAME = 'live_joins' THEN
     account := CASE WHEN TG_OP = 'DELETE' THEN OLD."account_id" ELSE NEW."account_id" END;
+    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."session_id" ELSE NEW."session_id" END;
     delta := 512;
   ELSIF TG_TABLE_NAME = 'live_sessions' THEN
     account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
+    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."id" ELSE NEW."id" END;
     delta := CASE WHEN TG_OP = 'DELETE' THEN OLD."payload_size" ELSE NEW."payload_size" END;
   ELSE
     account := CASE WHEN TG_OP = 'DELETE' THEN OLD."starter_account_id" ELSE NEW."starter_account_id" END;
+    session := CASE WHEN TG_OP = 'DELETE' THEN OLD."id" ELSE NEW."id" END;
     delta := 256;
   END IF;
   IF account IS NULL THEN RETURN NULL; END IF;
   IF TG_OP = 'DELETE' THEN
-    UPDATE "live_usage" SET "bytes" = "bytes" - delta WHERE "account_id" = account;
+    UPDATE "live_usage" SET "bytes" = "bytes" - delta
+      WHERE "account_id" = account AND "session_id" = session;
+    DELETE FROM "live_usage"
+      WHERE "account_id" = account AND "session_id" = session AND "bytes" <= 0;
   ELSE
-    INSERT INTO "live_usage" ("account_id", "bytes") VALUES (account, delta)
-      ON CONFLICT ("account_id") DO UPDATE SET "bytes" = "live_usage"."bytes" + delta;
+    INSERT INTO "live_usage" ("account_id", "session_id", "bytes") VALUES (account, session, delta)
+      ON CONFLICT ("account_id", "session_id") DO UPDATE SET "bytes" = "live_usage"."bytes" + delta;
   END IF;
   RETURN NULL;
 END $$;

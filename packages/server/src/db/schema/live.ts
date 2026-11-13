@@ -16,7 +16,7 @@ import {
 import { timestamptz } from './helpers.ts';
 import { identities } from './identities.ts';
 import { shares } from './shares.ts';
-import { nodes, spaces } from './spaces.ts';
+import { nodes } from './spaces.ts';
 import { users } from './users.ts';
 
 const position = () => bigint({ mode: 'number' });
@@ -88,51 +88,52 @@ export const liveSessions = pgTable(
 );
 
 /**
- * Every session ID and record version ID taken, kept when the session goes,
- * so the server keeps session IDs unique across the installation and no
- * later metadata, comment or session version takes a session's version ID
- * (protocol section 5.10). It goes with its space or its starter's account,
- * and counts toward the starter's storage (`LIVE_ID_BYTES` a row).
+ * Every session ID and record version ID taken, kept for good, so the
+ * server keeps session IDs unique across the installation and no later
+ * metadata, comment or session version takes a session's version ID
+ * (protocol section 5.10). It counts toward its starter's storage
+ * (`LIVE_ID_BYTES` a row) while their account lasts.
  */
 export const liveSessionIds = pgTable(
   'live_session_ids',
   {
     id: text().primaryKey(),
     versionId: text().notNull().unique(),
-    spaceId: text()
-      .notNull()
-      .references(() => spaces.id, { onDelete: 'cascade' }),
-    starterAccountId: uuid().references(() => users.id, { onDelete: 'cascade' }),
+    starterAccountId: uuid().references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamptz().notNull().defaultNow(),
   },
-  (table) => [
-    index('live_session_ids_space_idx').on(table.spaceId),
-    index('live_session_ids_starter_account_idx').on(table.starterAccountId),
-  ],
+  (table) => [index('live_session_ids_starter_account_idx').on(table.starterAccountId)],
 );
 
 /**
  * What live rows count toward their account's storage besides their
- * ciphertext, about what each takes on disk with its indexes: a used
- * session ID, a stored message and a join. The `live_usage` triggers
- * keep the sums (migration 0050).
+ * ciphertext, as stored (base64url), about what each takes on disk with
+ * its indexes: a used session ID, a stored message and a join. The
+ * `live_usage` triggers keep the sums (migration 0050).
  */
 export const LIVE_ID_BYTES = 256;
 export const LIVE_MESSAGE_BYTES = 1024;
 export const LIVE_JOIN_BYTES = 512;
 
 /**
- * Each account's live sessions' storage, kept by triggers as rows come and
- * go: records it signed and used session IDs it took, as starter; stored
- * messages and joins, as sender. So a quota check reads one row rather than
- * summing every message.
+ * Each account's live storage in each session, kept by triggers as rows
+ * come and go: the record it signed and the session ID it took, as
+ * starter; stored messages and joins, as sender. A quota check sums an
+ * account's rows rather than every message. One row per session, so two
+ * sessions' writes never wait on each other's, and writes to one session
+ * already wait on its own row. A row that comes to nothing goes.
  */
-export const liveUsage = pgTable('live_usage', {
-  accountId: uuid()
-    .primaryKey()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  bytes: bigint({ mode: 'number' }).notNull().default(0),
-});
+export const liveUsage = pgTable(
+  'live_usage',
+  {
+    accountId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: text().notNull(),
+    bytes: bigint({ mode: 'number' }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.sessionId] })],
+);
 
 /**
  * A session's key wrap in a share (section 5.10, **The session record**),

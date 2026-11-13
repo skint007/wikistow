@@ -46,6 +46,7 @@ const SHARED = { rateLimit: LIVE_LIMIT, rateLimitKey: 'live' };
 /** How often followed sessions are read again, and streams' access checked. */
 const TICK_MS = 2000;
 const ACCESS_MS = 10_000;
+const ACCESS_AT_ONCE = 4;
 /**
  * Bytes of lines a stream may have waiting before it is closed, its queue
  * dropped, for a reader that stopped reading; it joins again from where it got.
@@ -292,14 +293,18 @@ export function mountLiveRoutes(
   // hearing within `ACCESS_MS`, with nothing queued sent.
   async function checkAccess() {
     const checks = [...followed].flatMap(([sessionId, session]) =>
-      [...session.streams].map(async (stream) => {
+      [...session.streams].map((stream) => async () => {
         const signedIn = await stillSignedIn(stream.authSessionId);
         if (!signedIn || !(await canStillEdit(db, humanActor(stream.accountId), sessionId))) {
           close(stream, null, { drop: true });
         }
       }),
     );
-    await Promise.all(checks);
+    // A few at a time, so the checks never take every connection.
+    const runners = Array.from({ length: ACCESS_AT_ONCE }, async () => {
+      for (let check = checks.shift(); check; check = checks.shift()) await check();
+    });
+    await Promise.all(runners);
   }
 
   async function stillSignedIn(authSessionId: string) {
@@ -413,9 +418,10 @@ export function mountLiveRoutes(
       if ((fetching.get(actor.accountId) ?? 0) >= MAX_FETCHES_PER_ACCOUNT) {
         throw new ApiError('rate-limited', 'Fetching sessions already; try again shortly');
       }
-      await countRead(actor.accountId);
+      // Taken before anything is awaited, so fetches sent at once can't all pass.
       count(fetching, actor.accountId, 1);
       try {
+        await countRead(actor.accountId);
         return await getLive(db, actor, params.pageId, report).catch(toApiError);
       } finally {
         count(fetching, actor.accountId, -1);
@@ -575,7 +581,8 @@ export function mountLiveRoutes(
         const upTo = joined.lastPosition;
         return (async function* () {
           try {
-            for (let sent = after; sent < upTo && !signal.aborted;) {
+            let sent = after;
+            while (sent < upTo && !signal.aborted) {
               const { messages } = await storedAfter(db, sessionId, sent, { upTo });
               if (messages.length === 0) break;
               for (const message of messages) {
@@ -583,7 +590,8 @@ export function mountLiveRoutes(
                 yield { message, draftHead } satisfies Line;
               }
             }
-            yield { ended: reason, draftHead } satisfies Line;
+            // Cut short, as when it went meanwhile: no end, so its app reads again.
+            if (sent >= upTo) yield { ended: reason, draftHead } satisfies Line;
           } finally {
             release();
           }
