@@ -31,7 +31,13 @@ import {
   toBase64,
   utf8,
 } from '../encoding.ts';
-import { checkEnvelopeV2, keyCommitment, openAnyEnvelope, unsealCommitted } from '../envelope.ts';
+import {
+  checkEnvelopeV2,
+  keyCommitment,
+  openAnyEnvelope,
+  recordProtocol,
+  unsealCommitted,
+} from '../envelope.ts';
 import { CryptoError } from '../errors.ts';
 import {
   KeyWrap,
@@ -298,6 +304,10 @@ export function openLiveSession({
     : OWNER_REGION;
   if (!sameRegion(region, access.draftRegion)) {
     throw new CryptoError('region-mismatch', 'The session’s keys aren’t those of its page’s draft');
+  }
+  // A record protocol this app doesn't know fails closed, saying to update.
+  if (recordProtocol(sealed.record, 'Live session') !== 2) {
+    throw new CryptoError('malformed', 'There is no v1 session record');
   }
   const {
     record,

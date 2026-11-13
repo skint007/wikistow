@@ -120,6 +120,14 @@ describe('a live session in a share', () => {
     expect(() => open(shortKey, app(bob))).toThrow(code('malformed'));
   });
 
+  it('says to update for a record protocol it doesn’t know, and refuses a v1 one', () => {
+    const started = start();
+    const newer = { ...started.sealed, record: { ...started.sealed.record, protocol: 3 } };
+    expect(() => open({ ...started, sealed: newer }, app(bob))).toThrow(code('unsupported-format'));
+    const v1 = { ...started.sealed, record: { ...started.sealed.record, protocol: 1 } };
+    expect(() => open({ ...started, sealed: v1 }, app(bob))).toThrow(code('malformed'));
+  });
+
   it('refuses an altered record or payload', () => {
     const started = start();
     const signature = {
