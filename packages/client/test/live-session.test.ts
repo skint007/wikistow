@@ -215,6 +215,18 @@ describe('a live session in a share', () => {
     expect(() => open(start(), ended)).toThrow(code('key-version'));
   });
 
+  it('takes nothing in or out while a change of the share is pending', async () => {
+    const bobs = app(bob);
+    const opened = open(start(), bobs);
+    const [begun] = await bobs.marks.begin([
+      { spaceId, shareId, change: 'rotation', fromKeyVersion: 1 },
+    ]);
+    expect(() => requireLiveAccess(opened, bobs.access)).toThrow(code('key-version'));
+    expect(() => open(start(), bobs)).toThrow(code('key-version'));
+    await bobs.marks.settle([begun?.id ?? ''], []);
+    expect(() => requireLiveAccess(opened, bobs.access)).not.toThrow();
+  });
+
   it('leaves once the record’s version stops counting, or the draft moves region', () => {
     const bobs = app(bob);
     const opened = open(start(), bobs);

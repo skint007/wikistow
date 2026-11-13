@@ -56,7 +56,12 @@ import {
   type PublicIdentity,
 } from '../identity.ts';
 import { newId } from '../ids.ts';
-import { highestWritable, requireNotBehind, type KeyVersionMarks } from '../key-versions.ts';
+import {
+  changePending,
+  highestWritable,
+  requireNotBehind,
+  type KeyVersionMarks,
+} from '../key-versions.ts';
 import {
   grantMetadataKeyV2,
   metadataAd,
@@ -527,9 +532,11 @@ function readSessionPayload(plaintext: Uint8Array): LiveSessionPayload {
  *   which rotate nothing (`region-mismatch`).
  * - In a share, the record's key version is the highest this app holds
  *   that counts for writing, an owner who sealed this app a draft key its
- *   wrap opens under still counts for writing, and the version is not below
- *   its No going back mark, nor the mark of a share this app ended
- *   (`key-version`).
+ *   wrap opens under still counts for writing, the version is not below its
+ *   No going back mark, nor the mark of a share this app ended, and no
+ *   change of the share this app sent, in any tab, is pending
+ *   (`key-version`; section 6.8): the app keeps its typing in its document
+ *   meanwhile.
  * - In the owner region, every owner `sealedTo` names, the record's signer
  *   and every envelope's granter is one of its sealing owners now
  *   (`unaccepted-owner`), since anyone can seal to owners' public keys.
@@ -542,6 +549,12 @@ export function requireLiveAccess(session: OpenedLiveSession, access: LiveAccess
   if (session.region.kind === 'share') {
     const { spaceId, shareId } = session.region;
     const keyVersion = session.keyVersion ?? 0;
+    if (changePending(marks, spaceId, shareId)) {
+      throw new CryptoError(
+        'key-version',
+        `A change of share ${shareId} is waiting for its answer`,
+      );
+    }
     requireNotBehind({ marks, spaceId, shareId, keyVersion });
     const highest = highestWritable({ keyring, spaceId, shareId, writes: owners.writes });
     if (!session.wrapSealers.some((sealer) => owners.writes(sealer))) {
