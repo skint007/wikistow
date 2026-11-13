@@ -312,31 +312,33 @@ describe('pending changes across tabs', () => {
     await expect(marks.begin([])).resolves.toEqual([]);
   });
 
-  it('lands an answer that comes after the app locked, but never after a sign-out', async () => {
-    const b = browser();
-    const file = b.tab();
-    const one = await KeptMarks.open(file, who);
-    const [begun] = await one.begin([change()]);
-    one.close();
-    await one.settle([begun?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
-    const later = await KeptMarks.open(b.tab(), who);
-    expect(later.get(spaceId, shareId)).toBe(2);
-    expect(changePending(later, spaceId, shareId)).toBe(false);
-    // Signed out: the file is gone, and nothing writes it back.
+  it('writes nothing once closed, and gives a late answer to the next session', async () => {
     let kept: Uint8Array | null = null;
-    const gone: KeptFile = {
+    let writes = 0;
+    const file: KeptFile = {
       read: () => Promise.resolve(kept),
       write: (sealed) => {
+        writes += 1;
         kept = sealed;
         return Promise.resolve();
       },
     };
-    const two = await KeptMarks.open(gone, who);
-    const [other] = await two.begin([change()]);
-    two.close();
-    kept = null;
-    await two.settle([other?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
-    expect(kept).toBeNull();
+    const one = await KeptMarks.open(file, who);
+    const [begun] = await one.begin([change()]);
+    one.close();
+    const before = writes;
+    // The rotation's answer comes after the app locked.
+    await one.settle([begun?.id ?? ''], [{ spaceId, shareId, keyVersion: 2 }]);
+    expect(writes).toBe(before);
+    // The next session of this person takes it in, and writes it.
+    const next = await KeptMarks.open(file, who);
+    expect(next.get(spaceId, shareId)).toBe(2);
+    expect(changePending(next, spaceId, shareId)).toBe(false);
+    await expect.poll(async () => (await KeptMarks.open(file, who)).get(spaceId, shareId)).toBe(2);
+    // Another person's session never does.
+    const stranger = generateIdentity({ id: IdentityId.parse('bob'), kind: 'human' });
+    const theirs = await KeptMarks.open(file, { identity: stranger, installationId });
+    expect(theirs.get(spaceId, shareId)).toBe(0);
   });
 
   it('stops listening once closed', async () => {

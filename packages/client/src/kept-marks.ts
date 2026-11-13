@@ -95,6 +95,8 @@ export class KeptMarks implements KeyVersionMarks {
   readonly #listeners = new Set<() => void>();
   readonly #unlisten: () => void;
   #contents: Contents;
+  // This person on this server, for answers kept past a close.
+  readonly #who: string;
   // The marks as this tab's listeners last heard of them.
   #announced = '';
   #writing: Promise<void> = Promise.resolve();
@@ -111,7 +113,9 @@ export class KeptMarks implements KeyVersionMarks {
     },
     contents: Contents,
     channel: MarksChannel | null,
+    who: string,
   ) {
+    this.#who = who;
     this.#file = file;
     this.#seal = seal;
     this.#open = open;
@@ -150,7 +154,18 @@ export class KeptMarks implements KeyVersionMarks {
     };
     const seal = (kept: Contents) => sealOnDevice(identity, KEY, ad, utf8(JSON.stringify(kept)));
     const contents = open(await file.read().catch(() => null)) ?? NONE;
-    return new KeptMarks(file, { seal, open }, contents, file.channel ?? null);
+    const who = `${installationId} ${identity.public.id}`;
+    const marks = new KeptMarks(file, { seal, open }, contents, file.channel ?? null, who);
+    // Answers a closed session of this person heard after it closed.
+    const answers = late.get(who);
+    if (answers) {
+      late.delete(who);
+      void marks.#change({
+        ...marks.#contents,
+        marks: tidied(merge(marks.#contents.marks, answers)),
+      });
+    }
+    return marks;
   }
 
   /** The `restoredAt` of the last restore these marks were taken after, or null. */
@@ -277,9 +292,13 @@ export class KeptMarks implements KeyVersionMarks {
    */
   async settle(ids: readonly string[], raises: readonly MarkRaise[]): Promise<void> {
     const now = Date.now();
-    const marks = { ...raised(this.#contents.marks, raises) };
-    for (const id of ids) marks[`${CLEARED} ${id}`] = now;
-    await this.#change({ ...this.#contents, marks: tidied(marks) }, { afterClose: true });
+    const answer: Contents['marks'] = raised({}, raises);
+    for (const id of ids) answer[`${CLEARED} ${id}`] = now;
+    if (this.#keepForLater(answer)) return;
+    await this.#change({
+      ...this.#contents,
+      marks: tidied(merge(this.#contents.marks, answer)),
+    });
   }
 
   /** The answer to pending changes was lost: a fetch of their shares settles them. */
@@ -287,7 +306,21 @@ export class KeptMarks implements KeyVersionMarks {
     const now = Date.now();
     const marks = { ...this.#contents.marks };
     for (const id of ids) marks[`${LOST} ${id}`] = now;
-    await this.#change({ ...this.#contents, marks }, { afterClose: true });
+    const answer: Contents['marks'] = {};
+    for (const id of ids) answer[`${LOST} ${id}`] = now;
+    if (this.#keepForLater(answer)) return;
+    await this.#change({ ...this.#contents, marks });
+  }
+
+  // An answer to a change sent before the session closed, as when the app
+  // locked meanwhile: nothing more is written from a closed session, so
+  // the next session of this person on this server, in this window, takes
+  // it in as it opens. Whether the closed session was signed out of or
+  // locked, the answer is the server's, so it holds either way.
+  #keepForLater(answer: Contents['marks']): boolean {
+    if (!this.#closed) return false;
+    late.set(this.#who, tidied(merge(late.get(this.#who) ?? {}, answer)));
+    return true;
   }
 
   /**
@@ -346,47 +379,28 @@ export class KeptMarks implements KeyVersionMarks {
 
   #change(
     contents: Contents,
-    {
-      strict = false,
-      check,
-      afterClose = false,
-    }: {
-      strict?: boolean;
-      check?: () => void;
-      /**
-       * Still write once the session has closed, while the file is there:
-       * an answer to a change sent before the app locked must land, but
-       * nothing may bring the file back after a sign-out deleted it.
-       */
-      afterClose?: boolean;
-    } = {},
+    { strict = false, check }: { strict?: boolean; check?: () => void } = {},
   ): Promise<void> {
     this.#contents = contents;
     const write = async () => {
-      if (this.#closed && !afterClose) {
+      const closed = () => {
         if (strict) throw new Error('The session has ended; its marks are closed');
-        return;
-      }
-      const file = this.#file;
-      const land = async () => {
-        const disk = this.#open(await file.read().catch(() => null));
-        if (disk) this.#contents = merged(this.#contents, disk);
-        // What it took in counts, even if this write is refused or fails.
-        this.#notify();
-        if (this.#closed && !afterClose) {
-          if (strict) throw new Error('The session has ended; its marks are closed');
-          return;
-        }
-        check?.();
-        // Once closed, only into a file that is still there.
-        if (this.#closed && !disk) return;
-        await file.write(this.#seal(this.#contents));
       };
-      if (file.exclusive) await file.exclusive(land);
-      else if (this.#closed) await land();
-      else {
+      if (this.#closed) return closed();
+      const file = this.#file;
+      if (!file.exclusive) {
         check?.();
         await file.write(this.#seal(this.#contents));
+      } else {
+        await file.exclusive(async () => {
+          const disk = this.#open(await file.read().catch(() => null));
+          if (disk) this.#contents = merged(this.#contents, disk);
+          // What it took in counts, even if this write is refused or fails.
+          this.#notify();
+          if (this.#closed) return closed();
+          check?.();
+          await file.write(this.#seal(this.#contents));
+        });
       }
       if (!this.#closed) {
         this.#channel?.post();
@@ -463,6 +477,25 @@ function tidied(marks: Contents['marks']): Contents['marks'] {
       writable: true,
       configurable: true,
     });
+  }
+  return out;
+}
+
+// Answers closed sessions heard, by person and server, for their next session.
+const late = new Map<string, Contents['marks']>();
+
+// Two sets of marks taken together, the higher of each, as tabs merge them.
+function merge(a: Contents['marks'], b: Contents['marks']): Contents['marks'] {
+  const out: Contents['marks'] = {};
+  for (const source of [a, b]) {
+    for (const [key, value] of Object.entries(source)) {
+      Object.defineProperty(out, key, {
+        value: Math.max(out[key] ?? 0, value),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
   }
   return out;
 }
