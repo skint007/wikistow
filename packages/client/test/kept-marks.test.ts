@@ -151,6 +151,33 @@ describe('pending changes across tabs', () => {
     expect(changePending(later, spaceId, other)).toBe(true);
   });
 
+  it('holds a share for a kind of change a newer app recorded', async () => {
+    const b = browser();
+    const newer = await KeptMarks.open(b.tab(), who);
+    // A newer app's kind, kept among the marks as this app keeps its own.
+    newer.raise(
+      '~change newer-id' as SpaceId,
+      `${spaceId} ${shareId} renaming 1` as ShareId,
+      Date.now(),
+    );
+    await expect
+      .poll(async () => changePending(await KeptMarks.open(b.tab(), who), spaceId, shareId))
+      .toBe(true);
+    const later = await KeptMarks.open(b.tab(), who);
+    expect(later.pending().map((c) => c.change)).toEqual(['renaming']);
+  });
+
+  it('tells this tab’s own listeners of its own changes', async () => {
+    const b = browser();
+    const one = await KeptMarks.open(b.tab(), who);
+    let told = 0;
+    one.onChange(() => (told += 1));
+    await one.begin([change()]);
+    expect(told).toBeGreaterThan(0);
+    one.close();
+    expect(one.pending()).toEqual([]);
+  });
+
   it('keeps a change whose answer was lost, marked so', async () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);

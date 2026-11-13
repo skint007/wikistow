@@ -44,7 +44,9 @@ export interface MarksChannel {
 const CHANGE = '~change';
 const LOST = '~lost';
 const CLEARED = '~cleared';
-const CHANGES = new Set(['rotation', 'ending', 'move']);
+// A change's kind: one this app knows, or one a newer app recorded, which
+// holds the share's sessions all the same.
+const KIND = /^[a-z][a-z-]{0,31}$/;
 
 // The newest clears kept, so a tab that hasn't read a clear yet can't put
 // its change back, and the file stays small.
@@ -196,7 +198,8 @@ export class KeptMarks implements KeyVersionMarks {
   }
 
   pending(): readonly PendingChange[] {
-    return pendingIn(this.#contents.marks);
+    // Once closed, as at sign-out, nothing is pending for this session.
+    return this.#closed ? [] : pendingIn(this.#contents.marks);
   }
 
   /**
@@ -331,7 +334,11 @@ export class KeptMarks implements KeyVersionMarks {
           await file.write(this.#seal(this.#contents));
         });
       }
-      if (!this.#closed) this.#channel?.post();
+      if (!this.#closed) {
+        this.#channel?.post();
+        // This tab's own sessions hear of its changes as other tabs' do.
+        for (const listener of this.#listeners) listener();
+      }
     };
     const written = this.#writing.then(write);
     this.#writing = written.catch(() => {});
@@ -339,8 +346,9 @@ export class KeptMarks implements KeyVersionMarks {
   }
 }
 
-const changeKey = (c: NewChange & { id: string }) =>
-  `${CHANGE} ${c.id} ${c.spaceId} ${c.shareId} ${c.change} ${c.fromKeyVersion}`;
+const changeKey = (
+  c: Pick<PendingChange, 'id' | 'spaceId' | 'shareId' | 'change' | 'fromKeyVersion'>,
+) => `${CHANGE} ${c.id} ${c.spaceId} ${c.shareId} ${c.change} ${c.fromKeyVersion}`;
 
 // The pending changes `marks` holds, but those cleared.
 function pendingIn(marks: Contents['marks']): PendingChange[] {
@@ -350,8 +358,7 @@ function pendingIn(marks: Contents['marks']): PendingChange[] {
     if (kind !== CHANGE || rest.length > 0 || !id || !spaceId || !shareId || !change || !from)
       continue;
     const fromKeyVersion = Number(from);
-    if (!CHANGES.has(change) || !Number.isSafeInteger(fromKeyVersion) || fromKeyVersion < 1)
-      continue;
+    if (!KIND.test(change) || !Number.isSafeInteger(fromKeyVersion) || fromKeyVersion < 1) continue;
     if (marks[`${CLEARED} ${id}`] !== undefined) continue;
     const lostAt = marks[`${LOST} ${id}`] ?? null;
     out.push({

@@ -53,7 +53,9 @@ export type NewChange = {
   change: ShareChange;
   fromKeyVersion: number;
 };
-export type PendingChange = NewChange & {
+export type PendingChange = Omit<NewChange, 'change'> & {
+  /** A kind this app knows, or one a newer app recorded, which holds sessions all the same. */
+  change: ShareChange | (string & {});
   id: string;
   /** When it was begun, or last renewed while it is sent, in milliseconds since the epoch. */
   at: number;

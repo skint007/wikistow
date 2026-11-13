@@ -33,13 +33,25 @@ function context({
   held = [] as { keyVersion: number; sealer: string }[],
 } = {}) {
   const marks = new MemoryKeyVersionMarks();
+  const asked: string[] = [];
+  const spaces = new Map([[spaceId, Promise.resolve()]]);
   const ctx = {
     identity: alice,
     marks,
-    api: { call: () => Promise.resolve({ shares: shares.map((s) => ({ ...s, spaceId })) }) },
+    spaces,
+    api: {
+      call: (route: { path: string }) => {
+        asked.push(route.path);
+        return Promise.resolve({
+          shares: shares.map((s) => ({ ...s, spaceId })),
+          folders: [],
+          pages: [],
+        });
+      },
+    },
     keyring: { versions: () => held.map((h) => ({ ...h, sealer: { id: h.sealer } })) },
   } as unknown as ClientContext;
-  return { ctx, marks };
+  return { ctx, marks, asked, spaces };
 }
 
 describe('sending a change of a share', () => {
@@ -163,6 +175,16 @@ describe('settling a change whose answer was lost', () => {
       expect(marks.get(spaceId, shareId)).toBe(0);
       expect(changePending(marks, spaceId, shareId)).toBe(false);
     }
+  });
+
+  it('settles a lost move only once it has fetched the tree again, forgetting what it worked out', async () => {
+    const { ctx, marks, asked, spaces } = context({ shares: [{ shareId, currentKeyVersion: 1 }] });
+    await lostOne(marks, { ...rotation, change: 'move' });
+    await settleShareChanges(ctx, spaceId, later());
+    expect(changePending(marks, spaceId, shareId)).toBe(false);
+    expect(asked.some((path) => path.includes('tree'))).toBe(true);
+    expect(spaces.size).toBe(0);
+    expect(marks.get(spaceId, shareId)).toBe(0);
   });
 
   it('marks an ending done only when the share is gone', async () => {

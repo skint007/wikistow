@@ -4,7 +4,7 @@
 // it as pending in its kept marks and tells its other tabs, so tabs in a
 // session of the share stop sending at once; a definite answer clears it,
 // raising the No going back mark when the change was accepted.
-import { sharingRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
+import { sharingRoutes, structureRoutes, type ShareId, type SpaceId } from '@wikistow/contracts';
 import { outcomeUnknown } from '../api/client.ts';
 import {
   ENDED,
@@ -15,7 +15,7 @@ import {
   type NewChange,
   type PendingChange,
 } from '../key-versions.ts';
-import { spaceKeys } from './keys.ts';
+import { forgetSpaces, spaceKeys } from './keys.ts';
 import type { ClientContext } from './session.ts';
 
 /**
@@ -66,16 +66,47 @@ export async function sendShareChange<T>(
   return result;
 }
 
+/** How many times the app tries to settle a lost answer before leaving it to the next load. */
+const SETTLE_TRIES = 10;
+
 // Once a lost answer's grace has passed, fetch the spaces again, which
-// settles what was lost (`spaceKeys`), so no later load has to come first.
+// settles what was lost (`spaceKeys`), and again while it stays pending,
+// as when the network is still down. It stops once nothing is left to
+// settle, as after sign-out, when nothing is pending.
 function settleAfterGrace(ctx: ClientContext, changes: readonly NewChange[]): void {
   for (const spaceId of new Set(changes.map((change) => change.spaceId))) {
-    const timer = setTimeout(
-      () => void spaceKeys(ctx, spaceId, { refresh: true }).catch(() => {}),
-      LOST_GRACE_MS + 1_000,
-    );
-    (timer as { unref?: () => void }).unref?.();
+    let tries = 0;
+    const attempt = () => {
+      const timer = setTimeout(() => {
+        void spaceKeys(ctx, spaceId, { refresh: true })
+          .catch(() => {})
+          .then(() => {
+            tries += 1;
+            if (tries < SETTLE_TRIES && settleable(ctx, spaceId).length > 0) attempt();
+          });
+      }, LOST_GRACE_MS + 1_000);
+      (timer as { unref?: () => void }).unref?.();
+    };
+    attempt();
   }
+}
+
+/**
+ * The space's pending changes a fetch may settle: those whose answer was
+ * lost a while ago, or whose sender went silent. A change still being
+ * sent, here or in another tab, never is.
+ */
+export function settleable(
+  ctx: Pick<ClientContext, 'marks'>,
+  spaceId: SpaceId,
+  now = Date.now(),
+): PendingChange[] {
+  return (ctx.marks.pending?.() ?? []).filter(
+    (change) =>
+      change.spaceId === spaceId &&
+      ((change.lostAt !== null && now - change.lostAt > LOST_GRACE_MS) ||
+        now - change.at > SEND_LIMIT_MS),
+  );
 }
 
 /**
@@ -83,7 +114,8 @@ function settleAfterGrace(ctx: ClientContext, changes: readonly NewChange[]): vo
  * now: a rotation was accepted only when the share's version is past the
  * one it was sent from and is one whose keys this app sealed, which it
  * holds once it has worked out the space again; an ending only when the
- * share is gone. A move raises nothing. Everything listed is settled.
+ * share is gone. A move, or a kind this app doesn't know, raises nothing.
+ * Everything listed is settled.
  */
 export function outcomes(
   pending: readonly PendingChange[],
@@ -123,17 +155,16 @@ export async function settleShareChanges(
   spaceId: SpaceId,
   now = Date.now(),
 ): Promise<void> {
-  // A change still being sent, here or in another tab, is never settled
-  // under it: only one whose answer was lost a while ago, or whose sender
-  // went silent.
-  const pending = (ctx.marks.pending?.() ?? []).filter(
-    (change) =>
-      change.spaceId === spaceId &&
-      ((change.lostAt !== null && now - change.lostAt > LOST_GRACE_MS) ||
-        now - change.at > SEND_LIMIT_MS),
-  );
+  const pending = settleable(ctx, spaceId, now);
   if (pending.length === 0) return;
   const { shares } = await ctx.api.call(sharingRoutes.listShares, { params: { spaceId } });
+  // Which way a move went is in the tree: fetch it afresh, and drop what
+  // this app worked out before, so the page's region is read again from
+  // it, not from a tree from before the move.
+  if (pending.some((change) => change.change === 'move')) {
+    await ctx.api.call(structureRoutes.tree, { params: { spaceId } });
+    forgetSpaces(ctx);
+  }
   const self = ctx.identity.public.id;
   const sealedHere = (shareId: ShareId, keyVersion: number) =>
     ctx.keyring
