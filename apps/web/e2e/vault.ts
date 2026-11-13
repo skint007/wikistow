@@ -130,12 +130,14 @@ export async function sameAccountElsewhere(
  * properties unchanged (#408): change them with `setProperty`.
  */
 export async function fillSource(page: Page, text: string) {
+  const source = page.locator('#page-source');
+  // Properties draw with the source editor, so once it shows they would too.
+  await source.waitFor();
   if (/^(?:---|\.\.\.)\r?\n/.test(text) && (await properties(page).count()) > 0) {
     throw new Error(
       'This page has Properties, so frontmatter typed here is body text: use setProperty',
     );
   }
-  const source = page.locator('#page-source');
   await source.focus();
   await source.press('ControlOrMeta+a');
   await page.keyboard.insertText(text);
