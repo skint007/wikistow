@@ -167,6 +167,10 @@ async function sessionFor(
     .from(liveSessions)
     .where(eq(liveSessions.id, sessionId));
   if (!found) throw new ContentError('not-found');
+  // Checked before any lock too, so someone who can't edit holds none on the way to not-found.
+  if (lock && !canEdit(await requirePageAccess(tx, caller, await requirePage(tx, found.pageId)))) {
+    throw new ContentError('not-found');
+  }
   if (lock) await lockSpace(tx, found.spaceId);
   const page = await requirePage(tx, found.pageId, { lock });
   const access = await requirePageAccess(tx, caller, page);
@@ -1541,12 +1545,15 @@ export async function sendLive(db: Database, input: SendLive) {
       sizes.reduce((total, size) => total + size + LIVE_MESSAGE_BYTES, 0),
       input.storedBytesPerMinute,
     );
-    await chargeLive(
-      tx,
-      caller.accountId,
-      sizes.reduce((total, size) => total + storedSize(size), 0),
-      input.storageBytes,
-    );
+    // Only what it adds: a presence, an ask or a resend stores nothing, over quota or not.
+    if (sizes.length > 0) {
+      await chargeLive(
+        tx,
+        caller.accountId,
+        sizes.reduce((total, size) => total + storedSize(size), 0),
+        input.storageBytes,
+      );
+    }
     const positions: (number | null)[] = [];
     const updates: number[] = [];
     const resent: number[] = [];

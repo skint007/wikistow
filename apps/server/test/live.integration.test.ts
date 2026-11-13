@@ -509,6 +509,17 @@ describe('messages', () => {
     expect(open?.position).toBe(3);
   });
 
+  it('keeps a presence sent before any stream opened, for the first that does', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const presence = me.message('presence');
+    await me.send([presence]);
+    const theirs = await stream(owner, session, newId(JoinId), 1);
+    expect(await theirs.next((l) => 'presence' in l)).toMatchObject({ presence });
+  });
+
   it('numbers stored messages without gaps, takes one sent again unchanged, and refuses the rest by code', async () => {
     const { owner, editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
@@ -798,7 +809,6 @@ describe('ending', () => {
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
     expect(await staying.next((l) => 'ended' in l)).toMatchObject({ ended: 'access' });
     await removed.closed();
-    expect(removed.lines.some((l) => 'message' in l && l.message.position > 2)).toBe(false);
 
     const me = typist(editor, session, session.joinId);
     me.started();

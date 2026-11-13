@@ -235,7 +235,8 @@ export function mountLiveRoutes(
   // Forget a session nobody follows, unless a newer entry took its place meanwhile.
   function forget(sessionId: string, session: Followed) {
     if (followed.get(sessionId) !== session) return;
-    if (session.streams.size === 0) followed.delete(sessionId);
+    // Kept while it holds someone's latest presence, for the next stream to open.
+    if (session.streams.size === 0 && session.presence.size === 0) followed.delete(sessionId);
   }
 
   // A session read again, after any read of it already going.
@@ -373,7 +374,22 @@ export function mountLiveRoutes(
    * to it after a removal isn't relayed, even to those who can still edit.
    */
   function relay(change: Relay) {
-    const session = followed.get(change.sessionId);
+    let session = followed.get(change.sessionId);
+    // A presence sent with no stream open is kept for the first that opens.
+    if (!session && !change.ended && !change.deleted && change.sent.some((i) => 'presence' in i)) {
+      session = {
+        pageId: change.pageId,
+        streams: new Set(),
+        presence: new Map(),
+        draftHead: change.draftHead,
+        draftCount: change.draftCount,
+        joins: '',
+        grants: new Map(),
+        snapshotCovers: 0,
+        over: false,
+      };
+      followed.set(change.sessionId, session);
+    }
     if (!session) return;
     if (change.deleted) {
       endAll(session, 'deleted');
@@ -661,6 +677,7 @@ export function mountLiveRoutes(
         followed.set(sessionId, session);
       }
       const here = session;
+      here.snapshotCovers = Math.max(here.snapshotCovers, joined.snapshotCovers);
       setHead(here, joined.draftHead, joined.draftCount);
       // A newer stream of a join replaces the older one, which sends nothing more.
       for (const other of here.streams) {
