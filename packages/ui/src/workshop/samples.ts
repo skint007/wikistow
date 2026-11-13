@@ -350,6 +350,10 @@ export function sampleStore() {
           if (changes.length > BATCH_LIMIT)
             throw new PluginError('invalid', `At most ${BATCH_LIMIT} pages a batch`);
           if (changes.some(({ page }) => !find(page))) throw elsewhere();
+          if (changes.length === 0) {
+            allow('read');
+            return [];
+          }
           allow('write');
           return changes.map(({ page: ref, base, ...change }): DraftResult => {
             const page = { spaceId: ref.spaceId, pageId: ref.pageId };
@@ -390,7 +394,9 @@ export function sampleStore() {
           if (!first) return [];
           if (first.from.page.spaceId !== SAMPLE_SPACE) throw elsewhere();
           if (moves.some(({ from, to }) => !find(from.page) || !find(to.page))) throw elsewhere();
-          allow('write');
+          // Reading, as in the app: a write only once a sample changes.
+          allow('read');
+          let counted = false;
           for (const pageId of editors.keys()) flush(pageId);
           const linkable = linkableAs(
             samples.map(({ pageId, title }) => ({ id: pageId, title, folders: [] })),
@@ -410,6 +416,10 @@ export function sampleStore() {
                 linkable,
               );
               if (markdown === null) continue;
+              if (!counted) {
+                allow('write');
+                counted = true;
+              }
               const version = save(page, String(sample.revision), { markdown });
               caller.wrote(page, version.revision);
               results.push({ page, ok: true, version });

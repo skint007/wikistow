@@ -98,8 +98,9 @@ defineScript((host) => {
           to: { page: page.page, ...(UNWRITABLE.test(title) ? {} : { heading: title }) },
         })),
       );
-      await host.pages.trash(merged.map(({ page: each }) => each));
+      // Links that stayed would go nowhere once their pages are in the trash.
       followed(relinked);
+      await host.pages.trash(merged.map(({ page: each }) => each));
     },
   });
 });

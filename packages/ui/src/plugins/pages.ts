@@ -122,9 +122,16 @@ export type EditingCaller = Caller & {
   /**
    * Move `pages` to the trash once the person agrees, asked once for them
    * all: true once they are in it, false if they said no. `forbidden`
-   * where the person doesn't own the space, before anything is asked.
+   * where the person doesn't own the space, and `not-found` for an ID
+   * that isn't a page there (a folder's would take what is in it), before
+   * anything is asked. `mayStill` checks the plugin's access again before
+   * each goes.
    */
-  trash: (ctx: ClientContext, pages: readonly PageRef[]) => Promise<boolean>;
+  trash: (
+    ctx: ClientContext,
+    pages: readonly PageRef[],
+    mayStill: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<void>,
+  ) => Promise<boolean>;
 };
 
 /**
@@ -410,11 +417,14 @@ export function pagesFor(caller: EditingCaller): HostPages {
   /**
    * Each of `saves` saved as `saveDraft` saves it, in turn, at the pace of
    * every batch (`batchTurn`), waiting out the server's own limits, each
-   * result saying how it went. It stops once the plugin unloads.
+   * result saying how it went. Each is checked against the plugin's access
+   * as it is saved, as the person may take it away meanwhile, by the
+   * nodes' parents in `trees`. It stops once the plugin unloads.
    */
   const saveEach = async (
     ctx: ClientContext,
     saves: readonly { page: PageRef; base: string; change: PageChange }[],
+    trees: Map<SpaceId, ReturnType<typeof parentsIn>>,
   ): Promise<DraftResult[]> => {
     const waiting = patient(ctx, unloaded, caller.signal);
     const results: DraftResult[] = [];
@@ -422,10 +432,14 @@ export function pagesFor(caller: EditingCaller): HostPages {
       if (!caller.live()) break;
       const page = { spaceId: ref.spaceId, pageId: ref.pageId };
       try {
-        const version = await batchTurn(
-          async () =>
-            (await caller.open(page, base, change)) ?? saveOn(caller, waiting, page, base, change),
-        );
+        const version = await batchTurn(async () => {
+          await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(
+            page.pageId,
+          ), 'write', trees);
+          return (
+            (await caller.open(page, base, change)) ?? saveOn(caller, waiting, page, base, change)
+          );
+        });
         results.push({ page, ok: true, version });
       } catch (error) {
         const { code, message } = pluginError(error);
@@ -596,6 +610,7 @@ export function pagesFor(caller: EditingCaller): HostPages {
       return saveEach(
         ctx,
         changes.map(({ page, base, ...change }) => ({ page, base, change })),
+        trees,
       );
     }),
 
@@ -613,7 +628,10 @@ export function pagesFor(caller: EditingCaller): HostPages {
       const trees = new Map<SpaceId, ReturnType<typeof parentsIn>>();
       for (const page of pages) await require(ctx, page.spaceId, page.pageId, 'write', trees);
       write();
-      return caller.trash(ctx, pages);
+      // Checked again as each goes: the person may take its access away while asked.
+      return caller.trash(ctx, pages, (page) =>
+        require(ctx, page.spaceId, page.pageId, 'write', trees),
+      );
     }),
 
     relink: guarded(async (ctx, moves) => {
@@ -638,7 +656,10 @@ export function pagesFor(caller: EditingCaller): HostPages {
       }
       const saves: { page: PageRef; base: string; change: PageChange }[] = [];
       const refused: DraftResult[] = [];
+      // Read at the batches' pace too, as each read is two of the person's requests.
+      const waiting = patient(ctx, unloaded, caller.signal);
       for (const pageId of candidates) {
+        if (!caller.live()) break;
         const page = { spaceId, pageId };
         // One it can't read isn't named, nor whether it links there.
         const has = await accessAt(ctx, spaceId, pageId, trees).catch((error: unknown) => {
@@ -646,8 +667,10 @@ export function pagesFor(caller: EditingCaller): HostPages {
           throw error;
         });
         if (has === 'none') continue;
-        await caller.flush(page);
-        const read = await readPage(caller, ctx, page);
+        const read = await batchTurn(async () => {
+          await caller.flush(page);
+          return readPage(caller, waiting, page);
+        });
         if (read.opened.opened.kind !== 'current') continue;
         const { payload } = read.opened.opened;
         let markdown: string | null;
@@ -684,7 +707,7 @@ export function pagesFor(caller: EditingCaller): HostPages {
       }
       if (saves.length === 0) return refused;
       write();
-      return [...refused, ...(await saveEach(ctx, saves))];
+      return [...refused, ...(await saveEach(ctx, saves, trees))];
     }),
 
     move: guarded(async (ctx, node, parent) => {

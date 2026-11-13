@@ -59,10 +59,13 @@ export function shortcutOf(
   event: Pick<KeyboardEvent, 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'code'> & {
     // Autofill sends keydown events with no key at all.
     key?: string | undefined;
+    getModifierState?: (key: string) => boolean;
   },
   apple: boolean,
 ): string | null {
   if (!apple && event.metaKey) return null;
+  // AltGr, which comes as Ctrl and Alt on Windows, types characters such as @.
+  if (event.getModifierState?.('AltGraph')) return null;
   const { code } = event;
   const key =
     event.key !== undefined && /^[a-z]$/i.test(event.key)
@@ -207,7 +210,8 @@ const commandKey = ({ pluginId, commandId }: CommandKey) => `${pluginId}/${comma
 
 /**
  * Why `name` can't be a shortcut for `command`, or null if it can. It needs
- * Mod or Alt, or a function key, so it never types text. It mustn't be one
+ * Mod, or a function key, so it never types text: Alt alone types
+ * characters on a Mac (⌥S is ß), as AltGr does elsewhere. It mustn't be one
  * of the app's own (`APP_SHORTCUTS`) or another command's in `taken`, named
  * there with its title.
  */
@@ -220,10 +224,10 @@ export function shortcutProblem(
   const normal = normalShortcut(name);
   const parts = normal.split('-');
   const key = parts.at(-1) ?? '';
-  if (!/^F\d+$/.test(key) && !parts.includes('Mod') && !parts.includes('Alt')) {
-    // As the person's system names them: Ctrl and Alt, or ⌘ and ⌥.
-    const [mod, alt] = ['Mod-x', 'Alt-x'].map((keys) => label(keys).replace(/\+?X$/, ''));
-    return `Hold ${mod} or ${alt} with a key, so it types no text.`;
+  if (!/^F\d+$/.test(key) && !parts.includes('Mod')) {
+    // As the person's system names it: Ctrl, or ⌘.
+    const mod = label('Mod-x').replace(/\+?X$/, '');
+    return `Hold ${mod} with a key, or use a function key, so it types no text.`;
   }
   const own = APP_SHORTCUTS[normal];
   if (own) return `${label(normal)} is the app’s own: ${own}.`;

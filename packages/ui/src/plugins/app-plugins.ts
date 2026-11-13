@@ -102,6 +102,7 @@ export function startAppPlugins(queryClient: QueryClient) {
     caller: Caller,
     ctx: ReturnType<typeof session>,
     pages: readonly PageRef[],
+    mayStill: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<void>,
   ): Promise<boolean> => {
     const spaceIds = [...new Set(pages.map(({ spaceId }) => SpaceId.parse(spaceId)))];
     const spaces = await latest(spacesQuery(ctx));
@@ -112,6 +113,9 @@ export function startAppPlugins(queryClient: QueryClient) {
       for (const page of (await latest(treeQuery(ctx, spaceId))).pages)
         titles.set(page.id, page.title);
     }
+    // A page only: a folder's ID would take everything in it, which the prompt wouldn't list.
+    if (!pages.every(({ pageId }) => titles.has(pageId)))
+      throw new PluginError('not-found', 'There is no such page');
     const named = pages.map((page) => ({ ...page, title: titles.get(page.pageId) ?? null }));
     const agreed = await pluginTrashPrompts.ask(
       { plugin: caller.name, titles: named.map(({ title }) => title) },
@@ -124,14 +128,15 @@ export function startAppPlugins(queryClient: QueryClient) {
     try {
       for (const { spaceId, pageId, title } of named) {
         const nodeId = PageId.parse(pageId);
-        const done = await batchTurn(() =>
-          writer.deleteNode({
+        const done = await batchTurn(async () => {
+          await mayStill({ spaceId: SpaceId.parse(spaceId), pageId: nodeId });
+          return writer.deleteNode({
             spaceId: SpaceId.parse(spaceId),
             nodeId,
             node: 'page',
             name: pageTitle(title),
-          }),
-        );
+          });
+        });
         if (done === 'trashed') trashed.push(nodeId);
       }
     } finally {
@@ -165,8 +170,8 @@ export function startAppPlugins(queryClient: QueryClient) {
         // The index query tables read, as up to date as `tree`.
         index: (ctx) => latest(searchIndexQuery(ctx, queryClient)),
         flush: (page) => drafts.flush(caller, page),
-        trash: (ctx, pages) =>
-          trash(caller, ctx, pages).catch((error: unknown) => {
+        trash: (ctx, pages, mayStill) =>
+          trash(caller, ctx, pages, mayStill).catch((error: unknown) => {
             throw pluginError(error);
           }),
       }),

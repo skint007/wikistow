@@ -56,7 +56,11 @@ export function moveTargets(moves: readonly LinkMove[], { pages, index }: Linkab
       const [only, ...more] = pagesTitled([...above, title].join('/'), pages, index);
       if (only === to.page.pageId && more.length === 0) return [...above, title].join('/');
     }
-    throw new PluginError('invalid', `“${title}” names several pages; give it a title of its own`);
+    // Not saying why: another page of that name may be one it can't read.
+    throw new PluginError(
+      'invalid',
+      `A link can’t name “${title}” alone; give it a title of its own`,
+    );
   });
 }
 

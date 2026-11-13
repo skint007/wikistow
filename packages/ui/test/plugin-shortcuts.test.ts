@@ -55,6 +55,14 @@ describe('plugin shortcuts', () => {
     expect(
       shortcutOf({ ...press, ctrlKey: true, key: 'Control', code: 'ControlLeft' }, false),
     ).toBeNull();
+    // AltGr+Q types @ on a German keyboard, and comes as Ctrl and Alt: never a shortcut.
+    const altGr = (key: string) => key === 'AltGraph';
+    expect(
+      shortcutOf(
+        { ...press, ctrlKey: true, altKey: true, key: '@', code: 'KeyQ', getModifierState: altGr },
+        false,
+      ),
+    ).toBeNull();
   });
 
   it('refuse the app’s keys, another command’s, and keys that type text', () => {
@@ -66,6 +74,8 @@ describe('plugin shortcuts', () => {
     expect(shortcutProblem('Mod-k', mine, taken, label)).toContain('Search');
     expect(shortcutProblem('Alt-Mod-s', mine, taken, label)).toContain('Tools: Stamp');
     expect(shortcutProblem('Shift-s', mine, taken, label)).toContain('types no text');
+    // Alt alone types on a Mac: ⌥S is ß.
+    expect(shortcutProblem('Alt-s', mine, taken, label)).toContain('types no text');
     expect(
       shortcutProblem('Mod-Alt-s', { pluginId: 'tools', commandId: 'stamp' }, taken, label),
     ).toBeNull();
