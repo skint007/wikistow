@@ -70,6 +70,8 @@ const bridge: DesktopBridge = {
     ipcRenderer.on(DESKTOP_CHANNELS.onFind, heard);
     return () => void ipcRenderer.off(DESKTOP_CHANNELS.onFind, heard);
   },
+  clipping: () => call(DESKTOP_CHANNELS.clipping),
+  setClipping: (on) => call(DESKTOP_CHANNELS.setClipping, on),
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

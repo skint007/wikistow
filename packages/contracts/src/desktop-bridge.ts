@@ -138,6 +138,24 @@ export type KeptAccount = { id: string; name: string };
 /** Whether the desktop window fills the screen, for its titlebar's buttons (#74). */
 export type WindowState = { maximized: boolean; fullScreen: boolean };
 
+/** A browser the web clipper's host manifests are written for (ADR 0017, decision 2). */
+export type ClipBrowser = 'chrome' | 'chromium' | 'edge' | 'brave' | 'firefox';
+
+/** **Settings → Browser clipping** on this computer (ADR 0017). */
+export type ClippingState = {
+  /** The person's choice; it starts on. */
+  on: boolean;
+  /**
+   * Why browsers can't reach the app although it's on, or null: a Mac app
+   * run from where it was unzipped (`translocated`), a development build
+   * started without `--clip-manifests` (`development`), or the socket
+   * couldn't be opened (`unavailable`).
+   */
+  problem: 'translocated' | 'development' | 'unavailable' | null;
+  /** The browsers whose manifests name this app, found on this computer. */
+  browsers: ClipBrowser[];
+};
+
 /**
  * What the titlebar asks of the window. `toggle-maximize` leaves full screen
  * first; `close` closes as the window manager's close does, so changes still
@@ -307,6 +325,14 @@ export type DesktopBridge = {
    * (#276). Cmd+F itself goes to the page first. The returned function stops it.
    */
   onFind(listener: () => void): () => void;
+  /** Browser clipping on this computer: whether it's on, and which browsers can reach the app. */
+  clipping(): Promise<ClippingState>;
+  /**
+   * Turn browser clipping on or off on this computer. Off closes the
+   * socket and deletes the host manifests (and on Windows their keys); on
+   * writes them again.
+   */
+  setClipping(on: boolean): Promise<ClippingState>;
 };
 
 /** The IPC channels behind `DesktopBridge`, one per method. */
@@ -355,6 +381,8 @@ export const DESKTOP_CHANNELS = {
   windowState: 'wikistow:window-state',
   onWindowState: 'wikistow:window-state-changed',
   onFind: 'wikistow:find',
+  clipping: 'wikistow:clipping',
+  setClipping: 'wikistow:set-clipping',
 } as const satisfies Record<keyof DesktopBridge, string>;
 
 /** What a channel answers: the value, or the message for a failure. */

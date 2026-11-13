@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "WikiStow clipper test",
+  "description": "A stand-in for the WikiStow extension in the desktop tests (e2e/clip.spec.ts).",
+  "version": "0.0.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsPjYyZ7sXVmNpwZ0t44kiGXIWT+oioQhAZg5wsPcEEm5GXOjHfgbUCg5hF7OlIocteqP7WS3u8aOOhEY43jOYxA/cqMYFJ2PsE75pKvPJVMKOAfaD4jYGrVy+KOl1vCc4+4tg07XusGdUJNDSJBbLafoBBIB11OMruJ+xXdoO1ZDjeqYpld6MSpGF0BHLUDjDmaOPsVBLOdm9yTbZeC9HbrFEa+rR1yrqfV80ZeV3A0bjYRsYwu6ncOcQisMrdy+WRNCWyEoKgGQdheamx6Lm2F+totwoP8WVklLYIz5luUJbV4UfveNlnX9hLbFF+vCDGeLg9oSvYUHMjGxC+UjVQIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "background": { "service_worker": "background.js" }
+}

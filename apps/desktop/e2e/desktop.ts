@@ -30,6 +30,7 @@ export async function launch(
   profile: string,
   args: string[] = [],
   appPath = APP_DIR,
+  env?: NodeJS.ProcessEnv,
 ): Promise<Desktop> {
   // The plain-text store unless a test asks for the keyring, which the app
   // would otherwise find on the developer's own desktop.
@@ -39,6 +40,7 @@ export async function launch(
   const app = await _electron.launch({
     executablePath,
     args: [appPath, `--user-data-dir=${profile}`, ...CONTAINER_SWITCHES, ...store, ...args],
+    ...(env ? { env } : {}),
   });
   return { app, window: await app.firstWindow(), profile };
 }
