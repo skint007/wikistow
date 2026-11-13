@@ -194,11 +194,17 @@ export class LiveJoins {
    *   or held while that join is present; and each deleted range is within
    *   what its client's join has signed, this message included.
    *
-   * A presence is taken as it comes, and never checked against stored ones.
+   * A presence is taken as it comes, from a join this app takes, and never
+   * checked against stored ones.
    */
   check(message: OpenedLiveMessage, update?: DecodedUpdate): LiveVerdict {
-    if (message.kind === 'presence') return { kind: 'take' };
     const join = this.#joins.get(key(message));
+    if (message.kind === 'presence') {
+      // A refused join's presence counts as not visible, like any it refuses.
+      return join && !join.refused
+        ? { kind: 'take' }
+        : { kind: 'refuse', why: 'the join isn’t one this app takes' };
+    }
     if (!join) return { kind: 'refuse', why: 'the join isn’t one this app takes' };
     const seen = join.taken.get(message.seq);
     if (seen) {

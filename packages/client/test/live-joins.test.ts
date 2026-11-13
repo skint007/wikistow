@@ -258,6 +258,11 @@ describe('taking a join’s messages', () => {
     const { bobs, joins } = setup();
     const presence = opened(bobs.seal('saved', new Uint8Array([1])));
     expect(joins.check({ ...presence, kind: 'presence', seq: 0 })).toEqual({ kind: 'take' });
+    // Not once the join is refused, as folded in as gone.
+    joins.refuse(bobs.listed, 'folded in as gone');
+    expect(joins.check({ ...presence, kind: 'presence', seq: 0 })).toMatchObject({
+      kind: 'refuse',
+    });
   });
 });
 

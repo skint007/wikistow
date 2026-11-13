@@ -13,6 +13,7 @@ import {
   IdentityId,
   InstallationId,
   metadataAd,
+  newPayload,
   metadataRecordV2Bytes,
   newFolderKeys,
   PageId,
@@ -30,6 +31,7 @@ import {
   liveMessageBytes,
   liveWrapSubject,
   pad,
+  firstSnapshot,
   presenceContent,
   sealLiveMessage,
   stateContent,
@@ -37,7 +39,11 @@ import {
   type LiveBinding,
 } from '../src/live/index.ts';
 import { sodium } from '../src/sodium.ts';
-import { update as handWritten } from '../test/support/yjs-bytes.ts';
+import {
+  state as handState,
+  update as handWritten,
+  type Struct,
+} from '../test/support/yjs-bytes.ts';
 
 const exportIdentity = (identity: PrivateIdentity) => ({
   public: identity.public,
@@ -176,6 +182,8 @@ export function liveVectors(previous?: LivePrevious) {
   twice.getMap('extensions').set('a', '"x"');
   twice.getMap('extensions').set('a', '"y"');
   const text = { content: { string: 'x' } } as const;
+  const one = (struct: Struct) =>
+    handWritten({ sections: [{ client: 7, clock: 0, structs: [struct] }] });
   const decoder = {
     accept: {
       emptyUpdate: hex(new Uint8Array([0, 0])),
@@ -217,7 +225,75 @@ export function liveVectors(previous?: LivePrevious) {
         }),
       ),
       emptyDeleteRange: hex(handWritten({ deletes: [{ client: 7, ranges: [[0, 0]] }] })),
+      clientTwiceInStructs: hex(
+        handWritten({
+          sections: [
+            { client: 7, clock: 0, structs: [text] },
+            { client: 7, clock: 1, structs: [text] },
+          ],
+        }),
+      ),
+      clientTwiceInDeletes: hex(
+        handWritten({
+          deletes: [
+            { client: 7, ranges: [[0, 1]] },
+            { client: 7, ranges: [[2, 1]] },
+          ],
+        }),
+      ),
+      sectionWithoutStructs: hex(handWritten({ sections: [{ client: 7, clock: 0, structs: [] }] })),
+      clientWithoutRanges: hex(handWritten({ deletes: [{ client: 7, ranges: [] }] })),
+      emptyString: hex(one({ content: { string: '' } })),
+      emptyValueList: hex(one({ parent: 'fields', parentSub: 'n', content: { any: [] } })),
+      ownOriginAhead: hex(one({ origin: { client: 7, clock: 0 }, content: { string: 'x' } })),
+      notUtf8: hex(one({ content: { raw: 4, bytes: [2, 0xc3, 0x28] } })),
+      contentEmbed: hex(one({ content: { raw: 5, bytes: [2, 0x7b, 0x7d] } })),
+      contentFormat: hex(one({ content: { raw: 6, bytes: [1, 0x62, 4, 0x74, 0x72, 0x75, 0x65] } })),
+      contentType: hex(one({ content: { raw: 7, bytes: [1] } })),
     },
+  };
+  // States a receiver's decoder must refuse: each counts as none.
+  const states = {
+    accept: { saved: hex(Y.encodeSnapshot(Y.snapshot(doc))) },
+    refuse: {
+      zeroClock: hex(handState({ vector: [[7, 0]] })),
+      clientTwice: hex(
+        handState({
+          vector: [
+            [7, 1],
+            [7, 2],
+          ],
+        }),
+      ),
+      clientWithoutRanges: hex(handState({ deletes: [{ client: 7, ranges: [] }] })),
+      emptyRange: hex(handState({ deletes: [{ client: 7, ranges: [[0, 0]] }] })),
+      trailingByte: hex(new Uint8Array([...handState({ vector: [[7, 1]] }), 0])),
+    },
+  };
+  // The first snapshot, as the starter sends it with the record.
+  const first = firstSnapshot({
+    sender: starter,
+    binding,
+    joinId: started.joinId,
+    clientId,
+    revisionId: RevisionId.parse('vector-live-draft'),
+    payload: newPayload({ title: 'Lasagne', markdown: 'Brown the mince.' }),
+  });
+  const snapshotHeader = { ...header, kind: 'snapshot' as const, seq: 1 };
+  const snapshot = {
+    message: first.message,
+    ad: hex(liveMessageAd(binding, snapshotHeader)),
+    signedBytes: hex(
+      liveMessageBytes(binding, snapshotHeader, hash(sealedBytes(first.message.sealed))),
+    ),
+    padded: hex(
+      aeadDecrypt({
+        key: sessionKey,
+        sealed: first.message.sealed,
+        ad: liveMessageAd(binding, snapshotHeader),
+      }),
+    ),
+    state: hex(Y.encodeStateAsUpdate(first.document.doc)),
   };
   const clientInput = canonical('live-client/v1', [
     installationId,
@@ -278,6 +354,8 @@ export function liveVectors(previous?: LivePrevious) {
     saved: { message: saved, state: hex(state), revisionId: 'vector-live-draft-2' },
     padding,
     decoder,
+    states,
+    snapshot,
     presence: {
       message: presence,
       padded: hex(

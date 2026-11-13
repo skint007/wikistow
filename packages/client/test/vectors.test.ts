@@ -72,6 +72,7 @@ import {
   openLiveMessage,
   pad,
   readSaved,
+  readSnapshot,
   SealedLiveRecord,
   unpad,
   type LiveBinding,
@@ -628,9 +629,48 @@ describe('live session test vectors (section 5.10)', () => {
     for (const bytes of Object.values(live.decoder.accept)) {
       expect(() => decodeUpdate(sodium.from_hex(bytes))).not.toThrow();
     }
-    for (const bytes of Object.values(live.decoder.refuse)) {
-      expect(() => decodeUpdate(sodium.from_hex(bytes))).toThrow();
+    for (const [name, bytes] of Object.entries(live.decoder.refuse)) {
+      expect(() => decodeUpdate(sodium.from_hex(bytes)), name).toThrow(
+        expect.objectContaining({ code: 'binding-mismatch' }),
+      );
     }
+  });
+
+  it('decode states strictly, counting one that doesn’t as none', () => {
+    for (const bytes of Object.values(live.states.accept)) {
+      expect(decodeState(sodium.from_hex(bytes))).not.toBeNull();
+    }
+    for (const [name, bytes] of Object.entries(live.states.refuse)) {
+      expect(decodeState(sodium.from_hex(bytes)), name).toBeNull();
+    }
+  });
+
+  it('seal the first snapshot as the starter’s message with seq 1', () => {
+    const { snapshot } = live;
+    const opened = openLiveMessage({
+      binding,
+      trust,
+      listed: () => true,
+      message: snapshot.message,
+    });
+    expect(opened).toMatchObject({ kind: 'snapshot', seq: 1, joinId: live.client.joinId });
+    const header = { ...opened, kind: 'snapshot' as const };
+    expect(sodium.to_hex(liveMessageAd(binding, header))).toBe(snapshot.ad);
+    expect(sodium.to_hex(liveMessageBytes(binding, header, opened.payloadHash))).toBe(
+      snapshot.signedBytes,
+    );
+    const padded = aeadDecrypt({
+      key: sessionKey,
+      sealed: snapshot.message.sealed,
+      ad: sodium.from_hex(snapshot.ad),
+    });
+    expect(sodium.to_hex(padded)).toBe(snapshot.padded);
+    const read = readSnapshot(opened.content);
+    if (read.kind !== 'current') throw new Error('Not current');
+    expect(sodium.to_hex(read.state)).toBe(snapshot.state);
+    const decoded = decodeUpdate(read.state);
+    expect(decoded.structs.map((s) => s.client)).toEqual([live.client.clientId]);
+    expect(decoded.structs[0]?.end).toBe(opened.clock);
   });
 
   it('pad a presence to exactly 512 bytes', () => {
