@@ -12,7 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Optimizations
 
-- Importing notes sends about a third as many requests, so an import over a slow connection takes about a third of the time it did.
+- Importing notes sends about a third as many requests, so an import over a slow connection takes about 40% of the time it did.
 
 ### Changes
 
