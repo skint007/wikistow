@@ -3,6 +3,7 @@ import {
   type BlockField,
   type Command,
   type Disposer,
+  type DraftResult,
   type FolderEntry,
   type FolderRef,
   type OutputValue,
@@ -96,6 +97,9 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
       createFolder: (parent, name) => call<FolderRef>('pages.createFolder', [parent, name]),
       saveDraft: (page, change) => call<PageVersion>('pages.saveDraft', [page, change]),
       move: (node, parent) => call<void>('pages.move', [node, parent]),
+      saveDrafts: (changes) => call<DraftResult[]>('pages.saveDrafts', [changes]),
+      trash: (pages) => call<boolean>('pages.trash', [pages]),
+      relink: (moves) => call<DraftResult[]>('pages.relink', [moves]),
     },
     commands: {
       register(command): Disposer {

@@ -1,6 +1,8 @@
 import { indexedContent, PageId, RevisionId, searchOperations, SpaceId } from '@wikistow/client';
 import {
+  BATCH_LIMIT,
   PluginError,
+  type DraftResult,
   type Json,
   type PageChange,
   type PageHandle,
@@ -9,6 +11,8 @@ import {
 } from '@wikistow/plugin-sdk';
 import { pageRows, queryRows, readableSpace, readPluginQuery } from '../plugins/page-rows';
 import type { Caller, HostPages } from '../plugins/pages';
+import { checkMoves, linkableAs, moveTargets, relinkPage } from '../plugins/relink';
+import { pluginTrashPrompts } from '../plugins/trash-prompts';
 import type { ShownPage } from '../plugins/runtime';
 
 /** The space the workshop's sample pages are in, which no real page is. */
@@ -34,6 +38,11 @@ export type Sample = {
 };
 
 const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
+/** A batch's failure for one sample: the samples' own errors are `PluginError`s already. */
+const failure = (error: unknown) =>
+  error instanceof PluginError
+    ? error
+    : new PluginError('failed', error instanceof Error ? error.message : 'Something went wrong');
 const elsewhere = () =>
   new PluginError('not-found', 'The workshop’s preview has only its own sample pages');
 
@@ -67,7 +76,14 @@ export function sampleStore() {
       ? samples.find((sample) => sample.pageId === ref.pageId)
       : undefined;
 
+  /**
+   * When each sample last changed in this session, as the index's `updated`
+   * would have it; one restored with the draft has none until it changes.
+   */
+  const savedAt = new Map<string, string>();
+
   const set = (pageId: string, change: Partial<Sample>, outside: boolean) => {
+    savedAt.set(pageId, new Date().toISOString());
     samples = samples.map((sample) =>
       sample.pageId === pageId
         ? {
@@ -86,6 +102,7 @@ export function sampleStore() {
     if (page.copyOf !== null) copied = true;
     const sample: Sample = { ...page, pageId: `sample-${made}`, revision: 1, outside: 0 };
     samples = [...samples, sample];
+    savedAt.set(sample.pageId, new Date().toISOString());
     changed();
     return sample;
   };
@@ -150,7 +167,11 @@ export function sampleStore() {
           draft: true,
           unpublished: false,
         },
-        { title: sample.title, ...indexedContent(sample.markdown) },
+        {
+          title: sample.title,
+          ...indexedContent(sample.markdown),
+          updated: savedAt.get(sample.pageId) ?? null,
+        },
       );
     }
     return readableSpace(
@@ -335,6 +356,93 @@ export function sampleStore() {
         async move() {
           allow('write');
           throw new PluginError('unsupported', 'The workshop’s preview has no folders');
+        },
+        // A batch is one write, as in the app, saved at once: samples have no server to pace.
+        async saveDrafts(changes) {
+          if (changes.length > BATCH_LIMIT)
+            throw new PluginError('invalid', `At most ${BATCH_LIMIT} pages a batch`);
+          if (changes.some(({ page }) => !find(page))) throw elsewhere();
+          if (changes.length === 0) {
+            allow('read');
+            return [];
+          }
+          allow('write');
+          return changes.map(({ page: ref, base, ...change }): DraftResult => {
+            const page = { spaceId: ref.spaceId, pageId: ref.pageId };
+            try {
+              flush(page.pageId);
+              const version = save(page, base, change);
+              caller.wrote(page, version.revision);
+              return { page, ok: true, version };
+            } catch (error) {
+              const { code, message } = failure(error);
+              return { page, ok: false, code, message };
+            }
+          });
+        },
+        // Asked as the app asks: once, listing them all. They go for good, as samples do.
+        async trash(refs) {
+          if (refs.length === 0 || refs.length > BATCH_LIMIT)
+            throw new PluginError('invalid', `From 1 to ${BATCH_LIMIT} pages at a time`);
+          const found = refs.map(find);
+          if (found.some((sample) => !sample)) throw elsewhere();
+          allow('write');
+          const ids = new Set(found.flatMap((sample) => (sample ? [sample.pageId] : [])));
+          const agreed = await pluginTrashPrompts.ask(
+            {
+              plugin: caller.name,
+              pages: samples
+                .filter(({ pageId }) => ids.has(pageId))
+                .map(({ title }) => ({ title, folders: [] })),
+            },
+            caller.signal,
+          );
+          if (!agreed || !caller.live()) return false;
+          samples = samples.filter(({ pageId }) => !ids.has(pageId));
+          changed();
+          return true;
+        },
+        async relink(moves) {
+          checkMoves(moves);
+          const [first] = moves;
+          if (!first) return [];
+          if (first.from.page.spaceId !== SAMPLE_SPACE) throw elsewhere();
+          if (moves.some(({ from, to }) => !find(from.page) || !find(to.page))) throw elsewhere();
+          // Reading, as in the app: a write only once a sample changes.
+          allow('read');
+          let counted = false;
+          for (const pageId of editors.keys()) flush(pageId);
+          const linkable = linkableAs(
+            samples.map(({ pageId, title }) => ({ id: pageId, title, folders: [] })),
+          );
+          const targets = moveTargets(moves, linkable);
+          const results: DraftResult[] = [];
+          for (const sample of samples) {
+            const page = { spaceId: SAMPLE_SPACE, pageId: sample.pageId };
+            try {
+              // Samples hold no link table: links name them by title.
+              const markdown = relinkPage(
+                sample.markdown,
+                sample.pageId,
+                new Map(),
+                moves,
+                targets,
+                linkable,
+              );
+              if (markdown === null) continue;
+              if (!counted) {
+                allow('write');
+                counted = true;
+              }
+              const version = save(page, String(sample.revision), { markdown });
+              caller.wrote(page, version.revision);
+              results.push({ page, ok: true, version });
+            } catch (error) {
+              const { code, message } = failure(error);
+              results.push({ page, ok: false, code, message });
+            }
+          }
+          return results;
         },
       };
     },

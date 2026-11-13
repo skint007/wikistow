@@ -76,6 +76,15 @@ export type IndexedEntry = Readonly<Omit<SearchPage, 'folderIds' | 'path'>> & {
   readonly title: string;
   readonly properties: readonly Readonly<PropertyData>[];
   readonly links: readonly Readonly<IndexedLink>[];
+  /**
+   * When the server took the version indexed, as it says, not signed by its
+   * author (`OpenedRevision.createdAt`); for a version this person saved on
+   * this device, this device's time once the server confirmed it, until the
+   * version is read from the server again. A change waiting on this device
+   * keeps its base's. Null when unknown, as for a version kept on the device
+   * before times were, until the server is asked (`updateIndex`).
+   */
+  readonly updated: string | null;
 };
 
 /** Which pages of the index to list (`PageIndex.list`). */
@@ -172,8 +181,11 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * An index like this one, but holding `pages`, each in place of the page
    * with its space and page ID, and in each of `spaces` (every one for
    * `'all'`) no page `pages` leaves out. A page's content can be left out
-   * if this index holds that version of it. A page as this index holds it
-   * (the same version, in the same place) is kept as indexed: only the
+   * if this index holds that version of it, or given as its time alone
+   * (`VersionTime`): what the index holds of it stays, with that time. A
+   * page given in the version and place this index holds it is kept as
+   * indexed, its content and time too, unless given a time alone that
+   * differs: only the
    * text of pages that changed is read again (`SearchIndex`), and its
    * lookups are copied, in time linear in the pages it holds, then sorted
    * only where pages changed. If nothing did, this index is returned
@@ -187,20 +199,27 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * compacts: for a change this person made, whose version before was theirs.
    */
   with(
-    pages: Iterable<readonly [SearchPage, IndexedText?]>,
+    pages: Iterable<readonly [SearchPage, (IndexedText | VersionTime)?]>,
     { spaces = [] }: { spaces?: Iterable<SpaceId> | 'all' } = {},
   ): PageIndex {
     const read = this.#lookup();
     const { byPage, bySpace } = read;
-    const given = new Map<string, readonly [SearchPage, IndexedText?]>();
+    const given = new Map<string, readonly [SearchPage, (IndexedText | VersionTime)?]>();
     for (const page of pages) given.set(pageKey(page[0].spaceId, page[0].pageId), page);
     const removed = new Map<string, Held>();
     const added: Held[] = [];
-    for (const [key, [doc, content]] of given) {
+    for (const [key, [doc, give]] of given) {
       const held = byPage.get(key);
-      if (held && sameDoc(held.entry, doc)) continue;
+      const content = give && 'title' in give ? give : undefined;
+      // A time alone, for the version held: it keeps what it held, such as a
+      // change typed on this device over it (`withQueuedDrafts`), and takes
+      // the time if there is one.
+      const time = give && !('title' in give) ? give.updated : null;
+      const kept = held?.entry.revisionId === doc.revisionId ? held.page : undefined;
+      const at = time ?? kept?.updated ?? null;
+      if (held && sameDoc(held.entry, doc) && held.entry.updated === at) continue;
       if (held) removed.set(key, held);
-      const text = content ?? (held?.entry.revisionId === doc.revisionId ? held.page : undefined);
+      const text = content ?? (kept && { ...kept, updated: at });
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
       const page = {
         doc,
@@ -209,9 +228,10 @@ export class PageIndex extends SearchIndex<SearchPage> {
         headings: text.headings ?? [],
         properties: text.properties ?? [],
         links: text.links ?? [],
+        updated: text.updated ?? null,
       };
-      const { title, properties, links } = page;
-      added.push({ page, entry: { ...doc, title, properties, links } });
+      const { title, properties, links, updated } = page;
+      added.push({ page, entry: { ...doc, title, properties, links, updated } });
     }
     const relisted = spaces === 'all' ? [...bySpace.keys()] : spaces;
     let relisting = false;
@@ -241,8 +261,8 @@ export class PageIndex extends SearchIndex<SearchPage> {
     if (this.#read === null) {
       const read: Lookup = { bySpace: new Map(), byPage: new Map(), linked: new Map() };
       for (const page of this.pages()) {
-        const { doc, title, properties, links } = page;
-        const entry: IndexedEntry = { ...doc, title, properties, links };
+        const { doc, title, properties, links, updated } = page;
+        const entry: IndexedEntry = { ...doc, title, properties, links, updated };
         let space = read.bySpace.get(doc.spaceId);
         if (!space) read.bySpace.set(doc.spaceId, (space = []));
         space.push(entry);
@@ -434,8 +454,12 @@ export async function indexSpaces(
   await readPages(ctx, spaces, {
     reuse: (spaceId, page, head) => {
       const found = kept?.get(head);
-      return found?.spaceId === spaceId && found.pageId === page ? found : undefined;
+      // One kept without its time is opened again, to be asked for it (`timed`).
+      return found?.spaceId === spaceId && found.pageId === page && found.updated !== null
+        ? found
+        : undefined;
     },
+    timed: from === 'server',
     live,
     onProgress,
     readLinks,
@@ -443,6 +467,12 @@ export async function indexSpaces(
   });
   return index;
 }
+
+/**
+ * When the server took a version an index holds, given alone
+ * (`PageIndex.with`), as for one held without it: null if it still isn't known.
+ */
+export type VersionTime = { readonly updated: string | null };
 
 /** What changed since an index was built, for `updateIndex` to follow. */
 export type IndexChanges = {
@@ -460,6 +490,13 @@ export type SavedVersion = {
   revisionId: RevisionId;
   /** The payload written, as the server holds it: its title, Markdown and link table. */
   payload: Pick<PagePayload, 'title' | 'markdown' | 'extensions'>;
+  /**
+   * When it was saved, by this device's clock once the server confirmed it
+   * (`IndexedEntry.updated`); null or left out if unknown. A save still
+   * waiting on this device names its base as the version (`revisionId` is
+   * `basedOn`), and keeps the time the index holds for that.
+   */
+  updated?: string | null;
 };
 
 /**
@@ -467,9 +504,10 @@ export type SavedVersion = {
  * `indexSpaces` lists it, and what it holds now stands in for what `index`
  * held of it (`PageIndex.with`). A space gone, or failing its checks, is
  * dropped; with `'all'`, so is one no longer listed as held or shared.
- * Only the versions `index` doesn't hold are opened, and only the pages
- * that changed are indexed again, so if nothing did, `index` is returned
- * itself. Stops with `IndexAbandoned` as `indexSpaces` does.
+ * Only the versions `index` doesn't hold are opened, or holds without the
+ * time the server took them, which is asked for (`timed`), and only the
+ * pages that changed, or took their time, are indexed again, so if nothing
+ * did, `index` is returned itself. Stops with `IndexAbandoned` as `indexSpaces` does.
  *
  * A draft this person saved, in a space not listed, is put in without
  * listing anything, where it was, as the draft its editor sees, if `index`
@@ -497,30 +535,44 @@ export async function updateIndex(
   const all = changes.spaces === 'all';
   const listing = new Set<SpaceId>(changes.spaces === 'all' ? [] : changes.spaces);
   // Each saved page's version as saved in turn; one not saved over the
-  // version before it has its space listed instead.
+  // version before it has its space listed instead. With each, its time:
+  // one waiting on this device, saved over its base, keeps the base's.
   const saves = new Map<string, SavedVersion>();
+  const times = new Map<string, string | null>();
   for (const saved of all ? [] : (changes.saved ?? [])) {
     if (listing.has(saved.spaceId)) continue;
     const key = pageKey(saved.spaceId, saved.pageId);
     const before =
       saves.get(key)?.revisionId ?? index.page(saved.spaceId, saved.pageId)?.revisionId;
-    if (before === saved.basedOn) saves.set(key, saved);
-    else listing.add(saved.spaceId);
+    if (before === saved.basedOn) {
+      saves.set(key, saved);
+      if (saved.revisionId !== saved.basedOn) times.set(key, saved.updated ?? null);
+    } else listing.add(saved.spaceId);
   }
   const ids = all ? await readableSpaces(ctx) : [...listing];
   live();
-  const pages: [SearchPage, IndexedText?][] = [];
+  const pages: [SearchPage, (IndexedText | VersionTime)?][] = [];
   if (ids.length > 0) {
     await readPages(ctx, await loadSpaces(ctx, ids, true), {
-      reuse: (spaceId, page, head) =>
-        index.page(spaceId, page)?.revisionId === head ? 'held' : undefined,
+      reuse: (spaceId, page, head) => {
+        const held = index.page(spaceId, page);
+        // One held without its time is opened again, to be asked for it (`timed`).
+        return held?.revisionId === head && held.updated !== null ? 'held' : undefined;
+      },
+      timed: true,
       live,
       onProgress,
       readLinks,
-      each: (doc, content) => pages.push(content ? [doc, content] : [doc]),
+      each: (doc, content) => {
+        // The version held, opened again only for its time (`reuse`).
+        const again = content && index.page(doc.spaceId, doc.pageId)?.revisionId === doc.revisionId;
+        pages.push(
+          again ? [doc, { updated: content.updated ?? null }] : content ? [doc, content] : [doc],
+        );
+      },
     });
   }
-  for (const saved of saves.values()) {
+  for (const [key, saved] of saves) {
     const held = index.page(saved.spaceId, saved.pageId);
     if (!held || listing.has(saved.spaceId)) continue;
     // As in `readPages`: locking stops the links' reads.
@@ -537,7 +589,10 @@ export async function updateIndex(
         draft: true,
         unpublished: false,
       },
-      await contentOfPayload(saved.payload, readLinks),
+      {
+        ...(await contentOfPayload(saved.payload, readLinks)),
+        updated: times.has(key) ? (times.get(key) ?? null) : held.updated,
+      },
     ]);
   }
   live();
@@ -623,12 +678,15 @@ async function readPages(
   spaces: Awaited<ReturnType<typeof loadSpaces>>,
   {
     reuse,
+    timed,
     live,
     onProgress,
     readLinks,
     each,
   }: {
     reuse: (spaceId: SpaceId, pageId: PageId, head: RevisionId) => IndexedText | 'held' | undefined;
+    /** Ask the server for when each version opened was taken, if held without (`RevisionOptions`). */
+    timed: boolean;
     live: () => void;
     onProgress: ((progress: IndexProgress) => void) | undefined;
     readLinks: ReadWikilinks | undefined;
@@ -655,7 +713,8 @@ async function readPages(
         }
       }
       const unkept = chunk.filter((page) => !reused.has(page.id));
-      const versions = unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept) : null;
+      const versions =
+        unkept.length > 0 ? await shownVersions(ctx, spaceId, unkept, { timed }) : null;
       live();
       // One at a time, each read checked first: locking or giving up stops
       // the reads, rather than leave them queued with the pages' text.
@@ -713,17 +772,25 @@ export type KeptPages = ReadonlyMap<
     headings: readonly number[];
     properties: readonly Readonly<PropertyData>[];
     links: readonly Readonly<IndexedLink>[];
+    updated: string | null;
   }
 >;
 
 export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
-    index
-      .pages()
-      .map(({ doc, title, text, headings, properties, links }) => [
-        doc.revisionId,
-        { spaceId: doc.spaceId, pageId: doc.pageId, title, text, headings, properties, links },
-      ]),
+    index.pages().map(({ doc, title, text, headings, properties, links, updated }) => [
+      doc.revisionId,
+      {
+        spaceId: doc.spaceId,
+        pageId: doc.pageId,
+        title,
+        text,
+        headings,
+        properties,
+        links,
+        updated,
+      },
+    ]),
   );
 
 const KeptScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -744,6 +811,7 @@ const KeptJson = z.array(
     z.array(z.number().int().nonnegative()),
     z.array(KeptProperty),
     z.array(KeptLink),
+    z.iso.datetime().nullable(),
   ]),
 );
 
@@ -752,8 +820,8 @@ const KeptJson = z.array(
 // another account or server's. They are bound to the app's `build` too:
 // another build may reduce pages differently (`searchText`), so its file
 // opens as nothing and every page is read again. So does one kept before
-// headings, properties or links were (its rows have a field fewer), whatever
-// its build.
+// headings, properties, links or times were (its rows have a field fewer),
+// whatever its build.
 const KEPT_KEY = 'search-index-key/v1';
 const keptAd = (ctx: ClientContext, build: string) =>
   canonical('search-index/v1', [ctx.installationId, ctx.identity.public.id, build]);
@@ -769,6 +837,7 @@ export function sealKept(ctx: ClientContext, kept: KeptPages, build: string): Ui
     page.headings,
     page.properties,
     page.links.map(({ key, pageId }) => [key, pageId]),
+    page.updated,
   ]);
   return sealOnDevice(ctx.identity, KEPT_KEY, keptAd(ctx, build), utf8(JSON.stringify(json)));
 }
@@ -780,7 +849,7 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
   try {
     const json = KeptJson.parse(JSON.parse(decodeUtf8(plaintext, 'search index')));
     return new Map(
-      json.map(([id, spaceId, pageId, title, text, headings, properties, links]) => [
+      json.map(([id, spaceId, pageId, title, text, headings, properties, links, updated]) => [
         id,
         {
           spaceId,
@@ -790,6 +859,7 @@ export function openKept(ctx: ClientContext, sealed: Uint8Array, build: string):
           headings,
           properties,
           links: links.map(([key, target]) => ({ key, pageId: target })),
+          updated,
         },
       ]),
     );
@@ -805,7 +875,10 @@ async function contentOf(
 ): Promise<{ revisionId: RevisionId; content: IndexedText } | null> {
   if (version?.opened.kind !== 'current') return null;
   const content = await contentOfPayload(version.opened.payload, readLinks);
-  return { revisionId: version.record.revisionId, content };
+  return {
+    revisionId: version.record.revisionId,
+    content: { ...content, updated: version.createdAt },
+  };
 }
 
 /**

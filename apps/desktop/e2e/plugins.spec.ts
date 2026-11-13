@@ -70,7 +70,7 @@ async function setAccess(window: Page, access: 'none' | 'Read' | 'Read and write
   if (access === 'none') return;
   await pick(probe.getByRole('button', { name: /^Where/ }), (await wholeSpace(window)) ?? '');
   await pick(probe.getByRole('button', { name: /^Access/ }), access);
-  await probe.getByRole('button', { name: 'Add' }).click();
+  await probe.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(probe.getByRole('list', { name: 'Page access' })).toContainText(
     access === 'Read' ? ': read' : 'read and write',
   );

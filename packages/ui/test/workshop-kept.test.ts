@@ -82,6 +82,8 @@ describe('the kept conversation', () => {
 describe('samples the plugin writes', () => {
   const caller: Caller = {
     id: 'calculator',
+    name: 'Calculator',
+    signal: new AbortController().signal,
     access: 'write',
     scopes: () => [],
     live: () => true,
@@ -107,5 +109,20 @@ describe('samples the plugin writes', () => {
     samples.put({ pageId, title: 'Family recipes', markdown: `${SECRET}, with a block` });
     const made = await samples.pages(caller).create(at, { title: 'List', markdown: SECRET });
     expect(samples.fromCopies().has(made.pageId)).toBe(true);
+  });
+
+  it('list with when each was last saved here, and none for one restored with the draft', async () => {
+    const samples = sampleStore();
+    samples.restore(
+      [{ pageId: 'sample-1', title: 'Kept', markdown: 'From before.', data: null }],
+      1,
+    );
+    const pages = samples.pages({ ...caller, access: 'read' });
+    const before = new Date().toISOString();
+    samples.put({ title: 'Made', markdown: 'Now.' });
+    const rows = (await pages.index?.(SAMPLE_SPACE)) ?? [];
+    expect(rows.map(({ title }) => title)).toEqual(['Kept', 'Made']);
+    expect(rows[0]?.updated).toBeNull();
+    expect(rows[1]?.updated && rows[1].updated >= before).toBe(true);
   });
 });

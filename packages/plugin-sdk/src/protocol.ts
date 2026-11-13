@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
+  BATCH_LIMIT,
   QUERY_LIMIT,
+  RELINK_LIMIT,
   type PageRef,
   type PluginErrorCode,
   type PluginEvent,
@@ -25,6 +27,7 @@ const Title = z.string().max(1000);
 // The page's own limit is checked when it is saved; this only bounds a message.
 const Markdown = z.string().max(1024 * 1024);
 const Change = { title: Title.optional(), markdown: Markdown.optional(), data: Json.optional() };
+const Heading = z.string().min(1).max(1000);
 
 /** Each method a worker can call, with its arguments. */
 export const METHODS = {
@@ -52,6 +55,20 @@ export const METHODS = {
   'pages.createFolder': z.tuple([FolderRef, z.string().min(1).max(1000)]),
   'pages.saveDraft': z.tuple([PageRef, z.object({ ...Change, base: Id })]),
   'pages.move': z.tuple([NodeRef, FolderRef]),
+  'pages.saveDrafts': z.tuple([
+    z.array(z.object({ ...Change, page: PageRef, base: Id })).max(BATCH_LIMIT),
+  ]),
+  'pages.trash': z.tuple([z.array(PageRef).min(1).max(BATCH_LIMIT)]),
+  'pages.relink': z.tuple([
+    z
+      .array(
+        z.object({
+          from: z.object({ page: PageRef, heading: Heading.optional() }),
+          to: z.object({ page: PageRef, heading: Heading.optional() }),
+        }),
+      )
+      .max(RELINK_LIMIT),
+  ]),
   /** The page handle of the invocation named in the call. */
   'page.read': z.tuple([]),
   'page.edit': z.tuple([z.object(Change)]),

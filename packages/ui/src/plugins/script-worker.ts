@@ -24,6 +24,13 @@ export type ScriptSettings = Omit<PluginSettings, 'on'>;
 export const SCRIPT_BUDGET_MS = 10_000;
 /** How long a block's calculation may take. */
 export const CALCULATE_BUDGET_MS = 1_000;
+/**
+ * The calls that wait on the person or on the pace of batches (#404): a
+ * command's or event's time doesn't run while one is answered, since a
+ * prompt waits as long as the person takes, and a batch saves about one
+ * page a second.
+ */
+const WAITING: ReadonlySet<Method> = new Set(['pages.saveDrafts', 'pages.trash', 'pages.relink']);
 /** Failures (overrunning, crashing, a malformed message) that stop a script, within `FAILURE_WINDOW_MS`. */
 const FAILURES_ALLOWED = 3;
 const FAILURE_WINDOW_MS = 5 * 60_000;
@@ -90,7 +97,15 @@ type Invocation = {
   resolve: (outputs: Outputs | undefined) => void;
   reject: (error: PluginError) => void;
   page: PageHandle | null;
-  timer: ReturnType<typeof setTimeout>;
+  /** Its clock, unless paused: what fails it once its time is up. */
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** When its time is up, or while paused, null. */
+  ends: number | null;
+  /** The time it has left while paused. */
+  left: number;
+  /** Paused while a waiting call is answered: a command's or event's, not a calculation's. */
+  pauses: boolean;
+  overrun: () => void;
 };
 
 /**
@@ -121,9 +136,14 @@ export class ScriptWorker {
   #invocations = new Map<number, Invocation>();
   #next = 0;
   #failures: number[] = [];
+  /** Waiting calls (`WAITING`) its current worker made, not answered yet. */
+  #waits = 0;
   #stopped = false;
   /** Its activation's time, from starting the worker to `ready`. */
   #starting: ReturnType<typeof setTimeout> | undefined;
+  /** When its activation's time is up, and what it has left while a waiting call pauses it. */
+  #startEnds = 0;
+  #startLeft = SCRIPT_BUDGET_MS;
 
   constructor(
     launch: LaunchScript,
@@ -145,6 +165,9 @@ export class ScriptWorker {
         pages.createFolder(...METHODS['pages.createFolder'].parse(args)),
       'pages.saveDraft': (args) => pages.saveDraft(...METHODS['pages.saveDraft'].parse(args)),
       'pages.move': (args) => pages.move(...METHODS['pages.move'].parse(args)),
+      'pages.saveDrafts': (args) => pages.saveDrafts(...METHODS['pages.saveDrafts'].parse(args)),
+      'pages.trash': (args) => pages.trash(...METHODS['pages.trash'].parse(args)),
+      'pages.relink': (args) => pages.relink(...METHODS['pages.relink'].parse(args)),
       'page.read': async (args, page) => {
         METHODS['page.read'].parse(args);
         return handleOf(page).read();
@@ -197,12 +220,21 @@ export class ScriptWorker {
       },
     });
     this.#worker = worker;
+    this.#waits = 0;
     this.#ready = false;
     this.#started = Promise.withResolvers<void>();
+    this.#startLeft = SCRIPT_BUDGET_MS;
+    this.#startClock();
+  }
+
+  /** Run its activation's clock, from the time it has left. */
+  #startClock() {
+    const worker = this.#worker;
+    this.#startEnds = Date.now() + this.#startLeft;
     this.#starting = setTimeout(() => {
       if (this.#worker !== worker) return;
       this.#fail(`Its script took longer than ${SCRIPT_BUDGET_MS / 1000} seconds to start.`);
-    }, SCRIPT_BUDGET_MS);
+    }, this.#startLeft);
   }
 
   /** Settled once its activation finished, or the worker ended. */
@@ -268,17 +300,55 @@ export class ScriptWorker {
     const invocation = this.#next++;
     return new Promise<Outputs | undefined>((resolve, reject) => {
       const seconds = budget / 1000;
-      const timer = setTimeout(
-        () =>
-          this.#fail(
-            `Its script took longer than ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`,
-            'timeout',
-          ),
-        budget,
-      );
-      this.#invocations.set(invocation, { resolve, reject, page, timer });
+      const overrun = () =>
+        this.#fail(
+          `Its script took longer than ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`,
+          'timeout',
+        );
+      const waiting: Invocation = {
+        resolve,
+        reject,
+        page,
+        timer: undefined,
+        ends: null,
+        left: budget,
+        pauses: target.kind !== 'calculate',
+        overrun,
+      };
+      this.#invocations.set(invocation, waiting);
+      // Started while a waiting call is answered, its time runs once that is.
+      if (!waiting.pauses || this.#waits === 0) this.#run(waiting);
       worker.post({ type: 'invoke', invocation, target });
     });
+  }
+
+  /** Start or go on with `invocation`'s clock, from the time it has left. */
+  #run(invocation: Invocation) {
+    invocation.ends = Date.now() + invocation.left;
+    invocation.timer = setTimeout(invocation.overrun, invocation.left);
+  }
+
+  /** A waiting call was made: the commands' and events' clocks stop until every one is answered. */
+  #pause() {
+    if (this.#waits++ > 0) return;
+    // Its activation's clock too, as one may call them as it starts.
+    if (!this.#ready) {
+      clearTimeout(this.#starting);
+      this.#startLeft = Math.max(0, this.#startEnds - Date.now());
+    }
+    for (const invocation of this.#invocations.values()) {
+      if (!invocation.pauses || invocation.ends === null) continue;
+      clearTimeout(invocation.timer);
+      invocation.left = Math.max(0, invocation.ends - Date.now());
+      invocation.ends = null;
+    }
+  }
+
+  #resume() {
+    if (--this.#waits > 0) return;
+    if (!this.#ready) this.#startClock();
+    for (const invocation of this.#invocations.values())
+      if (invocation.ends === null) this.#run(invocation);
   }
 
   #receive(worker: ScriptPort, message: WorkerMessage) {
@@ -355,18 +425,23 @@ export class ScriptWorker {
   ) {
     const page =
       invocation === undefined ? null : (this.#invocations.get(invocation)?.page ?? null);
+    const waits = WAITING.has(method);
+    if (waits) this.#pause();
     let answer: HostMessage;
     try {
-      answer = { type: 'answer', call, ok: true, value: await this.#run(method, args, page) };
+      answer = { type: 'answer', call, ok: true, value: await this.#call(method, args, page) };
     } catch (error) {
       const { code, message } = pluginError(error);
       answer = { type: 'answer', call, ok: false, code, message };
+    } finally {
+      // Its worker's clocks; one that ended meanwhile has none left to go on with.
+      if (waits && this.#worker === worker) this.#resume();
     }
     // Not to a worker ended meanwhile, nor its successor.
     if (this.#worker === worker) worker.post(answer);
   }
 
-  #run(method: Method, args: unknown, page: PageHandle | null) {
+  #call(method: Method, args: unknown, page: PageHandle | null) {
     return this.#calls[method](args, page);
   }
 
