@@ -145,7 +145,7 @@ export function agentTools({ ctx, propose, noticePage }: AgentToolsOptions, canE
     aiTool({
       name: 'list_pages',
       description:
-        'List the folders and pages this agent can see in one space, with their IDs, names and titles, in the order the app lists them. A page with draftChanges has edits not yet published.',
+        "List the folders and pages this agent can see in one space, with their IDs, names and titles. Each has an order: where it comes in the app's listing, folders and pages together, each folder before what is in it. A page with draftChanges has edits not yet published.",
       input: z.object({ spaceId: SpaceId }),
       run: async ({ spaceId }) => {
         const tree = await spaces.loadTree(ctx, spaceId);
@@ -156,18 +156,18 @@ export function agentTools({ ctx, propose, noticePage }: AgentToolsOptions, canE
           page: (p) => shownTitle(p.title),
         });
         return json({
-          folders: ordered
-            .flatMap(({ kind, node }) => (kind === 'folder' ? [node] : []))
-            .map((f) => ({
-              folderId: f.id,
-              parentId: f.parentId,
-              name: nameOf(f.metadata),
-            })),
+          // `order`: where each comes in the app's listing, folders and pages together.
+          folders: ordered.flatMap(({ kind, node }, order) =>
+            kind === 'folder'
+              ? [{ folderId: node.id, parentId: node.parentId, name: nameOf(node.metadata), order }]
+              : [],
+          ),
           pages: ordered
-            .flatMap(({ kind, node }) => (kind === 'page' ? [node] : []))
+            .flatMap(({ kind, node }, order) => (kind === 'page' ? [{ ...node, order }] : []))
             .map((p) => ({
               pageId: p.id,
               parentId: p.parentId,
+              order: p.order,
               title: p.title,
               published: p.publishedHead !== null,
               draftChanges: p.draftChanges,

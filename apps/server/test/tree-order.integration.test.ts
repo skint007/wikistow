@@ -16,7 +16,7 @@ import {
   type FolderId,
   type SpaceId,
 } from '@wikistow/client';
-import { structureRoutes } from '@wikistow/contracts';
+import { Position, structureRoutes } from '@wikistow/contracts';
 import { listenForTreeChanges } from '@wikistow/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
@@ -357,6 +357,30 @@ describe('a folder’s own order', () => {
       }),
     );
     expect(result).toBe('not-found');
+  });
+
+  it('makes room at the end of a folder whose keys grew too long', async () => {
+    const owner = await personWithVault(t);
+    const { spaceId, folder, ids } = await shelf(owner);
+    // The longest key there is, which nothing fits after.
+    await orderOperations.arrange(owner.ctx, {
+      spaceId,
+      parentId: folder,
+      positions: [
+        { nodeId: ids.a, position: Position.parse('a0') },
+        { nodeId: ids.b, position: Position.parse('a1') },
+        { nodeId: ids.c, position: Position.parse('z'.repeat(100)) },
+      ],
+    });
+    await pages.createPage(owner.ctx, { spaceId, parentId: folder, title: 'Dates' });
+    expect(await listed(owner.ctx, spaceId, folder)).toEqual([
+      'Apples',
+      'Bread',
+      'Cheese',
+      'Dates',
+    ]);
+    const tree = await spaceOperations.loadTree(owner.ctx, spaceId);
+    expect(tree.pages.every((p) => (p.position?.length ?? 0) < 10)).toBe(true);
   });
 
   it('orders the top of a space too', async () => {

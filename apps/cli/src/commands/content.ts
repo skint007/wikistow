@@ -153,18 +153,18 @@ export async function tree(
     spaceId: args.spaceId,
     space: loaded.space && { name: nameOf(loaded.space.metadata), role: loaded.space.role },
     shares: loaded.shares,
-    folders: ordered
-      .flatMap(({ kind, node }) => (kind === 'folder' ? [node] : []))
-      .map((f) => ({
-        id: f.id,
-        parentId: f.parentId,
-        name: nameOf(f.metadata),
-      })),
+    // `order`: where each comes in the app's listing, folders and pages together.
+    folders: ordered.flatMap(({ kind, node }, order) =>
+      kind === 'folder'
+        ? [{ id: node.id, parentId: node.parentId, name: nameOf(node.metadata), order }]
+        : [],
+    ),
     pages: ordered
-      .flatMap(({ kind, node }) => (kind === 'page' ? [node] : []))
+      .flatMap(({ kind, node }, order) => (kind === 'page' ? [{ ...node, order }] : []))
       .map((p) => ({
         id: p.id,
         parentId: p.parentId,
+        order: p.order,
         title: p.title,
         permissionVersion: p.permissionVersion,
         draftHead: p.draftHead,

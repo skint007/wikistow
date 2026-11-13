@@ -1865,7 +1865,12 @@ export function withQueued(tree: Tree, spaceId: SpaceId, entries: readonly Queue
         if (last === null || other.position > last) last = other.position;
       }
     }
-    return last && positionBetween(last, null);
+    try {
+      return last && positionBetween(last, null);
+    } catch {
+      // Keys there grew too long: the server makes room as it places it.
+      return null;
+    }
   };
   const regionUnder = (parentId: string | null): Region | null => {
     try {

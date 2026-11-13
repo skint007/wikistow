@@ -4,7 +4,7 @@
 // lists them by `nodes.position`, a fractional index compared byte by byte.
 // The server sees an order of IDs it already sees, never a name.
 import { isPosition } from '@wikistow/contracts';
-import { positionBetween } from '@wikistow/client';
+import { positionBetween, positionsBetween } from '@wikistow/client';
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { nodes, shares } from '../db/schema/index.ts';
@@ -62,13 +62,49 @@ export async function placesAtEnd(
   tx: Database,
   { spaceId, parentId, count = 1, except = [] }: PlaceAt & { count?: number },
 ): Promise<(string | null)[]> {
-  let last = await lastPosition(tx, spaceId, parentId, except);
-  // A stored key the server didn't write is checked as it is read.
-  if (last !== null && !isPosition(last)) last = null;
+  const last = await lastPosition(tx, spaceId, parentId, except);
   if (last === null) return Array.from({ length: count }, () => null);
-  const placed: string[] = [];
-  for (let i = 0; i < count; i++) placed.push((last = positionBetween(last, null)));
-  return placed;
+  const after = (from: string) => {
+    const placed: string[] = [];
+    let at = from;
+    for (let i = 0; i < count; i++) placed.push((at = positionBetween(at, null)));
+    return placed;
+  };
+  try {
+    return after(last);
+  } catch {
+    // Its keys grew too long, or one isn't a position: written afresh, in
+    // the order they have, so there is room after them.
+    return after(await rekey(tx, { spaceId, parentId, except }));
+  }
+}
+
+/**
+ * Give everything in a folder with a position a new one, short, in the
+ * order they have, the trash's too; answers the last. For when keys there
+ * grew too long to place anything after them.
+ */
+async function rekey(tx: Database, { spaceId, parentId, except = [] }: PlaceAt): Promise<string> {
+  const placed = await tx
+    .select({ id: nodes.id })
+    .from(nodes)
+    .where(
+      and(
+        childrenOf(spaceId, parentId),
+        isNull(nodes.copyId),
+        isNotNull(nodes.position),
+        ...(except.length > 0 ? [sql`${nodes.id} <> all(${sql.param([...except])}::text[])`] : []),
+      ),
+    )
+    .orderBy(nodes.position, nodes.id);
+  const keys = positionsBetween(null, null, placed.length);
+  for (const [i, { id }] of placed.entries()) {
+    await tx
+      .update(nodes)
+      .set({ position: keys[i] ?? null })
+      .where(eq(nodes.id, id));
+  }
+  return keys.at(-1) ?? positionBetween(null, null);
 }
 
 type PlaceAt = { spaceId: string; parentId: string | null; except?: readonly string[] };
@@ -111,7 +147,11 @@ export async function placeBack(
     .limit(2);
   if (keys[0]?.position !== old) return old;
   const next = keys[1]?.position ?? null;
-  return positionBetween(old, next !== null && isPosition(next) && next > old ? next : null);
+  try {
+    return positionBetween(old, next !== null && isPosition(next) && next > old ? next : null);
+  } catch {
+    return placeAtEnd(tx, { spaceId, parentId, except: [nodeId] });
+  }
 }
 
 /**
