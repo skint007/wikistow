@@ -17,6 +17,7 @@ import { indexSpaces, nameOf, readableSpaces } from './operations/search.ts';
 import type { ClientContext } from './operations/session.ts';
 import * as spaces from './operations/spaces.ts';
 import { checkPayloadSize, newPayload, revisePayload } from './payload.ts';
+import { shownTitle, treeInOrder } from './tree.ts';
 
 type Tree = Awaited<ReturnType<typeof spaces.loadTree>>;
 
@@ -144,23 +145,32 @@ export function agentTools({ ctx, propose, noticePage }: AgentToolsOptions, canE
     aiTool({
       name: 'list_pages',
       description:
-        'List the folders and pages this agent can see in one space, with their IDs, names and titles. A page with draftChanges has edits not yet published.',
+        'List the folders and pages this agent can see in one space, with their IDs, names and titles, in the order the app lists them. A page with draftChanges has edits not yet published.',
       input: z.object({ spaceId: SpaceId }),
       run: async ({ spaceId }) => {
         const tree = await spaces.loadTree(ctx, spaceId);
+        // As the sidebar lists them, every folder open, each in its order (#400).
+        const ordered = treeInOrder(tree, {
+          folder: (f) => nameOf(f.metadata) ?? '',
+          page: (p) => shownTitle(p.title),
+        });
         return json({
-          folders: tree.folders.map((f) => ({
-            folderId: f.id,
-            parentId: f.parentId,
-            name: nameOf(f.metadata),
-          })),
-          pages: tree.pages.map((p) => ({
-            pageId: p.id,
-            parentId: p.parentId,
-            title: p.title,
-            published: p.publishedHead !== null,
-            draftChanges: p.draftChanges,
-          })),
+          folders: ordered
+            .flatMap(({ kind, node }) => (kind === 'folder' ? [node] : []))
+            .map((f) => ({
+              folderId: f.id,
+              parentId: f.parentId,
+              name: nameOf(f.metadata),
+            })),
+          pages: ordered
+            .flatMap(({ kind, node }) => (kind === 'page' ? [node] : []))
+            .map((p) => ({
+              pageId: p.id,
+              parentId: p.parentId,
+              title: p.title,
+              published: p.publishedHead !== null,
+              draftChanges: p.draftChanges,
+            })),
         });
       },
     }),

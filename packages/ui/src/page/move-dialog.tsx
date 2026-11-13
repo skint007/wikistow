@@ -42,6 +42,7 @@ import {
   type MoveTree,
 } from './move-model';
 import {
+  landWhereDropped,
   moveNotes,
   MoveNotesLines,
   moveNow,
@@ -72,6 +73,8 @@ export type Moving = {
   /** Move to… (the default) or Copy to…. */
   action?: 'move' | 'copy';
   to?: Destination<FolderId>;
+  /** Dropped on a line between rows of `to`: it lands just before this, or last for null (#400). */
+  before?: string | null;
   into?: SpaceId;
 };
 
@@ -234,7 +237,12 @@ export function useStartMove(open: (spaceId: SpaceId, moving: Moving) => void) {
     open(
       spaceId,
       to.spaceId === spaceId
-        ? { ...moving, action, to: to.place }
+        ? {
+            ...moving,
+            action,
+            to: to.place,
+            ...(drop.before !== undefined && { before: drop.before }),
+          }
         : { ...moving, action, into: to.spaceId },
     );
   };
@@ -749,15 +757,29 @@ function MoveHere({
     run(async () => {
       if (!tree) return;
       setChanged(false);
-      const back = { spaceId, moving, parentId: parentIn(tree, moving) };
+      const back = { spaceId, moving, parentId: parentIn(tree, moving), position: node?.position };
+      // Where it was dropped, if this is the place it was dropped on (#400).
+      const position = await landWhereDropped(ctx, availability, {
+        tree,
+        spaceId,
+        nodeId: moving.id,
+        parentId,
+        before: moving.to?.parentId === parentId ? moving.before : undefined,
+      });
       let undo;
       if (route === 'device') {
-        await moveOnDevice(ctx, spaceId, moving, parentId);
+        await moveOnDevice(ctx, spaceId, moving, parentId, position);
         undo = undoOnDevice(ctx, back);
       } else {
         const confirmed =
-          shown ??
-          (await moveOperations.previewMove(ctx, { spaceId, nodeId: moving.id, parentId }));
+          shown && position === undefined
+            ? shown
+            : await moveOperations.previewMove(ctx, {
+                spaceId,
+                nodeId: moving.id,
+                parentId,
+                ...(position !== undefined && { position }),
+              });
         // It crosses after all, which the tree didn't show: its notes come first.
         if (confirmed.crossing && !shown) {
           await queryClient.invalidateQueries({ queryKey: treeQuery(ctx, spaceId).queryKey });

@@ -46,6 +46,17 @@ const action = (
 ) => onSelect && { label, kind, onSelect, destructive };
 
 /**
+ * Move up and Move down, for a row its person can put in order where it is
+ * (#400): each only where the row can go that way, as the rail's.
+ */
+export type Ordering = { onMoveUp: (() => void) | undefined; onMoveDown: (() => void) | undefined };
+
+const orderingActions = (ordering: Ordering | null) => [
+  action('Move up', 'reorder', ordering?.onMoveUp),
+  action('Move down', 'reorder', ordering?.onMoveDown),
+];
+
+/**
  * A folder's actions: for everyone, Open and Export; for editors, what they
  * can do there; Import for those who can publish there too.
  */
@@ -62,6 +73,10 @@ export function folderActions({
     onNewFolder: () => void;
     onRename: () => void;
     onRestyle: () => void;
+    /** For a folder with an order of its own. */
+    onSortByName: (() => void) | undefined;
+    /** Where its person can put it in order in the folder it's in. */
+    ordering: Ordering | null;
     onMove: () => void;
     onCopy: () => void;
     onShare: (() => void) | undefined;
@@ -77,6 +92,8 @@ export function folderActions({
     action('New folder here', 'new-folder', editing?.onNewFolder),
     action('Rename…', 'rename', editing?.onRename),
     action('Emoji and colour…', 'rename', editing?.onRestyle),
+    action('Sort by name', 'server', editing?.onSortByName),
+    ...orderingActions(editing?.ordering ?? null),
     action('Move to…', 'move', editing?.onMove),
     action('Copy to…', 'copy', editing?.onCopy),
     action('Share…', 'server', editing?.onShare),
@@ -114,12 +131,14 @@ export type PageAction = 'move' | 'copy' | 'publish' | 'public-link' | 'unpublis
 function pageActions(
   info: PageInfo,
   deleter: boolean,
+  ordering: Ordering | null,
   onAction: (action: PageAction, info: PageInfo) => void,
 ): MenuAction[] {
   const canEdit = info.role !== 'reader';
   const when = (allowed: boolean, which: PageAction) =>
     allowed ? () => onAction(which, info) : undefined;
   return [
+    ...orderingActions(ordering),
     action('Move to…', 'move', when(canEdit, 'move')),
     action('Copy to…', 'copy', when(canEdit, 'copy')),
     action(
@@ -230,38 +249,73 @@ export function FolderMenuItems({
   return <Items actions={actions} Item={ContextMenuItem} waiting={waiting} />;
 }
 
+type PageMenuProps = {
+  pageId: PageId;
+  deleter: boolean;
+  /** Move up and Move down where its person can put it in order (#400). */
+  ordering: Ordering | null;
+  onOpen: () => void;
+  onAction: (action: PageAction, info: PageInfo) => void;
+};
+
 /**
- * A page's actions in its right-click menu. The tree doesn't say what the
+ * A page's actions in either kind of menu. The tree doesn't say what the
  * person can do with a page, so opening the menu loads the page's info
  * first, and offers only Open until it has.
  */
-export function PageMenuItems({
+function PageItems({
   pageId,
   deleter,
+  ordering,
   onOpen,
   onAction,
-}: {
-  pageId: PageId;
-  deleter: boolean;
-  onOpen: () => void;
-  onAction: (action: PageAction, info: PageInfo) => void;
-}) {
+  Item,
+}: PageMenuProps & { Item: typeof DropdownMenuItem | typeof ContextMenuItem }) {
   const ctx = useClient();
   const { data: info, isPending } = useQuery(pageQuery(ctx, pageId));
   const { waiting } = useAvailability();
   // Open stays the same item as the rest load, so a menu opened from the keyboard keeps its focus.
   return (
     <>
-      <ContextMenuItem onSelect={onOpen}>Open</ContextMenuItem>
+      <Item onSelect={onOpen}>Open</Item>
       {info ? (
         <Items
-          actions={pageActions(info, deleter, onAction)}
-          Item={ContextMenuItem}
+          actions={pageActions(info, deleter, ordering, onAction)}
+          Item={Item}
           waiting={waiting(pageId)}
         />
       ) : (
-        isPending && <ContextMenuItem disabled>Loading…</ContextMenuItem>
+        isPending && <Item disabled>Loading…</Item>
       )}
     </>
+  );
+}
+
+/** A page's actions in its right-click menu (`PageItems`). */
+export function PageMenuItems(props: PageMenuProps) {
+  return <PageItems {...props} Item={ContextMenuItem} />;
+}
+
+/**
+ * A page row's ⋯ button and its menu, as a folder row has, shown on hover
+ * and focus, and always on touch, where a long press opens no menu: the
+ * page's actions, Move up and Move down among them, reach a phone this way.
+ */
+export function PageMenu({ title, ...props }: PageMenuProps & { title: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        aria-label={`Actions for ${plainText(title)}`}
+        onClick={(event) => event.stopPropagation()}
+        className="-my-1 grid size-6 shrink-0 place-items-center rounded-row text-muted-foreground opacity-0 group-hover:opacity-100 hover:tint focus:opacity-100 active:tint-strong pointer-coarse:opacity-100 data-[state=open]:opacity-100"
+      >
+        <MoreHorizontal className="size-4" strokeWidth={1.75} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+        {/* Its info loads only once it opens. */}
+        {open && <PageItems {...props} Item={DropdownMenuItem} />}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

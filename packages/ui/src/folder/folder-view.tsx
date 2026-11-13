@@ -42,11 +42,13 @@ import { shareCovering } from '../sharing/model';
 import { folderLook, FolderTile } from '../shell/folder-look';
 import { usePhoneLayout } from '../shell/phone-layout';
 import { PageRowIcon, pageTitle } from '../shell/sidebar';
+import { childrenOf } from '../shell/tree-order';
 import { useClient } from '../vault/store';
 import { useFolderChoice } from './folder-choice';
 import {
   cellKey,
   folderColumns,
+  inFolderOrder,
   shownVersion,
   withColumn,
   type Column,
@@ -88,10 +90,13 @@ export function FolderView({
   // The phone layout shows the list unless the person chose.
   const narrow = usePhoneLayout();
   const layout = choice.layout ?? (narrow ? 'list' : 'table');
-  const entries = useMemo(
-    () => index?.list({ spaceId, folderId, nested: false }) ?? [],
-    [index, spaceId, folderId],
-  );
+  // In the folder's order, as the sidebar lists them (#400).
+  const entries = useMemo(() => {
+    const listed = index?.list({ spaceId, folderId, nested: false }) ?? [];
+    if (!tree) return listed;
+    const order = childrenOf(tree, folderId).map((child) => child.node.id);
+    return inFolderOrder(listed, order);
+  }, [index, spaceId, folderId, tree]);
   const keys = useMemo(() => index?.keys({ spaceId, folderId }) ?? [], [index, spaceId, folderId]);
   // Hidden columns are kept as tags, worked out once each.
   const tag = useMemo(() => {

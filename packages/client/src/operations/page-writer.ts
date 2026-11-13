@@ -9,6 +9,7 @@ import {
   MetadataRevisionId,
   PageId,
   RevisionId,
+  type Position,
   type SpaceId,
 } from '@wikistow/contracts';
 import { ApiError, noAnswer } from '../api/client.ts';
@@ -170,6 +171,8 @@ export type PageWriter = {
     node: 'page' | 'folder';
     name: string;
     parentId: FolderId | null;
+    /** Where among what is there (#400); a reorder moves it where it is already. */
+    position?: Position | null;
   }): Promise<void>;
   /** Publish a page's draft as it stands now on this device (#331), as `OfflineQueue.publish`. */
   publish(input: { page: PageRef; title: string; draftHead: RevisionId }): Promise<void>;
@@ -349,9 +352,16 @@ export function createPageWriter({
       }
     },
 
-    async moveNode({ spaceId, nodeId, node, name, parentId }) {
+    async moveNode({ spaceId, nodeId, node, name, parentId, position }) {
       if (!queue) throw new Error('This device keeps no changes');
-      await queue.move({ spaceId, id: nodeId, node, name, parentId });
+      await queue.move({
+        spaceId,
+        id: nodeId,
+        node,
+        name,
+        parentId,
+        ...(position !== undefined && { position }),
+      });
     },
 
     async publish(input) {

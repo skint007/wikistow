@@ -10,6 +10,7 @@ import {
   type ClientContext,
   type OpenedPayload,
   type PayloadChanges,
+  treeInOrder,
 } from '@wikistow/client';
 import { FolderId, PageId, RevisionId, SpaceId, structureRoutes } from '@wikistow/contracts';
 import type { PluginScope } from '@wikistow/contracts';
@@ -27,6 +28,7 @@ import {
 import { leastAccess } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { DraftConflict } from '../page/draft-session';
+import { childrenOf, treeLabels } from '../shell/tree-order';
 import { vaultStore } from '../vault/store';
 import { pageRows, queryRows, readableSpace, readPluginQuery, type IndexChange } from './page-rows';
 
@@ -382,24 +384,17 @@ export function pagesFor(caller: EditingCaller): HostPages {
       const { spaceId, folderId } = folderOf(ref);
       await require(ctx, spaceId, folderId, 'read');
       const tree = await spaceOperations.loadTree(ctx, spaceId);
-      return [
-        ...tree.folders
-          .filter((folder) => folder.parentId === folderId)
-          .map((folder): FolderEntry => ({
-            kind: 'folder',
-            spaceId,
-            folderId: folder.id,
-            name: searchOperations.nameOf(folder.metadata),
-          })),
-        ...tree.pages
-          .filter((page) => page.parentId === folderId)
-          .map((page): FolderEntry => ({
-            kind: 'page',
-            spaceId,
-            pageId: page.id,
-            title: page.title,
-          })),
-      ];
+      // In the folder's order, as the sidebar lists it (#400).
+      return childrenOf(tree, folderId).map((child): FolderEntry =>
+        child.kind === 'folder'
+          ? {
+              kind: 'folder',
+              spaceId,
+              folderId: child.node.id,
+              name: searchOperations.nameOf(child.node.metadata),
+            }
+          : { kind: 'page', spaceId, pageId: child.node.id, title: child.node.title },
+      );
     }),
 
     tree: guarded(async (ctx, spaceIdText) => {
@@ -412,26 +407,26 @@ export function pagesFor(caller: EditingCaller): HostPages {
         [...tree.folders, ...tree.pages].map((node) => [node.id, node.parentId]),
       );
       const readable = (id: string) => accessIn(scopes, parents, id) !== 'none';
-      return [
-        ...tree.folders
-          .filter((folder) => readable(folder.id))
-          .map((folder): TreeEntry => ({
-            kind: 'folder',
-            spaceId,
-            folderId: folder.id,
-            name: searchOperations.nameOf(folder.metadata),
-            parentId: folder.parentId,
-          })),
-        ...tree.pages
-          .filter((page) => readable(page.id))
-          .map((page): TreeEntry => ({
-            kind: 'page',
-            spaceId,
-            pageId: page.id,
-            title: page.title,
-            parentId: page.parentId,
-          })),
-      ];
+      // As the sidebar lists them with every folder open, each in its order (#400).
+      return treeInOrder(tree, treeLabels)
+        .filter((child) => readable(child.node.id))
+        .map((child): TreeEntry =>
+          child.kind === 'folder'
+            ? {
+                kind: 'folder',
+                spaceId,
+                folderId: child.node.id,
+                name: searchOperations.nameOf(child.node.metadata),
+                parentId: child.node.parentId,
+              }
+            : {
+                kind: 'page',
+                spaceId,
+                pageId: child.node.id,
+                title: child.node.title,
+                parentId: child.node.parentId,
+              },
+        );
     }),
 
     search: guarded(async (ctx, text, options) => {

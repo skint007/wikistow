@@ -6,6 +6,8 @@
 // (`Position`), so moving one item writes its key alone.
 import { integerLength, isPosition, POSITION_DIGITS, Position } from '@wikistow/contracts';
 
+export { Position };
+
 const DIGITS = POSITION_DIGITS;
 const SMALLEST = `A${'0'.repeat(26)}`;
 
