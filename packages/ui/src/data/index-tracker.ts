@@ -68,7 +68,8 @@ export function createIndexTracker(query: IndexQuery, clock: Clock = systemClock
   }
 
   // One save over a save still waiting stands in for it, over what that was
-  // saved over, so a page's autosaves wait as one.
+  // saved over, so a page's autosaves wait as one. One into this device's
+  // queue, on its base, keeps the time of the save it stands in for.
   function noteSave(save: searchOperations.SavedVersion) {
     const at = saved.findIndex(
       (before) =>
@@ -77,8 +78,16 @@ export function createIndexTracker(query: IndexQuery, clock: Clock = systemClock
         before.revisionId === save.basedOn,
     );
     const before = saved[at];
-    if (before) saved.splice(at, 1, { ...save, basedOn: before.basedOn });
-    else saved.push(save);
+    if (!before) saved.push(save);
+    else {
+      const queued = save.revisionId === save.basedOn;
+      const updated = queued ? before.updated : save.updated;
+      saved.splice(at, 1, {
+        ...save,
+        basedOn: before.basedOn,
+        ...(updated === undefined ? {} : { updated }),
+      });
+    }
   }
 
   /**

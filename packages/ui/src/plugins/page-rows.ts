@@ -104,6 +104,7 @@ export function pageRow(
     properties: blockProperties(entry.properties) ?? {},
     revision: entry.revisionId,
     draft: entry.draft,
+    updated: entry.updated,
   };
 }
 
@@ -174,8 +175,8 @@ const sameList = <T>(a: readonly T[], b: readonly T[]) =>
 
 /**
  * The pages whose rows may differ between `before` and `after`, each where
- * it is in either: a page in only one of them, another version of it, or
- * one moved, or whose folders were renamed. Linear in their pages; a page
+ * it is in either: a page in only one of them, another version of it, one
+ * moved, or whose folders were renamed, or one given the time it lacked. Linear in their pages; a page
  * held as it was, as an index derived from another keeps it, costs nothing.
  */
 export function indexChanges(
@@ -199,6 +200,8 @@ export function indexChanges(
       old.doc.parentId === doc.parentId &&
       old.doc.draft === doc.draft &&
       old.doc.unpublished === doc.unpublished &&
+      // As when the time it lacked comes in (`PageIndex.with`).
+      old.updated === page.updated &&
       sameList(old.doc.folderIds, doc.folderIds) &&
       sameList(old.doc.path, doc.path)
     )
