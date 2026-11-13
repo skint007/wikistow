@@ -25,7 +25,7 @@ import { resealAttachment, sealAttachment } from '../revision.ts';
 import type { ReadWikilinks } from '../link-table.ts';
 import { moveNode, previewMove } from './moves.ts';
 import { arrange } from './order.ts';
-import { positionBetween } from '../positions.ts';
+import { positionBetween, positionsBetween } from '../positions.ts';
 import {
   attachmentTarget,
   createPage,
@@ -1198,6 +1198,26 @@ export class OfflineQueue {
       const positions = Object.entries(entry.positions).flatMap(([nodeId, position]) =>
         here.has(nodeId) ? [{ nodeId, position }] : [],
       );
+      // What is there without a place, made offline before this, as the
+      // server made it in a folder then listed by name: last, as something
+      // new goes, by ID, the server having no names to go by.
+      const given = new Map<string, Position | null>(positions.map((p) => [p.nodeId, p.position]));
+      const keyOf = (node: { id: string; position: Position | null }) =>
+        given.has(node.id) ? (given.get(node.id) ?? null) : node.position;
+      const there = [...folders, ...pages].filter((node) => node.parentId === parentId);
+      const keys = there.flatMap((node) => keyOf(node) ?? []).toSorted();
+      const unplaced = there
+        .filter((node) => keyOf(node) === null)
+        .map((node) => node.id)
+        .toSorted();
+      if (keys.length > 0 && unplaced.length > 0) {
+        try {
+          const added = positionsBetween(keys.at(-1) ?? null, null, unplaced.length);
+          unplaced.forEach((nodeId, i) => positions.push({ nodeId, position: added[i] ?? null }));
+        } catch {
+          // Keys there grew too long: they stay listed by name after the rest.
+        }
+      }
       for (let i = 0; i < positions.length; i += ORDER_BATCH) {
         await arrange(ctx, { spaceId, parentId, positions: positions.slice(i, i + ORDER_BATCH) });
       }

@@ -24,10 +24,11 @@ const childrenOf = (spaceId: string, parentId: string | null) =>
 const shown = and(isNull(nodes.trashId), isNull(nodes.copyId));
 
 /**
- * Whether a folder has an order of its own, and the highest position there
- * (null when it has none). Only what it shows decides whether it is
- * ordered; what is in its trash counts for the highest too, so nothing new
- * takes a position that something restored will come back to. `except`
+ * The highest position in a folder, or null when it has no order of its
+ * own: nothing in it has a position, its trash included. What is in its
+ * trash counts, so a folder whose ordered items are all in the trash keeps
+ * its order for them to come back to, and nothing new takes a position one
+ * of them will come back to. Sort by name clears the trash's too. `except`
  * leaves out nodes on their way in.
  */
 async function lastPosition(
@@ -37,10 +38,7 @@ async function lastPosition(
   except: readonly string[] = [],
 ): Promise<string | null> {
   const [row] = await tx
-    .select({
-      ordered: sql<boolean>`bool_or(${nodes.trashId} is null)`,
-      last: sql<string | null>`max(${nodes.position})`,
-    })
+    .select({ last: sql<string | null>`max(${nodes.position})` })
     .from(nodes)
     .where(
       and(
@@ -50,7 +48,7 @@ async function lastPosition(
         ...(except.length > 0 ? [sql`${nodes.id} <> all(${sql.param([...except])}::text[])`] : []),
       ),
     );
-  return row?.ordered ? (row.last ?? null) : null;
+  return row?.last ?? null;
 }
 
 /**

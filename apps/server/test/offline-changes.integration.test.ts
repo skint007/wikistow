@@ -812,4 +812,21 @@ describe('moves and publishes made offline', () => {
     expect(position(page.pageId)).toBe(at(0));
     expect(position(second)).toBeNull();
   });
+
+  it('send a folder’s order with what is there without a place, last', async () => {
+    const { ctx, queue, spaceId, page } = await device();
+    // Made before the order, in a top listed by name: the server gave it no place.
+    const second = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Agenda' });
+    await queue.order({
+      spaceId,
+      parentId: null,
+      name: 'Notes',
+      positions: [{ nodeId: second, position: positionBetween(null, null) }],
+    });
+    expect(await queue.send(ctx)).toBe('sent');
+    const tree = await spaces.loadTree(ctx, spaceId);
+    const position = (id: string) => tree.pages.find((p) => p.id === id)?.position ?? null;
+    expect(position(second)).toBe(positionBetween(null, null));
+    expect(position(page.pageId)! > position(second)!).toBe(true);
+  });
 });

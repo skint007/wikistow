@@ -1,5 +1,7 @@
 import {
   childrenInOrder,
+  hasOwnOrder,
+  positionsFor,
   orderOperations,
   shownTitle,
   type ClientContext,
@@ -169,6 +171,33 @@ export async function writePositions(
     parentId,
     name: placeName(tree, parentId),
     positions: writes,
+  });
+}
+
+/**
+ * In a folder with an order of its own, give what has no position yet one,
+ * in the order shown, after the rest, so what comes later goes after it:
+ * for a whole space copied in, whose top the server places by ID alone.
+ */
+export async function fillOrder(
+  ctx: ClientContext,
+  {
+    tree,
+    spaceId,
+    parentId,
+    offline,
+    waiting,
+  }: { tree: Tree; spaceId: SpaceId; parentId: FolderId | null; offline: boolean } & Waits,
+) {
+  const shown = ordered(tree, parentId, { waiting });
+  if (!hasOwnOrder(shown) || shown.every((child) => child.position !== null)) return;
+  await writePositions(ctx, {
+    tree,
+    spaceId,
+    parentId,
+    writes: positionsFor(shown, null),
+    offline,
+    waiting,
   });
 }
 

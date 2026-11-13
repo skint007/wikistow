@@ -6,6 +6,7 @@ import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import { DialogFooter } from '@/components/ui/dialog';
 import { useAvailability } from '../shell/availability';
+import { fillOrder } from '../shell/tree-order';
 import { PLAIN, useClient } from '../vault/store';
 import { spacesQuery, treeQuery } from '../data/queries';
 import { isStale } from '../sharing/messages';
@@ -164,6 +165,18 @@ export function ConfirmCopy({
               before,
             })
           : undefined;
+      // A whole space copied into a folder with an order of its own: its
+      // top goes last there, in the order shown, as one item would.
+      if (node === null) {
+        const there = await queryClient.fetchQuery(treeQuery(ctx, spaceId));
+        await fillOrder(ctx, {
+          tree: there,
+          spaceId,
+          parentId: chosen.place.parentId,
+          offline: availability.offline,
+          waiting: availability.waiting,
+        }).catch(() => {});
+      }
       // Both trees, before opening what it made there.
       await refreshCopied(queryClient, ctx, confirmed, made);
       if (!copy && onMoved) {

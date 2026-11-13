@@ -383,6 +383,16 @@ describe('a folder’s own order', () => {
     expect(tree.pages.every((p) => (p.position?.length ?? 0) < 10)).toBe(true);
   });
 
+  it('keeps a folder’s order while all of it is in the trash', async () => {
+    const owner = await personWithVault(t);
+    const { spaceId, folder, ids } = await shelf(owner);
+    await drop(owner.ctx, spaceId, folder, ids.c, 'Apples');
+    for (const id of [ids.a, ids.b, ids.c])
+      await pages.deleteNode(owner.ctx, { spaceId, nodeId: id });
+    for (const id of [ids.a, ids.b, ids.c]) await trashOperations.restoreDeleted(owner.ctx, id);
+    expect(await listed(owner.ctx, spaceId, folder)).toEqual(['Cheese', 'Apples', 'Bread']);
+  });
+
   it('orders the top of a space too', async () => {
     const owner = await personWithVault(t);
     const { spaceId, folder } = await shelf(owner);
