@@ -5,6 +5,7 @@ import { writingLiterals, type Transformer } from './config';
 import { ending, endsInLine, shownOf, withLf, writesAsShown } from './fidelity';
 import type { Run } from './blocks';
 import { rawPlace, type Source, type Span } from './sources';
+import type { LineBreak } from '../surface';
 
 /** A document as Markdown, and whether that reads back as the document. */
 export type Written = { markdown: string; faithful: boolean };
@@ -75,6 +76,7 @@ type Composed = Written & {
  */
 type Progress = {
   base: Base | null;
+  lineBreak: LineBreak;
   runs: Node[][];
   places: (readonly [number, number] | null)[];
   /** For each run, the block of the source it starts in place of: the one after the last before it. */
@@ -202,6 +204,7 @@ export class Writer {
   readonly #endings = new WeakMap<Unit, Map<boolean, boolean>>();
   readonly #progress = new WeakMap<Node, Progress>();
   #base: Base | null = null;
+  #lineBreak: LineBreak = '\n';
 
   constructor({ parse, serialize }: Transformer) {
     this.#parse = parse;
@@ -211,9 +214,11 @@ export class Writer {
   /**
    * Write the blocks of documents that `source` has, unedited, as they are
    * in its text, from now on: the text a document was last given as. With
-   * none, every block is written in the editor's style.
+   * none, every block is written in the editor's style. Blocks written anew
+   * take `lineBreak`, the page's.
    */
-  source(source: Source | null) {
+  source(source: Source | null, lineBreak = source?.lineBreak ?? '\n') {
+    this.#lineBreak = lineBreak;
     if (!source) return void (this.#base = null);
     const nodes = [...source.doc.content.content];
     const index = new WeakMap<Node, number>();
@@ -375,7 +380,7 @@ export class Writer {
     // Written whole, as no block alone would read as it shows.
     if (laid.length === 0 && page !== '') return null;
     const { runs, units } = this.#progressOf(doc);
-    const lineBreak = this.#base?.source.lineBreak ?? '\n';
+    const lineBreak = this.#lineBreak;
     let start = 0;
     let at = 0;
     let next = 0;
@@ -494,7 +499,7 @@ export class Writer {
     );
     const faithful = writesAsShown(doc, markdown, this.#parse);
     if (only && !faithful) return null;
-    const lineBreak = this.#base?.source.lineBreak ?? '\n';
+    const lineBreak = this.#lineBreak;
     const page = lineBreak === '\n' ? markdown : markdown.replaceAll('\n', lineBreak);
     return { markdown, faithful, page, laid: [] };
   }
@@ -503,7 +508,7 @@ export class Writer {
   // the text that was between them there, if they were next to each other.
   #joined(doc: Node, progress: Progress, base: Base | null, final: boolean): Composed {
     const { units } = progress;
-    const lineBreak = base?.source.lineBreak ?? '\n';
+    const lineBreak = this.#lineBreak;
     const anew = (markdown: string) =>
       lineBreak === '\n' ? markdown : markdown.replaceAll('\n', lineBreak);
     const laid: Laid[] = [];
@@ -581,13 +586,22 @@ export class Writer {
 
   #progressOf(doc: Node): Progress {
     let progress = this.#progress.get(doc);
-    if (!progress || progress.base !== this.#base) {
+    if (!progress || progress.base !== this.#base || progress.lineBreak !== this.#lineBreak) {
       const runs = groups(doc);
       const base = this.#base;
       const { places, slots } = base
         ? placesOf(base, runs)
         : { places: runs.map(() => null), slots: runs.map(() => -1) };
-      progress = { base, runs, places, slots, units: [], done: false, written: new Map() };
+      progress = {
+        base,
+        lineBreak: this.#lineBreak,
+        runs,
+        places,
+        slots,
+        units: [],
+        done: false,
+        written: new Map(),
+      };
       for (const i of runs.keys()) this.#known(progress, i);
       this.#progress.set(doc, progress);
     }

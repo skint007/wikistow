@@ -68,7 +68,7 @@ afterEach(() => {
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-async function mount(initial: string): Promise<Mounted> {
+async function mount(initial: string, lineBreak?: '\r\n' | '\n'): Promise<Mounted> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -85,6 +85,7 @@ async function mount(initial: string): Promise<Mounted> {
           links={links}
           attachments={{ list: [], url: async () => null }}
           onFiles={() => {}}
+          {...(lineBreak ? { lineBreak } : {})}
           onUnfaithful={(markdown) => unfaithful.push(markdown)}
         />
       </StrictMode>,
@@ -274,6 +275,27 @@ describe('an edit in the visual editor', () => {
     expect(m.handle.caret?.()).toBe('[x](https://y.org/abc) abc'.length);
   });
 
+  it('writes a page with no text yet in the frontmatter’s line breaks', async () => {
+    for (const body of ['', '\r\n\r\n']) {
+      const m = await mount(body, '\r\n');
+      const view = viewOf(m.dom);
+      const { schema } = view.state;
+      const paragraph = (text: string) => schema.node('paragraph', null, schema.text(text));
+      act(() =>
+        view.dispatch(
+          view.state.tr.replaceWith(0, view.state.doc.content.size, [
+            paragraph('a'),
+            paragraph('b'),
+          ]),
+        ),
+      );
+      await expect
+        .poll(() => m.changes.at(-1), { message: JSON.stringify(body) })
+        .toBe('a\r\n\r\nb\r\n');
+      m.unmount();
+    }
+  });
+
   it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
     for (const [page, kept] of [
       ['Para.\n\n  ```\n  code\n  ```\n', '  ```\n  code\n  ```\n'],
@@ -438,6 +460,19 @@ describe('text taken in by block', () => {
       expect(await showsAsRead(m, next), next).toBe(true);
       m.unmount();
     }
+  });
+
+  it('reads the page whole where a change is beside a long block, which would be slow to read again', async () => {
+    const list = Array.from({ length: 1_500 }, (_, i) => `- item ${i}`).join('\n');
+    const page = `One.\n\n${list}\n\nTwo.\n\nThree.\n`;
+    const m = await mount(page);
+    const next = page.replace('Two.', 'Two, changed.');
+    expect(m.handle.take?.(next)).toBe(false);
+    act(() => m.handle.replace(next));
+    expect(m.handle.read()).toBe(next);
+    expect(await showsAsRead(m, next)).toBe(true);
+    // Away from it, a block at a time.
+    expect(m.handle.take?.(next.replace('Three.', 'Three, changed.'))).toBe(true);
   });
 
   it('takes nothing it wouldn’t keep whole, such as a reference link', async () => {

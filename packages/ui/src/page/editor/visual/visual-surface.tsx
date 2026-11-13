@@ -273,8 +273,8 @@ function Surface({
    */
   const sourceAs = (write: Writer, doc: Node, markdown: string, read: Node) => {
     const spans = spansOf(read);
-    if (!spans || spans.length !== doc.childCount) return write.source(null);
     const lineBreak = lineBreakFor(markdown, latest.current.lineBreak);
+    if (!spans || spans.length !== doc.childCount) return write.source(null, lineBreak);
     write.source({ doc, text: markdown, spans: inText(markdown, spans), lineBreak });
   };
   const [surface] = useState(() => ({
@@ -425,7 +425,7 @@ function Surface({
             spans: taken.spans,
             lineBreak: lineBreakFor(markdown, latest.current.lineBreak),
           });
-        else write.source(null);
+        else write.source(null, lineBreakFor(markdown, latest.current.lineBreak));
         surface.later();
         return true;
       });

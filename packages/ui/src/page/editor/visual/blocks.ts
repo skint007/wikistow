@@ -97,12 +97,13 @@ function same(a: Node, b: Node): boolean {
 
 const DEFINITION = 'footnote_definition';
 
-// A block this long that a change touches is checked off the page's
-// thread, read whole, as checking it here would hold up the next key: a
+// Blocks this long that a change touches are checked off the page's
+// thread, read whole, as checking them here would hold up the next key: a
 // list of 3,000 items takes about half a second. And what's read again,
-// the blocks beside it too, is at most this long.
-const TOUCHED_MAX = 10_000;
-const REGION_MAX = 100_000;
+// the blocks beside them too, is at most this long: a list of 1,000 links
+// beside a change takes about 70 to 100 ms to read again.
+const TOUCHED_MAX = 8_000;
+const REGION_MAX = 16_000;
 
 // An empty paragraph, which writes as nothing.
 const blank = (node: Node) => node.type.name === 'paragraph' && node.content.size === 0;
@@ -137,8 +138,9 @@ const sameKeys = (a: ReadonlyMap<string, unknown>, b: ReadonlyMap<string, unknow
  * and the footnotes defined there the same. Null if it must be read whole:
  * as a fence or HTML left open takes in the block after it, a footnote is
  * defined or no longer is, or 1 KB or more of text is new (`BLOCK_TIMED`),
- * or the blocks it touches are 10 KB or more (`TOUCHED_MAX`), which may be
- * slow to read and are checked off the page's thread then.
+ * or the blocks it touches are 8 KB or more (`TOUCHED_MAX`), or with those
+ * beside them 16 KB (`REGION_MAX`), which may be slow to read and are
+ * checked off the page's thread then.
  */
 export function byBlock({
   doc,
