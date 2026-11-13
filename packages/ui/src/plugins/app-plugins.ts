@@ -10,7 +10,15 @@ import {
 import { createContext, use } from 'react';
 import { contentChanged } from '../data/content-changed';
 import { pageWriter } from '../data/offline-changes';
-import { queueOf, searchIndexQuery, spacesQuery, trashQuery, treeQuery } from '../data/queries';
+import { noAnswer } from '../data/connection';
+import {
+  ownerToConfirmQuery,
+  queueOf,
+  searchIndexQuery,
+  spacesQuery,
+  trashQuery,
+  treeQuery,
+} from '../data/queries';
 import { showNotice } from '../page/undo-notice';
 import { pageTitle } from '../shell/sidebar';
 import { desktop } from '../desktop';
@@ -108,6 +116,19 @@ export function startAppPlugins(queryClient: QueryClient) {
     const spaces = await latest(spacesQuery(ctx));
     if (!spaceIds.every((id) => spaces.find((space) => space.id === id)?.role === 'owner'))
       throw new PluginError('forbidden', 'Only a space’s owners move its pages to the trash');
+    // As the app's own Delete (`mayDelete`): not while the person has yet to
+    // confirm who added them as an owner; offline, the check waits for the server.
+    for (const spaceId of spaceIds) {
+      const adder = await latest(ownerToConfirmQuery(ctx, spaceId)).then(
+        (toConfirm) => (toConfirm ? 'unconfirmed' : 'owner'),
+        (error: unknown) => (noAnswer(error) ? 'checking' : 'unconfirmed'),
+      );
+      if (adder === 'unconfirmed')
+        throw new PluginError(
+          'forbidden',
+          'The person has yet to confirm who added them as an owner of that space',
+        );
+    }
     const titles = new Map<string, { title: string | null; folders: readonly string[] }>();
     for (const spaceId of spaceIds) {
       for (const { id, title, folders } of linkablePages(await latest(treeQuery(ctx, spaceId))))
