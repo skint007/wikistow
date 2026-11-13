@@ -221,16 +221,20 @@ describe('an import', () => {
       name: 'Inbox',
     });
     const reader = await personWithVault(t);
+    // A, saved first, finds the share before sending; Z, made whole, when refused.
     const source = await vault([
-      file('A.md', 'Plain words.'),
-      file('C.md', 'See [[A]]. ![[photo.png]]'),
+      file('A.md', 'See [[Z]]. ![[photo.png]]'),
+      file('Z.md', 'Plain words.'),
       file('photo.png', 'PNG bytes'),
     ]);
-    // Shared, by its owner's other app, just before the first page is published:
-    // where the import was told to write has moved into a share.
+    // Shared, by its owner's other app, once the pages are made and before
+    // they are saved: where the import was told to write has moved into a
+    // share, which a save finds before sending and a publish when refused.
     let shared: Promise<unknown> | undefined;
+    let trees = 0;
     const sharing: Fetch = async (url, init) => {
-      if (routeOf(url, init) === 'POST /api/pages/:id/publications') {
+      // The import loads the tree first to find an earlier run's, then for links.
+      if (routeOf(url, init) === 'GET /api/spaces/:id/tree' && ++trees === 2) {
         shared ??= invite(person, reader, 'reader').then((member) =>
           shareFolder(person.ctx, { spaceId, rootId: folderId, people: [member] }),
         );
@@ -247,12 +251,12 @@ describe('an import', () => {
     expect(summary.pages).toHaveLength(2);
 
     // Its member reads both, the file too.
+    const z = await publication(spaceId, pageIdOf(summary, 'Z.md'), reader.ctx);
+    expect(z.payload.markdown).toBe('Plain words.');
     const a = await publication(spaceId, pageIdOf(summary, 'A.md'), reader.ctx);
-    expect(a.payload.markdown).toBe('Plain words.');
-    const c = await publication(spaceId, pageIdOf(summary, 'C.md'), reader.ctx);
-    const [ref] = c.payload.attachments;
+    const [ref] = a.payload.attachments;
     if (!ref) throw new Error('expected an attachment');
-    const bytes = await pages.readAttachment(reader.ctx, c.page, 'published', ref);
+    const bytes = await pages.readAttachment(reader.ctx, a.page, 'published', ref);
     expect(new TextDecoder().decode(bytes)).toBe('PNG bytes');
   });
 });

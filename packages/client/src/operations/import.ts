@@ -9,6 +9,7 @@ import {
 } from '@wikistow/contracts';
 import { ApiError, outcomeUnknown, type ApiClient, type CallInput } from '../api/client.ts';
 import { utf8 } from '../encoding.ts';
+import { CryptoError } from '../errors.ts';
 import type { ImportFile } from '../import-archive.ts';
 import { newId, PageId as PageIdSchema, RevisionId as RevisionIdSchema } from '../ids.ts';
 import {
@@ -162,13 +163,15 @@ export async function importNotes(
   ctx = onceEach(patient(ctx, stopped, signal), stopped, signal);
   const targets = targetsByFolder(ctx, scope.spaceId);
   ctx = targets.ctx;
-  // Once more if who may read there changed, asking the server where to
-  // write afresh: `step` is told it is a retry, to trust nothing it kept.
+  // Once more if where to write, or who may read there, changed since the
+  // server last said, as the server or this app found: asking it afresh.
+  // `step` is told it is a retry, to trust nothing it kept.
   const again = async <T>(step: (retry: boolean) => Promise<T>): Promise<T> => {
     try {
       return await step(false);
     } catch (error) {
-      if (!(error instanceof ApiError && error.code === 'permission-version')) throw error;
+      if (!movedOn(error)) throw error;
+      targets.forget();
       return step(true);
     }
   };
@@ -558,6 +561,17 @@ async function uploadFiles(
   return done.filter((file) => file !== undefined);
 }
 
+/**
+ * Whether a write failed because where it goes changed since the server
+ * said: access (`permission-version`), its share (`region-mismatch`) or the
+ * share's keys (`key-version`), as the server refused it or this app found
+ * before sending it.
+ */
+const movedOn = (error: unknown) =>
+  (error instanceof ApiError && error.code === 'permission-version') ||
+  ((error instanceof ApiError || error instanceof CryptoError) &&
+    (error.code === 'region-mismatch' || error.code === 'key-version'));
+
 /** The changes an import sends that take an `Idempotency-Key`. */
 const KEYED: ReadonlySet<RouteDef> = new Set([
   structureRoutes.createFolder,
@@ -605,7 +619,7 @@ type Target = Awaited<ReturnType<typeof treeTarget>>;
  * folder gave for making it, without the folder's name. Any other page is
  * asked about once. The server still checks each change against its own
  * word. A refused change forgets every answer, so the next change, or the
- * same one sealed again with fresh keys, asks again.
+ * same one sealed again with fresh keys, asks again, and so does `forget`.
  */
 function targetsByFolder(ctx: ClientContext, spaceId: SpaceId) {
   const { api } = ctx;
@@ -639,15 +653,17 @@ function targetsByFolder(ctx: ClientContext, spaceId: SpaceId) {
     try {
       return await api.call(...args);
     } catch (error) {
-      if (KEYED.has(route) && error instanceof ApiError) {
-        answers.clear();
-        pinned.clear();
-      }
+      if (KEYED.has(route) && error instanceof ApiError) forget();
       throw error;
     }
   }) as ApiClient['call'];
+  function forget() {
+    answers.clear();
+    pinned.clear();
+  }
   return {
     ctx: { ...ctx, api: { ...api, call } },
+    forget,
     /** `pageId` was just made in `parentId`, with the answer asked last for it. */
     made: (pageId: PageId, parentId: FolderId | null) => {
       const used = answers.get(parentId);
