@@ -10,16 +10,9 @@ import {
   type PageVersion,
 } from '@wikistow/plugin-sdk';
 import { pageRows, queryRows, readableSpace, readPluginQuery } from '../plugins/page-rows';
-import {
-  checkMoves,
-  linkableAs,
-  moveTargets,
-  pluginError,
-  relinkPage,
-  type Caller,
-  type HostPages,
-} from '../plugins/pages';
-import { pluginTrashPrompts } from '../plugins/trash-prompt';
+import type { Caller, HostPages } from '../plugins/pages';
+import { checkMoves, linkableAs, moveTargets, relinkPage } from '../plugins/relink';
+import { pluginTrashPrompts } from '../plugins/trash-prompts';
 import type { ShownPage } from '../plugins/runtime';
 
 /** The space the workshop's sample pages are in, which no real page is. */
@@ -45,6 +38,11 @@ export type Sample = {
 };
 
 const unloaded = () => new PluginError('unloaded', 'The plugin was turned off');
+/** A batch's failure for one sample: the samples' own errors are `PluginError`s already. */
+const failure = (error: unknown) =>
+  error instanceof PluginError
+    ? error
+    : new PluginError('failed', error instanceof Error ? error.message : 'Something went wrong');
 const elsewhere = () =>
   new PluginError('not-found', 'The workshop’s preview has only its own sample pages');
 
@@ -361,7 +359,7 @@ export function sampleStore() {
               caller.wrote(page, version.revision);
               return { page, ok: true, version };
             } catch (error) {
-              const { code, message } = pluginError(error);
+              const { code, message } = failure(error);
               return { page, ok: false, code, message };
             }
           });
@@ -416,7 +414,7 @@ export function sampleStore() {
               caller.wrote(page, version.revision);
               results.push({ page, ok: true, version });
             } catch (error) {
-              const { code, message } = pluginError(error);
+              const { code, message } = failure(error);
               results.push({ page, ok: false, code, message });
             }
           }

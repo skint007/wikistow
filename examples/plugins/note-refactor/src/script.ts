@@ -11,7 +11,7 @@
 //   place of the selection, under a heading of its title. Links to those
 //   pages now come here, to that heading, and the pages go to the trash
 //   once you agree, asked once for them all (`host.pages.trash`).
-import { defineScript, PluginError, type PageRef } from '@wikistow/plugin-sdk';
+import { defineScript, PluginError, type DraftResult, type PageRef } from '@wikistow/plugin-sdk';
 
 const HEADING = /^#{1,6}[ \t]+(.+?)[ \t#]*$/;
 /** `[[Title]]`, `[[Folder/Title#Heading|text]]`: the page each names. */
@@ -26,6 +26,16 @@ const titled = (text: string) =>
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 100);
+
+/** Say which pages' links couldn't follow, if any: the rest changed. */
+function followed(results: DraftResult[]) {
+  const failed = results.flatMap((result) => (result.ok ? [] : [result.message]));
+  if (failed.length > 0)
+    throw new PluginError(
+      'failed',
+      `Links in ${failed.length} pages stayed as they were: ${failed[0]}`,
+    );
+}
 
 /** A page's text after its frontmatter. */
 const body = (markdown: string) => markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
@@ -51,7 +61,9 @@ defineScript((host) => {
       await editor.insert(`[[${made.title}]]`);
       // The heading is the new page's title now: links to it go to the page.
       if (heading && !UNWRITABLE.test(heading))
-        await host.pages.relink([{ from: { page: page.page, heading }, to: { page: made } }]);
+        followed(
+          await host.pages.relink([{ from: { page: page.page, heading }, to: { page: made } }]),
+        );
     },
   });
 
@@ -80,13 +92,14 @@ defineScript((host) => {
       }
       await editor.insert(parts.join('\n'));
       // Links to them come here, each to its heading, before they go.
-      await host.pages.relink(
+      const relinked = await host.pages.relink(
         merged.map(({ page: from, title }) => ({
           from: { page: from },
           to: { page: page.page, ...(UNWRITABLE.test(title) ? {} : { heading: title }) },
         })),
       );
       await host.pages.trash(merged.map(({ page: each }) => each));
+      followed(relinked);
     },
   });
 });

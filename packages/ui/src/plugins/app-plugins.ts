@@ -24,7 +24,7 @@ import { indexChanges } from './page-rows';
 import { batchTurn, pagesFor, pluginError, session, type Caller } from './pages';
 import { createRuntime, type OpenDraft, type PluginSession } from './runtime';
 import { isSafeModeKey, tabSafeMode } from './safe-mode';
-import { pluginTrashPrompts } from './trash-prompt';
+import { pluginTrashPrompts } from './trash-prompts';
 import type { AppPluginStore } from './store';
 
 /** The vault's session, as the app's plugins and the workshop's preview run in it. */

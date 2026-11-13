@@ -122,7 +122,7 @@ test('a library plugin runs in the browser until it leaves the library', async (
     .first()
     .click();
   await pick(installed.getByRole('button', { name: /^Access/ }), 'Read and write');
-  await installed.getByRole('button', { name: 'Add' }).click();
+  await installed.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(installed.getByRole('list', { name: 'Page access' })).toContainText(
     'read and write',
   );

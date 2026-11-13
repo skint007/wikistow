@@ -66,7 +66,7 @@ test('a plugin draws a dataview block from the pages it can read', async ({
       .getByRole('menuitemradio', { name: /Recipes/ })
       .first()
       .click();
-    await installed.getByRole('button', { name: 'Add' }).click();
+    await installed.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(installed.getByRole('list', { name: 'Page access' })).toContainText('read');
   });
 
