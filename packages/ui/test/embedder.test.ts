@@ -117,6 +117,16 @@ describe('Embedder', () => {
     expect(FakeWorker.started[1]?.asked.map(({ op }) => op)).toEqual(['load']);
   });
 
+  it('fails an embedding stopped just after its load, rather than start an empty worker', async () => {
+    const embedder = new Embedder({ keep: true });
+    // Stopped as the load lands, before the embedding goes on from it.
+    const stopped = embedder.load().then(() => embedder.stop());
+    const embedding = embedder.embed('query', ['soup']);
+    await stopped;
+    await expect(embedding).rejects.toThrow('The embedding worker was stopped.');
+    expect(FakeWorker.started).toHaveLength(1);
+  });
+
   it('fails what waits when stopped', async () => {
     const embedder = new Embedder({ keep: true });
     FakeWorker.reply = () => null;

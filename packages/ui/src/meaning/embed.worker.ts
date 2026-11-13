@@ -37,45 +37,67 @@ const FILES: readonly File[] = [
   { url: wasmURL, check: webAssembly },
 ];
 
-/** The bytes at `url`, or an error naming it. */
-async function fetched(url: string): Promise<ArrayBuffer> {
-  const response = await fetch(url);
+/**
+ * The bytes at `url`, or an error naming it. A file the worker keeps
+ * itself skips the browser's HTTP cache, so forgetting the model leaves no
+ * copy there.
+ */
+async function fetched(url: string, keeping: boolean): Promise<ArrayBuffer> {
+  const response = await fetch(url, keeping ? { cache: 'no-store' } : {});
   if (!response.ok) throw new Error(`${url} answered ${response.status}`);
   return response.arrayBuffer();
 }
 
 /**
+ * The worker's cache, with other models' caches, and files of its own that
+ * this build doesn't name (an older runtime's, say), deleted. Null where
+ * there is no Cache Storage (a page not served over HTTPS) or it refuses
+ * (site data blocked, say).
+ */
+async function opened(): Promise<Cache | null> {
+  if (typeof caches === 'undefined') return null;
+  try {
+    for (const name of await caches.keys()) {
+      if (name.startsWith(MEANING_CACHE_PREFIX) && name !== MEANING_CACHE) {
+        await caches.delete(name);
+      }
+    }
+    const cache = await caches.open(MEANING_CACHE);
+    const wanted = new Set(FILES.map(({ url }) => new URL(url, self.location.href).href));
+    for (const request of await cache.keys()) {
+      if (!wanted.has(request.url)) await cache.delete(request);
+    }
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The three files, from the worker's cache when `keep`, which a file
  * missing from it is fetched into, once its bytes check out, so a wrong
- * answer (a proxy's page, say) is never kept. Other models' caches, and
- * files of this model's cache that this build doesn't name (an older
- * runtime's, say), are deleted. Without `keep` (the desktop app, whose
- * files are on its disk already), or where there is no Cache Storage (a
- * page not served over HTTPS), every file is fetched.
+ * answer (a proxy's page, say) is never kept. Without `keep` (the desktop
+ * app, whose files are on its disk already) every file is fetched, and so
+ * is any the cache can't give or take, as without Cache Storage or with
+ * no room left.
  */
 async function read(keep: boolean) {
-  if (!keep || typeof caches === 'undefined') {
-    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url)));
+  const cache = keep ? await opened() : null;
+  if (!cache) {
+    const bytes = await Promise.all(FILES.map(({ url }) => fetched(url, false)));
     return { bytes, from: keep ? ('network' as const) : ('files' as const) };
-  }
-  for (const name of await caches.keys()) {
-    if (name.startsWith(MEANING_CACHE_PREFIX) && name !== MEANING_CACHE) await caches.delete(name);
-  }
-  const cache = await caches.open(MEANING_CACHE);
-  const wanted = new Set(FILES.map(({ url }) => new URL(url, self.location.href).href));
-  for (const request of await cache.keys()) {
-    if (!wanted.has(request.url)) await cache.delete(request);
   }
   let fetchedAny = false;
   const bytes = await Promise.all(
     FILES.map(async ({ url, check }) => {
-      const kept = await cache.match(url);
+      const kept = await cache.match(url).catch(() => undefined);
       if (kept) return kept.arrayBuffer();
       fetchedAny = true;
-      const bytes = await fetched(url);
+      const bytes = await fetched(url, true);
       if (!(await check(bytes))) throw new Error(`${url} isn’t the file this build names`);
-      // A response copies the bytes it is given.
-      await cache.put(url, new Response(bytes));
+      // A response copies the bytes it is given. One the cache can't take
+      // is fetched again next time.
+      await cache.put(url, new Response(bytes)).catch(() => undefined);
       return bytes;
     }),
   );

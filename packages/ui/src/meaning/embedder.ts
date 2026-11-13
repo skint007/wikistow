@@ -117,7 +117,10 @@ export class Embedder {
 
   /** Each text's vector, in order, loading the model first if need be. */
   async embed(kind: EmbedKind, texts: string[]): Promise<Embedded> {
-    await this.load();
+    const loading = this.load();
+    await loading;
+    // Stopped between the load and this, which would start a worker with no model.
+    if (this.#loaded !== loading) throw new Error('The embedding worker was stopped.');
     const answer = await this.#ask({ op: 'embed', kind, texts });
     if (answer.op === 'error') throw new Error(answer.message);
     if (answer.op !== 'embed') throw new Error('The embedding worker answered out of turn.');

@@ -40,8 +40,22 @@ async function keep(name: string, bytes: Uint8Array) {
 
 type Pinned = { readonly path: string; readonly sha256: string };
 
+/** Each pinned file's bytes being read, so two at once, as on the dev server, share one fetch. */
+const reading = new Map<string, Promise<Uint8Array>>();
+
 /** A pinned file's bytes, from the cache or else from Hugging Face, checked either way. */
-async function pinned(file: Pinned): Promise<Uint8Array> {
+function pinned(file: Pinned): Promise<Uint8Array> {
+  let bytes = reading.get(file.sha256);
+  if (!bytes) {
+    bytes = read(file);
+    reading.set(file.sha256, bytes);
+    // Kept once read, so a later request reads the cache, and a failure can be tried again.
+    void bytes.finally(() => reading.delete(file.sha256)).catch(() => undefined);
+  }
+  return bytes;
+}
+
+async function read(file: Pinned): Promise<Uint8Array> {
   const kept = await readFile(join(CACHE, file.sha256)).catch(() => null);
   if (kept && sha256(kept) === file.sha256) return kept;
   const url = `https://huggingface.co/${MEANING_MODEL.repository}/resolve/${MEANING_MODEL.revision}/${file.path}`;
