@@ -702,8 +702,10 @@ export function relinkMarkdown(markdown: string, moves: readonly LinkPointing[])
     );
     if (!move) continue;
     const { target } = move.to;
-    const heading = move.heading === null ? (link.heading ?? move.to.heading) : move.to.heading;
-    for (const text of [target, heading]) {
+    // A link's own heading goes back as written; only what the move names is checked.
+    const kept = move.heading === null && link.heading !== null;
+    const heading = kept ? link.heading : move.to.heading;
+    for (const text of kept ? [target] : [target, heading]) {
       if (text !== null && text !== '' && !writableInLink(text)) throw new RelinkUnwritable(text);
     }
     if (target === '' && heading === null) throw new RelinkUnwritable('');

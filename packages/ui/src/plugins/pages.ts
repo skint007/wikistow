@@ -34,6 +34,7 @@ import { leastAccess } from '@wikistow/plugin-sdk/manifest';
 import { z } from 'zod';
 import { DraftConflict } from '../page/draft-session';
 import { childrenOf, treeLabels } from '../shell/tree-order';
+import { queueOf } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { pageRows, queryRows, readableSpace, readPluginQuery, type IndexChange } from './page-rows';
 import { checkMoves, linkableAs, moveTargets, relinkPage } from './relink';
@@ -473,9 +474,19 @@ export function pagesFor(caller: EditingCaller): HostPages {
       try {
         const version = await batchTurn(async () => {
           await recheck(page);
-          return (
-            (await caller.open(page, base, change)) ?? saveOn(caller, waiting, page, base, change)
-          );
+          const open = await caller.open(page, base, change);
+          if (open) return open;
+          // Its change waiting here would come after this one, as a conflict.
+          if (
+            await queueOf(ctx)
+              ?.entry(PageId.parse(page.pageId))
+              .catch(() => null)
+          )
+            throw new PluginError(
+              'unsupported',
+              'This page has changes saved on this device only. Try again once they are sent.',
+            );
+          return saveOn(caller, waiting, page, base, change);
         });
         results.push({ page, ok: true, version });
       } catch (error) {

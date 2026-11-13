@@ -679,6 +679,14 @@ describe('relinkMarkdown (#404)', () => {
     ).toBeNull();
   });
 
+  it('writes back a link’s own heading as it was written', () => {
+    expect(
+      relinkMarkdown('[[Notes#x < 10]]', [
+        { names: toNotes, heading: null, to: { target: 'Kitchen', heading: null } },
+      ]),
+    ).toBe('[[Kitchen#x < 10]]');
+  });
+
   it('refuses a title a link can’t hold rather than writing a broken link', () => {
     expect(() =>
       relinkMarkdown('[[Notes]]', [
