@@ -3,7 +3,6 @@ import type { MilkdownPlugin } from '@milkdown/kit/ctx';
 import type { Node, Schema } from '@milkdown/kit/prose/model';
 import { ParserState, type MarkdownNode, type RemarkParser } from '@milkdown/kit/transformer';
 import type { Root } from 'mdast';
-import type { LineBreak } from '../surface';
 
 // Where each top-level block of a document was read from (ADR 0015
 // decision 3, step 2), so a block nobody edited is written back as its
@@ -16,13 +15,12 @@ export type Span = { readonly from: number; readonly to: number };
  * A document and the page text it holds, with where each of its top-level
  * blocks is in that text, in order; null for one whose place can't be told,
  * which is written in the editor's style. Text between blocks is the page's
- * own, and the page's line break is what text written anew takes.
+ * own.
  */
 export type Source = {
   readonly doc: Node;
   readonly text: string;
   readonly spans: readonly (Span | null)[];
-  readonly lineBreak: LineBreak;
 };
 
 // The spans each document read has in the LF text it was read from.

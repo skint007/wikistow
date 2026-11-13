@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import { unnumbered } from '../src/page/editor/visual/blocks.ts';
 import { transformer } from '../src/page/editor/visual/config.ts';
-import { fidelityOf, withLf } from '../src/page/editor/visual/fidelity.ts';
+import { fidelityOf, withLf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
 import { inText, spansOf } from '../src/page/editor/visual/sources.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
@@ -55,6 +55,8 @@ const links: LinkAssist = {
 
 type Mounted = {
   handle: EditorSurfaceHandle;
+  /** Draw it again, with the page's line break now `lineBreak`. */
+  breaks: (lineBreak: '\r\n' | '\n') => void;
   dom: HTMLElement;
   changes: string[];
   unfaithful: string[];
@@ -75,7 +77,8 @@ async function mount(initial: string, lineBreak?: '\r\n' | '\n'): Promise<Mounte
   const ref = createRef<EditorSurfaceHandle>();
   const changes: string[] = [];
   const unfaithful: string[] = [];
-  await act(async () =>
+  const attachments = { list: [], url: async () => null };
+  const draw = (lineBreak?: '\r\n' | '\n') =>
     root.render(
       <StrictMode>
         <VisualSurface
@@ -83,14 +86,14 @@ async function mount(initial: string, lineBreak?: '\r\n' | '\n'): Promise<Mounte
           initial={initial}
           onChange={(markdown) => changes.push(markdown)}
           links={links}
-          attachments={{ list: [], url: async () => null }}
+          attachments={attachments}
           onFiles={() => {}}
           {...(lineBreak ? { lineBreak } : {})}
           onUnfaithful={(markdown) => unfaithful.push(markdown)}
         />
       </StrictMode>,
-    ),
-  );
+    );
+  await act(async () => draw(lineBreak));
   await act(() => expect.poll(() => container.querySelectorAll('.ProseMirror').length).toBe(1));
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
@@ -99,6 +102,7 @@ async function mount(initial: string, lineBreak?: '\r\n' | '\n'): Promise<Mounte
   let gone = false;
   const m: Mounted = {
     handle: ref.current,
+    breaks: (lineBreak) => act(() => draw(lineBreak)),
     dom,
     changes,
     unfaithful,
@@ -294,6 +298,26 @@ describe('an edit in the visual editor', () => {
         .toBe('a\r\n\r\nb\r\n');
       m.unmount();
     }
+    // Given later, as frontmatter is added, too.
+    const m = await mount('', '\n');
+    m.breaks('\r\n');
+    const view = viewOf(m.dom);
+    const { schema } = view.state;
+    const paragraph = (text: string) => schema.node('paragraph', null, schema.text(text));
+    act(() =>
+      view.dispatch(
+        view.state.tr.replaceWith(0, view.state.doc.content.size, [paragraph('a'), paragraph('b')]),
+      ),
+    );
+    await expect.poll(() => m.changes.at(-1)).toBe('a\r\n\r\nb\r\n');
+  });
+
+  it('keeps blank lines before the first block and after the last, either edited', async () => {
+    const m = await mount('\n\nA\n\nB\n\n\n');
+    const view = viewOf(m.dom);
+    expect(await typeAt(m, find(view.state.doc, 'B') + 1, '!')).toBe('\n\nA\n\nB!\n\n\n');
+    expect(await typeAt(m, find(view.state.doc, 'A') + 1, '!')).toBe('\n\nA!\n\nB!\n\n\n');
+    expect(m.unfaithful).toEqual([]);
   });
 
   it('keeps a block’s indent, which is part of what it says, wherever it goes', async () => {
@@ -498,6 +522,18 @@ describe('text taken in by block', () => {
     // Undo takes back the person's edit, not the change.
     act(() => void undo(view.state, view.dispatch));
     expect(view.state.doc.textContent).toBe('One, from outside.Two.Three.');
+  });
+
+  it('writes anew a block taken in that shows other than as read', async () => {
+    const t = await transformer();
+    const page = 'Intro\n\nMid\n\n| A | B |\n| --- | --- |\n| a | b |\n';
+    const m = await mount(page);
+    act(() => void m.handle.take?.(page.replace('| a | b |', '\t| a | b |')));
+    const view = viewOf(m.dom);
+    const written = (await typeAt(m, find(view.state.doc, 'Intro') + 5, '!')) ?? '';
+    // What it writes reads as it shows, or it says it doesn't.
+    if (m.unfaithful.length === 0)
+      expect(writesAsShown(view.state.doc, withLf(written), t.parse)).toBe(true);
   });
 
   it('keeps blocks taken in as written there, as they were given', async () => {

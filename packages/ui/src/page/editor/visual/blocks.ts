@@ -87,8 +87,8 @@ export function replacement(
   return { from: start, to: a, slice: inPlace(doc, next, start, a, b) };
 }
 
-// Whether two blocks show the same, whatever ids their links were given.
-function same(a: Node, b: Node): boolean {
+/** Whether two blocks show the same, whatever ids their links were given. */
+export function same(a: Node, b: Node): boolean {
   if (a === b || a.eq(b)) return true;
   const { schema } = a.type;
   const doc = (node: Node) => unnumbered(schema.topNodeType.create(null, node));
@@ -97,12 +97,11 @@ function same(a: Node, b: Node): boolean {
 
 const DEFINITION = 'footnote_definition';
 
-// Blocks this long that a change touches are checked off the page's
-// thread, read whole, as checking them here would hold up the next key: a
-// list of 3,000 items takes about half a second. And what's read again,
-// the blocks beside them too, is at most this long: a list of 1,000 links
-// beside a change takes about 70 to 100 ms to read again.
-const TOUCHED_MAX = 8_000;
+// What's read again, the blocks a change touches and those beside them,
+// is at most this long: longer, it's checked off the page's thread, read
+// whole, as checking it here would hold up the next key. A list of 1,000
+// links beside a change takes about 70 to 100 ms to read again, and a list
+// of 3,000 items about half a second to check.
 const REGION_MAX = 16_000;
 
 // An empty paragraph, which writes as nothing.
@@ -138,9 +137,9 @@ const sameKeys = (a: ReadonlyMap<string, unknown>, b: ReadonlyMap<string, unknow
  * and the footnotes defined there the same. Null if it must be read whole:
  * as a fence or HTML left open takes in the block after it, a footnote is
  * defined or no longer is, or 1 KB or more of text is new (`BLOCK_TIMED`),
- * or the blocks it touches are 8 KB or more (`TOUCHED_MAX`), or with those
- * beside them 16 KB (`REGION_MAX`), which may be slow to read and are
- * checked off the page's thread then.
+ * or the blocks it touches are, with those beside them, 16 KB or more
+ * (`REGION_MAX`), which may be slow to read and are checked off the page's
+ * thread then.
  */
 export function byBlock({
   doc,
@@ -201,21 +200,9 @@ export function byBlock({
     : new Map<string, string>();
   const stubs = [...outside.values()].map((label) => `[^${label}]: x`);
   const lf = [withLf(region), ...stubs].join('\n\n');
-  // Checked, the text of the blocks it touches alone: those beside them
-  // must read as they did, which was checked as they went in.
-  const shift = text.length - page.length;
-  const [checkFrom, checkTo] = [a < lo ? before.to : from, (b > hi ? after.from : to) + shift];
-  const nearby = notes
-    ? definedIn([
-        ...(a < lo ? doc.content.content.slice(before.first, before.first + before.count) : []),
-        ...(b > hi ? doc.content.content.slice(after.first, after.first + after.count) : []),
-      ])
-    : new Map<string, string>();
-  const near = [...nearby.values()].map((label) => `[^${label}]: x`);
-  const touching = text.slice(checkFrom, Math.max(checkFrom, checkTo));
-  if (touching.length >= TOUCHED_MAX || region.length >= REGION_MAX) return null;
-  const checked = [withLf(touching), ...stubs, ...near];
-  if (!kept(checked.join('\n\n'))) return null;
+  // Checked as a paste is, with the blocks beside it, as the editor would
+  // write them together.
+  if (region.length >= REGION_MAX || !kept(lf)) return null;
   let read: Node;
   try {
     read = parse(lf);
@@ -254,6 +241,7 @@ export function byBlock({
     if (offset < 0 || !was.every((node, i) => same(node, nodes[offset + i] as Node))) return null;
   }
   if (first === 0 && past === doc.childCount && nodes.length === 0) return null;
+  const shift = text.length - page.length;
   const moved = (span: Span | null) => span && { from: span.from + shift, to: span.to + shift };
   const placed = inText(region, at).map(
     (span) => span && { from: span.from + from, to: span.to + from },

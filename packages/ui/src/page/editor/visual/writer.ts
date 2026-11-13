@@ -154,6 +154,10 @@ function footnotesOf(nodes: readonly Node[]) {
 // blank lines, the next block starting its line.
 const BLANK_LINES = /^[ \t]*\n(?:[ \t]*\n)+$/;
 
+// Text before the first block or after the last that the editor's own
+// would read as: none, or lines with nothing on them.
+const LINES = /^(?:[ \t]*\n)*$/;
+
 // `page`, with a final line break `lineBreak` if `final`, else with none.
 function pageEnding(page: string, final: boolean, lineBreak: string): string {
   if (!final) return page.replace(/\r?\n$/, '');
@@ -201,7 +205,7 @@ export class Writer {
   readonly #units = new WeakMap<Node, Unit[]>();
   readonly #pairs = new WeakMap<Unit, WeakMap<Unit, boolean>>();
   // Whether each unit read last, with a final line break or without, reads as it shows.
-  readonly #endings = new WeakMap<Unit, Map<boolean, boolean>>();
+  readonly #endings = new WeakMap<Unit, Map<string, boolean>>();
   readonly #progress = new WeakMap<Node, Progress>();
   #base: Base | null = null;
   #lineBreak: LineBreak = '\n';
@@ -214,11 +218,9 @@ export class Writer {
   /**
    * Write the blocks of documents that `source` has, unedited, as they are
    * in its text, from now on: the text a document was last given as. With
-   * none, every block is written in the editor's style. Blocks written anew
-   * take `lineBreak`, the page's.
+   * none, every block is written in the editor's style.
    */
-  source(source: Source | null, lineBreak = source?.lineBreak ?? '\n') {
-    this.#lineBreak = lineBreak;
+  source(source: Source | null) {
     if (!source) return void (this.#base = null);
     const nodes = [...source.doc.content.content];
     const index = new WeakMap<Node, number>();
@@ -230,6 +232,11 @@ export class Writer {
       final: endsInLine(source.text),
       units: new WeakMap(),
     };
+  }
+
+  /** Write the line breaks of what's written anew as `lineBreak`, the page's, from now on. */
+  breaks(lineBreak: LineBreak) {
+    this.#lineBreak = lineBreak;
   }
 
   /**
@@ -525,8 +532,14 @@ export class Writer {
       // between it and the one before.
       let between: string | null = null;
       if (!before) {
+        // As it was there, or before a block written in place of the first,
+        // where that's only blank lines.
         const first = spans[0];
-        between = unit.sourced?.first === 0 && first ? text.slice(0, first.from) : '';
+        const lead = first ? text.slice(0, first.from) : '';
+        const kept = unit.sourced
+          ? unit.sourced.first === 0
+          : progress.slots[run] === 0 && LINES.test(withLf(lead));
+        between = kept ? lead : '';
       } else {
         // Where it was there, as two blocks next to each other there, or
         // one in place of a block next to the other: written anew, only
@@ -553,12 +566,20 @@ export class Writer {
       place = run;
       last = unit;
     }
-    // The page's own ending, if it ends with the source's last block.
+    // The page's own ending, if it ends with the source's last block, or a
+    // block written in its place, where that ending is only line breaks.
     const lastSpan = spans.at(-1);
+    const after = lastSpan ? text.slice(lastSpan.to) : '';
     const ends =
       !!base && !!last?.sourced && last.sourced.last === spans.length - 1 && final === base.final;
-    if (ends && lastSpan) {
-      const after = text.slice(lastSpan.to);
+    const instead =
+      !!base &&
+      !!last &&
+      !last.sourced &&
+      progress.slots[place] === spans.length - 1 &&
+      final === base.final &&
+      LINES.test(withLf(after));
+    if ((ends || instead) && lastSpan) {
       markdown += withLf(after);
       page += after;
     } else {
@@ -573,7 +594,7 @@ export class Writer {
     const end = parts.at(-1);
     let faithful =
       named &&
-      (!end || ends || this.#ends(end, final)) &&
+      (!end || ends || this.#ends(end, instead ? withLf(after) : final ? '\n' : '')) &&
       units.every((unit) => unit?.faithful) &&
       parts.every((unit, i) => {
         const before = parts[i - 1];
@@ -667,7 +688,7 @@ export class Writer {
     const base = this.#base;
     const last = base ? base.nodes.length - 1 : -1;
     if (unit.sourced?.last === last && base?.final === final) return true;
-    return this.#ends(unit, final);
+    return this.#ends(unit, final ? '\n' : '');
   }
 
   // The unit kept of just `nodes`.
@@ -781,19 +802,19 @@ export class Writer {
     return faithful;
   }
 
-  // Whether `unit`, read last, as a writing with a final line break if
-  // `final` ends, reads as it shows, as reading the whole writing would
-  // find: HTML left open there (`<pre>`) takes in the line break.
-  #ends(unit: Unit, final: boolean): boolean {
-    const endings = this.#endings.get(unit) ?? new Map<boolean, boolean>();
+  // Whether `unit`, read last, as a writing that ends with `tail` after it
+  // ends, reads as it shows, as reading the whole writing would find: HTML
+  // left open there (`<pre>`) takes in the line break.
+  #ends(unit: Unit, tail: string): boolean {
+    const endings = this.#endings.get(unit) ?? new Map<string, boolean>();
     this.#endings.set(unit, endings);
-    let ends = endings.get(final);
+    let ends = endings.get(tail);
     if (ends === undefined) {
       // Footnotes it names, defined before it, as nothing can follow it.
       const stubs = [...unit.names.values()].map((label) => `[^${label}]: x`);
       try {
         const read: string[] = [];
-        const markdown = [...stubs, ending(unit.markdown ?? '', final)].join('\n\n');
+        const markdown = [...stubs, ending(unit.markdown ?? '', false) + tail].join('\n\n');
         this.#parse(markdown).forEach((node) => read.push(...shownIn([node])));
         const shown = read.slice(stubs.length);
         ends =
@@ -802,7 +823,7 @@ export class Writer {
       } catch {
         ends = false;
       }
-      endings.set(final, ends);
+      endings.set(tail, ends);
     }
     return ends;
   }
@@ -817,9 +838,11 @@ export class Writer {
  * For each of `runs`, the blocks of `base` it is, unedited and next to
  * each other there, by index: each block the very one there, or one the
  * same as the block after the last found, as undoing an edit gives back.
- * And the block each starts in place of, the one after the last found.
+ * And the block each starts in place of: the one after the last found, or
+ * after the last a block written anew took the place of, being gone.
  */
 function placesOf(base: Base, runs: readonly Node[][]) {
+  const there = new Set(runs.flat());
   let expect = 0;
   const slots: number[] = [];
   const places = runs.map((nodes) => {
@@ -829,10 +852,12 @@ function placesOf(base: Base, runs: readonly Node[][]) {
     let kept = true;
     for (const node of nodes) {
       if (blank(node)) continue;
-      const there = base.nodes[expect];
-      const at = base.index.get(node) ?? (there && there.eq(node) ? expect : undefined);
+      const was = base.nodes[expect];
+      const at = base.index.get(node) ?? (was && was.eq(node) ? expect : undefined);
       if (at === undefined || !base.source.spans[at] || (last !== null && at !== last + 1)) {
         kept = false;
+        // A block written in place of one the document no longer has.
+        if (at === undefined && was && !there.has(was)) expect++;
         continue;
       }
       first ??= at;

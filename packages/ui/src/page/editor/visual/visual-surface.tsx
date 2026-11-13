@@ -27,10 +27,10 @@ import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
 import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
-import { byBlock, replacement } from './blocks';
+import { byBlock, replacement, same } from './blocks';
 import { endsInLine, fidelityOf, withLf } from './fidelity';
 import { lineBreakFor } from '../surface';
-import { inText, spansOf } from './sources';
+import { inText, spansOf, type Span } from './sources';
 import { visualFind, visualFindable } from './find';
 import { visualPassages } from './passages';
 import { formatKeys } from './formatting';
@@ -102,6 +102,26 @@ function whenIdle(work: (more: () => boolean) => void): () => void {
     { timeout: REPORT_MS },
   );
   return () => cancelIdleCallback(id);
+}
+
+/**
+ * `spans`, for `doc`'s top-level blocks by index, each only for a block
+ * that shows as what was read there (`read`): one `was` had, which the
+ * change left, or one the same. ProseMirror fitting the change in, or a
+ * plugin after it, may have made it otherwise.
+ */
+function shownAsRead(
+  doc: Node,
+  was: Node | undefined,
+  read: (i: number) => Node | undefined,
+  spans: readonly (Span | null)[],
+): (Span | null)[] {
+  const kept = new Set(was?.content.content);
+  return spans.map((span, i) => {
+    const node = doc.maybeChild(i);
+    const there = read(i);
+    return span && node && (kept.has(node) || (!!there && same(node, there))) ? span : null;
+  });
 }
 
 // Whether `tr` is the session's change (`EXTERNAL`), or one plugins added to it.
@@ -264,6 +284,7 @@ function Surface({
   // rest is read back now.
   const writing = (write: Writer, doc: Node, given: string) => {
     const final = endsInLine(given);
+    write.breaks(lineBreakFor(given, latest.current.lineBreak));
     return { ...write.write(doc, final), page: write.page(doc, final) };
   };
   /**
@@ -271,11 +292,11 @@ function Surface({
    * the same, as a document a change from it made: each top-level block's
    * source is where `read`'s was, for the writer to keep (`Writer.source`).
    */
-  const sourceAs = (write: Writer, doc: Node, markdown: string, read: Node) => {
+  const sourceAs = (write: Writer, doc: Node, markdown: string, read: Node, was?: Node) => {
     const spans = spansOf(read);
-    const lineBreak = lineBreakFor(markdown, latest.current.lineBreak);
-    if (!spans || spans.length !== doc.childCount) return write.source(null, lineBreak);
-    write.source({ doc, text: markdown, spans: inText(markdown, spans), lineBreak });
+    if (!spans || spans.length !== doc.childCount) return write.source(null);
+    const kept = shownAsRead(doc, was, (i) => read.maybeChild(i) ?? undefined, spans);
+    write.source({ doc, text: markdown, spans: inText(markdown, kept) });
   };
   const [surface] = useState(() => ({
     read: (): string => {
@@ -353,7 +374,8 @@ function Surface({
       editor.current?.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const next = ctx.get(parserCtx)(withLf(markdown));
-        const change = replacement(view.state.doc, next);
+        const { doc } = view.state;
+        const change = replacement(doc, next);
         if (change)
           view.dispatch(
             view.state.tr
@@ -362,7 +384,7 @@ function Surface({
               .setMeta('addToHistory', false),
           );
         origin.current = { markdown, doc: view.state.doc };
-        if (writer.current) sourceAs(writer.current, view.state.doc, markdown, next);
+        if (writer.current) sourceAs(writer.current, view.state.doc, markdown, next, doc);
       });
       surface.later();
     },
@@ -418,14 +440,16 @@ function Surface({
         text.current = markdown;
         focusing.current = null;
         origin.current = { markdown, doc: now };
+        const { first, nodes } = taken;
+        const read = (i: number) =>
+          i >= first && i < first + nodes.length ? nodes[i - first] : undefined;
         if (taken.spans.length === now.childCount)
           write.source({
             doc: now,
             text: markdown,
-            spans: taken.spans,
-            lineBreak: lineBreakFor(markdown, latest.current.lineBreak),
+            spans: shownAsRead(now, doc, read, taken.spans),
           });
-        else write.source(null, lineBreakFor(markdown, latest.current.lineBreak));
+        else write.source(null);
         surface.later();
         return true;
       });
