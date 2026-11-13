@@ -29,10 +29,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - A page's or folder's `position` among what is in its folder, a fractional index (migration `0049_node_positions`). `GET /api/spaces/:spaceId/tree?order=1` lists positions, which released apps never ask for. `POST /api/spaces/:spaceId/order` sets them and `POST /api/spaces/:spaceId/order/by-name` clears them, for editors there and their agents. A move may carry a `position`; without one, as from released apps, it goes last in a folder with an order of its own. (#413)
+- Dependencies with security advisories: `hono` 4.13.16, from 4.13.12, and `@hono/node-server` 2.1.6, from 2.1.3, in the server, the CLI and the web app's dev server. (#418)
 
 #### CLI
 
 - `wikistow tree` lists each folder's pages and folders in its order, and its JSON gives each an `order`. (#413)
+
+#### Releases and packaging
+
+- `@electron/asar` 4.3.2, from 4.3.1, which builds the desktop app's `app.asar`. It brings `glob` 14 and `minimatch` 11, past their security advisories. (#418)
 
 ## 0.25.0 - 2026-11-11
 
