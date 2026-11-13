@@ -356,7 +356,11 @@ export function pagesFor(caller: EditingCaller): HostPages {
     if (scopes.length === 0) return 'none';
     const listing = trees.get(spaceId) ?? parentsIn(ctx, spaceId);
     trees.set(spaceId, listing);
-    const parents = await listing;
+    // One that failed isn't kept: a batch keeping `trees` lists again at its next check.
+    const parents = await listing.catch((error: unknown) => {
+      if (trees.get(spaceId) === listing) trees.delete(spaceId);
+      throw error;
+    });
     if (nodeId !== null && !parents.has(nodeId)) {
       throw new PluginError('not-found', 'There is no such page or folder');
     }
@@ -440,7 +444,11 @@ export function pagesFor(caller: EditingCaller): HostPages {
     const relist = relisting(trees);
     return async (page: PageRef) => {
       relist();
-      await require(ctx, SpaceId.parse(page.spaceId), PageId.parse(page.pageId), 'write', trees);
+      // Listed patiently too, as a batch's saves are.
+      const waiting = patient(ctx, unloaded, caller.signal);
+      await require(waiting, SpaceId.parse(page.spaceId), PageId.parse(
+        page.pageId,
+      ), 'write', trees);
     };
   };
 
