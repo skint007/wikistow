@@ -500,9 +500,10 @@ export type SavedVersion = {
  * `indexSpaces` lists it, and what it holds now stands in for what `index`
  * held of it (`PageIndex.with`). A space gone, or failing its checks, is
  * dropped; with `'all'`, so is one no longer listed as held or shared.
- * Only the versions `index` doesn't hold are opened, and only the pages
- * that changed are indexed again, so if nothing did, `index` is returned
- * itself. Stops with `IndexAbandoned` as `indexSpaces` does.
+ * Only the versions `index` doesn't hold are opened, or holds without the
+ * time the server took them, which is asked for (`timed`), and only the
+ * pages that changed, or took their time, are indexed again, so if nothing
+ * did, `index` is returned itself. Stops with `IndexAbandoned` as `indexSpaces` does.
  *
  * A draft this person saved, in a space not listed, is put in without
  * listing anything, where it was, as the draft its editor sees, if `index`

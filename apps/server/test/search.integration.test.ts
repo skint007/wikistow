@@ -323,7 +323,15 @@ describe('a search index', () => {
     const index = await search.indexSpaces(ed.ctx);
     const basedOn = await draftHead(ed, lib.page);
     const markdown = '---\ntags: [mine]\n---\nsaved here';
+    const before = new Date().toISOString();
     const written = await pages.editDraft(ed.ctx, lib.page, { markdown });
+    // Its answer says no time: held with this device's, once the server took it.
+    const own = ed.ctx.revisions.get({
+      ...lib.page,
+      revisionId: written.revisionId,
+      audience: 'draft',
+    })?.createdAt;
+    expect(own && own >= before && own <= new Date().toISOString()).toBe(true);
     const paths = calls(ed.ctx);
     const saved = await search.updateIndex(ed.ctx, index, {
       spaces: [],

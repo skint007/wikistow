@@ -468,6 +468,18 @@ describe('an update with this person’s own saves', () => {
       title: 'Saved 6',
       updated: at,
     });
+    // Waiting alone, over a publication, it keeps the time the index holds for it.
+    const held = index.with([
+      [
+        { ...first.doc, draft: false },
+        { ...first.content, updated: at },
+      ],
+    ]);
+    const alone = await searchOperations.updateIndex(ctx, held, {
+      spaces: [],
+      saved: [{ ...save(first.doc.revisionId, 8, 'alone'), revisionId: first.doc.revisionId }],
+    });
+    expect(alone.page(first.doc.spaceId, first.doc.pageId)?.updated).toBe(at);
     // A save the server took, its time not known, has none.
     const unknown = await searchOperations.updateIndex(ctx, next, {
       spaces: [],
