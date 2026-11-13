@@ -255,15 +255,19 @@ export class KeptMarks implements KeyVersionMarks {
       lost: false,
       lostAt: null,
     }));
-    const marks = { ...this.#contents.marks };
-    for (const change of begun) marks[changeKey(change)] = at;
     try {
-      // Checked again against what other tabs kept, under the file's lock:
-      // never record a change from a version behind a mark.
-      await this.#change(
-        { ...this.#contents, marks },
-        { strict: true, check: () => this.#notBehind(changes) },
-      );
+      // Taken in only as its own write runs, so no write queued before it
+      // carries it; and checked again against what other tabs kept, under
+      // the file's lock: never record a change from a version behind a mark.
+      await this.#change(this.#contents, {
+        strict: true,
+        apply: (contents) => {
+          const marks = { ...contents.marks };
+          for (const change of begun) marks[changeKey(change)] = at;
+          return { ...contents, marks };
+        },
+        check: () => this.#notBehind(changes),
+      });
     } catch (error) {
       // Never sent, so never pending: no later write may keep it.
       const unsent = new Set(begun.map(changeKey));
@@ -405,9 +409,12 @@ export class KeptMarks implements KeyVersionMarks {
       strict = false,
       check,
       answer,
+      apply,
     }: {
       strict?: boolean;
       check?: () => void;
+      /** A change to make to the contents only when this write's turn comes. */
+      apply?: (contents: Contents) => Contents;
       /** A server's answer this write carries, kept for the next session if it closed first. */
       answer?: Contents['marks'];
     } = {},
@@ -419,6 +426,7 @@ export class KeptMarks implements KeyVersionMarks {
         if (strict) throw new Error('The session has ended; its marks are closed');
       };
       if (this.#closed) return closed();
+      if (apply) this.#contents = apply(this.#contents);
       const file = this.#file;
       if (!file.exclusive) {
         check?.();

@@ -121,6 +121,9 @@ export async function previewMove(
     position?: Position | null;
   },
 ): Promise<MovePreview> {
+  // The marks first, then the tree: a share ended after this reads them
+  // isn't in the tree, so it is never taken for one listed again.
+  await ctx.marks.refresh?.();
   const tree = await loadTree(ctx, spaceId);
   const folder = tree.folders.find((f) => f.id === nodeId);
   const page = tree.pages.find((p) => p.id === nodeId);
@@ -189,7 +192,6 @@ export async function previewMove(
   }
   // A share this app ended that the server lists again is a possible
   // attack (section 6.9), on either side of the move.
-  await ctx.marks.refresh?.();
   for (const region of [from, to]) {
     if (region.kind === 'share' && ctx.marks.get(region.spaceId, region.shareId) === ENDED) {
       throw new CryptoError(

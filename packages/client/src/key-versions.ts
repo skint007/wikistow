@@ -100,14 +100,6 @@ export type MarkRaise = { spaceId: SpaceId; shareId: ShareId; keyVersion: number
  */
 export function requireCurrentPlan(marks: KeyVersionMarks, change: NewChange): void {
   const mark = marks.get(change.spaceId, change.shareId);
-  // An ending's scan just found the share listed, so a share this app
-  // ended is the possible attack itself (section 6.9).
-  if (mark === ENDED && change.change === 'ending') {
-    throw new CryptoError(
-      'key-version',
-      `This app ended share ${change.shareId}, but the server still lists it`,
-    );
-  }
   // Ended meanwhile, as by another tab: plan or preview again, which says
   // whether the server still lists the share (`key-version` there).
   if (mark === ENDED) {

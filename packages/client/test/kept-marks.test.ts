@@ -178,6 +178,35 @@ describe('pending changes across tabs', () => {
     expect(one.pending()).toEqual([]);
   });
 
+  it('never lets a write queued while it waited carry a change it couldn’t record', async () => {
+    let kept: Uint8Array | null = null;
+    let writes = 0;
+    let gate: Promise<void> | null = null;
+    let release: () => void = () => {};
+    const file: KeptFile = {
+      read: () => Promise.resolve(kept),
+      write: async (sealed) => {
+        if (gate) await gate;
+        writes += 1;
+        // The change's own write is the third, and fails.
+        if (writes === 3) throw new Error('Quota exceeded');
+        kept = sealed;
+      },
+    };
+    const marks = await KeptMarks.open(file, who);
+    gate = new Promise<void>((resolve) => (release = resolve));
+    marks.raise(spaceId, other, 2);
+    const begun = marks.begin([change()]);
+    // Queued while the change waits on the write before it.
+    marks.raise(spaceId, other, 3);
+    release();
+    gate = null;
+    await expect(begun).rejects.toThrow('Quota exceeded');
+    const later = await KeptMarks.open(file, who);
+    expect(later.get(spaceId, other)).toBe(3);
+    expect(changePending(later, spaceId, shareId)).toBe(false);
+  });
+
   it('keeps a change whose answer was lost, marked so', async () => {
     const b = browser();
     const one = await KeptMarks.open(b.tab(), who);

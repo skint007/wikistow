@@ -201,7 +201,7 @@ describe('settling a change whose answer was lost', () => {
   });
 
   it('ends or moves whatever version the mark is at, but asks again once the share is ended', async () => {
-    for (const change of ['move'] as const) {
+    for (const change of ['ending', 'move'] as const) {
       const { ctx, marks } = context();
       marks.raise(spaceId, shareId, 3);
       await expect(
@@ -254,29 +254,6 @@ describe('settling a change whose answer was lost', () => {
         () => [],
       ),
     ).resolves.toBeUndefined();
-  });
-
-  it('reports a share this app ended that its ending’s scan found listed again', async () => {
-    const { ctx, marks } = context();
-    marks.raise(spaceId, shareId, 3);
-    const ending: NewChange = { ...rotation, change: 'ending', fromKeyVersion: 1 };
-    await expect(
-      sendShareChange(
-        ctx,
-        [ending],
-        () => Promise.resolve(),
-        () => [],
-      ),
-    ).resolves.toBeUndefined();
-    marks.raise(spaceId, shareId, ENDED);
-    await expect(
-      sendShareChange(
-        ctx,
-        [ending],
-        () => Promise.resolve(),
-        () => [],
-      ),
-    ).rejects.toMatchObject({ code: 'key-version' });
   });
 
   it('raises nothing, ending or not, when the server refuses the listing', async () => {
